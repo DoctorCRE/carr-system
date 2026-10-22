@@ -232,13 +232,29 @@ class BoardCase(unittest.TestCase):
 
 
 class ProgressBoardCLI(BoardCase):
+    def test_publication_reuses_inventory_without_calling_github(self):
+        self.run_board('init', 'carr-v5', '--title', 'Synthetic board')
+        self.fake_gh({})
+        external = {'schema': 'system-work-external.v1', 'items': [], 'complete': True,
+                    'observed_at': '2026-10-01T00:00:00Z', 'coverage': [], 'completed_pr_history': True}
+        (self.root / 'boards/system-work-github-cache.json').write_text(json.dumps(external))
+        remote = {}
+        def call(verb, args):
+            board = args['board_id']
+            if verb == 'publish-board-snapshot':
+                remote[board] = {'version': 1, 'snapshot_json': args['snapshot']}
+            return {'ok': True, 'snapshot': remote.get(board), 'questions': []}
+        with patch.dict(os.environ, self.env), patch.object(BOARD, 'call_verb', call):
+            BOARD.publish_board('carr-v5', costs={})
+        self.assertEqual(self.gh_calls(), [])
+        self.assertEqual(remote['carr-v5']['snapshot_json']['external_inventory']['observed_at'], external['observed_at'])
+
     def test_task_producer_explicitly_classifies_system_work(self):
         self.run_board('init','demo','--title','Synthetic board')
         self.update_legacy_task('demo','repair','--title','Synthetic repair','--status','running','--executor','codex')
         self.assertEqual(self.read_state('demo')['tasks']['repair'].get('domain'),'system')
 
     def test_large_history_publishes_bounded_pages_without_losing_rows(self):
-        import system_work_cache
         self.run_board('init', 'carr-v5', '--title', 'Synthetic board')
         items=[{'id':f'repo:pr:{i}', 'kind':'pull_request', 'title':'Synthetic title '*12,
                 'completed':True,'opened_at':'2026-09-01T00:00:00Z',
@@ -252,7 +268,8 @@ class ProgressBoardCLI(BoardCase):
                 self.assertLessEqual(len(json.dumps(args['snapshot'],separators=(',',':'),ensure_ascii=False)),262144)
                 remote[board]={'version':1,'snapshot_json':args['snapshot']}
             return {'ok':True,'snapshot':remote.get(board),'questions':[]}
-        with patch.dict(os.environ,self.env), patch.object(BOARD,'call_verb',call), patch.object(system_work_cache,'cached_github',return_value=external):
+        (self.root / 'boards/system-work-github-cache.json').write_text(json.dumps(external))
+        with patch.dict(os.environ,self.env), patch.object(BOARD,'call_verb',call):
             BOARD.publish_board('carr-v5')
         manifest=remote['carr-v5']['snapshot_json']['external_inventory']
         restored=[row for page in manifest['pages'] for row in remote[page['board_id']]['snapshot_json']['items']]

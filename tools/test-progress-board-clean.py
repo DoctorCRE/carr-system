@@ -261,7 +261,7 @@ class ReconcileApplyTests(BoardFileCase):
 
     def test_apply_writes_archives_and_publishes(self):
         publish = self.apply(lambda number, repo: (pr(number), None))
-        publish.assert_called_once_with("test", refresh_inventory=False)
+        publish.assert_called_once_with("test")
         state = board.read_state("test")
         self.assertEqual(set(state["tasks"]), {"pr-1"})
         self.assertEqual(state["tasks"]["pr-1"]["title"], "Keep me")

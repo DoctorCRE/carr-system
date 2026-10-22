@@ -750,27 +750,24 @@ def gh_json(args: list[str], timeout: int = 30) -> Any:
 
 
 # ── GitHub observation ───────────────────────────────────────────────────────
-# A refresh reads each repository with ONE GraphQL query: every open PR with its
-# checks, comments and reviews, and the PRs closed since the previous refresh.
-# A card naming a PR that neither list holds and the cache cannot vouch for is
-# read in one batched query per repository. The cost is O(repositories), never
-# O(PRs): the per-PR REST reads it replaced spent the account's 5,000/hour
-# limit on 2026-10-22.
+# A steady-state refresh reads each repository with one GraphQL query.
+# Overflow connections and unlisted identities use additional GraphQL pages.
+# Per-PR REST reads exhausted the account's shared limit on 2026-10-22.
 
 PR_FRAGMENTS = """
 fragment pr on PullRequest {
   number title body url createdAt updatedAt state isDraft headRefOid headRefName
   author { login } mergedAt closedAt mergeCommit { oid } mergeable mergeStateStatus
-  labels(first: 20) { nodes { name } } milestone { title }
+  labels(first: 100) { pageInfo { hasNextPage endCursor } nodes { name } } milestone { title }
 }
 fragment open on PullRequest {
   ...pr
-  statusCheckRollup { contexts(first: 100) { nodes { __typename
+  statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage endCursor } nodes { __typename
     ... on CheckRun { name status conclusion } ... on StatusContext { context state } } } }
-  comments(last: 100) { nodes { author { login } authorAssociation body createdAt } }
-  reviews(last: 100) { nodes { databaseId state submittedAt author { login } authorAssociation } }
+  comments(first: 100) { pageInfo { hasNextPage endCursor } nodes { author { login } authorAssociation body createdAt } }
+  reviews(first: 100) { pageInfo { hasNextPage endCursor } nodes { databaseId state submittedAt author { login } authorAssociation } }
 }
-fragment closed on PullRequest { ...pr changedFiles files(first: 100) { nodes { path } } }
+fragment closed on PullRequest { ...open changedFiles files(first: 100) { pageInfo { hasNextPage endCursor } nodes { path } } }
 """
 REPOSITORY_QUERY = """
 query($owner: String!, $name: String!, $withOpen: Boolean!, $openAfter: String,
@@ -818,6 +815,39 @@ def author(row: dict[str, Any]) -> dict[str, str]:
     if not isinstance(actor, dict) or not isinstance(actor.get("login"), str):
         raise RuntimeError("gh returned a malformed PR payload")
     return {"login": actor["login"]}
+
+
+def complete_connections(repo: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Read overflow pages before an observation can replace cached facts."""
+    owner, name = repo.split("/", 1)
+    for row in rows:
+        for kind, fields in (("contexts", "__typename ... on CheckRun { name status conclusion } "
+                              "... on StatusContext { context state }"),
+                             ("comments", "author { login } authorAssociation body createdAt"),
+                             ("reviews", "databaseId state submittedAt author { login } authorAssociation"),
+                             ("files", "path"), ("labels", "name")):
+            parent = (row.get("statusCheckRollup") or {}) if kind == "contexts" else row
+            connection = parent.get(kind) or {}
+            while (connection.get("pageInfo") or {}).get("hasNextPage"):
+                cursor = connection["pageInfo"].get("endCursor")
+                if not isinstance(cursor, str) or not cursor or not nodes(connection):
+                    raise RuntimeError("gh returned a malformed pagination cursor")
+                selection = (f"{kind}(first: 100, after: {json.dumps(cursor)}) "
+                             "{ pageInfo { hasNextPage endCursor } nodes { " + fields + " } }")
+                if kind == "contexts":
+                    selection = "statusCheckRollup { " + selection + " }"
+                query = ("query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { "
+                         f"pr{row['number']}: pullRequest(number: {row['number']}) "
+                         "{ headRefOid " + selection + " } } }")
+                found = graphql(query, {"owner": owner, "name": name}).get(f"pr{row['number']}") or {}
+                if found.get("headRefOid") != row.get("headRefOid"):
+                    raise RuntimeError("PR head changed while paging its facts")
+                following = ((found.get("statusCheckRollup") or {}) if kind == "contexts" else found).get(kind) or {}
+                if (following.get("pageInfo") or {}).get("endCursor") == cursor:
+                    raise RuntimeError("gh repeated a pagination cursor")
+                parent[kind]["nodes"].extend(nodes(following))
+                connection = following
+    return rows
 
 
 def review_decision(reviews: list[dict[str, Any]], merge_state: Any, repo: str) -> str:
@@ -883,7 +913,8 @@ class GitHubReadPass:
     def __init__(self) -> None:
         self.path = board_dir() / ".github-pr-cache.json"
         self.facts: dict[str, dict[str, Any]] = {
-            identity: info for identity, info in read_json_file(self.path).items() if validated_pr(info)}
+            identity: info for identity, info in read_json_file(self.path).items()
+            if validated_pr(info) and not info.get("_legacy_terminal")}
         self.errors: dict[str, str | None] = {}
         self.open: dict[str, list[dict[str, Any]]] = {}
 
@@ -922,10 +953,10 @@ class GitHubReadPass:
                 more = bool(info.get("hasNextPage")) and (
                     kind == "open" or str(rows[-1].get("updatedAt") or "") >= cursor)
                 variables[flag], variables[after] = more, info.get("endCursor")
-        open_prs = [pull_facts(row, repo) for row in pages["open"]]
+        open_prs = [pull_facts(row, repo) for row in complete_connections(repo, pages["open"])]
         if not all(valid_open_pr(info) and info["state"] == "OPEN" for info in open_prs):
             raise RuntimeError("gh returned a malformed open PR")
-        self.save(repo, [*open_prs, *(pull_facts(row, repo) for row in pages["closed"])])
+        self.save(repo, [*open_prs, *(pull_facts(row, repo) for row in complete_connections(repo, pages["closed"]))])
         self.open[repo] = open_prs
         with board_lock("github-discovery"):
             cursors = read_json_file(cursor_path)
@@ -934,7 +965,8 @@ class GitHubReadPass:
 
     def save(self, repo: str, observed: list[dict[str, Any]]) -> None:
         with board_lock("github-pr-cache"):
-            saved = read_json_file(self.path)
+            saved = {key: info for key, info in read_json_file(self.path).items()
+                     if validated_pr(info) and not info.get("_legacy_terminal")}
             for info in observed:
                 identity = f"{repo}#{info['number']}"
                 if (saved.get(identity) or {}).get("state") != "MERGED":
@@ -972,7 +1004,8 @@ class GitHubReadPass:
                          + " } }" + PR_FRAGMENTS)
                 try:
                     found = graphql(query, {"owner": owner, "name": name})
-                    self.save(repo, [pull_facts(found.get(f"pr{n}") or {}, repo) for n in batch])
+                    self.save(repo, [pull_facts(row, repo) for row in
+                                     complete_connections(repo, [found.get(f"pr{n}") or {} for n in batch])])
                     error = None
                 except RuntimeError as exc:
                     error = str(exc)[:200]
@@ -2516,7 +2549,7 @@ def as_published(record: dict[str, Any]) -> Any:
     return snapshot
 
 
-def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -> dict[str, int]:
+def publish_board(project: str, *, costs=None) -> dict[str, int]:
     state = read_state(project)
     board = safe_project(project)
     if board == LAUNCHD_BOARD:
@@ -2524,14 +2557,15 @@ def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -
     before = call_verb("read-progress-board", {"board_id": board})
     remote_snapshot = before.get("snapshot")
     snapshot = project_board_snapshot(state, costs=costs)
-    if board == "carr-v5" and refresh_inventory:
-        from system_work_cache import cached_github
-        snapshot["external_inventory"] = publish_external_inventory(cached_github(board_dir() / "system-work-github-cache.json",
-            Path.home() / "carr-system/out/orch/dot/job13/report-G.md"))
-    elif board == "carr-v5" and remote_snapshot:
-        inventory = remote_snapshot.get("snapshot_json", {}).get("external_inventory")
-        if inventory is not None:
-            snapshot["external_inventory"] = inventory
+    if board == "carr-v5":
+        from system_work_cache import valid_cache
+        inventory = read_json_file(board_dir() / "system-work-github-cache.json")
+        if valid_cache(inventory):
+            snapshot["external_inventory"] = publish_external_inventory(inventory)
+        elif remote_snapshot:
+            inventory = remote_snapshot.get("snapshot_json", {}).get("external_inventory")
+            if inventory is not None:
+                snapshot["external_inventory"] = inventory
     try:
         fitted = fit_snapshot(copy.deepcopy(snapshot))
     except SnapshotTooLarge:
@@ -2807,7 +2841,7 @@ def command_reconcile(args: argparse.Namespace) -> None:
         if local_only():
             log(f"{args.project}: reconciled locally; not published (PROGRESS_BOARD_LOCAL_ONLY is set)")
         else:
-            publish_board(args.project, refresh_inventory=False)
+            publish_board(args.project)
 
 
 @with_github_read_pass
