@@ -1187,10 +1187,16 @@ check_artifact() {
       ok artifact "$shipping verbs; no prior deployment recorded, this would set the baseline"
       ;;
     78)
-      if [ "${CARR_CI_PORTABLE_ONLY:-0}" = "1" ]; then
-            ok artifact "$shipping verbs; shrink guard not run here (portable runner has no ledger credential — the deploy enforces it)"
+      local base
+      base="$(git merge-base HEAD origin/main 2>/dev/null || true)"
+      [ "$base" != "$(git rev-parse HEAD)" ] || base="$(git rev-parse -q --verify 'HEAD^' || true)"
+      if [ -z "$base" ]; then
+        skip artifact "$shipping verbs counted, but no base commit or ledger credential — the shrink comparison did not run"
+      elif sh ops/verb-loss-vs-base.sh "$REPO" "$base" >"$LOGDIR/artifact-count.log" 2>"$LOGDIR/artifact.log"; then
+        ok artifact "$shipping verbs; loss checked by name against base ${base:0:12} and committed retirements"
       else
-        skip artifact "$shipping verbs counted, but no ledger credential — the shrink comparison did not run"
+        cat "$LOGDIR/artifact.log" >&2
+        bad artifact "verb loss against base ${base:0:12} does not match the committed retirement ledger"
       fi
       ;;
     *)
