@@ -11,6 +11,7 @@ import os
 import re
 import signal
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,7 @@ SOURCE = Path(__file__).resolve().parents[1]
 # Each evidence source and the finding kinds the watchdog derives from it. detect refuses
 # a kind its source does not declare, and an unreadable source blinds exactly these.
 EVIDENCE = {
+    "control_plane_tick": frozenset({"control_plane_tick_skipped"}),
     "scheduled_jobs": frozenset({"scheduled_job_drift"}),
     "salesforce_refresh": frozenset({"salesforce_refresh"}),
     "machine_cleanup": frozenset({"machine_cleanup"}),
@@ -328,6 +330,11 @@ def detect(facts, config, now):
             raise ValueError(f"{kind} is not declared as derived from {source} in EVIDENCE")
         found.append(finding(kind, subject, reason, config, **fields))
     t = config["thresholds"]
+    overlap_since = facts.get("control_plane_tick")
+    if overlap_since is not None and now - overlap_since > t["control_plane_tick_skip_seconds"]:
+        emit("control_plane_tick", "control_plane_tick_skipped", "control-plane-tick",
+             "Control-plane tick has skipped overlapping wakes for more than "
+             f"{t['control_plane_tick_skip_seconds'] / 60:g} minutes.")
     for row in facts.get("salesforce_refresh", []):
         emit("salesforce_refresh", "salesforce_refresh", row["subject"], row["reason"],
              key="salesforce_refresh:" + hashlib.sha256(row["reason"].encode()).hexdigest())
@@ -1021,6 +1028,19 @@ def collect(root, config, now=None):
         else:
             facts["errors"].append({"kind": "collection_error", "source": subject, "reason": str(exc),
                                     "blinds": sorted(blinds)})
+    try:
+        marker = path_at(root, config["paths"].get("control_plane_tick_overlap",
+                             "out/control-plane-tick.lock/overlap"))
+        try:
+            observed = marker.stat()
+        except FileNotFoundError:
+            facts["control_plane_tick"] = None
+        else:
+            if not stat.S_ISDIR(observed.st_mode):
+                raise ValueError("tick overlap marker is not a directory")
+            facts["control_plane_tick"] = observed.st_mtime
+    except Exception as exc:
+        error("control-plane tick overlap evidence", exc, "control_plane_tick")
     try:
         registry = path_at(root, config["paths"]["registry"])
         jobs = observations.file(registry, lambda: read_latest(registry))
