@@ -12,45 +12,66 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib.table_usage_sql import python_queries, other_queries, relation_targets
 
 
 STATS_RESET_CAVEAT = (
     "Mutation counters cover only the interval since stats_reset and can lag. "
     "Per-table resets can be newer and are not timestamped here. A zero counter "
     "is never proof of disuse. reltuples is an estimate (-1 means unknown), "
-    "not an exact row count. empty-and-unreferenced means estimated empty with "
+    "not an exact row count. unreferenced-and-empty means estimated empty with "
     "no references found in this scan, never permission to remove a table."
 )
 
 
 def build_report(tables, *, references, unresolved, backup_tables):
     rows = []
+    names = {f"{table['schema']}.{table['name']}" for table in tables}
+    evidence = {f'u{index:04d}': dict(item, possible_tables=None
+                if item.get('possible_tables') is None or set(item['possible_tables']) == names
+                else item['possible_tables']) for index, item in enumerate(unresolved)}
     for table in tables:
         name = f"{table['schema']}.{table['name']}"
         refs = references.get(name, [])
         mutations = [table.get(key) for key in ("inserts", "updates", "deletes")]
-        if any(value is not None and value > 0 for value in mutations):
-            classification, reason = "active", "Observed positive mutation counter."
-        elif (table["estimated_rows"] == 0 and not refs and not unresolved
-              and all(value == 0 for value in mutations)):
-            classification = "empty-and-unreferenced"
-            reason = "Zero row estimate and counters; no scanned references or unresolved SQL."
+        uncertainty = [key for key, item in evidence.items()
+                       if item['possible_tables'] is None or name in item['possible_tables']]
+        if refs or any(value is not None and value > 0 for value in mutations):
+            classification, reason = 'referenced', 'Scanned reference or positive mutation counter.'
+        elif uncertainty:
+            classification, reason = 'unknown', 'Unresolved evidence can reference this table.'
+        elif table['estimated_rows'] == 0 and all(value == 0 for value in mutations):
+            classification = 'unreferenced-and-empty'
+            reason = 'Zero row estimate and counters; no scanned references or applicable uncertainty.'
         else:
-            classification = "quiet"
-            reason = "No positive mutation counter; rows, references, or uncertainty remain."
-        rows.append({**table, "table": name, "references": refs,
-                     "reference_status": "unresolved" if unresolved else "static_scan_only",
-                     "in_backup_census": name in backup_tables,
-                     "classification": classification, "classification_reason": reason})
-    counts = Counter(row["classification"] for row in rows)
+            classification, reason = 'unknown', 'Emptiness is unproven: row estimate or mutation counters are nonzero or unavailable.'
+        rows.append({**table, 'table': name, 'references': refs, 'uncertainty': uncertainty,
+                     'reference_status': 'unknown' if uncertainty else 'static_scan_only',
+                     'in_backup_census': name in backup_tables if backup_tables is not None else None,
+                     'classification': classification, 'classification_reason': reason})
+    counts = Counter(row['classification'] for row in rows)
+    proposals = [{'table': row['table'], 'approval': 'required_from_joe',
+                  'evidence': {'estimated_rows': row['estimated_rows'],
+                               'mutation_counters': {key: row.get(key) for key in ('inserts', 'updates', 'deletes')},
+                               'references': row['references'], 'uncertainty': row['uncertainty'],
+                               'in_backup_census': row['in_backup_census']},
+                  'next_step': 'Joe must confirm this table before any separately scoped deletion.'}
+                 for row in sorted(rows, key=lambda row: row['table'])
+                 if row['classification'] == 'unreferenced-and-empty']
     return {
-        "schema": "carr-table-usage-census/v1",
+        "schema": "carr-table-usage-census/v2",
         "stats_reset_caveat": STATS_RESET_CAVEAT,
-        "counts": {key: counts[key] for key in ("active", "quiet", "empty-and-unreferenced")},
+        "counts": {key: counts[key] for key in ("referenced", "unreferenced-and-empty", "unknown")},
+        "proposed_deletions": proposals,
+        "next_step": "Resolve each unknown table's listed uncertainty and obtain missing row/counter metadata; "
+                     "regenerate this proposal, then have Joe confirm the named proposed deletions. No deletion is authorized by this report.",
         "tables": sorted(rows, key=lambda row: row["table"]),
-        "unresolved": unresolved,
+        "unresolved": evidence,
+        "evidence_caveat": "Each table uncertainty ID resolves to the shared unresolved map. A null possible_tables scope means any table, never a positive reference.",
         "top_25_by_size": [{key: row[key] for key in ("table", "total_bytes", "classification")}
-                           for row in sorted(rows, key=lambda row: (-(row["total_bytes"] or 0), row["table"]))[:25]],
+                           for row in sorted((row for row in rows if row["total_bytes"] is not None),
+                                             key=lambda row: (-row["total_bytes"], row["table"]))[:25]],
     }
 
 
@@ -58,11 +79,6 @@ SOURCE_ROOTS = ("mcp-server/src", "ops", "tools", "lib", "pipelines")
 SOURCE_SUFFIXES = {".py", ".js", ".mjs", ".ts", ".tsx", ".sql", ".sh", ".applescript"}
 SENSITIVE_PATH = re.compile(r"(?:^|[/_.-])(?:env|credentials?|tokens?|keys?|keychains?|dumps?|secrets?)(?:$|[/_.-])", re.I)
 SYMBOL = re.compile(r"(?:\b(?:async\s+)?def\s+|\bfunction\s+|\b(?:const|let)\s+)([A-Za-z_$][\w$]*)")
-DYNAMIC_SQL = re.compile(
-    r"\bEXECUTE\b|\b(?:sql\.)?(?:Identifier|SQL)\s*\(|"
-    r"(?:from|join|into|update|table)\s+[\"']?(?:\{|\$|%[sI])|"
-    r"\b(?:query|execute|executemany)\s*\(\s*[A-Za-z_]\w*\s*[,)]|"
-    r"\bsql`|\b(?:sql|query)\s*\+", re.I)
 
 
 def scan_references(root, tables, paths, inventory, functions):
@@ -92,6 +108,23 @@ def scan_references(root, tables, paths, inventory, functions):
     candidates_emitted = set()
 
     def scan(source, text, signature=None):
+        queries = python_queries(text) if source.endswith('.py') else other_queries(text, '.sql' if signature else Path(source).suffix)
+        seen_queries = set()
+        for number, values in queries:
+            key = (number, tuple(sorted(values)))
+            if key in seen_queries:
+                continue
+            seen_queries.add(key)
+            targets, possible = relation_targets(values, tables)
+            location = {'source': source, 'line': number}
+            if signature:
+                location['function'] = signature
+            for target in targets:
+                references[target].append({'kind': 'dynamic_sql_bounded', **location,
+                                           'resolved_tables': targets})
+            if possible:
+                unresolved.append({'kind': 'dynamic_sql', **location, 'possible_tables': possible,
+                                   'reason': 'Unresolved relation identifier or SQL expression.'})
         symbol = None
         for number, line in enumerate(text.splitlines(), 1):
             declaration = SYMBOL.search(line)
@@ -100,8 +133,6 @@ def scan_references(root, tables, paths, inventory, functions):
             location = {"source": source, "line": number}
             if signature:
                 location["function"] = signature
-            if DYNAMIC_SQL.search(line):
-                unresolved.append({"kind": "dynamic_sql", **location})
             lexical_line = re.sub(r"\$[A-Za-z_0-9]*\$", " ", line)
             for token in sorted(set(re.findall(r"[A-Za-z_][A-Za-z_0-9$]*", lexical_line)) & names.keys()):
                 for target in names[token]:
@@ -134,8 +165,11 @@ def render_summary(report):
     lines = [f"Table usage census: {len(report['tables'])} tables; {counts}",
              "Database stats_reset: " + ", ".join(sorted({str(row.get("stats_reset") or "unknown") for row in report["tables"]})),
              report["stats_reset_caveat"],
-             f"Unresolved evidence: {len(report['unresolved'])}. See JSON for locations.",
-             "Top 25 tables by total size (bytes, including indexes and TOAST):"]
+             f"Proposed deletions for Joe to confirm: {len(report['proposed_deletions'])}.",
+             report['next_step'],
+             f"Unresolved evidence: {len(report['unresolved'])}. See JSON for locations."]
+    if report["top_25_by_size"]:
+        lines.append("Top 25 tables by total size (bytes, including indexes and TOAST):")
     lines.extend(f"{row['total_bytes']}\t{row['table']}\t{row['classification']}"
                  for row in report["top_25_by_size"])
     return "\n".join(lines)
@@ -211,26 +245,56 @@ def write_report(report, path):
             temporary.unlink(missing_ok=True)
 
 
-def main():
-    import psycopg
-    sys.path.insert(0, str(ROOT))
-    from lib.credential_file import credential
+def source_catalog(paths):
+    tables = {}
+    declaration = re.compile(
+        r'\bcreate\s+(?:unlogged\s+)?table\s+(?:if\s+not\s+exists\s+)?'
+        r'(?:("?[A-Za-z_]\w*"?)\s*\.\s*)?("?[A-Za-z_]\w*"?)', re.I)
+    for source in paths:
+        if not source.startswith('migrations/') or not source.endswith('.sql') or SENSITIVE_PATH.search(source):
+            continue
+        path = ROOT/source
+        if path.is_symlink():
+            continue
+        for match in declaration.finditer(path.read_text()):
+            schema, name = (match[1] or 'public').strip('"'), match[2].strip('"')
+            if schema not in {'public', 'ops'}:
+                continue
+            tables[schema, name] = dict(schema=schema, name=name, estimated_rows=None,
+                inserts=None, updates=None, deletes=None, total_bytes=None, stats_reset=None)
+    return {'tables': list(tables.values()), 'functions': [], 'backup_tables': None,
+            'transaction_read_only': 'not_connected', 'backup_census_sha256': None}
 
-    dsn = credential("DATABASE_URL_READER")
-    if not dsn:
-        print("table-usage-census: DATABASE_URL_READER required", file=sys.stderr)
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv not in ([], ['--source-only']):
+        print('usage: table-usage-census.py [--source-only]', file=sys.stderr)
         return 2
-    with psycopg.connect(dsn, connect_timeout=15) as conn:
-        snapshot = collect_catalog(conn)
+    paths = subprocess.run(['git', 'ls-files', '-z', '--', *SOURCE_ROOTS, 'migrations'], cwd=ROOT,
+                           capture_output=True, check=True).stdout.decode().split('\0')
+    paths = [path for path in paths if path]
+    if argv:
+        snapshot = source_catalog(paths)
+    else:
+        import psycopg
+        from lib.credential_file import credential
+        dsn = credential('DATABASE_URL_READER')
+        if not dsn:
+            print('table-usage-census: DATABASE_URL_READER required', file=sys.stderr)
+            return 2
+        with psycopg.connect(dsn, connect_timeout=15) as conn:
+            snapshot = collect_catalog(conn)
     inventory = source_inventory()
-    paths = subprocess.run(["git", "ls-files", "-z", "--", *SOURCE_ROOTS], cwd=ROOT,
-                           capture_output=True, check=True).stdout.decode().split("\0")
+    paths = [path for path in paths if path.startswith(tuple(part + '/' for part in SOURCE_ROOTS))]
     references, unresolved = scan_references(ROOT, snapshot["tables"],
                                             [path for path in paths if path], inventory, snapshot["functions"])
     report = build_report(snapshot["tables"], references=references, unresolved=unresolved,
-                          backup_tables=set(snapshot["backup_tables"]))
+                          backup_tables=set(snapshot["backup_tables"]) if snapshot["backup_tables"] is not None else None)
     report["generated_at"] = datetime.now(timezone.utc).isoformat()
     report["provenance"] = {
+        "catalog_source": "migration_declarations_not_live_database" if argv else "live_read_only_catalog",
+        "catalog_caveat": "Source-only declarations include historical names; row statistics, installed functions and backup membership are unverified." if argv else None,
         "source_head": subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
                                       text=True, check=True).stdout.strip(),
         "source_roots": SOURCE_ROOTS,
@@ -244,15 +308,22 @@ def main():
     report["reference_caveat"] = (
         "Lexical matches can include comments, tests and ambiguous names. Symbols are nearest-declaration "
         "candidates; candidate_verbs share a module and do not prove a call graph. Dynamic SQL and "
-        "excluded sensitive paths are globally unresolved, so every table remains potentially referenced. "
+        "excluded sensitive paths produce uncertainty, never a reference. Finite expressions reference only their resolved relations; "
+        "unresolved relation slots are scoped by their known schema/name prefix where possible. "
         "Static absence never proves runtime absence."
     )
     report["backup_caveat"] = "Membership in the current backup census scope only; not proof of a successful backup."
     report["size_caveat"] = "Per-relation bytes include indexes and TOAST. Partition parents do not sum children. Foreign sizes are unknown."
     path = ROOT / "out/table-usage-census.json"
     write_report(report, path)
+    proposal_path = ROOT/'out/table-proposed-deletions.json'
+    write_report({'schema': 'carr-table-proposed-deletions/v1',
+                  'approval': 'required_from_joe', 'proposed_deletions': report['proposed_deletions'],
+                  'next_step': report['next_step'], 'stats_reset_caveat': report['stats_reset_caveat'],
+                  'provenance': report['provenance']}, proposal_path)
     print(render_summary(report))
     print(f"Artifact: {path}")
+    print(f"Proposed-deletion list for Joe: {proposal_path}")
     return 0
 
 

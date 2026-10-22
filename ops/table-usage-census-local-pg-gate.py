@@ -86,7 +86,7 @@ def main():
         assert any(item.get("function") == "ops.census_dynamic(text)" for item in unresolved)
         report = census.build_report(snapshot["tables"], references=refs,
                                      unresolved=unresolved, backup_tables=set(snapshot["backup_tables"]))
-        assert report["counts"] == {"active": 1, "quiet": 5, "empty-and-unreferenced": 0}, report["counts"]
+        assert report["counts"] == {"referenced": 1, "unreferenced-and-empty": 0, "unknown": 5}, report["counts"]
         artifact = fixture.root / "out/census.json"
         census.write_report(report, artifact)
         assert json.loads(artifact.read_text())["counts"] == report["counts"]
@@ -95,7 +95,7 @@ def main():
                              capture_output=True, text=True, timeout=60)
         assert cli.returncode == 0, cli.stderr
         generated = json.loads((ROOT / "out/table-usage-census.json").read_text())
-        assert generated["counts"]["active"] == 1 and len(generated["tables"]) == 6
+        assert generated["counts"]["referenced"] == 1 and len(generated["tables"]) == 6
         assert generated["provenance"]["transaction_read_only"] == "on"
         assert generated["provenance"]["inventory_entries"] > 0
         print(census.render_summary(report))
