@@ -3,6 +3,12 @@
   "work_request": "WR-000284",
   "declared": [
     {
+      "path": "bin/install-outlook-triage.sh",
+      "class": "hand_tool",
+      "reason": "Joe runs it once on the Mac that holds his Outlook session to load com.carr.outlook-triage; config-as-code install would also rewrite every unrelated LaunchAgent.",
+      "evidence": "ops/config/services.json outlook-triage notes name this installer; same narrow pattern as bin/install-notes-sweep.sh"
+    },
+    {
       "path": "bin/install-outlook-intake.sh",
       "class": "hand_tool",
       "reason": "Joe runs it once on the Mac that holds his Outlook store to build the pinned hxprobe and load com.carr.outlook-intake; config-as-code install would also rewrite every unrelated LaunchAgent.",
