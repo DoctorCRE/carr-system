@@ -191,9 +191,12 @@ def main() -> int:
         "{{REPO}}", "/carr-system"))
     canonical_identity_regression(source)
     session_groups = source["hooks"]["SessionStart"]
-    assert len(session_groups) == 3
-    continuity_group = session_groups[1]
-    unrelated_groups = [session_groups[0], session_groups[2]]
+    continuity_group = next(group for group in session_groups
+                            if any(continuity in hook.get("command", "")
+                                   for hook in group["hooks"]))
+    continuity_index = session_groups.index(continuity_group)
+    unrelated_groups = [group for group in session_groups if group is not continuity_group]
+    assert unrelated_groups
     # The live file still carries a continuity hook on an event the adapter
     # retired; install must clear it and keep the unrelated hook beside it.
     live: dict[str, Any] = {
@@ -242,11 +245,11 @@ def main() -> int:
         duplicate_group["hooks"]["SessionStart"].append(copy.deepcopy(continuity_group))
         invalid_sources.append(duplicate_group)
         duplicate_handler = copy.deepcopy(source)
-        duplicate_handler["hooks"]["SessionStart"][1]["hooks"] *= 2
+        duplicate_handler["hooks"]["SessionStart"][continuity_index]["hooks"] *= 2
         invalid_sources.append(duplicate_handler)
         for invalid_field, invalid_value in (("type", "prompt"), ("timeout", True), ("timeout", "10")):
             malformed = copy.deepcopy(source)
-            malformed["hooks"]["SessionStart"][1]["hooks"][0][invalid_field] = invalid_value
+            malformed["hooks"]["SessionStart"][continuity_index]["hooks"][0][invalid_field] = invalid_value
             invalid_sources.append(malformed)
         for invalid in invalid_sources:
             repo_source.write_text(json.dumps(invalid))
@@ -264,7 +267,7 @@ def main() -> int:
         assert desired == {"hooks": {"SessionStart": [continuity_group]}}
         assert len(contracts) == 1
         mixed = copy.deepcopy(source)
-        mixed["hooks"]["SessionStart"][1]["hooks"].append(_hook("/other/mixed.py")["hooks"][0])
+        mixed["hooks"]["SessionStart"][continuity_index]["hooks"].append(_hook("/other/mixed.py")["hooks"][0])
         repo_source.write_text(json.dumps(mixed))
         assert mod.canonical_codex_continuity_hooks() == (desired, contracts)
         repo_source.write_text(json.dumps(source))
