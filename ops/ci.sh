@@ -16,6 +16,10 @@ export CARR_CI_PYTHON="$PY"
 CI_SELFTEST_TIMEOUT_SECONDS=120
 CI_TIMEOUT_HELPER="$REPO/bin/with-timeout.py"
 
+if [ "${1:-}" = "--test-first" ]; then
+  exec "$PY" "$REPO/ops/ci-test-first.py" --base "${2:-}" --head "${3:-}"
+fi
+
 if [ "${1:-}" = "--doc-drift" ]; then
   shift
   exec "${CARR_DOC_DRIFT_PYTHON:-$PY}" "$REPO/scripts/doc-drift/ci.py" "$@"
