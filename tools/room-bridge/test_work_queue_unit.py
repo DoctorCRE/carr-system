@@ -53,6 +53,19 @@ class WorkQueueTests(unittest.TestCase):
         self.assertEqual(card['stages'][-1]['stage'], 'fixing')
         self.assertTrue(card['ready'])
 
+    def test_successful_completion_clears_a_desk_quota_stop(self):
+        self.add('quota')
+        self.add('success')
+        first = self.q.claim(eligible_desks={'sol'}, actor='runner', owner={})
+        self.q.finish('quota', first['claim'], {'status': 'quota_exhausted'}, actor='worker')
+        marked = self.q.quota_exhausted_desks()
+        self.assertIn('sol', marked)
+        self.assertTrue(marked['sol'])
+
+        second = self.q.claim(eligible_desks={'sol'}, actor='probe', owner={})
+        self.q.finish('success', second['claim'], {'status': 'completed'}, actor='worker')
+        self.assertNotIn('sol', self.q.quota_exhausted_desks())
+
     def test_card_details_review_cap_and_merge_export_follow_one_order(self):
         self.add('A', wr='WR-pending', slice='S1', title='Queue', description='Durable cards')
         self.add('B')

@@ -87,6 +87,8 @@ class WorkQueue:
                 error TEXT);
             INSERT OR IGNORE INTO publication(id) VALUES(1);
             CREATE TABLE IF NOT EXISTS imports (source TEXT PRIMARY KEY, card_id TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS desk_quota_stops (
+                desk TEXT PRIMARY KEY, marked_at TEXT NOT NULL);
         ''')
 
     def close(self):
@@ -263,6 +265,12 @@ class WorkQueue:
             data.update({k: result[k] for k in ('model', 'effort', 'family') if result.get(k)})
             data['last_result'] = result
             status = result.get('status')
+            if status == 'quota_exhausted':
+                self.db.execute('INSERT INTO desk_quota_stops(desk,marked_at) VALUES(?,?) '
+                                'ON CONFLICT(desk) DO UPDATE SET marked_at=excluded.marked_at',
+                                (old['desk'], timestamp()))
+            elif status == 'completed':
+                self.db.execute('DELETE FROM desk_quota_stops WHERE desk=?', (old['desk'],))
             # Delivered turns still own their desk. Their session must report completion.
             if status in ('delivered', 'delivered_live', 'backgrounded'):
                 self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
@@ -322,6 +330,7 @@ class WorkQueue:
             for position, key in enumerate(order, 1):
                 self.db.execute('UPDATE items SET position=? WHERE card_id=?', (position, key))
             self._event(card, self._state(old), self._state(self._item(card)), actor, reason, 'requeue')
+            self.db.execute('DELETE FROM desk_quota_stops WHERE desk=?', (desk or old['desk'],))
         return self.get(card)
 
 
@@ -418,6 +427,10 @@ class WorkQueue:
 
     def candidates(self):
         return [dict(r) for r in self.db.execute('SELECT * FROM items WHERE ready=1 AND claim IS NULL ORDER BY position')]
+
+    def quota_exhausted_desks(self):
+        return {row['desk']: row['marked_at'] for row in
+                self.db.execute('SELECT desk,marked_at FROM desk_quota_stops')}
 
     def active(self):
         return [dict(r) for r in self.db.execute('SELECT * FROM items WHERE claim IS NOT NULL ORDER BY position')]
