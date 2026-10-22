@@ -1,4 +1,4 @@
-ROLE: Platform Engineer. Model: gpt-6.1-sol, high effort. Repo jbookout/carr-system, branch codex/fast-ship-path.
+ROLE: Platform Engineer. Model: gpt-6.1-sol, high effort. Repo DoctorCRE/carr-system, branch codex/fast-ship-path.
 
 GOAL (Joe 2026-10-05, gap #1): merge-to-live under 20 minutes. Today invoices merged ~09:00 CDT and was still not live at noon. Measured: the main canary job (.github/workflows/main-canary.yml) runs ~26-60 min in one step "Run the classes that detect regressions on main" and runs serially (concurrency group main-canary); each new merge restarts the wait; the release pipeline (ops/release-pipeline.py) only ships a commit whose main canary is green. PR CI (ci.yml) already splits classes into parallel jobs (gates, migration, unit/types/contract..., replay) taking 4-28 min each.
 

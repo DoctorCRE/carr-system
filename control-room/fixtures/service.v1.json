@@ -20,7 +20,7 @@
     "criticality": "critical",
     "owner": "Joe",
     "business_workflows": ["Record lookup", "Deal Room", "Standing context", "Doctrine"],
-    "repository": "jbookout/carr-system",
+    "repository": "DoctorCRE/carr-system",
     "runtime": "Cloudflare Worker",
     "authentication_boundary": "MCP and record gateway; not Control Room authority",
     "current_version": "synthetic-release-017",

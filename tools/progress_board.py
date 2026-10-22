@@ -46,7 +46,7 @@ CONSUMER_PROOF_FIELDS = frozenset({"schema", "outcome", "repo", "source_sha", "t
 LEGACY_PROOF_CUTOFF = datetime(2026, 10, 19, 9, 33, 8, tzinfo=timezone.utc)
 LEGACY_PR_REF = re.compile(
     r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)"
-    r"|(?:(jbookout/(?:carr-system|doctorcre-app|software-factory)|carr-system|doctorcre-app|software-factory|App)\s+)?"
+    r"|(?:((?:DoctorCRE/carr-system|jbookout/(?:doctorcre-app|software-factory))|carr-system|doctorcre-app|software-factory|App)\s+)?"
     r"\bPR\s*#?\s*(\d+)", re.IGNORECASE)
 PIPELINE_STAGES = ("queued", "build", "review", "ci", "merged", "live")
 PR_STAGES = PIPELINE_STAGES[1:] + ("measured",)
@@ -72,7 +72,7 @@ IN_FLIGHT = frozenset({"queued", "running", "review"})
 STUCK_AFTER = timedelta(hours=2)
 STALE_AFTER = timedelta(days=14)
 LAUNCHD_BOARD = "carr-v5"
-DEFAULT_PR_REPO = "jbookout/carr-system"
+DEFAULT_PR_REPO = "DoctorCRE/carr-system"
 SNAPSHOT_SCHEMA = "carr-progress-board.v2"
 # publish-board-snapshot refuses JSON.stringify(snapshot).length > 262144
 # (mcp-server/src/board-answers.js): compact JSON, counted in UTF-16 units.
@@ -93,7 +93,7 @@ SNAPSHOT_TASK_FIELDS = frozenset("""
 BLOCKER_EXCERPT_LIMIT = 192
 
 ALL_REPOS_BOARD = "all-repos"
-CORE_REPOS = ("jbookout/carr-system", "jbookout/doctorcre-app", "jbookout/software-factory")
+CORE_REPOS = ("DoctorCRE/carr-system", "jbookout/doctorcre-app", "jbookout/software-factory")
 RECENT_MERGED = timedelta(days=14)
 # The repository this tool reads its release config, review rules and verbs
 # from. The launchd wrapper binds it explicitly, so a copy of the tool run from
@@ -1906,10 +1906,14 @@ def legacy_card(task: dict[str, Any]) -> bool:
             and not task.get("consumer_proof") and not task.get("consumer_proofs"))
 
 
+def canonical_repo(repo: str) -> str:
+    return next((core for core in CORE_REPOS if core.lower() == repo.lower()), repo.lower())
+
+
 def legacy_pr_refs(task: dict[str, Any]) -> set[tuple[str, int]]:
     if task.get("pr") is not None:
         repo, recorded_number = pr_key(task)
-        return {(repo.lower(), recorded_number)}
+        return {(canonical_repo(repo), recorded_number)}
     refs = set()
     text = "\n".join(str(task.get(field) or "") for field in ("title", "note", "summary"))
     for match in LEGACY_PR_REF.finditer(text):
@@ -1920,10 +1924,10 @@ def legacy_pr_refs(task: dict[str, Any]) -> set[tuple[str, int]]:
             if repo.lower() == "app":
                 repo = "doctorcre-app"
             if "/" not in repo:
-                repo = "jbookout/" + repo
-        refs.add((repo.lower(), int(number)))
+                repo = ("DoctorCRE/" if repo == "carr-system" else "jbookout/") + repo
+        refs.add((canonical_repo(repo), int(number)))
     for repo, number in re.findall(r"reports/[\w.-]*-AF-(carr-system|doctorcre-app|software-factory)-(\d+)\.txt\b", text):
-        refs.add((f"jbookout/{repo}", int(number)))
+        refs.add((f"{'DoctorCRE' if repo == 'carr-system' else 'jbookout'}/{repo}", int(number)))
     return refs
 
 
@@ -2558,14 +2562,10 @@ def publish_board(project: str, *, costs=None) -> dict[str, int]:
     remote_snapshot = before.get("snapshot")
     snapshot = project_board_snapshot(state, costs=costs)
     if board == "carr-v5":
-        from system_work_cache import valid_cache
-        inventory = read_json_file(board_dir() / "system-work-github-cache.json")
-        if valid_cache(inventory):
-            snapshot["external_inventory"] = publish_external_inventory(inventory)
-        elif remote_snapshot:
-            inventory = remote_snapshot.get("snapshot_json", {}).get("external_inventory")
-            if inventory is not None:
-                snapshot["external_inventory"] = inventory
+        from system_work_cache import cached_github
+        snapshot["external_inventory"] = publish_external_inventory(cached_github(
+            board_dir() / "system-work-github-cache.json",
+            Path.home() / "carr-system/out/orch/dot/job13/report-G.md"))
     try:
         fitted = fit_snapshot(copy.deepcopy(snapshot))
     except SnapshotTooLarge:

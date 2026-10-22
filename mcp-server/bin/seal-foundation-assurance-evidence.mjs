@@ -184,7 +184,7 @@ function command(command, args, options = {}) {
 
 async function githubChecks(sourceSha) {
   const raw = await command("gh", ["api", "--paginate",
-    `repos/jbookout/carr-system/commits/${sourceSha}/check-runs`]);
+    `repos/DoctorCRE/carr-system/commits/${sourceSha}/check-runs`]);
   const pages = raw.trim().split(/\n(?=\{)/).filter(Boolean).map(JSON.parse);
   const runs = pages.flatMap(page => page.check_runs || []);
   return FOUNDATION_ASSURANCE_GITHUB_CHECKS.map(name => {

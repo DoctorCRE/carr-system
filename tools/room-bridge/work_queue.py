@@ -481,7 +481,7 @@ def board_projection(path=None):
         projected = {key: clean(value) for key, value in item.items() if key in fields}
         projected['prs'] = [{key: ref[key] for key in ('repo', 'number', 'head') if key in ref}
                             for ref in item.get('prs', []) if isinstance(ref, dict)
-                            and re.fullmatch(r'jbookout/(carr-system|doctorcre-app|software-factory)', str(ref.get('repo', '')))]
+                            and re.fullmatch(r'(DoctorCRE/carr-system|jbookout/(doctorcre-app|software-factory))', str(ref.get('repo', '')))]
         projected['merge_complete'] = bool(item.get('prs')) and item['stage'] == 'done'
         projected['last_event'] = event(item.get('last_event'))
         projected['stages'] = item.get('stages', [])

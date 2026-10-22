@@ -250,7 +250,7 @@ class HoldTests(unittest.TestCase):
             verb("add-loop", {"fixture": True})
             return "WARN launchd holds fixture alarm", 1
         scope = {"sys": sys, "os": os, "REPO_ROOT": str(ROOT), "rc": 0,
-                 "_jev_outage": SimpleNamespace(call_verb=lambda name, payload, **kwargs: calls.append(name))}
+                 "_uptime": SimpleNamespace(call_verb=lambda name, payload, **kwargs: calls.append(name))}
         with patch.object(launchd_hold_health, "check", side_effect=checked):
             exec(compile(ast.Module(body=[block], type_ignores=[]), "health-row", "exec"), scope)
         self.assertEqual(scope["rc"], 1)
@@ -264,7 +264,7 @@ class HoldTests(unittest.TestCase):
             isinstance(child, ast.ImportFrom) and any(alias.name == "launchd_hold_health" for alias in child.names)
             for child in ast.walk(node)))
         scope = {"sys": sys, "os": os, "REPO_ROOT": str(ROOT), "rc": 0,
-                 "_jev_outage": SimpleNamespace(call_verb=lambda *args, **kwargs: {})}
+                 "_uptime": SimpleNamespace(call_verb=lambda *args, **kwargs: {})}
         output = io.StringIO()
         with patch.object(launchd_hold_health, "check", side_effect=RuntimeError("fixture failure")):
             with contextlib.redirect_stdout(output):
@@ -281,7 +281,7 @@ class HoldTests(unittest.TestCase):
 
     def test_detached_guard_reads_the_same_definition_registry(self):
         patch.stopall()
-        label = "com.carr.repo-hygiene-janitor"
+        label = "com.carr.resource-collector"
         fake = self.home / "launchctl-fixture"
         fake.write_text("#!/bin/sh\ncase \"$1\" in\n"
                         "print) echo 'Could not find service \"" + label + "\"'; exit 113;;\n"

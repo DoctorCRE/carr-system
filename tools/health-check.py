@@ -24,7 +24,6 @@ from pathlib import Path
 from types import MappingProxyType
 from zoneinfo import ZoneInfo
 import health_submodule as _health_sub
-import jev_outage_health as _jev_outage
 import uptime_health as _uptime
 import flashlib
 from lib.credential_file import read_env_file
@@ -113,8 +112,8 @@ def _reader_args(argv):
         # A parent shell may carry this old ambient variable.  Normal health must
         # not pass it to any child or let a child silently choose a Drive reader.
         os.environ.pop("CARR_VAULT", None)
-    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "uptime", "sends"):
-        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|uptime|sends")
+    if section not in ("all", "exports", "jobs", "registry", "credentials", "grok-session", "tailscale", "headless", "costs", "uptime", "sends"):
+        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|grok-session|tailscale|headless|costs|uptime|sends")
     if fixture and recovery:
         raise SystemExit("health-check: --fixture is for hermetic canonical tests only")
     # --act executes every red row's bound action (tools/health_breach.py). It
@@ -152,42 +151,10 @@ def _cloudflare_rows():
     return health_rows()
 
 
-def _jev_spend_row():
-    """Use the same receipt reader and response loop for manual and nightly health."""
-    spend_path = os.path.join(REPO_ROOT, "ops", "jev_spend_health.py")
-    spend_spec = importlib.util.spec_from_file_location("jev_spend_health", spend_path)
-    jev_spend_health = importlib.util.module_from_spec(spend_spec)
-    spend_spec.loader.exec_module(jev_spend_health)
-    return jev_spend_health, jev_spend_health.check_spend(
-        extra_logs=[jev_spend_health.FACTORY_USAGE_LOG],
-        worker_usage=jev_spend_health.read_worker_usage)
 
 
-def _jev_paid_cap_row():
-    try:
-        client_path = os.path.join(REPO_ROOT, "ops", "typesafe_client.py")
-        spec = importlib.util.spec_from_file_location("jev_cap_client", client_path)
-        client = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(client)
-        return client.paid_cap_health()
-    except Exception as exc:
-        return (f"UNKNOWN jev paid cap — {type(exc).__name__} · on breach: "
-                "owner orchestrator · remediation restore the cap reader/configuration · "
-                "verify rerun health · auto-clear on successful read")
 
 
-def _jev_site_spend_row():
-    """Today's paid Jev attempts per registered call site, against its budget."""
-    try:
-        client_path = os.path.join(REPO_ROOT, "ops", "typesafe_client.py")
-        spec = importlib.util.spec_from_file_location("jev_site_client", client_path)
-        client = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(client)
-        return client.spend_by_site_health()
-    except Exception as exc:
-        return (f"UNKNOWN jev spend by site — {type(exc).__name__} · on breach: "
-                "owner orchestrator · remediation restore ops/config/jev-call-sites.v1.json "
-                "or the cap reader · verify rerun health · auto-clear on successful read")
 
 
 def _grok_session_row():
@@ -201,18 +168,6 @@ def _grok_session_row():
                 "owner orchestrator · remediation restore the Grok reader/lock storage · "
                 "verify rerun health · auto-clear on successful read", 1)
 
-
-if CANONICAL_SECTION == "jev-spend":
-    try:
-        _spend_module, _spend_line = _jev_spend_row()
-    except Exception as exc:
-        print(f"UNAVAILABLE jev spend — {type(exc).__name__}; "
-              "on breach: nightly ledger records an incident · owner orchestrator · "
-              "remediation restore the receipt reader · verify the next run reads "
-              "all usage sources · noncritical incidents auto-clear after three healthy runs")
-        sys.exit(1)
-    print(_spend_line)
-    sys.exit(_spend_module.nightly_exit_status(_spend_line))
 
 if CANONICAL_SECTION == "costs":
     import system_costs
@@ -1368,20 +1323,8 @@ def _canonical_health():
         if _cost_snapshot['state'] != 'ready' or _cost_snapshot['alerts']:
             rc = _red('system_costs', _cost_line, hard_error=_cost_snapshot['state'] == 'unavailable'
                       and 'system_costs' not in PROVISIONING_PENDING)
-    if CANONICAL_SECTION in ("all", "credentials", "jev-cap"):
-        _cap_line = _jev_paid_cap_row()
-        print("  " + _cap_line)
-        if _cap_line.startswith(("HIT", "UNKNOWN")):
-            rc = _red("jev_paid_cap", _cap_line, hard_error=_cap_line.startswith("UNKNOWN"))
-        for _subject, _count in re.findall(r"(pending|failed)=(\d+)", _cap_line):
-            if int(_count):
-                rc = _red("jev_spend_alert", _cap_line, subject=_subject, count=int(_count))
-        _site_line = _jev_site_spend_row()
-        print("  " + _site_line)
-        if " over budget: " in _site_line or _site_line.startswith("UNKNOWN"):
-            rc = _red("jev_site_budget", _site_line, hard_error=_site_line.startswith("UNKNOWN"))
     try:
-        snap = {} if CANONICAL_SECTION in ("jev-cap", "grok-session", "uptime", "sends") else _canonical_snapshot()
+        snap = {} if CANONICAL_SECTION in ("grok-session", "uptime", "sends") else _canonical_snapshot()
     except Exception as exc:
         print(f"canonical health: REFUSED ({type(exc).__name__}: {exc})")
         _red("canonical_health_refused", f"{type(exc).__name__}: {exc}", hard_error=True)
@@ -1733,15 +1676,6 @@ def _canonical_health():
                 else:
                     rc = _red("cloudflare_token", token_row["line"], subject=token_row["subject"],
                               status=token_row["status"])
-        # The source log is canonical across worktrees. The row carries its
-        # response action on both OK and WARN, and the helper owns one loop.
-        try:
-            _, _spend_line = _jev_spend_row()
-            print("  " + _spend_line)
-        except Exception as exc:
-            print(f"  UNAVAILABLE jev spend — {type(exc).__name__}; "
-                  "on breach: open/update one dedup loop · owner orchestrator · "
-                  "remediation find caller in jev usage log · auto-clear when below threshold")
         # ── credential health (added 2026-09-24) ────────────────────────────
         # Daily liveness lane for every credential CARR needs to run
         # unattended — wrangler/Cloudflare, Neon, the two MCP machine-bearer
@@ -1868,92 +1802,6 @@ def _canonical_health():
             print(f"  ⚠︎ {'credential health':<18} check failed ({type(e).__name__}: {e})")
             rc = _red("credential_health", f"check failed ({type(e).__name__}: {e})", hard_error=True)
 
-    if CANONICAL_SECTION == "all":
-        # Jev liveness compares the last usable provider receipt with a
-        # recent failed judgment attempt. The row's loop is filed once and
-        # closed only after a later schema-valid judgment appears in these logs.
-        try:
-            _loop_state = os.path.join(REPO_ROOT, "out", "jev-outage-loop.json")
-            _joh = _jev_outage.evaluate(
-                os.path.join(REPO_ROOT, "out", "jev-judge.jsonl"),
-                os.path.join(REPO_ROOT, "out", "jev-calls.jsonl"),
-                state_path=_loop_state)
-            _action = _jev_outage.action(_joh.get("reason"))
-            _outcome = _jev_outage.reconcile(
-                _joh, _loop_state,
-                _jev_outage.call_verb)
-            if _joh["status"] == "warn":
-                _last = (f"last success {_joh['age_hours']}h ago"
-                         if _joh["age_hours"] is not None else "no usable call recorded")
-                _condition = ("outage evidence unreadable" if _joh["reason"] == "log_unreadable"
-                              else f"recent attempt failed ({_joh['reason']})")
-                _detail = f"{_last}; {_condition}; loop {_outcome}"
-                print(f"  ⚠︎ {'Jev live judgment':<18} {_detail} · {_action}")
-                rc = _red("jev_live_outage", f"{_detail} · {_action}")
-            elif _outcome == "error":
-                _detail = "outage loop could not be auto-cleared"
-                print(f"  ⚠︎ {'Jev live judgment':<18} {_detail} · {_action}")
-                rc = _red("jev_live_outage", f"{_detail} · {_action}")
-            else:
-                _summary = ("success verified; outage loop cleared" if _outcome == "cleared"
-                            else "recent failure; last success is inside the grace window"
-                            if _joh["pending"]
-                            else "no recent failed attempts" if _joh["status"] == "skip"
-                            else "successful Jev call is fresh")
-                print(f"  {'OK' if _joh['status'] == 'ok' else '--'} "
-                      f"{'Jev live judgment':<18} {_summary} · {_action}")
-        except Exception as e:
-            _detail = f"outage evidence unreadable ({type(e).__name__})"
-            print(f"  ⚠︎ {'Jev live judgment':<18} {_detail} · {_jev_outage.action('log_unreadable')}")
-            rc = _red("jev_live_outage", f"{_detail} · {_jev_outage.action('log_unreadable')}")
-
-    if CANONICAL_SECTION == "all":
-        # Jev call receipt tamper audit (migrations/0587). The receipt store is
-        # detectable-not-prevented against its database owner; this is the
-        # detection half: a receipt with no matching ask-jev tool_call row, or
-        # an append-only trigger that is not enabled, is a failing line. The
-        # child asks the deployed Worker through `./run.sh call` (no credential
-        # of its own); a Worker that does not serve the verb yet (unknown_tool)
-        # is a skip line, not a failure.
-        try:
-            _rih = os.path.join(REPO_ROOT, "ops", "receipt-integrity-health.py")
-            if not os.path.exists(_rih):
-                print(f"  -- {'jev receipts':<18} ops/receipt-integrity-health.py not present; skipped")
-            else:
-                _venv = os.path.join(REPO_ROOT, ".venv", "bin", "python")
-                _py = _venv if os.path.exists(_venv) else sys.executable
-                _p = subprocess.run([_py, _rih], capture_output=True, text=True, timeout=120,
-                                    stdin=subprocess.DEVNULL)
-                _lines = (_p.stdout or "").strip().splitlines()
-                _first = _lines[0] if _lines else "(no output)"
-                if _first.startswith("SKIP"):
-                    print(f"  -- {'jev receipts':<18} {_first.split(': ', 1)[-1]}")
-                elif _p.returncode == 0:
-                    print(f"  OK {'jev receipts':<18} {_first.split('— ', 1)[-1]}")
-                else:
-                    _detail = _first.split("— ", 1)[-1]
-                    print(f"  ⚠︎ {'jev receipts':<18} {_detail}")
-                    # hard_error=True unconditionally (round 8 of an
-                    # independent review of PR #1237, point 4): this is a
-                    # tamper-DETECTION check on the Jev call receipt store,
-                    # which is detectable-not-prevented against its own
-                    # database owner (see the block comment above) — a
-                    # mismatched receipt or a disabled append-only trigger is
-                    # never a business count a baseline comparison should be
-                    # allowed to excuse, the same reasoning `failed` gets in
-                    # the credential-health loop above. `count` is the actual
-                    # number of receipts without a matching ask-jev tool_call
-                    # row when the message says so (not a fixed 1), so a rise
-                    # from one mismatch to five is visible to ops/release-
-                    # pipeline.py's baseline-vs-live regression diff instead
-                    # of two runs reporting the identical count=1.
-                    _rm = re.search(r"(\d+)\s+receipt\(s\)\s+without\s+a\s+matching", _detail)
-                    rc = _red("jev_call_receipt_integrity", _detail,
-                              count=int(_rm.group(1)) if _rm else 1, hard_error=True)
-        except Exception as e:
-            _detail = f"check failed ({type(e).__name__}: {e})"
-            print(f"  ⚠︎ {'jev receipts':<18} {_detail}")
-            rc = _red("jev_call_receipt_integrity", _detail, hard_error=True)
 
     if CANONICAL_SECTION in ("all", "uptime") and not CANONICAL_FIXTURE:
         line, failed = _uptime.row()
@@ -2284,7 +2132,7 @@ _db_env_line = db_env_parse_failure()
 if _db_env_line is not None:
     print(f"  ⚠︎ {'db.env':<18} UNSOURCEABLE — {DB_ENV} does not parse as shell at line "
           f"{_db_env_line}. Every job that does `set -a; . db.env` (bin/migrate-prod.sh, "
-          f"bin/nightly.sh, bin/control-plane-tick.sh and the rest) "
+          f"bin/nightly.sh and the other scheduled jobs) "
           f"loses ALL of its keys, not just the bad one, and reports its credential missing. "
           f"Fix: single-quote that value  · one bad line disables every credential here")
     rc = 1
@@ -3020,7 +2868,7 @@ try:
     from lib import launchd_hold_health as _launchd_hold_health
     _hold_line, _hold_rc = _launchd_hold_health.check(
         os.path.expanduser("~"),
-        lambda name, payload: _jev_outage.call_verb(name, payload, repo=REPO_ROOT))
+        lambda name, payload: _uptime.call_verb(name, payload))
     print(f"  {_hold_line}")
     rc = max(rc, _hold_rc)
 except Exception as e:

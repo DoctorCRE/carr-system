@@ -80,7 +80,7 @@ class WorkQueueTests(unittest.TestCase):
             self.q.requeue('A', stage='review', actor='test', reason='fourth')
         self.q.update('A', actor='reviewer', reason='findings', findings=[
             {'id': 'f1', 'level': 'P1', 'summary': 'Lost ordering', 'resolved': False}],
-            prs=[{'repo': 'jbookout/carr-system', 'number': 1960, 'head': 'a' * 40}], ci_state='passed')
+            prs=[{'repo': 'DoctorCRE/carr-system', 'number': 1960, 'head': 'a' * 40}], ci_state='passed')
         self.q.update('A', actor='fixer', reason='fixed', findings=[
             {'id': 'f1', 'level': 'P1', 'summary': 'Lost ordering', 'resolved': True}])
         self.q.transition('A', 'merging', actor='orchestrator', reason='reviews passed')

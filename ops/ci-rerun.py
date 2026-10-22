@@ -61,7 +61,7 @@ def admit(run, job, pr, head, repo=REPO):
         if job.get('name') not in shapes[(run['name'], run['path'])]:
             raise Refusal('only a listed app job may be rerun')
         return {'head': head, 'job': job['name']}
-    groups = {'ops/ci.sh --strict --only ' + g: g for g in evidence.class_groups()}
+    groups = evidence.class_jobs(ROOT)
     if job.get('name') not in groups:
         raise Refusal('only a named CI class job may be rerun')
     group = groups[job['name']]

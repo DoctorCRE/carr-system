@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
-"""Run one coding task through the supervised Flash path.
+"""Run an explicit coding task through isolated Flash attempts and tests.
 
-When Flash is enabled, the command checks ambiguity, runs isolated attempts,
-tests each candidate, applies the selected patch, and tests the result again.
-Failures follow the configured Model Room escalation mode. When Flash is
-switched off, the command skips every local-model step and starts with that
-same escalation path. Every run appends one row to out/flash-runs.jsonl.
+Use one attempt by default or choose --attempts. A passing candidate is applied
+and tested again in the real tree; failed work follows the configured Model Room
+escalation mode. The stats command summarizes the local run log.
 
-Other subcommands:
-  flash-run plan <file>        route each step of a plan local/escalate (#18)
-  flash-run scorecard          the standing model scorecard (#25)
-  flash-run stats              summarize out/flash-runs.jsonl
-  flash-run note "<what>" --fix "<fix>"   add to the mistake notebook by hand
-
-Exit codes: 0 applied and tests pass (or no test given and an attempt ran),
-3 the task is ambiguous, 4 routed or escalated away from the local model,
-5 no candidate was good enough, 2 usage or environment problem.
+Exit codes: 0 success, 4 escalated away, 5 no passing candidate, 2 invalid environment.
 """
 import argparse
 import importlib.util
@@ -37,7 +27,6 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 import flashlib
 OUT = os.path.join(REPO, "out")
 RUNS_LOG = os.path.join(OUT, "flash-runs.jsonl")
-EXAMPLES_LOG = os.path.join(OUT, "flash-examples.jsonl")
 HANDOFF_DIR = os.path.join(OUT, "flash-handoffs")
 FLASH = os.environ.get("FLASH_BIN") or shutil.which("flash") or os.path.expanduser("~/.local/bin/flash")
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache", "out", "dist",
@@ -130,15 +119,6 @@ def sandbox_wrap(argv, work, *, reads=(), execs=(), port=None):
     if not os.path.exists(SANDBOX_EXEC):
         raise FileNotFoundError("sandbox-exec is not on this machine")
     return [SANDBOX_EXEC, "-p", sandbox_profile(work, reads=reads, execs=execs, port=port), *argv]
-
-
-def _lib(name):
-    spec = importlib.util.spec_from_file_location(name, os.path.join(REPO, "ops", f"{name}.py"))
-    if spec is None or spec.loader is None:
-        raise ImportError(name)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def _now():
@@ -345,7 +325,7 @@ def git_env(base=None, excludes=None):
     core.worktree); system and global config are off. The only config added back is our own excludes file."""
     global _GIT_ENV_LIB
     if _GIT_ENV_LIB is None:
-        _GIT_ENV_LIB = _lib("git_env")
+        _GIT_ENV_LIB = _load_path(os.path.join(REPO, "ops/git_env.py"), "git_env")
     env = _GIT_ENV_LIB.scrubbed_env(base)
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_TERMINAL_PROMPT="0")
     if excludes:
@@ -396,14 +376,8 @@ def read_patch(dest):
     return patch
 
 
-def build_prompt(task, test_cmd, context_files, recalled, example):
+def build_prompt(task, test_cmd):
     parts = [task.strip()]
-    if context_files:
-        parts.append("Files most likely involved: " + ", ".join(context_files))
-    if example:
-        parts.append("A similar task solved before:\n" + example)
-    if recalled:
-        parts.append("Mistakes made on similar tasks before — avoid them:\n" + "\n".join(recalled))
     if test_cmd:
         parts.append(f"Verify with: {test_cmd}\nRun it, fix until it passes, then stop. "
                      "Keep the change small; do not edit the tests to make them pass.")
@@ -438,28 +412,11 @@ def think_for(mode, effort, attempt):
     return not (effort == "low" and attempt == 1)
 
 
-MAX_TASK_RULES = 5
-RULE_STATEMENT_CHARS = 600
-# Said to the rule picker, not to Flash. Measured 2026-09-24: describing the task only as
-# "coding in carr-system" made Jev pick session rules (worktree-per-session, own the merge)
-# for a disposable copy that must not touch git; naming the real boundary drops them, and
-# a gate-building task still gets write-the-test-first.
-RULE_SITUATION = ("A local coding model (Flash) is about to write code for ONE scoped task inside a "
-                  "disposable copy of the files. It does no git, branching, worktrees, pushes, "
-                  "merges or delivery (the flash-run harness owns all of that, and tests and "
-                  "applies the patch). It only reads, edits and runs tests. The task: ")
-
-
-def pick_rules(task, situation=RULE_SITUATION, **judge):
-    """Return authoritative rules and a visible note for pending semantic advice.
-
-    Flash has no boot load or enforcing hooks, so the selector considers the whole
-    active corpus. Injected judgment arguments use the same bounded batch interface.
-    """
+def pick_rules(task):
+    """Return deterministic store-scoped rules and visible coverage gaps."""
     try:
         from lib.rule_scope_lookup import lookup
-        result = lookup({'hook_event_name': 'UserPromptSubmit', 'task': situation + task},
-                        judge=judge.get('judge'))
+        result = lookup({'hook_event_name': 'UserPromptSubmit', 'task': task})
         if len(json.dumps(result['rules'])) > 90000:
             return [], 'selected rule text exceeds the task context budget'
         note = None
@@ -568,7 +525,7 @@ def run_attempt(n, cwd, prompt, test_cmd, effort, workdir, think=True, rules_tex
         test_code, test_out = _run_test(test_cmd, dest, TEST_TIMEOUT, sandbox=sandbox, reads=reads,
                                         execs=execs, port=port)
     patch = read_patch(dest)
-    return {"id": f"attempt-{n}", "code_or_diff": patch[:20000], "patch": patch,
+    return {"id": f"attempt-{n}", "patch": patch,
             "test_output": test_out[-6000:], "test_exit_code": test_code,
             "probe_results": {"agent_exit_code": code, "patch_lines": patch.count("\n"),
                               "tests_passed": test_code == 0 if test_cmd else None},
@@ -596,9 +553,11 @@ def apply_patch(cwd, patch):
 # before any attempt is a design/judgment call -> the Opus desk, in the background.
 # Why not the Sol room seat (codex-desk): it is read-only on purpose, because it answers
 # partner-room turns inside the canonical checkout, which must stay clean.
-# The desks come from the Model Room routing policy (ops/config/model-routes.v1.json, read through
-# ops/jev_model_route.desk_for), so this hand-off and the router always name the same desks.
-ESCALATION_DESKS = {kind: _lib("jev_model_route").desk_for(kind) for kind in ("code", "judgment")}
+# Escalation uses the configured Model Room desks, without model routing.
+with open(os.path.join(REPO, "ops/config/model-routes.v1.json"), encoding="utf-8") as _policy_file:
+    _routes = json.load(_policy_file)["routes"]
+ESCALATION_DESKS = {"code": _routes["code"]["then"]["desk"],
+                    "judgment": _routes["escalate"]["desk"]}
 ESCALATION_FILE_CHARS = 20000
 DIFF_BLOCK = re.compile(r"```(?:diff|patch)\s*\n(.*?)```", re.S)
 
@@ -652,11 +611,7 @@ def escalate(task, cwd, run_id, failure, files, mode, *, test_cmd=None, kind="co
     """Write the handoff pack; in auto mode send it to the Model Room desk for `kind`.
 
     Returns {"handoff", "desk", "outcome", "detail"}. Never raises on a desk problem."""
-    done = _lib("jev_done_checks")
-    pack = done.build_handoff(task, "", files, failure_output=failure)
-    text = pack.get("pack") if isinstance(pack, dict) else None
-    if not text:
-        text = f"Task:\n{task}\n\nLast failure:\n{(failure or '')[-4000:]}"
+    text = f"Task:\n{task}\n\nLast failure:\n{(failure or '')[-4000:]}"
     if test_cmd:
         text += f"\n\nThe task is done when this passes: {test_cmd}"
     section = _file_section(cwd, files)
@@ -734,8 +689,6 @@ def cmd_run(a):
         row["handoff"] = row["escalation"]["handoff"]
         _append(RUNS_LOG, row)
         return 0 if row["escalation"]["outcome"] == "fixed_by_desk" else 4
-    intake = _lib("jev_intake")
-    notebook = _lib("jev_notebook")
 
     sandbox = a.sandbox == "on" or (a.sandbox == "auto" and os.path.exists(SANDBOX_EXEC))
     if a.sandbox == "on" and not os.path.exists(SANDBOX_EXEC):
@@ -746,60 +699,8 @@ def cmd_run(a):
     if a.sandbox == "auto" and not sandbox:
         _say("WARNING: no sandbox-exec on this machine; the attempt runs UNSANDBOXED (interactive use only)")
     row["sandbox"] = sandbox
-    learn = not a.no_learn
-
-    amb = intake.check_ambiguity(task)
-    row["ambiguity"] = amb.get("verdict")
-    if amb.get("verdict") in ("review_required", "unavailable") or (amb.get("escalate") and amb.get("verdict") != "ambiguous"):
-        row.update(outcome="intake_review_required", intake_advice=amb)
-        _say("ambiguity judgment requires review: " + json.dumps(amb.get("detail"))[:600])
-        _append(RUNS_LOG, row)
-        return 3
-    if amb.get("verdict") == "ambiguous" and not a.force:
-        _say("the task looks ambiguous: " + json.dumps(amb.get("detail"))[:600])
-        _say("clarify it, or pass --force to run anyway")
-        row["outcome"] = "ambiguous"
-        _append(RUNS_LOG, row)
-        return 3
-
-    files = [f for f in _tracked_files(cwd)][:4000]
-    route = intake.route_task(task, files=None, has_tests=bool(a.test))
-    row["route"] = route.get("verdict")
-    if route.get("verdict") in ("review_required", "unavailable") or (route.get("escalate") and route.get("verdict") != "escalate"):
-        row.update(outcome="route_review_required", intake_advice=route)
-        _say("route judgment requires review: " + json.dumps(route.get("detail"))[:600])
-        _append(RUNS_LOG, row)
-        return 4
-    if route.get("verdict") == "escalate" and not a.force:
-        _say("routed away from the local model: " + json.dumps(route.get("detail"))[:600])
-        row["outcome"] = "routed_escalate"
-        row["escalation"] = escalate(task, cwd, run_id, None, [], a.escalate, kind="judgment")
-        row["handoff"] = row["escalation"]["handoff"]
-        _append(RUNS_LOG, row)
-        return 4
-
-    effort_check = None if a.effort else intake.pick_effort(task)
-    if effort_check and (effort_check.get("escalate") or effort_check.get("verdict") not in ("low", "medium", "high")):
-        row.update(outcome="effort_review_required", intake_advice=effort_check)
-        _say("effort judgment requires review: " + json.dumps(effort_check.get("detail"))[:600])
-        _append(RUNS_LOG, row)
-        return 4
-    effort = a.effort or effort_check.get("verdict")
-    if effort not in ("low", "medium", "high"):
-        effort = "low"
-    ctx = intake.pick_context(task, cwd)
-    context_files = (ctx.get("detail") or {}).get("paths") or ctx.get("paths") or []
-    recall = notebook.recall_mistakes(task)
-    recalled = (recall.get("detail") or {}).get("lines") or recall.get("lines") or []
-    example_text = None
-    examples = _read_examples()
-    if examples:
-        pick = intake.pick_example(task, examples)
-        chosen = (pick.get("detail") or {}).get("example_id")
-        for ex in examples:
-            if ex.get("id") == chosen:
-                example_text = f"{ex.get('title')}\n{ex.get('summary')}"
-    row.update(effort=effort, context=context_files[:10], recalled=len(recalled))
+    effort = a.effort or "low"
+    row.update(effort=effort)
     rules, rules_error = ([], "skipped (--no-rules)") if a.no_rules else pick_rules(task)
     rules_text = rules_block(rules)
     row["rules"] = [r.get("id") for r in rules]
@@ -811,8 +712,8 @@ def cmd_run(a):
         _say("rules for this task: " + ", ".join(f"{r.get('id')} {r.get('gist', '')[:50]}"
                                                   for r in rules))
 
-    attempts = a.attempts or (3 if a.test else 1)
-    prompt = build_prompt(task, a.test, context_files[:8], recalled[:3], example_text)
+    attempts = a.attempts or 1
+    prompt = build_prompt(task, a.test)
     workdir = tempfile.mkdtemp(prefix=f"flash-run-{run_id}-")
     candidates = []
     try:
@@ -830,33 +731,19 @@ def cmd_run(a):
             # --all-attempts keeps the full best-of-N when the tests are known to be thin.
             if not a.all_attempts and cand["test_exit_code"] == 0:
                 break
-        best = _lib("jev_best_of").select_candidate(
-            task, [{k: c[k] for k in ("id", "code_or_diff", "probe_results", "test_output",
-                                      "test_exit_code")} for c in candidates])
-        chosen_id = best.get("verdict")
-        row["selection"] = {"verdict": chosen_id, "confidence": best.get("confidence"),
-                            "escalate": best.get("escalate"),
-                            "advice": best.get("detail"),
-                            "attempts": [{"id": c["id"], "test_exit_code": c["test_exit_code"],
-                                          "elapsed_s": c["elapsed_s"]} for c in candidates]}
-        if best.get("escalate") or chosen_id == "review_required":
-            row["outcome"] = "selection_review_required"
-            _say("candidate selection requires review; evidence retained in the run log")
-            _append(RUNS_LOG, row)
-            return 5
-        chosen = next((c for c in candidates if c["id"] == chosen_id), None)
-        if chosen is None and attempts == 1 and candidates and candidates[0]["patch"].strip() \
-                and not a.test:
+        chosen = next((candidate for candidate in candidates
+                       if candidate["test_exit_code"] == 0 and candidate["patch"].strip()), None)
+        if chosen is None and len(candidates) == 1 and not a.test:
             chosen = candidates[0]
+        row["selection"] = {"verdict": chosen["id"] if chosen else None,
+                            "attempts": [{"id": candidate["id"],
+                                          "test_exit_code": candidate["test_exit_code"],
+                                          "elapsed_s": candidate["elapsed_s"]} for candidate in candidates]}
         if chosen is None or not chosen["patch"].strip():
             failure = candidates[-1]["test_output"] if candidates else ""
             _say("no attempt was good enough")
-            if learn:  # queue runs pass --no-learn: posted task text must never seed a later prompt
-                notebook.record_mistake("no_candidate", task,
-                                        f"{attempts} attempts; last failure: {failure[-500:]}",
-                                        "escalated", source=f"flash-run {run_id}")
             row["outcome"] = "no_candidate"
-            row["escalation"] = escalate(task, cwd, run_id, failure, context_files[:8],
+            row["escalation"] = escalate(task, cwd, run_id, failure, [],
                                          a.escalate, test_cmd=a.test)
             row["handoff"] = row["escalation"]["handoff"]
             if row["escalation"]["outcome"] == "fixed_by_desk":
@@ -885,19 +772,7 @@ def cmd_run(a):
                                               port=flash_port())
             _say("tests pass in the real tree" if final_code == 0
                  else f"tests FAIL in the real tree ({final_code})\n{final_out[-1500:]}")
-        review = _lib("jev_done_checks").triage_review(chosen["patch"][:40000], task)
-        row["review"] = {"verdict": review.get("verdict"),
-                         "advice": (review.get("detail") or {}).get("advice")}
-        if review.get("verdict") == "needs_review":
-            _say("review triage: this change touches risky code — have Claude review it: "
-                 + str((review.get("detail") or {}).get("advice") or ""))
         row["outcome"] = "applied_pass" if final_code in (0, None) else "applied_fail"
-        if final_code == 0 and learn:
-            _append(EXAMPLES_LOG, {"id": run_id, "title": task[:120],
-                                   "summary": chosen["patch"][:1500], "at": _now()})
-        elif final_code is not None and learn:
-            notebook.record_mistake("applied_but_failing", task, final_out[-800:],
-                                    "needs follow-up", source=f"flash-run {run_id}")
         _append(RUNS_LOG, row)
         return 0 if final_code in (0, None) else 5
     finally:
@@ -905,48 +780,6 @@ def cmd_run(a):
             shutil.rmtree(workdir, ignore_errors=True)
         else:
             _say(f"attempt copies kept in {workdir}")
-
-
-def _read_examples(limit=200):
-    rows = []
-    try:
-        with open(EXAMPLES_LOG, encoding="utf-8") as fh:
-            for line in fh:
-                try:
-                    rows.append(json.loads(line))
-                except ValueError:
-                    continue
-    except OSError:
-        return []
-    return rows[-limit:]
-
-
-def cmd_plan(a):
-    with open(a.file, encoding="utf-8") as fh:
-        steps = [ln.strip().lstrip("-*0123456789. ").strip() for ln in fh
-                 if ln.strip() and not ln.lstrip().startswith("#")]
-    result = _lib("jev_intake").split_plan(steps)
-    for step in (result.get("detail") or {}).get("steps") or result.get("steps") or []:
-        print(f"{step.get('route', '?'):9} {step.get('difficulty', '')!s:6} {step.get('step', '')[:100]}")
-    return 0
-
-
-def cmd_scorecard(a):
-    if flashlib.is_switched_off():
-        _say(flashlib.OFF_REASON)
-        return 4
-    sc = _lib("jev_scorecard")
-    suite = sc.load_suite(a.suite)
-    results = []
-    for task in suite:
-        if a.only and task.get("id") not in a.only:
-            continue
-        _say(f"scorecard task {task.get('id')}")
-        results.append(sc.run_task(task, attempts=a.attempts))
-    summary = sc.summarize(results)
-    print(json.dumps(summary, indent=2))
-    _append(os.path.join(OUT, "flash-scorecard.jsonl"), {"at": _now(), "summary": summary})
-    return 0
 
 
 def cmd_stats(a):
@@ -967,12 +800,6 @@ def cmd_stats(a):
     return 0
 
 
-def cmd_note(a):
-    _lib("jev_notebook").record_mistake(a.kind, a.task or "", a.what, a.fix or "", source="manual")
-    _say("noted")
-    return 0
-
-
 def main(argv):
     p = argparse.ArgumentParser(prog="flash-run", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd")
@@ -987,31 +814,16 @@ def main(argv):
                    help="run every attempt even after one passes (slower, full best-of-N choice)")
     r.add_argument("--think", choices=["auto", "on", "off"], default="auto",
                    help="model thinking: auto = off on the first attempt of low-effort work, on for retries")
-    r.add_argument("--force", action="store_true", help="run despite an ambiguity or routing stop")
     r.add_argument("--no-rules", action="store_true",
-                   help="skip Jev's per-task rule pick (attempts get no RULES FOR THIS TASK block)")
+                   help="skip deterministic store rule lookup (attempts get no RULES FOR THIS TASK block)")
     r.add_argument("--dry-run", action="store_true", help="print the chosen patch, do not apply")
     r.add_argument("--keep", action="store_true", help="keep the attempt copies")
     r.add_argument("--sandbox", choices=["auto", "on", "off"], default="auto",
                    help="run the agent and the tests under macOS sandbox-exec: auto = on if present (else a warning "
                         "and an unsandboxed run), on = required (refuse if absent), off = never. Queue runs pass on.")
-    r.add_argument("--no-learn", action="store_true",
-                   help="do not write the task to the examples log or the mistake notebook (queue runs pass this, "
-                        "so untrusted room text can never seed a later prompt)")
-    pl = sub.add_parser("plan")
-    pl.add_argument("file")
-    s = sub.add_parser("scorecard")
-    s.add_argument("--suite", default=os.path.join(REPO, "ops", "config", "flash-scorecard-tasks.v1.json"))
-    s.add_argument("--attempts", type=int, default=1)
-    s.add_argument("--only", nargs="*")
     st = sub.add_parser("stats")
     st.add_argument("--since", default=None)
-    n = sub.add_parser("note")
-    n.add_argument("what")
-    n.add_argument("--fix", default="")
-    n.add_argument("--kind", default="manual")
-    n.add_argument("--task", default="")
-    known = {"run", "plan", "scorecard", "stats", "note", "-h", "--help"}
+    known = {"run", "stats", "-h", "--help"}
     if argv and argv[0] not in known:
         argv = ["run", *argv]
     a = p.parse_args(argv)
@@ -1021,8 +833,7 @@ def main(argv):
     if a.cmd == "run" and not flashlib.is_switched_off() and not os.path.exists(FLASH):
         _say(f"the flash launcher is missing ({FLASH})")
         return 2
-    return {"run": cmd_run, "plan": cmd_plan, "scorecard": cmd_scorecard,
-            "stats": cmd_stats, "note": cmd_note}[a.cmd](a)
+    return {"run": cmd_run, "stats": cmd_stats}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@
   "captured_at": "2026-10-05T19:11:36.942524+00:00",
   "source_sha": "8d5f00b6a81b0cc0a3756989a1f7226efff1b7f7",
   "manifest_source": {
-    "repository": "jbookout/carr-system",
+    "repository": "DoctorCRE/carr-system",
     "ref": "origin/codex/job-manifest-drift",
     "captured_machine_role": "secondary",
     "source_sha": "c5c4520b57302d0064560d0a1849813aa5443f06",
@@ -644,10 +644,6 @@
     },
     {
       "path": "~/.config/carr/tokens.env",
-      "macbook_present": true
-    },
-    {
-      "path": "~/.config/carr/typesafe.env",
       "macbook_present": true
     },
     {
@@ -1393,24 +1389,8 @@
       "macbook_present": true
     },
     {
-      "path": "~/carr-system/out/jev-calls.jsonl.daily-cap.sqlite3",
-      "macbook_present": true
-    },
-    {
-      "path": "~/carr-system/out/jev-judge-cache.sqlite3",
-      "macbook_present": true
-    },
-    {
       "path": "~/carr-system/out/run-spool.sqlite3",
       "macbook_present": true
-    },
-    {
-      "path": "~/carr-system/out/wt-dot-job3/.git-recovery.qiybFN/repo/out/jev-judge-cache.sqlite3",
-      "macbook_present": false
-    },
-    {
-      "path": "~/carr-system/out/wt-dot-job3/out/jev-judge-cache.sqlite3",
-      "macbook_present": false
     }
   ],
   "state_search_roots": [

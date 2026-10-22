@@ -2,7 +2,7 @@
 """one-repo-gate.py — the PreToolUse DENY gate on code written outside the repo.
 
 WHY THIS EXISTS. CARR's CLAUDE.md rev 10: "the code lives in ONE repo:
-jbookout/carr-system (~/carr-system locally) ... If a session cannot reach that
+DoctorCRE/carr-system (~/carr-system locally) ... If a session cannot reach that
 repo it must STOP and say so, not improvise a home." That rule is prose, so it
 binds only sessions that read it and obey it — which is precisely how it failed.
 A cloud session that could not see carr-system filed an entire system audit plus
@@ -98,7 +98,7 @@ CODE_EXTENSIONS = (".py", ".js", ".mjs", ".ts", ".sql", ".sh")
 # identity too, so the same owner and repo served from a different host is not
 # this repo and is refused.
 AUTHORIZED_REMOTES = {
-    ("github.com", "jbookout/carr-system"),
+    ("github.com", "DoctorCRE/carr-system"),
     ("github.com", "jbookout/doctorcre-app"),
     ("github.com", "jbookout/software-factory"),
 }
@@ -124,7 +124,7 @@ DENY = (
     "BLOCKED by the CARR one-repo gate: {path}\n"
     "That is a NEW {ext} file inside {tree}, which is a git working tree and is "
     "not one of CARR's authorized code homes. Code lives in three repos and "
-    "nowhere else (decision 1ceee300, AGENTS.md): jbookout/carr-system "
+    "nowhere else (decision 1ceee300, AGENTS.md): DoctorCRE/carr-system "
     "(~/carr-system locally), jbookout/doctorcre-app and "
     "jbookout/software-factory. A tree is one of those only if its origin "
     "remote says so.\n"

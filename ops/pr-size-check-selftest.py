@@ -46,7 +46,6 @@ check = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = check  # dataclasses resolve their module by name
 spec.loader.exec_module(check)
 
-import jev_intake  # noqa: E402  (stdlib-only; the thresholds' owner)
 
 checks: list[tuple[str, bool]] = []
 
@@ -85,10 +84,10 @@ def run(repo: Path, rng: str) -> tuple[int, str]:
     return rc, out.getvalue() + err.getvalue()
 
 
-LIMIT_LINES = jev_intake.ROUTE_MAX_DIFF_LINES
-LIMIT_FILES = jev_intake.ROUTE_MAX_FILES
+LIMIT_LINES = 300
+LIMIT_FILES = 5
 
-checks.append(("thresholds are the escalation router's constants (ops/jev_intake.py)",
+checks.append(("thresholds are the documented review size",
                check.thresholds() == (LIMIT_LINES, LIMIT_FILES)))
 checks.append(("a migration path is never excluded, even one named like generated output",
                check.is_excluded("migrations/0999_add.generated.sql") is None

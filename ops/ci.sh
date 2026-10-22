@@ -8,7 +8,6 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
-export CARR_JEV_OFFLINE=1
 
 PY="$REPO/.venv/bin/python"
 [ -x "$PY" ] || PY=python3
@@ -330,7 +329,7 @@ PYEOF
              selftest-git-isolation-check \
              sync-core-rule-ids rule-route-coverage \
              migration-order-gate \
-             migration-safety-gate check-jev-conformance door-reachability-check; do
+             migration-safety-gate door-reachability-check; do
     [ -f "ops/$inv.py" ] || continue
     local inv_args=()
     case "$inv" in
@@ -1043,7 +1042,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 
     _mstep triggers
     if ! DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-control-plane-sync.log" \
-         "$PY" tools/control-plane.py sync; then
+         "$PY" tools/workflow-registry.py sync; then
       tail -30 "$LOGDIR/migration-control-plane-sync.log" >&2
       bad migration "control-plane registry sync failed after migrations"
       return

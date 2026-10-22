@@ -45,7 +45,6 @@ import { evidenceActivationTools } from "./evidence-activation.js";
 import { resourceObservationTools } from "./resource-observation.v5.js";
 import { invoiceAutomation } from "./invoice-automation.js";
 import { leadAutomationTools } from "./lead-automation.js";
-import { jevCallReceiptTools } from "./jev-call-receipt.js";
 import { workflowCutoverTools } from "./workflow-cutover.v5.js";
 import { engineeringRuntimeTools } from "./engineering-runtime.js";
 import { tourRightsProjectionTools } from "./tour-rights-projection.js";
@@ -338,7 +337,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if (verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if (verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
@@ -1446,20 +1445,20 @@ async function require0066(c) {
 // ---------- code subjects (0101, loop #211) ----------
 
 // THE ONE REPO. CARR CLAUDE.md rev 10: "the code lives in ONE repo:
-// jbookout/carr-system". A caller who writes `commit:<sha>` and names no repo means
+// DoctorCRE/carr-system". A caller who writes `commit:<sha>` and names no repo means
 // this one, because there is no other. The schema deliberately does NOT hard-code
 // it — a second repo is a real possibility and a schema forbidding it would be a
 // lie — so the default lives here, at the caller's edge, where it is a convenience
 // rather than a constraint.
-const DEFAULT_REPO = "jbookout/carr-system";
+const DEFAULT_REPO = "DoctorCRE/carr-system";
 const SHA_RE = /^[0-9a-f]{7,40}$/i;
 const REPO_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 
 // Parse the forms a reviewing seat actually writes, in the order it writes them:
 //   commit:f7abde7               -> the one repo at that commit
-//   jbookout/carr-system@f7abde7 -> any repo at that commit
-//   repo:jbookout/carr-system    -> the repo itself (a finding about the codebase,
-//   jbookout/carr-system            not about one change)
+//   DoctorCRE/carr-system@f7abde7 -> any repo at that commit
+//   repo:DoctorCRE/carr-system    -> the repo itself (a finding about the codebase,
+//   DoctorCRE/carr-system            not about one change)
 // Returns { repo, sha } with sha null for a repo-level subject.
 function parseCodeRef(raw) {
   const s = String(raw || "").trim();
@@ -2617,7 +2616,6 @@ function morningCostSnapshot(value) {
       return { provider: row.provider, label: row.label, plan: row.plan, state: row.state,
         reason: row.reason, mtd_usd: row.mtd_usd, projection_usd: row.projection_usd,
         budget_usd: row.budget_usd, ...(typeof row.estimated === "boolean" ? { estimated: row.estimated } : {}),
-        call_sites: amounts(row.call_sites),
         daily: row.daily.map((day) => {
           if (!date(day.day) || !money(day.usd)) throw Error("invalid cost day");
           return { day: day.day, usd: day.usd, drivers: amounts(day.drivers) };
@@ -9083,7 +9081,6 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "bot-brief": "mcp-server/src/bot-brief.js",
   "evidence-activation": "mcp-server/src/evidence-activation.js",
   "resource-observation": "mcp-server/src/resource-observation.v5.js",
-  "jev-call-receipt": "mcp-server/src/jev-call-receipt.js",
   "lead-automation": "mcp-server/src/lead-automation.js",
   "invoice-automation": "mcp-server/src/invoice-automation.js",
   "workflow-cutover": "mcp-server/src/workflow-cutover.v5.js",
@@ -10251,16 +10248,11 @@ registerTools(evidenceActivationTools({ withEnvelope, ToolError }), "evidence-ac
 // one write door the local, credential-less collector uses. See
 // src/resource-observation.v5.js.
 registerTools(resourceObservationTools({ withEnvelope, ToolError }), "resource-observation");
-// Server-side Jev call log: the Worker calls TypeSafe itself and appends a
-// server-timestamped receipt (migration 0587) before returning the answers, so
-// Jev gates credit only rows the gated model could not forge locally. See
-// src/jev-call-receipt.js.
 const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealField,
   updateDeal:(c,actor,args)=>TOOLS["update-deal"].handler(c,actor,args),
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});
 registerTools(invoices.tools,"invoice-automation");
 registerTools(leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoices }), "lead-automation");
-registerTools(jevCallReceiptTools({ withEnvelope, ToolError }), "jev-call-receipt");
 // DoctorCRE V5-R02: workflow cutover, caller migration and retirement
 // readiness. Composes accept-workflow / disable-legacy-schedule rather than
 // duplicating their evidence; retire-workflow-cutover-plan is authority-only.

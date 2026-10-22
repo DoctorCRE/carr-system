@@ -35,8 +35,8 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(result['sources']['github']['state'], 'unknown')
 
     def test_portfolio_contains_backend_and_app_and_bounds_completed_history(self):
-        tasks = {str(i): {'title': f'Feature {i}', 'stage': 'live', 'repo': 'jbookout/carr-system'} for i in range(100)}
-        tasks['active'] = {'title': 'Shared search contract', 'stage': 'build', 'repo': 'jbookout/carr-system'}
+        tasks = {str(i): {'title': f'Feature {i}', 'stage': 'live', 'repo': 'DoctorCRE/carr-system'} for i in range(100)}
+        tasks['active'] = {'title': 'Shared search contract', 'stage': 'build', 'repo': 'DoctorCRE/carr-system'}
         result = project({'tasks': tasks}, None, portfolio={'tasks': {'app': {'title': 'Deal room search', 'stage': 'review', 'repo': 'jbookout/doctorcre-app'}}})
         self.assertEqual(len(result['history']), 20)
         self.assertEqual(len(result['cards']), 2)
@@ -128,7 +128,7 @@ def publication_sequence():
         state={'project':'carr-v5','tasks':{'source':{'title':'Find a deal across the portfolio','status':'review',
                'stage':'review','repo':'jbookout/doctorcre-app','pr':12,'pr_head':'a'*40}},'github_sync':sync}
         portfolio={'tasks':{'backend':{'title':'Shared search contract','status':'running','stage':'build',
-                   'repo':'jbookout/carr-system'}},'github_sync':sync}
+                   'repo':'DoctorCRE/carr-system'}},'github_sync':sync}
         with patch.object(tempfile, 'tempdir', tmp), \
              patch.object(board.repo_lib('machine_role'), 'read_marker', return_value='primary'), \
              patch.dict(os.environ,{'CARR_WORK_QUEUE_DB':str(db),'PROGRESS_BOARD_ROOT':tmp}), \

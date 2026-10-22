@@ -17,7 +17,7 @@ REVIEW = runpy.run_path(str(Path(__file__).resolve().parents[3] / "bin/dot-revie
 atomic_brief = REVIEW["atomic_brief"]
 
 D = Path(__file__).resolve().parent
-REPOS = ["jbookout/carr-system", "jbookout/doctorcre-app"]
+REPOS = ["DoctorCRE/carr-system", "jbookout/doctorcre-app"]
 HEADER = ("Rules, all required: 1. Read-only, public web and public GitHub only. 2. Never start or "
           "delegate a Codex task. 3. Post your answer only in this Slack thread. 4. Finish with a final "
           "line that is exactly DOT-REPORT-END, one space, and this job's name (the word after JOB "
@@ -112,7 +112,7 @@ def backlog(root, now):
         key = f"{kind}-{slug}"
         if kind == "B":
             directory = AUDIT_DIRS[[d.replace("/", "-") for d in AUDIT_DIRS].index(slug)]
-            task = ("read-only bug audit of current main of https://github.com/jbookout/carr-system "
+            task = ("read-only bug audit of current main of https://github.com/DoctorCRE/carr-system "
                     f"limited to {directory}/. Record the main commit SHA you read and inspect that "
                     "directory at that commit. For each defect, give file and line, the input that "
                     "triggers it, the wrong result, severity (blocks merge, should fix, nice to have), "

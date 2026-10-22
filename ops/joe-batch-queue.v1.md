@@ -195,7 +195,7 @@ advisory-only posture.
 `@jbookout` as owner of `/hooks/` and `/ops/config/` (added S2, PR #717-adjacent
 work). The repository's one active ruleset
 (`main: CI must be green`, id `20824501`) was read live via
-`gh api repos/jbookout/carr-system/rulesets/20824501` this pass and contains
+`gh api repos/DoctorCRE/carr-system/rulesets/20824501` this pass and contains
 exactly three rules: `deletion`, `non_fast_forward`, and
 `required_status_checks` (`ops/ci.sh --strict`). **There is no
 `pull_request` rule in it at all** — so CODEOWNERS review is requested on a
@@ -206,7 +206,7 @@ framing: CODEOWNERS is advisory today.
 existing ruleset, leaning on the CODEOWNERS file already in place so the
 requirement only bites on PRs that touch `hooks/` or `ops/config/`):
 ```
-gh api --method PUT repos/jbookout/carr-system/rulesets/20824501 \
+gh api --method PUT repos/DoctorCRE/carr-system/rulesets/20824501 \
   --input - <<'JSON'
 {
   "name": "main: CI must be green",

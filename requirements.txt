@@ -60,3 +60,6 @@ tomlkit>=0.13.3
 # Static instruction claims: workflow and config YAML parsing.
 PyYAML==6.0.3
 PyJWT[crypto]>=2.10
+
+# Product deal reading and post-call evidence checks use the official SDK.
+typesafe-sdk>=0.7.5

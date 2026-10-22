@@ -193,7 +193,7 @@
     },
     {
       "path": "ops/rule-claim-gate-selftest.py",
-      "sha256": "15946b9193562e81d294a7c8b58a816a54cd68b9d4403ed94045f259b6afd285",
+      "sha256": "0ed8e583c7357cb3ab75563f7e4e724e1f16a17a4fc4eb2919e8fd0d779718b1",
       "rule": "pii-email",
       "reason": "Exact rule-claim Git fixture revision. The email-shaped strings are GitHub SSH transport endpoints using the public git service account, not personal contact data."
     },
@@ -232,6 +232,54 @@
       "sha256": "7669221ae4871f570e53b9cdffab9ed878692658da93cca3af0e96f9b41af110",
       "rule": "pii-email",
       "reason": "Public example addresses in source comments from ukd1/hxstore-reverse-engineering commit 191b54e42757687806202f8f696e9066f0514e11, retained only for the byte-verbatim import commit. Final source comments use example.test. This qualification binds only this path and the exact upstream blob; no client data or private store was used."
+    },
+    {
+      "path": "mcp-server/test/deal-items.test.mjs",
+      "sha256": "d796f253a591570efca226d9fe6174e700739210896d575b39c647cd2e656794",
+      "rule": "pii-address",
+      "reason": "Historical synthetic fixture in PR #2120 uses an invented example address; current fixture uses a synthetic location marker. Exact historical file bytes only, retained because force-push is forbidden."
+    },
+    {
+      "path": "mcp-server/test/deal-items-postgres.test.mjs",
+      "sha256": "186712d0b5a4b2a106d065caaa4fbde493f8b3102f23fd39bdac237105b948c2",
+      "rule": "pii-address",
+      "reason": "Historical synthetic fixture in PR #2120 uses an invented example address; current fixture uses a synthetic location marker. Exact historical file bytes only, retained because force-push is forbidden."
+    },
+    {
+      "path": "mcp-server/test/deal-items-postgres.test.mjs",
+      "sha256": "a57963e71fb87f07cef4f4b4188c293daaf516e26c50a078c1c1246f327ea05c",
+      "rule": "pii-address",
+      "reason": "Historical synthetic fixture in PR #2120 uses an invented example address; current fixture uses a synthetic location marker. Exact historical file bytes only, retained because force-push is forbidden."
+    },
+    {
+      "path": "mcp-server/test/deal-items-postgres.test.mjs",
+      "sha256": "5e43ea3e10e726626977de2a37d0615811df520dbbc58e0f44e9173632834b7a",
+      "rule": "pii-address",
+      "reason": "Historical synthetic fixture in PR #2120 uses an invented example address; current fixture uses a synthetic location marker. Exact historical file bytes only, retained because force-push is forbidden."
+    },
+    {
+      "path": "mcp-server/test/deal-items-postgres.test.mjs",
+      "sha256": "62ccf70235cee5c4b18914d6320d5e491981bdf9296de39441154dacbb963262",
+      "rule": "pii-address",
+      "reason": "Historical synthetic fixture in PR #2120 uses an invented example address; current fixture uses a synthetic location marker. Exact historical file bytes only, retained because force-push is forbidden."
+    },
+    {
+      "path": "mcp-server/test/deal-items.test.mjs",
+      "sha256": "a9731b4445d818581cb6aed83f1384a5b235e3d079e4c3746528852a0e3576ba",
+      "rule": "pii-address",
+      "reason": "Historical synthetic fixture in PR #2120 uses an invented example address; current fixture uses a synthetic location marker. Exact historical file bytes only, retained because force-push is forbidden."
+    },
+    {
+      "path": "mcp-server/test/deal-items.test.mjs",
+      "sha256": "8097c9922d0b6c2be1b0fd54cd97bf7db7bd3b19dc282c83b311843bcefdd99d",
+      "rule": "pii-address",
+      "reason": "Historical synthetic fixture in PR #2120 uses an invented example address; current fixture uses a synthetic location marker. Exact historical file bytes only, retained because force-push is forbidden."
+    },
+    {
+      "path": "mcp-server/test/deal-items-postgres.test.mjs",
+      "sha256": "7fef2e4a5aa5f1eb6662212cee2d628d36eb8d60f255d55edac10f689758950a",
+      "rule": "pii-address",
+      "reason": "Historical synthetic fixture in PR #2120 uses an invented example address; current fixture uses a synthetic location marker. Exact historical file bytes only, retained because force-push is forbidden."
     }
   ]
 }

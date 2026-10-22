@@ -30,6 +30,16 @@ before(async () => {
 });
 after(async () => { await c?.end(); await fixture?.close(); });
 
+test('the record proof uses an isolated database on the provided CI service', async () => {
+  const name = (await c.query('select current_database() name')).rows[0].name;
+  if (process.env.CARR_CI_DATABASE_URL) {
+    assert.match(name, /^deal_items_/);
+    assert.notEqual(name, new URL(process.env.CARR_CI_DATABASE_URL).pathname.slice(1));
+  } else {
+    assert.equal(name, 'carr_ci');
+  }
+});
+
 async function command(name, args = {}, identity = actor) {
   await c.query('begin');
   try {
@@ -89,7 +99,7 @@ test('ordinary notes and legacy complete-action do not discard or complete check
 });
 
 test('an open next-step package backfills exactly once without losing dates or source facts', async () => {
-  const text = 'Vendor introductions: lender + healthcare attorney intros; Prelim market study: purchase sweep ~5 mi of 101 Example Ave, 8-10 exam rooms, ~$1M all in; walkthrough call before touring Wed/Thu/Fri; ETL sent 11 Sep via CONGA awaiting signature; raise on the package call rather than chasing separately.';
+  const text = 'Vendor introductions: lender + healthcare attorney intros; Prelim market study: purchase sweep ~5 mi of Synthetic Location Alpha, 8-10 exam rooms, ~$1M all in; walkthrough call before touring Wed/Thu/Fri; ETL sent 11 Sep via CONGA awaiting signature; raise on the package call rather than chasing separately.';
   await c.query("insert into deal_note(deal_id,kind,text,actor_id) values($1,'next_step',$2,$3)", [deal,text,actor.id]);
   await c.query("update deal set next_date='2026-10-26',city='Baytown' where id=$1", [deal]);
   const result = await command('backfill-deal-items');

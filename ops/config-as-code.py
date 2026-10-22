@@ -245,23 +245,8 @@ ACTIVE_LAUNCHD_LABEL_ENV = "CARR_CONFIG_AS_CODE_ACTIVE_LAUNCHD_LABEL"
 # The actual scheduler registration is outside this config reconciler, so
 # copying a SKILL.md would be both insufficient and unsafe.
 #
-# STILL EMPTY, deliberately, and here is the near-miss that tried to change it.
-# On 2026-08-18 source-of-truth copies of Dell's three personal tasks were added
-# to ops/scheduled-tasks/, which made them CARR-owned by this file's own rule —
-# "the repository is the ownership registry" — and dell-social-batch-weekly
-# immediately reported as a secondary scope violation. The first fix was to list
-# the three here. That was the wrong lever: it widens the machine-scope policy to
-# paper over a filing mistake, and it also left ops/control-plane-selftest.py
-# failing, because that selftest requires every *.SKILL.md directly under
-# ops/scheduled-tasks/ to be a registered control-plane workflow, which personal
-# tasks are not and should not be.
-#
-# The copies now live in ops/scheduled-tasks/dell/. Both this reconciler and the
-# control-plane selftest read only the top level, so the subdirectory keeps the
-# repo copies Dell asked for while leaving his tasks classified as what they are:
-# personal configuration this tool does not claim, move, or count. Anything added
-# to the TOP level is a CARR-managed primary task and must be registered as a
-# control-plane workflow.
+# Personal task copies live under ops/scheduled-tasks/dell/. Only top-level
+# definitions are managed primary tasks.
 SECONDARY_SCHEDULED_TASKS: set[str] = set()
 
 
