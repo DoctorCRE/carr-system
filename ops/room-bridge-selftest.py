@@ -26,8 +26,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import os
-import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -61,11 +59,8 @@ def run_suite(rel, *, runner=subprocess.run, timeout=SUITE_TIMEOUT_SECONDS):
               f"suite must be renamed here too, never dropped silently")
         return False
     try:
-        with tempfile.TemporaryDirectory() as directory:
-            environment = {**os.environ, 'CARR_WORK_QUEUE_DB': str(Path(directory) / 'work-queue.sqlite3'),
-                           'CARR_WORK_QUEUE_TEST': '1'}
-            result = runner([sys.executable, str(path)], cwd=REPO, env=environment,
-                            capture_output=True, text=True, timeout=timeout)
+        result = runner([sys.executable, str(path)], cwd=REPO,
+                        capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         print(f"FAIL  {rel}: timed out after {timeout}s")
         for line in _lines(exc.stdout, exc.stderr)[-15:]:

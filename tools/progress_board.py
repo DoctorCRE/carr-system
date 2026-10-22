@@ -22,6 +22,7 @@ import json
 import os
 import re
 import subprocess
+import sqlite3
 import time
 import sys
 import tempfile
@@ -2415,6 +2416,80 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
     })
 
 
+def orchestrator_snapshot(state: dict[str, Any]) -> dict[str, Any]:
+    from progress_orchestrator import project
+    try:
+        queue = work_queue_module().board_projection()
+    except (OSError, RuntimeError, sqlite3.Error):
+        queue = None
+    portfolio = read_json_file(state_path(ALL_REPOS_BOARD))
+    normalized = copy.deepcopy(state)
+    for task in normalized.get('tasks', {}).values():
+        normalize_task(task)
+        task['activity_status'] = activity_status(task, now_utc())
+    return {'schema': SNAPSHOT_SCHEMA, 'project': 'orchestrator', 'title': 'Orchestrator',
+            'tasks': {}, 'history': {}, 'omitted': {'live': 0, 'merged': 0, 'history': 0},
+            'orchestrator': project(normalized, queue, portfolio=portfolio)}
+
+
+def require_primary_publication() -> None:
+    if not repo_lib('machine_role').is_primary(str(REPO_ROOT)):
+        raise RuntimeError('Orchestrator publication requires this machine to be primary')
+
+
+def publish_orchestrator(state: dict[str, Any]) -> int:
+    require_primary_publication()
+    # All local publishers, including other checkouts, share this lock.
+    path = Path(tempfile.gettempdir()) / 'carr-orchestrator-publication.lock'
+    with path.open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _publish_orchestrator(state)
+
+
+def _publish_orchestrator(state: dict[str, Any]) -> int:
+    from progress_orchestrator import retain_unavailable_queue
+    before = call_verb('read-progress-board', {'board_id': 'orchestrator'}).get('snapshot')
+    snapshot = orchestrator_snapshot(state)
+    view = snapshot['orchestrator']
+    bank = 1 - (before or {}).get('snapshot_json', {}).get('orchestrator', {}).get('bank', 1)
+    view['bank'] = bank
+    if before:
+        previous = copy.deepcopy(before.get('snapshot_json', {}).get('orchestrator'))
+        if previous:
+            for page in previous.get('pages', []):
+                saved = call_verb('read-progress-board', {'board_id': page['board_id']}).get('snapshot')
+                if not saved or saved['version'] != page['version']:
+                    raise RuntimeError('previous orchestrator page unavailable; observation retained')
+                previous['cards'].extend(saved['snapshot_json']['cards'])
+            retain_unavailable_queue(view, previous)
+    cards = sorted(view['cards'], key=lambda card: (card.get('changed_at') or '', card['id']), reverse=True)
+    view['total_cards'] = len(cards)
+    view['state_counts'] = dict(Counter(card['state'] for card in cards))
+    view['cards'], view['pages'] = cards[:100], []
+    for offset in range(100, len(cards), 100):
+        payload = {'cards': cards[offset:offset + 100]}
+        if snapshot_size(payload) > SNAPSHOT_BUDGET:
+            raise SnapshotTooLarge('orchestrator page exceeds publication budget; no work dropped')
+        board_id = f'orchestrator-page-{bank}-{offset // 100}'
+        saved = call_verb('read-progress-board', {'board_id': board_id}).get('snapshot')
+        if not saved or saved.get('snapshot_json') != payload:
+            args = {'board_id': board_id, 'base_version': int(saved['version']) if saved else 0, 'snapshot': payload}
+            call_verb('publish-board-snapshot', {**args, 'idempotency_key': stable_key('publish-board-snapshot', args)})
+            saved = call_verb('read-progress-board', {'board_id': board_id}).get('snapshot')
+        if not saved or saved.get('snapshot_json') != payload:
+            raise RuntimeError('orchestrator page did not read back')
+        view['pages'].append({'board_id': board_id, 'version': int(saved['version']), 'count': len(payload['cards'])})
+    if snapshot_size(snapshot) > SNAPSHOT_BUDGET:
+        raise SnapshotTooLarge('orchestrator manifest exceeds publication budget; previous observation retained')
+    args = {'board_id': 'orchestrator', 'base_version': int(before['version']) if before else 0,
+            'snapshot': snapshot}
+    call_verb('publish-board-snapshot', {**args, 'idempotency_key': stable_key('publish-board-snapshot', args)})
+    after = call_verb('read-progress-board', {'board_id': 'orchestrator'}).get('snapshot') or {}
+    if after.get('snapshot_json') != snapshot:
+        raise RuntimeError('published orchestrator observation did not read back')
+    return int(after['version'])
+
+
 def hierarchy_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
     projection = repo_lib("progress_hierarchy").project(copy.deepcopy(state))
     fields = (SNAPSHOT_TASK_FIELDS - {"plan_id", "plan_ref", "title", "summary", "stage_history", "release_wait"}) | {
@@ -2490,19 +2565,11 @@ def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
             'schema': 'system-work-external.v2', 'pages': pages, 'item_count': len(cache['items'])}
 
 
-def published_snapshot_data(snapshot):
-    """Compare persisted fields without the reader's derived task linkage."""
-    data = copy.deepcopy(snapshot)
-    if isinstance(data, dict) and isinstance(data.get('tasks'), dict):
-        for task in data['tasks'].values():
-            if isinstance(task, dict):
-                task.pop('linkage', None)
-    return data
-
-
 def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -> dict[str, int]:
     state = read_state(project)
     board = safe_project(project)
+    if board == LAUNCHD_BOARD:
+        publish_orchestrator(state)
     before = call_verb("read-progress-board", {"board_id": board})
     remote_snapshot = before.get("snapshot")
     snapshot = board_snapshot(state, costs=costs)
@@ -2515,7 +2582,7 @@ def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -
         if inventory is not None:
             snapshot["external_inventory"] = inventory
     snapshot = fit_snapshot(snapshot)
-    if remote_snapshot is None or published_snapshot_data(remote_snapshot.get("snapshot_json")) != snapshot:
+    if remote_snapshot is None or remote_snapshot.get("snapshot_json") != snapshot:
         args = {"board_id": board, "base_version": int(remote_snapshot["version"]) if remote_snapshot else 0,
                 "snapshot": snapshot}
         call_verb("publish-board-snapshot", {**args, "idempotency_key": stable_key("publish-board-snapshot", args)})
@@ -2544,7 +2611,7 @@ def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -
 
     after = call_verb("read-progress-board", {"board_id": board})
     sealed = after.get("snapshot") or {}
-    if published_snapshot_data(sealed.get("snapshot_json")) != snapshot:
+    if sealed.get("snapshot_json") != snapshot:
         raise RuntimeError("published board snapshot did not read back")
     after_questions = {q["question_id"]: q for q in after.get("questions", [])}
     for qid, q in state.get("questions", {}).items():
@@ -2801,27 +2868,44 @@ def command_reconcile(args: argparse.Namespace) -> None:
 
 @with_github_read_pass
 def command_render(args: argparse.Namespace) -> None:
+    if args.project == LAUNCHD_BOARD:
+        require_primary_publication()
     if args.project == ALL_REPOS_BOARD:
         build_all_repos()
         if args.publish:
             publish_board(ALL_REPOS_BOARD)
         return
     render(args.project, discover=True)
-    if args.publish or args.project == LAUNCHD_BOARD:
+    if args.project != LAUNCHD_BOARD:
+        if args.publish:
+            publish_board(args.project)
+        return
+    # Refresh source facts before publish_board projects the Orchestrator view.
+    # Legacy publication failures must not strand the canonical portfolio.
+    portfolio_available = True
+    try:
+        build_all_repos()
+    except RuntimeError as exc:
+        log(f"all-repos rebuild failed, publishing last known state: {exc}")
+        portfolio_available = state_path(ALL_REPOS_BOARD).exists()
+    publication_error = None
+    try:
         publish_board(args.project)
-    if args.project == LAUNCHD_BOARD:
+    except Exception as exc:
+        publication_error = exc
+        log(f"{args.project} publication failed: {exc}")
+    if publication_error is None:
         poll_board_answers(args.project)
         publish_needs_joe_local()
-        # The system-wide board rides the same scheduled job, after the
-        # project board so a gh outage never holds that one back. A failed
-        # rebuild is logged and the last known board is published again.
+    if portfolio_available:
         try:
-            build_all_repos()
-        except RuntimeError as exc:
-            log(f"all-repos rebuild failed, publishing last known state: {exc}")
-            if not state_path(ALL_REPOS_BOARD).exists():
-                return
-        publish_board(ALL_REPOS_BOARD)
+            publish_board(ALL_REPOS_BOARD)
+        except Exception as exc:
+            log(f"all-repos publication failed: {exc}")
+            if publication_error is None:
+                raise
+    if publication_error is not None:
+        raise publication_error
 
 
 def publish_needs_joe_local() -> None:

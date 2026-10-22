@@ -2,9 +2,9 @@
 """Regression for the live board's duplicated watchdog command diagnostics."""
 import copy
 import importlib.util
+import os
 import unittest
 import json
-import os
 import tempfile
 from datetime import datetime, timezone
 from unittest.mock import patch
@@ -68,11 +68,8 @@ class CostSnapshotTests(unittest.TestCase):
 
 class SnapshotSizeTests(unittest.TestCase):
     def setUp(self):
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        environment = patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': str(Path(directory.name) / 'queue.sqlite3')})
-        environment.start()
-        self.addCleanup(environment.stop)
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(patch.dict(os.environ, {"CARR_WORK_QUEUE_DB": str(root / "work-queue.sqlite3")}))
 
     def test_trimming_removes_defaults_no_remaining_card_inherits(self):
         for field, value in (("title", "X" * 240000),
