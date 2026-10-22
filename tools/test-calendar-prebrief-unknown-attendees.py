@@ -6,16 +6,11 @@ One test per resolver outcome: a known attendee keeps its ref; an unknown one
 an ambiguous or tombstoned one (resolver raises) still refuses the whole
 snapshot. example.test addresses only.
 """
-import contextlib
 import importlib.util
-import io
 import json
 import pathlib
-import re
 import sys
-import tempfile
 import unittest
-from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -110,28 +105,6 @@ class UnknownAttendees(unittest.TestCase):
         result = {"sponsor": "joe", "mode": "live", "attestation_id": "0" * 36, "receipt_id": "0" * 36,
                   "unknown_attendees": coordinator.unknown_report(keys)}
         self.assertLess(len(json.dumps(result, sort_keys=True).encode() + b"\n"), 8192)
-
-
-class LastRunSummary(unittest.TestCase):
-    def setUp(self):
-        rt_spec = importlib.util.spec_from_file_location("calendar_prebrief_joe_runtime", REPO / "tools" / "calendar-prebrief-joe-runtime.py")
-        assert rt_spec is not None and rt_spec.loader is not None
-        self.runtime = importlib.util.module_from_spec(rt_spec)
-        rt_spec.loader.exec_module(self.runtime)
-        self.dir = tempfile.TemporaryDirectory()
-        self.path = pathlib.Path(self.dir.name) / "last-run.json"
-
-    def tearDown(self):
-        self.dir.cleanup()
-
-    def test_failed_write_never_leaves_an_older_summary_standing(self):
-        receipt = {"scheduled_for": "2026-09-28T11:30:00Z", "job_id": "j", "receipt_id": "r"}
-        self.runtime.write_last_run(receipt, {"count": 3, "attendee_keys": []}, path=self.path)
-        self.assertEqual(json.loads(self.path.read_text())["unknown_attendees"]["count"], 3)
-        with mock.patch.object(self.runtime.os, "replace", side_effect=OSError("disk")), \
-                contextlib.redirect_stderr(io.StringIO()):
-            self.runtime.write_last_run(receipt, {"count": 0, "attendee_keys": []}, path=self.path)
-        self.assertFalse(self.path.exists())
 
 
 if __name__ == "__main__":

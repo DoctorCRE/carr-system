@@ -200,12 +200,6 @@ LAUNCHD_ALT_REPO = {
         REPO, "tools", "dictation-rig", "launchd", "com.carr.call-mode.plist"
     ),
 }
-# These labels are managed outside this installer: Homebrew's local proxy
-# and the orchestrator's out/orch fix train. Their CARR prefix is not ownership.
-LAUNCHD_MACHINE_LOCAL = frozenset({
-    "com.carr.cliproxyapi.plist",
-    "com.carr.fix-train.plist",
-})
 HOOKS_REPO = os.path.join(REPO, "ops", "config", "hooks.json")
 CODEX_HOOKS_SRC = os.path.join(HOME, ".codex", "hooks.json")
 CODEX_HOOKS_REPO = os.path.join(REPO, "ops", "config", "codex-hooks.json")
@@ -1874,23 +1868,19 @@ def cmd_pull(apply):
 
 
 def reconcile_retired_launchd(apply):
-    """Retire unheld CARR definitions absent from both source registries.
+    """Unload and quarantine CARR definitions absent from the repository.
 
-    Explicit machine-local exceptions and holds retain their definitions.
+    Holds prevent activation of declared jobs, not retirement of deleted jobs.
     Labels outside com.carr.*, including local.carr-progress-board, are never owned here.
     """
     failures = []
     if not os.path.isdir(LAUNCHD_REPO):
         print(f"  RETIRE FAILED  template directory is unavailable: {LAUNCHD_REPO}")
         return [LAUNCHD_REPO]
-    holds = launchd_hold.read_holds(HOME)
     for filename in carr_plists():
-        if (filename in LAUNCHD_MACHINE_LOCAL or filename in LAUNCHD_ALT_REPO
-                or os.path.lexists(os.path.join(LAUNCHD_REPO, filename))):
+        if os.path.isfile(launchd_repo_path(filename)):
             continue
         label = filename.removesuffix(".plist")
-        if launchd_hold.off_reason(label, HOME, holds=holds):
-            continue
         live = os.path.join(LAUNCHD_SRC, filename)
         try:
             if os.path.islink(live) or not os.path.isfile(live):
