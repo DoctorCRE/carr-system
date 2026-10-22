@@ -2,7 +2,7 @@
 """Rerun one failed/cancelled CI class job, at most twice per run.
 
 Usage: ops/ci-rerun.sh RUN_ID --job JOB_ID [--repo OWNER/REPO].
-The default repository is jbookout/carr-system. Successful jobs are retained;
+The default repository is DoctorCRE/carr-system. Successful jobs are retained;
 GitHub also reruns dependents. Local checks precede policy admission and the
 remote attempt/head is rechecked immediately before the single dispatch.
 Other repositories use their associated PR head; carr-system also requires
@@ -26,7 +26,7 @@ spec = importlib.util.spec_from_file_location('ci_evidence', ROOT / 'ops/ci-evid
 assert spec is not None and spec.loader is not None
 evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
-REPO = 'jbookout/carr-system'
+REPO = 'DoctorCRE/carr-system'
 ALLOWED_REPOS = (REPO, 'jbookout/doctorcre-app', 'jbookout/software-factory')
 MAX_ATTEMPTS = 3  # Initial run plus two job-only retries; job timeouts unchanged.
 # Retryable jobs in other repositories: (workflow name, path) -> job names.

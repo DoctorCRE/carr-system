@@ -5,7 +5,7 @@
 <dict>
   <!-- Cadence is a checked projection of ops/config/job-watchdog.json.
        Source definition only in this delivery; no live settings installation.
-       Reads the dated run ledger; failures survive in the findings and record layer. -->
+       Reports failed scheduled jobs and disk free below ten percent to a local ledger. -->
   <key>Label</key><string>com.carr.job-watchdog</string>
   <key>ProgramArguments</key>
   <array>

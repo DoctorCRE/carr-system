@@ -1,0 +1,1929 @@
+{
+  "schema": "outlook-hxstore-atlas/v1",
+  "scope": "Catalog of pinned decoder contracts. No store read and no empirical mailbox coverage claim.",
+  "first_seen_policy": "Null means the first Outlook version is unknown. The pinned source revision establishes catalog provenance, not an Outlook build or introduction version.",
+  "confidence_policy": {
+    "proven": "Established by a version-bound format observation. No store observations were made in this slice.",
+    "inferred": "Interpretation implemented by the pinned reader, including heuristic selectors.",
+    "unknown": "Identity or meaning has not been established."
+  },
+  "decode_hypotheses": [],
+  "sources": {
+    "vendor/hxprobe/src/block.rs": {
+      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "sha256": "093617bc8e5aaa9f3597b873dc93539850c202b4531209db69a39de9c8a316d6"
+    },
+    "vendor/hxprobe/src/header.rs": {
+      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "sha256": "6e774497fed3d077d89437525e0106d2975954675f4db763079991a0556eb3a3"
+    },
+    "vendor/hxprobe/src/folder.rs": {
+      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "sha256": "af4abd79a95f36a325e0d12e9994df80add60851e9c54bc88cd7a4c6e1c9b6d8"
+    },
+    "vendor/hxprobe/src/calendar.rs": {
+      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "sha256": "28f9a5f9fb11701369e8c4a161195ad4a709f181975e07f6c092ce085bb1362f"
+    },
+    "vendor/hxprobe/src/record.rs": {
+      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "sha256": "327cfc0658b26279fc33385e72f01e3f65ae036a35e2822f34a87f30f5968d41"
+    },
+    "vendor/hxprobe/src/schema.rs": {
+      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "sha256": "a76bd8449dd21c14f987f5d303ec0932e70dcc084c4e672c76721ecc4d963102"
+    },
+    "vendor/hxprobe/src/body.rs": {
+      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "sha256": "ac7130b31bc06e000598c5acfe019942316900010d8ccb4f95a9be4a651bc499"
+    }
+  },
+  "entries": [
+    {
+      "id": "store",
+      "parent": null,
+      "identifier": {
+        "kind": "container",
+        "value": "Nostromo"
+      },
+      "name": "Store header",
+      "wire_type": "container",
+      "decoder": "header::check",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/header.rs",
+          "symbol": "check"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "store.offset.0",
+      "parent": "store",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 0
+      },
+      "name": "Magic",
+      "wire_type": "ascii[8]",
+      "decoder": "header::check",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/header.rs",
+          "symbol": "check"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "store.offset.8",
+      "parent": "store",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 8
+      },
+      "name": "Version",
+      "wire_type": "u8",
+      "decoder": "header::check",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/header.rs",
+          "symbol": "check"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "store.offset.56",
+      "parent": "store",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 56
+      },
+      "name": "Page size",
+      "wire_type": "u64le",
+      "decoder": "header::check",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/header.rs",
+          "symbol": "check"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "store.offset.156",
+      "parent": "store",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 156
+      },
+      "name": "Guard pattern",
+      "wire_type": "bytes[36]",
+      "decoder": null,
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/header.rs",
+          "symbol": "module documentation"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "block",
+      "parent": null,
+      "identifier": {
+        "kind": "container",
+        "value": null
+      },
+      "name": "Block container",
+      "wire_type": "container",
+      "decoder": "block::parse",
+      "confidence": "unknown",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/block.rs",
+          "symbol": "parse"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "block.type.8",
+      "parent": "block",
+      "identifier": {
+        "kind": "block_type",
+        "value": 8
+      },
+      "name": "Block type 8",
+      "wire_type": "lz4-block",
+      "decoder": "block::parse",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/block.rs",
+          "symbol": "module documentation"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "block.type.16",
+      "parent": "block",
+      "identifier": {
+        "kind": "block_type",
+        "value": 16
+      },
+      "name": "Block type 16",
+      "wire_type": "lz4-block",
+      "decoder": "block::parse",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/block.rs",
+          "symbol": "module documentation"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "block.type.unknown",
+      "parent": "block",
+      "identifier": {
+        "kind": "block_type",
+        "value": null
+      },
+      "name": "Unknown block type",
+      "wire_type": "unknown",
+      "decoder": null,
+      "confidence": "unknown",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/block.rs",
+          "symbol": "Block::kind"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "block.offset.0",
+      "parent": "block",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 0
+      },
+      "name": "Header CRC",
+      "wire_type": "u32le",
+      "decoder": "block::crc32",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/block.rs",
+          "symbol": "module documentation"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "block.offset.4",
+      "parent": "block",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 4
+      },
+      "name": "Body CRC",
+      "wire_type": "u32le",
+      "decoder": "block::crc32",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/block.rs",
+          "symbol": "module documentation"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "block.offset.8",
+      "parent": "block",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 8
+      },
+      "name": "Magic",
+      "wire_type": "u64le",
+      "decoder": "block::find_all",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/block.rs",
+          "symbol": "module documentation"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "block.offset.16",
+      "parent": "block",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 16
+      },
+      "name": "Block type",
+      "wire_type": "u32le",
+      "decoder": "block::read_header",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/block.rs",
+          "symbol": "module documentation"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "block.offset.20",
+      "parent": "block",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 20
+      },
+      "name": "Payload length",
+      "wire_type": "u32le",
+      "decoder": "block::read_header",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/block.rs",
+          "symbol": "module documentation"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "block.offset.24",
+      "parent": "block",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 24
+      },
+      "name": "Inflated length",
+      "wire_type": "u32le",
+      "decoder": "block::read_header",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/block.rs",
+          "symbol": "module documentation"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "block.offset.28",
+      "parent": "block",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 28
+      },
+      "name": "Observed constant 4",
+      "wire_type": "u32le",
+      "decoder": null,
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/block.rs",
+          "symbol": "module documentation"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "block.offset.32",
+      "parent": "block",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 32
+      },
+      "name": "Unknown reserved header bytes",
+      "wire_type": "unknown",
+      "decoder": null,
+      "confidence": "unknown",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/block.rs",
+          "symbol": "module documentation"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "block.offset.40",
+      "parent": "block",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 40
+      },
+      "name": "Compressed payload",
+      "wire_type": "lz4-block",
+      "decoder": "lz::decode_exact",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/block.rs",
+          "symbol": "module documentation"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "envelope",
+      "parent": null,
+      "identifier": {
+        "kind": "container",
+        "value": null
+      },
+      "name": "Serialized object envelope",
+      "wire_type": "container",
+      "decoder": "folder::envelopes",
+      "confidence": "unknown",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "envelopes"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "envelope.offset.0",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 0
+      },
+      "name": "Envelope marker 5",
+      "wire_type": "u16le",
+      "decoder": "folder::envelopes",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "envelopes"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "envelope.offset.2",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 2
+      },
+      "name": "Envelope tag",
+      "wire_type": "u16le",
+      "decoder": "folder::envelopes",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "envelopes"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "envelope.offset.4",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 4
+      },
+      "name": "Length including envelope",
+      "wire_type": "u32le",
+      "decoder": "folder::envelopes",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "envelopes"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "envelope.offset.8",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 8
+      },
+      "name": "Zero padding",
+      "wire_type": "bytes[2]",
+      "decoder": "folder::envelopes",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "envelopes"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "envelope.offset.10",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 10
+      },
+      "name": "Object body",
+      "wire_type": "serialized-object",
+      "decoder": "folder::envelopes",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "envelopes"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "envelope.tag.04c2",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "envelope_tag",
+        "value": 1218
+      },
+      "name": "Folder envelope",
+      "wire_type": "u16le",
+      "decoder": "folder::Index::observe",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::observe"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004d",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "record_type",
+        "value": 77
+      },
+      "name": "Folder",
+      "wire_type": "serialized-object",
+      "decoder": "folder::Index::observe",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::observe"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Class starts at object +0, ten bytes after envelope start."
+    },
+    {
+      "id": "envelope.tag.0430",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "envelope_tag",
+        "value": 1072
+      },
+      "name": "View membership envelope",
+      "wire_type": "u16le",
+      "decoder": "folder::Index::links",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::links"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004f",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "record_type",
+        "value": 79
+      },
+      "name": "View membership",
+      "wire_type": "serialized-object",
+      "decoder": "folder::Index::links",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::links"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Class starts at object +0, ten bytes after envelope start."
+    },
+    {
+      "id": "envelope.tag.0740",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "envelope_tag",
+        "value": 1856
+      },
+      "name": "Compact message envelope",
+      "wire_type": "u16le",
+      "decoder": "folder::Index::links",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::links"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.00ca",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "record_type",
+        "value": 202
+      },
+      "name": "Compact message",
+      "wire_type": "serialized-object",
+      "decoder": "folder::Index::links",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::links"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Class starts at object +0, ten bytes after envelope start."
+    },
+    {
+      "id": "envelope.tag.02c8",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "envelope_tag",
+        "value": 712
+      },
+      "name": "Message metadata envelope",
+      "wire_type": "u16le",
+      "decoder": "folder::Index::observe",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::observe"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.00bf",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "record_type",
+        "value": 191
+      },
+      "name": "Message metadata",
+      "wire_type": "serialized-object",
+      "decoder": "folder::Index::observe",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::observe"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Class starts at object +0, ten bytes after envelope start."
+    },
+    {
+      "id": "envelope.tag.0455",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "envelope_tag",
+        "value": 1109
+      },
+      "name": "Calendar or working hours envelope",
+      "wire_type": "u16le",
+      "decoder": "calendar::Index::observe",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "objects"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.006b",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "record_type",
+        "value": 107
+      },
+      "name": "Calendar or working hours",
+      "wire_type": "serialized-object",
+      "decoder": "calendar::Index::observe",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "objects"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Class starts at object +0, ten bytes after envelope start."
+    },
+    {
+      "id": "envelope.tag.unknown",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "envelope_tag",
+        "value": null
+      },
+      "name": "Unknown envelope tag",
+      "wire_type": "unknown",
+      "decoder": null,
+      "confidence": "unknown",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "envelopes"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.0004",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "record_type",
+        "value": 4
+      },
+      "name": "View collection reference",
+      "wire_type": "serialized-object",
+      "decoder": "folder::Index::observe",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::observe"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.unknown",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "record_type",
+        "value": null
+      },
+      "name": "Unknown object class",
+      "wire_type": "unknown",
+      "decoder": null,
+      "confidence": "unknown",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "envelopes"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004d.offset.0",
+      "parent": "object.class.004d",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 0
+      },
+      "name": "Object class",
+      "wire_type": "u16le",
+      "decoder": "folder::signature",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "reference"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004d.offset.2",
+      "parent": "object.class.004d",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 2
+      },
+      "name": "Signature zero bytes",
+      "wire_type": "bytes[8]",
+      "decoder": "folder::signature",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "reference"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004d.offset.10",
+      "parent": "object.class.004d",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 10
+      },
+      "name": "Local object key",
+      "wire_type": "u64le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "reference"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004d.offset.18",
+      "parent": "object.class.004d",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 18
+      },
+      "name": "Reference kind",
+      "wire_type": "u32le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "reference"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004d.offset.22",
+      "parent": "object.class.004d",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 22
+      },
+      "name": "Owner key",
+      "wire_type": "u64le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "reference"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004d.offset.30",
+      "parent": "object.class.004d",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 30
+      },
+      "name": "Repeated local key",
+      "wire_type": "u64le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "reference"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004d.offset.38",
+      "parent": "object.class.004d",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 38
+      },
+      "name": "Repeated owner or local key",
+      "wire_type": "u64le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "reference"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004f.offset.0",
+      "parent": "object.class.004f",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 0
+      },
+      "name": "Object class",
+      "wire_type": "u16le",
+      "decoder": "folder::signature",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "reference"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004f.offset.2",
+      "parent": "object.class.004f",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 2
+      },
+      "name": "Signature zero bytes",
+      "wire_type": "bytes[8]",
+      "decoder": "folder::signature",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "reference"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004f.offset.10",
+      "parent": "object.class.004f",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 10
+      },
+      "name": "Local object key",
+      "wire_type": "u64le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "reference"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004f.offset.18",
+      "parent": "object.class.004f",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 18
+      },
+      "name": "Reference kind",
+      "wire_type": "u32le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "reference"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004f.offset.22",
+      "parent": "object.class.004f",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 22
+      },
+      "name": "Owner key",
+      "wire_type": "u64le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "reference"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004f.offset.30",
+      "parent": "object.class.004f",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 30
+      },
+      "name": "Repeated local key",
+      "wire_type": "u64le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "reference"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004f.offset.38",
+      "parent": "object.class.004f",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 38
+      },
+      "name": "Repeated owner or local key",
+      "wire_type": "u64le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "reference"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.00ca.offset.0",
+      "parent": "object.class.00ca",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 0
+      },
+      "name": "Object class",
+      "wire_type": "u16le",
+      "decoder": "folder::signature",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "message_key"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.00ca.offset.2",
+      "parent": "object.class.00ca",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 2
+      },
+      "name": "Signature zero bytes",
+      "wire_type": "bytes[8]",
+      "decoder": "folder::signature",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "message_key"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.00ca.offset.10",
+      "parent": "object.class.00ca",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 10
+      },
+      "name": "Local object key",
+      "wire_type": "u64le",
+      "decoder": "folder::message_key",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "message_key"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.00ca.offset.30",
+      "parent": "object.class.00ca",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 30
+      },
+      "name": "Repeated local key",
+      "wire_type": "u64le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "message_key"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.00ca.offset.38",
+      "parent": "object.class.00ca",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 38
+      },
+      "name": "Repeated local key",
+      "wire_type": "u64le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "message_key"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.00bf.offset.0",
+      "parent": "object.class.00bf",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 0
+      },
+      "name": "Object class",
+      "wire_type": "u16le",
+      "decoder": "folder::signature",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "message_key"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.00bf.offset.2",
+      "parent": "object.class.00bf",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 2
+      },
+      "name": "Signature zero bytes",
+      "wire_type": "bytes[8]",
+      "decoder": "folder::signature",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "message_key"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.00bf.offset.10",
+      "parent": "object.class.00bf",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 10
+      },
+      "name": "Local object key",
+      "wire_type": "u64le",
+      "decoder": "folder::message_key",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "message_key"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.00bf.offset.30",
+      "parent": "object.class.00bf",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 30
+      },
+      "name": "Repeated local key",
+      "wire_type": "u64le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "message_key"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.00bf.offset.38",
+      "parent": "object.class.00bf",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 38
+      },
+      "name": "Repeated local key",
+      "wire_type": "u64le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "message_key"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.0004.offset.0",
+      "parent": "object.class.0004",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 0
+      },
+      "name": "Object class",
+      "wire_type": "u16le",
+      "decoder": "folder::signature",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::observe"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.0004.offset.2",
+      "parent": "object.class.0004",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 2
+      },
+      "name": "Signature zero bytes",
+      "wire_type": "bytes[8]",
+      "decoder": "folder::signature",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::observe"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.0004.offset.10",
+      "parent": "object.class.0004",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 10
+      },
+      "name": "Local object key",
+      "wire_type": "u64le",
+      "decoder": "folder::message_key",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::observe"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.0004.offset.38",
+      "parent": "object.class.0004",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 38
+      },
+      "name": "Repeated collection key",
+      "wire_type": "u64le",
+      "decoder": "folder::reference",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::observe"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004d.offset.160",
+      "parent": "object.class.004d",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 160
+      },
+      "name": "View collection reference",
+      "wire_type": "serialized-object",
+      "decoder": "folder::Index::observe",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::observe"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.004d.offset.360",
+      "parent": "object.class.004d",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 360
+      },
+      "name": "View collection reference",
+      "wire_type": "serialized-object",
+      "decoder": "folder::Index::observe",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::observe"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "object.class.00ca.offset.408",
+      "parent": "object.class.00ca",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 408
+      },
+      "name": "Expanded folder reference",
+      "wire_type": "serialized-object",
+      "decoder": "folder::Index::links",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::links"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "folder.name",
+      "parent": "object.class.004d",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "trailing UTF-16 run after sort-key NUL"
+      },
+      "name": "Folder name",
+      "wire_type": "utf16le-z",
+      "decoder": "folder::trailing_name",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "trailing_name"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "metadata.folder",
+      "parent": "object.class.00bf",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": "object length - 8"
+      },
+      "name": "Local folder key",
+      "wire_type": "u64le",
+      "decoder": "folder::Index::observe",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::observe"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Accepted only after the 51-byte immutable-ID tail framing check."
+    },
+    {
+      "id": "object.class.006b.offset.574",
+      "parent": "object.class.006b",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 574
+      },
+      "name": "Calendar start",
+      "wire_type": "u64le-dotnet-ticks",
+      "decoder": "calendar::tick",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "tick"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Offset relative to object body, not envelope start."
+    },
+    {
+      "id": "object.class.006b.offset.582",
+      "parent": "object.class.006b",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 582
+      },
+      "name": "Calendar end",
+      "wire_type": "u64le-dotnet-ticks",
+      "decoder": "calendar::tick",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "tick"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Offset relative to object body, not envelope start."
+    },
+    {
+      "id": "calendar.goid",
+      "parent": "object.class.006b",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "hex UTF-16 run beginning with GOID_PREFIX"
+      },
+      "name": "Global object ID",
+      "wire_type": "utf16le",
+      "decoder": "calendar::goid",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "goid"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "calendar.subject",
+      "parent": "object.class.006b",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "repeated subject run"
+      },
+      "name": "Calendar subject",
+      "wire_type": "utf16le-z",
+      "decoder": "calendar::parse",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "parse"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "calendar.location",
+      "parent": "object.class.006b",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "run following selected subject"
+      },
+      "name": "Calendar location",
+      "wire_type": "utf16le-z",
+      "decoder": "calendar::parse",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "parse"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "calendar.organizer_name",
+      "parent": "object.class.006b",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "run adjacent to organizer address"
+      },
+      "name": "Organizer name",
+      "wire_type": "utf16le-z",
+      "decoder": "calendar::parse",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "parse"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "calendar.organizer_email",
+      "parent": "object.class.006b",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "email-shaped run"
+      },
+      "name": "Organizer address",
+      "wire_type": "utf16le-z",
+      "decoder": "calendar::parse",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "parse"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "calendar.body",
+      "parent": "object.class.006b",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "longest non-subject run containing CRLF or more than 60 characters"
+      },
+      "name": "Calendar notes",
+      "wire_type": "utf16le-z",
+      "decoder": "calendar::parse",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "parse"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "calendar.attendees",
+      "parent": "object.class.006b",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "u32 count and length-prefixed pairs ending at object end"
+      },
+      "name": "Attendees",
+      "wire_type": "count+u8-length-utf16le+bytes[12]",
+      "decoder": "calendar::attendees_at",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "attendees_at"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "mail",
+      "parent": null,
+      "identifier": {
+        "kind": "record_anchor",
+        "value": "IPM.Note"
+      },
+      "name": "Mail anchor region",
+      "wire_type": "utf16le-anchor",
+      "decoder": "record::anchor_needle",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/record.rs",
+          "symbol": "anchor_needle"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "A heuristic region bounded by neighboring anchors. Not a numeric serialized class or object envelope."
+    },
+    {
+      "id": "mail.selector.SenderAddress",
+      "parent": "mail",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "nearest email-shaped run near anchor"
+      },
+      "name": "SenderAddress",
+      "wire_type": "utf16le-run",
+      "decoder": "schema::build_bounded",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/schema.rs",
+          "symbol": "build_bounded"
+        }
+      ],
+      "first_seen_version": null,
+      "decoder_key": "SenderAddress"
+    },
+    {
+      "id": "mail.selector.SenderName",
+      "parent": "mail",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "person-like neighbor of selected sender address"
+      },
+      "name": "SenderName",
+      "wire_type": "utf16le-run",
+      "decoder": "schema::build_bounded",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/schema.rs",
+          "symbol": "build_bounded"
+        }
+      ],
+      "first_seen_version": null,
+      "decoder_key": "SenderName"
+    },
+    {
+      "id": "mail.selector.ItemClass",
+      "parent": "mail",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "anchor at relative offset 0"
+      },
+      "name": "ItemClass",
+      "wire_type": "utf16le-run",
+      "decoder": "schema::build_bounded",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/schema.rs",
+          "symbol": "build_bounded"
+        }
+      ],
+      "first_seen_version": null,
+      "decoder_key": "ItemClass"
+    },
+    {
+      "id": "mail.selector.InternetMessageId",
+      "parent": "mail",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "angle-bracketed message ID after anchor"
+      },
+      "name": "InternetMessageId",
+      "wire_type": "utf16le-run",
+      "decoder": "schema::build_bounded",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/schema.rs",
+          "symbol": "build_bounded"
+        }
+      ],
+      "first_seen_version": null,
+      "decoder_key": "InternetMessageId"
+    },
+    {
+      "id": "mail.selector.Preview",
+      "parent": "mail",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "longest unclaimed non-markup run after anchor"
+      },
+      "name": "Preview",
+      "wire_type": "utf16le-run",
+      "decoder": "schema::build_bounded",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/schema.rs",
+          "symbol": "build_bounded"
+        }
+      ],
+      "first_seen_version": null,
+      "decoder_key": "Preview"
+    },
+    {
+      "id": "mail.selector.NormalizedSubject",
+      "parent": "mail",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "duplicate normalized subject or bounded solo fallback"
+      },
+      "name": "NormalizedSubject",
+      "wire_type": "utf16le-run",
+      "decoder": "schema::build_bounded",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/schema.rs",
+          "symbol": "build_bounded"
+        }
+      ],
+      "first_seen_version": null,
+      "decoder_key": "NormalizedSubject"
+    },
+    {
+      "id": "mail.selector.Recipient",
+      "parent": "mail",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "email-shaped runs after anchor"
+      },
+      "name": "Recipient",
+      "wire_type": "utf16le-run",
+      "decoder": "schema::build_bounded",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/schema.rs",
+          "symbol": "build_bounded"
+        }
+      ],
+      "first_seen_version": null,
+      "decoder_key": "Recipient"
+    },
+    {
+      "id": "mail.selector.ConversationId",
+      "parent": "mail",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "hex or GUID-shaped run"
+      },
+      "name": "ConversationId",
+      "wire_type": "utf16le-run",
+      "decoder": "schema::build_bounded",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/schema.rs",
+          "symbol": "build_bounded"
+        }
+      ],
+      "first_seen_version": null,
+      "decoder_key": "ConversationId"
+    },
+    {
+      "id": "mail.sent",
+      "parent": "mail",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "earliest plausible tick in anchor region"
+      },
+      "name": "Send time",
+      "wire_type": "u64le-dotnet-ticks",
+      "decoder": "record::read_time",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/record.rs",
+          "symbol": "read_time"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "mail.body",
+      "parent": "mail",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "inline markup or text after anchor"
+      },
+      "name": "Message body",
+      "wire_type": "utf16le-run",
+      "decoder": "record::parse",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/record.rs",
+          "symbol": "parse"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "mail.sidecar",
+      "parent": "mail",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "EFMData/ basename run"
+      },
+      "name": "Sidecar reference",
+      "wire_type": "utf16le-run",
+      "decoder": "body::sidecar_names",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/body.rs",
+          "symbol": "sidecar_names"
+        }
+      ],
+      "first_seen_version": null
+    },
+    {
+      "id": "mail.wire-fields.unknown",
+      "parent": "mail",
+      "identifier": {
+        "kind": "wire_field_id",
+        "value": null
+      },
+      "name": "Unknown property IDs",
+      "wire_type": "unknown",
+      "decoder": null,
+      "confidence": "unknown",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/schema.rs",
+          "symbol": "build_bounded"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "No numeric property-ID framing established by the pinned reader. Offsets and selectors above are not property IDs."
+    },
+    {
+      "id": "object.class.004d.wire-fields.unknown",
+      "parent": "object.class.004d",
+      "identifier": {
+        "kind": "wire_field_id",
+        "value": null
+      },
+      "name": "Unknown property IDs",
+      "wire_type": "unknown",
+      "decoder": null,
+      "confidence": "unknown",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "envelopes"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "No numeric property-ID framing established by the pinned reader. Offsets and selectors above are not property IDs."
+    },
+    {
+      "id": "object.class.004f.wire-fields.unknown",
+      "parent": "object.class.004f",
+      "identifier": {
+        "kind": "wire_field_id",
+        "value": null
+      },
+      "name": "Unknown property IDs",
+      "wire_type": "unknown",
+      "decoder": null,
+      "confidence": "unknown",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "envelopes"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "No numeric property-ID framing established by the pinned reader. Offsets and selectors above are not property IDs."
+    },
+    {
+      "id": "object.class.00ca.wire-fields.unknown",
+      "parent": "object.class.00ca",
+      "identifier": {
+        "kind": "wire_field_id",
+        "value": null
+      },
+      "name": "Unknown property IDs",
+      "wire_type": "unknown",
+      "decoder": null,
+      "confidence": "unknown",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "envelopes"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "No numeric property-ID framing established by the pinned reader. Offsets and selectors above are not property IDs."
+    },
+    {
+      "id": "object.class.00bf.wire-fields.unknown",
+      "parent": "object.class.00bf",
+      "identifier": {
+        "kind": "wire_field_id",
+        "value": null
+      },
+      "name": "Unknown property IDs",
+      "wire_type": "unknown",
+      "decoder": null,
+      "confidence": "unknown",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "envelopes"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "No numeric property-ID framing established by the pinned reader. Offsets and selectors above are not property IDs."
+    },
+    {
+      "id": "object.class.006b.wire-fields.unknown",
+      "parent": "object.class.006b",
+      "identifier": {
+        "kind": "wire_field_id",
+        "value": null
+      },
+      "name": "Unknown property IDs",
+      "wire_type": "unknown",
+      "decoder": null,
+      "confidence": "unknown",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "objects"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "No numeric property-ID framing established by the pinned reader. Offsets and selectors above are not property IDs."
+    },
+    {
+      "id": "object.class.0004.wire-fields.unknown",
+      "parent": "object.class.0004",
+      "identifier": {
+        "kind": "wire_field_id",
+        "value": null
+      },
+      "name": "Unknown property IDs",
+      "wire_type": "unknown",
+      "decoder": null,
+      "confidence": "unknown",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "envelopes"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "No numeric property-ID framing established by the pinned reader. Offsets and selectors above are not property IDs."
+    }
+  ]
+}

@@ -37,57 +37,288 @@
     {
       "id": "S1",
       "name": "Static application baseline and drift",
-      "criteria": ["ATLAS-SURFACE-BASELINE"],
+      "criteria": [
+        "ATLAS-SURFACE-BASELINE"
+      ],
       "state": "verified_locally",
       "depends_on": []
     },
     {
       "id": "S2",
       "name": "Atlas-backed hxprobe and count-only observation",
-      "criteria": ["ATLAS-STORE-SOURCE", "ATLAS-STORE-PROBE"],
-      "state": "remaining",
-      "depends_on": ["https://github.com/jbookout/carr-system/pull/2038"]
+      "criteria": [
+        "ATLAS-STORE-SOURCE",
+        "ATLAS-STORE-PROBE"
+      ],
+      "state": "verified_locally",
+      "completed_criteria": [
+        "ATLAS-STORE-SOURCE",
+        "ATLAS-STORE-PROBE"
+      ],
+      "remaining_criteria": [],
+      "depends_on": [
+        "https://github.com/jbookout/carr-system/pull/2038"
+      ]
     },
     {
       "id": "S3",
       "name": "Reconcile reconstructed application grammar",
-      "criteria": ["ATLAS-GRAMMAR-RECONCILE"],
-      "state": "remaining",
-      "depends_on": ["S1", "PR #2040", "wr443-deeplink-grammar", "wr443-send-by-id"]
+      "criteria": [
+        "ATLAS-GRAMMAR-RECONCILE"
+      ],
+      "state": "verified_locally_against_pinned_audits",
+      "depends_on": [
+        "S1",
+        "PR #2040",
+        "wr443-deeplink-grammar",
+        "wr443-send-by-id"
+      ],
+      "merge_status": "PR #2040 merged; PRs #2041 and #2042 open at pinned source revisions. No merge is inferred."
     },
     {
       "id": "S4",
       "name": "Combined drift, measured coverage and trigger design",
-      "criteria": ["ATLAS-DRIFT-COMBINED", "ATLAS-COVERAGE", "ATLAS-LAUNCHD-DESIGN"],
+      "criteria": [
+        "ATLAS-DRIFT-COMBINED",
+        "ATLAS-COVERAGE",
+        "ATLAS-LAUNCHD-DESIGN"
+      ],
       "state": "remaining",
-      "depends_on": ["S2", "S3", "orchestrator count-only private-copy run"]
+      "depends_on": [
+        "S2",
+        "S3",
+        "orchestrator count-only private-copy run"
+      ]
     }
   ],
   "decisions": [
-    {"id": "D1", "question": "What is slice 1?", "answer": "Deliver the independent static bundle baseline and drift. Keep the unmerged hxprobe dependency out of this PR.", "trade_off": "The store atlas remains an explicit later criterion."},
-    {"id": "D2", "question": "Are schema.rs names numeric field IDs?", "answer": "No. Preserve wire IDs, offsets and heuristic string selectors as distinct concepts.", "trade_off": "A field-name list cannot establish byte or ID coverage."},
-    {"id": "D3", "question": "Which module interface?", "answer": "Use extract_surface, diff_surface and render_surface with a thin stdout-only CLI and no public extractor registry.", "trade_off": "A future binary format may require internal changes. Three independent designs favored keeping format details local."},
-    {"id": "D4", "question": "How are tests and input failures handled?", "answer": "Test the module and CLI with generated synthetic app bundles. Require exact CFBundleVersion, refuse malformed metadata, and report skipped symlinks.", "trade_off": "Unreadable or unsupported inputs fail instead of producing a partial success."},
-    {"id": "D5", "question": "What counts as drift?", "answer": "Compare semantic identities and fields separately from hashes and evidence offsets. Retain all literal offsets.", "trade_off": "Consumers must inspect source_changes as well as semantic changes."},
-    {"id": "D6", "question": "How strong is binary grammar evidence?", "answer": "In slice 1 extract ASCII ms-outlook literals from identified Mach-O files. Emit host, path and query keys, omit query values, and make no runtime claim.", "trade_off": "Routes assembled from constants remain unknown until S3."},
-    {"id": "D7", "question": "What does first seen mean?", "answer": "First observed in atlas history. Preserve existing first_seen_version when extracting against a baseline.", "trade_off": "This does not claim the version in which Microsoft introduced a declaration."},
-    {"id": "D8", "question": "Where do remaining criteria live?", "answer": "Keep the extension criteria and dependency map in this versioned JSON and link them from the PR. Do not mutate the production Work Request under the no-production-writes boundary.", "trade_off": "The orchestrator must reconcile these criteria into the Work Request record if needed."},
-    {"id": "D9", "question": "Install a version watcher now?", "answer": "No. S4 designs the trigger after combined drift and its count-only contract exist.", "trade_off": "No automatic watch runs from slice 1."},
-    {"id": "D10", "question": "How are delivery checks run in the fresh checkout?", "answer": "Install the committed Node lockfile and mypy 2.3.0 locally, and invoke the existing leak guard with the absolute repository root used by its hooks.", "trade_off": "Local dependency directories remain ignored. No gate, global configuration or dependency manifest changes."}
+    {
+      "id": "D1",
+      "question": "What is slice 1?",
+      "answer": "Deliver the independent static bundle baseline and drift. Keep the unmerged hxprobe dependency out of this PR.",
+      "trade_off": "The store atlas remains an explicit later criterion."
+    },
+    {
+      "id": "D2",
+      "question": "Are schema.rs names numeric field IDs?",
+      "answer": "No. Preserve wire IDs, offsets and heuristic string selectors as distinct concepts.",
+      "trade_off": "A field-name list cannot establish byte or ID coverage."
+    },
+    {
+      "id": "D3",
+      "question": "Which module interface?",
+      "answer": "Use extract_surface, diff_surface and render_surface with a thin stdout-only CLI and no public extractor registry.",
+      "trade_off": "A future binary format may require internal changes. Three independent designs favored keeping format details local."
+    },
+    {
+      "id": "D4",
+      "question": "How are tests and input failures handled?",
+      "answer": "Test the module and CLI with generated synthetic app bundles. Require exact CFBundleVersion, refuse malformed metadata, and report skipped symlinks.",
+      "trade_off": "Unreadable or unsupported inputs fail instead of producing a partial success."
+    },
+    {
+      "id": "D5",
+      "question": "What counts as drift?",
+      "answer": "Compare semantic identities and fields separately from hashes and evidence offsets. Retain all literal offsets.",
+      "trade_off": "Consumers must inspect source_changes as well as semantic changes."
+    },
+    {
+      "id": "D6",
+      "question": "How strong is binary grammar evidence?",
+      "answer": "In slice 1 extract ASCII ms-outlook literals from identified Mach-O files. Emit host, path and query keys, omit query values, and make no runtime claim.",
+      "trade_off": "Routes assembled from constants remain unknown until S3."
+    },
+    {
+      "id": "D7",
+      "question": "What does first seen mean?",
+      "answer": "First observed in atlas history. Preserve existing first_seen_version when extracting against a baseline.",
+      "trade_off": "This does not claim the version in which Microsoft introduced a declaration."
+    },
+    {
+      "id": "D8",
+      "question": "Where do remaining criteria live?",
+      "answer": "Keep the extension criteria and dependency map in this versioned JSON and link them from the PR. Do not mutate the production Work Request under the no-production-writes boundary.",
+      "trade_off": "The orchestrator must reconcile these criteria into the Work Request record if needed."
+    },
+    {
+      "id": "D9",
+      "question": "Install a version watcher now?",
+      "answer": "No. S4 designs the trigger after combined drift and its count-only contract exist.",
+      "trade_off": "No automatic watch runs from slice 1."
+    },
+    {
+      "id": "D10",
+      "question": "How are delivery checks run in the fresh checkout?",
+      "answer": "Install the committed Node lockfile and mypy 2.3.0 locally, and invoke the existing leak guard with the absolute repository root used by its hooks.",
+      "trade_off": "Local dependency directories remain ignored. No gate, global configuration or dependency manifest changes."
+    },
+    {
+      "id": "D11",
+      "question": "How much work fits this desk session?",
+      "answer": "Deliver ATLAS-STORE-SOURCE only, following the explicit one-session-per-criterion sizing. Merge the approved vendor branch into the approved atlas base without rebasing.",
+      "trade_off": "The count-only command and grammar reconciliation remain subsequent criteria. This PR stays open against main."
+    },
+    {
+      "id": "D12",
+      "question": "Where do decoder display names live?",
+      "answer": "Keep stable decoder_key identities and display names in hxstore-atlas.json. Generate the Key enum, name mapping and iteration list during the Cargo build. Remove the hand-maintained definitions.",
+      "trade_off": "A runtime JSON reader would add runtime configuration and parsing. Build generation uses the repository Python 3 standard library and adds no Cargo dependency. Name edits require rebuilding hxprobe."
+    },
+    {
+      "id": "D13",
+      "question": "Which public seams prove the name migration?",
+      "answer": "Test the reference CLI and the actual hxprobe map CLI using a generated CRC-valid literal-only LZ4 block. Copy only the maintained crate, generator and atlas into a temporary tree, rename an entry, rebuild and inspect map and tally output.",
+      "trade_off": "This proves name locality and build invalidation. It does not establish real-store decoding accuracy or wire-ID coverage."
+    },
+    {
+      "id": "D14",
+      "question": "How are wire IDs and first-seen versions represented?",
+      "answer": "Distinguish containers, record anchors, block types, object classes, envelope tags, object byte offsets, string-run selectors and wire field IDs. Keep unknown IDs and first_seen_version explicitly null. Bind interpretation evidence to exact vendor revision and SHA-256.",
+      "trade_off": "The pinned implementation establishes recognized layouts and heuristics, not the first Outlook build or empirical proof. All interpreted meanings are inferred and unresolved meanings unknown."
+    },
+    {
+      "id": "D15",
+      "question": "How do malformed atlas edits fail?",
+      "answer": "Validate before generating any reference or Rust. Reject duplicate IDs, decoder keys and decoder display names, dangling parents, unsupported schemas, missing evidence and malformed provenance.",
+      "trade_off": "Duplicate display names would collapse distinct tally entries. Invalid atlas input stops the Cargo build instead of using fallback names."
+    },
+    {
+      "id": "D16",
+      "question": "Which output contract changes?",
+      "answer": "Generate the eight named schema-map labels and their tally keys from the atlas. Stable decoder keys continue to drive extraction. SQLite table and column contracts are separate derived outputs and retain their existing names.",
+      "trade_off": "The atlas migration does not rename persisted SQLite columns or modify decoding heuristics."
+    },
+    {
+      "id": "D17",
+      "question": "What fits the next session?",
+      "answer": "Finish ATLAS-STORE-PROBE on a new branch from 039a4d05. Include structural coverage requested with the command. Keep ATLAS-GRAMMAR-RECONCILE for the next session.",
+      "trade_off": "One session per criterion takes priority over batching both ordered criteria into this PR."
+    },
+    {
+      "id": "D18",
+      "question": "Which public seam and interface?",
+      "answer": "Use hxprobe observe <copy> as the only test seam. One count-only JSON contract, no content flags, no sidecars. Prefer a private Rust observation module over a second Python parser or wrapping map output.",
+      "trade_off": "A separate structural observer cannot measure the content decoders, but does not construct or format mailbox values. Synthetic fixtures exercise the actual executable."
+    },
+    {
+      "id": "D19",
+      "question": "Which identifiers can be reported?",
+      "answer": "Keep object class IDs, block types, typed layout offsets and mail anchor selectors distinct. No numeric property-ID framing is established. wire_field_ids and decoded_field_id_percent remain null; unknown field_id is null.",
+      "trade_off": "Unknown entries group unframed remainder by record type. Their frequencies count records with remainder, not discovered numeric property IDs."
+    },
+    {
+      "id": "D20",
+      "question": "What is decoded coverage?",
+      "answer": "Partition each verified block payload into outermost bounded envelope candidates, anchor-to-next-anchor mail regions outside those envelopes, and unframed gaps. Decode only the envelope header and class signature (20 bytes) or the mail anchor (16 bytes). Count no heuristic string bytes.",
+      "trade_off": "This is a conservative structural lower bound, not total decoder or message recovery coverage. Envelope bytes belong to the record denominator. Nested objects remain opaque. Empty record types are omitted and field-ID denominators are unavailable."
+    },
+    {
+      "id": "D21",
+      "question": "Which output and failure policy?",
+      "answer": "Emit only fixed schema labels, structural IDs, wire types and aggregate occurrence/byte counts/percentages. Accumulate before output. Fixed stderr error and exit 2 on invalid header/version/page size, CRC, LZ4, overlapping blocks, object bounds, arguments or I/O.",
+      "trade_off": "The scan can refuse ambiguous or damaged data instead of returning partial counts. No paths, content hashes, content strings, record identities or excerpts appear in the report."
+    },
+    {
+      "id": "D22",
+      "question": "Should decompression validation be isolated to observe?",
+      "answer": "Fix lz::decode_exact for every caller. Require complete input consumption, forbid literal and match expansion beyond the declared length.",
+      "trade_off": "Existing readers now reject malformed blocks they previously accepted. Valid synthetic decoder tests retain their behavior."
+    },
+    {
+      "id": "D23",
+      "question": "How are observation ordering and privacy proved?",
+      "answer": "Order block and record types by ID. Order unknown remainder groups by descending affected-record count then record-type ID. Test payload substitution, forbidden fixture strings/UTF-16/hex runs, exact output shape, fixed failures and immutable input.",
+      "trade_off": "Synthetic evidence establishes the count-only contract. The orchestrator still owns the private-copy run; no real-store compatibility or coverage is claimed."
+    },
+    {
+      "id": "D24",
+      "question": "How does the branch satisfy delivery preconditions?",
+      "answer": "Install ignored local dependencies from the existing lockfiles, including psycopg 3.3.4, and merge origin/main at 17cd3e66 before push. Keep the requested 039a4d05 ancestry; no rebase, force-push or gate bypass.",
+      "trade_off": "The first push was refused for freshness and for type errors caused by absent local psycopg. Installing the pinned dependency makes the configured types class pass without a source edit."
+    },
+    {
+      "id": "D25",
+      "question": "Should this criterion repair the progress-board failures?",
+      "answer": "No. Reproduce the same two snapshot-size test errors in an untouched detached worktree at 039a4d05 and report them in the PR. Keep the observer criterion scoped.",
+      "trade_off": "Broad local CI is not green. Targeted observer, Rust and atlas tests pass. The required hosted checks remain the merge gate."
+    },
+    {
+      "id": "D26",
+      "question": "When is observation unusable?",
+      "answer": "Fail the run only for invalid arguments, unreadable input, non-store headers, or unsupported header format. Count CRC, LZ4, truncation, overlap and object-bound failures locally with fixed stage/reason codes and signature ordinals.",
+      "trade_off": "Valid store copies can contain unverified candidates. Damaged payloads do not justify losing verified observations."
+    },
+    {
+      "id": "D27",
+      "question": "Which bytes belong in coverage?",
+      "answer": "Use all verified decompressed bytes. If structural parsing fails, discard the block-local record counts and count its entire verified payload as unframed.",
+      "trade_off": "This loses tentative interpretations from that block but avoids partial credit and inflated coverage. Unverified block bytes have no trusted decompressed size and are excluded."
+    },
+    {
+      "id": "D28",
+      "question": "Does the session include grammar reconciliation?",
+      "answer": "The latest assignment authorizes the corrupt-block fix plus ATLAS-GRAMMAR-RECONCILE in the same draft PR. S4 remains separate.",
+      "trade_off": "Supersedes the earlier one-criterion stop in D17 for this explicit continuation."
+    },
+    {
+      "id": "D29",
+      "question": "How do assembled constants become atlas grammar?",
+      "answer": "Use audit-guided extraction from getter vocabulary and traced dispatch. Read the three audits at exact git revisions, verify SHA-256, match build and all referenced binary hashes to the saved atlas, then emit four reconstructed routes and two host query vocabularies.",
+      "trade_off": "No general ARM disassembler or new installed-app scan. A changed binary or build requires a new audit. Retain assembled grammar on extraction only while its exact sources match."
+    },
+    {
+      "id": "D30",
+      "question": "Which source and merge evidence is authoritative?",
+      "answer": "Bind PR #2040 merge 913029145c56534c1b6d516bd88a0d43950b5551, PR #2041 head 7432eac46324f2e4db8f9e852d9402c630bfb1af, and PR #2042 head 8f69356aac9162b1b03ffa4b3c7b33e38872cdcb. The last two were open in GitHub readback.",
+      "trade_off": "Branch source was explicitly permitted. Reconciliation is provisional until their merge evidence is refreshed; no claim they have landed."
+    },
+    {
+      "id": "D31",
+      "question": "Which grammar differences survive reconciliation?",
+      "answer": "Keep literal emails/message/open distinct from reconstructed emails/open/message. Keep recognized host keys distinct from keys read by an action. emails/send consumes no query keys and returns false in the audited canonical branch. account and fallback from select an account; immutableID belongs to open/message.",
+      "trade_off": "All reconstructed entries are inferred. Runtime acceptance remains untested, and UI or locked-screen delivery is not inferred from static forwarding."
+    },
+    {
+      "id": "D32",
+      "question": "Which public seams prove reconciliation?",
+      "answer": "Use reconcile_surface, extract_surface with a baseline, diff_surface, render_surface, and the actual reconcile CLI over a synthetic git repository. Test byte/hash binding, source/build changes, disagreement, query-key drift, evidence-only drift, and regeneration.",
+      "trade_off": "Fixtures prove the extraction contract. The saved real atlas is reconciled against static audit artifacts only; no app or store data is read."
+    }
   ],
   "not_yet_specified": [
     "Numeric field framing beyond the pinned vendor's known object envelopes requires evidence from safe synthetic work and orchestrator counts.",
-    "Reconstructed grammar merge details depend on the final landed outputs of the three WR-000443 jobs."
+    "Refresh merge evidence for pinned PRs #2041/#2042 when they land; source reconciliation currently uses their explicitly permitted branches."
   ],
   "out_of_scope": [
     "Outlook launch, URL invocation, Apple events, profile/store/data/preference access by this desk",
     "Microsoft 365, Graph, SMTP, EWS, decryption, production writes, LaunchAgent installation and merge"
   ],
   "source_study": [
-    {"source": "PR #2038", "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df", "finding": "Maintained Rust reader is unmerged; schema names describe string-run heuristics, not numeric property IDs."},
-    {"source": "upstream README.md and SPEC.md", "revision": "191b54e42757687806202f8f696e9066f0514e11", "finding": "Format evidence covers block CRC/LZ4, UTF-16 runs, ticks and object envelopes. Published recovery counts are not format-byte coverage."},
-    {"source": "vendor-patches/README.md and hxprobe-calendar-and-bodies.patch", "revision": "66ac4cc709af5265819e2612aab62d746a9faf85", "finding": "Calendar class 0x006b uses offsets 574 and 582 and variable text heuristics. The body extension reads sidecars; no such read is used by this atlas slice."},
-    {"source": "PR #2040", "revision": "6da9e8ce7862bc4f63440fb5a01ad271b879204a", "finding": "Static route survey is unmerged. Its inferred builder vocabulary is not a validated invocation contract."}
+    {
+      "source": "PR #2038",
+      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "finding": "Maintained Rust reader is unmerged; schema names describe string-run heuristics, not numeric property IDs."
+    },
+    {
+      "source": "upstream README.md and SPEC.md",
+      "revision": "191b54e42757687806202f8f696e9066f0514e11",
+      "finding": "Format evidence covers block CRC/LZ4, UTF-16 runs, ticks and object envelopes. Published recovery counts are not format-byte coverage."
+    },
+    {
+      "source": "vendor-patches/README.md and hxprobe-calendar-and-bodies.patch",
+      "revision": "66ac4cc709af5265819e2612aab62d746a9faf85",
+      "finding": "Calendar class 0x006b uses offsets 574 and 582 and variable text heuristics. The body extension reads sidecars; no such read is used by this atlas slice."
+    },
+    {
+      "source": "PR #2040",
+      "revision": "6da9e8ce7862bc4f63440fb5a01ad271b879204a",
+      "finding": "Static route survey is unmerged. Its inferred builder vocabulary is not a validated invocation contract."
+    },
+    {
+      "source": "Maintained vendor/hxprobe source",
+      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "finding": "Cataloged block types 8/16, serialized object envelopes and classes, folder reference offsets, calendar object offsets, and eight mail string-run selector keys. Numeric property-ID framing and first-seen Outlook builds remain unknown."
+    }
   ],
   "tool_documentation": [
     "https://docs.python.org/3/library/plistlib.html",
@@ -97,5 +328,20 @@
     "https://docs.python.org/3/library/unittest.html",
     "https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html",
     "Local gh help and gh pr view --help; git --help; curl --help; ./run.sh --help; ops/ci.sh --help"
-  ]
+  ],
+  "observation_contract": {
+    "schema": "hxprobe-observation/v1",
+    "command": "vendor/hxprobe/target/release/hxprobe observe <immutable-store-copy>",
+    "input_owner": "Orchestrator only; desk tests use generated synthetic bytes.",
+    "record_bytes": "Serialized envelope length including its 10-byte header, mail anchor through next anchor or envelope boundary, or unframed gap. Outermost envelope candidates require marker 5, zero guard, bounded length >=20, and an 8-byte zero class-signature suffix.",
+    "decoded_bytes": "Unique structural spans only: envelope header plus class signature (20 bytes), or mail anchor (16 bytes). No content interpretation credited.",
+    "decoded_byte_percent": "100 * decoded_bytes / total_bytes per observed record type. Absent types are omitted; a zero denominator is unavailable.",
+    "wire_field_ids": null,
+    "decoded_field_id_percent": null,
+    "field_identifier_policy": "fields[].field_id identifies a structural layout position or selector with explicit identifier_kind, never a numeric wire property ID. Values of fields are never emitted.",
+    "unknown_fields": "One null-field-ID remainder group per affected record type. occurrences counts records with undecoded bytes; unknown_bytes sums their remainder. Descending occurrences then ascending record_type. No claim to have enumerated unframed numeric IDs.",
+    "scope": "Conservative structural observation, not message recovery, event identities, or full content-decoder coverage.",
+    "failure_policy": "Fixed {stage, reason_code, block_ordinal} only. Whole-run exit 2 for unusable input. Block-local issues continue, grouped by stage and reason; ordinals are one-based signature positions.",
+    "coverage": "Total decoded structural bytes / all CRC-and-LZ4-verified payload bytes. Structurally undecodable verified blocks count as wholly unframed."
+  }
 }

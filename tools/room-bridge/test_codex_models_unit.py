@@ -48,9 +48,8 @@ class FamilyDispatchTests(unittest.TestCase):
             seen.append(argv)
             Path(argv[argv.index('-o') + 1]).write_text('done')
             return subprocess.CompletedProcess(argv, 0, '{"type":"turn.completed"}\n', '')
-        with patch.object(dispatch.subprocess, 'run', side_effect=run):
-            row = dispatch.dispatch('cx', 'build it', registry=self.reg,
-                                    results_path=self.results, **kwargs)
+        row = dispatch.dispatch('cx', 'build it', registry=self.reg,
+                                results_path=self.results, provider_run=run, **kwargs)
         return row, seen
 
     def test_stale_entries_do_not_pin_sol(self):
@@ -93,11 +92,10 @@ class FamilyDispatchTests(unittest.TestCase):
                         seen.append(argv)
                         Path(argv[argv.index('-o') + 1]).write_text('done')
                         return subprocess.CompletedProcess(argv, 0, '{"type":"turn.completed"}\n', '')
-                    with patch.object(dispatch.subprocess, 'run', side_effect=run):
-                        row = dispatch.dispatch(desk, 'automatic task', registry=self.reg,
-                                                results_path=self.results,
-                                                config_overrides=('forced_login_method="api"',
-                                                                  'model_provider="unguarded-api"'))
+                    row = dispatch.dispatch(desk, 'automatic task', registry=self.reg,
+                                            results_path=self.results, provider_run=run,
+                                            config_overrides=('forced_login_method="api"',
+                                                              'model_provider="unguarded-api"'))
                     self.assertEqual(row['model'], model)
                     self.assertEqual('resume' in seen[0], resume)
                     for forced, overridden in [('forced_login_method="chatgpt"', 'forced_login_method="api"'),

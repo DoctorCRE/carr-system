@@ -332,27 +332,26 @@ class ReaperTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "identity"):
             reaper.recover_pending("fixture/repo", fixture.repo)
 
-    def test_configured_protected_branch_binds_census_watchdog_and_guard(self):
+    def test_configured_protected_branch_binds_census_and_guard(self):
         import io
         import runpy
         from unittest.mock import patch
-        import job_watchdog as watchdog
+        import local_jobs
         fixture = Fixture()
         fixture.git("branch", "reserved")
         fixture.git("push", "origin", "reserved")
         head = fixture.git("rev-parse", "reserved")
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
+        config = local_jobs.load_config(ROOT / "ops/config/local-jobs.json")
         config["protected_branches"].append("reserved")
         config["repositories"] = ["fixture/repo"]
         config["repository_roots"] = {"fixture/repo": str(fixture.repo)}
-        self.assertEqual(watchdog.repository_roots(config), {"fixture/repo": fixture.repo})
+        self.assertEqual(local_jobs.repository_roots(config), {"fixture/repo": fixture.repo})
         rows = fixture.reaper(config=config).snapshot("fixture/repo", fixture.repo)
         reserved = [r for r in rows if r.get("name") == "reserved"]
         self.assertTrue(reserved)
         self.assertTrue(all(r["class"] == "live" and r["action"] is None for r in reserved))
-        self.assertFalse(watchdog.detect({"branches": [{"repo": "fixture/repo", "name": "reserved", "updated": 0}]}, config, 100000))
         env = {"CARR_RETIRE_REF": "refs/heads/reserved", "CARR_RETIRE_HEAD": head}
-        with patch.object(watchdog, "load_config", return_value=config), patch.dict(os.environ, env), \
+        with patch.object(local_jobs, "load_config", return_value=config), patch.dict(os.environ, env), \
                 patch.object(sys, "stdin", io.StringIO(f"(delete) {'0' * 40} refs/heads/reserved {head}\n")):
             with self.assertRaises(SystemExit) as refused:
                 runpy.run_path(str(ROOT / "ops/branch-janitor-hooks/pre-push"))
@@ -431,15 +430,15 @@ class ReaperTest(unittest.TestCase):
     def test_reap_main_exits_nonzero_for_malformed_configuration(self):
         with tempfile.TemporaryDirectory(prefix="branch-retire-config-") as directory:
             source = Path(directory)
-            config = source / "ops/config/job-watchdog.json"
+            config = source / "ops/config/local-jobs.json"
             config.parent.mkdir(parents=True)
             config.write_text("{")
             program = f"""import runpy
 import sys
 from pathlib import Path
 sys.path[:0] = [{str(ROOT / 'lib')!r}, {str(ROOT / 'ops')!r}]
-import job_watchdog
-job_watchdog.SOURCE = Path({str(source)!r})
+import local_jobs
+local_jobs.SOURCE = Path({str(source)!r})
 sys.argv = [{str(ROOT / 'hooks/worktree-self-plumb.py')!r}, '--reap', '--repo', {str(source)!r}]
 runpy.run_path(sys.argv[0], run_name='__main__')
 """
@@ -508,7 +507,7 @@ runpy.run_path(sys.argv[0], run_name='__main__')
     def test_registered_job_retires_fixture_branches_and_keeps_dirty_tree(self):
         import contextlib
         import io
-        import job_watchdog as watchdog
+        import local_jobs
         fixture = Fixture()
         for name in ("claude/merged-one", "claude/merged-two"):
             fixture.git("push", "origin", "main:refs/heads/" + name)
@@ -523,21 +522,9 @@ runpy.run_path(sys.argv[0], run_name='__main__')
             closed[side]["repo"]["full_name"] = "jbookout/carr-system"
         (tree / "file").write_text("uncommitted orphan bytes\n")
         fixture.age(tree)
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
+        config = local_jobs.load_config(ROOT / "ops/config/local-jobs.json")
         now = time.time() + config["thresholds"]["branch_idle_seconds"] + 1
 
-        def idle_findings():
-            refs = fixture.git("ls-remote", "--heads", "origin").splitlines()
-            facts = {"branches": [{"repo": "fixture/repo", "name": line.split()[1].removeprefix("refs/heads/"),
-                                    "updated": 0} for line in refs]}
-            return watchdog.detect(facts, config, now)
-
-        class Effects:
-            def report(self, finding):
-                return {}
-
-        before = idle_findings()
-        watchdog.reconcile(fixture.repo, config, before, Effects(), now)
         runner = fixture.base / "run-fixture.py"
         runner.write_text(f"""import runpy
 import sys
@@ -555,10 +542,10 @@ with patch.object(hook, 'fleet_reaper', return_value=reaper), \
     sys.exit(hook.main())
 """)
         output = io.StringIO()
-        with patch.object(watchdog, "board_task", return_value={}), \
+        with patch.object(local_jobs, "board_task", return_value={}), \
                 patch.dict(os.environ, {"CARR_JOB_ID": "fixture-branch-retire"}), \
                 contextlib.redirect_stdout(output):
-            status = watchdog.run_job(fixture.repo, config, "branch-janitor", "fixture", 1,
+            status = local_jobs.run_job(fixture.repo, config, "branch-janitor", "fixture", 1,
                                       [sys.executable, str(runner)])
         receipt = json.loads(output.getvalue())
         self.assertEqual(status, 0, receipt)
@@ -570,14 +557,6 @@ with patch.object(hook, 'fleet_reaper', return_value=reaper), \
         self.assertEqual((tree / "file").read_text(), "uncommitted orphan bytes\n")
         self.assertEqual(fixture.git("rev-parse", "unmerged"), unmerged)
         self.assertIn(unmerged, fixture.git("ls-remote", "origin", "refs/heads/claude/unmerged"))
-        after = idle_findings()
-        watchdog.reconcile(fixture.repo, config, after, Effects(), now + 1)
-        latest = watchdog.read_latest(fixture.repo / config["paths"]["findings"])
-        self.assertEqual(len(before), 4)
-        self.assertEqual(len(after), 1)
-        self.assertEqual(sum(not r.get("cleared_at") for r in latest.values()), 1)
-        print("fixture branch-retire: exit=0; eligible remote branches 3 -> 0; "
-              "idle findings 4 -> 1; dirty orphan tree kept; unmerged refs/bytes preserved")
 
     def test_receipts_publish_while_maintenance_is_held(self):
         from unittest.mock import patch
@@ -617,26 +596,17 @@ with patch.object(hook, 'fleet_reaper', return_value=reaper), \
         (tree / "file").write_text("value\n  \n")
         self.assertNotEqual(reaper.work_content(tree), first)
 
-    def test_janitor_has_deliberate_silence_policy_until_registered_limit(self):
-        import job_watchdog as watchdog
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
-        job = {"id": "janitor", "card": "branch-janitor", "start": 1000, "log_mtime": 1000,
-               "limit": 3600, "alive": True, "log_tail": ""}
-        self.assertFalse(watchdog.detect({"jobs": [job]}, config, 1601))
-        self.assertIn("job_over_limit", {f["kind"] for f in watchdog.detect({"jobs": [job]}, config, 4601)})
-        job["card"] = "ordinary"
-        self.assertIn("job_silent", {f["kind"] for f in watchdog.detect({"jobs": [job]}, config, 1601)})
 
     def test_reaper_uses_loaded_branch_idle_policy(self):
         from unittest.mock import patch
-        import job_watchdog as watchdog
+        import local_jobs
         fixture = Fixture()
         tree = fixture.tree("old")
         head = fixture.commit("unmerged", cwd=tree)
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
+        config = local_jobs.load_config(ROOT / "ops/config/local-jobs.json")
         config["thresholds"]["branch_idle_seconds"] = 1
         now = int(fixture.git("show", "-s", "--format=%ct", head)) + 2
-        with patch.object(watchdog, "load_config", return_value=config):
+        with patch.object(local_jobs, "load_config", return_value=config):
             reaper = fixture.reaper(clock=lambda: now)
             row = next(r for r in reaper.snapshot("fixture/repo", fixture.repo) if r.get("ref") == "refs/heads/old")
         self.assertEqual(row["class"], "abandoned")
@@ -835,23 +805,6 @@ with patch.object(hook, 'fleet_reaper', return_value=reaper), \
         self.assertNotEqual(reaper.patch(fixture.repo, base, first),
                             reaper.patch(fixture.repo, base, second))
 
-    def test_watchdog_clears_idle_finding_after_fixture_remote_retirement(self):
-        import job_watchdog as watchdog
-        fixture = Fixture()
-        fixture.git("push", "origin", "main:refs/heads/claude/old")
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
-        class Effects:
-            def report(self, finding):
-                return {}
-        facts = {"branches": [{"repo": "fixture/repo", "name": "claude/old", "updated": 0}]}
-        found = watchdog.detect(facts, config, 100000)
-        watchdog.reconcile(fixture.repo, config, found, Effects(), 100000)
-        report = fixture.reaper().run({"fixture/repo": fixture.repo}, execute=True)
-        self.assertFalse(report["errors"])
-        self.assertFalse(fixture.git("ls-remote", "origin", "refs/heads/claude/old"))
-        watchdog.reconcile(fixture.repo, config, watchdog.detect({"branches": []}, config, 100100), Effects(), 100100)
-        latest = watchdog.read_latest(fixture.repo / config["paths"]["findings"])
-        self.assertEqual(latest[found[0]["key"]]["cleared_at"], watchdog.stamp(100100))
 
     def test_health_row_has_bound_action_and_clears_on_complete_evidence(self):
         from branch_retirement import health, save, repository_roots
