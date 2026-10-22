@@ -41,6 +41,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -122,6 +123,13 @@ if argv[:1] == ["deploy"]:
     if mode == "fail_after_apply":
         print("X [ERROR] custom domain sync failed"); sys.exit(1)
     sys.exit(0)
+if argv[:2] == ["versions", "list"]:
+    print(json.dumps([{"id": os.environ["FAKE_V1"]}] if state.get("uploaded") else [])); sys.exit(0)
+if argv[:2] == ["versions", "view"]:
+    if not state.get("uploaded"): sys.exit(1)
+    print(json.dumps({"id": os.environ["FAKE_V1"], "resources": {"bindings": [
+        {"name": "GIT_SHA", "type": "plain_text", "text": os.environ["HEAD_SHA"]},
+        {"name": "CANDIDATE_MANIFEST_DIGEST", "type": "plain_text", "text": os.environ["CANDIDATE_MANIFEST_DIGEST"]}]}})); sys.exit(0)
 if argv[:2] == ["versions", "upload"]:
     if state.get("latest_tag") and state.get("applied_tag") != state["latest_tag"]:
         print("X [ERROR] This Worker has a pending Durable Object migration, which cannot be "
@@ -144,6 +152,7 @@ if argv[:2] == ["versions", "upload"]:
         else:
             print("X [ERROR] A request to the Cloudflare API failed. Authentication error [code: 10000]")
         sys.exit(1)
+    state["uploaded"] = True; save()
     print("Worker Version ID: " + os.environ["FAKE_V1"]); sys.exit(0)
 print("fake wrangler: unexpected " + " ".join(argv), file=sys.stderr); sys.exit(2)
 '''
@@ -305,6 +314,9 @@ def run(source: str, *, tags: list[str], state: dict, toml: str | None = None,
             subprocess.run([*git, "-C", str(tmp / "main"), "worktree", "add", "-q", "--detach",
                             str(tmp / "repo")], check=True, env=GIT_ENV)
         (tmp / "repo" / "tools").mkdir(parents=True)
+        if locate not in ("worktree", "none"):
+            subprocess.run(["git", "init", "-q", str(tmp / "repo")], check=True, env=GIT_ENV)
+        shutil.copy2(REPO / "tools/worker-upload-readback.py", tmp / "repo/tools/worker-upload-readback.py")
         (tmp / "repo" / "ops").symlink_to(REPO / "ops")
         (tmp / "repo" / "lib").symlink_to(REPO / "lib")
         (tmp / "worker" / "wrangler.toml").write_text(toml, encoding="utf-8")
@@ -352,7 +364,7 @@ def run(source: str, *, tags: list[str], state: dict, toml: str | None = None,
         }
         if locate == "override":
             env["CARR_DO_MIGRATION_STATE_DIR"] = str(tag_dir)
-        done = subprocess.run(["sh", str(harness)], env=env, capture_output=True, text=True,
+        done = subprocess.run(["sh", str(harness)], cwd=tmp / "repo", env=env, capture_output=True, text=True,
                               timeout=180)
         receipt_path = tmp / "repo" / "out" / "deploy-worker" / f"do-migration-{HEAD_SHA}.json"
         receipt = json.loads(receipt_path.read_text()) if receipt_path.exists() else None
@@ -565,33 +577,18 @@ def main() -> int:
               and sp.get("tag_moved") is moved and sp.get("deploy_exit") == s_exit
               and res["receipt_valid"] and "DO migration" not in res["out"], json.dumps(rc))
 
-    # U. a connectivity failure on the upload is retried; nothing else is.
-    # 2026-10-02: wrangler's first API read timed out once and the pipeline
-    # burned release bde9be154445 for good, with nothing wrong in the release.
-    res = run(source, tags=[], state={"upload_failures": ["network"]})
-    check("U1. one connectivity failure, then success: the retried upload is the candidate",
-          res["rc"] == 0 and len(wrangler_calls(res, "versions", "upload")) == 2
-          and f"provider version: {V1}" in res["out"]
-          and "attempt 1/3 hit a connectivity failure" in res["out"], res["all"][-700:])
-    res = run(source, tags=[], state={"upload_failures": ["network"] * 5})
-    check("U2. connectivity failure every time: refused after exactly 3 attempts",
-          res["rc"] == 1 and len(wrangler_calls(res, "versions", "upload")) == 3
-          and "Cloudflare version upload failed after 3 attempt(s)" in res["err"]
-          and "provider version:" not in res["out"], res["all"][-700:])
-    res = run(source, tags=[], state={"upload_failures": ["auth"]})
-    check("U3. a non-connectivity failure is never retried",
-          res["rc"] == 1 and len(wrangler_calls(res, "versions", "upload")) == 1
-          and "Cloudflare version upload failed after 1 attempt(s)" in res["err"], res["all"][-700:])
-    res = run(source, tags=[], state={"upload_failures": ["network_after_version"]})
-    check("U4. a failure after Cloudflare named a version is never retried",
-          res["rc"] == 1 and len(wrangler_calls(res, "versions", "upload")) == 1, res["all"][-700:])
-    res = run(source, tags=[TAG1], state={"applied_tag": TAG1, "upload_failures": ["network"]},
+    for kind in ("network", "auth", "network_after_version"):
+        res = run(source, tags=[], state={"upload_failures": [kind]})
+        check(f"U. {kind}: unverifiable upload stops after one write",
+              res["rc"] == 1 and len(wrangler_calls(res, "versions", "upload")) == 1
+              and "unverifiable" in res["err"], res["all"][-700:])
+    res = run(source, tags=[TAG1], state={"applied_tag": TAG1},
               env_extra={"PROBE_TOKENS_FILE": "/private/probe-tokens.json"})
     uploads = wrangler_calls(res, "versions", "upload")
-    check("U5. the retry carries the same secrets file and stamps as the first attempt",
-          res["rc"] == 0 and len(uploads) == 2 and uploads[0] == uploads[1]
-          and arg(uploads[1], "--secrets-file") == "/private/probe-tokens.json"
-          and f"GIT_SHA:{HEAD_SHA}" in uploads[1], json.dumps(uploads))
+    check("U. fresh upload carries the secrets file and exact source stamp",
+          res["rc"] == 0 and len(uploads) == 1
+          and arg(uploads[0], "--secrets-file") == "/private/probe-tokens.json"
+          and f"GIT_SHA:{HEAD_SHA}" in uploads[0], json.dumps(uploads))
 
     # F. a failure AFTER the upload branch reports what traffic actually did
     res = run(source, tags=[TAG1], state={"applied_tag": None, "bind_fail": True})
@@ -869,7 +866,7 @@ def main() -> int:
                                                     source.index("# ---------- pending Durable Object")])
     tail = source[upload_at:source.index('echo "The wrapper writes the typed rehearsal evidence required for readiness."')]
     check("E6. after the candidate exists, no refusal claims traffic was unchanged unconditionally",
-          tail.count("raffic was not changed") == 2 and tail.count("$DO_TRAFFIC_CLAUSE") >= 4,
+          tail.count("raffic was not changed") == 1 and tail.count("$DO_TRAFFIC_CLAUSE") >= 4,
           f"{tail.count('raffic was not changed')} / {tail.count('$DO_TRAFFIC_CLAUSE')}")
 
     if FAILURES:

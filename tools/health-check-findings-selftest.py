@@ -775,6 +775,22 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         self.assertEqual(ns["_canonical_health"](), 1)
         self.assertEqual([row["key"] for row in ns["_FINDINGS"]], ["grok_session"])
 
+    def test_release_section_never_reads_machine_snapshot_or_watchdogs(self):
+        import contextlib, io
+        ns = self.namespace()
+        def unrelated():
+            raise AssertionError("release health read unrelated machine state")
+        ns.update(CANONICAL_SECTION="release", _canonical_snapshot=unrelated,
+                  _storage_hygiene_row=unrelated, _studio_failover_row=unrelated,
+                  _grok_session_row=unrelated, _branch_janitor_row=unrelated)
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(ns["_canonical_health"](), 0)
+        self.assertIn("HEALTH_COMPLETE", output.getvalue())
+        self.assertEqual(ns["_FINDINGS"], [])
+        command = ns["subprocess"].run.call_args.args[0]
+        self.assertTrue(command[1].endswith("tools/feature-switch-health.py"))
+        self.assertEqual(ns["subprocess"].run.call_count, 1)
+
     def test_storage_section_does_not_read_unrelated_canonical_snapshot(self):
         import contextlib, io
         ns = self.namespace()

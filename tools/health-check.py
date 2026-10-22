@@ -113,8 +113,8 @@ def _reader_args(argv):
         # A parent shell may carry this old ambient variable.  Normal health must
         # not pass it to any child or let a child silently choose a Drive reader.
         os.environ.pop("CARR_VAULT", None)
-    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "uptime", "storage", "sends"):
-        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|uptime|storage|sends")
+    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "uptime", "storage", "sends", "release"):
+        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|uptime|storage|sends|release")
     if fixture and recovery:
         raise SystemExit("health-check: --fixture is for hermetic canonical tests only")
     # --act executes every red row's bound action (tools/health_breach.py). It
@@ -1183,35 +1183,9 @@ _FINDINGS: list = []
 # Row family -> subjects its reader positively reported green this run (None:
 # not evaluated). health_breach.act() auto-clears a loop only on this evidence.
 _GREEN_EVIDENCE: dict = {}
-# The machine-readable form of every CANONICAL_FINDING line the run prints,
-# built alongside the text so both stay in lockstep. Schema decided against
-# Jev (architecture_or_design, 2026-09-24, full confidence on subject
-# granularity): `subject` is the specific target/job/gate name wherever one
-# exists (export_receipt: the target file; job_terminal_failure/job_stuck/
-# job_completion_receipt/job_missing_due/job_due_non_success: the
-# definition_key), because an AGGREGATE subject per key hides a target that
-# newly broke while another recovered — the exact masking bug an independent
-# review of PR #1237 flagged (point C: "duplicates collapse, counts cancel,
-# and the same text can carry a worse state"). A structural "this whole
-# section of run.sh health could not be read" finding (source_unreadable,
-# job_ledger, control_state, repo_status, registry_integrity,
-# credential_health) has no natural per-target subject, so it keeps an empty
-# `subject` (Jev noul 0.84) and is always `hard_error=True` instead — see
-# point A of the same review: a completely unreadable section must always
-# fail the release gate regardless of any count.
-#
-# `count` defaults to 1 and ACCUMULATES when the same (key, subject) is
-# reported more than once in a single run, so two failures of the same job in
-# one run show count=2 rather than two identical lines that a downstream
-# exact-string diff would collapse into "no change" (review point C again).
-# `hard_error` marks a finding that must always fail the release gate,
-# independent of any baseline comparison (an unreadable section, never a
-# business count that could legitimately improve). `time_rolling` marks a
-# finding whose (key, subject) changes purely because wall-clock time passed
-# — a job's MISSING DUE date rolling forward one day at a time, an export
-# crossing the 26h STALE clock, a rolling 24h gate-block window — none of
-# which is caused by any particular release, so the pipeline reports these
-# but excludes them from its regression diff (review point D).
+# Findings feed the independent machine watchdog. Counts accumulate within a
+# (key, subject) pair. hard_error marks unreadable evidence, while time_rolling
+# marks clock-driven findings. Release gating requests only --section release.
 
 
 CALENDAR_PREBRIEF_KEY = "calendar-prebrief-projection-joe-daily"
@@ -1546,7 +1520,7 @@ def _canonical_health():
         if " over budget: " in _site_line or _site_line.startswith("UNKNOWN"):
             rc = _red("jev_site_budget", _site_line, hard_error=_site_line.startswith("UNKNOWN"))
     try:
-        snap = {} if CANONICAL_SECTION in ("jev-cap", "grok-session", "storage", "uptime", "sends") else _canonical_snapshot()
+        snap = {} if CANONICAL_SECTION in ("jev-cap", "grok-session", "storage", "uptime", "sends", "release") else _canonical_snapshot()
     except Exception as exc:
         print(f"canonical health: REFUSED ({type(exc).__name__}: {exc})")
         _red("canonical_health_refused", f"{type(exc).__name__}: {exc}", hard_error=True)
@@ -1778,7 +1752,7 @@ def _canonical_health():
         else:
             _canonical_assurance_health()
 
-    if CANONICAL_SECTION in ("all", "registry"):
+    if CANONICAL_SECTION in ("all", "registry", "release"):
         feature_command = [sys.executable, os.path.join(REPO_ROOT, "tools/feature-switch-health.py")]
         if CANONICAL_FIXTURE:
             feature_command += ["--fixture", CANONICAL_FIXTURE]
