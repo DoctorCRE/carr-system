@@ -52,6 +52,13 @@ async function loadMutant(anchor, replacement) {
   return import(pathToFileURL(path).href);
 }
 
+test("assembled handlers remain importable after mutation-test relocation", async () => {
+  const path = join(WORK, "unmutated-tools.mjs");
+  writeFileSync(path, relink(readFileSync(join(SRC, FILE), "utf8")));
+  const { TOOLS } = await import(pathToFileURL(path).href);
+  assert.equal(typeof TOOLS["get-deal-room"].handler, "function");
+});
+
 const joe = { id: "10000000-0000-0000-0000-000000000002", slug: "joe",
   display: "Joe", human: true, via: "mcp", client_id: "claude" };
 
