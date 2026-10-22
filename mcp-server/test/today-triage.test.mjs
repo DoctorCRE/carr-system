@@ -1,11 +1,13 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import pg from 'pg';
 import { executeRegisteredTool, ToolError } from '../src/tools.js';
 import { acquireDisposablePostgres, acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
+import { morningBriefView } from './fixtures/doctorcre-brief-a753e121/morning-brief-model.js';
 
 const JOE = { slug: 'joe', human: true, via: 'oauth-google', client_id: 'fixture' };
 let bin;
@@ -38,6 +40,37 @@ async function rows(values) {
       [kind, id(number), owner, `Synthetic ${number}`, due]);
 }
 const call = args => executeRegisteredTool(db, JOE, 'today-triage', args);
+
+test('due actions reach the exact app brief consumer before a full page of future critical dates', async () => {
+  const source = new URL('./fixtures/doctorcre-brief-a753e121/', import.meta.url);
+  const manifest = JSON.parse(readFileSync(new URL('source.json', source), 'utf8'));
+  assert.equal(manifest.commit, 'a753e12120ba396339c0e874ba309333348a12eb');
+  for (const [name, digest] of Object.entries(manifest.files))
+    assert.equal(createHash('sha256').update(readFileSync(new URL(name, source))).digest('hex'), digest, name);
+  const { today, tomorrow, yesterday } = (await db.query(`select current_date::text as today,
+    (current_date + 1)::text as tomorrow, (current_date - 1)::text as yesterday`)).rows[0];
+  await rows([
+    ...Array.from({ length: 50 }, (_, i) => [i + 1, 'critical_date', null, tomorrow]),
+    [61, 'next_action', 'joe-local', today],
+    [62, 'next_action', 'dell-local', yesterday],
+  ]);
+  const brief = await executeRegisteredTool(db, JOE, 'morning-brief', {});
+  // Other sections require tables outside this disposable triage fixture.
+  brief.sections.deals = { state: 'empty', items: [] };
+  brief.sections.loops = { state: 'empty', items: [] };
+  const view = morningBriefView(JSON.parse(JSON.stringify(brief)), {
+    now: new Date(`${today}T12:00:00`), caughtUp: true,
+  });
+  assert.deepEqual(view.groups.map(group => group.row.id), [id(62), id(61)]);
+  const first = brief.sections.today;
+  assert.equal(first.items.length, 50);
+  assert.equal(first.total, 52);
+  assert.equal(first.has_more, true);
+  const next = await call({ owners: 'partners', cursor: first.next_cursor });
+  assert.equal(next.items.length, 2);
+  assert.equal(next.has_more, false);
+  assert.equal(new Set([...first.items, ...next.items].map(row => row.id)).size, 52);
+});
 
 test('morning brief filters autonomous backlog before its page and places imminent critical dates first', async () => {
   const near = (await db.query("select (current_date + 3)::text as day")).rows[0].day;
