@@ -222,7 +222,7 @@ def test_queue_task_to_a_desktop_held_thread_is_never_left_pending_for_a_retry()
          mock.patch.object(dispatch.subprocess, "run", return_value=Proc()) as provider:
         def dispatch_queue(prompt):  # the shape of bridge.run_once's closure
             return dispatch.dispatch("codex-desk", prompt, registry=cast(Any, Reg()),
-                                     results_path=Path(td) / "r.jsonl")
+                                     results_path=Path(td) / "r.jsonl", provider_run=provider)
         out = executor.start("sol", dispatch_call=dispatch_queue, now="2026-09-27T00:00:00+00:00")
     provider.assert_called_once()
     assert started == [], "queue work must never start a Desktop turn"
