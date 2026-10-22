@@ -171,9 +171,13 @@ class BoardCase(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
+        self.enterContext(patch.object(BOARD.repo_lib("machine_role"), "read_marker", return_value="primary"))
+        self.enterContext(patch.object(tempfile, "tempdir", str(self.root)))
+        self.enterContext(patch.dict(os.environ, {"CARR_WORK_QUEUE_DB": str(self.root / "queue.sqlite3")}))
         self.env = os.environ.copy()
         self.env["CARR_WORK_QUEUE_DB"] = str(self.root / "work-queue.sqlite3")
         self.env["PROGRESS_BOARD_ROOT"] = str(self.root)
+        self.env.update(TMPDIR=str(self.root), TMP=str(self.root), TEMP=str(self.root))
         self.env["PROGRESS_BOARD_SKIP_GH"] = "1"
         self.env["PROGRESS_BOARD_SKIP_PROBE"] = "1"
         self.env["PROGRESS_BOARD_RELEASES"] = str(self.root / "releases.jsonl")
@@ -1401,9 +1405,9 @@ class PublishAndAnswers(BoardCase):
              patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))), \
              patch.object(BOARD, "publish_needs_joe_local", lambda: events.append(("local", "needs-joe"))):
             BOARD.command_render(args)
-        self.assertEqual(events, [("render", "carr-v5", True), ("publish", "carr-v5"), ("poll", "carr-v5"),
-                                  ("local", "needs-joe"),
-                                  ("build", "all-repos"), ("publish", "all-repos")])
+        self.assertEqual(events, [("render", "carr-v5", True), ("build", "all-repos"),
+                                  ("publish", "carr-v5"), ("poll", "carr-v5"),
+                                  ("local", "needs-joe"), ("publish", "all-repos")])
 
     def test_scheduled_render_reads_github_in_one_pass(self):
         passes = []
@@ -1504,6 +1508,9 @@ class SharedBoardRoot(unittest.TestCase):
 
 
 class NeedsJoePublication(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(BOARD.repo_lib("machine_role"), "read_marker", return_value="primary"))
+
     def test_local_publication_failures_do_not_interrupt_other_boards(self):
         import needs_joe_local
         from argparse import Namespace
@@ -1524,8 +1531,8 @@ class NeedsJoePublication(unittest.TestCase):
                          patch.object(BOARD, "call_verb", side_effect=call_effect) as call, \
                          patch("sys.stderr", new_callable=io.StringIO) as err:
                         BOARD.command_render(Namespace(project=BOARD.LAUNCHD_BOARD, publish=False))
-                    self.assertEqual(events, [("render", "carr-v5"), ("publish", "carr-v5"),
-                        ("poll", "carr-v5"), ("build", "all-repos"), ("publish", "all-repos")])
+                    self.assertEqual(events, [("render", "carr-v5"), ("build", "all-repos"), ("publish", "carr-v5"),
+                        ("poll", "carr-v5"), ("publish", "all-repos")])
                     self.assertIn("needs-joe local page not published", err.getvalue())
                     self.assertEqual(call.call_count, 0 if location == "read_source" else 1)
 
@@ -1549,9 +1556,9 @@ class NeedsJoePublication(unittest.TestCase):
              patch.object(needs_joe_local, "read_source", return_value=""), \
              patch.object(BOARD, "call_verb", call), patch("sys.stderr", new_callable=io.StringIO):
             BOARD.command_render(Namespace(project=BOARD.LAUNCHD_BOARD, publish=False))
-        self.assertEqual(events, [("render", "carr-v5"), ("publish", "carr-v5"), ("poll", "carr-v5"),
+        self.assertEqual(events, [("render", "carr-v5"), ("build", "all-repos"), ("publish", "carr-v5"), ("poll", "carr-v5"),
             ("read-progress-board", "needs-joe-local"), ("publish-board-snapshot", "needs-joe-local"),
-            ("read-progress-board", "needs-joe-local"), ("build", "all-repos"), ("publish", "all-repos")])
+            ("read-progress-board", "needs-joe-local"), ("publish", "all-repos")])
 
 class CardColumns(unittest.TestCase):
     """Addition 14: finished cards never sit in Building; retired cards leave the pipeline."""

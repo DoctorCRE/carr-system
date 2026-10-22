@@ -1,0 +1,794 @@
+{
+  "schema": "wr443-deeplink-grammar/v1",
+  "work_request": "WR-000443",
+  "sizing": "medium",
+  "outcome": "Recovered canonical parser and action-dispatch grammar. emails/send is an explicit unhandled false branch, not an existing-draft send interface. New-mail body/signature and event location are parsed and forwarded; their visible New Outlook effects remain unverified here.",
+  "subject": {
+    "app": "/Applications/Microsoft Outlook.app",
+    "binary": "Contents/MacOS/Microsoft Outlook",
+    "version": "16.114",
+    "build": "16.114.26101123",
+    "bytes": 211731024,
+    "sha256": "729e211992b71ed7979813269815d563473c4821674e7e0d89b356fc7125900c",
+    "architecture": "arm64",
+    "arm64_slice_file_offset": "0x68e4000",
+    "arm64_slice_bytes": 101745232,
+    "arm64_slice_sha256": "fb2dac72b2b4fba6db3d4902d8176183ab7a87b993d0d9c89efd5c7905d1bee2",
+    "image_base": "0x100000000",
+    "offset_contract": "All evidence ranges below lie in __TEXT, whose vmaddr is 0x100000000 and fileoff is 0. file_offset is into the ORIGINAL universal binary, including the arm64 slice offset. vm_start is unslid. Prior survey offsets often concern x86_64 and are not interchangeable."
+  },
+  "scope": {
+    "performed": "Read-only static analysis of installed app-bundle binaries and Info.plist. Extracted a separate arm64 copy under /tmp. Read local Apple SDK formatter headers. No Outlook execution.",
+    "forbidden_actions_performed": [],
+    "outlook_runtime_tests": 0,
+    "not_performed": "No launch, URL opening, Apple events, Outlook data/preferences or HxStore access, mailbox reads, credential/token/key/keychain/DB-dump/.env reads, decryption, Microsoft 365/Graph/SMTP/EWS, production writes, or merge."
+  },
+  "classification_procedure": [
+    "Does an enum raw-value getter reconstruct a spelling? Yes: classify as a recognized key, not a visible field effect.",
+    "Does the selected action branch actually read that key? Yes: classify as parsed. Follow its conversion and downstream call arguments.",
+    "Does the action branch directly return false? Yes for emails/send: classify as unhandled in this canonical dispatcher. Do not infer capabilities from the send enum name.",
+    "Was Outlook run this session? No: call all visible UI and delivery behavior untested. Supplied probes remain attributed observations.",
+    "Does a negative cover the whole app? No: bound it to the named getter, dispatcher, and traced callees."
+  ],
+  "glossary": {
+    "wire_key": "The query name reconstructed by the enum or consumed by the handler. A reflection field label alone does not qualify.",
+    "parsed": "The selected action reads the query item and converts it. Parsed location is not proof of a filled Location control.",
+    "forwarded": "The value reaches the named action-handler argument. A downstream implementation can still ignore it.",
+    "unhandled": "The selected branch returns false before an action call. This differs from a missing string or a failed live send."
+  },
+  "common_query_grammar": {
+    "lookup": "Foundation URLComponents(url:resolvingAgainstBaseURL:false).queryItems; localized case-insensitive key comparison; first matching item wins; absent or empty scalar becomes nil. Repeated keys are not accumulated.",
+    "encoding": "Use percent-encoded URL query values. The handler consumes URLQueryItem.value, then bridges ordinary Swift strings to NSString. No base64 or JSON body/attachment envelope appears in the traced path. Foundation percent decoding is delegated to the system, not reimplemented or runtime-tested here.",
+    "arrays": "Split the first matching decoded value on either comma or semicolon, remove empty components, preserve whitespace. Encode each path before building the URL, but percent-encoding a comma/semicolon inside a filename does not escape it from the later split.",
+    "evidence": [
+      "query_lookup",
+      "array_split"
+    ]
+  },
+  "emails": {
+    "class": "EmailsCanonicalOutlookURL / OlkEmailsDeepLinkActionHandler",
+    "recognized_query_keys": [
+      "from",
+      "to",
+      "cc",
+      "bcc",
+      "subject",
+      "body",
+      "attachments",
+      "signature",
+      "immutableID",
+      "account"
+    ],
+    "new": {
+      "route": "ms-outlook://emails/new",
+      "reads": [
+        "to",
+        "cc",
+        "bcc",
+        "subject",
+        "body",
+        "signature",
+        "attachments",
+        "account"
+      ],
+      "body": {
+        "key": "body",
+        "value": "Ordinary query text, forwarded as NSString to body:. No special body codec in canonical parsing.",
+        "visible_effect": "Supplied live probe said ignored. Static trace confirms parsing and forwarding, not rendering. A different spelling is not supported by this evidence."
+      },
+      "signature": {
+        "key": "signature",
+        "value": "String forwarded to signatureName:, indicating a signature name rather than a Boolean or signature body. Matching/fallback semantics of the installed UI implementation remain unproven."
+      },
+      "account": {
+        "key": "account",
+        "value": "Signed decimal Int converted to NSNumber, then matched against account hash in sharedCollectionWithoutLDAPWithoutOMC.accounts. accountID is not the canonical query key. Omitted, invalid or unresolvable account yields nil; downstream receives nil for normal default-account handling. No account IDs were read."
+      },
+      "attachments": {
+        "key": "attachments",
+        "value": "One decoded query value containing filesystem path strings separated by comma or semicolon. Each existing path becomes a file URL via URL(fileURLWithPath:). Supply a path such as /tmp/example.txt, not file:///tmp/example.txt. Absolute paths are the reproducible intended form; code does not explicitly require absolute paths.",
+        "missing_path": "Shows fileNotFound transient info, skips that item, continues with other items. Does not abort all composition.",
+        "synthetic_query_example": "attachments=%2Ftmp%2Fexample%20one.txt%3B%2Ftmp%2Fexample-two.txt",
+        "caveats": "Existence checks do not prove sandbox readability or successful UI attachment. No files were attached or opened."
+      },
+      "evidence": [
+        "email_keys",
+        "email_new_fields",
+        "email_account_parse",
+        "email_account_decimal",
+        "email_accounts",
+        "attachment_paths",
+        "email_new_bridge",
+        "email_new_objc_stub",
+        "email_new_selector"
+      ]
+    },
+    "send": {
+      "route": "ms-outlook://emails/send",
+      "result": "false, unhandled",
+      "requires": "No set of query values reaches a send implementation on this branch. Adding immutableID/account cannot change the direct false return.",
+      "does": "No draft lookup, compose, send or confirmation call occurs on this branch. This is a static control-flow conclusion, not a send test.",
+      "evidence": [
+        "email_path_enum",
+        "email_dispatch",
+        "email_send_false"
+      ]
+    },
+    "existing_message": {
+      "route": "ms-outlook://emails/open/message?immutableID=...&account=...",
+      "requires": "Resolvable decimal account and nonempty immutableID. The handler reverses Exchange web-safe characters before message lookup.",
+      "distinction": "Existing-message open is the branch using IDs; send never enters it. A source literal in the prior survey uses emails/message/open, but this handler tests open first and message second. No existing message was opened.",
+      "evidence": [
+        "email_dispatch",
+        "email_open_ids"
+      ]
+    },
+    "from": "Recognized enum key; the traced new branch does not read it."
+  },
+  "events": {
+    "class": "EventsCanonicalOutlookURL / OlkEventsDeepLinkActionHandler",
+    "route": "ms-outlook://events/new",
+    "recognized_query_keys": [
+      "view",
+      "date",
+      "title",
+      "start",
+      "end",
+      "location",
+      "attendees",
+      "isallday",
+      "restID",
+      "iCal",
+      "instanceID",
+      "seriesMasterID",
+      "calendar",
+      "account",
+      "immutableID"
+    ],
+    "location": {
+      "key": "location",
+      "value": "Ordinary query string passed to openNewEventInFolder:title:location:description:startTime:endTime:isAllDay:attendees:.",
+      "visible_effect": "Supplied live probe said ignored. Canonical handler reads and forwards it; this report does not claim the New Outlook UI honors it."
+    },
+    "attendees": {
+      "key": "attendees",
+      "value": "Same comma-or-semicolon split as mail recipient and attachment arrays. First query item only, empty parts removed, whitespace preserved. Values go to attendees: as NSArray of strings.",
+      "synthetic_query_example": "attendees=one%40example.invalid%3Btwo%40example.invalid"
+    },
+    "isallday": {
+      "key": "isallday",
+      "true": "t or T, after lowercasing.",
+      "false": "Every other nonempty value, including true, 1, yes and f.",
+      "omitted_or_empty": "Optional.none. The handler infers all-day from date parse results instead of forcing false.",
+      "evidence": [
+        "event_all_day_getter",
+        "event_new_fields"
+      ]
+    },
+    "description": {
+      "wire_key": null,
+      "result": "No body or description case in the complete 15-case query enum, and the new handler passes nil to description:. No alternate description query key is supported by this traced path.",
+      "evidence": [
+        "event_keys",
+        "event_key_jump_table",
+        "event_new_bridge",
+        "event_new_selector"
+      ]
+    },
+    "dates": {
+      "keys": [
+        "start",
+        "end"
+      ],
+      "parser": "Date.parseUsingIS8601DateFormatter(from:). Three ordered attempts below. These are formatter configurations, not a claim that Foundation strictly rejects every other input spelling.",
+      "attempts": [
+        {
+          "order": 1,
+          "format": "yyyy-MM-dd'T'HH:mm:ssXXXXX",
+          "example": "2026-10-23T15:00:00Z",
+          "timezone": "Explicit RFC 3339 Z or offset. Default NSISO8601DateFormatter options; default GMT.",
+          "hadTimeComponent": true,
+          "evidence": "date_default_attempt"
+        },
+        {
+          "order": 2,
+          "format": "yyyy-MM-dd'T'HH:mm:ss",
+          "example": "2026-10-23T15:00:00",
+          "options": "0x333 = year|month|day|time|dash-in-date|colon-in-time",
+          "timezone": "Calendar.current.timeZone",
+          "hadTimeComponent": true,
+          "evidence": "date_local_attempt"
+        },
+        {
+          "order": 3,
+          "format": "yyyy-MM-dd",
+          "example": "2026-10-23",
+          "options": "0x113 = withFullDate",
+          "timezone": "New formatter default GMT; this third formatter does not receive current time zone.",
+          "hadTimeComponent": false,
+          "evidence": "date_only_attempt"
+        }
+      ],
+      "fractional_seconds": "No attempt sets withFractionalSeconds, 0x800. Extra Foundation permissiveness, trailing characters and fractional inputs were not exercised.",
+      "failure": "If all formatter attempts fail, returns nil. No Outlook or Foundation date execution tests were run."
+    },
+    "evidence": [
+      "event_keys",
+      "event_new_fields",
+      "event_new_dates_attendees",
+      "event_new_bridge",
+      "event_new_objc_stub",
+      "event_new_selector"
+    ]
+  },
+  "gates": {
+    "origin": {
+      "finding": "No origin allowlist precondition in the examined canonical dispatchers and mail/event action branches. Events logURLAction reads origin and widget attributes for telemetry. Omitted origin is supported by that accessor. Unknown or malformed widget attributes can invoke diagnostics; do not treat arbitrary origin values as a supported authorization bypass.",
+      "scope": "CanonicalOutlookURL origin decoder, Emails/Events canHandleURL, processURLAsCanonicalURLResult, mail route handler, event-new route and event telemetry. Universal-link handler and outer application URL reception are outside this negative.",
+      "evidence": [
+        "origin_decode",
+        "event_origin_telemetry",
+        "canonical_dispatch",
+        "email_can_handle",
+        "event_can_handle"
+      ]
+    },
+    "app_focus": {
+      "finding": "No NSApplication.isActive/frontmost-app prerequisite found in these traced dispatch/action paths. MainActor hops marshal UI work; they do not test whether Outlook is frontmost. Accounts and installed message/calendar action handlers must resolve.",
+      "scope": "Bounded static negative. Does not establish behavior while Outlook is closed, locked, modal, signing in, under a focus profile, or under an outer launch-services handler.",
+      "evidence": [
+        "canonical_dispatch",
+        "email_dispatch",
+        "email_new_fields",
+        "email_accounts",
+        "event_new_fields",
+        "event_new_dates_attendees"
+      ]
+    }
+  },
+  "prior_evidence": {
+    "branch": "origin/wr443-route-survey",
+    "pr": 2040,
+    "artifact": "audits/wr443-outlook-route-survey.json",
+    "role": "Starting vocabulary, not control-flow proof. Recovered enum/function evidence here supersedes the send-by-IDs hypothesis for this canonical branch.",
+    "supplied_observations": "Orchestrator reported editable events/new with title/start/end honored and location ignored; editable emails/new with to/subject honored and body/attachments ignored; emails/send did nothing. Not repeated."
+  },
+  "decisions": [
+    {
+      "id": "D1",
+      "frontier": "Which evidence settles exact grammar?",
+      "decision": "Follow arm64 raw-value getters, query conversion and action branches, with original-file offsets and byte hashes. Do not promote reflection strings to handler behavior.",
+      "tradeoff": "Only arm64 control flow is claimed; x86_64 parity is not inferred."
+    },
+    {
+      "id": "D2",
+      "frontier": "Can send-by-IDs be presumed or probed?",
+      "decision": "No probe. Report the direct false branch and keep existing-message IDs under open/message.",
+      "tradeoff": "No live mail delivery claim; no mailbox identifiers needed."
+    },
+    {
+      "id": "D3",
+      "frontier": "Should ignored fields be renamed or considered unsupported?",
+      "decision": "Keep exact recovered spellings and label parsed/forwarded separately from visible effects.",
+      "tradeoff": "The downstream reason body/location were ignored remains unresolved by this slice."
+    },
+    {
+      "id": "D4",
+      "frontier": "Should a parser emulator or integration be added?",
+      "decision": "No. Installed disassemblers and bounded byte reads suffice. Add only the requested JSON artifact. No parser helper was authored, so parser TDD is not applicable.",
+      "tradeoff": "No runtime contract test, synthetic implementation or maintained scanner. Verification checks actual binary ranges."
+    },
+    {
+      "id": "D5",
+      "frontier": "How broad can negative origin/focus claims be?",
+      "decision": "Bound them to canonical dispatch and traced mail/event handlers. Treat MainActor scheduling as scheduling.",
+      "tradeoff": "Outer application reception, runtime registrations and dynamic UI gating remain unproven."
+    },
+    {
+      "id": "D6",
+      "frontier": "How are dates specified without executing Outlook?",
+      "decision": "Record exact formatter attempts and local SDK flag definitions; distinguish configuration from exhaustive accepted-language testing.",
+      "tradeoff": "Foundation leniency and edge formats are untested."
+    },
+    {
+      "id": "D7",
+      "frontier": "How is the audit delivered?",
+      "decision": "Commit/push this standalone checkout, open a PR against main, and do not merge as explicitly assigned.",
+      "tradeoff": "Retain checkout and PR for orchestrator review. No CARR production record mutation."
+    }
+  ],
+  "tools_and_docs": {
+    "read_before_use": [
+      "man otool, options -f, -l, -t, -v, -V, -s and -arch",
+      "man nm, numeric sort and architecture selection",
+      "xcrun swift-demangle --help, --compact",
+      "xcrun llvm-objdump --help, Mach-O disassembly, --dis-symname and address limits",
+      "man lipo, -thin arm64 and -output",
+      "gh pr create --help, --base, --head, --body-file",
+      "ops/ci.sh --list and source"
+    ],
+    "unavailable_tools": "command -v found no radare2, r2 or rizin; none used.",
+    "tool_limit": "llvm-objdump Mach-O mode ignored start/stop bounds on the universal input. Broad output was kept under /tmp and interrupted. Successful bounded disassembly used a separate arm64 copy with generic llvm-objdump; full symbolic otool output stayed under /tmp.",
+    "sdk_sources": [
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSISO8601DateFormatter.h",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/CoreFoundation.framework/Headers/CFDateFormatter.h"
+    ]
+  },
+  "reproduce_read_only": [
+    "nm -arch arm64 -n \"/Applications/Microsoft Outlook.app/Contents/MacOS/Microsoft Outlook\" | xcrun swift-demangle --compact",
+    "otool -f \"/Applications/Microsoft Outlook.app/Contents/MacOS/Microsoft Outlook\"",
+    "otool -arch arm64 -l \"/Applications/Microsoft Outlook.app/Contents/MacOS/Microsoft Outlook\"",
+    "lipo \"/Applications/Microsoft Outlook.app/Contents/MacOS/Microsoft Outlook\" -thin arm64 -output /tmp/wr443-arm64",
+    "xcrun llvm-objdump -d --start-address=0x102d17f30 --stop-address=0x102d18158 /tmp/wr443-arm64",
+    "otool -arch arm64 -tvV \"/Applications/Microsoft Outlook.app/Contents/MacOS/Microsoft Outlook\" > /tmp/wr443-full.asm"
+  ],
+  "evidence": [
+    {
+      "id": "query_lookup",
+      "vm_start": "0x101fd8774",
+      "vm_end_exclusive": "0x101fd8a94",
+      "arm64_slice_offset": "0x1fd8774",
+      "file_offset": "0x88bc774",
+      "byte_length": 800,
+      "sha256": "62ee0e2218357799018821513361a8f46c86ab3dd1bda5062526f4fb9bd793f9",
+      "interpretation": "URLComponents.queryItems, localizedCaseInsensitiveCompare, first matching item, empty-to-nil.",
+      "disassembly": [
+        "0000000101fd88c0\tbl\t0x1035287f4 ; symbol stub for: _$s10Foundation13URLComponentsV10queryItemsSayAA12URLQueryItemVGSgvg",
+        "0000000101fd892c\tbl\t0x1035287d0 ; symbol stub for: _$s10Foundation12URLQueryItemV4nameSSvg",
+        "0000000101fd8958\tbl\t0x103532d24 ; symbol stub for: _$sSy10FoundationE31localizedCaseInsensitiveCompareySo18NSComparisonResultVqd__SyRd__lF",
+        "0000000101fd8978\tcbz\tx20, 0x101fd89e4",
+        "0000000101fd8a04\tbl\t0x1035287dc ; symbol stub for: _$s10Foundation12URLQueryItemV5valueSSSgvg"
+      ]
+    },
+    {
+      "id": "array_split",
+      "vm_start": "0x101fda160",
+      "vm_end_exclusive": "0x101fda214",
+      "arm64_slice_offset": "0x1fda160",
+      "file_offset": "0x88be160",
+      "byte_length": 180,
+      "sha256": "b8838d1a20e83a7356d0ca21b82fc38cdb7880d3e7e7b6e09e0c1a44d53be0ef",
+      "interpretation": "Reads one scalar value. CharacterSet charactersIn is comma and semicolon, 0x3b2c. components(separatedBy:) then removes empty strings. No trimming.",
+      "disassembly": [
+        "0000000101fda170\tbl\t_$s13OlkCocoaUtils19CanonicalOutlookURLC22valueForQueryParamName_020resolvingAgainstBaseF003nilH10EmptyValueSSSgSS_S2btF",
+        "0000000101fda184\tmov\tw0, #0x3b2c",
+        "0000000101fda18c\tbl\t0x1035285d8 ; symbol stub for: _$s10Foundation12CharacterSetV12charactersInACSSh_tcfC",
+        "0000000101fda1ac\tbl\t0x103532ca0 ; symbol stub for: _$sSy10FoundationE10components11separatedBySaySSGAA12CharacterSetV_tF",
+        "0000000101fda204\tcbz\tx9, 0x101fda1d4"
+      ]
+    },
+    {
+      "id": "email_keys",
+      "vm_start": "0x101fde540",
+      "vm_end_exclusive": "0x101fde62c",
+      "arm64_slice_offset": "0x1fde540",
+      "file_offset": "0x88c2540",
+      "byte_length": 236,
+      "sha256": "7fb71b4addba72239f3197f176460a103611eb9d45d2ab825685f59418c89f16",
+      "interpretation": "Raw value getter reconstructs from,to,cc,bcc,subject,body,attachments,signature,immutableID,account. Swift small strings are instruction immediates.",
+      "disassembly": []
+    },
+    {
+      "id": "email_key_jump_table",
+      "vm_start": "0x103ca1afa",
+      "vm_end_exclusive": "0x103ca1b04",
+      "arm64_slice_offset": "0x3ca1afa",
+      "file_offset": "0xa585afa",
+      "byte_length": 10,
+      "sha256": "eebfea6e227f00bbf3a78d15136ea836931af727d4139a3474e21085f32c9d66",
+      "interpretation": "Ten one-byte jump entries for the email query enum.",
+      "disassembly": []
+    },
+    {
+      "id": "email_account_parse",
+      "vm_start": "0x101fde758",
+      "vm_end_exclusive": "0x101fde778",
+      "arm64_slice_offset": "0x1fde758",
+      "file_offset": "0x88c2758",
+      "byte_length": 32,
+      "sha256": "4774d86b8486fbc33b7842f855813975b1a55e12cf129803ee5ee6b955a72d25",
+      "interpretation": "Wire key is account. Calls scalar query lookup.",
+      "disassembly": []
+    },
+    {
+      "id": "email_account_decimal",
+      "vm_start": "0x101fde884",
+      "vm_end_exclusive": "0x101fde9f0",
+      "arm64_slice_offset": "0x1fde884",
+      "file_offset": "0x88c2884",
+      "byte_length": 364,
+      "sha256": "2a9aa156870f8fc4a250e74e400e15615f39b3149b211df2fb0d11e7c91d8eae",
+      "interpretation": "Signed base-10 Int conversion with digit and overflow checks; NSNumber result, not an address or GUID.",
+      "disassembly": []
+    },
+    {
+      "id": "email_path_enum",
+      "vm_start": "0x101fded50",
+      "vm_end_exclusive": "0x101fdedfc",
+      "arm64_slice_offset": "0x1fded50",
+      "file_offset": "0x88c2d50",
+      "byte_length": 172,
+      "sha256": "e2723ca16f618ad94024a907ca322fb3c986cbc3a9b5cb7ed8b1d102d1242733",
+      "interpretation": "Paths ordinal 0=open, 1=new, 2=send, 3=message, 4=conversation.",
+      "disassembly": []
+    },
+    {
+      "id": "email_dispatch",
+      "vm_start": "0x102d17f30",
+      "vm_end_exclusive": "0x102d1807c",
+      "arm64_slice_offset": "0x2d17f30",
+      "file_offset": "0x95fbf30",
+      "byte_length": 332,
+      "sha256": "4cdbbe9515c71fd0a669961fbc83a805b0bd089ebf97e1b8bd3a33f142171a8f",
+      "interpretation": "Lowercases first path component. send ordinal 2 branches to 0x102d18138. new ordinal 1 enters newMessage. open/message enters openMessage.",
+      "disassembly": [
+        "0000000102d17f64\tand\tw8, w0, #0xff",
+        "0000000102d17f68\tcmp\tw8, #0x2",
+        "0000000102d17f6c\tb.eq\t0x102d18138",
+        "0000000102d17f70\tcmp\tw8, #0x1",
+        "0000000102d17f74\tb.eq\t0x102d1803c",
+        "0000000102d18000\tb\t0x102d171e4",
+        "0000000102d18078\tb\t0x102d17a00"
+      ]
+    },
+    {
+      "id": "email_send_false",
+      "vm_start": "0x102d18138",
+      "vm_end_exclusive": "0x102d18158",
+      "arm64_slice_offset": "0x2d18138",
+      "file_offset": "0x95fc138",
+      "byte_length": 32,
+      "sha256": "355c711a0edb12aaf2ac83f8bf3d9f735264d9684304e6365318d59457243441",
+      "interpretation": "Returns false immediately; no query read, existing-draft lookup, compose or confirmation call on this branch.",
+      "disassembly": [
+        "0000000102d18138\tmov\tw0, #0x0",
+        "0000000102d1813c\tldr\tx1, [x22, #0x8]",
+        "0000000102d18154\tbr\tx1"
+      ]
+    },
+    {
+      "id": "email_new_fields",
+      "vm_start": "0x102d17a38",
+      "vm_end_exclusive": "0x102d17b30",
+      "arm64_slice_offset": "0x2d17a38",
+      "file_offset": "0x95fba38",
+      "byte_length": 248,
+      "sha256": "a55b7e2eba34a7f518fd4dc7685e3431114d0de2ccd8b12bb9cd9e700ef0987c",
+      "interpretation": "Reads to,cc,bcc,subject,body,signature,attachments, then optional account lookup.",
+      "disassembly": [
+        "0000000102d17a48\tbl\t_$s13OlkCocoaUtils19CanonicalOutlookURLC22arrayForQueryParamName_020resolvingAgainstBaseF0SaySSGSgSS_SbtF",
+        "0000000102d17a60\tbl\t_$s13OlkCocoaUtils19CanonicalOutlookURLC22arrayForQueryParamName_020resolvingAgainstBaseF0SaySSGSgSS_SbtF",
+        "0000000102d17a7c\tbl\t_$s13OlkCocoaUtils19CanonicalOutlookURLC22arrayForQueryParamName_020resolvingAgainstBaseF0SaySSGSgSS_SbtF",
+        "0000000102d17aa4\tbl\t_$s13OlkCocoaUtils19CanonicalOutlookURLC22valueForQueryParamName_020resolvingAgainstBaseF003nilH10EmptyValueSSSgSS_S2btF",
+        "0000000102d17ac4\tbl\t_$s13OlkCocoaUtils19CanonicalOutlookURLC22valueForQueryParamName_020resolvingAgainstBaseF003nilH10EmptyValueSSSgSS_S2btF",
+        "0000000102d17af0\tbl\t_$s13OlkCocoaUtils19CanonicalOutlookURLC22valueForQueryParamName_020resolvingAgainstBaseF003nilH10EmptyValueSSSgSS_S2btF",
+        "0000000102d17b1c\tbl\t_$s13OlkCocoaUtils19CanonicalOutlookURLC22arrayForQueryParamName_020resolvingAgainstBaseF0SaySSGSgSS_SbtF",
+        "0000000102d17b28\tbl\t0x102d16ca8"
+      ]
+    },
+    {
+      "id": "attachment_paths",
+      "vm_start": "0x102d16b18",
+      "vm_end_exclusive": "0x102d16b7c",
+      "arm64_slice_offset": "0x2d16b18",
+      "file_offset": "0x95fab18",
+      "byte_length": 100,
+      "sha256": "785b5e070525f131f964b9817215ecbc45ca47ada3c21c0dbd8061ce5e19e7eb",
+      "interpretation": "Each split string goes to NSFileManager.fileExistsAtPath:. Existing paths become URL(fileURLWithPath:). Missing paths show fileNotFound and are skipped.",
+      "disassembly": [
+        "0000000102d16b50\tbl\t0x1035983a0",
+        "0000000102d16b68\tcbz\tw24, 0x102d16aa4",
+        "0000000102d16b78\tbl\t0x10352904c ; symbol stub for: _$s10Foundation3URLV15fileURLWithPathACSSh_tcfC"
+      ]
+    },
+    {
+      "id": "email_new_bridge",
+      "vm_start": "0x102d17d24",
+      "vm_end_exclusive": "0x102d17e04",
+      "arm64_slice_offset": "0x2d17d24",
+      "file_offset": "0x95fbd24",
+      "byte_length": 224,
+      "sha256": "9304a1d0da216d7933302590f3240c837f6c79df763f3c5865fedc32f18040e3",
+      "interpretation": "Body and signature become NSString. Attachment URLs bridge to NSArray. Calls newMessageFromAccount:toRecipients:ccRecipients:bccRecipients:subject:body:signatureName:attachments:.",
+      "disassembly": [
+        "0000000102d17d30\tbl\t0x103531a64 ; symbol stub for: _$sSS10FoundationE19_bridgeToObjectiveCSo8NSStringCyF",
+        "0000000102d17d48\tbl\t0x103531a64 ; symbol stub for: _$sSS10FoundationE19_bridgeToObjectiveCSo8NSStringCyF",
+        "0000000102d17dd0\tbl\t0x103531f08 ; symbol stub for: _$sSa10FoundationE19_bridgeToObjectiveCSo7NSArrayCyF",
+        "0000000102d17dd8\tstp\tx26, x0, [sp]",
+        "0000000102d17df8\tmov\tx6, x23",
+        "0000000102d17dfc\tmov\tx7, x28",
+        "0000000102d17e00\tbl\t0x1035de480"
+      ]
+    },
+    {
+      "id": "email_new_objc_stub",
+      "vm_start": "0x1035de480",
+      "vm_end_exclusive": "0x1035de494",
+      "arm64_slice_offset": "0x35de480",
+      "file_offset": "0x9ec2480",
+      "byte_length": 20,
+      "sha256": "4dc67bce24bddb46995af02740802959949e5dfb821db2572728e7ed80a67d2b",
+      "interpretation": "Selector reference 0x104a5cfb8.",
+      "disassembly": []
+    },
+    {
+      "id": "email_new_selector",
+      "vm_start": "0x103efef21",
+      "vm_end_exclusive": "0x103efef87",
+      "arm64_slice_offset": "0x3efef21",
+      "file_offset": "0xa7e2f21",
+      "byte_length": 102,
+      "sha256": "bef6bb6b8688ddcaa8bda37b06464d3a05cf78ece56c220a76e1e9e1b7a1fab2",
+      "interpretation": "Selector bytes.",
+      "disassembly": []
+    },
+    {
+      "id": "email_open_ids",
+      "vm_start": "0x102d17218",
+      "vm_end_exclusive": "0x102d17278",
+      "arm64_slice_offset": "0x2d17218",
+      "file_offset": "0x95fb218",
+      "byte_length": 96,
+      "sha256": "a215286bf03326345ff9acee9e87082aaa0bc447085be98b30b3516b77a0961b",
+      "interpretation": "open/message requires a resolvable account and nonempty immutableID. Reverses Exchange web-safe characters. This is not send.",
+      "disassembly": []
+    },
+    {
+      "id": "email_accounts",
+      "vm_start": "0x102d16ca8",
+      "vm_end_exclusive": "0x102d16de4",
+      "arm64_slice_offset": "0x2d16ca8",
+      "file_offset": "0x95faca8",
+      "byte_length": 316,
+      "sha256": "362aaad5a2141c2f37c718fa5146a171302825af09f48d2fb847d8e1f9094b70",
+      "interpretation": "Resolves account number by hash against accounts in sharedCollectionWithoutLDAPWithoutOMC. No focus/frontmost predicate in this resolver.",
+      "disassembly": []
+    },
+    {
+      "id": "event_keys",
+      "vm_start": "0x101fdf4f4",
+      "vm_end_exclusive": "0x101fdf660",
+      "arm64_slice_offset": "0x1fdf4f4",
+      "file_offset": "0x88c34f4",
+      "byte_length": 364,
+      "sha256": "c29a5509703bd782fb10928013ba687375c805fe51a0c44999f107b86be2c14a",
+      "interpretation": "Complete 15-case raw-value getter. Includes location and no body or description key.",
+      "disassembly": []
+    },
+    {
+      "id": "event_key_jump_table",
+      "vm_start": "0x103ca1c90",
+      "vm_end_exclusive": "0x103ca1c9f",
+      "arm64_slice_offset": "0x3ca1c90",
+      "file_offset": "0xa585c90",
+      "byte_length": 15,
+      "sha256": "7dfc86f7350a0b4ccfd9169333e5abab72ff455c94e846029fb7d55dfb17fa2c",
+      "interpretation": "Fifteen one-byte jump entries for the event query enum.",
+      "disassembly": []
+    },
+    {
+      "id": "event_all_day_getter",
+      "vm_start": "0x101fdfcdc",
+      "vm_end_exclusive": "0x101fdfd84",
+      "arm64_slice_offset": "0x1fdfcdc",
+      "file_offset": "0x88c3cdc",
+      "byte_length": 168,
+      "sha256": "8d4501a0cf62ef3ed7e18bfcd5ed75933c8ca9d249438e715e8ef132c98efa95",
+      "interpretation": "Lowercases nonempty isallday value and compares it to the one-character string t. Missing/empty returns Optional.none.",
+      "disassembly": []
+    },
+    {
+      "id": "event_new_fields",
+      "vm_start": "0x102d1e6d0",
+      "vm_end_exclusive": "0x102d1e778",
+      "arm64_slice_offset": "0x2d1e6d0",
+      "file_offset": "0x96026d0",
+      "byte_length": 168,
+      "sha256": "8ead3caf8edc476122ec8adb9bb123c4f9a813cc3ca4e619442a15570497ceae",
+      "interpretation": "Reads title,location,isallday. Repeats the t comparison in new-event handler.",
+      "disassembly": [
+        "0000000102d1e6ec\tbl\t_$s13OlkCocoaUtils19CanonicalOutlookURLC22valueForQueryParamName_020resolvingAgainstBaseF003nilH10EmptyValueSSSgSS_S2btF",
+        "0000000102d1e714\tbl\t_$s13OlkCocoaUtils19CanonicalOutlookURLC22valueForQueryParamName_020resolvingAgainstBaseF003nilH10EmptyValueSSSgSS_S2btF",
+        "0000000102d1e73c\tbl\t_$s13OlkCocoaUtils19CanonicalOutlookURLC22valueForQueryParamName_020resolvingAgainstBaseF003nilH10EmptyValueSSSgSS_S2btF",
+        "0000000102d1e75c\tcmp\tx27, #0x74",
+        "0000000102d1e764\tmov\tx8, #-0x1f00000000000000",
+        "0000000102d1e770\tmov\tw25, #0x1"
+      ]
+    },
+    {
+      "id": "event_new_dates_attendees",
+      "vm_start": "0x102d1e8bc",
+      "vm_end_exclusive": "0x102d1e9c4",
+      "arm64_slice_offset": "0x2d1e8bc",
+      "file_offset": "0x96028bc",
+      "byte_length": 264,
+      "sha256": "6bee37b4e2dd11b5d11cadae4ae0ff55c105eef17d155e479e949b281a70db54",
+      "interpretation": "Reads start,end using ISO parser and attendees using shared array parser.",
+      "disassembly": []
+    },
+    {
+      "id": "event_new_bridge",
+      "vm_start": "0x102d1ed54",
+      "vm_end_exclusive": "0x102d1ed94",
+      "arm64_slice_offset": "0x2d1ed54",
+      "file_offset": "0x9602d54",
+      "byte_length": 64,
+      "sha256": "9a25e8f134f5dd0570183f1e349add40f117d180e654f1e158d2ecd777e39899",
+      "interpretation": "Passes folder,title,location,description=nil,startTime,endTime,isAllDay,attendees to calendar action handler.",
+      "disassembly": [
+        "0000000102d1ed74\tmov\tx2, x28",
+        "0000000102d1ed7c\tmov\tx3, x19",
+        "0000000102d1ed80\tmov\tx4, x21",
+        "0000000102d1ed84\tmov\tx5, #0x0",
+        "0000000102d1ed90\tbl\t0x1035e6940"
+      ]
+    },
+    {
+      "id": "event_new_objc_stub",
+      "vm_start": "0x1035e6940",
+      "vm_end_exclusive": "0x1035e6954",
+      "arm64_slice_offset": "0x35e6940",
+      "file_offset": "0x9eca940",
+      "byte_length": 20,
+      "sha256": "615a43773d3e7c12cf73be09956d223eb51661360c72ca4468f09f80e7485a3d",
+      "interpretation": "Selector reference 0x104a5f0e8.",
+      "disassembly": []
+    },
+    {
+      "id": "event_new_selector",
+      "vm_start": "0x103f087bd",
+      "vm_end_exclusive": "0x103f08813",
+      "arm64_slice_offset": "0x3f087bd",
+      "file_offset": "0xa7ec7bd",
+      "byte_length": 86,
+      "sha256": "da9da8f7c4ad04b825a542467d00be061fc0c8dfbb29ff488b9a7e8f784566c2",
+      "interpretation": "Selector bytes.",
+      "disassembly": []
+    },
+    {
+      "id": "date_default_attempt",
+      "vm_start": "0x101fdb12c",
+      "vm_end_exclusive": "0x101fdb180",
+      "arm64_slice_offset": "0x1fdb12c",
+      "file_offset": "0x88bf12c",
+      "byte_length": 84,
+      "sha256": "05161e99fdb60cfb01287ee261c549e854c901af7b6b4c7fc3f56de08f059804",
+      "interpretation": "Allocates NSISO8601DateFormatter, init with default options, dateFromString. Success has hadTimeComponent=true.",
+      "disassembly": [
+        "0000000101fdb138\tbl\t0x1035adb40",
+        "0000000101fdb15c\tbl\t0x103580b40"
+      ]
+    },
+    {
+      "id": "date_local_attempt",
+      "vm_start": "0x101fdb20c",
+      "vm_end_exclusive": "0x101fdb2b8",
+      "arm64_slice_offset": "0x1fdb20c",
+      "file_offset": "0x88bf20c",
+      "byte_length": 172,
+      "sha256": "06f78b71d68b67194bf2afd1e15f7d2c0326024c4c77e4f31a6fe84a3c4566b6",
+      "interpretation": "Second formatter setFormatOptions=0x333, Calendar.current.timeZone, then dateFromString. Success has hadTimeComponent=true.",
+      "disassembly": [
+        "0000000101fdb218\tbl\t0x1035adb40",
+        "0000000101fdb220\tmov\tw2, #0x333",
+        "0000000101fdb224\tbl\t0x103627e00",
+        "0000000101fdb230\tbl\t0x103529904 ; symbol stub for: _$s10Foundation8CalendarV7currentACvgZ",
+        "0000000101fdb240\tbl\t0x10352991c ; symbol stub for: _$s10Foundation8CalendarV8timeZoneAA04TimeD0Vvg",
+        "0000000101fdb278\tbl\t0x103646420",
+        "0000000101fdb2a0\tbl\t0x103580b40"
+      ]
+    },
+    {
+      "id": "date_only_attempt",
+      "vm_start": "0x101fdb330",
+      "vm_end_exclusive": "0x101fdb404",
+      "arm64_slice_offset": "0x1fdb330",
+      "file_offset": "0x88bf330",
+      "byte_length": 212,
+      "sha256": "19670b8919ddabbb1d9ebb826b5c55096b9747fb9647c4e55c69517f25ec75c1",
+      "interpretation": "Third formatter setFormatOptions=0x113, default GMT. Success has hadTimeComponent=false.",
+      "disassembly": [
+        "0000000101fdb33c\tbl\t0x1035adb40",
+        "0000000101fdb344\tmov\tw2, #0x113",
+        "0000000101fdb348\tbl\t0x103627e00",
+        "0000000101fdb364\tbl\t0x103580b40",
+        "0000000101fdb3f0\tstrb\twzr, [x23, x21]"
+      ]
+    },
+    {
+      "id": "origin_decode",
+      "vm_start": "0x101fd8b9c",
+      "vm_end_exclusive": "0x101fd8d50",
+      "arm64_slice_offset": "0x1fd8b9c",
+      "file_offset": "0x88bcb9c",
+      "byte_length": 436,
+      "sha256": "e14699eb10afb23eddfed1d428fffa51195a0de132242dff0a3485052e0d666f",
+      "interpretation": "Origin accessor decodes origin/widgetKind/widgetFamily; absent/unrecognized origin returns enum nil=4 with diagnostics on malformed input.",
+      "disassembly": []
+    },
+    {
+      "id": "event_origin_telemetry",
+      "vm_start": "0x102d1d010",
+      "vm_end_exclusive": "0x102d1d040",
+      "arm64_slice_offset": "0x2d1d010",
+      "file_offset": "0x9601010",
+      "byte_length": 48,
+      "sha256": "e38b1f8166ff48aedc30620fd2d981aee94630c651877089a2a1cf2fedc59bde",
+      "interpretation": "Origin read occurs in logURLAction, where nil versus widget selects telemetry formatting.",
+      "disassembly": [
+        "0000000102d1d010\tbl\t_$s13OlkCocoaUtils19CanonicalOutlookURLC6originAC6OriginOSgvg",
+        "0000000102d1d034\tcmp\tw22, #0x4",
+        "0000000102d1d03c\tb.ne\t0x102d1d254"
+      ]
+    },
+    {
+      "id": "canonical_dispatch",
+      "vm_start": "0x102d16334",
+      "vm_end_exclusive": "0x102d165fc",
+      "arm64_slice_offset": "0x2d16334",
+      "file_offset": "0x95fa334",
+      "byte_length": 712,
+      "sha256": "d8c8e026c4cd45106b10c7bfaa148af18211ba986729f576466d345a1ba731ef",
+      "interpretation": "Canonical type/path dispatch. No origin or NSApplication.isActive precondition in this dispatcher.",
+      "disassembly": []
+    },
+    {
+      "id": "email_can_handle",
+      "vm_start": "0x101fdf108",
+      "vm_end_exclusive": "0x101fdf1e4",
+      "arm64_slice_offset": "0x1fdf108",
+      "file_offset": "0x88c3108",
+      "byte_length": 220,
+      "sha256": "aab9dcde8da9bb281c45c7abc0e66e461261880e72497a96477b0ae7c358f4bc",
+      "interpretation": "Scheme/host classification, no query origin or frontmost test.",
+      "disassembly": []
+    },
+    {
+      "id": "event_can_handle",
+      "vm_start": "0x101fe14f8",
+      "vm_end_exclusive": "0x101fe15d4",
+      "arm64_slice_offset": "0x1fe14f8",
+      "file_offset": "0x88c54f8",
+      "byte_length": 220,
+      "sha256": "33648929b4ca9dfdcd97cf74e9596bf8c73b72112281c7fd00d1faed07858ec1",
+      "interpretation": "Scheme/host classification, no query origin or frontmost test.",
+      "disassembly": []
+    }
+  ],
+  "verification": {
+    "outlook_runtime_tests": 0,
+    "parser_unit_tests": 0,
+    "reason": "No Outlook execution and no query/Mach-O parser helper authored. Evidence generation selected known addresses from tool output and compared bounded byte ranges.",
+    "artifact_checks": {
+      "passed": 74,
+      "failed": 0,
+      "categories": {
+        "whole_binary_hashes": 2,
+        "original_file_range_hashes": 32,
+        "slice_to_original_range_identity": 32,
+        "key_inventory_invariants": 3,
+        "critical_instruction_bytes": 3,
+        "selector_strings": 2
+      }
+    },
+    "ci": "ops/ci.sh --only secret passed. Other local CI classes were not run for this JSON-only audit. Hosted status is reported separately in the PR closeout.",
+    "readback_command": "python3 - <<'PY'\nimport hashlib,json,pathlib\nj=json.loads(pathlib.Path('audits/wr443-deeplink-grammar.json').read_text())\nb=pathlib.Path('/Applications/Microsoft Outlook.app/Contents/MacOS/Microsoft Outlook').read_bytes()\nassert hashlib.sha256(b).hexdigest()==j['subject']['sha256']\nfor r in j['evidence']:\n    o=int(r['file_offset'],16); n=r['byte_length']\n    assert hashlib.sha256(b[o:o+n]).hexdigest()==r['sha256'],r['id']\nprint('Verified binary hash and',len(j['evidence']),'original-file ranges')\nPY"
+  },
+  "design_and_debt_pass": {
+    "codebase-design": "One evidence artifact is the review interface. The seam between parsed query and installed UI action is explicit. No implementation or hypothetical adapter added.",
+    "zero-tech-debt": "No runtime parser, mode flags, compatibility aliases, generated binary dumps, or duplicate survey copy committed."
+  },
+  "skills_used": [
+    "poteto-mode",
+    "grill-with-docs",
+    "mattpocock-skills:grilling, frontier answered autonomously",
+    "mattpocock-skills:domain-modeling, glossary embedded in the requested JSON",
+    "Prove It Works",
+    "mattpocock-skills:tdd, conditional parser work not needed",
+    "technical-writing",
+    "unslop",
+    "mattpocock-skills:pr",
+    "codebase-design",
+    "zero-tech-debt"
+  ]
+}

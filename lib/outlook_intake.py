@@ -1,7 +1,7 @@
 """Outlook intake: Joe's mail and calendar into the record layer, by code.
 
 Every 30 minutes from 07:00 to 19:00 local (com.carr.outlook-intake) this reads
-a private copy of the new Outlook's HxStore.hxd and its EFMData body sidecars,
+a private copy of Main Identity's HxStore.hxd and its EFMData body sidecars,
 never the live files, decodes it with the pinned hxprobe fork
 (vendor-patches/hxprobe-calendar-and-bodies.patch), and writes what it finds
 through the named record-layer verbs:
@@ -44,10 +44,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
+import errno
 import fcntl
 import hashlib
 import json
-import logging
 import os
 from pathlib import Path
 import re
@@ -60,6 +60,8 @@ import uuid
 import zoneinfo
 
 HXPROBE = Path('carr-local/hxstore-reverse-engineering/hxprobe/target/release/hxprobe')
+COPY_HELPER = Path('carr-local/bin/outlook-intake-copy')
+PROFILE = Path('Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity')
 OUT = Path('out/outlook-intake')
 REFRESH_LIST = 'needs-refresh.json'
 STATE = 'state.json'
@@ -82,25 +84,11 @@ BALL_OWNERS = re.compile(r'^ball → (joe|joe-local):')
 
 
 def resolve_store(home: Path) -> Path:
-    """Locate the New Outlook store when a job runs."""
-    profiles = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles'
-    override = os.environ.get('CARR_OUTLOOK_STORE')
-    if override:
-        selected = home / Path(override).expanduser()
-        if selected.is_file():
-            return selected
-        message = f'CARR_OUTLOOK_STORE is not a file: {selected}'
-        logging.error('%s', message)
-        raise FileNotFoundError(message)
-    stores = [path for path in profiles.glob('*/HxStore.hxd') if path.is_file()]
-    if not stores:
-        message = f'No Outlook store found: searched {profiles}/*/HxStore.hxd'
-        logging.error('%s', message)
-        raise FileNotFoundError(message)
-    selected = max(stores, key=lambda path: (path.stat().st_mtime_ns, str(path)))
-    if len(stores) > 1:
-        logging.warning('Multiple Outlook stores found; using most recently modified: %s', selected)
-    return selected
+    """The Studio intake and its copy helper use only Main Identity."""
+    store = home / PROFILE / 'HxStore.hxd'
+    if not store.is_file():
+        raise FileNotFoundError(f'No Outlook store found: {store}')
+    return store
 
 
 class CarrError(RuntimeError):
@@ -109,6 +97,10 @@ class CarrError(RuntimeError):
 
 class DecodeError(RuntimeError):
     """hxprobe could not decode the store copy."""
+
+
+class FullDiskAccessRequired(RuntimeError):
+    """macOS denied the dedicated snapshot helper access to Outlook."""
 
 
 class CleanupError(RuntimeError):
@@ -220,19 +212,18 @@ def _load(db: Path) -> tuple[dict, list[dict], list[dict]]:
         con.close()
 
 
-def _copy_private(src: Path, dst: Path) -> None:
-    with open(src, 'rb') as reader, os.fdopen(_private_fd(dst, os.O_WRONLY | os.O_EXCL), 'wb') as writer:
-        shutil.copyfileobj(reader, writer)
-
-
-def _snapshot_sidecars(files: Path, into: Path) -> None:
-    """Copy every S0/*/EFMData/*.dat body sidecar so the decoder reads only private copies."""
-    for efm in sorted(files.glob('S0/*/EFMData')):
-        target = into / efm.relative_to(files)
-        target.mkdir(parents=True, mode=0o700)
-        for dat in efm.glob('*.dat'):
-            if dat.is_file():
-                _copy_private(dat, target / dat.name)
+def _snapshot(home: Path, work: Path) -> None:
+    helper = home / COPY_HELPER
+    try:
+        done = subprocess.run([str(helper)], cwd=work, capture_output=True, timeout=900)
+        if done.returncode in (errno.EPERM, errno.EACCES):
+            raise PermissionError(done.returncode, 'Outlook copy denied')
+        if done.returncode:
+            raise DecodeError(f'Outlook copy helper exit {done.returncode}')
+    except PermissionError:
+        raise FullDiskAccessRequired(f'grant Full Disk Access to {helper}') from None
+    except subprocess.TimeoutExpired:
+        raise DecodeError('Outlook copy helper timed out') from None
 
 
 def _remove(work: Path) -> None:
@@ -241,14 +232,12 @@ def _remove(work: Path) -> None:
         raise CleanupError('private work folder left behind')
 
 
-def _decode(store: Path, out: Path, decode: Callable[[Path, Path, Path], None]):
+def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None]):
     work = Path(tempfile.mkdtemp(prefix=WORK_PREFIX, dir=out))
     try:
         copy = work / 'store.hxd'
-        _copy_private(store, copy)
+        _snapshot(home, work)
         files = work / 'Files'
-        files.mkdir(mode=0o700)
-        _snapshot_sidecars(store.parent / 'Files', files)
         db = work / 'store.db'
         decode(copy, files, db)
         return _load(db)
@@ -666,7 +655,9 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
             _save(out, state)
         return Outcome('succeeded', 'store_unchanged')
     try:
-        meta, mails, events = _decode(store, out, ports.decode)
+        meta, mails, events = _decode(home, out, ports.decode)
+    except FullDiskAccessRequired as error:
+        return Outcome('failed', str(error))
     except (DecodeError, sqlite3.Error, OSError):
         return Outcome('failed', 'decode_failed')
     found = meta.get('blocks_found') or 0
