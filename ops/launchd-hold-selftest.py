@@ -449,6 +449,7 @@ class DeclaredDisabledTests(unittest.TestCase):
         sys.path.insert(0, str(ROOT / "lib"))
         sys.path.insert(0, str(ROOT / "ops"))
         import scheduled_jobs
+        holds = scheduled_jobs.launchd_hold.read_holds()
         declared_off = {j["label"] for j in scheduled_jobs.native_manifest(ROOT)["jobs"]
                         if j["scheduler"] == "launchd" and not j["expected_installed"]}
         self.assertIn("com.carr.resource-collector", declared_off)
@@ -457,7 +458,7 @@ class DeclaredDisabledTests(unittest.TestCase):
                 continue  # local.* agents are not in the fleet installer's com.carr. set
             body = (ROOT / "ops/launchd" / (label + ".plist")).read_text()
             # pairs() skips exactly the plists this returns a reason for.
-            self.assertTrue(cac.launchd_off_reason(label + ".plist", body, holds={}), label + " would be installed")
+            self.assertTrue(cac.launchd_off_reason(label + ".plist", body, holds=holds), label + " would be installed")
 
     def test_fleet_sync_plan_does_not_install_the_resource_collector(self):
         body = (ROOT / "ops/launchd/com.carr.resource-collector.plist").read_text()
