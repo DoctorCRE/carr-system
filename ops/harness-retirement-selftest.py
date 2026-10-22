@@ -47,7 +47,7 @@ class HarnessRetirement(unittest.TestCase):
     def test_control_catalog_compiles_native_guidance_without_retired_gates(self):
         catalog = runpy.run_path(str(ROOT / 'ops/sync_control_catalog.py'))
         controls = {row['control_key']: row for row in catalog['compile_catalog']()}
-        self.assertEqual(controls['delegation_guidance']['enforcement_class'], 'surfacing')
+        self.assertNotIn('delegation_guidance', controls)
         self.assertNotIn('delegation_tripwire', controls)
         self.assertNotIn('executor_tier', controls)
 

@@ -8,7 +8,6 @@
     "costar_lane": "deny_gate",
     "deal_guard": "transactional_schema",
     "delegation_names_model_and_effort": "deny_gate",
-    "delegation_guidance": "surfacing",
     "draft_export_read": "surfacing",
     "egress_guard": "deny_gate",
     "gate_integrity": "stop_gate",

@@ -705,16 +705,6 @@
       "test": [
         "ops/whose-work-selftest.py"
       ]
-    },
-    "delegation_guidance": {
-      "failure_mode": "Native agent instructions and task briefs supply model-selection guidance without automated refusal.",
-      "implementation": [
-        "AGENTS.md",
-        "tools/room-bridge/brief-footer.md"
-      ],
-      "test": [
-        "ops/harness-retirement-selftest.py"
-      ]
     }
   },
   "default_category": "judgment_advisory",
@@ -792,7 +782,6 @@
     "185013c6": {
       "binding_moment": "model selection",
       "category": "session_task_rail",
-      "control": "delegation_guidance",
       "enforcement_class": "surfacing",
       "exceptions": "peer tier when qualification requires"
     },
@@ -892,7 +881,6 @@
     "2b66211d": {
       "binding_moment": "fan-out brief",
       "category": "session_task_rail",
-      "control": "delegation_guidance",
       "enforcement_class": "surfacing",
       "exceptions": "mechanical verifier tier"
     },
@@ -1610,7 +1598,6 @@
     "c6f69dee": {
       "binding_moment": "agent staffing",
       "category": "session_task_rail",
-      "control": "delegation_guidance",
       "enforcement_class": "surfacing",
       "exceptions": "main retains final call"
     },
@@ -1720,7 +1707,6 @@
     "df55c398": {
       "binding_moment": "delegated scope brief",
       "category": "session_task_rail",
-      "control": "delegation_guidance",
       "enforcement_class": "surfacing",
       "exceptions": "explicit human data-class expansion"
     },
