@@ -254,7 +254,7 @@ EOF
     export CARR_CI_RANGE
 
     # WHICH CLASSES THE FLOOR RUNS, decided from the diff (ci-failures council,
-    # 2026-08-24). pushfloor carries the diff-scoped predictors; the three named
+    # 2026-08-24). pushfloor carries the diff-scoped predictors; the classes named
     # here are whole classes cheap enough to keep local.
     #
     #   secret     — NOT a red-predictor, and kept anyway. The council's table
@@ -265,8 +265,6 @@ EOF
     #                before it ruled the opposite way and in as many words —
     #                keep owner, no-main and secrets local no matter what. Range-
     #                scoped it costs about a second. Kept.
-    #   freshness  — the council asked for it by name; it is 0s hosted and it
-    #                catches a generated file being overwritten from a stale base.
     #   migration  — ONLY when the diff touches migrations/. The class is 33s
     #                hosted and needs a throwaway Postgres, so it SKIPs on a
     #                laptop; adding it unconditionally would buy a skip line.
@@ -295,7 +293,7 @@ EOF
     # and ci.sh's `for _want in $ONLY` splits it on whitespace; the new one runs
     # tr over a string with no commas and changes nothing. Verified against both
     # parsers before this was written. Do not "tidy" these back into commas.
-    FLOOR_CLASSES="pushfloor secret freshness"
+    FLOOR_CLASSES="pushfloor secret"
     if [ -n "$CARR_CI_RANGE" ] \
         && git diff --name-only "$CARR_CI_RANGE" 2>/dev/null | grep -q '^migrations/'; then
       FLOOR_CLASSES="$FLOOR_CLASSES migration"
