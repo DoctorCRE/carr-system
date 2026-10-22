@@ -73,28 +73,171 @@ class CheckoutDispatchTests(unittest.TestCase):
         return subprocess.CompletedProcess(argv, 0, '{"type":"turn.completed"}\n', '')
 
     def send(self, desk='cx', **kwargs):
-        row = dispatch.dispatch(desk, 'repair it', registry=self.reg,
-                                results_path=self.results, env=self.env,
-                                provider_run=self.execute, **kwargs)
-        workspace = Path(row['checkout_workspace'])
-        self.addCleanup(lambda: shutil.rmtree(workspace, ignore_errors=True))
-        repo = Path(row['checkout_path'])
-        if not repo.exists():
-            staged = next((self.root / '_to_delete').glob('*/*/checkout'))
-            shutil.move(str(staged), str(repo))
+        # These cases inspect checkout provisioning before lifecycle retirement.
+        with patch('codex_checkout.retire', return_value={'status': 'fixture-retained'}):
+            row = dispatch.dispatch(desk, 'repair it', registry=self.reg,
+                                    results_path=self.results, env=self.env,
+                                    provider_run=self.execute, **kwargs)
+        self.addCleanup(lambda: shutil.rmtree(row['checkout_workspace'], ignore_errors=True))
         return row
 
-    def test_finished_pushed_job_retires_its_own_clone(self):
-        row = dispatch.dispatch('cx', 'repair it', registry=self.reg,
-            results_path=self.results, env=self.env, provider_run=self.execute,
-            checkout='repair', fresh=True)
+    def test_terminal_job_deletes_only_its_owned_workspace_and_preserves_report(self):
+        sibling = self.root / 'room-codex-sibling'
+        sibling.mkdir()
+        (sibling / 'keep.txt').write_text('other job')
+        def provider(argv, **options):
+            workspace = Path(options['cwd'])
+            report = workspace / 'checkout/out/proof.txt'
+            report.parent.mkdir()
+            report.write_text('job-42 verified\n')
+            (workspace / 'checkout/unpushed.txt').write_text('uncommitted work')
+            return self.execute(argv, **options)
+        row = dispatch.dispatch('cx', 'Completion artifact: {"kind":"report_line","path":"out/proof.txt","contains":"job-42"}',
+            registry=self.reg, results_path=self.results, env=self.env, provider_run=provider,
+            checkout='new:cleanup-proof', fresh=True)
         self.assertEqual(row['status'], 'completed')
-        self.assertFalse(Path(row['checkout_path']).exists())
-        staged = list((self.root / '_to_delete').glob('*/*/checkout'))
-        self.assertEqual(len(staged), 1)
-        self.assertEqual(self.git('rev-parse', 'HEAD', cwd=staged[0]),
-                         self.git('rev-parse', 'repair'))
+        self.assertFalse(Path(row['checkout_workspace']).exists())
+        self.assertEqual((sibling / 'keep.txt').read_text(), 'other job')
         self.assertTrue(self.source.exists())
+        self.assertEqual(row['checkout_cleanup']['status'], 'deleted')
+        evidence = Path(row['checkout_cleanup']['evidence'][0])
+        self.assertEqual(evidence.read_text(), 'job-42 verified\n')
+        self.assertEqual(json.loads(self.results.read_text())['checkout_cleanup'], row['checkout_cleanup'])
+
+    def test_final_report_file_links_are_copied_before_deletion(self):
+        for name, suffix in (('evidence.txt', ''), ('evidence.txt', ':12'), ('my report.txt', '')):
+            def provider(argv, **options):
+                report = Path(options['cwd']) / 'checkout' / name
+                report.write_text('fixture proof')
+                Path(argv[argv.index('-o') + 1]).write_text(f'Proof: [report](<{report}{suffix}>)')
+                return subprocess.CompletedProcess(argv, 0, '{"type":"turn.completed"}\n', '')
+            with self.subTest(name=name, suffix=suffix):
+                row = dispatch.dispatch('cx', 'repair it', registry=self.reg,
+                    results_path=self.results, env=self.env, provider_run=provider,
+                    checkout='new:report-link', fresh=True)
+                self.assertFalse(Path(row['checkout_workspace']).exists())
+                self.assertEqual(Path(row['checkout_cleanup']['evidence'][0]).read_text(), 'fixture proof')
+
+    def test_report_already_outside_clone_does_not_prevent_retirement(self):
+        report = self.root / 'external-proof.txt'
+        report.write_text('job proof already retained\n')
+        task = 'Completion artifact: ' + json.dumps({
+            'kind': 'report_line', 'path': str(report), 'contains': 'job proof'})
+        row = dispatch.dispatch('cx', task, registry=self.reg,
+            results_path=self.results, env=self.env, provider_run=self.execute,
+            checkout='new:external-proof', fresh=True)
+        self.assertFalse(Path(row['checkout_workspace']).exists())
+        self.assertEqual(row['checkout_cleanup']['status'], 'deleted')
+        self.assertEqual(report.read_text(), 'job proof already retained\n')
+
+    def test_workspace_parent_reports_are_preserved_before_deletion(self):
+        for declared in (True, False):
+            def provider(argv, **options):
+                report = Path(options['cwd']) / 'parent-proof.txt'
+                report.write_text('parent workspace proof\n')
+                Path(argv[argv.index('-o') + 1]).write_text('[proof](../parent-proof.txt)')
+                return subprocess.CompletedProcess(argv, 0, '{"type":"turn.completed"}\n', '')
+            task = ('Completion artifact: {"kind":"report_line","path":"../parent-proof.txt","contains":"proof"}'
+                    if declared else 'repair it')
+            with self.subTest(declared=declared):
+                row = dispatch.dispatch('cx', task, registry=self.reg,
+                    results_path=self.results, env=self.env, provider_run=provider,
+                    checkout='new:parent-proof', fresh=True)
+                self.assertFalse(Path(row['checkout_workspace']).exists())
+                self.assertEqual(Path(row['checkout_cleanup']['evidence'][0]).read_text(),
+                                 'parent workspace proof\n')
+
+    def test_cleanup_failure_reaches_card_without_failing_the_job(self):
+        from work_queue import WorkQueue, board_projection
+        rmtree = shutil.rmtree
+        def refuse_job(path, *args, **kwargs):
+            if Path(path).name.startswith('room-codex-'):
+                raise PermissionError('fixture deletion denied')
+            return rmtree(path, *args, **kwargs)
+        with patch('codex_checkout.shutil.rmtree', side_effect=refuse_job):
+            row = dispatch.dispatch('cx', 'repair it', registry=self.reg,
+                results_path=self.results, env=self.env, provider_run=self.execute,
+                checkout='new:cleanup-failure', fresh=True)
+        self.addCleanup(lambda: shutil.rmtree(row['checkout_workspace'], ignore_errors=True))
+        self.assertEqual(row['status'], 'completed')
+        self.assertTrue(Path(row['checkout_workspace']).exists())
+        with WorkQueue(self.root / 'card.sqlite3') as queue:
+            queue.enqueue('cleanup', desk='cx', task='repair', actor='test')
+            claim = queue.claim(eligible_desks={'cx'}, actor='test', owner={})
+            queue.finish('cleanup', claim['claim'], row, actor='test')
+            card = queue.get('cleanup')
+        self.assertEqual(card['stage'], 'review')
+        self.assertEqual(card['checkout_cleanup']['status'], 'failed')
+        self.assertIn('PermissionError', card['checkout_cleanup']['detail'])
+        published = board_projection(self.root / 'card.sqlite3')['items'][0]
+        self.assertIn('PermissionError', published['result_detail'])
+
+    def test_failed_and_timed_out_jobs_retire_but_live_executors_keep_checkout(self):
+        for status, confirmed in (('failed', True), ('timeout', True), ('capacity', True),
+                                  ('failed', False), ('backgrounded', True)):
+            with self.subTest(status=status, confirmed=confirmed), \
+                 patch.object(dispatch, '_execute', return_value={
+                     'status': status, 'termination_confirmed': confirmed}):
+                row = dispatch.dispatch('cx', 'repair it', registry=self.reg,
+                    results_path=self.results, env=self.env, checkout='new:terminal', fresh=True)
+            workspace = Path(row['checkout_workspace'])
+            self.addCleanup(lambda path=workspace: shutil.rmtree(path, ignore_errors=True))
+            self.assertEqual(workspace.exists(), not confirmed or status == 'backgrounded')
+
+    def test_grok_unconfirmed_process_or_timeout_preserves_checkout(self):
+        self.reg.register('grok-builder', 'grok-cli', model='grok-9.2', cwd=str(self.source))
+        for timeout in (False, True):
+            def provider(argv, **options):
+                if timeout:
+                    error = subprocess.TimeoutExpired(argv, 1)
+                    error.termination_confirmed = False
+                    raise error
+                end = {'type': 'end', 'stopReason': 'end_turn', 'modelUsage': {'grok-9.2-build': {'modelCalls': 1}}}
+                proc = subprocess.CompletedProcess(argv, 0, json.dumps(end), '')
+                proc.termination_confirmed = False
+                return proc
+            with self.subTest(timeout=timeout):
+                row = dispatch.dispatch('grok-builder', 'repair it', registry=self.reg,
+                    results_path=self.results, env=self.env, provider_run=provider,
+                    checkout='new:unconfirmed-grok')
+                workspace = Path(row['checkout_workspace'])
+                self.addCleanup(lambda path=workspace: shutil.rmtree(path, ignore_errors=True))
+                self.assertTrue(workspace.exists())
+                self.assertFalse(row['termination_confirmed'])
+
+    def test_later_cli_cannot_hide_an_unconfirmed_preflight_process(self):
+        from contextlib import nullcontext
+        self.reg.register('hermes', 'hermes-nous', family='glm', effort='high')
+        calls = []
+        def provider(argv, **options):
+            proc = subprocess.CompletedProcess(argv, 0, 'fixture', '')
+            proc.termination_confirmed = bool(calls)
+            calls.append(argv)
+            return proc
+        def wire(entry, task, *, run, **options):
+            run(['preflight'], timeout=1)
+            run(['job'], timeout=1)
+            return {'status': 'completed', 'result': 'fixture'}
+        with patch.object(dispatch, '_hermes_slot', return_value=nullcontext()), \
+             patch.object(dispatch.hermes_wire, 'run_task', side_effect=wire):
+            row = dispatch.dispatch('hermes', 'repair it', registry=self.reg,
+                results_path=self.results, env=self.env, provider_run=provider,
+                checkout='new:hermes-termination')
+        workspace = Path(row['checkout_workspace'])
+        self.addCleanup(lambda: shutil.rmtree(workspace, ignore_errors=True))
+        self.assertTrue(workspace.exists())
+        self.assertFalse(row['termination_confirmed'])
+
+    def test_retired_workspace_thread_is_not_reused_for_next_job(self):
+        def provider(argv, **options):
+            self.execute(argv, **options)
+            return subprocess.CompletedProcess(argv, 0,
+                '{"type":"thread.started","thread_id":"job-thread"}\n{"type":"turn.completed"}\n', '')
+        row = dispatch.dispatch('cx', 'repair it', registry=self.reg,
+            results_path=self.results, env=self.env, provider_run=provider,
+            checkout='new:thread-cleanup', fresh=True)
+        self.assertFalse(Path(row['checkout_workspace']).exists())
+        self.assertIsNone(self.reg.entries()['cx'].get('thread_id'))
 
     def test_clone_cwd_and_noreply_author_before_fresh_turn(self):
         before = self.git('status', '--porcelain')
@@ -130,14 +273,13 @@ class CheckoutDispatchTests(unittest.TestCase):
             calls.append(argv)
             return self.execute(argv, **kwargs)
         with patch.object(dispatch.subprocess, 'run', side_effect=record), \
-             patch('codex_checkout.subprocess.run', side_effect=record):
+             patch('codex_checkout.subprocess.run', side_effect=record), \
+             patch('codex_checkout.retire', return_value={'status': 'fixture-retained'}):
             row = dispatch.dispatch('cx', 'repair it', registry=self.reg,
                                     results_path=self.results, env=self.env,
                                     checkout='repair', fresh=True, provider_run=self.execute)
         self.addCleanup(lambda: shutil.rmtree(row['checkout_workspace'], ignore_errors=True))
         repo = Path(row['checkout_path'])
-        if not repo.exists():
-            shutil.move(str(next((self.root / '_to_delete').glob('*/*/checkout'))), str(repo))
         clone = next(argv for argv in calls if argv[:2] == ['git', 'clone'])
         self.assertIn('--dissociate', clone)
         self.assertEqual(clone[clone.index('--reference-if-able') + 1], str(self.source))
@@ -173,6 +315,7 @@ class CheckoutDispatchTests(unittest.TestCase):
             (repo / 'fixed.py').write_text('fixed = True\n')
             self.git('add', 'fixed.py', cwd=repo)
             self.git('commit', '-m', 'fix', cwd=repo)
+            self.assertEqual(self.git('log', '-1', '--format=%s', cwd=repo), 'fix')
             end = {'type': 'end', 'stopReason': 'end_turn', 'requestId': 'r', 'sessionId': 's',
                    'modelUsage': {'grok-9.2-build': {'modelCalls': 1}}}
             return subprocess.CompletedProcess(argv, 0, json.dumps({'type': 'text', 'data': 'Fixed'})
@@ -181,7 +324,7 @@ class CheckoutDispatchTests(unittest.TestCase):
             results_path=self.results, env=self.env, checkout='new:grok-fix', provider_run=provider)
         self.addCleanup(lambda: shutil.rmtree(row['checkout_workspace'], ignore_errors=True))
         self.assertEqual(row['status'], 'completed')
-        self.assertEqual(self.git('log', '-1', '--format=%s', cwd=row['checkout_path']), 'fix')
+        self.assertFalse(Path(row['checkout_workspace']).exists())
         self.assertFalse((self.source / 'fixed.py').exists())
 
     def test_grok_checkout_job_gets_the_job_deadline_not_the_reply_deadline(self):

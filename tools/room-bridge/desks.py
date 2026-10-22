@@ -61,8 +61,8 @@ RECORD_LAYER_KINDS = ("hermes-nous", "grok-cli", "flash-local", "codex-session",
 
 DESK_INSTRUCTION = (
     "Desk instruction: If you need approvals, permissions, or decisions, "
-    "write questions to ~/carr-system/out/orchestrator-inbox.md, then "
-    "end the turn. Never ask Joe."
+    "put QUESTION: followed by your question on the first line of your final report, "
+    "then end the turn. Never ask Joe."
 )
 
 

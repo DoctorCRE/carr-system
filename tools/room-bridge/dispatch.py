@@ -635,8 +635,20 @@ def _execute(request: dict, *, on_executor=None) -> dict:
         on_executor({**identity, **({'socket': entry['socket']}
                                     if identity.get('kind') in ('codex_turn', 'no_launch') and entry.get('socket') else {})})
     executor_options: dict = {'on_executor': executor_started} if on_executor else {}
+    termination: dict = {}
     def run_cli(argv, *, timeout, env=None, cwd=None, **options):
-        return _run_headless_process(argv, env, timeout, on_executor, False, cwd=cwd)
+        try:
+            if request.get('provider_run') is not None:
+                proc = request['provider_run'](argv, timeout=timeout, env=env, cwd=cwd, **options)
+            else:
+                proc = _run_headless_process(argv, env, timeout, on_executor, False, cwd=cwd)
+        except subprocess.TimeoutExpired as exc:
+            termination['termination_confirmed'] = (termination.get('termination_confirmed', True)
+                and getattr(exc, 'termination_confirmed', False))
+            raise
+        termination['termination_confirmed'] = (termination.get('termination_confirmed', True)
+            and getattr(proc, 'termination_confirmed', True))
+        return proc
     if entry["kind"] == "claude-session":
         if name == "flash":
             with flashlib.activity_scope():
@@ -659,9 +671,7 @@ def _execute(request: dict, *, on_executor=None) -> dict:
             grok_options['timeout_seconds'] = codex_timeout_s if codex_timeout_s is not None else CODEX_TIMEOUT_S
         if env is not None:
             grok_options['env'] = scrubbed_env(env)
-        if request.get('provider_run') is not None:
-            grok_options["run"] = request['provider_run']
-        elif on_executor:
+        if request.get('provider_run') is not None or on_executor:
             grok_options['run'] = run_cli
         outcome = grok_wire.run_task(entry, task, **grok_options)
     elif entry['kind'] == 'hermes-nous':
@@ -691,6 +701,7 @@ def _execute(request: dict, *, on_executor=None) -> dict:
             **runner_options, **stream_options,
             **executor_options,
         )
+    outcome.update(termination)
     return outcome
 
 
@@ -839,27 +850,35 @@ def dispatch(
                 print(f"capacity: retrying {name} in {CODEX_CAPACITY_BACKOFF_S}s "
                       f"(attempt {attempt + 2}/{CODEX_CAPACITY_ATTEMPTS})", file=sys.stderr, flush=True)
                 time.sleep(CODEX_CAPACITY_BACKOFF_S)
-        if outcome.get('thread_id') and not network_access and (entry['kind'] == 'codex-live'
-                or entry['kind'] in codex_models.CODEX_KINDS and not cwd):
-            registry.remember_thread(name, outcome['thread_id'])
+    except DeskError as exc:
+        outcome = {'status': 'failed', 'code': exc.code, 'detail': f'{exc.code}: {exc}',
+                   'termination_confirmed': True}
+    except Exception as exc:
+        outcome = {'status': 'failed', 'detail': f'{type(exc).__name__}: {exc}',
+                   'termination_confirmed': False}
+    if outcome.get('thread_id') and checkout is None and not network_access and (entry['kind'] == 'codex-live'
+            or entry['kind'] in codex_models.CODEX_KINDS and not cwd):
+        registry.remember_thread(name, outcome['thread_id'])
 
-        row = {
-            **base,
-            **outcome,
-            'status': outcome['status'],
-            **({'ephemeral_thread': True, 'thread_resumable': False} if network_access else {}),
-        }
-        if row['status'] == 'failed' and SAFETY_REFUSAL.search(row.get('detail', '')):
-            print('Provider safety refusal. ' + _phrasing_hint(original_task, examples_on_miss=True),
-                  file=sys.stderr, flush=True)
-        _record(results_path, row)
-        return row
-    finally:
-        if checkout is not None:
-            from ops.job_cleanup import clean
-            cleanup = clean(Path(base['checkout_path']), staging=Path.home() / '_to_delete', immediate=True)
-            print('Job checkout cleanup: ' + json.dumps(cleanup), file=sys.stderr, flush=True)
-
+    row = {
+        **base,
+        **outcome,
+        'status': outcome['status'],
+        **({'ephemeral_thread': True, 'thread_resumable': False} if network_access else {}),
+    }
+    if row['status'] == 'failed' and SAFETY_REFUSAL.search(row.get('detail', '')):
+        print('Provider safety refusal. ' + _phrasing_hint(original_task, examples_on_miss=True),
+              file=sys.stderr, flush=True)
+    if checkout is not None:
+        if (row['status'] in ('delivered', 'delivered_live', 'backgrounded')
+                or row.get('termination_confirmed') is False):
+            row['checkout_cleanup'] = {'status': 'retained', 'detail': 'executor termination unconfirmed'}
+        else:
+            row['checkout_cleanup'] = codex_checkout.retire(
+                base, original_task, str(row.get('result') or ''),
+                results_path.parent / 'artifacts' / msg_id)
+    _record(results_path, row)
+    return row
 
 # ---------------------------------------------------------------------------
 # putting a desk on the line
