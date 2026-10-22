@@ -988,10 +988,13 @@ class GithubBudgetTests(unittest.TestCase):
             for name in ("out/watchdog/observations.json", self.c["paths"]["pr_cache"]):
                 (self.root / name).unlink(missing_ok=True)
             return findings()
+        registry = self.root / self.c["paths"]["registry"]
+        self.w.append(registry, {"id": "local-fixture", "exit_code": 1})
         cold = findings()
-        self.assertEqual([f["kind"] for f in cold], ["pr_ci_red"])
+        self.assertEqual([f["kind"] for f in cold], ["job_failed", "pr_ci_red"])
         self.assertEqual(findings(), cold)
         self.assertEqual(fresh(), cold)
+        self.w.append(registry, {"id": "local-fixture", "exit_code": 0})
         self.listing = []
         self.branches = [{"name": "codex/orphan", "commit": {"sha": "b" * 40}}]
         warm_changed = findings()
