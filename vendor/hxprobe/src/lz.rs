@@ -36,7 +36,7 @@ pub fn decode_exact(src: &[u8], expected: usize) -> Option<Vec<u8>> {
         if lit == 15 {
             lit = varint(src, &mut i, lit)?;
         }
-        if i + lit > src.len() {
+        if i + lit > src.len() || lit > expected - out.len() {
             return None;
         }
         out.extend_from_slice(&src[i..i + lit]);
@@ -60,17 +60,17 @@ pub fn decode_exact(src: &[u8], expected: usize) -> Option<Vec<u8>> {
 
         // Overlapping copies are legal and encode run-length expansion, so the
         // copy has to proceed one byte at a time rather than as a block move.
+        if len > expected - out.len() {
+            return None;
+        }
         let start = out.len() - dist;
         for k in 0..len {
-            if out.len() >= expected {
-                break;
-            }
             let b = out[start + k];
             out.push(b);
         }
     }
 
-    (out.len() == expected).then_some(out)
+    (out.len() == expected && i == src.len()).then_some(out)
 }
 
 /// Read a 255-continuation varint, adding to `base`.

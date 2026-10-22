@@ -374,7 +374,8 @@ print(json.dumps({**result, "entries": reg.entries()}))
         for thread in (None, "fixture-thread"):
             with self.subTest(thread=thread), patch.object(dispatch.subprocess, "run",
                     return_value=subprocess.CompletedProcess([], 1, stdout="", stderr="")) as run:
-                dispatch._to_codex({**entry, "thread_id": thread}, "Synthetic task", env={"PATH": "/tmp"})
+                dispatch._to_codex({**entry, "thread_id": thread}, "Synthetic task",
+                                   env={"PATH": "/tmp"}, provider_run=run)
                 argv = run.call_args.args[0]
                 self.assertIn('approval_policy="never"', argv)
                 self.assertEqual(argv[-1], INSTRUCTION + "\n\nSynthetic task")

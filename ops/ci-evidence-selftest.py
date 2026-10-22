@@ -24,7 +24,7 @@ class HostedVerdict(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix='ci-verdict-selftest-')
         self.addCleanup(self.tmp.cleanup)
         self.summary = pathlib.Path(self.tmp.name) / 'summary'
-        self.env = patch.dict(os.environ, GITHUB_REPOSITORY='jbookout/carr-system',
+        self.env = patch.dict(os.environ, GITHUB_REPOSITORY='DoctorCRE/carr-system',
                               GITHUB_RUN_ID='39284055792', GITHUB_RUN_ATTEMPT='1',
                               GITHUB_STEP_SUMMARY=str(self.summary))
         self.env.start()
@@ -285,7 +285,7 @@ class Reuse(unittest.TestCase):
             gh.chmod(0o700)
             env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'],
                        GH_TOKEN='must-not-appear-in-evidence',
-                       GITHUB_REPOSITORY='jbookout/carr-system',
+                       GITHUB_REPOSITORY='DoctorCRE/carr-system',
                        GITHUB_OUTPUT=str(root / 'output'),
                        GITHUB_STEP_SUMMARY=str(root / 'summary'))
             result = subprocess.run([sys.executable, str(ROOT / 'ops/ci-evidence.py'),

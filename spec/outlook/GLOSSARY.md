@@ -32,3 +32,39 @@ _Avoid_: Introduction version.
 **Decoded-byte coverage**:
 The share of record bytes whose meaning has a supported interpretation, with overlapping spans counted once.
 _Avoid_: Message recovery rate.
+
+**Object class**:
+A serialized object's encoded type discriminator.
+_Avoid_: Property ID, envelope tag.
+
+**Envelope tag**:
+An encoded discriminator in the wrapper around a serialized object.
+_Avoid_: Object class, property ID.
+
+**Object offset**:
+A byte displacement measured from the start of a serialized object's body.
+_Avoid_: Wire field ID, envelope-relative offset.
+
+**Decoder key**:
+A stable identity used to select a decoded meaning independently of its display name.
+
+**Display name**:
+The human-readable label attached to a decoded meaning.
+_Avoid_: Wire field ID.
+
+
+**Verified payload bytes**:
+Decompressed bytes from a block whose bounds, header checksum, payload checksum, and exact decompression all pass.
+A block with verified bytes can still have undecodable record structure.
+
+**Unverified block**:
+A detected block signature whose block bounds, checksums, or decompression cannot be verified.
+Its claimed decompressed size does not count toward decoded-byte coverage.
+
+**Undecodable block**:
+A verified payload whose candidate record bounds prevent a complete structural partition.
+Its bytes count toward coverage as wholly unframed, without tentative decoded credit.
+
+**Audit-guided reconstruction**:
+Extraction of route and key vocabulary from a pinned static analysis of one exact binary build.
+A changed binary does not qualify until its constants and control flow receive a new audit.
