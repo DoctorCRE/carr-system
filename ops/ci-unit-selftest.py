@@ -21,12 +21,11 @@ class UnitClassTests(unittest.TestCase):
         (self.root / 'ops/config').mkdir(parents=True)
         (self.root / 'bin').mkdir()
         shutil.copy2(ROOT / 'bin/with-timeout.py', self.root / 'bin/with-timeout.py')
-        for name in ('ci.sh', 'ci-quarantine.py', 'git_env.py', 'ci-unit.py', 'node_test_summary.py',
+        for name in ('ci.sh', 'git_env.py', 'ci-unit.py', 'node_test_summary.py',
                      'ci-secret-scan.py', 'pii_guard.py', 'ci-node-file.mjs'):
             source = ROOT / 'ops' / name
             if source.exists():
                 shutil.copy2(source, self.root / 'ops' / name)
-        (self.root / 'ops/config/ci-quarantine.json').write_text('{"version":1,"tests":[]}')
         (self.root / 'ops/config/ci-check-scope.json').write_text('{}')
         shutil.copy2(ROOT / 'ops/config/public-source-identities.v1.json',
                      self.root / 'ops/config/public-source-identities.v1.json')
@@ -94,27 +93,6 @@ class UnitClassTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('workspace: command exited 1', result.stderr)
 
-    def test_early_failure_survives_later_passing_receipts(self):
-        self.all_packages()
-        failed = {'version': 1, 'test': 'mcp-server/test/early.test.mjs',
-                  'first_exit': 1, 'rerun_exit': 1, 'status': 'failed', 'candidate': False,
-                  'test_counts': {'tests': 1, 'pass': 0, 'fail': 1,
-                                  'cancelled': 0, 'skipped': 0, 'todo': 0}}
-        passed = dict(failed, test='mcp-server/test/later.test.mjs', first_exit=0,
-                      rerun_exit=None, status='passed',
-                      test_counts=dict(failed['test_counts'], **{'pass': 1, 'fail': 0}))
-        (self.root / 'mcp-server/run.mjs').write_text(
-            'console.log(' + json.dumps('CARR_FLAKE_RESULT ' + json.dumps(failed)) + ');\n'
-            'console.log("original assertion diagnostic");\n'
-            'for (let i=0; i<300; i++) console.log('
-            + json.dumps('CARR_FLAKE_RESULT ' + json.dumps(passed)) + ');\nprocess.exit(1);\n')
-        (self.root / 'mcp-server/package.json').write_text(
-            json.dumps({'scripts': {'test': 'node run.mjs'}}))
-        result = self.run_class()
-        self.assertEqual(result.returncode, 1)
-        self.assertIn('mcp-server/test/early.test.mjs', result.stderr)
-        self.assertIn('original assertion diagnostic', result.stderr)
-
     def test_exit_zero_without_test_output_fails(self):
         self.all_packages()
         (self.root / 'workspace/package.json').write_text(
@@ -129,30 +107,30 @@ class UnitClassTests(unittest.TestCase):
         result = self.run_class()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
 
-    def test_mcp_quarantine_receipts_report_executed_tests(self):
+    def test_mcp_direct_suites_report_combined_executed_tests(self):
         self.all_packages()
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
         (mcp / 'test/suite.test.mjs').rename(mcp / 'test/workspace-command-center-browser.test.mjs')
         (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
-        self.env['CARR_CI_PYTHON'] = shutil.which('python3')
+        (mcp / 'test/second.test.mjs').write_text("import test from 'node:test'; test('second', () => {});")
         result = self.run_class()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('mcp-server: 1 tests, 1 passed', result.stdout)
+        self.assertIn('mcp-server: 2 tests, 2 passed', result.stdout)
 
-    def test_failed_receipt_survives_many_later_passing_suites(self):
+    def test_mcp_failed_suite_survives_later_passing_suites(self):
         self.all_packages()
+        package_body = "import test from 'node:test';" + "".join(
+            f"test('later {i}', () => {{}});" for i in range(60))
+        (self.root / 'mcp-server/test/suite.test.mjs').write_text(package_body)
         mcp = self.root / 'mcp-server'
-        receipt = dict(version=1, test='broken.test.mjs', first_exit=1, status='failed')
-        passed = dict(version=1, test='passing.test.mjs', first_exit=0, status='passed')
-        lines = ['CARR_FLAKE_RESULT ' + json.dumps(receipt)]
-        lines += ['CARR_FLAKE_RESULT ' + json.dumps(passed)] * 300
-        (mcp / 'runner.mjs').write_text(
-            'console.log(' + json.dumps('\n'.join(lines)) + '); process.exitCode = 1;')
-        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node runner.mjs'}}))
+        shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
+        (mcp / 'test/chrome-launch.test.mjs').write_text(
+            "import test from 'node:test'; test('early failure', () => { throw Error('original diagnostic'); });")
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
         result = self.run_class()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn('broken.test.mjs', result.stderr)
+        self.assertIn('original diagnostic', result.stderr)
 
     def test_package_skip_exit_is_red(self):
         self.all_packages()
@@ -187,7 +165,7 @@ class UnitClassTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('workspace: zero passing tests', result.stderr)
 
-    def test_mcp_skipped_only_receipts_fail(self):
+    def test_mcp_skipped_only_suites_fail(self):
         self.all_packages()
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
