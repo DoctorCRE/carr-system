@@ -32,47 +32,7 @@ use std::collections::BTreeMap;
 
 use crate::record::{self, Field};
 
-/// The fields worth naming, using the Osa protocol's own names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Key {
-    /// `From` / `SenderDisplayNamesCollection` -> `Address`.
-    SenderAddress,
-    /// `From` / `SenderDisplayNamesCollection` -> `Name`.
-    SenderName,
-    /// `ItemClass_Substrate`, always `IPM.Note` here. The anchor.
-    ItemClass,
-    /// `InternetMessageId`, the RFC822 Message-ID.
-    InternetMessageId,
-    /// `Preview`, Outlook's cached ~255-character body summary.
-    Preview,
-    /// `NormalizedSubject` / `Topic` -- stored as an adjacent near-identical
-    /// pair, which is what makes the subject identifiable at all.
-    NormalizedSubject,
-    /// A recipient address, in order of appearance.
-    Recipient,
-    /// `ConversationId` / `ImmConversationId` / `ImmThreadId`: a hex or GUID
-    /// run identifying the thread this message belongs to.
-    ///
-    /// Not display data, but the key that makes the subject recoverable for the
-    /// records that hold none of their own: the store writes `Topic` once per
-    /// conversation, not once per message.
-    ConversationId,
-}
-
-impl Key {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Key::SenderAddress => "SenderAddress",
-            Key::SenderName => "SenderName",
-            Key::ItemClass => "ItemClass",
-            Key::InternetMessageId => "InternetMessageId",
-            Key::Preview => "Preview",
-            Key::NormalizedSubject => "NormalizedSubject",
-            Key::Recipient => "Recipient",
-            Key::ConversationId => "ConversationId",
-        }
-    }
-}
+include!(concat!(env!("OUT_DIR"), "/atlas_names.rs"));
 
 /// A named field, keeping the evidence that produced it.
 #[derive(Debug, Clone)]
@@ -369,16 +329,7 @@ pub fn build_bounded(blob: &[u8], anchor: usize, end: usize, back: usize) -> Map
 pub fn tally(maps: &[Map]) -> BTreeMap<&'static str, usize> {
     let mut t = BTreeMap::new();
     for m in maps {
-        for k in [
-            Key::SenderAddress,
-            Key::SenderName,
-            Key::ItemClass,
-            Key::InternetMessageId,
-            Key::Preview,
-            Key::NormalizedSubject,
-            Key::Recipient,
-            Key::ConversationId,
-        ] {
+        for &k in Key::ALL {
             if m.get(k).is_some() {
                 *t.entry(k.as_str()).or_insert(0) += 1;
             }

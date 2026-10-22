@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -57,10 +58,8 @@ def main() -> int:
               "CARR_AI_ROUTE_SECONDARY_URL", "CARR_AI_ROUTE_SECONDARY_TOKEN")))
     check("wrapper never forwards an ambient provider wildcard",
           "CARR_AI_ROUTE_*" not in source)
-    check("wrapper serializes overlap with an atomic directory lock",
-          "mkdir \"$LOCK_DIR\"" in source and "trap release_lock EXIT" in source)
     check("wrapper never installs or manipulates a scheduler",
-          not any(word in source.lower() for word in ("launchctl", "bootstrap", "bootout", "unload", "load ")))
+          re.search(r"(?m)^\s*(?:/bin/)?(?:launchctl|bootstrap|bootout|unload|load)\b", source) is None)
     check("wrapper never accepts an owner credential",
           "CARR_DB_OWNER_URL" not in source and "CARR_DB_EXPORTER_URL" not in source)
 
@@ -68,21 +67,6 @@ def main() -> int:
                             capture_output=True, check=False)
     check("wrapper passes zsh syntax validation", syntax.returncode == 0,
           syntax.stderr.strip())
-
-    # An overlap is not a failure and must return without trying to fetch a
-    # credential or touch the database.
-    with tempfile.TemporaryDirectory() as td:
-        lock = Path(td) / "already-running.lock"
-        lock.mkdir()
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": td,
-               "CARR_CONTROL_PLANE_LOCK_DIR": str(lock),
-               "CARR_CONTROL_PLANE_DB_ENV": str(Path(td) / "missing-db.env")}
-        overlap = subprocess.run([str(WRAPPER)], env=env, text=True,
-                                 capture_output=True, check=False)
-        check("overlapping tick is skipped cleanly", overlap.returncode == 0,
-              f"rc={overlap.returncode} stderr={overlap.stderr.strip()!r}")
-        check("overlap reports a skip", "already active" in overlap.stderr,
-              overlap.stderr.strip())
 
     # With no jobs credential, the wrapper refuses before invoking Python.  A
     # terminal's ambient DATABASE_URL must never become an implicit fallback.

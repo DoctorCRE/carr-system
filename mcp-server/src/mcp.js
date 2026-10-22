@@ -693,6 +693,24 @@ export async function recordReadCall(insertFn, actor, verb, ok, errorKind) {
   }
 }
 
+async function recordGateRejection(insertFn, actor, verb, args, rejection) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(args || {})));
+  const inputDigest = "sha256:" + Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+  // One statement keeps the run and findings atomic after the content rollback.
+  // A change set created by the rejected transaction no longer exists.
+  await insertFn(
+    `with rejected_run as (
+       insert into doctrine_gate_run (id, actor_id, finished_at, result, report)
+       values ($1,$2,now(),'fail',$3::jsonb) returning id
+     )
+     insert into doctrine_gate_finding (run_id, check_key, severity, passed, message, path)
+     select r.id, f.check_key, f.severity, f.passed, f.message, coalesce(f.path,'')
+       from rejected_run r cross join jsonb_to_recordset($3::jsonb->'findings')
+         as f(check_key text, severity text, passed boolean, message text, path text)
+     on conflict do nothing`,
+    [rejection.gate_run_id, actor.id, JSON.stringify({ verb, input_digest: inputDigest, findings: rejection.findings })]);
+}
+
 // Actor-scoped read doors use a read-only writer transaction and bypass the
 // ordinary reader branch. Schedule their identity-only audit after that
 // transaction; never classify a mutating writer call as a read.
@@ -1005,6 +1023,16 @@ export async function callTool(env, actor, name, args, profile = "full", judgeWo
     return result;
   } catch (e) {
     await client.query("rollback").catch(() => {});
+    if (e instanceof ToolError && e.payload?.error === "gate_blocked") {
+      const { gate_run_id, ...rejection } = e.payload;
+      try {
+        const insertFn = (text, params) => neon(env.DATABASE_URL_WRITER).query(text, params);
+        await recordGateRejection(insertFn, actor, name, args, e.payload);
+      } catch {
+        throw new ToolError({ ...rejection, persisted: false });
+      }
+      throw new ToolError({ ...rejection, gate_run_id, persisted: true });
+    }
     if (writerRead) {
       readOk = false;
       readErrorKind = e instanceof ToolError

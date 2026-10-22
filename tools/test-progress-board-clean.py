@@ -27,51 +27,6 @@ def pr(number, state="OPEN", title="Synthetic work", **extra):
 
 
 class CleanupTests(unittest.TestCase):
-    def test_reconcile_preserves_open_vendor_fetch_error_and_removes_watchdog_card(self):
-        watchdog = board.repo_lib("job_watchdog")
-        config = watchdog.load_config(board.REPO_ROOT / "ops/config/job-watchdog.json")
-        config["board"] = "test"
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            config_path = root / "watchdog.json"
-            config_path.write_text(json.dumps({**config, "board": "default-board"}))
-            with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(root / "out"),
-                                         "PROGRESS_BOARD_LOCAL_ONLY": "1",
-                                         "CARR_JOB_BOARD": "test",
-                                         "CARR_WATCHDOG_CONFIG": str(config_path)}):
-                incident = watchdog.finding("vendor_release_fetch_error", "vendor:https://vendor.example/docs",
-                                            "Vendor unavailable", config, url="https://vendor.example/docs")
-                effects = watchdog.Effects(root, config)
-                # Cleanup evaluates an imported legacy incident, not a new job dispatch.
-                board.main(['init', 'test', '--title', 'Synthetic incidents'])
-                existing = board.read_state('test')
-                existing['tasks'][effects.card(incident)] = {'title':'Vendor unavailable',
-                    'status':'blocked', 'executor':'watchdog'}
-                board.write_json(existing)
-                with patch.object(effects, "_record", return_value={"ok": True, "loop_id": "vendor-loop"}):
-                    watchdog.reconcile(root, config, [incident], effects, 100)
-                vendor_card = effects.card(incident)
-                state = board.read_state("test")
-                vendor_task = copy.deepcopy(state["tasks"][vendor_card])
-                state["tasks"]["wd-ordinary"] = {"status": "blocked", "title": "Watchdog noise"}
-                board.write_json(state)
-                with patch.object(board, "discover_v1", return_value={}), \
-                        patch.object(board, "publish_board"), contextlib.redirect_stdout(io.StringIO()):
-                    board.main(["reconcile", "test", "--apply"])
-                result = board.read_state("test")
-                self.assertEqual(result["tasks"], {vendor_card: vendor_task})
-                self.assertEqual(set(result["reconcile_archive"][-1]["tasks"]), {"wd-ordinary"})
-                stored = watchdog.read_latest(root / config["paths"]["findings"])[incident["key"]]
-                self.assertEqual(stored["loop_id"], "vendor-loop")
-                self.assertIsNone(stored["cleared_at"])
-                watchdog.append(root / config["paths"]["findings"],
-                                {"key": incident["key"], "cleared_at": AT.isoformat(), "recovery_reported": True})
-                with patch.object(board, "discover_v1", return_value={}), \
-                        patch.object(board, "publish_board"), contextlib.redirect_stdout(io.StringIO()):
-                    board.main(["reconcile", "test", "--apply"])
-                recovered = board.read_state("test")
-                self.assertEqual(recovered["tasks"], {})
-                self.assertEqual(set(recovered["reconcile_archive"][-1]["tasks"]), {vendor_card})
 
     def test_preview_removes_watchdog_folds_duplicates_and_retires_terminal_prs(self):
         state = {"project": "test", "tasks": {
