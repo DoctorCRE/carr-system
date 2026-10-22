@@ -33,6 +33,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -246,7 +247,9 @@ def world(**kw: Any):
     old_home = os.environ.get("HOME")
     with tempfile.TemporaryDirectory() as raw:
         try:
-            yield World(Path(raw), **kw)
+            # Keep fleet delivery on FakeCodex even when this host is a fleet member.
+            with patch("socket.gethostname", return_value="synthetic-host"):
+                yield World(Path(raw), **kw)
         finally:
             if old_home is not None:
                 os.environ["HOME"] = old_home

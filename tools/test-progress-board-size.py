@@ -66,6 +66,11 @@ class CostSnapshotTests(unittest.TestCase):
 
 
 class SnapshotSizeTests(unittest.TestCase):
+    def setUp(self):
+        queue = patch.object(board.work_queue_module(), 'board_projection', return_value=None)
+        queue.start()
+        self.addCleanup(queue.stop)
+
     def test_trimming_removes_defaults_no_remaining_card_inherits(self):
         for field, value in (("title", "X" * 240000),
                              ("stage_history", [{"stage": "merged", "entered_at": "2026-10-18T12:00:00Z"}] * 5000)):
