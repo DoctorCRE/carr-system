@@ -576,6 +576,8 @@ class Queue:
         action = self.db.execute('SELECT * FROM actions WHERE key=?', (key,)).fetchone()
         if action['phase'] == 'done':
             return False
+        if action['phase'] == 'issued':
+            return self.reconcile_preparation(action, self.pr(repo, n))
         if action['phase'] != 'planned':
             raise ActionUncertain(f'regeneration at {head}; inspect {receipt} and provider head before reconcile-action')
         if self.stopped or self.held(p):
@@ -591,6 +593,8 @@ class Queue:
             self.preparation_process = process
             try:
                 stdout, stderr = process.communicate(timeout=BOUNDS['regeneration']['seconds'])
+            except subprocess.TimeoutExpired:
+                stdout, stderr = '', 'regeneration transport deadline expired'
             finally:
                 self.preparation_process = None
                 try:
@@ -600,13 +604,42 @@ class Queue:
                 process.wait()
             self.check_cancelled()
             if process.returncode:
-                raise ActionUncertain('regeneration failed; inspect receipt before retry: ' + redacted_tail(stderr))
+                action = self.db.execute('SELECT * FROM actions WHERE key=?', (key,)).fetchone()
+                return self.reconcile_preparation(action, self.pr(repo, n))
         output = json.loads(stdout)
         if not SHA.fullmatch(output['head']) or output['changed'] != (output['head'] != head):
             raise ActionUncertain('invalid regeneration readback; inspect receipt before retry')
         with self.db:
             self.db.execute("UPDATE actions SET phase='done' WHERE key=?", (key,))
         return output['changed']
+
+    def reconcile_preparation(self, action, p):
+        try:
+            receipt = json.loads(Path(action['receipt']).read_text())
+            prepared = receipt['prepared']
+            if not SHA.fullmatch(prepared) or receipt != dict(
+                    head=action['head'], main=action['payload'], prepared=prepared, branch=p['head']['ref']):
+                raise ValueError('receipt does not match regeneration intent')
+        except (OSError, ValueError, KeyError, TypeError):
+            raise ActionUncertain('Regeneration receipt is unknown; reconcile before retry') from None
+        head = p['head']['sha']
+        if self.held(p) and head != action['head']:
+            raise QueueChanged('held_during_regeneration')
+        if head == prepared or head != action['head']:
+            with self.db:
+                self.db.execute("UPDATE actions SET phase='done' WHERE key=?", (action['key'],))
+                self.event(action['repo'], action['pr'], 'regeneration_reconciled',
+                           f'Provider head {head}; intended push {prepared}; no replay')
+            return head != action['head']
+        if self.held(p) or p['state'] != 'open' or p['base']['ref'] != 'main':
+            raise ActionUncertain('Regeneration PR is held or changed; no retry')
+        if action['attempts'] >= MAX_ATTEMPTS:
+            raise ActionExhausted(f'Regeneration push did not land after {MAX_ATTEMPTS} attempts; provider remains at {head}')
+        with self.db:
+            self.db.execute("UPDATE actions SET phase='planned' WHERE key=?", (action['key'],))
+            self.event(action['repo'], action['pr'], 'regeneration_reconciled',
+                       f'Provider remains at {head}; intended push {prepared} did not land; retry permitted')
+        return True
 
     def green(self, repo, n, head):
         def validate(checks):
@@ -1062,7 +1095,7 @@ class Queue:
                                (e['repo'], e['pr'], e['approved'])).fetchone():
                 raise QueueChanged('held_during_regeneration')
             return False
-        update = self.db.execute("SELECT * FROM actions WHERE kind='update' AND phase IN ('issued','done') "
+        update = self.db.execute("SELECT * FROM actions WHERE kind='update' AND phase IN ('issued','done') AND attempts>0 "
                                  'AND repo=? AND pr=? AND head=?',
                                  (e['repo'], e['pr'], e['approved'])).fetchone()
         if update:

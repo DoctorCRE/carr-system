@@ -911,10 +911,13 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(row['outcome'], 'waiting_ci')
         self.assertEqual(self.calls('merge'), [])
 
-    def test_hold_after_lost_regeneration_response_requires_manual_repin(self):
+    def test_hold_during_lost_regeneration_response_requires_manual_repin(self):
         card_id = self.prepare_pinned_head()
         script = self.root / 'tools/prepare_pr.py'
-        script.write_text(script.read_text() + 'raise SystemExit("response lost after push")\n')
+        script.write_text(script.read_text().replace(
+            'state.write_text(json.dumps(data))',
+            'data["prs"]["jbookout/carr-system#1"]["labels"] = [{"name": "do_not_merge"}]\n'
+            'state.write_text(json.dumps(data))') + 'raise SystemExit("response lost after push")\n')
         self.q.tick()
         action = dict(self.q.db.execute("SELECT * FROM actions WHERE kind='regen'").fetchone())
         receipt = Path(action['receipt']).read_text()
