@@ -19,19 +19,19 @@ class RunnerTests(unittest.TestCase):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         import progress_board
         repo = Path(__file__).resolve().parents[2]
-        remote = None
+        remote = {}
         writes = []
         corrupt = False
 
         def call(verb, args):
-            nonlocal remote
             if verb == 'publish-board-snapshot':
                 writes.append(args)
-                remote = {'board_id': args['board_id'], 'version': len(writes),
+                remote[args['board_id']] = {'board_id': args['board_id'], 'version': len(writes),
                           'snapshot_json': copy.deepcopy(args['snapshot'])}
-                return {'ok': True, 'snapshot': remote}
+                return {'ok': True, 'snapshot': remote[args['board_id']]}
             self.assertEqual(verb, 'read-progress-board')
-            if remote is None:
+            saved = remote.get(args['board_id'])
+            if saved is None:
                 return {'ok': True, 'snapshot': None, 'questions': []}
             script = """
 import {projectBoardLinkage} from './mcp-server/src/work-linkage.js';
@@ -39,8 +39,8 @@ let input = ''; for await (const part of process.stdin) input += part;
 console.log(JSON.stringify(projectBoardLinkage(JSON.parse(input))));
 """
             row = json.loads(subprocess.run(['node', '--input-type=module', '-e', script],
-                input=json.dumps(remote), text=True, capture_output=True, check=True, cwd=repo).stdout)
-            if corrupt:
+                input=json.dumps(saved), text=True, capture_output=True, check=True, cwd=repo).stdout)
+            if corrupt and args['board_id'] == 'carr-v5':
                 row['snapshot_json']['tasks']['job']['title'] = 'Wrong title'
             return {'ok': True, 'snapshot': row, 'questions': []}
 
@@ -48,17 +48,19 @@ console.log(JSON.stringify(projectBoardLinkage(JSON.parse(input))));
             db = Path(directory) / 'queue.sqlite3'
             state = {'project': 'carr-v5', 'tasks': {'job': {'title': 'Synthetic job', 'status': 'queued'}}}
             with WorkQueue(db) as queue, \
-                 patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': str(db)}), \
+                 patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': str(db), 'PROGRESS_BOARD_ROOT': directory}), \
                  patch.object(progress_board, 'read_state', return_value=state), \
+                 patch.object(progress_board, 'require_primary_publication'), \
                  patch.object(progress_board, 'call_verb', side_effect=call):
                 queue.enqueue('A', desk='sol', task='synthetic', actor='test')
                 publish = lambda: progress_board.publish_board('carr-v5', costs={}, refresh_inventory=False)
                 self.assertTrue(queue.publish(publish, now=10), queue.publication()['error'])
                 self.assertEqual(queue.publication()['published'], queue.export()['revision'])
                 publish()
-                write_count = len(writes)
+                project_writes = lambda: sum(row['board_id'] == 'carr-v5' for row in writes)
+                write_count = project_writes()
                 publish()
-                self.assertEqual(len(writes), write_count, 'reader enrichment must not trigger another write')
+                self.assertEqual(project_writes(), write_count, 'reader enrichment must not trigger another write')
                 queue.enqueue('B', desk='luna', task='synthetic', actor='test')
                 corrupt = True
                 self.assertFalse(queue.publish(publish, now=12))

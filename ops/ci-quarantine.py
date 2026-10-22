@@ -65,7 +65,9 @@ def attempt(command, log):
     with tempfile.TemporaryDirectory(prefix='carr-ci-test-', dir='/tmp') as directory:
         environment = {**os.environ, 'TMPDIR': directory, 'TMP': directory, 'TEMP': directory,
                        'CI': '1', 'NODE_DISABLE_COMPILE_CACHE': '1', 'NO_UPDATE_NOTIFIER': '1'}
-        with log.open('w') as output:
+        with tempfile.TemporaryDirectory(dir=directory) as queue_directory, log.open('w') as output:
+            environment['CARR_WORK_QUEUE_DB'] = str(Path(queue_directory) / 'work-queue.sqlite3')
+            environment['CARR_WORK_QUEUE_TEST'] = '1'
             code = subprocess.run(command, env=environment, stdout=output, stderr=subprocess.STDOUT).returncode
         with os.scandir(directory) as entries:
             leaks = [entry.name for _, entry in zip(range(25), entries)]
