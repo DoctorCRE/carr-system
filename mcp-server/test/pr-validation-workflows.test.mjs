@@ -63,7 +63,7 @@ for (const file of files) {
     event.event.pull_request.draft = true;
     const draft = policy(workflow, event);
     assert.equal(draft.triggers, true);
-    assert.deepEqual(draft.runnable, file === "ci.yml" ? ["scope", "classes", "checks"] : file === "doc-drift.yml" ? ["check"] : []);
+    assert.deepEqual(draft.runnable, file === "ci.yml" ? ["scope", "classes", "fallow", "checks"] : file === "doc-drift.yml" ? ["check"] : []);
   });
   test(`${file}: cancellation is scoped to the workflow and PR`, () => {
     const current = policy(workflow, context());
@@ -132,7 +132,7 @@ test("metadata edits start no validation workflow, so no skipped suite replaces 
 test("strict aggregate runs after failed classes and requires complete successful evidence", () => {
   const ci = read("ci.yml"), gate = ci.jobs.checks;
   assert.equal(gate.name, "ops/ci.sh --strict", "the required context name must be a literal");
-  assert.deepEqual(gate.needs, ["scope", "classes", "migration-fixtures"]);
+  assert.deepEqual(gate.needs, ["scope", "classes", "migration-fixtures", "fallow"]);
   assert.ok(policy(ci, context(), false).runnable.includes("checks"), "always() must override implicit success()");
   const step = gate.steps.find(step => step.name === "Fail unless every class group succeeded");
   assert.match(step.run, /python3 ops\/ci-evidence.py verdict/);
@@ -141,15 +141,17 @@ test("strict aggregate runs after failed classes and requires complete successfu
     assert.equal(step.env.CI_NEEDS, "${{ toJSON(needs) }}");
     for (const classes of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
       for (const fixtures of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
-        const output = spawnSync("bash", ["-e", "-c", step.run], {
-          cwd: new URL("../../", import.meta.url),
-          env: { PATH: process.env.PATH, CI_DRAFT: "false",
-            CI_NEEDS: JSON.stringify({ scope: { result: "success", outputs: { full: "true" } },
-              classes: { result: classes }, "migration-fixtures": { result: fixtures } }),
-            GITHUB_STEP_SUMMARY: join(fixture, "summary") },
-          encoding: "utf8", timeout: 5000 });
-        assert.ifError(output.error);
-        assert.equal(output.status === 0, classes === "success" && fixtures === "success", output.stdout + output.stderr);
+        for (const fallow of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
+          const output = spawnSync("bash", ["-e", "-c", step.run], {
+            cwd: new URL("../../", import.meta.url),
+            env: { PATH: process.env.PATH, CI_DRAFT: "false",
+              CI_NEEDS: JSON.stringify({ scope: { result: "success", outputs: { full: "true" } },
+                classes: { result: classes }, "migration-fixtures": { result: fixtures }, fallow: { result: fallow } }),
+              GITHUB_STEP_SUMMARY: join(fixture, "summary") },
+            encoding: "utf8", timeout: 5000 });
+          assert.ifError(output.error);
+          assert.equal(output.status === 0, classes === "success" && fixtures === "success" && fallow === "success", output.stdout + output.stderr);
+        }
       }
     }
   } finally { rmSync(fixture, { recursive: true, force: true }); }
