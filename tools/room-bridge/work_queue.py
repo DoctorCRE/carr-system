@@ -41,7 +41,7 @@ STAGES = ('queued', 'building', 'review', 'fixing', 'merging', 'done', 'failed',
 EXECUTABLE = ('queued', 'building', 'review', 'fixing')
 TERMINAL = ('done', 'failed', 'parked')
 FIELDS = {'wr', 'slice', 'title', 'description', 'agent', 'family', 'model', 'effort',
-          'prs', 'ci_state', 'findings'}
+          'prs', 'ci_state', 'findings', 'executor_kind'}
 
 
 def default_path() -> Path:
@@ -252,6 +252,8 @@ class WorkQueue:
             token = str(uuid.uuid4())
             data = json.loads(selected['data'])
             data.pop('last_result', None)
+            if selected['stage'] == 'review' and data.get('handoff'):
+                data['handoff']['review_started_at'] = timestamp()
             self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
             self.db.execute('UPDATE items SET claim=?,owner=?,ready=0,review_round=review_round+? WHERE card_id=?',
                             (token, json.dumps(owner), int(selected['stage'] == 'review'), card))
@@ -277,6 +279,7 @@ class WorkQueue:
             data = json.loads(old['data'])
             data.update({k: result[k] for k in ('model', 'effort', 'family') if result.get(k)})
             data['last_result'] = result
+            data['completion'] = {'stage': old['stage'], 'desk': old['desk'], 'claim': token}
             status = result.get('status')
             # Delivered turns still own their desk. Their session must report completion.
             if status in ('delivered', 'delivered_live', 'backgrounded'):
@@ -293,6 +296,30 @@ class WorkQueue:
                 self.db.execute('UPDATE items SET claim=NULL,owner=NULL,data=? WHERE card_id=?', (json.dumps(data), card))
             self._event(card, self._state(old), self._state(self._item(card)), actor,
                         f'executor {status}', 'stage')
+
+    def handoff(self, expected, *, stage, desk, task, options, data, reason, effect=None):
+        """Commit a completion transition only while its observed card still owns it."""
+        card = expected['card_id']
+        with self.transaction():
+            old = self._item(card)
+            if old != expected or old['claim'] or self._merge_active(card):
+                raise QueueChanged('card changed before completion handoff')
+            if stage == 'review' and old['review_round'] >= 3:
+                stage, reason = 'blocked', 'round cap'
+            if stage == 'merging':
+                self._validate_merge(data)
+            if effect is not None:
+                effect()
+            data.pop('completion', None)
+            self._stage(card, stage, stage in EXECUTABLE)
+            self.db.execute('UPDATE items SET desk=?,task=?,options=?,data=? WHERE card_id=?',
+                            (desk, task, json.dumps(options), json.dumps(data), card))
+            self._event(card, self._state(old), self._state(self._item(card)),
+                        'handoff', reason, 'handoff')
+
+    def handoff_candidates(self):
+        return [dict(r) for r in self.db.execute(
+            "SELECT * FROM items WHERE stage IN ('review','merging') AND ready=0 AND claim IS NULL ORDER BY position")]
 
     def begin_merge(self, card, *, actor, reason, pin=None, expected_order=None):
         with self.transaction():
@@ -476,7 +503,7 @@ class WorkQueue:
             data = json.loads(row['data'])
             if self._merge_active(card) and 'prs' in fields and fields['prs'] != data['prs']:
                 raise ValueError('active merge requires a completion receipt before replacing pins')
-            before = {k: data[k] for k in fields}
+            before = {k: data.get(k) for k in fields}
             if 'findings' in fields:
                 findings = {f['id']: f for f in data['findings']}
                 findings.update({f['id']: f for f in fields['findings']})

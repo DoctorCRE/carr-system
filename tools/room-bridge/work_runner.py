@@ -56,10 +56,13 @@ class Resources:
 
 
 class Runner:
-    def __init__(self, queue, resources, *, launch, terminated=write_ownership.process_terminated):
+    def __init__(self, queue, resources, *, launch, terminated=write_ownership.process_terminated, handoffs=None):
         self.queue, self.resources, self.launch, self.terminated = queue, resources, launch, terminated
+        self.handoffs = handoffs
 
     def tick(self):
+        if self.handoffs is not None:
+            self.handoffs.tick()
         self.queue.recover(self.terminated, actor='runner')
         while self._claim_pass():
             pass
@@ -117,11 +120,22 @@ def worker(queue, card_id, token, registry, results):
     results = Path(options.pop('result_path', results))
     registry = Path(options.pop('registry_path', registry))
     def started(entry):
+        if os.environ.get('CARR_WORK_AUTO_HANDOFFS') == '1':
+            from work_handoffs import model_family
+            builder = json.loads(row['data']).get('handoff', {}).get('builder')
+            if row['stage'] == 'review' and builder and (
+                    not model_family(entry) or model_family(entry) == builder['family']):
+                raise DeskError('reviewer_family_changed', 'review requires a different builder model family')
         queue.update(card_id, actor='worker', reason='executor resolved at start',
-                     agent=entry.get('name', row['desk']),
+                     agent=entry.get('name', row['desk']), executor_kind=entry.get('kind', ''),
                      **{k: entry[k] for k in ('model', 'effort', 'family') if entry.get(k)})
+    task = row['task']
+    if os.environ.get('CARR_WORK_AUTO_HANDOFFS') == '1' and row['stage'] in ('building', 'fixing'):
+        task += ('\n\nReturn a final receipt line CARR_WORK_RESULT '
+                 '{"repo":"jbookout/carr-system","number":<PR number>,"head":"<40-character head>"}. '
+                 'This completion receipt advances the queue. No separate ready or inbox acknowledgment is required.')
     try:
-        result = dispatch.dispatch(row['desk'], row['task'], registry=Registry(registry),
+        result = dispatch.dispatch(row['desk'], task, registry=Registry(registry),
                                    results_path=results, on_started=started, **options)
     except DeskError as exc:
         result = {'status': 'failed', 'code': exc.code, 'detail': f'{exc.code}: {exc}', 'termination_confirmed': True}
@@ -177,7 +191,12 @@ def main(argv=None):
                 except ValueError:
                     pass  # The worker already committed its completion receipt.
         resources = Resources(args.db.with_suffix('.desks'))
-        runner = Runner(queue, resources, launch=launch)
+        handoffs = None
+        if os.environ.get('CARR_WORK_AUTO_HANDOFFS') == '1':
+            from desks import Registry
+            from work_handoffs import Handoffs, GitHub
+            handoffs = Handoffs(queue, Registry(args.registry).entries, GitHub())
+        runner = Runner(queue, resources, launch=launch, handoffs=handoffs)
         publisher = None
         with lock:
             while True:
