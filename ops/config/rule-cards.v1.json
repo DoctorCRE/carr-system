@@ -643,7 +643,7 @@
           "expected_match": false
         }
       },
-      "code_note": "executor-tier-gate.py already forces an explicit model on generic subagent types (partial code); the data-class exclusion in briefs is G6 mechanical candidate df55c398 for dispatch.py."
+      "code_note": "Agent definitions name the model; task briefs name the executor. The data-class exclusion belongs in dispatch.py."
     },
     {
       "id": "L06",

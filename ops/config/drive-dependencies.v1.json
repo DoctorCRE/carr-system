@@ -261,10 +261,10 @@
       "id": "normal-executor-agent-definitions",
       "class": "normal_runtime",
       "sources": [
-        "hooks/executor-tier-gate.py"
+        "AGENTS.md"
       ],
       "path_pattern": "{{VAULT}}/**",
-      "producer": "executor-tier hook",
+      "producer": "native agent definitions and task briefs",
       "consumers": [
         "subagent dispatch policy"
       ],
@@ -276,7 +276,7 @@
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
         "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
-        "verified": "hooks/executor-tier-gate.py contains ZERO references to Drive, vault or CloudStorage; agent definitions are repo-owned."
+        "verified": "AGENTS.md directs model selection through model fields in repo-owned agent definitions and an executor line in task briefs."
       }
     },
     {
