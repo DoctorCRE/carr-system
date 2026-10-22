@@ -319,8 +319,8 @@ class Controls(unittest.TestCase):
         sibling = {'id':789, 'name':'test', 'status':'completed', 'conclusion':'success'}
         with tempfile.TemporaryDirectory() as temp:
             for repo, options in (
-                    ('jbookout/carr-system', []),
-                    ('jbookout/carr-system', ['--repo', 'jbookout/carr-system']),
+                    ('DoctorCRE/carr-system', []),
+                    ('DoctorCRE/carr-system', ['--repo', 'DoctorCRE/carr-system']),
                     ('jbookout/doctorcre-app', ['--repo', 'jbookout/doctorcre-app'])):
                 with self.subTest(repo=repo, options=options), tempfile.TemporaryDirectory(dir=temp) as attempt:
                     candidate = 'a'*40 if repo == mod.REPO else 'b'*40
@@ -366,7 +366,7 @@ class Controls(unittest.TestCase):
                     self.assertEqual(len(receipts), 1)
                     self.assertEqual(json.loads(receipts[0].read_text())['repo'], repo)
                     self.assertEqual(json.loads(receipts[0].read_text())['head_sha'], candidate)
-                    if repo == 'jbookout/carr-system':
+                    if repo == 'DoctorCRE/carr-system':
                         self.assertEqual(receipts[0].parent, Path(attempt) / 'carr-ci-rerun')
                     else:
                         self.assertEqual(receipts[0].parent.name, repo.replace('/', '--'))
