@@ -1,0 +1,362 @@
+{
+  "schema": "third-party-security-read/v1",
+  "subject": "Scrawl 0.3.6 by Kit Langton",
+  "observed_at": "2026-10-20T08:50:12-05:00",
+  "timezone": "America/Chicago",
+  "verdict": "SAFE WITH CONDITIONS",
+  "summary": "Suitable for sanitized Mac UI review with manual paste after the conditions below. Transcription defaults to local Apple models. The app also enables automatic OpenCode delivery and a LAN ingest listener by default. Signed and notarized release identity is verified; equivalence to the public source is unproven.",
+  "scope": {
+    "purpose": "Joe records narration, clicks, and drawings with Option-Shift-S, then supplies the contact sheet and transcript to Claude or Codex review desks.",
+    "repository": "https://github.com/kitlangton/scrawl",
+    "release": "https://github.com/kitlangton/scrawl/releases/tag/v0.3.6",
+    "site": "https://scrawl.kitlangton.com/",
+    "source_commit": "10531a67a9d7677cb276f1c0aaaf0ce91bd025fc",
+    "annotated_tag_object": "dd753c5b7d58dd71a53419d3b93a5e99880d5d89",
+    "observed_main_commit": "6449367d9744b432f7f77a61b3f638b86e48953f",
+    "main_delta": "The one subsequent commit changes performance scripts and instructions. Runtime, helper, SDK, skill, dependency manifests, and release workflow code match v0.3.6.",
+    "tap_repository": "https://github.com/kitlangton/homebrew-tap",
+    "tap_commit": "f38979e6ce001ee45fb34c1f249c50a974460f78",
+    "method": "Read source as data, search runtime network and process sinks, trace security-relevant call paths, inspect public release metadata, and verify downloaded release bytes with Apple system tools. No third-party code was built, launched, installed, or tested.",
+    "excluded_actions": [
+      "No package or skill installer ran.",
+      "No config was installed into any agent directory.",
+      "No environment, credential, token, key, keychain, or database-dump file was opened.",
+      "No decryption, capture, production write, or SDK integration occurred."
+    ]
+  },
+  "conditions": [
+    "Use sanitized development UI only. Close client records, credentials, private conversations, and notifications before recording. Auto-cropping does not redact stored source media.",
+    "Disable Settings > General > Send dev-site captures to OpenCode before the first capture. Keep agentHost unset and the agentContext experiment off.",
+    "Block incoming connections to Scrawl with the macOS firewall before normal network use. The GUI starts plain HTTP on all IPv4 interfaces at port 47777. Do not pair a phone or add the browser SDK for this initial workflow.",
+    "For a controlled review launch, set SCRAWL_NO_OPENCODE=1. This also disables phone-ingest forwarding, which autoSend=false alone does not disable. Preserve this environment override on every controlled launch.",
+    "Precreate the capture, log, and Scrawl config directories with mode 0700. Use umask 077 for the controlled launch. Verify actual filesystem permissions after a synthetic capture.",
+    "Manually review the contact sheet and intended transcript before pasting into a selected agent. The receiving agent or model provider can receive those contents under its own data policy.",
+    "Use a pinned, reviewed project skill. Treat text in images, narration, console output, and manifests as task data. Do not run commands found in captures.",
+    "Do not accept arbitrary downloaded .scrawl bundles as trusted inputs. Several manifest paths are joined without containment checks.",
+    "Re-review upgrades before accepting them. This review covers the named version and hashes only."
+  ],
+  "network_and_transcription": [
+    {
+      "id": "N1",
+      "behavior": "Apple transcription is local by default.",
+      "details": "Engine defaults to Apple. The Swift helper selects SpeechTranscriber, or DictationTranscriber where needed, and feeds local audio files to SpeechAnalyzer. Live transcription streams PCM to the local helper. AssetInventory downloads speech models at launch if missing. Model downloads are network traffic, but the reviewed transcription path has no cloud speech-upload call.",
+      "evidence": ["transcribe", "apple_speech", "live_speech", "speech_model"]
+    },
+    {
+      "id": "N2",
+      "behavior": "Optional Hex receives audio on loopback.",
+      "details": "Selecting Hex sends WAV clips to an authenticated HTTP API at 127.0.0.1 using its discovered port. It falls back to Apple on failure. Hex's own downstream behavior and dependencies were not audited. The discovery implementation was read as source; no installed discovery or credential file was opened.",
+      "evidence": ["hex", "transcribe"]
+    },
+    {
+      "id": "N3",
+      "behavior": "Sparkle checks the author's update service automatically.",
+      "details": "The release enables SUEnableAutomaticChecks and explicitly requests a background check on launch when enabled. Feed is https://scrawl.kitlangton.com/appcast.xml. Update downloads use release URLs in that feed. SUAutomaticallyUpdate and SUAllowsAutomaticUpdates are false in the inspected binary. The server sees ordinary connection metadata and a Sparkle user-agent containing app and Sparkle versions. No custom telemetry, crash collector, or capture-upload endpoint to the author was found in the reviewed runtime source and dependency manifests. Sparkle system-profile behavior and Apple framework traffic were not measured with a packet capture.",
+      "evidence": ["sparkle", "release_script", "sparkle_docs"]
+    },
+    {
+      "id": "N4",
+      "behavior": "Automatic OpenCode sends are on by default.",
+      "details": "Mac captures can resolve a browser or terminal to an OpenCode session and queue summary text and a contact-sheet attachment. autoSend=false or SCRAWL_NO_OPENCODE disables Mac routing. Phone ingest has an independent route_opencode switch, controlled by SCRAWL_NO_OPENCODE or headless --no-opencode. It may fall back to the newest root session. Failed phone deliveries retry for up to a day. Local OpenCode may send the resulting prompt onward to a model provider.",
+      "evidence": ["auto_send", "routing", "handoff_send", "ingest", "delivery_retry"]
+    },
+    {
+      "id": "N5",
+      "behavior": "Explicit remote forwarding copies the entire bundle over SSH.",
+      "details": "agentHost or SCRAWL_AGENT_HOST selects a remote host. Contact sheets, keyframes, summary, and manifest transfer first, followed by video, audio, and uncropped frames in the background. OpenCode API calls then run remotely. Arguments use arrays or shell quoting. This is an intentional export path. Leave it unconfigured for manual local review.",
+      "evidence": ["ssh_handoff"]
+    },
+    {
+      "id": "N6",
+      "behavior": "The GUI always starts an inbound LAN server.",
+      "details": "run_app calls start_ingest_server, which binds 0.0.0.0:47777. Upload and health paths require a generated 32-byte random bearer token. /sdk.js is public. Loopback browser-page registrations can omit the token; remote registrations require it, and page context is limited to local peers and local origins. No reviewed route serves stored capture contents. The server allocates a thread per connection before authorization, so exposing it also permits connection-resource exhaustion. Disabling auto-send does not close the listener.",
+      "evidence": ["app_start", "ingest", "ingest_auth", "browser_server"]
+    },
+    {
+      "id": "N7",
+      "behavior": "ScrawlKit can upload off-device to a chosen LAN or HTTPS target.",
+      "details": "Health requests send the pairing bearer token. Uploads include timeline/context JSON and the complete MP4 with narration. Discovered Mac URLs use plain HTTP. On ordinary LAN that provides no transport encryption; a correctly routed Tailscale tunnel supplies separate protection. HTTPS destinations use a durable background URLSession outbox with retries. ScrawlKit is not needed for Joe's Mac workflow.",
+      "evidence": ["phone_pairing", "sdk_pairing", "sdk_upload", "sdk_outbox"]
+    },
+    {
+      "id": "N8",
+      "behavior": "SDK pairing links can change where queued recordings go.",
+      "details": "The .scrawl modifier automatically handles scheme links. A link with url and token accepts arbitrary HTTP or HTTPS hosts and immediately applies configuration without a confirmation screen. Pending outbox entries use the current destination. Keep SDK use development-only with trusted links until this is separately constrained and tested.",
+      "evidence": ["sdk_modifier", "sdk_pairing", "sdk_outbox"]
+    },
+    {
+      "id": "N9",
+      "behavior": "Browser and accessibility context can contain private data.",
+      "details": "The optional browser SDK registers full location.href, title, session, and directory every 30 seconds. The agentContext experiment is off by default. Enabled context can include accessibility labels, console-error text, rejection messages, and performance context. Omission of input values and request headers or bodies is not comprehensive redaction. Screen pixels and microphone audio remain sensitive regardless.",
+      "evidence": ["browser_sdk", "context_opt_in", "ax_context", "page_context"]
+    },
+    {
+      "id": "N10",
+      "behavior": "Website and installation traffic are separate from capture processing.",
+      "details": "The site is served by a Cloudflare assets worker and loads a font from fonts.bunny.net. Download hosts and their infrastructure see download requests. Homebrew fetches the tap and DMG. bunx additionally obtains and executes an external skills installer; that installer was not audited or run. No all-dependency or endpoint-log audit was performed.",
+      "evidence": ["site_worker", "site_html", "cask", "skill"]
+    }
+  ],
+  "storage_and_permissions": {
+    "captures": {
+      "path": "~/Library/Application Support/scrawl/captures/<id>.scrawl/",
+      "override": "SCRAWL_CAPTURES_DIR",
+      "files": ["scrawl.json", "summary.md", "contact-sheet.png", "frames/frame-NN.png", "recording.mp4 or recording.mov", "audio.wav", "frames-full/ and contact-sheet-full.png when autocropped", "zoom/ outputs", "routing and delivery markers when applicable"],
+      "privacy": "Final bundle directories receive best-effort chmod 0700, with chmod failures ignored. The GUI creates the directory and starts recording before that chmod. Individual files use ordinary filesystem writes and inherited umask. A private parent closes the recording and crash window. No application-level encryption is implemented in the reviewed storage paths.",
+      "evidence": ["capture_path", "capture_creation", "bundle_write"]
+    },
+    "configuration": {
+      "path": "~/.config/scrawl/config.json",
+      "override": "SCRAWL_CONFIG",
+      "privacy": "Stores settings and the ingest bearer token. New token creation and normal saved configuration target mode 0600. Existing-token reads return without tightening an existing file's mode. Normal config updates write a temporary file before chmod 0600 and rename. Parent mode 0700 is recommended. No actual config was opened for this review.",
+      "evidence": ["config"]
+    },
+    "logs_and_exports": {
+      "log": "~/Library/Logs/Scrawl/scrawl.log",
+      "export_default": "~/Movies/Scrawl/<bundle>.mp4",
+      "privacy": "Log creation has no explicit permission mode and can include full browser URLs, session names, paths, and errors. Logs and exports are outside capture retention. Temporary WAV chunks, media processing directories, and ingest staging also use ordinary directory and file creation; normal cleanup is not a crash-proof or secure-erasure guarantee.",
+      "evidence": ["log_path", "log_write", "routing", "wav_temp", "ingest_auth", "skill"]
+    },
+    "retention": {
+      "default": "Heavy media moves to Trash after 7 days. Whole bundles move to Trash after 30 days.",
+      "schedule": "90 seconds after launch, then daily while running.",
+      "exceptions": "Pinned, active, recently modified, synchronizing, and pending-delivery bundles can survive longer. Trash and backups retain data beyond the cleanup deadline. Cleanup is not secure deletion.",
+      "evidence": ["retention", "retention_worker"]
+    },
+    "ios_sdk": {
+      "paths": "App Documents/Scrawl for local recordings; temporary staging for hosted recordings; app Application Support/ScrawlOutbox for HTTPS background delivery.",
+      "privacy": "Outbox is excluded from backup and uses completeUntilFirstUserAuthentication protection, allowing uploads after the phone is locked following its first unlock. Unpairing cancels upload tasks but retains queued files. SDK storage lives in the host app sandbox; it is not the Mac capture directory.",
+      "evidence": ["sdk_storage", "sdk_outbox"]
+    }
+  },
+  "macos_permissions": [
+    {"permission": "Screen & System Audio Recording", "required": true, "reason": "ScreenCaptureKit captures displays, windows, or areas. The permission name is broader than the narration microphone.", "evidence": ["onboarding", "release_script"]},
+    {"permission": "Microphone", "required": true, "reason": "Records narration for local transcription and retained source audio.", "evidence": ["onboarding", "release_script"]},
+    {"permission": "Accessibility", "required": true, "reason": "Keyboard event tap for cancel, undo, switcher controls, and modifier chords; synthetic click and Command-V for paste. Carbon record/paste hotkeys themselves need no TCC grant. Ordinary typed text is not collected by the reviewed chord-recording path.", "evidence": ["onboarding", "mac_input", "paste"]},
+    {"permission": "Camera", "required": false, "reason": "Requested when selecting a cabled iPhone, which macOS presents as a camera device. Not needed for Mac screen review.", "evidence": ["onboarding", "release_script"]},
+    {"permission": "Automation / Apple Events", "required": false, "reason": "Read the captured browser tab URL for agent routing. Declared entitlement and usage description. Leave unused with auto-send off.", "evidence": ["entitlements", "release_script", "routing"]},
+    {"permission": "Speech Recognition and Input Monitoring", "required": false, "reason": "The reviewed flow does not request these grants. SpeechAnalyzer uses local assets; mouse monitoring and modifier polling avoid Input Monitoring. A speech usage description remains in the plist.", "evidence": ["onboarding", "apple_speech"]}
+  ],
+  "release_provenance": {
+    "ci": "check.yml builds and tests locked Rust dependencies on macOS and Windows. release-windows.yml builds tag-based Windows releases. The complete workflow tree at v0.3.6 contains no Mac release workflow.",
+    "mac_build": "scripts/release-app.sh builds locally with cargo build --release --offline, bundles the Rust binary and Swift helper, signs hardened-runtime executables and Sparkle, submits for notarization, staples tickets, and publishes website assets. Its signing/notarization operations are conditional and can fall back to ad-hoc signing. The script was read, never executed.",
+    "equivalence": "No public reproducible-build result, Mac CI release attestation, or source-to-binary proof was found in the reviewed workflow, release metadata, and release script. Signature/notarization authenticate the publisher and artifact integrity, not equivalence to the source. The audited source is therefore a trust inference for the publisher's release.",
+    "cask": "Cask installs the app and links its bundled scrawl executable. It contains no preflight/postflight installer script. It requires arm64 and macOS Tahoe, declares auto_updates true, and uses Sparkle livecheck. Uninstall quits the app; zap removes its config, captures/support, logs, caches, HTTP storage, and preferences.",
+    "sparkle": "Bundled Sparkle 2.9.4. setup-sparkle.sh pins the downloaded archive checksum but can reuse an existing local cache. Release appcast supplies Ed25519 signatures and deltas. SUPublicEDKey and SUVerifyUpdateBeforeExtraction are present. This review did not independently verify the appcast Ed25519 signature or rebuild Sparkle.",
+    "artifacts": {
+      "dmg": {"url": "https://scrawl.kitlangton.com/releases/Scrawl-0.3.6-arm64.dmg", "sha256": "dcbefe58caaa729b61a0c29c8decbe7d9df71525aa08ad9ec4977c44b1c26aca", "result": "Downloaded bytes match both the pinned cask and GitHub release asset digest. codesign verification passed."},
+      "zip": {"url": "https://scrawl.kitlangton.com/releases/Scrawl-0.3.6-arm64.zip", "sha256": "5631c65f31e047b47d23610220c0dfa7fc3bb073f5300f88824d8c2448172065", "result": "Extracted only into a temporary audit directory. App is arm64, version 0.3.6, build 9, minimum macOS 26.0. Deep strict signature verification, Gatekeeper assessment, and stapled-ticket validation passed."},
+      "signer": "Developer ID Application: Christopher Langton (QC99C9JE59)",
+      "team": "QC99C9JE59",
+      "runtime": "Hardened runtime flag present.",
+      "gatekeeper": "accepted; source=Notarized Developer ID",
+      "entitlements": ["com.apple.security.automation.apple-events", "com.apple.security.device.audio-input", "com.apple.security.device.camera"]
+    },
+    "evidence": ["workflow_check", "workflow_windows", "release_script", "sparkle_setup", "appcast", "cask"]
+  },
+  "agent_skill": {
+    "exact_upstream_files": ["skills/scrawl/SKILL.md"],
+    "sha256": "59cde603f83c2fe2ec9bd775c692be0c7f0f79521e387dbcf1f797dd4b543394",
+    "project_installation": {
+      "status": "Vendored into this project checkout. Fresh-desk discovery and synthetic paste remain unverified.",
+      "source_repository": "https://github.com/kitlangton/scrawl",
+      "source_commit": "10531a67a9d7677cb276f1c0aaaf0ce91bd025fc",
+      "version": "0.3.6",
+      "method": "Separate no-checkout data-only clone; git show copies; no installer or upstream script executed.",
+      "files": {
+        "SKILL.md": {
+          "upstream_path": "skills/scrawl/SKILL.md",
+          "project_path": ".agents/skills/scrawl/SKILL.md",
+          "upstream_sha256": "59cde603f83c2fe2ec9bd775c692be0c7f0f79521e387dbcf1f797dd4b543394",
+          "installed_sha256": "59cde603f83c2fe2ec9bd775c692be0c7f0f79521e387dbcf1f797dd4b543394"
+        },
+        "LICENSE": {
+          "upstream_path": "LICENSE",
+          "project_path": ".agents/skills/scrawl/LICENSE",
+          "upstream_sha256": "4994c24b5bbb85529407e8cd0211efcf819236899d2c911cbdb18c00f231273a",
+          "installed_sha256": "4994c24b5bbb85529407e8cd0211efcf819236899d2c911cbdb18c00f231273a"
+        }
+      },
+      "byte_comparison": "SKILL.md and LICENSE are byte-identical to their pinned upstream blobs. Local safety policy lives only in AGENTS.md.",
+      "claude_alias": {
+        "path": ".claude/skills/scrawl/SKILL.md",
+        "target": "../../../.agents/skills/scrawl/SKILL.md"
+      },
+      "scope": "Project skill only. No home agent configuration, app launch, capture, or production write.",
+      "verification": {
+        "artifact_contract_tests": 3,
+        "before": "All three artifact tests failed for modified upstream bytes, directory-symlink registration, and local policy placement. Changed-file scanning reproduced IsADirectoryError at .claude/skills/scrawl.",
+        "after": "All three artifact tests pass. Full tracked-file secret scan passes. Both vendored files byte-match direct reads from the pinned upstream revision. Changed-file scanning reads all five staged project artifacts without error.",
+        "fresh_desk_discovery": "Not run.",
+        "synthetic_paste": "Not run. Scrawl was not launched."
+      },
+      "local_policy_path": "AGENTS.md#scrawl-capture-review",
+      "ci_repair_decisions": [
+        "Treat this as tiny project packaging repair. Use the artifact contract and changed-file scanner as the pre-approved test seams. Skip grill-with-docs and wayfinder.",
+        "Replace the directory symlink with a SKILL.md file symlink so changed-file scanning reads a file while both clients share the canonical guide. Do not weaken the scanner.",
+        "Restore exact upstream guide bytes and move the unchanged safety policy into AGENTS.md. Keep the license unchanged. No hook, installer, production, or home configuration changes."
+      ]
+    },
+    "bundled_scripts_hooks_or_config": "None in the complete skills subtree at the pinned commit. The app embeds this guide for scrawl skill. Settings displays and copies the install command; it does not execute it.",
+    "installer": "bunx skills add kitlangton/scrawl executes a separate package-manager-delivered skills program. That external installer's exact write set and execution behavior are unverified. Do not infer its safety from the one-file Scrawl skill. Prefer a pinned manual copy.",
+    "commands_in_guide": [
+      "command -v scrawl",
+      "/Applications/Scrawl.app/Contents/MacOS/scrawl or ~/Applications/Scrawl.app/Contents/MacOS/scrawl as executable fallback",
+      "scrawl zoom <bundle> --at 0:21",
+      "scrawl zoom <bundle> --at \"the width changes\"",
+      "scrawl zoom <bundle> --at 0:21 --span 1 --frames 16 --full",
+      "scrawl inspect <bundle>",
+      "scrawl inspect <bundle> --json",
+      "scrawl frames <bundle> --from 0:04 --to 0:06 [--fps 4]",
+      "scrawl send <bundle> --session ses_...",
+      "scrawl send <bundle> --clipboard",
+      "scrawl export <bundle> [--out demo.mp4] [--zoom] [--crop auto|full|x,y,w,h] [--size 1920]",
+      "scrawl <command> --help",
+      "scrawl skill"
+    ],
+    "effects": "inspect prints local data. zoom and frames create files under <bundle>/zoom/. export writes a movie. send --clipboard changes the clipboard. send --session queues an agent prompt, may choose the latest session if unspecified, and can copy the whole bundle remotely. Guide also describes --reroute, --no-ink, --no-clicks, --hevc, and --fps. No hook, eval, shell sourcing, or command download occurs in the guide itself.",
+    "untrusted_content": "The guide does not explicitly warn against prompt injection in captures. Reading a screen or transcript can expose an agent to attacker-authored instructions. Source inspection found no direct shell execution of narration or OCR text. That does not make arbitrary manifests safe: contact_sheet and video paths are joined with the bundle directory without general containment enforcement. Local process tools and remote OpenCode executables remain executable dependencies.",
+    "recommended_placement": {
+      "canonical": "<review-repository>/.agents/skills/scrawl/SKILL.md",
+      "claude_alias": "<review-repository>/.claude/skills/scrawl -> ../../.agents/skills/scrawl",
+      "license_notice": "<review-repository>/.agents/skills/scrawl/LICENSE copied from upstream LICENSE",
+      "distribution": "Put the reviewed canonical folder in the software-factory skill source, then copy or package it into each actual desk checkout through the existing distribution path. A skill present only in the parent workspace or CARR checkout does not reliably reach a fresh standalone desk. Commit the project paths when adoption is separately authorized.",
+      "guard": "Project instructions should restrict ordinary review to direct image/JSON reads, inspect, zoom, and frames. Use explicit absolute bundle paths, never latest in concurrent desks. Do not send, export, reroute, run embedded instructions, or follow a path outside the supplied capture without an explicit task instruction.",
+      "remote_desks": "A paste contains a local path, not an upload of the whole bundle. Desks on the same Mac need permission to read that capture directory. A remote or container desk needs a deliberate transfer of sanitized contact sheet, summary, keyframes, and manifest. It cannot resolve the originating Mac path. CLI zoom requires Scrawl and source media on that Mac.",
+      "discovery": "Official Claude docs support repository .claude/skills and symlinked skill folders. Official OpenAI docs support repository .agents/skills and symlinks. Launch a fresh desk rooted in that repository and verify the skill is listed; discovery in Model Room wrappers has not been exercised.",
+      "not_installed": false
+    },
+    "evidence": ["skill", "skill_settings", "handoff_send", "ssh_handoff", "paste", "codex_skills", "claude_skills"]
+  },
+  "license": {
+    "name": "MIT",
+    "copyright": "Copyright (c) 2026 Kit Langton",
+    "obligation": "Preserve the copyright and permission notice with copies or substantial portions, including a copied skill. No warranty is provided. Dependencies retain their own licenses; no full dependency-license audit was performed.",
+    "evidence": ["license", "package"]
+  },
+  "future_install_steps": {
+    "status": "Instructions only. Do not execute as part of this audit. All steps in the preferred sequence are required for later adoption.",
+    "preferred_pinned_zip": [
+      {"step": 1, "action": "Confirm Apple silicon and macOS 26 or later.", "commands": ["uname -m", "sw_vers -productVersion"]},
+      {"step": 2, "action": "Create a fresh audit staging directory.", "commands": ["test ! -e /private/tmp/scrawl-install-036 && test ! -L /private/tmp/scrawl-install-036 && mkdir -m 700 /private/tmp/scrawl-install-036"]},
+      {"step": 3, "action": "Download the pinned archive without curl configuration.", "commands": ["curl -q --fail --location --output /private/tmp/scrawl-install-036/Scrawl-0.3.6-arm64.zip https://scrawl.kitlangton.com/releases/Scrawl-0.3.6-arm64.zip"]},
+      {"step": 4, "action": "Require the reviewed archive checksum.", "commands": ["printf '%s  %s\n' '5631c65f31e047b47d23610220c0dfa7fc3bb073f5300f88824d8c2448172065' '/private/tmp/scrawl-install-036/Scrawl-0.3.6-arm64.zip' | shasum -a 256 -c -"], "check": "Require OK. Stop on mismatch."},
+      {"step": 5, "action": "Extract the archive into staging.", "commands": ["ditto -x -k /private/tmp/scrawl-install-036/Scrawl-0.3.6-arm64.zip /private/tmp/scrawl-install-036/extracted"]},
+      {"step": 6, "action": "Verify signatures and notarization before installation.", "commands": ["codesign --verify --deep --strict --verbose=2 /private/tmp/scrawl-install-036/extracted/Scrawl.app", "codesign -d --verbose=4 /private/tmp/scrawl-install-036/extracted/Scrawl.app", "spctl --assess --type execute --verbose=4 /private/tmp/scrawl-install-036/extracted/Scrawl.app", "xcrun stapler validate /private/tmp/scrawl-install-036/extracted/Scrawl.app"], "check": "Require successful verification, Notarized Developer ID, and team QC99C9JE59. Never bypass Gatekeeper."},
+      {"step": 7, "action": "Copy the verified app into Applications without replacing an existing installation.", "commands": ["test ! -e /Applications/Scrawl.app && ditto /private/tmp/scrawl-install-036/extracted/Scrawl.app /Applications/Scrawl.app"]},
+      {"step": 8, "action": "Create private capture, log, and config directories before launch.", "commands": ["install -d -m 700 \"$HOME/Library/Application Support/scrawl/captures\" \"$HOME/Library/Logs/Scrawl\" \"$HOME/.config/scrawl\""], "check": "For an existing setup, inspect directory metadata and preserve existing files. Do not open config contents."},
+      {"step": 9, "action": "Set macOS Firewall Options to block incoming connections for Scrawl.", "check": "Enable the firewall and verify Scrawl's entry is Block incoming connections. Do this before normal network use."},
+      {"step": 10, "action": "Launch the app with OpenCode forwarding disabled.", "commands": ["(umask 077; SCRAWL_NO_OPENCODE=1 /Applications/Scrawl.app/Contents/MacOS/scrawl app)"], "check": "This is the first command that executes Scrawl. Preserve the override on later controlled launches."},
+      {"step": 11, "action": "Disable Send dev-site captures to OpenCode in Scrawl General settings.", "check": "Keep Apple Speech selected, agentContext off, remote forwarding unset, and phone pairing unused."},
+      {"step": 12, "action": "Grant Screen Recording, Microphone, and Accessibility through onboarding.", "check": "Leave Camera and Automation ungranted for this Mac-only manual workflow."},
+      {"step": 13, "action": "Verify installed identity and private-directory permissions.", "commands": ["codesign --verify --deep --strict /Applications/Scrawl.app", "stat -f '%Lp %N' \"$HOME/Library/Application Support/scrawl/captures\" \"$HOME/Library/Logs/Scrawl\" \"$HOME/.config/scrawl\""], "check": "Require valid code signature and mode 700 for each private directory."},
+      {"step": 14, "action": "Record a synthetic UI example and verify manual paste in each review desk.", "check": "Require the expected contact sheet, frame transcript, local bundle access, no automatic agent send, private bundle mode, and firewall isolation. Capture no client data. Live smoke test remains unperformed by this audit."}
+    ],
+    "homebrew_alternative": {
+      "command": "brew install --cask kitlangton/tap/scrawl",
+      "condition": "First inspect the resolved cask and require version 0.3.6 and DMG SHA-256 dcbefe58caaa729b61a0c29c8decbe7d9df71525aa08ad9ec4977c44b1c26aca. Stop and re-review if the tap has changed. Then perform the same signature, private-storage, firewall, settings, permission, and smoke checks. Do not run the source install-app.sh or release-app.sh.",
+      "cli": "The cask links the bundled scrawl executable onto PATH. The ZIP route can use its absolute executable path and needs no agent config install."
+    },
+    "project_skill_steps": [
+      {"step": 1, "action": "Fetch the pinned source into a separate data-only clone.", "commands": ["git clone --no-checkout https://github.com/kitlangton/scrawl.git /private/tmp/scrawl-skill-source-036"], "check": "Use a new path. Do not run repository scripts."},
+      {"step": 2, "action": "Create the project skill directories from the review repository root.", "commands": ["mkdir -p .agents/skills/scrawl .claude/skills"]},
+      {"step": 3, "action": "Copy the pinned skill and license as data.", "commands": ["git -C /private/tmp/scrawl-skill-source-036 show 10531a67a9d7677cb276f1c0aaaf0ce91bd025fc:skills/scrawl/SKILL.md > .agents/skills/scrawl/SKILL.md", "git -C /private/tmp/scrawl-skill-source-036 show 10531a67a9d7677cb276f1c0aaaf0ce91bd025fc:LICENSE > .agents/skills/scrawl/LICENSE"], "check": "Require absent destination files before copying. Preserve and review existing versions instead of overwriting."},
+      {"step": 4, "action": "Require the reviewed skill checksum.", "commands": ["printf '%s  %s\n' '59cde603f83c2fe2ec9bd775c692be0c7f0f79521e387dbcf1f797dd4b543394' '.agents/skills/scrawl/SKILL.md' | shasum -a 256 -c -"]},
+      {"step": 5, "action": "Expose the same project skill to Claude.", "commands": ["test ! -e .claude/skills/scrawl && test ! -L .claude/skills/scrawl && ln -s ../../.agents/skills/scrawl .claude/skills/scrawl"]},
+      {"step": 6, "action": "Add the capture trust restrictions to the project's authoritative desk instructions.", "check": "Keep the upstream file checksum intact. Record the pinned upstream revision beside local policy."},
+      {"step": 7, "action": "Commit the project paths through the authorized skill-distribution repository.", "check": "Do not put anything into ~/.claude or ~/.codex. Do not use bunx for this route."},
+      {"step": 8, "action": "Verify discovery and synthetic paste access in fresh Claude and Codex desks.", "check": "Require the skill to appear in each desk and the intended sanitized images to open. Shared text instructions alone do not transfer capture files."}
+    ]
+  },
+  "decisions": [
+    "One-session read-only security investigation. No application behavior changes, so Pocock TDD is not applicable and no failing behavior test was written.",
+    "Review v0.3.6 as the installation target and bind citations to the peeled commit, not the annotated tag object. Record the current main delta separately.",
+    "Recommend SAFE WITH CONDITIONS only for sanitized Mac manual paste. Do not authorize ScrawlKit inclusion in a distributed app from this audit.",
+    "Verify downloaded artifacts with trusted Apple tools without launching the app. Publisher identity passes; source equivalence remains unproven.",
+    "Prefer a hash-pinned ZIP and manual pinned skill copy over moving latest URLs, a changing tap, or an unaudited bunx installer.",
+    "Use one project .agents skill with a project .claude symlink. Adoption belongs in the software-factory distribution path and actual desk checkouts. This PR installs nothing.",
+    "Record the audit as one versioned JSON evidence artifact, consistent with existing repository audits. Do not add a runtime, installer, scanner, or broad framework.",
+    "Run two independent same-model adversarial source reviews. Configured external Claude/Grok reviewer slugs were not available through this session's collaboration tool. This is an adapted interrogate review, not a completed diverse-model panel.",
+    "Leave the PR open and unmerged, as explicitly requested. Do not expand this read into upstream fixes or production writes."
+  ],
+  "adversarial_review": {
+    "intent": "Find concrete privacy, execution, and provenance risks that would invalidate safe Mac UI review, including behavior omitted by the landing page.",
+    "reviewers": ["scrawl_network_review, inherited session model, source-only", "scrawl_skill_storage_review, inherited session model, source-only"],
+    "agreement": "Both recommend SAFE WITH CONDITIONS, disable auto-send, avoid remote forwarding, protect capture contents, and keep SDK pairing outside this workflow.",
+    "act_on": ["Separate Mac and phone auto-forward controls.", "Restrict the always-started LAN listener.", "Precreate private storage before recording.", "Keep skill execution and capture prompt-injection restrictions explicit."],
+    "consider": ["SDK pairing links retarget queued recordings. Requires a separate SDK adoption review."],
+    "noted": ["Publisher notarization is not proof of source equivalence.", "No full dependency audit or runtime network trace."],
+    "dismissed": ["No evidence in reviewed source that narration or OCR text is directly evaluated as shell code. Agent prompt injection and manifest path handling remain separate real concerns."],
+    "limitations": "Two same-model reviewers provide independent reading coverage but not the model diversity prescribed by the default interrogate skill. Lead checked security conclusions against source and artifact checks."
+  },
+  "verification": {
+    "third_party_tests_run": 0,
+    "third_party_install_or_execution": false,
+    "report_validation": "JSON parsed. All 53 indexed source references resolve at their pinned revisions and cited line ranges exist. Every evidence ID resolves. The skill hash matches the pinned source. All seven requested report areas are present. git diff --check passed.",
+    "repository_checks": "ops/ci.sh --only pushfloor,freshness passed both selected classes. No behavior tests were added for this evidence-only artifact.",
+    "release_checks_passed": ["DMG SHA-256 equals pinned cask", "DMG SHA-256 equals GitHub release asset digest", "DMG codesign verification", "ZIP SHA-256 recorded", "App deep strict codesign verification", "Expected Developer ID and team", "Expected version, build, architecture, and minimum OS", "Gatekeeper Notarized Developer ID assessment", "Stapled notarization ticket validation", "Release entitlements match reviewed declarations"],
+    "release_checks_count": 10,
+    "skipped": ["No live capture, installed-file mode observation, packet capture, UI permission-prompt exercise, firewall enforcement test, SDK upload, skill discovery smoke test, dependency execution, reproducible build, or Ed25519 appcast verification."],
+    "source_gaps": ["Security-relevant source and linked capture, routing, retention, onboarding, SDK, and keyframe documentation were studied. This is not a line-by-line audit of every rendering, animation, benchmark, Windows, video-generation, or transitive dependency file.", "The site was unavailable through web open but fetched successfully with a configuration-free public GET. Apple documentation's Markdown link was unavailable through the web tool; local-only fallback is grounded in the reviewed Swift code, not a claimed successful render of that Apple page.", "No exact claim is made about writes by the external skills installer because that package was not audited."]
+  },
+  "design_and_debt_pass": {
+    "codebase_design": "One audit artifact exposes evidence and decisions without adding a new interface or runtime module. No code seam changed.",
+    "zero_tech_debt": "No installers, wrappers, flags, duplicate skills, or compatibility paths were introduced. The intended end state for this task is a reviewable security verdict only."
+  },
+  "skills_used": ["poteto-mode", "grill-with-docs with autonomous frontier decisions", "mattpocock-skills:grilling", "mattpocock-skills:domain-modeling vocabulary", "interrogate adapted to two same-model reviews", "Prove It Works", "codebase-design", "zero-tech-debt", "technical-writing", "unslop", "mattpocock-skills:pr", "openai-docs for official skill discovery documentation"],
+  "source_index": {
+    "transcribe": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/transcribe.rs#L13-L229",
+    "apple_speech": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/helper/Media.swift#L5-L203",
+    "live_speech": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/helper/LiveTranscribe.swift#L4-L60",
+    "speech_model": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/speech_model.rs#L91-L179",
+    "hex": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/hex.rs#L124-L155",
+    "sparkle": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/sparkle.rs#L89-L147",
+    "sparkle_docs": "https://sparkle-project.org/documentation/api-reference/Classes/SPUUpdater.html",
+    "auto_send": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/handoff.rs#L626-L628",
+    "routing": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/routing.rs#L384-L421",
+    "handoff_send": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/handoff.rs#L1067-L1166",
+    "delivery_retry": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/delivery.rs#L144-L280",
+    "ssh_handoff": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/handoff.rs#L728-L914",
+    "app_start": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/ui.rs#L5316-L5334",
+    "ingest": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/phone.rs#L1238-L1305",
+    "ingest_auth": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/phone.rs#L1550-L1646",
+    "browser_server": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/web.rs#L298-L410",
+    "phone_pairing": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/phone.rs#L1134-L1235",
+    "sdk_pairing": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/Sources/ScrawlKit/Scrawl.swift#L37-L80",
+    "sdk_modifier": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/Sources/ScrawlKit/ScrawlModifier.swift#L26-L31",
+    "sdk_upload": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/Sources/ScrawlKit/Scrawl.swift#L1365-L1411",
+    "sdk_outbox": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/Sources/ScrawlKit/Outbox.swift#L155-L388",
+    "sdk_storage": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/Sources/ScrawlKit/Scrawl.swift#L491-L518",
+    "browser_sdk": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/sdk.js#L40-L246",
+    "context_opt_in": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/handoff.rs#L479-L490",
+    "ax_context": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/ax.rs#L236-L264",
+    "page_context": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/page.rs#L115-L138",
+    "site_worker": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/site/worker.ts",
+    "site_html": "https://scrawl.kitlangton.com/",
+    "capture_path": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/handoff.rs#L10-L25",
+    "capture_creation": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/ui.rs#L2538-L2544",
+    "bundle_write": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/main.rs#L1033-L1058",
+    "config": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/handoff.rs#L493-L705",
+    "log_path": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/capture/macos.rs#L35-L37",
+    "log_write": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/capture.rs#L318-L335",
+    "wav_temp": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/helper/Media.swift#L263-L285",
+    "retention": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/retention.rs#L48-L101",
+    "retention_worker": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/retention.rs#L690-L744",
+    "onboarding": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/onboarding.rs#L6-L43",
+    "mac_input": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/capture/macos.rs#L1576-L1693",
+    "paste": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/handoff.rs#L195-L241",
+    "entitlements": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/scripts/Scrawl.entitlements",
+    "workflow_check": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/.github/workflows/check.yml",
+    "workflow_windows": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/.github/workflows/release-windows.yml",
+    "release_script": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/scripts/release-app.sh",
+    "sparkle_setup": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/scripts/setup-sparkle.sh",
+    "appcast": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/site/public/appcast.xml",
+    "cask": "https://github.com/kitlangton/homebrew-tap/blob/f38979e6ce001ee45fb34c1f249c50a974460f78/Casks/scrawl.rb",
+    "skill": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/skills/scrawl/SKILL.md",
+    "skill_settings": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/src/settings.rs#L568-L569",
+    "codex_skills": "https://learn.chatgpt.com/docs/build-skills",
+    "claude_skills": "https://code.claude.com/docs/en/skills",
+    "license": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/LICENSE",
+    "package": "https://github.com/kitlangton/scrawl/blob/10531a67a9d7677cb276f1c0aaaf0ce91bd025fc/Cargo.toml"
+  }
+}
