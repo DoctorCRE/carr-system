@@ -109,6 +109,16 @@ test('short heading uses a recorded doctor contact and market while preserving u
   assert.equal(result.deals.find(d => d.id === deal).short_name,"Dr. Example's Baytown Deal");
 });
 
+test('a follow-up entered after conversion is visible without replacing existing checklist items', async () => {
+  const before = await readDealItems(c,deal);
+  const result = await command('record-deal-item',{ ...item('Schedule package review'),due_on:'2026-10-28',source_ref:`app:deal-item:${randomUUID()}` });
+  const after = await readDealItems(c,deal);
+  assert.equal(after.length,before.length+1);
+  assert.ok(after.some(i => i.title === 'Schedule package review' && i.due_on === '2026-10-28'));
+  assert.deepEqual(after.filter(i => before.some(b => b.id === i.id)),before);
+  assert.equal(result.item.title,'Schedule package review');
+});
+
 test('logging outreach cannot silently complete unrelated structured commitments', async () => {
   const before = await readDealItems(c,deal);
   await command('log-outreach',{ ref:deal,channel:'call',outcome:'connected',summary:'Synthetic check-in completed.',next_on:'2026-10-26',next_step:'Independent legacy follow-up.' });
