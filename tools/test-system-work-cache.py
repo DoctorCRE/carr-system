@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 import threading
+from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 from datetime import timedelta
@@ -121,6 +122,24 @@ class CacheTests(unittest.TestCase):
    self.assertEqual(sum(row['kind']=='pull_request' for row in result['items']),500)
    self.assertEqual([c['history'] for c in calls],['null','null','100','100','200','200'])
    self.assertEqual([c['updates'] for c in calls],['null','null','100','100','200','200'])
+ def test_same_second_updates_do_not_fall_behind_a_fractional_watermark(self):
+  first=self.read([])['data']['repository']['history']['nodes'][0]
+  state={repo:{'watermark':'2026-10-01T00:00:00.900000+00:00','history':'history-end',
+               'prs':{'101':{k:v for k,v in {**first,'number':101,'work_refs':[]}.items() if k!='body'}}}
+         for repo in cache.REPOSITORIES}
+  def read(args):
+   fields=dict(arg.split('=',1) for arg in args if '=' in arg)
+   rows=[{**first,'number':n,'updatedAt':'2026-10-01T00:00:00Z','title':'Updated'}
+         for n in (range(1,101) if fields['updates']=='null' else [101])]
+   return {'data':{'repository':{
+    'history':{'nodes':[],'pageInfo':{'endCursor':None,'hasNextPage':False}},
+    'updates':{'nodes':rows,'pageInfo':{'endCursor':'updates-100' if len(rows)==100 else 'updates-end',
+                                      'hasNextPage':len(rows)==100}}}}}
+  result=cache.collect_github(NOW+timedelta(seconds=1),read,state=state,branches=lambda *_:[])
+  self.assertFalse(result['complete'],'same-second rows must not prematurely end the update scan')
+  result=cache.collect_github(NOW+timedelta(minutes=16),read,state=state,branches=lambda *_:[])
+  self.assertTrue(result['complete'])
+  self.assertTrue(all(row['title']=='Updated' for row in result['items'] if row['id'].endswith(':pr:101')))
  def test_real_git_fetch_filters_merged_recent_and_deleted_branches(self):
   with tempfile.TemporaryDirectory() as d:
    root=Path(d); source=root/'source'
@@ -138,20 +157,85 @@ class CacheTests(unittest.TestCase):
     self.assertEqual(rows,[{'name':'stale/feature','sha':sha,'date':'2026-09-02T00:00:00Z'}])
     git('branch','-D','stale/feature')
     self.assertEqual(cache.local_branches('jbookout/carr-system',root/'mirrors',NOW),[])
- def test_cold_mirror_reuses_fetched_checkout_objects(self):
+ def test_git_fetch_leaves_no_object_store_and_never_changes_the_checkout(self):
+  with tempfile.TemporaryDirectory() as d:
+   root=Path(d);source=root/'checkout';source.mkdir()
+   def git(*args):
+    return subprocess.run(['git','-C',str(source),'-c','user.name=Fixture',
+                           '-c','user.email=fixture@example.invalid',*args],capture_output=True,text=True,check=True).stdout
+   git('init','-b','main');git('commit','--allow-empty','-m','base')
+   before=git('show-ref')
+   env={'CARR_REPO_ROOT':str(source),'GIT_CONFIG_COUNT':'1',
+        'GIT_CONFIG_KEY_0':f'url.{source}.insteadOf','GIT_CONFIG_VALUE_0':'https://github.com/DoctorCRE/carr-system.git'}
+   abandoned=root/'mirrors/carr-system.scratch'
+   (abandoned/'repo.git/objects').mkdir(parents=True)
+   (abandoned/'.inventory-owner').write_text('system-work-cache.v1\n')
+   with patch.dict(os.environ,env):
+    self.assertEqual(cache.local_branches('jbookout/carr-system',root/'mirrors',NOW),[])
+   self.assertEqual(list((root/'mirrors').rglob('objects')),[],'refresh must discard its object store')
+   self.assertEqual(git('show-ref'),before)
+ def test_low_disk_refuses_git_before_creating_an_object_store(self):
+  with tempfile.TemporaryDirectory() as d, patch('shutil.disk_usage',return_value=SimpleNamespace(free=0)), \
+       patch.object(subprocess,'run',side_effect=AssertionError('git must not start on low disk')):
+   with self.assertRaises(OSError):
+    cache.local_branches('jbookout/carr-system',Path(d)/'mirrors',NOW)
+ def test_repository_routing_environment_cannot_redirect_the_private_fetch(self):
+  with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,{'GIT_OBJECT_DIRECTORY':'/synthetic/fleet/objects'}), \
+       patch.object(subprocess,'run',side_effect=AssertionError('git must not use inherited object routing')):
+   with self.assertRaises(ValueError):
+    cache.local_branches('jbookout/carr-system',Path(d)/'mirrors',NOW)
+ def test_git_cleanup_refuses_unowned_paths_and_symlinks(self):
+  for symlink in (False,True):
+   with self.subTest(symlink=symlink), tempfile.TemporaryDirectory() as d:
+    root=Path(d);mirrors=root/'mirrors';mirrors.mkdir();fleet=root/'fleet';fleet.mkdir()
+    scratch=mirrors/'carr-system.scratch'
+    if symlink:
+     (fleet/'.inventory-owner').write_text('system-work-cache.v1\n')
+     scratch.symlink_to(fleet,target_is_directory=True)
+    else:scratch.mkdir()
+    with patch.object(subprocess,'run',side_effect=AssertionError('git must not start')):
+     with self.assertRaises(ValueError):
+      cache.local_branches('jbookout/carr-system',mirrors,NOW)
+    self.assertTrue(fleet.is_dir())
+    self.assertTrue(scratch.exists())
+ def test_empty_nonterminal_page_does_not_advance_saved_cursors(self):
+  state={}
+  result=cache.collect_github(NOW,lambda _:self.response([],more=True),state=state,branches=self.branches)
+  self.assertFalse(result['complete'])
+  self.assertEqual(state,{})
+ def test_filtered_fetch_omits_trees_and_blobs(self):
   with tempfile.TemporaryDirectory() as d:
    root=Path(d);source=root/'checkout';source.mkdir()
    subprocess.run(['git','init','-b','main',str(source)],capture_output=True,check=True)
-   subprocess.run(['git','-C',str(source),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-m','base'],capture_output=True,check=True)
+   subprocess.run(['git','-C',str(source),'config','uploadpack.allowFilter','true'],capture_output=True,check=True)
+   (source/'payload.txt').write_text('Synthetic payload\n'*1000)
+   subprocess.run(['git','-C',str(source),'add','payload.txt'],capture_output=True,check=True)
+   subprocess.run(['git','-C',str(source),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-m','base'],capture_output=True,check=True)
    real_run=subprocess.run
    def transport(args,**kwargs):
-    if any(arg.startswith('https://') for arg in args):
-     probe=real_run([*args[:2],'cat-file','-e','refs/heads/main^{commit}'],capture_output=True)
-     self.assertEqual(probe.returncode,0,'cold fetch must reuse the already-fetched checkout')
-     return subprocess.CompletedProcess(args,0,stdout='',stderr='')
-    return real_run(args,**kwargs)
-   with patch.dict(os.environ,{'CARR_REPO_ROOT':str(source)}), patch.object(subprocess,'run',side_effect=transport):
+    result=real_run(args,**kwargs)
+    if 'fetch' in args:
+     git_dir=next(arg for arg in args if arg.startswith('--git-dir='))
+     probe=real_run(['git',git_dir,'cat-file','--batch-all-objects','--batch-check=%(objecttype)'],capture_output=True,text=True,check=True)
+     self.assertEqual(set(probe.stdout.splitlines()),{'commit'})
+    return result
+   env={'CARR_REPO_ROOT':str(source),'GIT_CONFIG_COUNT':'2',
+        'GIT_CONFIG_KEY_0':f'url.{source}.insteadOf','GIT_CONFIG_VALUE_0':'https://github.com/DoctorCRE/carr-system.git',
+        'GIT_CONFIG_KEY_1':'uploadpack.allowFilter','GIT_CONFIG_VALUE_1':'true'}
+   with patch.dict(os.environ,env), patch.object(subprocess,'run',side_effect=transport):
     self.assertEqual(cache.local_branches('jbookout/carr-system',root/'mirrors',NOW),[])
+ def test_git_pack_limit_fails_closed_and_discards_the_object_store(self):
+  with tempfile.TemporaryDirectory() as d:
+   root=Path(d);source=root/'checkout';source.mkdir()
+   subprocess.run(['git','init','-b','main',str(source)],capture_output=True,check=True)
+   subprocess.run(['git','-C',str(source),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid',
+                   'commit','--allow-empty','-m','base'],capture_output=True,check=True)
+   env={'GIT_CONFIG_COUNT':'1','GIT_CONFIG_KEY_0':f'url.{source}.insteadOf',
+        'GIT_CONFIG_VALUE_0':'https://github.com/DoctorCRE/carr-system.git'}
+   with patch.dict(os.environ,env), patch.object(cache,'GIT_PACK_LIMIT_BYTES',512,create=True):
+    with self.assertRaises(subprocess.CalledProcessError):
+     cache.local_branches('jbookout/carr-system',root/'mirrors',NOW)
+   self.assertEqual(list((root/'mirrors').rglob('objects')),[])
  def test_builder_brief_with_pr_is_excluded_and_no_body_cached(self):
   with tempfile.TemporaryDirectory() as d:
    p=Path(d)/'brief-synthetic.txt';p.write_text('ROLE: builder\nREPOS: carr-system\nBRANCH: synthetic\n')

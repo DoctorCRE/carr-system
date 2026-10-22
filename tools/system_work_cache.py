@@ -11,6 +11,8 @@ import os
 import tempfile
 import re
 import subprocess
+import shutil
+import sys
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from pathlib import Path
@@ -18,6 +20,14 @@ from pathlib import Path
 # Published identities stay stable across repository transfers.
 REPOSITORIES = {"jbookout/carr-system": "DoctorCRE/carr-system",
                 "jbookout/doctorcre-app": "jbookout/doctorcre-app"}
+GIT_MIN_FREE_BYTES = 512 * 1024 * 1024
+GIT_PACK_LIMIT_BYTES = 128 * 1024 * 1024
+LIMITED_GIT = """import os, resource, sys
+limit = int(sys.argv[1])
+resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+os.execvp(sys.argv[2], sys.argv[2:])
+"""
 
 
 def github_json(args):
@@ -68,14 +78,19 @@ def pull_requests(repo, now, previous, read):
     if result.get('errors'): raise ValueError('GraphQL errors')
     data = result['data']['repository']
     rows = state.setdefault('prs', {})
-    watermark = date_value(state.setdefault('watermark', now.isoformat()))
-    state.setdefault('scan_started', now.isoformat())
+    # GitHub updates have second resolution; overlap the previous scan so
+    # changes during its first second cannot fall behind a fractional cursor.
+    watermark = date_value(state.setdefault('watermark', now.isoformat(timespec='seconds')))
+    watermark = watermark.replace(microsecond=0) - timedelta(seconds=1)
+    state.setdefault('scan_started', now.isoformat(timespec='seconds'))
     for stream in ('history', 'updates'):
         connection = data[stream]
         page = connection['pageInfo']
         nodes = connection['nodes']
         if not isinstance(nodes, list) or type(page['hasNextPage']) is not bool:
             raise ValueError('GraphQL page invalid')
+        if page['hasNextPage'] and not nodes:
+            raise ValueError('GraphQL nonterminal page is empty')
         cursor = page['endCursor']
         if nodes or page['hasNextPage']: required_text(cursor)
         if page['hasNextPage'] and cursor == state.get(stream):
@@ -107,37 +122,51 @@ def pull_requests(repo, now, previous, read):
 
 
 def local_branches(repo, root, now):
-    """Fetch one private mirror; branch age and ahead counts use local objects."""
-    mirror = Path(root) / (repo.split('/')[1] + '.git')
-    mirror.parent.mkdir(parents=True, exist_ok=True)
-    def git(*args):
-        return subprocess.run(['git', '--git-dir=' + str(mirror), *args],
-            capture_output=True, text=True, timeout=120, check=True).stdout.strip()
-    with mirror.with_suffix('.lock').open('a') as lock:
+    """Compare commits in a disposable bare repository, never a fleet checkout."""
+    if any(os.environ.get(key) for key in ('GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE',
+                                         'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_SHALLOW_FILE')):
+        raise ValueError('inherited git repository routing is unsafe for the inventory fetch')
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    name = repo.split('/')[1]
+    with (root / (name + '.lock')).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        if not mirror.exists():
+        scratch = root / (name + '.scratch')
+        marker = scratch / '.inventory-owner'
+        if scratch.exists() or scratch.is_symlink():
+            if scratch.is_symlink() or marker.is_symlink() or not marker.is_file() or marker.read_text() != 'system-work-cache.v1\n':
+                raise ValueError('inventory scratch directory is not owned by this collector')
+            shutil.rmtree(scratch)
+        if shutil.disk_usage(root).free < GIT_MIN_FREE_BYTES:
+            raise OSError('insufficient space for the inventory git fetch')
+        scratch.mkdir()
+        marker.write_text('system-work-cache.v1\n')
+        try:
+            mirror = scratch / 'repo.git'
+            def git(*args):
+                command = ['git', '--git-dir=' + str(mirror), *args]
+                if args[0] == 'fetch':
+                    command = [sys.executable, '-c', LIMITED_GIT, str(GIT_PACK_LIMIT_BYTES), *command]
+                return subprocess.run(command,
+                    capture_output=True, text=True, timeout=120, check=True).stdout.strip()
             subprocess.run(['git', 'init', '--bare', str(mirror)], capture_output=True,
                            text=True, timeout=30, check=True)
-        source = (Path(os.environ.get('CARR_REPO_ROOT') or Path(__file__).resolve().parents[1])
-                  if repo.endswith('/carr-system') else Path.home() / 'doctorcre-app')
-        if not git('for-each-ref', '--count=1', '--format=%(refname)', 'refs/heads/') and (source / '.git').exists():
-            # Reuse fetched objects before asking GitHub for branch deltas.
-            git('fetch', '--no-tags', str(source), '+refs/heads/*:refs/heads/*')
-        canonical = REPOSITORIES[repo]
-        git('fetch', '--prune', '--no-tags', 'https://github.com/' + canonical + '.git',
-            '+refs/heads/*:refs/heads/*')
-        main = git('rev-parse', 'refs/heads/main')
-        rows = []
-        refs = git('for-each-ref', '--sort=refname', '--format=%(refname:strip=2)	%(objectname)	%(committerdate:iso-strict)', 'refs/heads/')
-        for line in refs.splitlines():
-            name, sha, date = line.split('\t')
-            if name == 'main' or now - date_value(date) <= timedelta(days=7): continue
-            base = git('merge-base', main, sha)
-            if int(git('rev-list', '--count', base + '..' + sha)) == 0: continue
-            # REST uses UTC Z dates; preserve the published bytes.
-            date = date_value(date).astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-            rows.append({'name': name, 'sha': sha, 'date': date})
-        return rows
+            git('fetch', '--no-tags', '--no-auto-maintenance', '--filter=tree:0',
+                'https://github.com/' + REPOSITORIES[repo] + '.git', '+refs/heads/*:refs/heads/*')
+            main = git('rev-parse', 'refs/heads/main')
+            rows = []
+            refs = git('for-each-ref', '--sort=refname', '--format=%(refname:strip=2)\t%(objectname)\t%(committerdate:iso-strict)', 'refs/heads/')
+            for line in refs.splitlines():
+                name, sha, date = line.split('\t')
+                if name == 'main' or now - date_value(date) <= timedelta(days=7): continue
+                base = git('merge-base', main, sha)
+                if int(git('rev-list', '--count', base + '..' + sha)) == 0: continue
+                # REST uses UTC Z dates; preserve the published bytes.
+                date = date_value(date).astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                rows.append({'name': name, 'sha': sha, 'date': date})
+            return rows
+        finally:
+            shutil.rmtree(scratch)
 
 
 def date_value(value):
