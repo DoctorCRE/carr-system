@@ -296,6 +296,21 @@ check("core partition remains strict and runs the full acceptance manifest",
       result == 0 and any(event[-3:] == ("--strict", "--migration-part", "core") for event in core_events)
       and any(event[-1].endswith("tools/test-f03-production-migration.py") for event in core_events)
       and any("--verify-only" in event for event in core_events))
+for part in ("proofs", "gates"):
+    start = len(events)
+    try:
+        with patch.object(mod, "find_postgres_binaries", return_value=fake_bins), \
+                patch.object(mod, "port_is_available", return_value=True):
+            result = mod.run_local_ci(repo=REPO, ci_class="migration", port=55432,
+                                      runner=FakeRunner(), migration_part=part)
+    except mod.LocalPGRefusal:
+        result = 78
+    calls = events[start:]
+    check(f"{part} partition runs strictly", result == 0 and any(
+        event[-3:] == ("--strict", "--migration-part", part) for event in calls))
+    acceptance = any(event[-1].endswith("tools/test-f03-production-migration.py") for event in calls)
+    check(f"{part} partition owns the intended acceptance programs", acceptance == (part == "proofs"))
+
 for invalid_part in ("fixtures", "unknown"):
     try:
         mod.run_local_ci(repo=REPO, ci_class="migration", port=55432, runner=FakeRunner(), migration_part=invalid_part)

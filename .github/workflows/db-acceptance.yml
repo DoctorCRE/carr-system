@@ -61,11 +61,8 @@ jobs:
           fetch-depth: 0
 
       - name: Decide whether this diff can change the database lane
-        # The path filter above is deliberately wide (ops/**, tools/**), so most
-        # PRs start this job. ops/db-acceptance-scope.py narrows it to
-        # migration, schema and record-layer database files; any other diff
-        # skips the 34-45 minute install and run and the job still reports
-        # green. Schedule, manual and undecidable runs stay full.
+        # Manual diagnostics always run full proof. Required PR and nightly
+        # proof belongs to ci.yml; its applicability has one scope inventory.
         id: scope
         run: python3 ops/db-acceptance-scope.py
 

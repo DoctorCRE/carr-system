@@ -28,6 +28,21 @@ def check(name, ok):
         failures.append(name)
 
 
+check('transitive continuity manifest runs database proof',
+      scope.needs_full(['mcp-server/continuity-reference-manifest.mjs']))
+
+# A new import outside the declared trees must enter scope automatically.
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    (root / 'mcp-server/test').mkdir(parents=True)
+    (root / 'mcp-server/test/proof.mjs').write_text("import '../adapter.mjs';\n")
+    (root / 'mcp-server/adapter.mjs').write_text("export * from '../shared/contract.mjs';\n")
+    (root / 'shared').mkdir()
+    (root / 'shared/contract.mjs').write_text('export const value = 1;\n')
+    inputs = scope.relative_imports([root / 'mcp-server/test/proof.mjs'], root)
+    check('a new transitive proof import cannot remain unlisted',
+          'shared/contract.mjs' in inputs and 'mcp-server/adapter.mjs' in inputs)
+
 for path in ('migrations/0363_x.sql', 'db/schema.sql', 'mcp-server/src/tools.js', 'ops/local-pg-ci.py',
              'ops/migration-shadow.py', 'tools/migrate.py', 'tools/test_migration_claims.py',
              'bin/schema-snapshot.sh', 'run.sh', '.github/workflows/db-acceptance.yml',

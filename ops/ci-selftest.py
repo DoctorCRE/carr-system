@@ -306,24 +306,72 @@ def test_hosted_migration_ownership():
     check("PR slot claims run before entering the credential-scrubbed database lane",
           runner["run"].index("python3 ops/migration-open-pr-gate.py") < runner["run"].index("python ops/local-pg-ci.py")
           and "GH_TOKEN" in runner["env"])
+    check("hosted migration partitions cover all independent proof groups",
+          set(wf["jobs"]["migration-fixtures"].get("strategy", {}).get("matrix", {}).get("part", []))
+          == {"reconstruction", "equivalence", "shadow", "gates"}
+          and "--migration-part proofs" in runner["run"])
     check("required aggregate waits for independent fixtures", "migration-fixtures" in wf["jobs"]["checks"]["needs"])
     aggregate = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Fail unless every class group succeeded")
     with tempfile.TemporaryDirectory() as directory:
         fake = pathlib.Path(directory) / "python3"
         fake.write_text("#!/bin/sh\nexit 0\n")
         fake.chmod(0o755)
-        for full, fixtures, classes, expected in (
-            ("true", "success", "success", 0), ("false", "skipped", "success", 0),
-            ("", "skipped", "success", 1), ("true", "failure", "success", 1),
-            ("true", "cancelled", "success", 1), ("false", "failure", "success", 1),
-            ("false", "skipped", "failure", 1),
+        for full, fixtures, classes, draft, expected in (
+            ("true", "success", "success", "false", 0), ("false", "skipped", "success", "false", 0),
+            ("", "skipped", "success", "false", 1), ("true", "failure", "success", "false", 1),
+            ("true", "cancelled", "success", "false", 1), ("false", "failure", "success", "false", 1),
+            ("false", "skipped", "failure", "false", 1),
+            ("true", "skipped", "success", "true", 0),
+            ("true", "skipped", "success", "false", 1),
         ):
             result = subprocess.run(["bash", "-e", "-c", aggregate["run"]], capture_output=True, text=True,
                                     env={**scrubbed_env(), "PATH": directory + os.pathsep + os.environ["PATH"],
-                                         "DB_FULL": full, "FIXTURES_RESULT": fixtures, "CLASSES_RESULT": classes})
+                                         "DB_FULL": full, "CI_DRAFT": draft, "FIXTURES_RESULT": fixtures, "CLASSES_RESULT": classes})
             check(f"aggregate scope={full!r} fixtures={fixtures} classes={classes}", result.returncode == expected)
     record = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Record the tested tree and class contract")
     check("not-applicable proof cannot be reused as full main evidence", "full != 'false'" in record.get("if", ""))
+
+
+def test_migration_partitions_execute_complete_inventory():
+    import shlex
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        shim = root / "program"
+        shim.write_text('#!/bin/bash\necho "$*" >> "$CALLS"\n'
+                        '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && exit 9\nexit 0\n')
+        shim.chmod(0o755)
+        (root / "psql").symlink_to(shim)
+        body = _ci_function_body("check_migration_fixtures", "check_binding")
+        prefix = "\n".join(("set -uo pipefail", f"PY={shlex.quote(str(shim))}",
+            f"LOGDIR={shlex.quote(str(root))}", "STRICT=1", "FAILED=0",
+            "bad() { FAILED=1; }", "ok() { :; }", "skip() { FAILED=1; }",
+            'run_quiet() { local log="$1"; shift; echo "$*" >> "$CALLS"; '
+            '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && return 9; '
+            'printf "r03_recovered_health\\njoe,3,3,3,0,0,0,0,1,0,0,0,0,0,No open\\n'
+            'r03_actor_mismatch_health\\njoe,4,3,3,0,1,1,1,1,0,0,0,0,0,On missing\\n" > "$log"; }'))
+        def run(part, fail=""):
+            calls = root / "calls"
+            calls.write_text("")
+            result = subprocess.run(["bash", "-c", prefix + f"\nMIGRATION_PART={part}\n" + body +
+                                     '\ncheck_migration; exit "$FAILED"'], cwd=REPO,
+                env={**scrubbed_env(), "PATH": directory + os.pathsep + os.environ["PATH"],
+                     "CALLS": str(calls), "CARR_CI_DATABASE_URL": "postgres://ci@127.0.0.1:55432/ci",
+                     "FAIL_PROGRAM": fail}, capture_output=True, text=True)
+            return result.returncode, set(calls.read_text().splitlines())
+        fixtures = {}
+        for part in ("reconstruction", "equivalence", "shadow", "fixtures", "proofs", "gates", "core"):
+            rc, fixtures[part] = run(part)
+            check(f"migration {part} partition executes", rc == 0)
+        check("fixture partition union retains the complete canonical fixture inventory",
+              fixtures["reconstruction"] | fixtures["equivalence"] | fixtures["shadow"] == fixtures["fixtures"])
+        check("core partition union retains every canonical database command",
+              fixtures["proofs"] | fixtures["gates"] == fixtures["core"])
+        check("consumer partition excludes DB gate commands", not any(
+              "ci-migration-gates.py --logdir" in call and "--sql-proof" not in call
+              for call in fixtures["proofs"]))
+        check("DB gate partition excludes consumer proofs", not any(
+              "node --test" in call for call in fixtures["gates"]))
+        check("a failing partition fails the migration verdict", run("reconstruction", "schema-reconstruction-selftest.py")[0] == 1)
 
 
 def test_gate_shards_execute_a_disjoint_complete_inventory():
@@ -1174,6 +1222,7 @@ def main(argv=None):
                test_unknown_class_refuses,
                test_hxprobe_runs_locked_checks_and_propagates_failures,
                test_gate_shards_execute_a_disjoint_complete_inventory,
+               test_migration_partitions_execute_complete_inventory,
                test_hosted_migration_ownership,
                test_database_scope_receipts,
                test_migration_refuses_non_loopback,

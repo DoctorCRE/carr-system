@@ -68,9 +68,9 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
     pr_steps = pr['jobs']['classes']['steps']
     check('main retains the full default class while PR partitions the same proof',
           any(st.get('run') == 'ops/ci.sh --strict --only "${{ matrix.classes }}"' for st in main_steps)
-          and any('--migration-part core' in st.get('run', '') for st in pr_steps)
-          and any('--migration-part fixtures' in st.get('run', '')
-                  for st in pr['jobs']['migration-fixtures']['steps']))
+          and any('--migration-part proofs' in st.get('run', '') for st in pr_steps)
+          and set(pr['jobs']['migration-fixtures']['strategy']['matrix']['part'])
+          == {'reconstruction', 'equivalence', 'shadow', 'gates'})
     check('main retains its service and PR limits the shared fixture to unit checks',
           classes['services']['postgres']['image'] in pr['jobs']['classes']['services']['postgres']['image']
           and "contains(matrix.classes, 'unit')" in pr['jobs']['classes']['services']['postgres']['image'])
