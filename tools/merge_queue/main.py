@@ -1098,12 +1098,24 @@ class Queue:
         update = self.db.execute("SELECT * FROM actions WHERE kind='update' AND phase IN ('issued','done') AND attempts>0 "
                                  'AND repo=? AND pr=? AND head=?',
                                  (e['repo'], e['pr'], e['approved'])).fetchone()
-        if update:
+        actions = self.db.execute("SELECT * FROM actions WHERE kind='regen' AND phase IN ('issued','done') "
+                                  'AND repo=? AND pr=? AND head=? AND receipt IS NOT NULL',
+                                  (e['repo'], e['pr'], e['approved'])).fetchall()
+        if update or actions:
             self.fetch(e['repo'], e['approved'], head)
-            ancestor = self.git(e['repo'], 'merge-base', e['approved'], head).strip()
+            repo_path = self.state / 'repos' / (e['repo'].split('/')[-1] + '.git')
+            ancestor = subprocess.run(['git', '-C', str(repo_path), 'merge-base', '--is-ancestor',
+                                       e['approved'], head], capture_output=True, env=scrubbed_env(),
+                                      timeout=BOUNDS['command']['seconds'])
+            if ancestor.returncode == 1:
+                return False
+            if ancestor.returncode != 0:
+                raise RuntimeError('approved head ancestry readback failed')
             commits = self.git(e['repo'], 'log', '--format=%H', '--no-merges', '--first-parent',
                                f'{e["approved"]}..{head}').strip()
-            if ancestor == e['approved'] and not commits:
+            if commits:
+                return False
+            if update:
                 with WorkQueue(default_path()) as work:
                     work.advance_merge_pin(card_id, repo=e['repo'], pr=e['pr'], head=e['approved'],
                                            prepared=head, main=p['base']['sha'], actor='merge-daemon',
@@ -1114,9 +1126,6 @@ class Queue:
                 self.report(e, 'updated', f'Advanced work pin from {e["approved"]} to {head}; hosted CI required',
                             'done')
                 return True
-        actions = self.db.execute("SELECT * FROM actions WHERE kind='regen' AND phase IN ('issued','done') "
-                                  'AND repo=? AND pr=? AND head=? AND receipt IS NOT NULL',
-                                  (e['repo'], e['pr'], e['approved'])).fetchall()
         for action in bounded_items('snapshot', actions):
             try:
                 receipt = json.loads(Path(action['receipt']).read_text())

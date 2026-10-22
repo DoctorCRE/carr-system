@@ -58,7 +58,8 @@ def prepare(remote: str, branch: str, head: str, main: str, receipt: Path,
             git(repo, 'restore', '--source=origin/main', '--staged', '--worktree', '--', path)
         if git(repo, 'diff', '--name-only', '--diff-filter=U'):
             raise ValueError('unresolved merge conflicts')
-        if (repo / '.git/MERGE_HEAD').exists():
+        merging = (repo / '.git/MERGE_HEAD').exists()
+        if merging:
             message = repo / '.git/merge-message'
             message.write_text('chore(ci): merge main before regeneration\n')
             git(repo, 'commit', '-q', '-F', str(message))
@@ -68,11 +69,10 @@ def prepare(remote: str, branch: str, head: str, main: str, receipt: Path,
         if changed:
             git(repo, 'add', '--', *sorted(changed))
         staged = git(repo, 'diff', '--cached', '--name-only')
-        merging = (repo / '.git/MERGE_HEAD').exists()
-        if staged or merging:
+        if staged:
             message = repo / '.git/regen-message'
             message.write_text('chore(ci): regenerate derived files against current main\n')
-            git(repo, 'commit', '-q', '-F', str(message))
+            git(repo, 'commit', '-q', *(['--amend'] if merging else []), '-F', str(message))
         prepared = git(repo, 'rev-parse', 'HEAD')
         receipt.parent.mkdir(parents=True, exist_ok=True)
         pending = receipt.with_suffix('.tmp')

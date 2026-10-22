@@ -56,6 +56,7 @@ class PrepareTests(unittest.TestCase):
 
     def test_regeneration_against_new_main_produces_only_merge_commits(self):
         def regen(repo):
+            self.git('merge-base', '--is-ancestor', self.main, 'HEAD', repo=repo)
             (repo / 'generated.txt').write_text('fresh\n')
         sha = prepare(str(self.remote), 'feature', self.head, self.main, self.receipt, regen)
         self.assertEqual(self.git('log', '--format=%H', '--no-merges', '--first-parent',
