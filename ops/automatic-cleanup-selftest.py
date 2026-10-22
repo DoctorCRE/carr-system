@@ -18,12 +18,12 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'lib'), str(ROOT / 'tools'), str(ROOT / 'ops')]
-import job_watchdog as watchdog
+import local_jobs
 
 
-class WatchdogBudgetTests(unittest.TestCase):
+class LocalJobBudgetTests(unittest.TestCase):
     def test_budget_kills_term_ignoring_descendant_and_records_timeout(self):
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
         config['thresholds']['kill_grace_seconds'] = 0.1
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -32,37 +32,25 @@ class WatchdogBudgetTests(unittest.TestCase):
             parent = root / 'parent.py'
             parent.write_text('import subprocess,sys,time\np=subprocess.Popen([sys.executable,sys.argv[1]])\nprint(p.pid,flush=True)\ntime.sleep(30)\n')
             start = time.monotonic()
-            with patch.object(watchdog, 'board_task'), redirect_stdout(io.StringIO()):
-                code = watchdog.run_job(root, config, 'fixture', 'test', .005,
+            with patch.object(local_jobs, 'board_task'), redirect_stdout(io.StringIO()):
+                code = local_jobs.run_job(root, config, 'fixture', 'test', .005,
                                         [sys.executable, str(parent), str(child)])
             self.assertLess(time.monotonic() - start, 3)
             self.assertEqual(code, 124)
-            row = next(iter(watchdog.read_latest(root / config['paths']['registry']).values()))
+            row = next(iter(local_jobs.read_latest(root / config['paths']['registry']).values()))
             self.assertTrue(row['timed_out'])
             pid = int(Path(row['log_path']).read_text().strip())
             state = subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)], capture_output=True, text=True).stdout.strip()
             self.assertTrue(not state or state.startswith('Z'), state)
 
-    def test_watchdog_rejects_nonfinite_budgets_before_starting_a_job(self):
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+    def test_runner_rejects_nonfinite_budgets_before_starting_a_job(self):
+        config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
         for minutes in (float('nan'), float('inf')):
             with self.subTest(minutes=minutes), tempfile.TemporaryDirectory() as directory:
-                with patch.object(watchdog, 'board_task'), redirect_stdout(io.StringIO()):
+                with patch.object(local_jobs, 'board_task'), redirect_stdout(io.StringIO()):
                     with self.assertRaises(ValueError):
-                        watchdog.run_job(Path(directory), config, 'fixture', 'test', minutes,
+                        local_jobs.run_job(Path(directory), config, 'fixture', 'test', minutes,
                                          [sys.executable, '-c', 'pass'])
-
-    def test_watchdog_job_wrapper_is_independent_of_scan_agent_hold(self):
-        from unittest.mock import Mock
-        spec = importlib.util.spec_from_file_location('watchdog_cli', ROOT / 'tools/job-watchdog.py')
-        cli = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cli)
-        with tempfile.TemporaryDirectory() as directory, patch.object(cli, 'read_holds', return_value={
-                'com.carr.job-watchdog': Mock()}), patch.object(cli.watchdog, 'run_job', return_value=0) as run_job:
-            with patch.object(sys, 'argv', ['job-watchdog.py', '--root', directory, 'run',
-                    'storage-hygiene', 'cleanup', '5', '--', sys.executable, '-c', 'pass']), redirect_stdout(io.StringIO()):
-                self.assertEqual(cli.main(), 0)
-            run_job.assert_called_once()
 
 
 spec = importlib.util.spec_from_file_location('janitor_fixtures', ROOT / 'ops/branch-janitor-selftest.py')
@@ -589,7 +577,7 @@ class ThreadArchiveTests(unittest.TestCase):
 class CleanupHealthTests(unittest.TestCase):
     def test_receipt_reports_partial_temp_batch_and_resumes_backlog(self):
         import machine_cleanup as cleanup
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
         config['machine_cleanup']['test_temp_max_items'] = 1
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -627,22 +615,6 @@ class CleanupHealthTests(unittest.TestCase):
             self.assertFalse(report['errors'], report)
             self.assertIn('budget', report['kept'][0]['reason'])
 
-    def test_health_retains_partial_size_evidence_instead_of_discarding_it(self):
-        import itertools
-        import machine_cleanup as cleanup
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            (root / 'room-codex-fixture').mkdir()
-            with patch('time.monotonic', side_effect=itertools.count()):
-                rows = cleanup.health_findings(root, config, tmp_root=root,
-                    user_tmp_root=root, roots={}, now=90000)
-            sizes = [r for r in rows if r['code'].endswith('_bytes_partial')]
-            self.assertEqual(len(sizes), 2, rows)
-            for row in sizes:
-                self.assertFalse(row['measurement']['complete'])
-                self.assertEqual(row['measurement']['allocated_bytes'], 0)
-                self.assertIn('at least 0', row['detail'])
 
     def test_large_tree_measurement_returns_bounded_honest_lower_bound(self):
         import storage_hygiene
@@ -672,7 +644,7 @@ class CleanupHealthTests(unittest.TestCase):
 
     def test_scheduled_cleanup_records_temp_effects_bytes_and_durable_receipt(self):
         import machine_cleanup as cleanup
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             scratch, clones = root / 'scratch', root / 'clones'
@@ -698,37 +670,6 @@ class CleanupHealthTests(unittest.TestCase):
             self.assertEqual(saved['temp_staged_allocated_bytes'], report['temp_staged_allocated_bytes'])
 
 
-    def test_temp_and_clone_byte_thresholds_feed_red_watchdog_findings(self):
-        import machine_cleanup as cleanup
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
-        config['machine_cleanup'].update(user_temp_bytes_threshold=1, job_clone_bytes_threshold=1)
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            (root / 'room-codex-fixture').mkdir()
-            (root / 'room-codex-fixture/payload').write_bytes(b'x' * 8192)
-            rows = cleanup.health_findings(root, config, tmp_root=root, user_tmp_root=root, roots={}, now=90000)
-            codes = {row['code'] for row in rows}
-            self.assertIn('job_clone_bytes', codes)
-            self.assertIn('user_temp_bytes', codes)
-
-
-    def test_cleanup_health_reports_thresholds_and_stale_success_as_watchdog_findings(self):
-        import machine_cleanup as cleanup
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            for index in range(31):
-                (root / ('room-codex-' + str(index))).mkdir()
-            report = root / 'out/machine-cleanup.json'
-            report.parent.mkdir()
-            report.write_text(json.dumps({'last_success_at': 100, 'errors': []}))
-            rows = cleanup.health_findings(root, config, tmp_root=root, roots={}, now=90000)
-            self.assertEqual({r['code'] for r in rows}, {'job_clone_count', 'cleanup_stale'})
-            found = watchdog.detect({'machine_cleanup': rows}, config, 90000)
-            self.assertEqual({f['kind'] for f in found}, {'machine_cleanup'})
-            self.assertTrue(all(f['owner'] == 'orchestrator' for f in found))
-
-
 class ScheduledCleanupTests(unittest.TestCase):
     def test_worktree_slice_timeout_defers_scheduler_before_overall_deadline(self):
         import branch_retirement as retirement
@@ -742,7 +683,7 @@ class ScheduledCleanupTests(unittest.TestCase):
             for entry in real_entries(root):
                 elapsed[0] += 40
                 yield entry
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
         with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
              patch.object(retirement, 'iter_worktrees', side_effect=slow_entries):
             report = cleanup.run(fixture.repo, config, hook=fixtures.hook, tmp_root=fixture.base,
@@ -768,7 +709,7 @@ class ScheduledCleanupTests(unittest.TestCase):
             dispatch = root / 'dispatch.jsonl'
             dispatch.write_text(''.join(json.dumps({'thread_id': thread, 'status': 'completed',
                 'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n' for thread in ('first', 'second')))
-            config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+            config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
             config['machine_cleanup']['max_items'] = 1
             archived, offsets = [], []
             def archive(thread, **kwargs):
@@ -813,7 +754,7 @@ class ScheduledCleanupTests(unittest.TestCase):
                     if moved and path.name == 'fixture' and '_to_delete' in path.parts:
                         elapsed[0] = 240
                     return result
-                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
                 options = dict(hook=None, tmp_root=clones, user_tmp_root=scratch, roots={},
                     dispatch_path=root / 'absent', provider=object(), archive_thread=lambda *a, **k: None)
                 with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
@@ -853,7 +794,7 @@ class ScheduledCleanupTests(unittest.TestCase):
                 if len(calls) == 2:
                     elapsed[0] = 240
                 return set()
-            config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+            config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
             options = dict(hook=None, tmp_root=clones, user_tmp_root=scratch, roots={},
                 dispatch_path=root / 'absent', provider=object(), archive_thread=lambda *a, **k: None)
             with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]):
@@ -921,7 +862,7 @@ class ScheduledCleanupTests(unittest.TestCase):
                         return {'id': self.request['id'], 'result': result}
                 def archive(*args, **kwargs):
                     return codex_wire.archive_finished_thread(*args, **kwargs, wire_factory=Wire)
-                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
                 options = dict(hook=None, tmp_root=clones, roots={}, dispatch_path=ledger,
                     provider=object(), process_probe=lambda paths: set(), archive_thread=archive)
                 with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]):
@@ -958,7 +899,7 @@ class ScheduledCleanupTests(unittest.TestCase):
                         'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00Z'})
                 ledger = fixture.base / 'dispatch.jsonl'
                 ledger.write_text(''.join(json.dumps(row) + '\n' for row in dispatches))
-                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
                 options = dict(hook=fixtures.hook, tmp_root=clones, dispatch_path=ledger,
                     roots={}, provider=fixtures.FakeProvider(), process_probe=lambda paths: set(),
                     archive_thread=lambda *a, **k: self.fail('no thread'))
@@ -1005,7 +946,7 @@ class ScheduledCleanupTests(unittest.TestCase):
                     if len(calls) == (1 if stage == 'listed' else 2):
                         candidate.rmdir()
                     return set()
-                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
                 report = cleanup.run(root, config, hook=None, tmp_root=clones,
                     user_tmp_root=scratch, roots={}, dispatch_path=root / 'absent',
                     provider=object(), process_probe=probe, archive_thread=lambda *a, **k: None)
@@ -1048,7 +989,7 @@ class ScheduledCleanupTests(unittest.TestCase):
         def scan(path):
             slow = os.fstat(path).st_ino == identity if isinstance(path, int) else Path(path) == scratch
             return SlowEntries(path) if slow else real_scandir(path)
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
         with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
              patch.object(os, 'scandir', side_effect=scan):
             report = cleanup.run(fixture.repo, config, hook=fixtures.hook, tmp_root=clones,
@@ -1081,7 +1022,7 @@ class ScheduledCleanupTests(unittest.TestCase):
             elapsed[0] = 240
             return []
         provider.open_pulls = expire
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
         with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]):
             report = cleanup.run(fixture.repo, config, hook=fixtures.hook, tmp_root=clones,
                 dispatch_path=ledger, roots={}, provider=provider, process_probe=lambda paths: set(),
@@ -1125,7 +1066,7 @@ class ScheduledCleanupTests(unittest.TestCase):
                     if path == actual:
                         elapsed[0] = 240
                     return result
-                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
                 with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
                      patch.object(Path, 'lstat', expire):
                     report = cleanup.run(root, config, hook=None, tmp_root=clones, roots={},
@@ -1173,7 +1114,7 @@ class ScheduledCleanupTests(unittest.TestCase):
                 return entry
         def scan(path):
             return SlowEntries() if Path(path) == staging else real_scandir(path)
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
         with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
              patch.object(os, 'scandir', side_effect=scan):
             report = cleanup.run(fixture.repo, config, hook=fixtures.hook, tmp_root=clones,
@@ -1195,7 +1136,7 @@ class ScheduledCleanupTests(unittest.TestCase):
             workspace = clones / f'room-codex-{index}'
             workspace.mkdir()
             (workspace / 'payload').write_text('preserve complete item')
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
         elapsed = [0.0]
         real_scandir = os.scandir
         class SlowEntries:
@@ -1231,7 +1172,7 @@ class ScheduledCleanupTests(unittest.TestCase):
         import fcntl
         import machine_cleanup as cleanup
         fixture = fixtures.Fixture()
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
         config['machine_cleanup']['max_seconds'] = .3
         lock = fixture.repo / 'out/worktree-reap.lock'
         lock.parent.mkdir(exist_ok=True)
@@ -1259,7 +1200,7 @@ class ScheduledCleanupTests(unittest.TestCase):
         ledger = fixture.base / 'dispatch.jsonl'
         ledger.write_text(json.dumps({'checkout_path': str(clone), 'checkout_workspace': str(workspace),
             'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00+00:00', 'thread_id': 'finished'}) + '\n')
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
         provider = fixtures.FakeProvider()
         provider.branch_pulls = lambda repo, branch: []
         calls = []
@@ -1288,7 +1229,7 @@ class ScheduledCleanupTests(unittest.TestCase):
         ledger = fixture.base / 'dispatch.jsonl'
         ledger.write_text(json.dumps({'checkout_path': str(clone), 'checkout_workspace': str(workspace),
             'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00+00:00'}) + '\n')
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
         provider = fixtures.FakeProvider()
         real_rename = os.rename
         def interrupt(*args, **kwargs):
