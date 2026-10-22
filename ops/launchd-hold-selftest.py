@@ -181,10 +181,6 @@ class HoldTests(unittest.TestCase):
         patch.object(cac, "codex_configuration_state", return_value="absent").start()
         patch.object(cac, "tracked_scheduled_task_paths", return_value={}).start()
         patch.object(cac, "scheduled_task_install_plan", return_value={"modified": [], "exact": []}).start()
-        patch.object(cac.continuity_config, "load", return_value=None).start()
-        patch.object(cac.continuity_config, "read_mode", return_value=None).start()
-        patch.object(cac, "claude_continuity_state", return_value=(None, None)).start()
-        patch.object(cac.continuity_config, "render_effective_hooks", return_value={}).start()
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(cac.cmd_install(True), 0)
@@ -367,8 +363,6 @@ class HoldTests(unittest.TestCase):
                      "refused_launchd_templates", "pending_launchd_reloads"):
             patch.object(cac, name, return_value=[]).start()
         patch.object(cac, "PREREQUISITE_CHECK", return_value=[]).start()
-        patch.object(cac.continuity_config, "load", return_value={}).start()
-        patch.object(cac.continuity_config, "read_mode", return_value=None).start()
         patch.object(cac, "git_hooks_path_report", return_value="fixture hooks").start()
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
