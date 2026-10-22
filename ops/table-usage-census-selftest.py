@@ -83,6 +83,28 @@ class ReferenceTests(unittest.TestCase):
                                          unresolved=unresolved, backup_tables=set())
             self.assertEqual(report["tables"][0]["classification"], "quiet")
 
+    def test_quoted_and_multiline_execute_prevent_false_empty_classification(self):
+        for expression in ("EXECUTE 'SELECT * FROM public.' || quote_ident(table_name);",
+                           "EXECUTE\n    query;"):
+            for installed in (False, True):
+                with self.subTest(expression=expression, installed=installed):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        root = Path(tmp)
+                        source = "ops/run.sql"
+                        (root / "ops").mkdir()
+                        (root / source).write_text("begin\n" + expression + "\nend")
+                        functions = [{"signature": "ops.run_dynamic()",
+                                      "definition": "begin\n" + expression + "\nend"}]
+                        refs, unresolved = census.scan_references(
+                            root, [table("widget")], [] if installed else [source], [],
+                            functions if installed else [])
+                        self.assertEqual(unresolved, [{
+                            "kind": "dynamic_sql", "source": "pg_proc" if installed else source,
+                            "line": 2, **({"function": "ops.run_dynamic()"} if installed else {})}])
+                        report = census.build_report([table("widget")], references=refs,
+                                                     unresolved=unresolved, backup_tables=set())
+                        self.assertEqual(report["counts"]["empty-and-unreferenced"], 0)
+
     def test_installed_functions_and_same_file_verbs_are_labeled_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
