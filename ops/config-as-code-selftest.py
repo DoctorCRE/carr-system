@@ -382,10 +382,6 @@ def main():
         # A selftest must assert the same thing everywhere; the real role is
         # restored after the block instead.
         mod.IS_PRIMARY = True
-        # The definition-only mechanism is pinned with a SYNTHETIC entry since
-        # the 2026-08-26 cutover released the real tick plist from the hold
-        # (decision f4af0c87); tick_released below pins that release itself.
-        tick_released = "com.carr.control-plane-tick.plist" not in mod.launchd_hold.DEFINITION_ONLY
         original_definition_only = dict(mod.launchd_hold.DEFINITION_ONLY)
         mod.launchd_hold.DEFINITION_ONLY["com.carr.synthetic-definition-only.plist"] = (
             "synthetic hold for the selftest"
@@ -848,8 +844,6 @@ def main():
         ("definition-only hold skips a held plist without installing it",
          definition_only_absent
          and "DEFINITION ONLY com.carr.synthetic-definition-only:" in launchd_out.getvalue()),
-        ("control-plane tick released from definition-only hold (cutover 2026-08-26)",
-         tick_released),
         ("apply leaves an UNSET core.hooksPath byte-identical",
          hooks_path_untouched["unset"]),
         ("apply leaves a non-default RELATIVE core.hooksPath byte-identical",

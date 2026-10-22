@@ -212,15 +212,9 @@ def main() -> int:
     }, today=date(2026, 8, 17))
     check("one verified Cloudflare release candidate is admitted", allowed_deploy["admitted"] is True)
 
-    gates = POLICY.get("execution_gates", {})
-    check("paid cognition delegates to the transactional database cost gate",
-          gates.get("cognition-provider", {}).get("installed_enforcement_ref") ==
-          "tools/control-plane.py:_reserve->ops.admit_job_cost")
-
     branch_sources = {
         "ops/p1-integration-gate.py",
         "ops/p1-rebuild-gate.py",
-        "ops/cc-update-audit-shadow-harness.py",
         "bin/restore-rehearse.sh",
         "tools/pitr-restore-proof.py",
     }
@@ -258,12 +252,6 @@ def main() -> int:
     deploy = (REPO / "bin/deploy-worker.sh").read_text(encoding="utf-8")
     check("Worker release passes the metering gate before Wrangler",
           deploy.find("cloudflare-worker-release") < deploy.find('"$WRANGLER" versions upload'))
-
-    control_plane = (REPO / "tools/control-plane.py").read_text(encoding="utf-8")
-    check("provider call remains behind transactional cost admission",
-          control_plane.find("ops.admit_job_cost") < control_plane.find("CognitionDispatcher(")
-          and "budget admission refusal stops before every provider call" in
-          (REPO / "ops/control-plane-runner-selftest.py").read_text(encoding="utf-8"))
 
     print(f"\n{len(FAILED)} failure(s)" if FAILED else "\nall platform metering gate checks passed")
     return 1 if FAILED else 0

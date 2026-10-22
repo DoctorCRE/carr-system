@@ -30,16 +30,6 @@
       "enabled": true
     },
     {
-      "label": "com.carr.control-plane-tick",
-      "source": "ops/launchd/com.carr.control-plane-tick.plist",
-      "credentials": [
-        "~/.config/carr/db.env",
-        "~/.config/carr/engineering-controller.env"
-      ],
-      "state": [],
-      "enabled": true
-    },
-    {
       "label": "com.carr.delivery-cadence-a05-sweep",
       "source": "ops/launchd/com.carr.delivery-cadence-a05-sweep.plist",
       "credentials": [

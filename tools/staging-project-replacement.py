@@ -406,7 +406,7 @@ def sync_control_plane(owner: SecretDsn, *, run: Run,
                        environ: Mapping[str, str]) -> None:
     bootstrap_env = safe_environment(environ)
     bootstrap_env["DATABASE_URL"] = owner.value
-    _success(_run([str(REPO / ".venv/bin/python"), str(REPO / "tools/control-plane.py"), "sync"],
+    _success(_run([str(REPO / ".venv/bin/python"), str(REPO / "tools/workflow-registry.py"), "sync"],
                   run=run, env=bootstrap_env, timeout=900), "control-plane sync")
     readback_env = safe_environment(environ)
     readback_env["DATABASE_URL"] = owner.value
