@@ -26,6 +26,9 @@ with open(os.environ['GH_TEST_LOG'], 'a') as log:
     log.write(json.dumps(sys.argv[1:]) + '\\n')
 if sys.argv[1:3] == ['pr', 'view']:
     print(Path(os.environ['GH_TEST_PR']).read_text())
+elif sys.argv[1:3] == ['pr', 'merge'] and '--auto' in sys.argv and os.environ.get('GH_TEST_AUTO_ERROR'):
+    print(os.environ['GH_TEST_AUTO_ERROR'], file=sys.stderr)
+    sys.exit(2)
 elif sys.argv[1:3] != ['pr', 'merge']:
     sys.exit('unexpected GitHub command')
 ''')
@@ -64,6 +67,15 @@ elif sys.argv[1:3] != ['pr', 'merge']:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls()[-1], ['pr', 'merge', '12', '--repo', 'example/repo',
                                           '--auto', '--squash', '--match-head-commit', SHA])
+
+    def test_clean_status_merges_immediately_for_exact_head(self):
+        self.env['GH_TEST_AUTO_ERROR'] = 'GraphQL: Pull request is in clean status (enablePullRequestAutoMerge)'
+        result = self.run_command('example/repo', '12', SHA)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls()[1:], [
+            ['pr', 'merge', '12', '--repo', 'example/repo', '--auto', '--squash', '--match-head-commit', SHA],
+            ['pr', 'merge', '12', '--repo', 'example/repo', '--squash', '--match-head-commit', SHA],
+        ])
 
     def test_missing_label_evidence_refuses(self):
         del self.pr['labels']
