@@ -636,7 +636,7 @@ RULES = [
     # flags or obfuscation, same as every other rule here.
     (re.compile(r"\bage\s+[^|;&]*(--?d\b|--decrypt\b|--?i\b|--identity\b)", re.I),
      "raw decrypt of an encrypted backup — production data in cleartext. Use "
-     "`./run.sh restore-rehearse --verify-only [--date YYYYMMDD]`, which handles the "
+     "`./run.sh restore-rehearse --backup-run-id RUN --verify-only`, which handles the "
      "key and shreds the plaintext"),
     # 4. destructive SQL
     (re.compile(r"\bdrop\s+(table|schema|database|view|index)\b", re.I), "DROP"),

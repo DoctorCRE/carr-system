@@ -25,9 +25,9 @@
 # a failure or a Ctrl-C.
 #
 #   ./run.sh restore-rehearse --backup-run-id RUN # the full rehearsal
-#   ./run.sh restore-rehearse --preflight      # checks only; creates nothing
-#   ./run.sh restore-rehearse --identity path  # where the age private key is
-#   ./run.sh restore-rehearse --keep-branch    # leave the branch for debugging
+#   ./run.sh restore-rehearse --preflight --backup-run-id latest # checks only; creates nothing
+#   ./run.sh restore-rehearse --backup-run-id RUN --identity path # where the age private key is
+#   ./run.sh restore-rehearse --backup-run-id RUN --keep-branch # leave the branch for debugging
 #
 # THE PRIVATE KEY IS NOT OPTIONAL AND NOT STORED HERE. backups-public-key.txt in
 # the repo can only ENCRYPT. Decryption needs ~/.config/carr/age-key.txt (600,
@@ -155,8 +155,6 @@ while [ $# -gt 0 ]; do
     # (tools/restore-watermark.py fetch-copy). Nothing about the copy is typed
     # in by whoever runs this. Only then does phase 5 write a typed
     # restore-exercise-receipt.v1, and it re-reads the provider to verify it.
-    # Without it the exact watermark still gates; no receipt is written, because
-    # a local backups/ file has no independently recorded digest to hold it to.
     #
     # RUNBOOK NOTE (review H2): a run counts only while the
     # .github/workflows/backup-nightly.yml at its commit is byte-identical to
@@ -166,7 +164,7 @@ while [ $# -gt 0 ]; do
     # that run id. Only backup-nightly.yml may hold `checks: write`
     # (tools/test_workflow_checks_write_grant.py fails CI otherwise).
     --backup-run-id) [ $# -ge 2 ] || { echo "FAIL: --backup-run-id needs a workflow run id" >&2; exit 2; }
-                   case "$2" in (*[!0-9]*|'') echo "FAIL: --backup-run-id must be a number" >&2; exit 2 ;; esac
+                   case "$2" in (latest) ;; (*[!0-9]*|'') echo "FAIL: --backup-run-id must be a number or latest" >&2; exit 2 ;; esac
                    BACKUP_RUN_ID="$2"; shift 2 ;;
     -h|--help)     sed -n '2,60p' "$0"; exit 0 ;;
     *)             echo "FAIL: unknown argument '$1'" >&2; exit 2 ;;
@@ -437,6 +435,10 @@ fi
 #    every one of these passes. Ordered cheapest-and-most-likely-missing first.
 step "phase 0: preflight"
 [ -n "$BACKUP_RUN_ID" ] || die "artifact schema revision cannot be identified without --backup-run-id"
+if [ "$BACKUP_RUN_ID" = latest ]; then
+  BACKUP_RUN_ID="$("$PY" "$REPO/tools/restore-watermark.py" latest-run-id --repository "$BACKUP_REPOSITORY")" \
+    || die "no verified backup workflow run could be selected"
+fi
 
 for tool in age psql neonctl; do
   case "$tool" in
@@ -458,8 +460,8 @@ if [ ! -f "$IDENTITY" ]; then
   print -r -- "  an offline copy per secrets-inventory.md." >&2
   print -r -- "" >&2
   print -r -- "  Supply it one of two ways:" >&2
-  print -r -- "    ./run.sh restore-rehearse --identity /path/to/age-key.txt" >&2
-  print -r -- "    CARR_AGE_IDENTITY=/path/to/age-key.txt ./run.sh restore-rehearse" >&2
+  print -r -- "    ./run.sh restore-rehearse --backup-run-id $BACKUP_RUN_ID --identity /path/to/age-key.txt" >&2
+  print -r -- "    CARR_AGE_IDENTITY=/path/to/age-key.txt ./run.sh restore-rehearse --backup-run-id $BACKUP_RUN_ID" >&2
   print -r -- "" >&2
   print -r -- "  If NO copy of that key can be found, the dumps in backups/ are already" >&2
   print -r -- "  unrecoverable and that is the emergency, not this message." >&2

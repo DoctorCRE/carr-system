@@ -33,6 +33,7 @@ taken over whatever bytes are stored, and the decrypt is age's own.
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import importlib.util
 import io
@@ -502,6 +503,74 @@ class CopyRecordFromProvider(unittest.TestCase):
         patcher = mock.patch.object(rw, "_status_module", return_value=real)
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def test_latest_run_id_cli_selects_a_provider_verified_backup_without_downloading(self):
+        original = self.fake.api
+        def catalogue(path, **kwargs):
+            if path.endswith("/actions/workflows/backup-nightly.yml/runs"):
+                self.assertEqual(kwargs["query"]["branch"], "main")
+                return {"workflow_runs": [self.fake.run]}
+            self.assertNotIn("/zip", path)
+            return original(path, **kwargs)
+        with mock.patch.object(rw._status_module(), "api", side_effect=catalogue):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(rw.main(["latest-run-id", "--repository", REPO_SLUG]), 0)
+            self.assertEqual(output.getvalue().strip(), str(RUN_ID))
+
+    def test_latest_run_id_orders_runs_and_skips_unverified_newer_artifacts(self):
+        original = self.fake.api
+        for newer_time in ('2026-09-25T03:00:30Z', self.fake.run['run_started_at']):
+            attempted = []
+            newer = {**self.fake.run, 'id': 102, 'run_started_at': newer_time}
+            def catalogue(path, **kwargs):
+                if path.endswith('/actions/workflows/backup-nightly.yml/runs'):
+                    return {'workflow_runs': [self.fake.run, newer]}
+                if path.endswith('/actions/runs/102'):
+                    attempted.append(102)
+                    return {**newer, 'conclusion': 'failure'}
+                if path.endswith('/actions/runs/101'):
+                    attempted.append(101)
+                return original(path, **kwargs)
+            with self.subTest(newer_time=newer_time), mock.patch.object(rw._status_module(), 'api', side_effect=catalogue):
+                self.assertEqual(rw.latest_backup_run_id(REPO_SLUG), 101)
+                self.assertEqual(attempted, [102, 101])
+
+    def test_latest_run_id_reads_all_pages_and_refuses_exhausted_or_unreadable_lists(self):
+        bws = rw._status_module()
+        original = self.fake.api
+        pages = []
+        def catalogue(path, **kwargs):
+            if path.endswith('/actions/workflows/backup-nightly.yml/runs'):
+                page = kwargs['query']['page']
+                pages.append(page)
+                return {'workflow_runs': [self.fake.run] if page == 1 else []}
+            return original(path, **kwargs)
+        with mock.patch.object(bws, 'RUNS_PER_PAGE', 1), mock.patch.object(bws, 'api', side_effect=catalogue):
+            self.assertEqual(rw.latest_backup_run_id(REPO_SLUG), RUN_ID)
+            self.assertEqual(pages, [1, 2])
+        with mock.patch.object(bws, 'RUNS_PER_PAGE', 1), mock.patch.object(bws, 'api', return_value={'workflow_runs': [self.fake.run]}):
+            with self.assertRaisesRegex(ValueError, 'page limit'):
+                rw.latest_backup_run_id(REPO_SLUG)
+        for response in ({}, {'workflow_runs': [{}]}, {'workflow_runs': [{**self.fake.run, 'run_started_at': 'invalid'}]}):
+            with self.subTest(response=response), mock.patch.object(bws, 'api', return_value=response):
+                with self.assertRaises(ValueError):
+                    rw.latest_backup_run_id(REPO_SLUG)
+
+    def test_latest_run_id_refuses_expired_or_unauthenticated_backups(self):
+        original = self.fake.api
+        def catalogue(path, **kwargs):
+            if path.endswith('/actions/workflows/backup-nightly.yml/runs'):
+                return {'workflow_runs': [self.fake.run]}
+            return original(path, **kwargs)
+        with mock.patch.object(rw._status_module(), 'api', side_effect=catalogue):
+            self.fake.artifact['expired'] = True
+            with self.assertRaisesRegex(ValueError, 'no verified'):
+                rw.latest_backup_run_id(REPO_SLUG)
+            self.fake.artifact['expired'] = False
+            self.fake.check['app']['id'] = 1
+            with self.assertRaisesRegex(ValueError, 'no verified'):
+                rw.latest_backup_run_id(REPO_SLUG)
 
     def test_artifact_declaration_is_pinned_to_producer_commit_and_blob(self):
         declared = rw.artifact_declaration(REPO_SLUG, RUN_ID)

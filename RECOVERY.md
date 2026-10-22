@@ -88,16 +88,19 @@ This is the case the backups exist for.
 thing to try** — it is faster and loses less. Past six hours, these dumps are the
 only history that exists. There is no vendor safety net behind them.
 
-1. **Get a dump.** Either path:
-   - GitHub: the artifact on any successful **Nightly backup (cloud)** run.
-     Browser download works; no CLI needed.
-   - Cloudflare: the R2 bucket `carr-documents`.
+1. **Choose a backup run.** Keep the numeric run ID from a successful
+   **Nightly backup (cloud)** run. The rehearsal authenticates its producer Check
+   and artifact metadata, then fetches that run's encrypted artifact. To select
+   the latest verified, available artifact, use
+   `python3 tools/restore-watermark.py latest-run-id --repository jbookout/carr-system`.
+   A local dump path alone cannot identify the pinned schema and is refused.
 2. **Get the key.** From the paper copy. Never from a machine — that is the
    whole reason it is on paper.
-3. **Restore it.** `./run.sh restore-rehearse` is the sanctioned path and does
-   the whole thing: creates a throwaway Neon branch, restores into it, compares
-   row counts table by table against production, and tears the branch down. Use
-   `--preflight` first — it checks every prerequisite and creates nothing.
+3. **Restore it.** Use `./run.sh restore-rehearse --backup-run-id RUN`.
+   It creates a throwaway Neon branch, restores the artifact, replays its pinned
+   grants, checks data and app-role security parity, and tears the branch down.
+   First run `./run.sh restore-rehearse --backup-run-id RUN --preflight`.
+   Preflight checks prerequisites and creates nothing.
    For a real recovery rather than a rehearsal you want the restored data kept,
    so use `--keep-branch` and promote that branch.
 
@@ -124,9 +127,9 @@ system's code being intact. Given the file and the key, Postgres alone is enough
 
 ## Proving it still works, before you need it
 
-- **Weekly, automatic**: `restore-rehearse-weekly` runs the full rehearsal and
-  records durable evidence. If it stops reporting, the off-Mac liveness check on
-  GitHub raises it.
+- **Weekly, automatic**: `restore-rehearse-weekly` selects the latest verified
+  backup run, runs the full rehearsal, and records durable evidence. If reporting
+  stops, the off-Mac liveness check on GitHub raises it.
 - **The paper key**: `bin/key-recovery-test.sh` prompts for the key typed from
   paper, derives the public key it produces, and compares that against the
   repo-tracked `backups-public-key.txt`. A mismatch is decisive and needs no
@@ -134,11 +137,10 @@ system's code being intact. Given the file and the key, Postgres alone is enough
   full end-to-end proof. You never create a key file and never have to remember
   to delete one — it is read silently and shredded on every exit path.
 
-  Add `--backup <path>` to run the drill against an **off-Mac copy** — an R2
-  object or a GitHub artifact you have downloaded — instead of the local
-  `backups/` folder. That distinction is the whole point on the day it matters:
-  "the backups restore" and "the backups that would SURVIVE restore" are
-  different claims, and only the second one is about recovery.
+  Use `./run.sh key-recovery-test --backup-run-id RUN` to pin the same
+  authenticated off-Mac artifact. The default selects `latest`, which resolves
+  to a verified numeric run ID before any restore. The old `--backup <path>`
+  option is no longer supported.
 - **Last passed**: 2026-08-14. The paper copy opened a GitHub-artifact backup —
   43,605,559 bytes, plaintext validated as a real dump.
 

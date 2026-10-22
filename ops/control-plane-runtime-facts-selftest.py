@@ -172,7 +172,7 @@ command_fixtures={
  'calendar-fetch-daily':{'entrypoint':'bin/calendar-eventkit-capture.sh','mode':'shadow','args':['--dry-run','--receipt-safe','--days','7'],'exit_code':0,'stdout_tail':'calendar-capture: source=eventkit mode=shadow scanned=81 exact=6 domain=2 unknown=3 writes=0 failed=0'},
  'nightly-record-layer':{'entrypoint':'bin/nightly.sh','mode':'shadow','args':['--preflight'],'exit_code':0,'stdout_tail':'nightly preflight: 8 chain surfaces present; writes=0'},
  'notes-sweep-hourly':{'entrypoint':'bin/notes-sweep-post.sh','mode':'shadow','args':['--dry-run'],'exit_code':0,'stdout_tail':'notes-sweep shadow: scanned=1 unposted=1 writes=0 posts=0'},
- 'restore-rehearse-weekly':{'entrypoint':'run.sh','mode':'shadow','args':['restore-rehearse','--preflight'],'exit_code':0,'stdout_tail':'PREFLIGHT OK — every check that runs before anything is created has passed.\nNothing was created, decrypted or charged for. Drop --preflight for the real rehearsal.'},
+ 'restore-rehearse-weekly':{'entrypoint':'run.sh','mode':'shadow','args':['restore-rehearse','--preflight','--backup-run-id','latest'],'exit_code':0,'stdout_tail':'PREFLIGHT OK — every check that runs before anything is created has passed.\nNothing was created, decrypted or charged for. Drop --preflight for the real rehearsal.'},
 }
 for key,evidence in command_fixtures.items():
     workflow=by[key]

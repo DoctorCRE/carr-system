@@ -63,7 +63,7 @@ class RestoreReportTests(unittest.TestCase):
                         if w['key'] == 'restore-rehearse-weekly')
         for text, expected in ((PASS, True), ('RESTORE REHEARSAL: PASS\n', False),
                                (PASS + 'REHEARSAL FAILED: interrupted\n', False)):
-            evidence = {'entrypoint': 'run.sh', 'args': ['restore-rehearse'],
+            evidence = {'entrypoint': 'run.sh', 'args': ['restore-rehearse', '--backup-run-id', 'latest'],
                         'mode': 'live', 'exit_code': 0, 'stdout_tail': text}
             collector = cp.RuntimeWorkflowFactCollector(workflow,
                 {'scheduled_for': '2026-10-19T12:00:00Z'}, execution=evidence)

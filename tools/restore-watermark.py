@@ -21,6 +21,9 @@ only thing a restore can be compared EXACTLY against is the artifact itself.
   compare      artifact vs restored watermark. Exit 0 only on exact equality —
                rows AND content digest, table for table, none missing either side.
   digest       the sha256 of a stored file, as "sha256:<hex>".
+  latest-run-id
+               the newest provider-verified, unexpired backup run id, ordered
+               by run start time then id. Reads metadata only; downloads nothing.
   fetch-copy   the independently held copy AND the digest its producer
                recorded, both read from the store, never from an operator: the
                nightly workflow run's provider-authenticated "Backup artifact"
@@ -492,6 +495,37 @@ def read_copy_record(repository: str, run_id: int) -> dict[str, Any]:
         "store_readback_digest": str(stored["digest"]),
         "_artifact_id": int(summary["artifact_id"]),
     }
+
+
+def latest_backup_run_id(repository: str) -> int:
+    """Select the newest authenticated, available backup without fetching its bytes."""
+    bws = _status_module()
+    runs = {}
+    for page in range(1, bws.MAX_RUN_PAGES + 1):
+        response = bws.api(f"/repos/{repository}/actions/workflows/{bws.BACKUP_WORKFLOW_FILE}/runs",
+                           query={"branch": BACKUP_RUN_BRANCH, "status": "success",
+                                  "per_page": bws.RUNS_PER_PAGE, "page": page})
+        rows = response.get("workflow_runs") if isinstance(response, dict) else None
+        if not isinstance(rows, list):
+            raise ValueError("cannot enumerate backup workflow runs")
+        for run in rows:
+            if not isinstance(run, dict) or type(run.get("id")) is not int or run["id"] <= 0:
+                raise ValueError("backup workflow listing contains an invalid run id")
+            started = _instant(run.get("run_started_at"))
+            if started is None or started.tzinfo is None:
+                raise ValueError("backup workflow listing contains an invalid start time")
+            runs[run["id"]] = started
+        if len(rows) < bws.RUNS_PER_PAGE:
+            break
+    else:
+        raise ValueError("backup workflow listing exceeded its page limit")
+    for run_id in sorted(runs, key=lambda value: (runs[value], value), reverse=True):
+        try:
+            read_copy_record(repository, run_id)
+        except ValueError:
+            continue
+        return run_id
+    raise ValueError("no verified backup workflow run has an available artifact")
 
 
 def artifact_declaration(repository: str, run_id: int):
@@ -1045,6 +1079,8 @@ def main(argv=None) -> int:
     c.add_argument("--restored", required=True)
     d = sub.add_parser("digest")
     d.add_argument("path")
+    latest = sub.add_parser("latest-run-id")
+    latest.add_argument("--repository", required=True)
     f = sub.add_parser("fetch-copy")
     f.add_argument("--repository", required=True)
     f.add_argument("--run-id", required=True, type=int)
@@ -1080,6 +1116,9 @@ def main(argv=None) -> int:
             return 0
         if a.cmd == "restored":
             print(json.dumps(restored_watermark(_dsn_from(a.dsn_env), _load_json(a.artifact)), sort_keys=True))
+            return 0
+        if a.cmd == "latest-run-id":
+            print(latest_backup_run_id(a.repository))
             return 0
         if a.cmd == "fetch-copy":
             archive, dump = fetch_copy(a.repository, a.run_id, Path(a.out_dir))
