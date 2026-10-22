@@ -890,6 +890,27 @@ class QueueTests(unittest.TestCase):
                                          (self.updated,)).fetchone()[0], 'waiting_ci')
         self.assertEqual(self.calls('merge'), [])
 
+    def test_regeneration_push_timeout_not_landed_retries_after_provider_readback(self):
+        card_id = self.prepare_pinned_head()
+        script = self.root / 'tools/prepare_pr.py'
+        script.write_text(script.read_text().replace(
+            'state = Path(os.environ["FAKE_GH_STATE"])',
+            'marker = receipt.with_suffix(".attempt")\n'
+            'if not marker.exists():\n marker.touch(); raise SystemExit("git push timed out before landing")\n'
+            'state = Path(os.environ["FAKE_GH_STATE"])'))
+        self.q.tick()
+        self.assertEqual(self.load()['prs'][f'{module.REPOS[0]}#1']['head']['sha'], self.approved)
+        self.restart()
+        for _ in range(4):
+            self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.updated)
+        action = self.q.db.execute("SELECT * FROM actions WHERE kind='regen' AND head=?", (self.approved,)).fetchone()
+        self.assertEqual((action['phase'], action['attempts']), ('done', 2))
+        row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.updated,)).fetchone()
+        self.assertEqual(row['outcome'], 'waiting_ci')
+        self.assertEqual(self.calls('merge'), [])
+
     def test_hold_after_lost_regeneration_response_requires_manual_repin(self):
         card_id = self.prepare_pinned_head()
         script = self.root / 'tools/prepare_pr.py'
