@@ -755,6 +755,65 @@ class LegacyHealthPromotion(Base):
         self.assertEqual(runner.calls, [])
         self.assertEqual(self.fx.slice_marks, [])
 
+    def test_source_only_checkpoint_can_advance_after_health_failure_then_main_releases_with_health(self):
+        pipe, state, row, runner, _ = self.legacy(recorded=True)
+        state['worker']['last_released_sha'] = row['sha']
+        pipe.store.save(state)
+        source_only = self.fx.commit({'docs/after-health.md': 'source only'})
+        self.assertEqual(pipe.tick(['worker']), 0)
+        self.assertEqual(pipe.store.load()['worker']['last_released_sha'], source_only)
+        self.assertEqual(pipe.store.records()[-1]['status'], 'no_release_needed')
+        self.assertEqual(pipe.store.load()['worker']['failed_step'], 'health')
+        self.assertEqual(runner.calls, [])
+        target = self.fx.commit({'mcp-server/src/a.js': 'health repair'})
+        self.assertEqual(pipe.tick(['worker']), 0, pipe.store.records()[-1])
+        receipts = [r for r in pipe.store.records() if r['status'] == 'live_identity_reconciled']
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(receipts[0]['from_sha'], source_only)
+        self.assertEqual(receipts[0]['sha'], row['sha'])
+        self.assertEqual(receipts[0]['legacy_promotion']['promotion_receipt_digest'],
+                         rp.evidence_digest(pipe.store.records()[0]))
+        self.assertEqual(runner.names().count('upload'), 1)
+        self.assertEqual(runner.names().count('promote'), 1)
+        self.assertIn('health-baseline', runner.names())
+        self.assertIn('health', runner.names())
+        self.assertEqual(pipe.store.load()['worker']['last_released_sha'], target)
+        self.assertIsNone(pipe.store.load()['worker']['failed_sha'])
+        self.assertEqual(pipe.store.records()[-1]['status'], 'shipped')
+
+    def test_recorded_health_recovery_refuses_missing_or_contradictory_run_evidence(self):
+        cases = {
+            'missing receipt': lambda rows, state: rows.pop(0),
+            'foreign run': lambda rows, state: rows[0].update(run_id='20261021T225805Z-aaaaaa'),
+            'wrong source': lambda rows, state: rows[0].update(sha=self.fx.base),
+            'wrong version': lambda rows, state: rows[0].update(provider_version_id=PRIOR),
+            'wrong endpoint': lambda rows, state: rows[0].update(release_endpoint='https://foreign.invalid/release'),
+            'wrong prior source': lambda rows, state: rows[0].update(from_sha='a' * 40),
+            'conflicting receipt': lambda rows, state: rows.insert(0, {**rows[0], 'provider_version_id': PRIOR}),
+            'contradictory failure': lambda rows, state: rows[1].update(promotion={
+                'sha': rows[1]['sha'], 'provider_version_id': PRIOR,
+                'release_endpoint': rows[0]['release_endpoint']}),
+            'missing promotion field': lambda rows, state: rows[1].pop('promotion'),
+            'unrelated checkpoint': lambda rows, state: state['worker'].update(last_released_sha='a' * 40),
+        }
+        for label, mutate in cases.items():
+            with self.subTest(label=label):
+                pipe, state, row, runner, _ = self.legacy(recorded=True)
+                main = self.fx.commit({'docs/recovery.md': label})
+                state['worker']['last_released_sha'] = main
+                rows = pipe.store.records()[-2:]
+                mutate(rows, state)
+                pipe.store.save(state)
+                pipe.store.records_path.write_text(''.join(json.dumps(r) + '\n' for r in rows))
+                before = pipe.store.load()
+                with self.assertRaises(rp.Blocked) as caught:
+                    pipe.reconcile_worker_identity(state, pipe.cfg['worker'], main)
+                self.assertEqual(caught.exception.reason, 'live_target_unreceipted')
+                self.assertEqual(state, before)
+                self.assertEqual(pipe.store.load(), before)
+                self.assertEqual(pipe.store.records(), rows)
+                self.assertEqual(runner.calls, [])
+
     def test_exact_legacy_health_failure_recovers_identity_without_claiming_health(self):
         pipe, state, row, runner, main = self.legacy(exact=True)
         pipe.reconcile_worker_identity(state, pipe.cfg['worker'], main)
