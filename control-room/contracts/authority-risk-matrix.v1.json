@@ -74,7 +74,7 @@
     "R3": {"name": "Material operating change", "gate": "fresh base version, old/new diff, human confirmation, event, and compensation path"},
     "R4": {"name": "High-consequence record change", "gate": "authorized human, recent re-authentication, typed target and provenance, second acknowledgement when irreversible or cross-owner"},
     "R5": {"name": "Control plane", "gate": "Joe approves immutable exact plan revision and hash after re-authentication; dedicated executor uses registered actuator after rehearsal and rollback readiness"},
-    "R6": {"name": "External effect", "gate": "no Control Room execution route; Joe sends in the owning outbound system"}
+    "R6": {"name": "External effect", "gate": "no Control Room execution route; outbound goes through Joe's own accounts when Joe asks (decision 41906a30)"}
   },
   "phase0": {
     "allowed_methods": ["GET", "HEAD", "OPTIONS"],

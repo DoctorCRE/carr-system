@@ -140,11 +140,13 @@ print(json.dumps({'type': 'turn.completed'}))
             with WorkQueue(db) as q:
                 q.enqueue('A', desk='sol', task='synthetic', actor='test')
                 with patch.dict(os.environ, {'PROGRESS_BOARD_LOCAL_ONLY': '0'}), \
-                     patch.object(progress_board, 'publish_board') as publish:
+                     patch.object(progress_board, 'publish_board', side_effect=RuntimeError('legacy oversized')), \
+                     patch.object(progress_board, 'read_state', return_value={'project': 'carr-v5'}), \
+                     patch.object(progress_board, 'publish_orchestrator') as publish:
                     result = work_runner.main(['--db', str(db), '--registry', str(root / 'registry.json'),
                                                '--results', str(root / 'results.jsonl'), '--publish'])
                 self.assertEqual(result, 0)
-                publish.assert_called_once_with('carr-v5', refresh_inventory=False)
+                publish.assert_called_once_with({'project': 'carr-v5'})
                 self.assertEqual(q.publication()['published'], q.export()['revision'])
 
 

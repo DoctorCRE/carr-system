@@ -24,6 +24,9 @@ DESK KINDS:
   flash-local      the local Flash model itself, answering direct questions (flash_wire.py)
   claude-api       a fresh API-key coding agent in a retained job checkout
 
+A desk registered with posture record-layer is a business
+desk: it gets the CARR verbs and nothing else, and takes only business briefs.
+
 BOTH KINDS KEEP THEIR CONTEXT, and that is the whole point. Joe, 2026-08-20:
 The kinds differ only in HOW a turn reaches them: a Claude desk is a live
 process listening on a socket, so a turn is delivered to something already
@@ -52,6 +55,9 @@ KINDS = ("claude-session", "claude-desktop", "claude-remote", "codex-session", "
 KIND_ALIASES = {"codex-exec": "codex-session"}
 AUTOMATIC_CODEX_DESKS = frozenset({"luna-desk", "sol-fixer", "codex-desk"})
 EFFORT_CHOICES = ("minimal", "low", "medium", "high", "xhigh")
+# Record-layer is independent of provider. Each wire enforces or refuses it.
+POSTURES = ("record-layer",)
+RECORD_LAYER_KINDS = ("hermes-nous", "grok-cli", "flash-local", "codex-session", "claude-desktop")
 
 DESK_INSTRUCTION = (
     "Model Room desk instruction: If you need approvals, permissions, or decisions, "
@@ -139,6 +145,11 @@ def _normalize_effort(kind: str, effort: str | None) -> str | None:
             "chooses its own model and reasoning profile",
         )
     return effort
+
+
+def tool_posture(kind: str, posture: object) -> None:
+    if posture is not None and (kind not in RECORD_LAYER_KINDS or posture not in POSTURES):
+        raise DeskError("bad_posture", "record-layer requires a Nous, Grok, Flash, Codex session, or Claude Desktop desk")
 
 
 def remote_posture(entry: dict) -> None:
@@ -245,6 +256,7 @@ class Registry:
         family: str | None = None,
         network_access: bool = False,
         provider: str | None = None,
+        posture: str | None = None,
     ) -> dict:
         if not NAME_OK.match(name or ""):
             raise DeskError(
@@ -260,6 +272,7 @@ class Registry:
         if network_access and kind != "codex-live":
             raise DeskError("bad_network_access", "network_access is supported only by codex-live")
         effort = _normalize_effort(kind, effort)
+        tool_posture(kind, posture)
         if kind in codex_models.CODEX_KINDS:
             family = codex_models.family_default(family, model)
         elif kind != 'hermes-nous' and family is not None:
@@ -327,6 +340,8 @@ class Registry:
             if add_dirs:
                 entry["add_dirs"] = [str(x) for x in add_dirs]
 
+        if posture:
+            entry["posture"] = posture
         entry["registered_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         with self._locked():
             data = self._load_locked()
@@ -364,6 +379,7 @@ class Registry:
         entry = {**entry, "kind": kind}
         if kind not in KINDS:
             raise DeskError("bad_kind", f"desk {name!r} has kind {kind!r}")
+        tool_posture(kind, entry.get("posture"))
         if kind == "claude-api":
             api_posture(entry)
         if kind == "claude-remote":

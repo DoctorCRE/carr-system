@@ -102,6 +102,42 @@ class CheckoutDispatchTests(unittest.TestCase):
         self.assertEqual(self.git('config', '--local', 'user.email'),
                          '123+author@users.noreply.github.com')
 
+    def test_clone_is_seeded_from_canonical_objects_then_dissociated(self):
+        # Five parallel 226 MB network clones overran the clone deadline
+        # (2026-10-20). The job clone borrows the canonical object store and
+        # then copies it in, so it never keeps a link to the live checkout.
+        calls = []
+        def record(argv, **kwargs):
+            calls.append(argv)
+            return self.execute(argv, **kwargs)
+        with patch.object(dispatch.subprocess, 'run', side_effect=record), \
+             patch('codex_checkout.subprocess.run', side_effect=record):
+            row = dispatch.dispatch('cx', 'repair it', registry=self.reg,
+                                    results_path=self.results, env=self.env,
+                                    checkout='repair', fresh=True)
+        self.addCleanup(lambda: shutil.rmtree(row['checkout_workspace'], ignore_errors=True))
+        clone = next(argv for argv in calls if argv[:2] == ['git', 'clone'])
+        self.assertIn('--dissociate', clone)
+        self.assertEqual(clone[clone.index('--reference-if-able') + 1], str(self.source))
+        repo = Path(row['checkout_path'])
+        self.assertFalse((repo / '.git' / 'objects' / 'info' / 'alternates').exists())
+        self.assertEqual(self.git('remote', 'get-url', 'origin', cwd=repo), str(self.origin))
+
+    def test_unreadable_canonical_objects_fall_back_to_an_origin_clone(self):
+        # The fixture origin hardlinks canonical objects; give it its own copy.
+        shutil.rmtree(self.origin)
+        REAL_RUN(['git', 'clone', '--bare', '--no-local', str(self.source), str(self.origin)],
+                 check=True, capture_output=True, env=fixture_env())
+        objects = [f for f in (self.source / '.git' / 'objects').rglob('*')
+                   if f.is_file() and len(f.parent.name) == 2]
+        for f in objects:
+            f.chmod(0)
+        self.addCleanup(lambda: [f.chmod(0o444) for f in objects])
+        row = self.send(checkout='repair', fresh=True)
+        repo = Path(row['checkout_path'])
+        self.assertEqual(self.git('branch', '--show-current', cwd=repo), 'repair')
+        self.assertFalse((repo / '.git' / 'objects' / 'info' / 'alternates').exists())
+
     def test_new_branch_uses_origin_default_head(self):
         row = self.send(checkout='new:job-repair')
         repo = Path(row['checkout_path'])
@@ -125,6 +161,24 @@ class CheckoutDispatchTests(unittest.TestCase):
         self.assertEqual(row['status'], 'completed')
         self.assertEqual(self.git('log', '-1', '--format=%s', cwd=row['checkout_path']), 'fix')
         self.assertFalse((self.source / 'fixed.py').exists())
+
+    def test_grok_checkout_job_gets_the_job_deadline_not_the_reply_deadline(self):
+        # 2026-10-20: Grok reviews dispatched with a checkout died at the
+        # 180-second room-reply limit (grok_cli_timeout).
+        self.reg.register('grok-reviewer', 'grok-cli', model='grok-9.2', cwd=str(self.source))
+        seen = {}
+        def provider(argv, **options):
+            seen.update(options)
+            end = {'type': 'end', 'stopReason': 'end_turn', 'requestId': 'r', 'sessionId': 's',
+                   'modelUsage': {'grok-9.2-build': {'modelCalls': 1}}}
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'type': 'text', 'data': 'Reviewed'})
+                + '\n' + json.dumps(end), '')
+        row = dispatch.dispatch('grok-reviewer', 'review it', registry=self.reg,
+            results_path=self.results, env=self.env, checkout='new:grok-review',
+            provider_run=provider, codex_timeout_s=7200)
+        self.addCleanup(lambda: shutil.rmtree(row['checkout_workspace'], ignore_errors=True))
+        self.assertEqual(row['status'], 'completed')
+        self.assertEqual(seen['timeout'], 7200)
 
     def test_resumed_thread_keeps_cwd_and_names_checkout(self):
         self.reg.remember_thread('cx', 'old-thread')
