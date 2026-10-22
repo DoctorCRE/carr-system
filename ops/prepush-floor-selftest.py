@@ -8,10 +8,7 @@ that required three changes to the hook whose failure modes are silent:
 
   1. It now selects classes (`--only pushfloor,secret`). Select the wrong ones
      and the push path checks less than anybody thinks, with no symptom.
-  2. It now derives CARR_CI_RANGE from the refs on stdin -- which the owner
-     check above it already consumed, so stdin had to be captured and replayed.
-     Get that wrong and either the owner check stops seeing main, or the range
-     is empty and the secret scan silently widens (safe) or misreads (not).
+  2. It derives CARR_CI_RANGE from the refs captured on stdin.
   3. It now TEEs the run so the failure text can be attributed. A shell pipeline
      reports the status of its LAST command, and tee always succeeds, so the
      obvious spelling of this makes EVERY RED PUSH GREEN. That is the single
@@ -106,9 +103,6 @@ def build(tmp):
     (repo / "seed.txt").write_text("seed\n")
     git(repo, "add", "-A", check_rc=True)
     git(repo, "commit", "-qm", "seed", check_rc=True)
-    # The seed push goes to main, which the owner check correctly refuses for a
-    # fixture identity -- the hatch is the point of the hatch. It also proves,
-    # before any assertion runs, that the owner check still reads its refs.
     seed_env = dict(env)
     seed_env.update(CARR_ALLOW_MAIN_PUSH="1", STUB_CI_RC="0",
                     CI_CALL_LOG="/dev/null")
@@ -221,17 +215,19 @@ def main():
         check("an incremental push scopes to remote..local",
               f"range:{head}.." in calls, calls)
 
-        # 5. THE OWNER CHECK ABOVE STILL SEES ITS REFS. Capturing stdin for the
-        #    range is exactly the change that could have blinded it.
+        # Main protection belongs to the receiver; local checks still run.
         env = dict(fixture_env())
         env.update(STUB_CI_RC="0", CI_CALL_LOG="/dev/null",
                    GIT_AUTHOR_EMAIL="stranger@example.invalid")
         r = git(repo, "-c", "user.email=stranger@example.invalid",
                 "push", "origin", "HEAD:refs/heads/main", env=env)
-        check("a non-owner push to main is still refused",
-              r.returncode != 0, f"exit {r.returncode}")
-        check("the owner refusal is the one that fired",
-              "PUSH TO main REFUSED" in (r.stdout + r.stderr))
+        check("a non-owner main push reaches the receiver after local content checks",
+              r.returncode == 0, r.stderr)
+        log.write_text("")
+        env.update(STUB_CI_RC="1", CI_CALL_LOG=str(log), CARR_ALLOW_MAIN_PUSH="1")
+        r = git(repo, "push", "origin", "HEAD:refs/heads/main", env=env)
+        check("the retired owner override cannot bypass a red content floor",
+              r.returncode != 0 and "pushfloor secret" in log.read_text(), r.stderr)
 
         # 5b. THE NEW-BRANCH BASE IS THE MERGE BASE, NOT origin/main.
         #     `git diff origin/main..HEAD` is a TWO-DOT diff: it compares two
@@ -333,8 +329,7 @@ def main():
         print("FAILED: " + ", ".join(failures))
         return 1
     print("PRE-PUSH FLOOR SELFTEST PASSED: the hook runs the fast subset, "
-          "exports the pushed range, still refuses a red floor and a non-owner "
-          "push to main, and honours its escape hatch.")
+          "exports the pushed range, refuses a red floor, and honours its reasoned escape hatch.")
     return 0
 
 
