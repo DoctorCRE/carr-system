@@ -60,11 +60,11 @@ class PublicationTests(unittest.TestCase):
             for private in ('PRIVATE BRIEF','PRIVATE DESCRIPTION','PRIVATE RESULT',card['claim']):
                 self.assertNotIn(private,encoded)
 
-    def test_scheduled_refresh_is_bounded_to_one_minute_without_a_model(self):
+    def test_scheduled_refresh_runs_every_five_minutes_without_a_model(self):
         import plistlib
         from pathlib import Path
         config=plistlib.loads((Path(__file__).parents[1]/'ops/launchd/local.carr-progress-board.plist').read_bytes())
-        self.assertEqual(len(config['StartCalendarInterval']),60)
+        self.assertEqual(len(config['StartCalendarInterval']),12)
         self.assertEqual(config['ProgramArguments'][1],'{{REPO}}/ops/progress-board-render.sh')
 
     def test_source_outage_preserves_the_last_successful_queue_observation(self):
