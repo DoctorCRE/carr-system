@@ -30,7 +30,7 @@
     "session-presence-hook.py": "d1e429368468f30b1c30da8fb3113c57138064de36075ceb7068176182c8c78c",
     "turn_origin.py": "7fe75beaec283cd3ce3a3c8a109ef36e44999eb1b27dcebbffafff590a261f7e",
     "weekend-quiet-gate.py": "fdbf7de53460157f53d09e552c2cd1724be811dd357dff16c381ecb77b8085c8",
-    "worktree-self-plumb.py": "8e0bf83cd8d4cca465b1a4166364f374251e03f00c62342e50365a04791c3549",
+    "worktree-self-plumb.py": "cbaaf8325f88cb0cf289853d53e1afd7944964c1cb40987b3c82624d41d22d17",
     "write-effect-check.py": "056cde22fee078d4b93ad58487058e0aabdd4af0a88ec4a099b926668367d167",
     "builder-agent-gate.py": "f34229429f3a904c024e85845663547d34cb0b96ad375a9464c52d430b1e2cee",
     "rule-claim-gate.py": "56db76112c657c2287a9a2e8d70518dd34d9faf05c7e4fb795defe905ab8de91"

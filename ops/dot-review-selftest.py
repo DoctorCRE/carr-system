@@ -32,7 +32,6 @@ def load(rel):
 class DotReview(unittest.TestCase):
 
 
-
     def test_r14_long_candidate_lines_keep_matched_source(self):
         mod = load('ops/jev_code_review.py')
         with tempfile.TemporaryDirectory() as tmp:
@@ -96,11 +95,6 @@ class DotReview(unittest.TestCase):
                     self.assertIn('blocked.md', targets)
                     self.assertIn('log.txt', targets)
                     self.assertNotIn('input.txt', targets)
-
-
-
-
-
 
 
     def test_control_single_quoted_prose(self):
@@ -202,19 +196,6 @@ class DotReview(unittest.TestCase):
         self.assertNotEqual('ok',answer['verdict'])
 
 
-
-
-    def test_b24_reaper_dry_run_no_prune(self):
-        gate=load('hooks/worktree-self-plumb.py')
-        with tempfile.TemporaryDirectory() as tmp:
-            with patch.object(gate,'canonical_root',return_value=tmp),patch.object(gate,'worktree_entries',return_value=[]),patch.object(gate,'run_git') as git,contextlib.redirect_stdout(io.StringIO()):
-                gate.reap_main(['--reap','--dry-run','--repo',tmp])
-                self.assertFalse(any(c.args[0]==['worktree','prune'] for c in git.call_args_list))
-
-
-
-
-
     def test_b01_executable_substitution(self):
         guard = load("hooks/guard-unattended.py")
         self.assertIsNotNone(guard.check('echo --title "$(git reset --hard)"'))
@@ -235,7 +216,6 @@ class DotReview(unittest.TestCase):
         gate = load("hooks/bash-write-gate.py")
         self.assertIn('blocked.md', gate.extract_targets('printf x>blocked.md'))
         self.assertIn('blocked.md', gate.extract_targets('cp a blocked.md && echo done'))
-
 
 
     def test_b08_statement_local_where(self):
