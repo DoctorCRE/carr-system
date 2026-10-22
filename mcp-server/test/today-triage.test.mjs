@@ -81,6 +81,9 @@ test('triage pages equal and null dates across kinds without dropping or repeati
   const broad = await call({});
   assert.equal(broad.total, 6);
   assert.equal(broad.items[0].owner, 'claude');
+  await db.query("delete from triage_fixture where id <> $1 or item_kind <> 'next_action'", [id(1)]);
+  assert.deepEqual(await call({ owners: 'partners', cursor: first.next_cursor }),
+    { items: [], total: 1, has_more: false, next_cursor: null });
 });
 
 test('imminent critical dates survive more than one page of overdue critical dates', async () => {
@@ -90,7 +93,7 @@ test('imminent critical dates survive more than one page of overdue critical dat
     [61, 'critical_date', null, near],
     [62, 'next_action', 'joe', '2019-01-01'],
   ]);
-  const first = await call({ owners: 'partners' });
+  const first = (await executeRegisteredTool(db, JOE, 'morning-brief', {})).sections.today;
   assert.equal(first.items.length, 50);
   assert.equal(first.items[0].id, id(61));
   assert.equal(first.items[1].id, id(62));
@@ -106,9 +109,23 @@ test('imminent critical dates survive more than one page of overdue critical dat
 test('invalid paging inputs are refused before SQL and empty queues remain complete', async () => {
   const noQuery = { query: () => assert.fail('invalid paging inputs must not reach SQL') };
   for (const args of [
-    { limit: 0 }, { limit: 51 }, { limit: 1.5 }, { owners: 'someone' },
+    { limit: 0 }, { limit: 51 }, { limit: 1.5 }, { limit: null }, { owners: null }, { owners: 'someone' },
     { cursor: '' }, { cursor: 'garbage' }, { cursor: btoa('{}') }, { cursor: 7 },
   ]) await assert.rejects(executeRegisteredTool(noQuery, JOE, 'today-triage', args), ToolError);
   await rows([]);
   assert.deepEqual(await call({ owners: 'partners' }), { items: [], total: 0, has_more: false, next_cursor: null });
+});
+
+
+test('malformed cursor dates and keys refuse before SQL', async () => {
+  const noQuery = { query: () => assert.fail('malformed cursors must not reach SQL') };
+  const valid = { v: 1, owners: 'partners', on: '2026-01-01', rank: 1, due_on: null,
+    item_kind: 'next_action', id: id(1) };
+  for (const patch of [
+    { v: 2 }, { owners: 'all' }, { on: '0000-01-01' }, { due_on: '0000-01-01' },
+    { on: '2026-02-30' }, { due_on: '2026-01-01T00:00:00Z' }, { rank: 2 },
+    { item_kind: 'unknown' }, { id: 'not-an-id' },
+  ]) await assert.rejects(executeRegisteredTool(noQuery, JOE, 'today-triage',
+    { owners: 'partners', cursor: btoa(JSON.stringify({ ...valid, ...patch })) }),
+    error => error instanceof ToolError && error.payload.error === 'triage_cursor_invalid');
 });
