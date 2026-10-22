@@ -1547,6 +1547,60 @@ class QueueTests(unittest.TestCase):
         detail = json.loads(log.splitlines()[-1])['detail']
         self.assertLess(len(detail), 2300)
 
+    def test_enqueue_rearms_transient_github_block_before_merge_intent(self):
+        for n, outcome in enumerate(('github_exhausted', 'discovery_exhausted'), 1):
+            with self.subTest(outcome=outcome):
+                self.pr(n)
+                entry = self.q.enqueue(module.REPOS[0], n, self.approved)
+                with self.q.db:
+                    self.q.db.execute("UPDATE entries SET phase='blocked',outcome=?,"
+                                      "github_attempts=4,read_attempts=4,transient_attempts=4,retry_at=99999999999,"
+                                      "merge_attempts=4,ci_since=1,ci_head=? WHERE id=?",
+                                      (outcome, self.approved, entry))
+                result = self.cli('enqueue', module.REPOS[0], str(n), self.approved, 'try again')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(int(result.stdout), entry)
+                row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+                self.assertEqual((row['phase'], row['outcome'], row['github_attempts'],
+                                  row['read_attempts'], row['transient_attempts'], row['retry_at']),
+                                 ('pending', 'requeued', 0, 0, 0, 0))
+                self.assertEqual((row['tested'], row['merge_attempts'], row['ci_since'], row['ci_head']),
+                                 (None, 4, 1, self.approved))
+        self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_submit_retries_same_head_after_premerge_github_exhaustion(self):
+        self.pr()
+        entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
+        with self.q.db:
+            self.q.db.execute('UPDATE entries SET github_attempts=? WHERE id=?', (module.MAX_ATTEMPTS, entry))
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome'], row['tested']), ('blocked', 'github_exhausted', None))
+        result = self.cli('submit', '1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0], 'pending')
+        self.restart()
+        self.q.tick()
+        self.assertEqual(len(self.calls('merge')), 1)
+        self.assertEqual(self.calls('merge')[0][-1], self.approved)
+
+    def test_enqueue_never_rearms_held_or_head_moved_entries(self):
+        n = 0
+        for phase in ('blocked', 'exhausted'):
+            for outcome, held in (('head_moved', False), ('held', False), ('github_exhausted', True)):
+                n += 1
+                with self.subTest(phase=phase, outcome=outcome, held=held):
+                    self.pr(n, held=held)
+                    entry = self.q.enqueue(module.REPOS[0], n, self.approved)
+                    with self.q.db:
+                        self.q.db.execute('UPDATE entries SET phase=?,outcome=?,github_attempts=4 WHERE id=?',
+                                          (phase, outcome, entry))
+                    self.q.enqueue(module.REPOS[0], n, self.approved)
+                    row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+                    self.assertEqual((row['phase'], row['github_attempts']), (phase, 4))
+        self.assertEqual(self.calls('merge'), [])
+
     def test_enqueue_rearms_exhausted_entry_without_resetting_merge_or_ci_caps(self):
         self.pr()
         entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
