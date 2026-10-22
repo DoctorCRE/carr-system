@@ -826,7 +826,10 @@ class Pipeline:
                 raise Blocked("toolchain_runtime_path", "runtime directory resolves into the pinned toolchain or outside this run")
         for path in directories.values():
             path.mkdir(parents=True, exist_ok=True)
-        return {**env, **{name: str(path) for name, path in directories.items()},
+        github_config = env.get("GH_CONFIG_DIR") or str(
+            Path(env.get("XDG_CONFIG_HOME") or Path(env["HOME"]) / ".config") / "gh")
+        return {**env, "GH_CONFIG_DIR": github_config,
+                **{name: str(path) for name, path in directories.items()},
                 "CLOUDFLARE_CF_FETCH_PATH": str(directories["MINIFLARE_CACHE_DIR"] / "cf.json")}
 
     def run_command(self, argv: list[str], *, cwd: Path, log: Path,

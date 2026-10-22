@@ -6595,6 +6595,24 @@ class TokenCheckWrangler(Base):
             pipe.step(name, argv, self.fx.repo)
             self.assertEqual(runner.envs[name]["HOME"], str(home), argv)
 
+    def test_non_wrangler_steps_preserve_github_config_when_xdg_is_redirected(self):
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner)
+        home = self.fx.repo / "login-home"
+        for index, (settings, expected) in enumerate((
+                ({}, home / ".config/gh"),
+                ({"XDG_CONFIG_HOME": str(home / "xdg")}, home / "xdg/gh"),
+                ({"GH_CONFIG_DIR": str(home / "custom"),
+                  "XDG_CONFIG_HOME": str(home / "xdg")}, home / "custom"))):
+            env = {key: value for key, value in pipe.env.items()
+                   if key not in {"GH_CONFIG_DIR", "XDG_CONFIG_HOME"}}
+            env.update(HOME=str(home), **settings)
+            name = f"github-config-check-{index}"
+            pipe.step(name, ["./run.sh", "health"], self.fx.repo, env=env)
+            observed = runner.envs[name]
+            config = observed.get("GH_CONFIG_DIR") or str(Path(observed["XDG_CONFIG_HOME"]) / "gh")
+            self.assertEqual(config, str(expected))
+
     def test_command_before_toolchain_install_does_not_need_package_files(self):
         pipe = self.fx.pipeline(FakeRunner())
         for name in rp.TOOLCHAIN_FILES:
