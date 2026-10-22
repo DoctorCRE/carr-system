@@ -175,6 +175,7 @@ class BoardCase(unittest.TestCase):
         self.enterContext(patch.object(tempfile, "tempdir", str(self.root)))
         self.enterContext(patch.dict(os.environ, {"CARR_WORK_QUEUE_DB": str(self.root / "queue.sqlite3")}))
         self.env = os.environ.copy()
+        self.env["CARR_WORK_QUEUE_DB"] = str(self.root / "work-queue.sqlite3")
         self.env["PROGRESS_BOARD_ROOT"] = str(self.root)
         self.env.update(TMPDIR=str(self.root), TMP=str(self.root), TEMP=str(self.root))
         self.env["PROGRESS_BOARD_SKIP_GH"] = "1"

@@ -1,8 +1,8 @@
 {
   "schema": "legacy-lifecycle-callers.v1",
   "generator": "ops/scac-mutation-inventory.mjs",
-  "source_set_digest": "sha256:93ed1a7380fed7eb7b5e80506c567fe1754cc6c42d1b13793c78582c4719f83e",
-  "source_count": 1421,
+  "source_set_digest": "sha256:3edd627bdc222b87fad74262e491818f2ffae7d55e915e3fda47f6ae40d71dc1",
+  "source_count": 1428,
   "tables": [
     "public.client",
     "public.deal"
@@ -15,7 +15,7 @@
     {
       "operation": "add-deal-note",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "b1c819c39a27b2eda3d2dc0e23ae13f547b01c1fc53817fbf242d1478496302c",
       "tables_written": [
         "public.capture_post_call_action",
@@ -30,7 +30,7 @@
     {
       "operation": "confirm-merge",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "9ab2287823b79ead581af58d3d67d92047a0dd9e6c59c11312393a14e4ceb795",
       "tables_written": [
         "public.client",
@@ -45,7 +45,7 @@
     {
       "operation": "create-national-account",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "89ff71bc3b7f58572ffb8b12e7811916cc478b2013b3b100414ffc99220fb59c",
       "tables_written": [
         "public.client",
@@ -60,7 +60,7 @@
     {
       "operation": "create-national-market-deal",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "202a61d68c0eacb6a9b6e8e5d59c6736e68a88e2919243439a0cbe63b995f801",
       "tables_written": [
         "public.client",
@@ -77,7 +77,7 @@
     {
       "operation": "new-client",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "8844b41a66cc5cd11df88c52ff7ce6cff20f6813b2872748ba3dc993910e2657",
       "tables_written": [
         "public.client",
@@ -90,7 +90,7 @@
     {
       "operation": "new-deal",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "723fe7457ed04768ab45e67395cefed1fb0682afe4157a3a076356278ff48e1a",
       "tables_written": [
         "public.deal",
@@ -102,7 +102,7 @@
     {
       "operation": "patch-deal-field",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "0ef48f41baa34a2b86825fd6c08e8336fcc797c68be3a71131edf849034f757b",
       "tables_written": [
         "public.capture_post_call_action",
@@ -118,7 +118,7 @@
     {
       "operation": "reassign-deal",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "845cab5fa4e8fb52a6af73b87334e588577f9d4d8eacd0cddd0f6c5c806b547a",
       "tables_written": [
         "public.deal",
@@ -130,7 +130,7 @@
     {
       "operation": "resolve-candidate",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "53b947213740197f65b0cf7fda13349e728021bfb594bdc20563edb00fee84fa",
       "tables_written": [
         "public.activity",
@@ -155,7 +155,7 @@
     {
       "operation": "resolve-conflict",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "71b026be027f186e76769e5ff5e762a78246ea886c4caab9c568d1dc830ed671",
       "tables_written": [
         "public.capture_post_call_action",
@@ -171,7 +171,7 @@
     {
       "operation": "revert-deal-field",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "0da4ef9137bcdf2d5108c5f0b89651f054d313c51ed2d0851858064c2a7193f8",
       "tables_written": [
         "public.capture_post_call_action",
@@ -186,7 +186,7 @@
     {
       "operation": "set-lead",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "b14cc85142646cfb452c72a8cda85e4675bb98298a7e3c9664b1dfed3aef0ec9",
       "tables_written": [
         "public.deal",
@@ -199,7 +199,7 @@
     {
       "operation": "set-next-action",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "9696a8471811a6e8262d43bf7b35cb1fe508c5ad5b6b30a6d9c237c56eb04d41",
       "tables_written": [
         "public.capture_post_call_action",
@@ -213,7 +213,7 @@
     {
       "operation": "set-next-step",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "8e0ca1d84ca17b362abbf9a8dfaa5001228ba1c25b88d62d2a77aed2a039b7c4",
       "tables_written": [
         "public.capture_post_call_action",
@@ -228,7 +228,7 @@
     {
       "operation": "set-prospect-engagement-status",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "38e8d1b1fdf90297f9e45f56baa6163945577278adae9294248dd102fbc94f84",
       "tables_written": [
         "public.client",
@@ -241,7 +241,7 @@
     {
       "operation": "update-deal",
       "source_locator": "mcp-server/src/tools.js",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d",
       "handler_digest": "0dd1de37c4de30909c84563cf7c2965fb1cbc0d5657ffbf798cbaf749e0d1cd2",
       "tables_written": [
         "public.capture_post_call_action",
@@ -321,7 +321,7 @@
       "line": 2298,
       "caller": "appendDealNextStep",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.deal",
@@ -329,7 +329,7 @@
       "line": 2382,
       "caller": "supersedeOverdueDealAction",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.deal",
@@ -337,7 +337,7 @@
       "line": 2461,
       "caller": "applyDealRoomField",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.deal",
@@ -345,7 +345,7 @@
       "line": 2472,
       "caller": "applyDealRoomField",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.deal",
@@ -353,7 +353,7 @@
       "line": 4084,
       "caller": "set-next-action",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.deal",
@@ -361,7 +361,7 @@
       "line": 4289,
       "caller": "update-deal",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.deal",
@@ -369,7 +369,7 @@
       "line": 4344,
       "caller": "new-deal",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.deal",
@@ -377,7 +377,7 @@
       "line": 4421,
       "caller": "reassign-deal",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.deal",
@@ -385,7 +385,7 @@
       "line": 4455,
       "caller": "set-lead",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.client",
@@ -393,7 +393,7 @@
       "line": 5069,
       "caller": "set-prospect-engagement-status",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.client",
@@ -401,7 +401,7 @@
       "line": 5097,
       "caller": "new-client",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.client",
@@ -409,31 +409,31 @@
       "line": 6070,
       "caller": "confirm-merge",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.client",
       "source_locator": "mcp-server/src/tools.js",
-      "line": 9553,
+      "line": 9554,
       "caller": "create-national-account",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.client",
       "source_locator": "mcp-server/src/tools.js",
-      "line": 9603,
+      "line": 9604,
       "caller": "create-national-market-deal",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.deal",
       "source_locator": "mcp-server/src/tools.js",
-      "line": 9610,
+      "line": 9611,
       "caller": "create-national-market-deal",
       "kind": "runtime_sql",
-      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+      "source_digest": "de791f31dabb1cea43d6fd7f26c61abadb72b2c212269e5f09426718b27e565d"
     },
     {
       "table": "public.deal",
