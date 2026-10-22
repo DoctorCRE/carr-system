@@ -50,10 +50,10 @@ def module(path: str):
     return loaded
 
 
-def regenerate(pr: int | None) -> None:
+def regenerate(pr: int | None, exclude_prs=()) -> None:
     pending = migration_names(ROOT) - migration_names(ROOT, 'origin/main')
     branch = run('git', 'branch', '--show-current').strip() if pending and pr is None else None
-    peer = claims(pr, branch=branch) if pending else Claims(set(), set(), {})
+    peer = claims(pr, branch=branch, exclude_prs=exclude_prs) if pending else Claims(set(), set(), {})
     command = [sys.executable, 'tools/renumber-at-merge.py']
     for slot in sorted(peer.earlier):
         command += ['--claimed-slot', str(slot)]
@@ -87,6 +87,7 @@ def regenerate(pr: int | None) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--pr', type=int, help='PR number; before opening a PR all existing PRs take precedence')
+    parser.add_argument('--exclude-pr', type=int, action='append', default=[], help='Other pinned PRs already composed in this candidate')
     parser.add_argument('--list', action='store_true')
     args = parser.parse_args()
     if args.list:
@@ -94,7 +95,7 @@ def main() -> int:
         return 0
     try:
         run('git', 'merge-base', '--is-ancestor', 'origin/main', 'HEAD')
-        regenerate(args.pr)
+        regenerate(args.pr, args.exclude_pr)
         return 0
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         print(f'regen: REFUSED: {exc}', file=sys.stderr)

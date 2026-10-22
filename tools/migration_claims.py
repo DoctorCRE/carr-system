@@ -33,7 +33,7 @@ def rows(pages):
             yield row
 
 
-def claims(pr: int | None, read: Callable = github, *, branch: str | None = None) -> Claims:
+def claims(pr: int | None, read: Callable = github, *, branch: str | None = None, exclude_prs=()) -> Claims:
     result = Claims(set(), set(), {})
     peers = list(rows(read(f'repos/{REPO}/pulls?state=open&per_page=100')))
     if pr is None and branch:
@@ -42,7 +42,7 @@ def claims(pr: int | None, read: Callable = github, *, branch: str | None = None
         number = peer.get('number')
         if type(number) is not int or number < 1:
             raise ValueError('invalid open PR number')
-        if number == pr:
+        if number == pr or number in exclude_prs:
             continue
         files = list(rows(read(f'repos/{REPO}/pulls/{number}/files?per_page=100')))
         if len(files) >= 3000:

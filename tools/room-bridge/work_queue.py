@@ -298,26 +298,64 @@ class WorkQueue:
         with self.transaction():
             if expected_order is not None and self._merge_entries() != expected_order:
                 raise QueueChanged('merge order changed before ownership')
-            row = self._item(card)
-            if pin is not None and pin not in json.loads(row['data'])['prs']:
-                raise ValueError('merge head differs from pinned work card')
-            if row['stage'] != 'merging':
-                raise ValueError('merge executor can start only a merging-stage card')
-            data = json.loads(row['data'])
-            if 'merge_inflight' in data or not self._merge_active(card):
-                inflight = self._merge_inflight(card, data)
-                owned = inflight + [p for p in ([pin] if pin is not None else data['prs']) if p not in inflight]
-                if owned != data.get('merge_inflight'):
-                    data['merge_inflight'] = owned
-                    self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
-                    self._event(card, inflight, owned, actor, reason, 'merge_pin_started')
-            run = self.db.execute('SELECT * FROM stage_runs WHERE card_id=? ORDER BY id DESC LIMIT 1', (card,)).fetchone()
-            if run['started_at'] is None:
-                at = timestamp()
-                self.db.execute('UPDATE stage_runs SET started_at=?,started=? WHERE id=?', (at, time.time(), run['id']))
-                self._event(card, {**self._state(row), 'started_at': None},
-                            {**self._state(row), 'started_at': at}, actor, reason, 'merge_started')
+            self._begin_merge(card, pin, actor, reason)
         return self.get(card)
+
+    def begin_merge_batch(self, members, *, expected_order, actor, reason):
+        with self.transaction():
+            if self._merge_entries() != expected_order:
+                raise QueueChanged('merge order changed before batch ownership')
+            for member in members:
+                data = json.loads(self._item(member['card_id'])['data'])
+                if 'merge_inflight' not in data and self._merge_active(member['card_id']):
+                    raise QueueChanged('legacy_ownership')
+                self._begin_merge(member['card_id'], member['pin'], actor, reason)
+
+    def release_merge_batch(self, members, *, actor, reason):
+        """Release only a provider-rejected attempt in the same merge runs."""
+        with self.transaction():
+            for member in members:
+                card = member['pin']['card_id']
+                run = self.db.execute("SELECT MAX(id) FROM stage_runs WHERE card_id=? AND stage='merging'", (card,)).fetchone()[0]
+                if run != member['pin']['merge_run']:
+                    raise QueueChanged('merge run changed before rejected batch release')
+                data = json.loads(self._item(card)['data'])
+                if 'merge_inflight' not in data:
+                    raise QueueChanged('legacy_ownership')
+                before = data['merge_inflight']
+                pin = dict(repo=member['pin']['repo'], number=member['pr'], head=member['head'])
+                data['merge_inflight'] = [p for p in before if p != pin]
+                self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
+                if before != data['merge_inflight']:
+                    self._event(card, before, data['merge_inflight'], actor, reason, 'merge_pin_released')
+
+    @contextmanager
+    def guard_merge_order(self, expected_order):
+        with self.transaction():
+            if self._merge_entries() != expected_order:
+                raise QueueChanged('merge order changed before provider effect')
+            yield
+
+    def _begin_merge(self, card, pin, actor, reason):
+        row = self._item(card)
+        if pin is not None and pin not in json.loads(row['data'])['prs']:
+            raise ValueError('merge head differs from pinned work card')
+        if row['stage'] != 'merging':
+            raise ValueError('merge executor can start only a merging-stage card')
+        data = json.loads(row['data'])
+        if 'merge_inflight' in data or not self._merge_active(card):
+            inflight = self._merge_inflight(card, data)
+            owned = inflight + [p for p in ([pin] if pin is not None else data['prs']) if p not in inflight]
+            if owned != data.get('merge_inflight'):
+                data['merge_inflight'] = owned
+                self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
+                self._event(card, inflight, owned, actor, reason, 'merge_pin_started')
+        run = self.db.execute('SELECT * FROM stage_runs WHERE card_id=? ORDER BY id DESC LIMIT 1', (card,)).fetchone()
+        if run['started_at'] is None:
+            at = timestamp()
+            self.db.execute('UPDATE stage_runs SET started_at=?,started=? WHERE id=?', (at, time.time(), run['id']))
+            self._event(card, {**self._state(row), 'started_at': None},
+                        {**self._state(row), 'started_at': at}, actor, reason, 'merge_started')
 
     def advance_merge_pin(self, card, *, repo, pr, head, prepared, main, actor, reason, expected_order):
         if any(not re.fullmatch(r'[0-9a-f]{40}', sha or '') for sha in (head, prepared, main)) or head == prepared:

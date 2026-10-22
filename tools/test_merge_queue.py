@@ -39,11 +39,37 @@ if failure and a[:len(failure['prefix'])]==failure['prefix'] and all(x in a for 
  if failure.get('malformed'): save();print('{broken');sys.exit()
  save();print(failure.get('stderr', f"gh: Forbidden (HTTP {failure.get('status',403)})"),file=sys.stderr);sys.exit(1)
 if a[:2]==['label','create']: emit({'name':'do_not_merge'});sys.exit()
+if a[:2]==['api','graphql'] and any(x.startswith('input=') for x in a):
+ inp=json.loads(next(x[6:] for x in a if x.startswith('input=')))
+ updates=inp['refUpdates']; repo=inp['repositoryId']; remote=d.get('remotes',{}).get(repo,d['remote'])
+ if d.get('move_before_land'):
+  n=str(d.pop('move_before_land')); d['prs'][repo+'#'+n]['head']['sha']=d['updated_head']
+ refs={'refs/heads/main':subprocess.check_output(['git','-C',remote,'rev-parse','main'],text=True).strip()}
+ refs.update({'refs/heads/'+p['head']['ref']:p['head']['sha'] for p in d['prs'].values() if p['repo']==repo})
+ if any(refs.get(u['name'])!=u['beforeOid'] for u in updates):
+  emit({'errors':[{'message':'beforeOid mismatch'}]});sys.exit()
+ assert all(u['force'] is False for u in updates)
+ landed=updates[0]['afterOid']
+ subprocess.run(['git','-C',remote,'update-ref','refs/heads/main',landed,updates[0]['beforeOid']],check=True)
+ d.setdefault('landed',[]).append(landed)
+ for p in d['prs'].values():
+  if p['repo']==repo and p['state']=='open' and subprocess.run(['git','-C',remote,'merge-base','--is-ancestor',p['head']['sha'],landed]).returncode==0:
+   p.update(merged=True,state='closed',merge_commit_sha=landed)
+ emit({'data':{'updateRefs':{'clientMutationId':inp['clientMutationId']}}})
+ if d.get('lost_batch_response'): print('lost response',file=sys.stderr);sys.exit(1)
+ sys.exit()
 if a[:2]==['api','graphql']:
  repo=next(x[5:] for x in a if x.startswith('repo='));owner=next(x[6:] for x in a if x.startswith('owner='));n=next(x[2:] for x in a if x.startswith('n='));p=d['prs'][owner+'/'+repo+'#'+n]
  emit({'data':{'repository':{'pullRequest':{'headRefOid':p['head']['sha'],'state':'OPEN','mergeQueueEntry':{'id':'queued'} if d.get('server_queued') else None,'autoMergeRequest':None}}}});sys.exit()
 if a[0]=='api':
- path=a[1]; bits=path.split('/'); repo='/'.join(bits[1:3]); n=bits[4].split('?')[0] if len(bits)>4 else ''
+ path=a[1]; bits=path.split('/'); repo='/'.join(bits[1:3]); n=bits[4].split('?')[0] if len(bits)>4 else ''; remote=d.get('remotes',{}).get(repo,d['remote'])
+ if len(bits)==3: emit({'node_id':repo});sys.exit()
+ if bits[3:]==['rules','branches','main']:
+  emit([{'type':'required_status_checks','parameters':{'required_status_checks':[{'context':'ops/ci.sh --strict'}]}}]);sys.exit()
+ if bits[3]=='pulls' and '-X' in a and a[a.index('-X')+1]=='POST':
+  branch=next(x[5:] for x in a if x.startswith('head=')); sha=subprocess.check_output(['git','-C',remote,'rev-parse',branch],text=True).strip()
+  n=str(1000+len(d['prs'])); p=dict(number=int(n),repo=repo,head=dict(sha=sha,ref=branch,repo=dict(full_name=repo)),base=dict(sha=d['main'],ref='main'),state='open',merged=False,draft=False,labels=[],mergeable=True,mergeable_state='clean',title='batch')
+  d['prs'][repo+'#'+n]=p;emit(p);sys.exit()
  if bits[3].startswith('pulls?'): emit([[p for p in d['prs'].values() if p['repo']==repo and p['state']=='open']]); sys.exit()
  if bits[3]=='labels': emit({'name':'do_not_merge'});sys.exit()
  if bits[3]=='pulls':
@@ -65,6 +91,11 @@ if a[0]=='api':
   else: emit([[dict(c,id=i+1) for i,c in enumerate(d['comments'].get(key,[]))]])
   sys.exit()
  if bits[3]=='commits':
+  if bits[-1].startswith('check-runs') and d.get('batch_checks'):
+   head=bits[4]; bad=subprocess.run(['git','-C',remote,'cat-file','-e',head+':bad.txt'],capture_output=True).returncode==0
+   conclusion='failure' if bad else 'success'
+   status='in_progress' if repo in d.get('pending_repos',[]) else 'completed'
+   emit({'check_runs':[dict(id=1,name='ops/ci.sh --strict',head_sha=head,app=dict(id=1),status=status,conclusion=conclusion)]});sys.exit()
   if bits[-1].startswith('check-runs'): emit([{'check_runs':d.get('runs',[{'id':1,'name':'CI','app':{'id':1},'status':'completed','conclusion':'success'}])}])
   elif bits[-1].startswith('statuses'): emit([d.get('statuses',[])])
   else: raise AssertionError(a)
@@ -2332,6 +2363,234 @@ class QueueTests(unittest.TestCase):
         discover.assert_called_once()
         self.assertTrue(sleeps)
 
+
+
+class BatchTests(unittest.TestCase):
+    def setUp(self):
+        self.f = QueueTests()
+        self.f.setUp()
+        self.addCleanup(self.f.doCleanups)
+        self.f.q.batch_size = 5
+        self.f.data['batch_checks'] = True
+        self.f.git('config', 'receive.denyCurrentBranch', 'ignore')
+        tools = self.f.remote / 'tools'
+        tools.mkdir()
+        (tools / 'regen.py').write_text(
+            'from pathlib import Path\n'
+            'Path("generated.txt").write_text("regenerated batch\\n")\n'
+            'if Path("db/schema.sql").exists(): Path("db/schema.sql").write_text("regenerated schema\\n")\n')
+        self.f.git('add', 'tools/regen.py')
+        self.f.git('commit', '-qm', 'fixture generator')
+        self.f.main = self.f.git('rev-parse', 'HEAD').strip()
+        self.f.data['main'] = self.f.main
+        self.f.save()
+
+    def members(self, numbers=(1, 2, 3), repo=module.REPOS[0], bad=None):
+        heads = []
+        for n in numbers:
+            self.f.git('switch', '-q', '-C', f'branch-{n}', self.f.main)
+            name = 'bad.txt' if n == bad else f'change-{n}.txt'
+            (self.f.remote / name).write_text(f'approved {n}\n')
+            self.f.git('add', name)
+            self.f.git('commit', '-qm', f'PR {n}')
+            head = self.f.git('rev-parse', 'HEAD').strip()
+            self.f.pr(n, repo=repo, head=head)
+            self.f.q.enqueue(repo, n, head)
+            heads.append(head)
+        self.f.git('switch', '-q', 'main')
+        return heads
+
+    def drive(self, count=50):
+        for _ in range(count):
+            self.f.q.tick()
+            time.sleep(.03)
+
+    def wait_for_ci(self):
+        for _ in range(50):
+            self.f.q.tick()
+            if any(p['head']['ref'].startswith('merge-queue/batch-') for p in self.f.load()['prs'].values()):
+                return
+            time.sleep(.03)
+        self.fail('candidate PR did not reach hosted CI')
+
+    def test_head_moved_during_batch_excludes_only_that_pin(self):
+        self.members()
+        self.wait_for_ci()
+        self.f.load()['prs'][module.REPOS[0]+'#2']['head']['sha'] = self.f.changed
+        self.f.save()
+        self.drive()
+        provider = self.f.load()
+        self.assertEqual(len(provider.get('landed', [])), 1)
+        self.assertEqual([provider['prs'][module.REPOS[0]+f'#{n}']['merged'] for n in (1,2,3)], [True, False, True])
+        self.assertEqual([e['pr'] for e in self.f.q.status() if e['outcome']=='head_moved'], [2])
+
+    def test_batch_regeneration_does_not_reserve_its_own_migration_slots(self):
+        from migration_claims import claims
+        reads = []
+        def read(path):
+            reads.append(path)
+            if '/pulls?' in path:
+                return [[dict(number=n) for n in (1,2,3,4)]]
+            return [[dict(filename='migrations/0123_fixture.sql', status='added')]]
+        result = claims(1, read, exclude_prs={2,3})
+        self.assertEqual(result.occupied, {123})
+        self.assertFalse(any('/pulls/2/' in p or '/pulls/3/' in p for p in reads))
+        self.assertEqual(result.owners, {123:4})
+
+    def test_immutable_candidate_is_regenerated_once(self):
+        marker = self.f.root / 'regenerations'
+        script = self.f.remote / 'tools/regen.py'
+        script.write_text(script.read_text() + f'with Path({str(marker)!r}).open("a") as f: f.write("regen\\n")\n')
+        self.f.git('add', 'tools/regen.py')
+        self.f.git('commit', '-qm', 'record generator calls')
+        self.f.main = self.f.git('rev-parse', 'HEAD').strip()
+        self.f.data['main'] = self.f.main
+        self.f.save()
+        self.members()
+        self.drive()
+        self.assertEqual(marker.read_text().splitlines(), ['regen'])
+
+    def test_new_queue_priority_invalidates_an_inflight_candidate(self):
+        self.members()
+        self.wait_for_ci()
+        fourth = self.members(numbers=(4,))[0]
+        with module.WorkQueue(module.default_path()) as work:
+            work.prioritize(f'{module.REPOS[0]}#4@{fourth}', actor='test', reason='new reviewed priority')
+        self.drive()
+        landed = self.f.load()['landed']
+        self.assertEqual(len(landed), 1)
+        self.f.git('merge-base', '--is-ancestor', fourth, landed[0])
+
+    def test_two_repos_start_ci_while_first_repo_waits(self):
+        self.members()
+        self.members(numbers=(4,5), repo=module.REPOS[1])
+        other = self.f.root / 'doctorcre-remote.git'
+        subprocess.run(['git', 'clone', '-q', '--bare', str(self.f.remote), str(other)], check=True)
+        self.f.q.git(module.REPOS[1], 'remote', 'set-url', 'origin', str(other))
+        self.f.load()['remotes'] = {module.REPOS[1]: str(other)}
+        self.f.save()
+        self.f.load()['pending_repos'] = list(module.REPOS)
+        self.f.save()
+        self.drive(25)
+        candidates = [p for p in self.f.load()['prs'].values() if p['head']['ref'].startswith('merge-queue/batch-')]
+        self.assertEqual({p['repo'] for p in candidates}, {module.REPOS[0], module.REPOS[1]})
+        self.assertEqual(self.f.load().get('landed', []), [])
+        self.f.load()['pending_repos'] = [module.REPOS[0]]
+        self.f.save()
+        self.drive(15)
+        self.assertTrue(self.f.load()['prs'][module.REPOS[1]+'#4']['merged'])
+        self.assertFalse(self.f.load()['prs'][module.REPOS[0]+'#1']['merged'])
+        self.f.load()['pending_repos'] = []
+        self.f.save()
+        self.drive(20)
+        self.assertTrue(self.f.load()['prs'][module.REPOS[0]+'#1']['merged'])
+        self.assertEqual(len(self.f.load()['landed']), 2)
+
+    def test_atomic_landing_rejects_head_race_then_retries_remaining_pins(self):
+        self.members()
+        self.f.load()['move_before_land'] = 2
+        self.f.save()
+        self.drive(50)
+        provider = self.f.load()
+        self.assertEqual(len(provider.get('landed', [])), 1)
+        self.assertEqual([provider['prs'][module.REPOS[0]+f'#{n}']['merged'] for n in (1,2,3)], [True, False, True])
+        attempts = [a for a in provider['calls'] if a[:2]==['api','graphql']]
+        self.assertEqual(len(attempts), 2)
+        with module.WorkQueue(module.default_path(), read_only=True) as work:
+            moved = next(c for c in work.export()['items'] if c['prs'][0]['number']==2)
+            self.assertEqual(moved['stage'], 'blocked')
+            self.assertEqual(moved['merge_stopped'], moved['prs'])
+
+
+    def test_batch_merge_refreshes_stacked_children(self):
+        self.members()
+        self.f.pr(9, head=self.f.updated, base='branch-1', state='behind', draft=True)
+        self.drive()
+        self.assertEqual(self.f.load()['prs'][module.REPOS[0]+'#9']['base']['ref'], 'main')
+        self.assertEqual([a[2] for a in self.f.calls('edit')], ['9'])
+        self.assertTrue(any('/pulls/9/update-branch' in str(a) for a in self.f.load()['calls']))
+
+    def test_service_does_not_exit_between_batch_steps(self):
+        self.members()
+        previous = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)}
+        try:
+            self.f.q.run(poll=.01, discover=False)
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
+        self.assertEqual(len(self.f.load().get('landed', [])), 1)
+        self.assertTrue(all(e['batch']['phase']=='done' for e in self.f.q.status()))
+
+    def test_restart_drains_an_existing_batch_with_default_size_one(self):
+        self.members()
+        self.wait_for_ci()
+        self.f.restart()
+        self.assertEqual(self.f.q.batch_size, 1)
+        self.drive()
+        self.assertEqual(len(self.f.load().get('landed', [])), 1)
+        self.assertTrue(all(e['batch']['phase']=='done' for e in self.f.q.status()))
+        self.assertEqual(self.f.calls('merge'), [])
+
+    def test_generated_conflicts_are_resolved_before_one_regeneration(self):
+        self.members()
+        for n in (1,2,3):
+            self.f.git('switch', '-q', f'branch-{n}')
+            schema = self.f.remote / 'db/schema.sql'
+            schema.parent.mkdir(exist_ok=True)
+            schema.write_text(f'generated from branch {n}\n')
+            self.f.git('add', 'db/schema.sql')
+            self.f.git('commit', '-qm', 'fixture generated conflict')
+            head = self.f.git('rev-parse', 'HEAD').strip()
+            self.f.pr(n, head=head)
+            self.f.q.enqueue(module.REPOS[0], n, head)
+        self.f.git('switch', '-q', 'main')
+        # Older fixture cards remain pinned to old heads and cannot authorize the new heads.
+        self.drive()
+        self.assertEqual(len(self.f.load().get('landed', [])), 1)
+        landed = self.f.load()['landed'][0]
+        self.assertEqual(self.f.git('show', landed+':generated.txt'), 'regenerated batch\n')
+        self.assertEqual(self.f.git('show', landed+':db/schema.sql'), 'regenerated schema\n')
+        self.assertFalse(any(e['outcome']=='batch_failed' for e in self.f.q.status()))
+
+    def test_lost_landing_response_is_reconciled_without_replay(self):
+        self.members()
+        self.f.load()['lost_batch_response'] = True
+        self.f.save()
+        self.drive()
+        self.assertEqual(len(self.f.load().get('landed', [])), 1)
+        self.assertTrue(all(e['outcome']=='merged' for e in self.f.q.status()))
+        self.assertEqual(len([a for a in self.f.load()['calls'] if a[:2]==['api','graphql']]), 1)
+
+    def test_bad_member_is_bisected_and_other_two_land(self):
+        self.members(bad=2)
+        self.drive(100)
+        provider = self.f.load()
+        self.assertEqual(len(provider.get('landed', [])), 2)
+        self.assertTrue(provider['prs'][module.REPOS[0]+'#1']['merged'])
+        self.assertFalse(provider['prs'][module.REPOS[0]+'#2']['merged'])
+        self.assertTrue(provider['prs'][module.REPOS[0]+'#3']['merged'])
+        failed = [e for e in self.f.q.status() if e['outcome']=='batch_failed']
+        self.assertEqual([e['pr'] for e in failed], [2])
+
+    def test_three_green_pins_land_one_exact_tested_tree(self):
+        heads = self.members()
+        self.drive()
+        provider = self.f.load()
+        self.assertEqual(len(provider.get('landed', [])), 1)
+        landed = provider['landed'][0]
+        self.assertEqual(self.f.git('rev-parse', 'main').strip(), landed)
+        self.assertEqual(self.f.git('show', landed+':generated.txt'), 'regenerated batch\n')
+        for n, head in enumerate(heads, 1):
+            self.f.git('merge-base', '--is-ancestor', head, landed)
+            self.assertEqual(self.f.git('show', landed+f':change-{n}.txt'), f'approved {n}\n')
+            self.assertTrue(provider['prs'][module.REPOS[0]+f'#{n}']['merged'])
+        with module.WorkQueue(module.default_path(), read_only=True) as work:
+            self.assertEqual(work.merge_order()['entries'], [])
+            self.assertEqual(sum(len(c.get('merge_receipts', [])) for c in work.export()['items']), 3)
+        checked = [a[1].split('/')[4] for a in provider['calls'] if a[0]=='api' and '/check-runs?' in a[1]]
+        self.assertIn(landed, checked)
+        self.assertTrue(all(e['batch']['tree']==self.f.git('rev-parse', 'main^{tree}').strip() for e in self.f.q.status()))
+        self.assertEqual(self.f.calls('merge'), [])
 
 if __name__ == '__main__':
     unittest.main()
