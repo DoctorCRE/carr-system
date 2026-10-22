@@ -1,0 +1,135 @@
+{
+  "schema": "rule-scope-cache-latency/v1",
+  "measured_at": "2026-10-22T00:50:04.004446-05:00",
+  "cpu_count": 18,
+  "load": "0:50  up 6 days,  9:40, 1 user, load averages: 8.05 7.33 8.47",
+  "method": "Five alternating warmed lookup calls per side. Includes transport subprocess startup; excludes hook Python startup and receipt rendering. Profiling is separate.",
+  "local": {
+    "surface": "local Node and registered handler; synthetic query adapter; no network",
+    "baseline_ref": "4c652ef76308845f9c365dd1960e051f50fdf289",
+    "errors": 0,
+    "equal_selections": 10,
+    "runs_per_side": 5,
+    "samples_ms": {
+      "before": [
+        162.888,
+        188.402,
+        141.916,
+        153.396,
+        188.854
+      ],
+      "after": [
+        3.081,
+        2.124,
+        1.667,
+        2.36,
+        2.02
+      ]
+    },
+    "medians_ms": {
+      "before": 162.888,
+      "after": 2.124
+    },
+    "ranges_ms": {
+      "before": [
+        141.916,
+        188.854
+      ],
+      "after": [
+        1.667,
+        3.081
+      ]
+    },
+    "transport_calls": {
+      "before": 5,
+      "after": 0
+    },
+    "response_bytes": {
+      "before": [
+        293,
+        293,
+        293,
+        293,
+        293
+      ],
+      "after": []
+    },
+    "separate_profile": {
+      "registry_import_ms": 61.576375,
+      "synthetic_query_ms": 1.209457999999998,
+      "queries": 1,
+      "digest_ms": 0.7916670000000039,
+      "handler_ms": 5.201417000000006,
+      "process_total_ms": 164.5553329726681,
+      "outside_registry_and_handler_ms": 97.7775409726681
+    },
+    "limitation": "Query adapter timings exclude a real database."
+  },
+  "live": {
+    "surface": "live run.sh and deployed Worker",
+    "baseline_ref": "ee939f41",
+    "errors": 0,
+    "equal_selections": 10,
+    "runs_per_side": 5,
+    "samples_ms": {
+      "before": [
+        424.508,
+        367.423,
+        333.314,
+        382.616,
+        345.84
+      ],
+      "after": [
+        3.19,
+        3.332,
+        3.474,
+        2.701,
+        2.449
+      ]
+    },
+    "medians_ms": {
+      "before": 367.423,
+      "after": 3.19
+    },
+    "ranges_ms": {
+      "before": [
+        333.314,
+        424.508
+      ],
+      "after": [
+        2.449,
+        3.474
+      ]
+    },
+    "transport_calls": {
+      "before": 5,
+      "after": 0
+    },
+    "response_bytes": {
+      "before": [
+        339771,
+        339771,
+        339771,
+        339771,
+        339771
+      ],
+      "after": []
+    },
+    "separate_profile": {
+      "http_headers_ms": 334.173209,
+      "http_body_ms": 356.02587500000004,
+      "server_timing": null,
+      "status": 200,
+      "process_total_ms": 492.66216601245105,
+      "outside_http_ms": 136.636291012451
+    },
+    "limitation": "No live server-timing header means network and server query/digest cannot be separated without deployment."
+  },
+  "live_baseline_reason": "Deployed Worker rejects scope_cache, so live uses the deployed full-read baseline ee939f41. Local uses PR 2089 head 4c652ef76308845f9c365dd1960e051f50fdf289.",
+  "verification": {
+    "lookup_tests": 22,
+    "delivery_tests": 31,
+    "replayed_events": 418,
+    "store_calls_in_replay": 1
+  }
+}

@@ -20,6 +20,7 @@ from lib.rule_delivery_preuse import digest
 
 REPO = Path(__file__).resolve().parent.parent
 CACHE_DIR = REPO / "out/rule-scope-cache"
+FRESH_SECONDS = 60
 MATCH_KEYS = ("tools", "verbs", "bash_patterns", "path_globs")
 MODEL = "jev-1.13.0"
 MAX_QUESTIONS = json.loads((REPO / "mcp-server/src/jev-request-contract.v1.json").read_text())["max_questions"]
@@ -165,8 +166,24 @@ def select_rules(catalog: dict, event: dict, *, judge: Callable | None = None) -
 
 def _cache_path(session_id: str | None, agent_id: str | None) -> Path | None:
     from lib.rule_routes import _context_epoch
+    from lib.rule_boot_gate import read_arm
+    # Environment bearers have no non-secret rotation marker. Revalidate them.
+    if 'CARR_MCP_LOCAL_TOKEN' in os.environ:
+        return None
+    transport = Path(os.environ.get('CARR_MCP_ENV', str(Path.home()/'.config/carr/mcp-tokens.env')))
+    try:
+        stat = transport.lstat()
+        provenance = [stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns,
+                      stat.st_size, stat.st_mode, stat.st_uid]
+    except FileNotFoundError:
+        provenance = None
+    except OSError:
+        return None
     epoch = _context_epoch(session_id, agent_id) if session_id else None
-    return CACHE_DIR / digest([session_id, agent_id, epoch]) if epoch else None
+    boot_digest = (read_arm(session_id) or {}).get('digest') if session_id else None
+    return CACHE_DIR / digest([session_id, agent_id, epoch, boot_digest,
+        os.environ.get('CARR_MCP_URL', 'https://api.doctorcre.com/mcp'),
+        str(transport.absolute()), provenance, os.getuid()]) if epoch else None
 
 
 def _cache_key(catalog: dict) -> str:
@@ -182,7 +199,10 @@ def _read_catalog(directory: Path | None) -> dict | None:
             return None
         entry = json.loads((directory / (key + '.json')).read_text())
         catalog = entry['catalog']
-        if _cache_key(catalog) == key and digest(catalog) == entry['checksum']:
+        ages = [time.time() - entry['validated_at'],
+                time.monotonic() - entry['validated_monotonic']]
+        if (all(0 <= age < FRESH_SECONDS for age in ages) and _cache_key(catalog) == key
+                and digest({k: v for k, v in entry.items() if k != 'checksum'}) == entry['checksum']):
             return catalog
     except (OSError, ValueError, KeyError, TypeError):
         pass
@@ -201,34 +221,55 @@ def _atomic_write(path: Path, text: str) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def _write_catalog(directory: Path | None, catalog: dict) -> None:
+def _write_catalog(directory: Path | None, catalog: dict, validated_at: float, validated_monotonic: float) -> None:
     if directory is None:
         return
     try:
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         key = _cache_key(catalog)
+        entry = {'catalog': catalog, 'validated_at': validated_at,
+                 'validated_monotonic': validated_monotonic}
         _atomic_write(directory / (key + '.json'), json.dumps(
-            {'catalog': catalog, 'checksum': digest(catalog)}, ensure_ascii=False))
+            dict(entry, checksum=digest(entry)), ensure_ascii=False))
         _atomic_write(directory / 'current', key)
     except OSError:
         pass  # Disk cache availability never changes an authoritative selection.
 
 
+def _prune_catalogs() -> None:
+    """Expire disk artifacts after a day, off the fresh-hit path."""
+    cutoff = time.time() - 86400
+    try:
+        for directory in CACHE_DIR.iterdir():
+            if directory.is_symlink() or not directory.is_dir():
+                continue
+            try:
+                for path in directory.iterdir():
+                    if path.is_file() and not path.is_symlink() and path.stat().st_mtime < cutoff:
+                        path.unlink(missing_ok=True)
+                directory.rmdir()
+            except OSError:
+                continue
+    except OSError:
+        pass
+
+
 def lookup(event: dict, *, runner: Callable = subprocess.run,
            session_id: str | None = None, agent_id: str | None = None,
            judge: Callable | None = None) -> dict:
-    """Revalidate the sponsor-bound catalog on every event, then select locally.
+    """Select locally for at most 60 seconds after an authoritative read starts.
 
     The caller supplies its admitted, bounded cognition adapter for moments.
     Only catalogs are cached, never event selections or delivery receipts.
-    Reuse requires a live exact identity and digest confirmation. No epoch means
-    no reuse. Store failure never serves cached records.
+    Every event still selects; callers create their own event-bound receipts.
+    No epoch means no reuse. Expiry requires a store read, including during outages.
     """
     directory = _cache_path(session_id, agent_id)
     cached = _read_catalog(directory)
-    args: dict = {'detail': 'scopes'}
     if cached is not None:
-        args['scope_cache'] = {k: cached[k] for k in ('identity', 'corpus_digest')}
+        return select_rules(cached, event, judge=judge)
+    validated_at, validated_monotonic = time.time(), time.monotonic()
+    args: dict = {'detail': 'scopes'}
     env = {k: v for k, v in os.environ.items()
            if k not in {"DATABASE_URL", "CARR_BREAK_GLASS", "CARR_BREAK_GLASS_REASON", "CARR_MCP_CLIENT_PROFILE"}}
     try:
@@ -239,16 +280,9 @@ def lookup(event: dict, *, runner: Callable = subprocess.run,
         catalog = json.loads(response.stdout)
     except Exception:
         raise RuntimeError("scope_catalog_unavailable") from None
-    if catalog.get('not_modified') is True:
-        if (cached is None or catalog.get('ok') is not True
-                or catalog.get('schema') != 'rule-scope-catalog/v1'
-                or catalog.get('identity') != cached['identity']
-                or catalog.get('corpus_digest') != cached['corpus_digest']):
-            raise ValueError('invalid_scope_cache_confirmation')
-        catalog = cached
     selection = select_rules(catalog, event, judge=judge)
-    if catalog is not cached:
-        _write_catalog(directory, catalog)
+    _write_catalog(directory, catalog, validated_at, validated_monotonic)
+    _prune_catalogs()
     return selection
 
 

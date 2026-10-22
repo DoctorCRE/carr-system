@@ -1,5 +1,6 @@
 """Behavior at the store-backed lookup interface. No live store or model calls."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -25,106 +26,152 @@ def catalog(*rules):
 
 
 class LookupTests(unittest.TestCase):
-    def test_disk_catalog_survives_a_new_lookup_process(self):
-        source = catalog(rule('11111111', {'tools': ['Bash']}))
-        runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(source), '')
-        with tempfile.TemporaryDirectory() as raw, patch('lib.rule_scope_lookup.CACHE_DIR', Path(raw)), \
-                patch('lib.rule_routes._context_epoch', return_value='epoch1'):
-            expected = lookup(dict(tool_name='Bash'), runner=runner, session_id='s')
-            script = '''
-import json, subprocess, sys
-from pathlib import Path
-from unittest.mock import patch
-from lib.rule_scope_lookup import lookup
-source = json.loads(sys.argv[2])
-def runner(command, **kwargs):
-    assert json.loads(command[-1])['scope_cache'] == {k: source[k] for k in ('identity', 'corpus_digest')}
-    result = {k: v for k, v in source.items() if k != 'rules'} | {'not_modified': True}
-    return subprocess.CompletedProcess(command, 0, json.dumps(result), '')
-with patch('lib.rule_scope_lookup.CACHE_DIR', Path(sys.argv[1])), patch('lib.rule_routes._context_epoch', return_value='epoch1'):
-    print(json.dumps(lookup(dict(tool_name='Bash'), runner=runner, session_id='s')))
-'''
-            result = subprocess.run([sys.executable, '-c', script, raw, json.dumps(source)],
-                                    cwd=Path(__file__).resolve().parent.parent, capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout), expected)
-
-    def test_sponsor_epoch_and_failed_confirmation_cannot_reuse_another_catalog(self):
+    def test_fresh_catalog_selects_each_event_without_a_store_call(self):
         source = catalog(rule('11111111', {'tools': ['Bash']}))
         calls = []
         def runner(command, **kwargs):
-            args = json.loads(command[-1])
-            calls.append(args)
-            if source is None:
-                return subprocess.CompletedProcess(command, 1, '', '')
+            calls.append(command)
             return subprocess.CompletedProcess(command, 0, json.dumps(source), '')
         with tempfile.TemporaryDirectory() as raw, patch('lib.rule_scope_lookup.CACHE_DIR', Path(raw)), \
-                patch('lib.rule_routes._context_epoch', return_value='epoch1') as epoch:
+                patch('lib.rule_routes._context_epoch', return_value='epoch1'):
+            self.assertEqual(lookup(dict(tool_name='Bash'), runner=runner, session_id='s')['rules'], source['rules'])
+            self.assertEqual(lookup(dict(tool_name='Read'), runner=runner, session_id='s')['rules'], [])
+            self.assertEqual(len(calls), 1)
+
+    def test_boot_digest_change_invalidates_a_fresh_catalog(self):
+        source = catalog(rule('11111111', {'tools': ['Bash']}))
+        calls = []
+        def runner(command, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, json.dumps(source), '')
+        with tempfile.TemporaryDirectory() as raw, patch('lib.rule_scope_lookup.CACHE_DIR', Path(raw)), \
+                patch('lib.rule_routes._context_epoch', return_value='epoch1'), \
+                patch('lib.rule_boot_gate.read_arm', return_value={'digest': 'old'}) as arm:
+            lookup(dict(tool_name='Bash'), runner=runner, session_id='s')
+            arm.return_value = {'digest': 'new'}
+            source = dict(source, corpus_digest='b'*64, rules=[])
+            self.assertEqual(lookup(dict(tool_name='Bash'), runner=runner, session_id='s')['rules'], [])
+            self.assertEqual(len(calls), 2)
+
+    def test_cache_binds_transport_sponsor_session_agent_and_epoch(self):
+        source = catalog(rule('11111111', {'tools': ['Bash']}))
+        calls = []
+        def runner(command, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, json.dumps(source), '')
+        with tempfile.TemporaryDirectory() as raw, patch('lib.rule_scope_lookup.CACHE_DIR', Path(raw)/'cache'), \
+                patch('lib.rule_routes._context_epoch', return_value='epoch1') as epoch, \
+                patch.dict('os.environ', {'CARR_MCP_ENV': str(Path(raw)/'transport')}):
             event = dict(tool_name='Bash')
-            self.assertEqual(len(lookup(event, runner=runner, session_id='s')['rules']), 1)
-            joe = source
+            lookup(event, runner=runner, session_id='s')
             source = dict(source, identity=dict(source['identity'], sponsoring_human_id='dell',
                           agent_principal_id='dell-local', runtime_principal='dell-local'), rules=[])
-            self.assertEqual(lookup(event, runner=runner, session_id='s')['rules'], [])
+            Path(raw, 'transport').write_text('Synthetic metadata fixture')
             self.assertEqual(lookup(event, runner=runner, session_id='s')['identity'], source['identity'])
-            self.assertEqual(len(list(Path(raw).rglob('*.json'))), 2)
-            source = None
-            with self.assertRaisesRegex(RuntimeError, 'scope_catalog_unavailable'):
-                lookup(event, runner=runner, session_id='s')
-            source = joe
+            lookup(event, runner=runner, session_id='other')
+            lookup(event, runner=runner, session_id='s', agent_id='child')
             epoch.return_value = 'epoch2'
             lookup(event, runner=runner, session_id='s')
-            self.assertNotIn('scope_cache', calls[-1])
             epoch.return_value = None
             lookup(event, runner=runner, session_id='s')
             lookup(event, runner=runner, session_id='s')
-            self.assertNotIn('scope_cache', calls[-1])
+            self.assertEqual(len(calls), 7)
 
-    def test_invalid_confirmation_and_corrupt_disk_cache_never_select_cached_text(self):
+    def test_lease_expires_during_outage_even_when_wall_clock_moves_back(self):
         source = catalog(rule('11111111', {'tools': ['Bash']}))
         calls = []
         def runner(command, **kwargs):
-            calls.append(json.loads(command[-1]))
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0 if len(calls) == 1 else 1,
+                                               json.dumps(source), '')
+        with tempfile.TemporaryDirectory() as raw, patch('lib.rule_scope_lookup.CACHE_DIR', Path(raw)), \
+                patch('lib.rule_routes._context_epoch', return_value='epoch1'), \
+                patch('lib.rule_scope_lookup.time.time', return_value=1000) as wall, \
+                patch('lib.rule_scope_lookup.time.monotonic', return_value=500) as monotonic:
+            event = dict(tool_name='Bash')
+            lookup(event, runner=runner, session_id='s')
+            wall.return_value = 1059
+            monotonic.return_value = 559
+            lookup(event, runner=runner, session_id='s')
+            self.assertEqual(len(calls), 1)
+            wall.return_value = 1030
+            monotonic.return_value = 560
+            with self.assertRaisesRegex(RuntimeError, 'scope_catalog_unavailable'):
+                lookup(event, runner=runner, session_id='s')
+            wall.return_value = 1060
+            with self.assertRaisesRegex(RuntimeError, 'scope_catalog_unavailable'):
+                lookup(event, runner=runner, session_id='s')
+
+    def test_refresh_prunes_day_old_cache_files_without_following_symlinks(self):
+        source = catalog()
+        runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(source), '')
+        with tempfile.TemporaryDirectory() as raw, tempfile.TemporaryDirectory() as other, \
+                patch('lib.rule_scope_lookup.CACHE_DIR', Path(raw)), \
+                patch('lib.rule_routes._context_epoch', return_value='epoch1'):
+            old = Path(raw)/('f'*64)
+            old.mkdir()
+            (old/'current').write_text('obsolete')
+            os.utime(old/'current', (1, 1))
+            kept = Path(other)/'keep'
+            kept.write_text('unrelated')
+            Path(raw, 'linked').symlink_to(other, target_is_directory=True)
+            lookup(dict(tool_name='Bash'), runner=runner, session_id='s')
+            self.assertFalse(old.exists())
+            self.assertTrue(kept.exists())
+            self.assertEqual(len(list(Path(raw).glob('*/current'))), 1)
+
+    def test_disk_lease_survives_a_new_process_and_corruption_forces_a_read(self):
+        source = catalog(rule('11111111', {'tools': ['Bash']}))
+        calls = []
+        def runner(command, **kwargs):
+            calls.append(command)
             return subprocess.CompletedProcess(command, 0, json.dumps(source), '')
         with tempfile.TemporaryDirectory() as raw, patch('lib.rule_scope_lookup.CACHE_DIR', Path(raw)), \
                 patch('lib.rule_routes._context_epoch', return_value='epoch1'):
-            event = dict(tool_name='Bash')
-            lookup(event, runner=runner, session_id='s')
-            full = source
-            for changes in ({'corpus_digest': 'b'*64}, {'identity': dict(source['identity'], sponsoring_human_id='dell')},
-                            {'ok': False}, {'schema': 'other'}):
-                source = {k: v for k, v in full.items() if k != 'rules'} | {'not_modified': True} | changes
-                with self.assertRaisesRegex(ValueError, 'invalid_scope_cache_confirmation'):
-                    lookup(event, runner=runner, session_id='s')
-            source = full
+            expected = lookup(dict(tool_name='Bash'), runner=runner, session_id='s')
+            script = """
+import json, sys
+from pathlib import Path
+from unittest.mock import patch
+from lib.rule_scope_lookup import lookup
+def runner(*args, **kwargs):
+    raise AssertionError('fresh disk lease must not call the store')
+with patch('lib.rule_scope_lookup.CACHE_DIR', Path(sys.argv[1])), patch('lib.rule_routes._context_epoch', return_value='epoch1'):
+    print(json.dumps(lookup(dict(tool_name='Bash'), runner=runner, session_id='s')))
+"""
+            result = subprocess.run([sys.executable, '-c', script, raw],
+                cwd=Path(__file__).resolve().parent.parent, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), expected)
             for path in Path(raw).rglob('*.json'):
-                data = json.loads(path.read_text())
-                data['catalog']['rules'][0]['statement'] = 'Corrupted but still valid text'
-                path.write_text(json.dumps(data))
-            self.assertEqual(lookup(event, runner=runner, session_id='s')['rules'], full['rules'])
-            self.assertNotIn('scope_cache', calls[-1])
+                entry = json.loads(path.read_text())
+                entry['catalog']['rules'][0]['statement'] = 'Corrupted text'
+                path.write_text(json.dumps(entry))
+            self.assertEqual(lookup(dict(tool_name='Bash'), runner=runner, session_id='s'), expected)
+            self.assertEqual(len(calls), 2)
 
-    def test_catalog_is_reused_only_after_live_digest_and_identity_confirmation(self):
-        source = catalog(rule("11111111", {"tools": ["Bash"]}))
+    def test_slow_refresh_does_not_extend_lease_and_expiry_can_load_a_new_digest(self):
+        source = catalog(rule('11111111', {'tools': ['Bash']}))
         calls = []
         def runner(command, **kwargs):
-            args = json.loads(command[-1])
-            calls.append(args)
-            response = source
-            if args.get('scope_cache') == {k: source[k] for k in ('identity', 'corpus_digest')}:
-                response = {k: v for k, v in source.items() if k != 'rules'} | {'not_modified': True}
-            return subprocess.CompletedProcess(command, 0, json.dumps(response), '')
+            calls.append(command)
+            wall.return_value += 15
+            monotonic.return_value += 15
+            return subprocess.CompletedProcess(command, 0, json.dumps(source), '')
         with tempfile.TemporaryDirectory() as raw, patch('lib.rule_scope_lookup.CACHE_DIR', Path(raw)), \
-                patch('lib.rule_routes._context_epoch', return_value='epoch1'):
+                patch('lib.rule_routes._context_epoch', return_value='epoch1'), \
+                patch('lib.rule_scope_lookup.time.time', return_value=1000) as wall, \
+                patch('lib.rule_scope_lookup.time.monotonic', return_value=500) as monotonic:
             event = dict(tool_name='Bash')
-            first = lookup(event, runner=runner, session_id='s')
-            self.assertEqual(lookup(event, runner=runner, session_id='s'), first)
-            self.assertIn('scope_cache', calls[-1])
-            self.assertEqual(len(calls), 2)
+            lookup(event, runner=runner, session_id='s')
+            wall.return_value, monotonic.return_value = 1059, 559
+            lookup(event, runner=runner, session_id='s')
+            self.assertEqual(len(calls), 1)
+            wall.return_value, monotonic.return_value = 1060, 560
             source = dict(source, corpus_digest='b'*64, rules=[])
+            self.assertEqual(lookup(event, runner=runner, session_id='s')['corpus_digest'], 'b'*64)
             self.assertEqual(lookup(event, runner=runner, session_id='s')['rules'], [])
-            self.assertEqual(lookup(event, runner=runner, session_id='s')['rules'], [])
-            self.assertEqual(calls[-1]['scope_cache']['corpus_digest'], 'b'*64)
+            self.assertEqual(len(calls), 2)
 
     def test_replay_excludes_only_confirmed_retired_structural_and_moment_rules(self):
         event = dict(hook_event_name='PreToolUse', tool_name='Bash', task='Synthetic replay')

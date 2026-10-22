@@ -52,8 +52,8 @@ class DeliveryTests(unittest.TestCase):
                 self.assertTrue(validate_lookup_receipt(receipt, repo=REPO))
                 self.assertEqual(receipt['tool_use_id'], f'call-{i}')
                 self.assertEqual(receipt['tool_input_sha256'], digest(payload['tool_input']))
-            self.assertGreater(len(transfers), 350)
-            self.assertEqual(sum(transfers), 1)
+            self.assertEqual(len(fixture['structural_calls']), 418)
+            self.assertEqual(transfers, [True])
 
     def invoke(self, rows, *, event='PreToolUse', **options):
         source = {'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': 'a'*64,
