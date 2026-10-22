@@ -9,6 +9,7 @@ snapshot. example.test addresses only.
 import importlib.util
 import json
 import pathlib
+import re
 import sys
 import unittest
 
