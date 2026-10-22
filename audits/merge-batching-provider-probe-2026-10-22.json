@@ -1,0 +1,1078 @@
+{
+  "summary": {
+    "completed": true,
+    "prefix": "mq-probe-20261022-5b7bf02720",
+    "minimum_api_start_spacing_seconds": 2.3668,
+    "main_initial": "2d3df77b9fe742f2ce61100d3268b158893229f8",
+    "main_final": "2d3df77b9fe742f2ce61100d3268b158893229f8",
+    "all_ref_mutations_under_unique_probe_prefix": true,
+    "fresh_noop_guard_ref_updates": "accepted with correct JSON variables.input envelope",
+    "stale_guard": "request rejected with generic GitHub execution error; base, source and candidate remained unchanged; fresh-guard control accepted",
+    "required_check_enforcement": "UNPROVEN: probe branch rules=[], active required-check ruleset includes main only; no rulesets changed",
+    "linear_same_tree_squash_pr": [
+      {
+        "number": 2091,
+        "html_url": "https://github.com/jbookout/carr-system/pull/2091",
+        "state": "open",
+        "merged": false,
+        "merged_at": null,
+        "merge_commit_sha": "b50df1cb9ac4c046c13dbc96fcf74d79dd281021"
+      },
+      {
+        "number": 2091,
+        "html_url": "https://github.com/jbookout/carr-system/pull/2091",
+        "state": "open",
+        "merged": false,
+        "merged_at": null,
+        "merge_commit_sha": "b50df1cb9ac4c046c13dbc96fcf74d79dd281021"
+      },
+      {
+        "number": 2091,
+        "html_url": "https://github.com/jbookout/carr-system/pull/2091",
+        "state": "open",
+        "merged": false,
+        "merged_at": null,
+        "merge_commit_sha": "b50df1cb9ac4c046c13dbc96fcf74d79dd281021"
+      }
+    ],
+    "source_reachable_pr": [
+      {
+        "number": 2092,
+        "html_url": "https://github.com/jbookout/carr-system/pull/2092",
+        "state": "closed",
+        "merged": true,
+        "merged_at": "2026-10-22T06:14:16Z",
+        "merge_commit_sha": "87a895e0f6beee6b9487e76e41786fed1604b7c0"
+      },
+      {
+        "number": 2092,
+        "html_url": "https://github.com/jbookout/carr-system/pull/2092",
+        "state": "closed",
+        "merged": true,
+        "merged_at": "2026-10-22T06:14:16Z",
+        "merge_commit_sha": "87a895e0f6beee6b9487e76e41786fed1604b7c0"
+      }
+    ],
+    "exact_existing_f_input_transport": "REJECTED: Variable $input of type UpdateRefsInput! was provided invalid value; expected key-value object",
+    "cleanup": {
+      "all_six_refs_verified_absent": true,
+      "unmerged_probe_pr_2091_closed": true,
+      "probe_pr_2092_auto_marked_merged": true,
+      "initial_delete_422_resolved_by_get_404": true
+    },
+    "constraint": "Keep default batch mode OFF and serial fallback; protected-branch enforcement and squash attribution requirements are not met by this proof",
+    "artifacts": {
+      "provider-probe.py": "76255f541693f6ddf2c9bd0a71667f23772769846bef0b12ee3293ad344aef88",
+      "provider-probe.json": "cddada80c5a536015376a29b5814366bb00cd82f73515797be5a214d4fe0bfa4",
+      "provider-probe-transport.py": "8b389e2be2d466e659e8a068d69fb38464f91357a8dc22beb723dddc38dd9210",
+      "provider-probe-transport.json": "06981a66d94bd82ad51fddb4d054e1a5579f588017e2a8cb344bacf67196fb57"
+    }
+  },
+  "projection": "Selected API requests and responses for guards, branch rules, PR attribution, exact transport and cleanup. Repository, PR and comparison responses retain only relevant public fields. GraphQL envelopes and ref/rules responses are preserved.",
+  "events": [
+    {
+      "label": "repository",
+      "started": "2026-10-22T06:12:46.233082+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "full_name": "jbookout/carr-system",
+        "node_id": "R_kgDOTiphwg"
+      },
+      "stderr": ""
+    },
+    {
+      "label": "main_ref_initial",
+      "started": "2026-10-22T06:12:48.781865+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/main",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "ref": "refs/heads/main",
+        "node_id": "REF_kwDOTiphwq9yZWZzL2hlYWRzL21haW4",
+        "url": "https://api.github.com/repos/jbookout/carr-system/git/refs/heads/main",
+        "object": {
+          "sha": "2d3df77b9fe742f2ce61100d3268b158893229f8",
+          "type": "commit",
+          "url": "https://api.github.com/repos/jbookout/carr-system/git/commits/2d3df77b9fe742f2ce61100d3268b158893229f8"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "label": "main_rules_readonly",
+      "started": "2026-10-22T06:12:53.585721+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/rules/branches/main",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": [
+        {
+          "type": "deletion",
+          "ruleset_source_type": "Repository",
+          "ruleset_source": "jbookout/carr-system",
+          "ruleset_id": 20824501
+        },
+        {
+          "type": "non_fast_forward",
+          "ruleset_source_type": "Repository",
+          "ruleset_source": "jbookout/carr-system",
+          "ruleset_id": 20824501
+        },
+        {
+          "type": "required_status_checks",
+          "parameters": {
+            "strict_required_status_checks_policy": false,
+            "do_not_enforce_on_create": false,
+            "required_status_checks": [
+              {
+                "context": "ops/ci.sh --strict"
+              }
+            ]
+          },
+          "ruleset_source_type": "Repository",
+          "ruleset_source": "jbookout/carr-system",
+          "ruleset_id": 20824501
+        }
+      ],
+      "stderr": ""
+    },
+    {
+      "label": "repository_rulesets_readonly",
+      "started": "2026-10-22T06:12:55.969305+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/rulesets?includes_parents=true",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": [
+        {
+          "id": 24526078,
+          "name": "Public repository leak guard",
+          "target": "branch",
+          "source_type": "Repository",
+          "source": "jbookout/carr-system",
+          "enforcement": "disabled",
+          "node_id": "RRS_lACqUmVwb3NpdG9yec5OKmHCzgF2PP4",
+          "_links": {
+            "self": {
+              "href": "https://api.github.com/repos/jbookout/carr-system/rulesets/24526078"
+            },
+            "html": {
+              "href": "https://github.com/jbookout/carr-system/rules/24526078"
+            }
+          },
+          "created_at": "2026-10-05T14:19:36.987-05:00",
+          "updated_at": "2026-10-05T20:53:55.241-05:00"
+        },
+        {
+          "id": 20824501,
+          "name": "main: CI must be green",
+          "target": "branch",
+          "source_type": "Repository",
+          "source": "jbookout/carr-system",
+          "enforcement": "active",
+          "node_id": "RRS_lACqUmVwb3NpdG9yec5OKmHCzgE9wbU",
+          "_links": {
+            "self": {
+              "href": "https://api.github.com/repos/jbookout/carr-system/rulesets/20824501"
+            },
+            "html": {
+              "href": "https://github.com/jbookout/carr-system/rules/20824501"
+            }
+          },
+          "created_at": "2026-08-13T19:58:21.480-05:00",
+          "updated_at": "2026-10-13T17:28:32.397-05:00"
+        }
+      ],
+      "stderr": ""
+    },
+    {
+      "label": "probe_base_rules",
+      "started": "2026-10-22T06:13:01.015741+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/rules/branches/mq-probe-20261022-5b7bf02720-base",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": [],
+      "stderr": ""
+    },
+    {
+      "label": "before_stale_guard",
+      "started": "2026-10-22T06:13:24.958143+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-base",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "ref": "refs/heads/mq-probe-20261022-5b7bf02720-base",
+        "node_id": "REF_kwDOTiphwtoALHJlZnMvaGVhZHMvbXEtcHJvYmUtMjAyNjEwMjItNWI3YmYwMjcyMC1iYXNl",
+        "url": "https://api.github.com/repos/jbookout/carr-system/git/refs/heads/mq-probe-20261022-5b7bf02720-base",
+        "object": {
+          "sha": "2d3df77b9fe742f2ce61100d3268b158893229f8",
+          "type": "commit",
+          "url": "https://api.github.com/repos/jbookout/carr-system/git/commits/2d3df77b9fe742f2ce61100d3268b158893229f8"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "label": "stale_guard_atomic_attempt",
+      "started": "2026-10-22T06:13:27.330645+00:00",
+      "command": [
+        "gh",
+        "api",
+        "graphql",
+        "-X",
+        "POST",
+        "--input",
+        "-"
+      ],
+      "request": {
+        "query": "mutation($input:UpdateRefsInput!){updateRefs(input:$input){clientMutationId}}",
+        "variables": {
+          "input": {
+            "repositoryId": "R_kgDOTiphwg",
+            "refUpdates": [
+              {
+                "name": "refs/heads/mq-probe-20261022-5b7bf02720-base",
+                "beforeOid": "2d3df77b9fe742f2ce61100d3268b158893229f8",
+                "afterOid": "7306f7f2b140c81e07ca71b0a83a0c4558b24296",
+                "force": false
+              },
+              {
+                "name": "refs/heads/mq-probe-20261022-5b7bf02720-source",
+                "beforeOid": "e529d6a4e97c5822a5f69cb046fe0a4c0781b176",
+                "afterOid": "e529d6a4e97c5822a5f69cb046fe0a4c0781b176",
+                "force": false
+              },
+              {
+                "name": "refs/heads/mq-probe-20261022-5b7bf02720-candidate",
+                "beforeOid": "7306f7f2b140c81e07ca71b0a83a0c4558b24296",
+                "afterOid": "7306f7f2b140c81e07ca71b0a83a0c4558b24296",
+                "force": false
+              }
+            ],
+            "clientMutationId": "mq-probe-20261022-5b7bf02720-stale_guard_atomic_attempt"
+          }
+        }
+      },
+      "returncode": 1,
+      "response": {
+        "errors": [
+          {
+            "message": "Something went wrong while executing your query on 2026-10-22T06:13:27Z. Please include `E5B0:15AB8C:50C3D:1097FE:6AD9A987` when reporting this issue."
+          }
+        ]
+      },
+      "stderr": "gh: Something went wrong while executing your query on 2026-10-22T06:13:27Z. Please include `E5B0:15AB8C:50C3D:1097FE:6AD9A987` when reporting this issue.\n"
+    },
+    {
+      "label": "after_stale_guard",
+      "started": "2026-10-22T06:13:30.027887+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-base",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "ref": "refs/heads/mq-probe-20261022-5b7bf02720-base",
+        "node_id": "REF_kwDOTiphwtoALHJlZnMvaGVhZHMvbXEtcHJvYmUtMjAyNjEwMjItNWI3YmYwMjcyMC1iYXNl",
+        "url": "https://api.github.com/repos/jbookout/carr-system/git/refs/heads/mq-probe-20261022-5b7bf02720-base",
+        "object": {
+          "sha": "2d3df77b9fe742f2ce61100d3268b158893229f8",
+          "type": "commit",
+          "url": "https://api.github.com/repos/jbookout/carr-system/git/commits/2d3df77b9fe742f2ce61100d3268b158893229f8"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "label": "source_after_stale_guard",
+      "started": "2026-10-22T06:13:32.487944+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-source",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "ref": "refs/heads/mq-probe-20261022-5b7bf02720-source",
+        "node_id": "REF_kwDOTiphwtoALnJlZnMvaGVhZHMvbXEtcHJvYmUtMjAyNjEwMjItNWI3YmYwMjcyMC1zb3VyY2U",
+        "url": "https://api.github.com/repos/jbookout/carr-system/git/refs/heads/mq-probe-20261022-5b7bf02720-source",
+        "object": {
+          "sha": "e4462446790b0b422821c848649c72f483ef4b8c",
+          "type": "commit",
+          "url": "https://api.github.com/repos/jbookout/carr-system/git/commits/e4462446790b0b422821c848649c72f483ef4b8c"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "label": "candidate_after_stale_guard",
+      "started": "2026-10-22T06:13:34.966229+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-candidate",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "ref": "refs/heads/mq-probe-20261022-5b7bf02720-candidate",
+        "node_id": "REF_kwDOTiphwtoAMXJlZnMvaGVhZHMvbXEtcHJvYmUtMjAyNjEwMjItNWI3YmYwMjcyMC1jYW5kaWRhdGU",
+        "url": "https://api.github.com/repos/jbookout/carr-system/git/refs/heads/mq-probe-20261022-5b7bf02720-candidate",
+        "object": {
+          "sha": "7306f7f2b140c81e07ca71b0a83a0c4558b24296",
+          "type": "commit",
+          "url": "https://api.github.com/repos/jbookout/carr-system/git/commits/7306f7f2b140c81e07ca71b0a83a0c4558b24296"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "label": "fresh_noop_guards_linear_landing",
+      "started": "2026-10-22T06:13:37.344477+00:00",
+      "command": [
+        "gh",
+        "api",
+        "graphql",
+        "-X",
+        "POST",
+        "--input",
+        "-"
+      ],
+      "request": {
+        "query": "mutation($input:UpdateRefsInput!){updateRefs(input:$input){clientMutationId}}",
+        "variables": {
+          "input": {
+            "repositoryId": "R_kgDOTiphwg",
+            "refUpdates": [
+              {
+                "name": "refs/heads/mq-probe-20261022-5b7bf02720-base",
+                "beforeOid": "2d3df77b9fe742f2ce61100d3268b158893229f8",
+                "afterOid": "7306f7f2b140c81e07ca71b0a83a0c4558b24296",
+                "force": false
+              },
+              {
+                "name": "refs/heads/mq-probe-20261022-5b7bf02720-source",
+                "beforeOid": "e4462446790b0b422821c848649c72f483ef4b8c",
+                "afterOid": "e4462446790b0b422821c848649c72f483ef4b8c",
+                "force": false
+              },
+              {
+                "name": "refs/heads/mq-probe-20261022-5b7bf02720-candidate",
+                "beforeOid": "7306f7f2b140c81e07ca71b0a83a0c4558b24296",
+                "afterOid": "7306f7f2b140c81e07ca71b0a83a0c4558b24296",
+                "force": false
+              }
+            ],
+            "clientMutationId": "mq-probe-20261022-5b7bf02720-fresh_noop_guards_linear_landing"
+          }
+        }
+      },
+      "returncode": 0,
+      "response": {
+        "data": {
+          "updateRefs": {
+            "clientMutationId": "mq-probe-20261022-5b7bf02720-fresh_noop_guards_linear_landing"
+          }
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "label": "linear_landing_ref",
+      "started": "2026-10-22T06:13:40.166375+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-base",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "ref": "refs/heads/mq-probe-20261022-5b7bf02720-base",
+        "node_id": "REF_kwDOTiphwtoALHJlZnMvaGVhZHMvbXEtcHJvYmUtMjAyNjEwMjItNWI3YmYwMjcyMC1iYXNl",
+        "url": "https://api.github.com/repos/jbookout/carr-system/git/refs/heads/mq-probe-20261022-5b7bf02720-base",
+        "object": {
+          "sha": "7306f7f2b140c81e07ca71b0a83a0c4558b24296",
+          "type": "commit",
+          "url": "https://api.github.com/repos/jbookout/carr-system/git/commits/7306f7f2b140c81e07ca71b0a83a0c4558b24296"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "label": "linear_pr_immediate",
+      "started": "2026-10-22T06:13:42.561393+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/pulls/2091",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "number": 2091,
+        "html_url": "https://github.com/jbookout/carr-system/pull/2091",
+        "state": "open",
+        "merged": false,
+        "merged_at": null,
+        "merge_commit_sha": "b50df1cb9ac4c046c13dbc96fcf74d79dd281021"
+      },
+      "stderr": ""
+    },
+    {
+      "label": "linear_ancestry_compare",
+      "started": "2026-10-22T06:13:45.167061+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/compare/e4462446790b0b422821c848649c72f483ef4b8c...7306f7f2b140c81e07ca71b0a83a0c4558b24296",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "status": "diverged",
+        "ahead_by": 1,
+        "behind_by": 2
+      },
+      "stderr": ""
+    },
+    {
+      "label": "linear_pr_after_10s",
+      "started": "2026-10-22T06:13:55.928823+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/pulls/2091",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "number": 2091,
+        "html_url": "https://github.com/jbookout/carr-system/pull/2091",
+        "state": "open",
+        "merged": false,
+        "merged_at": null,
+        "merge_commit_sha": "b50df1cb9ac4c046c13dbc96fcf74d79dd281021"
+      },
+      "stderr": ""
+    },
+    {
+      "label": "fresh_noop_guards_reachable_landing",
+      "started": "2026-10-22T06:14:15.333058+00:00",
+      "command": [
+        "gh",
+        "api",
+        "graphql",
+        "-X",
+        "POST",
+        "--input",
+        "-"
+      ],
+      "request": {
+        "query": "mutation($input:UpdateRefsInput!){updateRefs(input:$input){clientMutationId}}",
+        "variables": {
+          "input": {
+            "repositoryId": "R_kgDOTiphwg",
+            "refUpdates": [
+              {
+                "name": "refs/heads/mq-probe-20261022-5b7bf02720-base",
+                "beforeOid": "7306f7f2b140c81e07ca71b0a83a0c4558b24296",
+                "afterOid": "75ec4ec17d7643f0b193e22ec4b76b99e825ba88",
+                "force": false
+              },
+              {
+                "name": "refs/heads/mq-probe-20261022-5b7bf02720-reachable-source",
+                "beforeOid": "87a895e0f6beee6b9487e76e41786fed1604b7c0",
+                "afterOid": "87a895e0f6beee6b9487e76e41786fed1604b7c0",
+                "force": false
+              },
+              {
+                "name": "refs/heads/mq-probe-20261022-5b7bf02720-reachable-candidate",
+                "beforeOid": "75ec4ec17d7643f0b193e22ec4b76b99e825ba88",
+                "afterOid": "75ec4ec17d7643f0b193e22ec4b76b99e825ba88",
+                "force": false
+              }
+            ],
+            "clientMutationId": "mq-probe-20261022-5b7bf02720-fresh_noop_guards_reachable_landing"
+          }
+        }
+      },
+      "returncode": 0,
+      "response": {
+        "data": {
+          "updateRefs": {
+            "clientMutationId": "mq-probe-20261022-5b7bf02720-fresh_noop_guards_reachable_landing"
+          }
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "label": "reachable_landing_ref",
+      "started": "2026-10-22T06:14:18.179115+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-base",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "ref": "refs/heads/mq-probe-20261022-5b7bf02720-base",
+        "node_id": "REF_kwDOTiphwtoALHJlZnMvaGVhZHMvbXEtcHJvYmUtMjAyNjEwMjItNWI3YmYwMjcyMC1iYXNl",
+        "url": "https://api.github.com/repos/jbookout/carr-system/git/refs/heads/mq-probe-20261022-5b7bf02720-base",
+        "object": {
+          "sha": "75ec4ec17d7643f0b193e22ec4b76b99e825ba88",
+          "type": "commit",
+          "url": "https://api.github.com/repos/jbookout/carr-system/git/commits/75ec4ec17d7643f0b193e22ec4b76b99e825ba88"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "label": "reachable_pr_immediate",
+      "started": "2026-10-22T06:14:20.562392+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/pulls/2092",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "number": 2092,
+        "html_url": "https://github.com/jbookout/carr-system/pull/2092",
+        "state": "closed",
+        "merged": true,
+        "merged_at": "2026-10-22T06:14:16Z",
+        "merge_commit_sha": "87a895e0f6beee6b9487e76e41786fed1604b7c0"
+      },
+      "stderr": ""
+    },
+    {
+      "label": "reachable_ancestry_compare",
+      "started": "2026-10-22T06:14:23.029763+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/compare/87a895e0f6beee6b9487e76e41786fed1604b7c0...75ec4ec17d7643f0b193e22ec4b76b99e825ba88",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "status": "ahead",
+        "ahead_by": 1,
+        "behind_by": 0
+      },
+      "stderr": ""
+    },
+    {
+      "label": "reachable_pr_after_10s",
+      "started": "2026-10-22T06:14:33.493059+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/pulls/2092",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "number": 2092,
+        "html_url": "https://github.com/jbookout/carr-system/pull/2092",
+        "state": "closed",
+        "merged": true,
+        "merged_at": "2026-10-22T06:14:16Z",
+        "merge_commit_sha": "87a895e0f6beee6b9487e76e41786fed1604b7c0"
+      },
+      "stderr": ""
+    },
+    {
+      "label": "linear_pr_final_observation",
+      "started": "2026-10-22T06:14:36.115112+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/pulls/2091",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "number": 2091,
+        "html_url": "https://github.com/jbookout/carr-system/pull/2091",
+        "state": "open",
+        "merged": false,
+        "merged_at": null,
+        "merge_commit_sha": "b50df1cb9ac4c046c13dbc96fcf74d79dd281021"
+      },
+      "stderr": ""
+    },
+    {
+      "label": "cleanup_ref_absent_mq-probe-20261022-5b7bf02720-reachable-candidate",
+      "started": "2026-10-22T06:14:49.605054+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-reachable-candidate",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 1,
+      "response": {
+        "message": "Not Found",
+        "documentation_url": "https://docs.github.com/rest/git/refs#get-a-reference",
+        "status": "404"
+      },
+      "stderr": "gh: Not Found (HTTP 404)\n"
+    },
+    {
+      "label": "cleanup_ref_absent_mq-probe-20261022-5b7bf02720-candidate",
+      "started": "2026-10-22T06:14:57.431713+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-candidate",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 1,
+      "response": {
+        "message": "Not Found",
+        "documentation_url": "https://docs.github.com/rest/git/refs#get-a-reference",
+        "status": "404"
+      },
+      "stderr": "gh: Not Found (HTTP 404)\n"
+    },
+    {
+      "label": "cleanup_ref_absent_mq-probe-20261022-5b7bf02720-source",
+      "started": "2026-10-22T06:15:02.907044+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-source",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 1,
+      "response": {
+        "message": "Not Found",
+        "documentation_url": "https://docs.github.com/rest/git/refs#get-a-reference",
+        "status": "404"
+      },
+      "stderr": "gh: Not Found (HTTP 404)\n"
+    },
+    {
+      "label": "cleanup_ref_absent_mq-probe-20261022-5b7bf02720-base",
+      "started": "2026-10-22T06:15:08.431280+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-base",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 1,
+      "response": {
+        "message": "Not Found",
+        "documentation_url": "https://docs.github.com/rest/git/refs#get-a-reference",
+        "status": "404"
+      },
+      "stderr": "gh: Not Found (HTTP 404)\n"
+    },
+    {
+      "label": "main_ref_final_readonly",
+      "started": "2026-10-22T06:15:10.864189+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/main",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "returncode": 0,
+      "response": {
+        "ref": "refs/heads/main",
+        "node_id": "REF_kwDOTiphwq9yZWZzL2hlYWRzL21haW4",
+        "url": "https://api.github.com/repos/jbookout/carr-system/git/refs/heads/main",
+        "object": {
+          "sha": "2d3df77b9fe742f2ce61100d3268b158893229f8",
+          "type": "commit",
+          "url": "https://api.github.com/repos/jbookout/carr-system/git/commits/2d3df77b9fe742f2ce61100d3268b158893229f8"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "label": "prior_probe_ref_absence_mq-probe-20261022-5b7bf02720-base",
+      "started": "2026-10-22T06:15:33.626946+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-base",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "raw_fields": null,
+      "returncode": 1,
+      "response": {
+        "message": "Not Found",
+        "documentation_url": "https://docs.github.com/rest/git/refs#get-a-reference",
+        "status": "404"
+      },
+      "stderr": "gh: Not Found (HTTP 404)\n"
+    },
+    {
+      "label": "prior_probe_ref_absence_mq-probe-20261022-5b7bf02720-source",
+      "started": "2026-10-22T06:15:36.029740+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-source",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "raw_fields": null,
+      "returncode": 1,
+      "response": {
+        "message": "Not Found",
+        "documentation_url": "https://docs.github.com/rest/git/refs#get-a-reference",
+        "status": "404"
+      },
+      "stderr": "gh: Not Found (HTTP 404)\n"
+    },
+    {
+      "label": "prior_probe_ref_absence_mq-probe-20261022-5b7bf02720-candidate",
+      "started": "2026-10-22T06:15:38.409519+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-candidate",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "raw_fields": null,
+      "returncode": 1,
+      "response": {
+        "message": "Not Found",
+        "documentation_url": "https://docs.github.com/rest/git/refs#get-a-reference",
+        "status": "404"
+      },
+      "stderr": "gh: Not Found (HTTP 404)\n"
+    },
+    {
+      "label": "prior_probe_ref_absence_mq-probe-20261022-5b7bf02720-reachable-source",
+      "started": "2026-10-22T06:15:40.802569+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-reachable-source",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "raw_fields": null,
+      "returncode": 1,
+      "response": {
+        "message": "Not Found",
+        "documentation_url": "https://docs.github.com/rest/git/refs#get-a-reference",
+        "status": "404"
+      },
+      "stderr": "gh: Not Found (HTTP 404)\n"
+    },
+    {
+      "label": "prior_probe_ref_absence_mq-probe-20261022-5b7bf02720-reachable-candidate",
+      "started": "2026-10-22T06:15:43.201929+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-reachable-candidate",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "raw_fields": null,
+      "returncode": 1,
+      "response": {
+        "message": "Not Found",
+        "documentation_url": "https://docs.github.com/rest/git/refs#get-a-reference",
+        "status": "404"
+      },
+      "stderr": "gh: Not Found (HTTP 404)\n"
+    },
+    {
+      "label": "exact_existing_gh_f_input_transport",
+      "started": "2026-10-22T06:15:50.708314+00:00",
+      "command": [
+        "gh",
+        "api",
+        "graphql",
+        "-X",
+        "POST",
+        "-f",
+        "query=mutation($input:UpdateRefsInput!){updateRefs(input:$input){clientMutationId}}",
+        "-f",
+        "input={\"repositoryId\": \"R_kgDOTiphwg\", \"refUpdates\": [{\"name\": \"refs/heads/mq-probe-20261022-5b7bf02720-transport\", \"beforeOid\": \"2d3df77b9fe742f2ce61100d3268b158893229f8\", \"afterOid\": \"2d3df77b9fe742f2ce61100d3268b158893229f8\", \"force\": false}], \"clientMutationId\": \"mq-probe-20261022-5b7bf02720-exact-transport\"}"
+      ],
+      "request": null,
+      "raw_fields": {
+        "query": "mutation($input:UpdateRefsInput!){updateRefs(input:$input){clientMutationId}}",
+        "input": "{\"repositoryId\": \"R_kgDOTiphwg\", \"refUpdates\": [{\"name\": \"refs/heads/mq-probe-20261022-5b7bf02720-transport\", \"beforeOid\": \"2d3df77b9fe742f2ce61100d3268b158893229f8\", \"afterOid\": \"2d3df77b9fe742f2ce61100d3268b158893229f8\", \"force\": false}], \"clientMutationId\": \"mq-probe-20261022-5b7bf02720-exact-transport\"}"
+      },
+      "returncode": 1,
+      "response": {
+        "errors": [
+          {
+            "extensions": {
+              "value": "{\"repositoryId\": \"R_kgDOTiphwg\", \"refUpdates\": [{\"name\": \"refs/heads/mq-probe-20261022-5b7bf02720-transport\", \"beforeOid\": \"2d3df77b9fe742f2ce61100d3268b158893229f8\", \"afterOid\": \"2d3df77b9fe742f2ce61100d3268b158893229f8\", \"force\": false}], \"clientMutationId\": \"mq-probe-20261022-5b7bf02720-exact-transport\"}",
+              "problems": [
+                {
+                  "path": [],
+                  "explanation": "Expected \"{\\\"repositoryId\\\": \\\"R_kgDOTiphwg\\\", \\\"refUpdates\\\": [{\\\"name\\\": \\\"refs/heads/mq-probe-20261022-5b7bf02720-transport\\\", \\\"beforeOid\\\": \\\"2d3df77b9fe742f2ce61100d3268b158893229f8\\\", \\\"afterOid\\\": \\\"2d3df77b9fe742f2ce61100d3268b158893229f8\\\", \\\"force\\\": false}], \\\"clientMutationId\\\": \\\"mq-probe-20261022-5b7bf02720-exact-transport\\\"}\" to be a key-value object."
+                }
+              ]
+            },
+            "locations": [
+              {
+                "line": 1,
+                "column": 10
+              }
+            ],
+            "message": "Variable $input of type UpdateRefsInput! was provided invalid value"
+          }
+        ]
+      },
+      "stderr": "gh: Variable $input of type UpdateRefsInput! was provided invalid value\n"
+    },
+    {
+      "label": "main_ruleset_details_readonly",
+      "started": "2026-10-22T06:15:45.702878+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/rulesets/20824501",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "raw_fields": null,
+      "returncode": 0,
+      "response": {
+        "id": 20824501,
+        "name": "main: CI must be green",
+        "target": "branch",
+        "source_type": "Repository",
+        "source": "jbookout/carr-system",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "exclude": [],
+            "include": [
+              "refs/heads/main"
+            ]
+          }
+        },
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "non_fast_forward"
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "strict_required_status_checks_policy": false,
+              "do_not_enforce_on_create": false,
+              "required_status_checks": [
+                {
+                  "context": "ops/ci.sh --strict"
+                }
+              ]
+            }
+          }
+        ],
+        "node_id": "RRS_lACqUmVwb3NpdG9yec5OKmHCzgE9wbU",
+        "created_at": "2026-08-13T19:58:21.480-05:00",
+        "updated_at": "2026-10-13T17:28:32.397-05:00",
+        "bypass_actors": [
+          {
+            "actor_id": 5,
+            "actor_type": "RepositoryRole",
+            "bypass_mode": "pull_request"
+          }
+        ],
+        "current_user_can_bypass": "pull_requests_only",
+        "_links": {
+          "self": {
+            "href": "https://api.github.com/repos/jbookout/carr-system/rulesets/20824501"
+          },
+          "html": {
+            "href": "https://github.com/jbookout/carr-system/rules/20824501"
+          }
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "label": "create_transport_ref",
+      "started": "2026-10-22T06:15:48.081623+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/refs",
+        "-X",
+        "POST",
+        "--input",
+        "-"
+      ],
+      "request": {
+        "ref": "refs/heads/mq-probe-20261022-5b7bf02720-transport",
+        "sha": "2d3df77b9fe742f2ce61100d3268b158893229f8"
+      },
+      "raw_fields": null,
+      "returncode": 0,
+      "response": {
+        "ref": "refs/heads/mq-probe-20261022-5b7bf02720-transport",
+        "node_id": "REF_kwDOTiphwtoAMXJlZnMvaGVhZHMvbXEtcHJvYmUtMjAyNjEwMjItNWI3YmYwMjcyMC10cmFuc3BvcnQ",
+        "url": "https://api.github.com/repos/jbookout/carr-system/git/refs/heads/mq-probe-20261022-5b7bf02720-transport",
+        "object": {
+          "sha": "2d3df77b9fe742f2ce61100d3268b158893229f8",
+          "type": "commit",
+          "url": "https://api.github.com/repos/jbookout/carr-system/git/commits/2d3df77b9fe742f2ce61100d3268b158893229f8"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "label": "transport_ref_readback",
+      "started": "2026-10-22T06:15:53.075114+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-transport",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "raw_fields": null,
+      "returncode": 0,
+      "response": {
+        "ref": "refs/heads/mq-probe-20261022-5b7bf02720-transport",
+        "node_id": "REF_kwDOTiphwtoAMXJlZnMvaGVhZHMvbXEtcHJvYmUtMjAyNjEwMjItNWI3YmYwMjcyMC10cmFuc3BvcnQ",
+        "url": "https://api.github.com/repos/jbookout/carr-system/git/refs/heads/mq-probe-20261022-5b7bf02720-transport",
+        "object": {
+          "sha": "2d3df77b9fe742f2ce61100d3268b158893229f8",
+          "type": "commit",
+          "url": "https://api.github.com/repos/jbookout/carr-system/git/commits/2d3df77b9fe742f2ce61100d3268b158893229f8"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "label": "delete_transport_ref",
+      "started": "2026-10-22T06:15:55.579358+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/refs/heads/mq-probe-20261022-5b7bf02720-transport",
+        "-X",
+        "DELETE"
+      ],
+      "request": null,
+      "raw_fields": null,
+      "returncode": 0,
+      "response": null,
+      "stderr": ""
+    },
+    {
+      "label": "transport_ref_absent",
+      "started": "2026-10-22T06:15:58.574484+00:00",
+      "command": [
+        "gh",
+        "api",
+        "repos/jbookout/carr-system/git/ref/heads/mq-probe-20261022-5b7bf02720-transport",
+        "-X",
+        "GET"
+      ],
+      "request": null,
+      "raw_fields": null,
+      "returncode": 1,
+      "response": {
+        "message": "Not Found",
+        "documentation_url": "https://docs.github.com/rest/git/refs#get-a-reference",
+        "status": "404"
+      },
+      "stderr": "gh: Not Found (HTTP 404)\n"
+    }
+  ]
+}

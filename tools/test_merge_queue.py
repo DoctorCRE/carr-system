@@ -39,25 +39,6 @@ if failure and a[:len(failure['prefix'])]==failure['prefix'] and all(x in a for 
  if failure.get('malformed'): save();print('{broken');sys.exit()
  save();print(failure.get('stderr', f"gh: Forbidden (HTTP {failure.get('status',403)})"),file=sys.stderr);sys.exit(1)
 if a[:2]==['label','create']: emit({'name':'do_not_merge'});sys.exit()
-if a[:2]==['api','graphql'] and any(x.startswith('input=') for x in a):
- inp=json.loads(next(x[6:] for x in a if x.startswith('input=')))
- updates=inp['refUpdates']; repo=inp['repositoryId']; remote=d.get('remotes',{}).get(repo,d['remote'])
- if d.get('move_before_land'):
-  n=str(d.pop('move_before_land')); d['prs'][repo+'#'+n]['head']['sha']=d['updated_head']
- refs={'refs/heads/main':subprocess.check_output(['git','-C',remote,'rev-parse','main'],text=True).strip()}
- refs.update({'refs/heads/'+p['head']['ref']:p['head']['sha'] for p in d['prs'].values() if p['repo']==repo})
- if any(refs.get(u['name'])!=u['beforeOid'] for u in updates):
-  emit({'errors':[{'message':'beforeOid mismatch'}]});sys.exit()
- assert all(u['force'] is False for u in updates)
- landed=updates[0]['afterOid']
- subprocess.run(['git','-C',remote,'update-ref','refs/heads/main',landed,updates[0]['beforeOid']],check=True)
- d.setdefault('landed',[]).append(landed)
- for p in d['prs'].values():
-  if p['repo']==repo and p['state']=='open' and subprocess.run(['git','-C',remote,'merge-base','--is-ancestor',p['head']['sha'],landed]).returncode==0:
-   p.update(merged=True,state='closed',merge_commit_sha=landed)
- emit({'data':{'updateRefs':{'clientMutationId':inp['clientMutationId']}}})
- if d.get('lost_batch_response'): print('lost response',file=sys.stderr);sys.exit(1)
- sys.exit()
 if a[:2]==['api','graphql']:
  repo=next(x[5:] for x in a if x.startswith('repo='));owner=next(x[6:] for x in a if x.startswith('owner='));n=next(x[2:] for x in a if x.startswith('n='));p=d['prs'][owner+'/'+repo+'#'+n]
  emit({'data':{'repository':{'pullRequest':{'headRefOid':p['head']['sha'],'state':'OPEN','mergeQueueEntry':{'id':'queued'} if d.get('server_queued') else None,'autoMergeRequest':None}}}});sys.exit()
@@ -663,6 +644,58 @@ class QueueTests(unittest.TestCase):
             self.q.discover()
         self.assertEqual(self.q.db.execute('SELECT approved FROM entries WHERE pr=1').fetchone()[0], self.updated)
         self.assertEqual(self.calls('merge'), [])
+
+    def test_timed_out_discovery_read_recovers_after_cooldown_across_restart(self):
+        errors = (module.GitHubBudgetLockTimeout('budget lock deadline'),
+                  subprocess.TimeoutExpired('gh', 120), module.WaitExpired('read deadline'))
+        command = module.command
+        listing = ['gh', 'api', f'repos/{module.REPOS[0]}/pulls?state=open&per_page=100&page=1']
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                self.pr(head=self.updated)
+                with self.q.db:
+                    self.q.db.execute('DELETE FROM entries')
+                    self.q.db.execute('DELETE FROM github_failures')
+                calls = []
+                def request(argv, **kwargs):
+                    if argv[:3] == listing:
+                        calls.append(clock.return_value)
+                        if len(calls) == 1:
+                            raise error
+                    return command(argv, **kwargs)
+                with patch.object(module.time, 'time', return_value=10000) as clock, \
+                        patch.object(module, 'command', side_effect=request):
+                    self.q.discover()
+                    self.restart()
+                    clock.return_value += module.BOUNDS['github_retry']['seconds'] - 1
+                    self.q.discover()
+                    self.assertEqual(len(calls), 1, 'Discovery retried before its cooldown')
+                    clock.return_value += 1
+                    self.q.discover()
+                row = self.q.db.execute('SELECT approved FROM entries WHERE pr=1').fetchone()
+                self.assertIsNotNone(row, 'Discovery remained stopped after its cooldown')
+                self.assertEqual(row['approved'], self.updated)
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(self.calls('merge'), [])
+
+    def test_timeout_stops_writes_and_entry_owned_reads_after_cooldown(self):
+        self.pr()
+        entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
+        cases = ((False, 'automatic', None), (True, 'automatic', entry),
+                 (True, f'post-merge:{entry}', None))
+        for read, scope, owner in cases:
+            with self.subTest(read=read, scope=scope, entry=owner), \
+                    self.q.github_scope(scope), \
+                    patch.object(module.time, 'time', return_value=10000) as clock, \
+                    patch.object(module, 'command', side_effect=module.WaitExpired('deadline')) as command:
+                self.q._github_entry = owner
+                args = ('api', f'repos/{module.REPOS[0]}/pulls/1') + (() if read else ('-X', 'PATCH'))
+                with self.assertRaises(module.WaitExpired):
+                    self.q.gh(*args)
+                clock.return_value += module.BOUNDS['github_retry']['seconds'] + 1
+                with self.assertRaisesRegex(module.WaitExpired, 'stopped; reconcile'):
+                    self.q.gh(*args)
+                self.assertEqual(command.call_count, 1, 'Stopped operation was replayed')
 
     def test_daemon_updated_head_is_discovered_and_waits_for_its_checks(self):
         self.pr(state='behind')
@@ -1526,6 +1559,60 @@ class QueueTests(unittest.TestCase):
         detail = json.loads(log.splitlines()[-1])['detail']
         self.assertLess(len(detail), 2300)
 
+    def test_enqueue_rearms_transient_github_block_before_merge_intent(self):
+        for n, outcome in enumerate(('github_exhausted', 'discovery_exhausted'), 1):
+            with self.subTest(outcome=outcome):
+                self.pr(n)
+                entry = self.q.enqueue(module.REPOS[0], n, self.approved)
+                with self.q.db:
+                    self.q.db.execute("UPDATE entries SET phase='blocked',outcome=?,"
+                                      "github_attempts=4,read_attempts=4,transient_attempts=4,retry_at=99999999999,"
+                                      "merge_attempts=4,ci_since=1,ci_head=? WHERE id=?",
+                                      (outcome, self.approved, entry))
+                result = self.cli('enqueue', module.REPOS[0], str(n), self.approved, 'try again')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(int(result.stdout), entry)
+                row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+                self.assertEqual((row['phase'], row['outcome'], row['github_attempts'],
+                                  row['read_attempts'], row['transient_attempts'], row['retry_at']),
+                                 ('pending', 'requeued', 0, 0, 0, 0))
+                self.assertEqual((row['tested'], row['merge_attempts'], row['ci_since'], row['ci_head']),
+                                 (None, 4, 1, self.approved))
+        self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_submit_retries_same_head_after_premerge_github_exhaustion(self):
+        self.pr()
+        entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
+        with self.q.db:
+            self.q.db.execute('UPDATE entries SET github_attempts=? WHERE id=?', (module.MAX_ATTEMPTS, entry))
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome'], row['tested']), ('blocked', 'github_exhausted', None))
+        result = self.cli('submit', '1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0], 'pending')
+        self.restart()
+        self.q.tick()
+        self.assertEqual(len(self.calls('merge')), 1)
+        self.assertEqual(self.calls('merge')[0][-1], self.approved)
+
+    def test_enqueue_never_rearms_held_or_head_moved_entries(self):
+        n = 0
+        for phase in ('blocked', 'exhausted'):
+            for outcome, held in (('head_moved', False), ('held', False), ('github_exhausted', True)):
+                n += 1
+                with self.subTest(phase=phase, outcome=outcome, held=held):
+                    self.pr(n, held=held)
+                    entry = self.q.enqueue(module.REPOS[0], n, self.approved)
+                    with self.q.db:
+                        self.q.db.execute('UPDATE entries SET phase=?,outcome=?,github_attempts=4 WHERE id=?',
+                                          (phase, outcome, entry))
+                    self.q.enqueue(module.REPOS[0], n, self.approved)
+                    row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+                    self.assertEqual((row['phase'], row['github_attempts']), (phase, 4))
+        self.assertEqual(self.calls('merge'), [])
+
     def test_enqueue_rearms_exhausted_entry_without_resetting_merge_or_ci_caps(self):
         self.pr()
         entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
@@ -2370,6 +2457,7 @@ class BatchTests(unittest.TestCase):
         self.f = QueueTests()
         self.f.setUp()
         self.addCleanup(self.f.doCleanups)
+        self.addCleanup(self.stop_composers)
         self.f.q.batch_size = 5
         self.f.data['batch_checks'] = True
         self.f.git('config', 'receive.denyCurrentBranch', 'ignore')
@@ -2384,6 +2472,12 @@ class BatchTests(unittest.TestCase):
         self.f.main = self.f.git('rev-parse', 'HEAD').strip()
         self.f.data['main'] = self.f.main
         self.f.save()
+
+    def stop_composers(self):
+        for child in self.f.q.batch_children.values():
+            if child.poll() is None:
+                os.killpg(child.pid, signal.SIGTERM)
+            child.wait(timeout=5)
 
     def members(self, numbers=(1, 2, 3), repo=module.REPOS[0], bad=None):
         heads = []
@@ -2413,16 +2507,223 @@ class BatchTests(unittest.TestCase):
             time.sleep(.03)
         self.fail('candidate PR did not reach hosted CI')
 
+    def test_failed_singleton_uses_serial_retry_and_explicit_reconcile(self):
+        self.members(numbers=(1,))
+        self.f.q.tick()
+        b = self.f.q.db.execute('SELECT * FROM batches').fetchone()
+        self.f.q.split_batch(b, 'one-off red')
+        e = self.f.q.db.execute('SELECT * FROM entries').fetchone()
+        self.assertEqual(e['phase'], 'pending')
+        with patch.object(self.f.q, '_tick_entry', return_value=False) as serial:
+            self.f.q.tick()
+            self.assertEqual(serial.call_count, 1)
+        self.f.q.reconcile(e['id'], retry=True)
+        self.assertEqual(self.f.q.db.execute('SELECT phase FROM entries').fetchone()[0], 'pending')
+
+    def test_flag_off_releases_blocked_batches_to_serial(self):
+        self.members(numbers=(1, 2))
+        self.f.q.tick()
+        b = self.f.q.db.execute('SELECT * FROM batches').fetchone()
+        self.f.q.batch_report(b, 'blocked', 'old read error')
+        self.f.q.batch_size = 1
+        with patch.object(self.f.q, '_tick_entry', return_value=False) as serial:
+            self.f.q.tick()
+            self.assertEqual(serial.call_count, 2)
+        self.assertEqual(self.f.q.db.execute('SELECT phase FROM batches').fetchone()[0], 'serial')
+
+    def test_transient_batch_read_backs_off_without_blocking(self):
+        self.members(numbers=(1, 2))
+        self.f.q.tick()
+        with patch.object(self.f.q, 'advance_batch', side_effect=module.CommandFailed('HTTP 502')):
+            self.f.q.tick()
+        b = self.f.q.db.execute('SELECT * FROM batches').fetchone()
+        e = self.f.q.db.execute('SELECT * FROM entries ORDER BY id LIMIT 1').fetchone()
+        self.assertEqual(b['phase'], 'planned')
+        self.assertGreater(e['retry_at'], time.time())
+        with patch.object(self.f.q, 'advance_batch') as advance:
+            self.f.q.tick()
+            advance.assert_not_called()
+        with self.f.q.db:
+            self.f.q.db.execute('UPDATE entries SET retry_at=0')
+        with patch.object(self.f.q, 'advance_batch') as advance:
+            self.f.q.tick()
+            advance.assert_called_once()
+        self.assertIsNone(self.f.q.db.execute("SELECT 1 FROM waits WHERE kind='github_retry' AND owner=?", (f'entry:{e["id"]}',)).fetchone())
+
+    def test_blocked_batch_does_not_stall_unrelated_pins_in_repo(self):
+        self.members(numbers=(1, 2))
+        self.f.q.tick()
+        b = self.f.q.db.execute('SELECT * FROM batches').fetchone()
+        self.f.q.batch_report(b, 'blocked', 'invalid composition receipt')
+        self.members(numbers=(3,))
+        self.f.q.tick()
+        groups = self.f.q.db.execute('SELECT members FROM batches ORDER BY id').fetchall()
+        self.assertEqual(len(groups), 2)
+        self.assertEqual([m['pr'] for m in json.loads(groups[1][0])], [3])
+        next_batch = self.f.q.db.execute('SELECT * FROM batches ORDER BY id DESC LIMIT 1').fetchone()
+        with module.WorkQueue(module.default_path(), read_only=True) as work:
+            self.assertTrue(self.f.q.batch_members_current(next_batch, work.merge_order()['entries']))
+
+    def test_conflict_receipt_excludes_named_member_without_bisecting(self):
+        self.members(numbers=(1, 2, 3, 4))
+        self.f.q.tick()
+        b = self.f.q.db.execute('SELECT * FROM batches').fetchone()
+        self.f.q.split_batch(b, 'source conflict: shared.txt', conflict=3)
+        groups = self.f.q.db.execute('SELECT members,phase FROM batches WHERE id!=? ORDER BY id', (b['id'],)).fetchall()
+        self.assertEqual([([m['pr'] for m in json.loads(g['members'])], g['phase']) for g in groups],
+                         [([1, 2, 4], 'planned'), ([3], 'serial')])
+        remaining = self.f.q.db.execute("SELECT * FROM batches WHERE phase='planned'").fetchone()
+        with module.WorkQueue(module.default_path(), read_only=True) as work:
+            self.assertTrue(self.f.q.batch_members_current(remaining, work.merge_order()['entries']))
+
+    def test_ordered_squash_receipt_reaches_ci(self):
+        self.members()
+        self.wait_for_ci()
+        b = self.f.q.db.execute('SELECT * FROM batches').fetchone()
+        receipt = json.loads((self.f.state / 'batches' / str(b['id']) / 'receipt.json').read_text())
+        previous = b['base']
+        for item in receipt['members']:
+            self.assertEqual(self.f.git('rev-list', '--parents', '-n', '1', item['commit']).split(),
+                             [item['commit'], previous])
+            previous = item['commit']
+        self.assertEqual(previous, b['candidate'])
+
+    def test_main_advancing_recomposes_same_members_on_new_base(self):
+        self.members()
+        self.wait_for_ci()
+        b = self.f.q.db.execute('SELECT * FROM batches').fetchone()
+        (self.f.remote / 'unrelated.txt').write_text('main advanced\n')
+        self.f.git('add', 'unrelated.txt')
+        self.f.git('commit', '-qm', 'unrelated main change')
+        base = self.f.git('rev-parse', 'HEAD').strip()
+        self.f.q.tick()
+        current = self.f.q.db.execute('SELECT * FROM batches WHERE id=?', (b['id'],)).fetchone()
+        self.assertEqual(current['phase'], 'planned')
+        self.assertEqual(current['members'], b['members'])
+        self.f.q.tick()
+        current = self.f.q.db.execute('SELECT * FROM batches WHERE id=?', (b['id'],)).fetchone()
+        self.assertEqual(current['base'], base)
+        self.assertEqual(current['phase'], 'preparing')
+        self.assertFalse((self.f.state / 'batches' / str(b['id']) / 'receipt.json').exists())
+
+    def test_serial_reconcile_rearms_only_requested_member(self):
+        self.members(numbers=(1, 2))
+        self.f.q.tick()
+        b = self.f.q.db.execute('SELECT * FROM batches').fetchone()
+        self.f.q.serial_batch(b, 'provider proof missing')
+        with self.f.q.db:
+            self.f.q.db.execute("UPDATE entries SET phase='exhausted',transient_attempts=4,retry_at=? WHERE pr=1",
+                                (time.time() + module.BOUNDS['github_retry']['seconds'],))
+            self.f.q.db.execute("UPDATE entries SET phase='done',outcome='merged',merged_commit=? WHERE pr=2", (self.f.merge_sha,))
+        first = self.f.q.db.execute('SELECT id FROM entries WHERE pr=1').fetchone()[0]
+        self.f.q.reconcile(first, retry=True)
+        rows = self.f.q.db.execute('SELECT phase,transient_attempts,retry_at FROM entries ORDER BY pr').fetchall()
+        self.assertEqual(tuple(rows[0]), ('pending', 0, 0))
+        self.assertEqual(rows[1]['phase'], 'done')
+
+    def test_serial_handoff_consumes_provider_receipt_in_work_queue(self):
+        self.f.pr()
+        self.f.q.enqueue(module.REPOS[0], 1, self.f.approved)
+        self.f.q.tick()
+        b = self.f.q.db.execute('SELECT * FROM batches').fetchone()
+        self.f.q.serial_batch(b, 'provider proof missing')
+        self.f.q.tick()
+        self.f.q.tick()
+        with module.WorkQueue(module.default_path(), read_only=True) as work:
+            self.assertEqual(work.merge_order()['entries'], [])
+            self.assertEqual(sum(len(c.get('merge_receipts', [])) for c in work.export()['items']), 1)
+        self.assertEqual([a[2] for a in self.f.calls('merge')], ['1'])
+
+    def test_restart_observes_owned_live_composer_without_duplicate_launch(self):
+        self.members()
+        self.f.q.tick()
+        b = self.f.q.db.execute('SELECT * FROM batches').fetchone()
+        directory = self.f.state / 'batches' / str(b['id'])
+        directory.mkdir(parents=True)
+        (directory / 'process.json').write_text(json.dumps(dict(pid=12345, identity='same-process')))
+        with self.f.q.db:
+            self.f.q.db.execute("UPDATE batches SET phase='preparing',started=?", (time.time(),))
+        with patch.object(self.f.q, 'process_identity', return_value='same-process'), \
+                patch.object(self.f.q, 'batch_members_current', return_value=True), \
+                patch.object(module.subprocess, 'Popen') as spawn:
+            self.f.q.tick()
+            spawn.assert_not_called()
+        self.assertEqual(self.f.q.db.execute('SELECT phase FROM batches').fetchone()[0], 'preparing')
+
+    def test_invalid_ordered_receipt_blocks_only_its_members(self):
+        self.members()
+        self.wait_for_ci()
+        b = self.f.q.db.execute('SELECT * FROM batches').fetchone()
+        path = self.f.state / 'batches' / str(b['id']) / 'receipt.json'
+        receipt = json.loads(path.read_text())
+        receipt['members'].reverse()
+        path.write_text(json.dumps(receipt))
+        with self.f.q.db:
+            self.f.q.db.execute("UPDATE batches SET phase='preparing'")
+        self.f.q.tick()
+        self.assertEqual(self.f.q.db.execute('SELECT phase FROM batches').fetchone()[0], 'blocked')
+        self.assertFalse(any(a[:2] == ['pr', 'merge'] for a in self.f.load()['calls']))
+
+    def test_repeated_missing_composer_exhausts_bounded_retries(self):
+        self.members()
+        self.f.q.tick()
+        with patch.object(self.f.q, 'batch_members_current', return_value=True):
+            for _ in range(module.MAX_ATTEMPTS):
+                with self.f.q.db:
+                    self.f.q.db.execute("UPDATE batches SET phase='preparing',started=?", (time.time(),))
+                    self.f.q.db.execute('UPDATE entries SET retry_at=0')
+                self.f.q.tick()
+        self.assertEqual(self.f.q.db.execute('SELECT phase FROM batches').fetchone()[0], 'blocked')
+
+    def drive_until(self, condition, count=100):
+        with patch.object(self.f.q, '_tick_entry', return_value=False):
+            for _ in range(count):
+                self.f.q.tick()
+                if condition():
+                    return
+                time.sleep(.01)
+        self.fail('batch did not reach expected bounded observation')
+
+    def serial_groups(self):
+        return [[m['pr'] for m in json.loads(b['members'])] for b in self.f.q.db.execute(
+            "SELECT members FROM batches WHERE phase='serial' ORDER BY id")]
+
+    def assert_no_batch_landing(self):
+        provider = self.f.load()
+        self.assertFalse(any(a[:2] == ['api', 'graphql'] and
+                             any(x.startswith('input=') or 'updateRefs' in x for x in a)
+                             for a in provider['calls']))
+        self.assertEqual(self.f.calls('merge'), [])
+        self.assertEqual(provider.get('landed', []), [])
+
     def test_head_moved_during_batch_excludes_only_that_pin(self):
         self.members()
         self.wait_for_ci()
         self.f.load()['prs'][module.REPOS[0]+'#2']['head']['sha'] = self.f.changed
         self.f.save()
-        self.drive()
-        provider = self.f.load()
-        self.assertEqual(len(provider.get('landed', [])), 1)
-        self.assertEqual([provider['prs'][module.REPOS[0]+f'#{n}']['merged'] for n in (1,2,3)], [True, False, True])
+
+        self.drive_until(lambda: self.serial_groups() == [[1, 3]])
+
         self.assertEqual([e['pr'] for e in self.f.q.status() if e['outcome']=='head_moved'], [2])
+        self.assertFalse(any(p['merged'] for p in self.f.load()['prs'].values()))
+        self.assert_no_batch_landing()
+
+    def test_green_candidate_hands_original_order_to_serial_without_atomic_write(self):
+        heads = self.members()
+        self.wait_for_ci()
+
+        self.f.q.tick()
+
+        batch = self.f.q.db.execute('SELECT * FROM batches').fetchone()
+        self.assertEqual(batch['phase'], 'serial')
+        entries = self.f.q.db.execute('SELECT pr,approved,phase FROM entries ORDER BY id').fetchall()
+        self.assertEqual([tuple(e) for e in entries],
+                         [(n, head, 'pending') for n, head in enumerate(heads, 1)])
+        with module.WorkQueue(module.default_path(), read_only=True) as work:
+            self.assertEqual([e['pr'] for e in work.merge_order()['entries']], [1, 2, 3])
+            self.assertEqual(sum(len(c.get('merge_receipts', [])) for c in work.export()['items']), 0)
+        self.assertEqual(self.f.git('rev-parse', 'main').strip(), self.f.main)
+        self.assert_no_batch_landing()
 
     def test_batch_regeneration_does_not_reserve_its_own_migration_slots(self):
         from migration_claims import claims
@@ -2447,19 +2748,28 @@ class BatchTests(unittest.TestCase):
         self.f.data['main'] = self.f.main
         self.f.save()
         self.members()
-        self.drive()
+
+        self.drive_until(lambda: self.serial_groups() == [[1, 2, 3]])
+
         self.assertEqual(marker.read_text().splitlines(), ['regen'])
+        self.assert_no_batch_landing()
 
     def test_new_queue_priority_invalidates_an_inflight_candidate(self):
         self.members()
         self.wait_for_ci()
+        old = self.f.q.db.execute('SELECT * FROM batches').fetchone()
         fourth = self.members(numbers=(4,))[0]
         with module.WorkQueue(module.default_path()) as work:
             work.prioritize(f'{module.REPOS[0]}#4@{fourth}', actor='test', reason='new reviewed priority')
-        self.drive()
-        landed = self.f.load()['landed']
-        self.assertEqual(len(landed), 1)
-        self.f.git('merge-base', '--is-ancestor', fourth, landed[0])
+
+        self.f.q.tick()
+
+        self.assertEqual(self.f.q.db.execute('SELECT phase FROM batches WHERE id=?', (old['id'],)).fetchone()[0], 'stale')
+        self.drive_until(lambda: self.serial_groups() == [[4, 1, 2, 3]])
+        latest = self.f.q.db.execute('SELECT * FROM batches ORDER BY id DESC LIMIT 1').fetchone()
+        self.assertNotEqual(latest['candidate'], old['candidate'])
+        self.assertEqual(self.f.git('show', latest['candidate'] + ':change-4.txt'), 'approved 4\n')
+        self.assert_no_batch_landing()
 
     def test_two_repos_start_ci_while_first_repo_waits(self):
         self.members()
@@ -2471,67 +2781,94 @@ class BatchTests(unittest.TestCase):
         self.f.save()
         self.f.load()['pending_repos'] = list(module.REPOS)
         self.f.save()
-        self.drive(25)
+        def both_in_ci():
+            rows = self.f.q.db.execute("SELECT repo FROM batches WHERE phase='ci'").fetchall()
+            return {b['repo'] for b in rows} == set(module.REPOS[:2])
+        self.drive_until(both_in_ci)
         candidates = [p for p in self.f.load()['prs'].values() if p['head']['ref'].startswith('merge-queue/batch-')]
-        self.assertEqual({p['repo'] for p in candidates}, {module.REPOS[0], module.REPOS[1]})
-        self.assertEqual(self.f.load().get('landed', []), [])
+        self.assertEqual({p['repo'] for p in candidates}, set(module.REPOS[:2]))
         self.f.load()['pending_repos'] = [module.REPOS[0]]
         self.f.save()
-        self.drive(15)
-        self.assertTrue(self.f.load()['prs'][module.REPOS[1]+'#4']['merged'])
-        self.assertFalse(self.f.load()['prs'][module.REPOS[0]+'#1']['merged'])
+
+        self.drive_until(lambda: [4, 5] in self.serial_groups())
+
+        phases = {b['repo']: b['phase'] for b in self.f.q.db.execute('SELECT repo,phase FROM batches')}
+        self.assertEqual(phases, {module.REPOS[0]: 'ci', module.REPOS[1]: 'serial'})
         self.f.load()['pending_repos'] = []
         self.f.save()
-        self.drive(20)
-        self.assertTrue(self.f.load()['prs'][module.REPOS[0]+'#1']['merged'])
-        self.assertEqual(len(self.f.load()['landed']), 2)
+        self.drive_until(lambda: len(self.serial_groups()) == 2)
+        self.assert_no_batch_landing()
 
-    def test_atomic_landing_rejects_head_race_then_retries_remaining_pins(self):
-        self.members()
-        self.f.load()['move_before_land'] = 2
-        self.f.save()
-        self.drive(50)
-        provider = self.f.load()
-        self.assertEqual(len(provider.get('landed', [])), 1)
-        self.assertEqual([provider['prs'][module.REPOS[0]+f'#{n}']['merged'] for n in (1,2,3)], [True, False, True])
-        attempts = [a for a in provider['calls'] if a[:2]==['api','graphql']]
-        self.assertEqual(len(attempts), 2)
-        with module.WorkQueue(module.default_path(), read_only=True) as work:
-            moved = next(c for c in work.export()['items'] if c['prs'][0]['number']==2)
-            self.assertEqual(moved['stage'], 'blocked')
-            self.assertEqual(moved['merge_stopped'], moved['prs'])
-
-
-    def test_batch_merge_refreshes_stacked_children(self):
+    def test_serial_handoff_leaves_stacked_children_for_serial_merge_refresh(self):
         self.members()
         self.f.pr(9, head=self.f.updated, base='branch-1', state='behind', draft=True)
-        self.drive()
-        self.assertEqual(self.f.load()['prs'][module.REPOS[0]+'#9']['base']['ref'], 'main')
-        self.assertEqual([a[2] for a in self.f.calls('edit')], ['9'])
-        self.assertTrue(any('/pulls/9/update-branch' in str(a) for a in self.f.load()['calls']))
 
-    def test_service_does_not_exit_between_batch_steps(self):
+        self.drive_until(lambda: self.serial_groups() == [[1, 2, 3]])
+
+        self.assertEqual(self.f.load()['prs'][module.REPOS[0]+'#9']['base']['ref'], 'branch-1')
+        self.assertEqual(self.f.calls('edit'), [])
+        self.assertFalse(any('/pulls/9/update-branch' in str(a) for a in self.f.load()['calls']))
+        self.assert_no_batch_landing()
+
+    def test_service_does_not_exit_between_candidate_steps(self):
         self.members()
+        tick = self.f.q.tick
+        ticks = 0
+        def stop_at_serial():
+            nonlocal ticks
+            ticks += 1
+            tick()
+            if self.serial_groups() or ticks == 100:
+                self.f.q.stopped = True
         previous = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)}
         try:
-            self.f.q.run(poll=.01, discover=False)
+            with patch.object(self.f.q, 'tick', side_effect=stop_at_serial):
+                self.f.q.run(poll=.01, discover=False)
         finally:
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
-        self.assertEqual(len(self.f.load().get('landed', [])), 1)
-        self.assertTrue(all(e['batch']['phase']=='done' for e in self.f.q.status()))
+        self.assertEqual(self.serial_groups(), [[1, 2, 3]])
+        self.assert_no_batch_landing()
 
-    def test_restart_drains_an_existing_batch_with_default_size_one(self):
+    def test_restart_with_default_off_releases_existing_candidate_to_serial(self):
         self.members()
         self.wait_for_ci()
+        candidate = self.f.q.db.execute('SELECT candidate FROM batches').fetchone()[0]
+
         self.f.restart()
         self.assertEqual(self.f.q.batch_size, 1)
-        self.drive()
-        self.assertEqual(len(self.f.load().get('landed', [])), 1)
-        self.assertTrue(all(e['batch']['phase']=='done' for e in self.f.q.status()))
-        self.assertEqual(self.f.calls('merge'), [])
+        with patch.object(self.f.q, '_tick_entry', return_value=False):
+            self.f.q.tick()
+
+        self.assertEqual(self.serial_groups(), [[1, 2, 3]])
+        self.assertEqual(self.f.q.db.execute('SELECT candidate FROM batches').fetchone()[0], candidate)
+        self.assertTrue(all(e['phase'] == 'pending' for e in self.f.q.status()))
+        self.assert_no_batch_landing()
+
+    def test_restart_enabled_without_receipt_replans_composition_immediately(self):
+        self.members()
+        self.f.q.tick()
+        with self.f.q.db:
+            self.f.q.db.execute("UPDATE batches SET phase='preparing',started=?", (time.time(),))
+        self.f.q.db.close()
+        self.f.q = module.Queue(self.f.state, self.f.root, gap=0, batch_size=5)
+        self.f.bind_work_queue()
+        self.addCleanup(self.f.q.db.close)
+
+        self.f.q.tick()
+
+        self.assertEqual(self.f.q.db.execute('SELECT phase FROM batches').fetchone()[0], 'planned')
+        self.assert_no_batch_landing()
 
     def test_generated_conflicts_are_resolved_before_one_regeneration(self):
+        marker = self.f.root / 'regenerations'
+        script = self.f.remote / 'tools/regen.py'
+        script.write_text(script.read_text() + f'with Path({str(marker)!r}).open("a") as f: f.write("regen\\n")\n')
+        self.f.git('add', 'tools/regen.py')
+        self.f.git('commit', '-qm', 'record generator calls')
+        self.f.main = self.f.git('rev-parse', 'HEAD').strip()
+        self.f.data['main'] = self.f.main
+        self.f.save()
         self.members()
         for n in (1,2,3):
             self.f.git('switch', '-q', f'branch-{n}')
@@ -2544,53 +2881,54 @@ class BatchTests(unittest.TestCase):
             self.f.pr(n, head=head)
             self.f.q.enqueue(module.REPOS[0], n, head)
         self.f.git('switch', '-q', 'main')
-        # Older fixture cards remain pinned to old heads and cannot authorize the new heads.
-        self.drive()
-        self.assertEqual(len(self.f.load().get('landed', [])), 1)
-        landed = self.f.load()['landed'][0]
-        self.assertEqual(self.f.git('show', landed+':generated.txt'), 'regenerated batch\n')
-        self.assertEqual(self.f.git('show', landed+':db/schema.sql'), 'regenerated schema\n')
+
+        self.drive_until(lambda: self.serial_groups() == [[1, 2, 3]])
+
+        candidate = self.f.q.db.execute("SELECT candidate FROM batches WHERE phase='serial'").fetchone()[0]
+        self.assertEqual(self.f.git('show', candidate+':generated.txt'), 'regenerated batch\n')
+        self.assertEqual(self.f.git('show', candidate+':db/schema.sql'), 'regenerated schema\n')
+        self.assertEqual(marker.read_text().splitlines(), ['regen'])
         self.assertFalse(any(e['outcome']=='batch_failed' for e in self.f.q.status()))
+        self.assert_no_batch_landing()
 
-    def test_lost_landing_response_is_reconciled_without_replay(self):
-        self.members()
-        self.f.load()['lost_batch_response'] = True
-        self.f.save()
-        self.drive()
-        self.assertEqual(len(self.f.load().get('landed', [])), 1)
-        self.assertTrue(all(e['outcome']=='merged' for e in self.f.q.status()))
-        self.assertEqual(len([a for a in self.f.load()['calls'] if a[:2]==['api','graphql']]), 1)
-
-    def test_bad_member_is_bisected_and_other_two_land(self):
-        self.members(bad=2)
-        self.drive(100)
-        provider = self.f.load()
-        self.assertEqual(len(provider.get('landed', [])), 2)
-        self.assertTrue(provider['prs'][module.REPOS[0]+'#1']['merged'])
-        self.assertFalse(provider['prs'][module.REPOS[0]+'#2']['merged'])
-        self.assertTrue(provider['prs'][module.REPOS[0]+'#3']['merged'])
-        failed = [e for e in self.f.q.status() if e['outcome']=='batch_failed']
-        self.assertEqual([e['pr'] for e in failed], [2])
-
-    def test_three_green_pins_land_one_exact_tested_tree(self):
+    def test_legacy_issued_octopus_intent_is_observed_without_replay(self):
         heads = self.members()
-        self.drive()
-        provider = self.f.load()
-        self.assertEqual(len(provider.get('landed', [])), 1)
-        landed = provider['landed'][0]
-        self.assertEqual(self.f.git('rev-parse', 'main').strip(), landed)
-        self.assertEqual(self.f.git('show', landed+':generated.txt'), 'regenerated batch\n')
-        for n, head in enumerate(heads, 1):
-            self.f.git('merge-base', '--is-ancestor', head, landed)
-            self.assertEqual(self.f.git('show', landed+f':change-{n}.txt'), f'approved {n}\n')
-            self.assertTrue(provider['prs'][module.REPOS[0]+f'#{n}']['merged'])
-        with module.WorkQueue(module.default_path(), read_only=True) as work:
-            self.assertEqual(work.merge_order()['entries'], [])
-            self.assertEqual(sum(len(c.get('merge_receipts', [])) for c in work.export()['items']), 3)
-        checked = [a[1].split('/')[4] for a in provider['calls'] if a[0]=='api' and '/check-runs?' in a[1]]
-        self.assertIn(landed, checked)
-        self.assertTrue(all(e['batch']['tree']==self.f.git('rev-parse', 'main^{tree}').strip() for e in self.f.q.status()))
-        self.assertEqual(self.f.calls('merge'), [])
+        self.wait_for_ci()
+        batch = self.f.q.db.execute('SELECT * FROM batches').fetchone()
+        message = self.f.root / 'legacy-intent-message'
+        message.write_text('Synthetic legacy octopus intent\n')
+        parents = [arg for head in [batch['base'], *heads] for arg in ('-p', head)]
+        legacy = self.f.git('commit-tree', batch['tree'], *parents, '-F', str(message)).strip()
+        payload = json.dumps(dict(repositoryId=module.REPOS[0], refUpdates=[dict(
+            name='refs/heads/main', beforeOid=batch['base'], afterOid=legacy, force=False)],
+            clientMutationId=f'legacy-batch-{batch["id"]}'))
+        with self.f.q.db:
+            self.f.q.db.execute("UPDATE batches SET phase='blocked',candidate=?,mutation=?,started=? WHERE id=?",
+                                (legacy, payload, time.time(), batch['id']))
+            self.f.q.db.execute('UPDATE entries SET tested=approved,merge_attempts=1')
+        entry = self.f.q.db.execute('SELECT id FROM entries ORDER BY id LIMIT 1').fetchone()[0]
+
+        self.f.q.reconcile(entry, retry=True)
+        self.assertEqual(self.f.q.db.execute('SELECT phase FROM batches').fetchone()[0], 'confirming')
+        self.f.restart()
+        self.f.q.tick()
+
+        observed = self.f.q.db.execute('SELECT * FROM batches').fetchone()
+        self.assertEqual((observed['phase'], observed['mutation'], observed['candidate']),
+                         ('confirming', payload, legacy))
+        self.assertTrue(all(e['tested'] == e['approved'] for e in self.f.q.status()))
+        self.assert_no_batch_landing()
+
+    def test_failed_candidate_is_bisected_before_first_serial_handoff(self):
+        self.members(bad=2)
+
+        self.drive_until(lambda: self.serial_groups() == [[1]])
+
+        batches = self.f.q.db.execute('SELECT members,phase FROM batches ORDER BY id').fetchall()
+        self.assertEqual([([m['pr'] for m in json.loads(b['members'])], b['phase']) for b in batches],
+                         [([1, 2, 3], 'split'), ([1], 'serial'), ([2, 3], 'planned')])
+        self.assertFalse(any(p['merged'] for p in self.f.load()['prs'].values()))
+        self.assert_no_batch_landing()
 
 if __name__ == '__main__':
     unittest.main()

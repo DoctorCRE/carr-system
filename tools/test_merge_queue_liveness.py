@@ -259,6 +259,36 @@ class RunLoop:
 
 class LivenessTests(unittest.TestCase):
 
+    def test_timed_out_discovery_read_resumes_on_next_poll_after_cooldown(self):
+        f = fixture_module.QueueTests()
+        f.setUp()
+        try:
+            loop = RunLoop(f, next(e for e in EFFECTS if e.name == 'open_prs'), 'timeout')
+            f.pr(head=f.updated)
+            loop.session(polls=1)
+            self.assertEqual(loop.failures, 1)
+            self.assertEqual(loop.merged, [])
+            f.restart()
+            loop.active = False
+            loop.now += mq.BOUNDS['github_retry']['seconds']
+            loop.session(polls=2)
+            self.assertIn((mq.REPOS[0], 1, f.updated), loop.merged)
+        finally:
+            f.doCleanups()
+
+    def test_stuck_discovery_logs_each_discovery_interval(self):
+        f = fixture_module.QueueTests()
+        f.setUp()
+        try:
+            loop = RunLoop(f, next(e for e in EFFECTS if e.name == 'open_prs'), 'timeout')
+            loop.session(polls=32)
+            events = [json.loads(line) for line in (f.state / 'queue.log').read_text().splitlines()]
+            failures = [e for e in events if e.get('repo') == mq.REPOS[0]
+                        and e['outcome'] == 'discovery_unreadable']
+            self.assertEqual([e['created'] for e in failures], [10000, 10300, 10600, 10900])
+        finally:
+            f.doCleanups()
+
 
     def test_failed_discovery_keeps_tick_and_the_discovery_schedule_running(self):
         f = fixture_module.QueueTests()
@@ -297,13 +327,13 @@ class LivenessTests(unittest.TestCase):
                             f.restart()
                         self.assertGreater(loop.failures, 0, 'Fault site was never reached')
                         limit = 8 if effect.name == 'merge_intent' else 4
-                        if effect.name == 'open_prs' and fault == 'error':
+                        if effect.name == 'open_prs':
                             self.assertLessEqual(f.q.db.execute('SELECT MAX(attempts) FROM github_failures').fetchone()[0], 4)
                         else:
                             self.assertLessEqual(loop.failures, limit, 'Persistent fault exceeded automatic and reconciliation budgets')
                         count = loop.failures
                         loop.session()
-                        if effect.name == 'open_prs' and fault == 'error':
+                        if effect.name == 'open_prs':
                             self.assertLessEqual(loop.failures - count, 4, 'Only the discovery read cooldown may renew a budget')
                         else:
                             self.assertEqual(loop.failures, count, 'Restart replenished the failure budget')
