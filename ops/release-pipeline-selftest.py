@@ -2575,7 +2575,8 @@ class StopOnFailure(Base):
         self.assertEqual(pipe.tick(["worker"]), 0)
         self.assertEqual(runner.names().count("promote"), 1)
         self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
-        self.assertTrue(any(row["status"] == "shipped" for row in self.fx.records()))
+        statuses = [row["status"] for row in self.fx.records()]
+        self.assertLess(statuses.index("worker_promoted"), statuses.index("shipped"))
         reads = [json.loads(line) for line in (pipe.run_dir / "worker-verify-live.jsonl").read_text().splitlines()]
         self.assertEqual(len(reads), 2)
         self.assertEqual(reads[0]["error"], "TimeoutError: The read operation timed out")
@@ -2602,7 +2603,7 @@ class StopOnFailure(Base):
         self.assertEqual(len(reads), 12)
         self.assertEqual(runner.names().count("promote"), 1)
         self.assertEqual(self.fx.state()["worker"]["failed_sha"], sha)
-        self.assertFalse(any(row["status"] in {"release_verified", "shipped"} for row in self.fx.records()))
+        self.assertFalse(any(row["status"] in {"worker_promoted", "release_verified", "shipped"} for row in self.fx.records()))
 
     def test_worker_readback_rejects_same_sha_with_a_different_provider_version(self):
         self.fx.commit({"mcp-server/src/a.js": "1"})

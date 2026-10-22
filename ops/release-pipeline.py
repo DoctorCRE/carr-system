@@ -2424,10 +2424,7 @@ class Pipeline:
         if self.dry_run:
             self.out(f"  [dry-run] GET {lane_cfg['live_release_url']} and require git_sha.value == {sha}")
         else:
-            live = self.http(lane_cfg["live_release_url"])
-            if ((live.get("git_sha") or {}).get("value") != sha
-                    or (live.get("worker_version") or {}).get("id") != version):
-                raise StepFailed("verify-live", 1, "", "production /release does not serve the released SHA and version")
+            live = self.verify_worker_live(lane_cfg, sha, version)
             self.store.record_durable({**state[lane]["pending_promotion"], "status": "worker_promoted"})
         health_excused = self.health_gate(wt, health_baseline)
         post_release = self.post_release_proof(
@@ -2599,6 +2596,26 @@ class Pipeline:
         raise StepFailed("app-verify-live", 1, str(log),
                          f"/app-release did not serve {sha} after {attempts} reads; "
                          f"source_commit={last.get('source_commit')} environment={last.get('environment')}"
+                         f"{read_error}; log {log}")
+
+    def verify_worker_live(self, lane_cfg: dict, sha: str, version: str, *, attempts: int = 12) -> dict:
+        """Read until production serves both the released SHA and provider version."""
+        matched, last, error, log = self.await_live(
+            lane_cfg, "worker-verify-live",
+            lambda live: (live.get("git_sha") or {}).get("value") == sha
+            and (live.get("worker_version") or {}).get("id") == version,
+            attempts=attempts)
+        if matched:
+            return last
+        raw_git_sha = last.get("git_sha")
+        raw_worker_version = last.get("worker_version")
+        git_sha = raw_git_sha if isinstance(raw_git_sha, dict) else {}
+        worker_version = raw_worker_version if isinstance(raw_worker_version, dict) else {}
+        read_error = f" last_read_error={error}" if error else ""
+        raise StepFailed("verify-live", 1, str(log),
+                         f"/release did not serve SHA {sha} and provider version {version} "
+                         f"after {attempts} reads; last_sha={git_sha.get('value')} "
+                         f"last_version={worker_version.get('id')}"
                          f"{read_error}; log {log}")
 
     def app_checks_green(self, lane_cfg: dict, sha: str, *, hosted: bool = False) -> None:
