@@ -27,7 +27,8 @@ was generated from, and this refuses when they disagree. Regenerate with:
     ops/ci-dep-check.py --write-lock
 
 NETWORK. `npm audit` reaches the registry. Offline, it cannot run — and a check
-that cannot run reports SKIPPED, never OK (rule 88e9b5eb). Under --strict, which
+that cannot run reports SKIPPED, never OK (rule 88e9b5eb). Each audit has
+a 120-second deadline; a timeout is also SKIPPED and fails strict CI. Under --strict, which
 CI passes, a skip is a failure, because on a runner the network is there and a
 skip means the audit quietly stopped happening.
 """
@@ -253,10 +254,14 @@ def check_npm(problems, notes, skipped, strict):
                 notes.append(f"npm {proj}: no dependencies, no lock needed")
             continue
 
-        res = subprocess.run(
-            ["npm", "audit", "--omit=dev", "--audit-level=high", "--json"],
-            cwd=REPO / proj, capture_output=True, text=True,
-        )
+        try:
+            res = subprocess.run(
+                ["npm", "audit", "--omit=dev", "--audit-level=high", "--json"],
+                cwd=REPO / proj, capture_output=True, text=True, timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            skipped.append(f"npm audit in {proj} timed out after 120 seconds")
+            continue
         blob = res.stdout or ""
         if not blob.strip():
             skipped.append(f"npm audit in {proj} produced no report (offline?)")
