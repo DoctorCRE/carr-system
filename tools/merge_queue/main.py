@@ -1081,7 +1081,7 @@ class Queue:
                 self.report(e, 'updated', f'Advanced work pin from {e["approved"]} to {head}; hosted CI required',
                             'done')
                 return True
-        actions = self.db.execute("SELECT * FROM actions WHERE kind='regen' AND phase='done' "
+        actions = self.db.execute("SELECT * FROM actions WHERE kind='regen' AND phase IN ('issued','done') "
                                   'AND repo=? AND pr=? AND head=? AND receipt IS NOT NULL',
                                   (e['repo'], e['pr'], e['approved'])).fetchall()
         for action in bounded_items('snapshot', actions):
@@ -1091,13 +1091,15 @@ class Queue:
                 continue
             if receipt != dict(head=e['approved'], main=action['payload'], prepared=head, branch=p['head']['ref']):
                 continue
+            with self.db:
+                self.db.execute("UPDATE actions SET phase='done' WHERE key=?", (action['key'],))
             with WorkQueue(default_path()) as work:
                 work.advance_merge_pin(card_id, repo=e['repo'], pr=e['pr'], head=e['approved'],
                                        prepared=head, main=receipt['main'], actor='merge-daemon',
                                        reason=f'journal entry {e["id"]}: verified regeneration receipt {action["receipt"]}',
                                        expected_order=expected_order)
             self.report(e, 'regenerated', f'Advanced work pin from {e["approved"]} to {head}; hosted CI required',
-                        'superseded')
+                        'done')
             return True
         if self.db.execute("SELECT 1 FROM actions WHERE kind='regen' AND phase='issued' "
                            'AND repo=? AND pr=? AND head=?',
