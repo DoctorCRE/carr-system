@@ -148,9 +148,9 @@ def inventory_findings(config, *, tmp_root, roots, user_tmp_root=None):
     return rows
 
 
-def health_findings(root, config, *, tmp_root, roots, now, user_tmp_root=None, inventory=None):
+def health_findings(root, config, *, tmp_root, roots, now, user_tmp_root=None):
     policy = config['machine_cleanup']
-    rows = list(inventory) if inventory is not None else inventory_findings(
+    rows = inventory_findings(
         config, tmp_root=tmp_root, roots=roots, user_tmp_root=user_tmp_root)
     try:
         receipt = json.loads((Path(root) / 'out/machine-cleanup.json').read_text())

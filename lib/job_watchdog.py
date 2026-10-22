@@ -956,12 +956,11 @@ class Observations:
         except (OSError, ValueError, KeyError, TypeError):
             self.entries = {}
 
-    def get(self, key, revision, load, max_age=None):
+    def get(self, key, revision, load):
         self.used.add(key)
         entry = self.entries.get(key)
         try:
             if (entry["revision"] == revision and 0 <= self.now - entry["at"]
-                    and (max_age is None or self.now - entry["at"] < max_age)
                     and entry["digest"] == self.signature(entry["value"])):
                 return copy.deepcopy(entry["value"])
         except (KeyError, TypeError, ValueError):
@@ -1054,37 +1053,20 @@ def collect(root, config, now=None):
     if sys.platform == "darwin":
         try:
             import scheduled_jobs
-            def observe_schedule(manifest):
-                directories = [Path.home() / "Library/LaunchAgents", Path("/Library/LaunchAgents"),
-                               Path("/Library/LaunchDaemons")]
-                revision = [manifest, [[str(p), file_revision(p)] for directory in directories
-                                      for p in sorted(directory.glob("*.plist"))]]
-                snapshot = observations.get("scheduled", revision, lambda: scheduled_jobs.collect(manifest),
-                                            config["thresholds"]["machine_collect_seconds"])
-                if snapshot.get("errors"):
-                    observations.entries.pop("scheduled", None)
-                return snapshot
-            facts["scheduled_jobs"] = scheduled_jobs.check(now=now, observe=observe_schedule)
+            facts["scheduled_jobs"] = scheduled_jobs.check(now=now)
             if any(row["code"] == "evidence_unavailable" for row in facts["scheduled_jobs"]):
                 error("scheduled job evidence", RuntimeError("incomplete scheduled-job observation"), "scheduled_jobs")
         except Exception as exc:
             error("scheduled jobs", exc, "scheduled_jobs")
     if sys.platform == "darwin" and Path(root).resolve() == repository_roots(config).get("jbookout/carr-system"):
         try:
-            from machine_cleanup import health_findings, inventory_findings
+            from machine_cleanup import health_findings
             sys.path.append(str(Path(__file__).resolve().parents[1] / "tools"))
             from storage_hygiene import storage_roots
             user_tmp = storage_roots()[0]
             roots = repository_roots(config)
-            revision = [file_revision(root / "out/machine-cleanup.json"), file_revision("/private/tmp"),
-                        file_revision(user_tmp)]
-            inventory = observations.get("cleanup_inventory", revision, lambda: inventory_findings(
-                config, tmp_root=Path("/private/tmp"), roots=roots, user_tmp_root=user_tmp),
-                config["thresholds"]["machine_collect_seconds"])
-            if any("unavailable" in row["detail"].lower() or row["code"].endswith("_partial") for row in inventory):
-                observations.entries.pop("cleanup_inventory", None)
             facts["machine_cleanup"] = health_findings(root, config, tmp_root=Path("/private/tmp"),
-                roots=roots, now=now, user_tmp_root=user_tmp, inventory=inventory)
+                roots=roots, now=now, user_tmp_root=user_tmp)
         except Exception as exc:
             error("machine cleanup", exc, "machine_cleanup")
     queue = path_at(root, config["paths"]["merge_queue"])
@@ -1111,9 +1093,8 @@ def collect(root, config, now=None):
             facts["prs"].extend(v["pr"] for k, v in cache.items() if k.startswith(repo + "#"))
             continue  # Stop provider reads; all skipped evidence is blinded.
         try:
-            pages = observations.get(repo + ":pulls", file_revision(queue), lambda: json.loads(command(
-                ["gh", "api", "--paginate", "--slurp", f"repos/{repo}/pulls?state=open&per_page=100"], config)),
-                t["remote_collect_seconds"])
+            pages = json.loads(command(
+                ["gh", "api", "--paginate", "--slurp", f"repos/{repo}/pulls?state=open&per_page=100"], config))
             open_branches = {pr["head"]["ref"] for page in pages for pr in page
                              if (pr["head"].get("repo") or {}).get("full_name") == repo}
             # Closed PRs leave the cache; an unlisted repository keeps its entries.
@@ -1138,8 +1119,6 @@ def collect(root, config, now=None):
                         if limited and entry:
                             facts["prs"].append(entry["pr"])
         except Exception as exc:
-            observations.entries.pop(repo + ":pulls", None)
-            observations.dirty = True
             error(repo + " PRs", exc, "prs")
             if open_branches is None:
                 error(repo + " branches", exc, "branches")
@@ -1148,9 +1127,8 @@ def collect(root, config, now=None):
         if open_branches is None:
             continue
         try:
-            pages = observations.get(repo + ":branches", file_revision(queue), lambda: json.loads(command(
-                ["gh", "api", "--paginate", "--slurp", f"repos/{repo}/branches?per_page=100"], config)),
-                t["remote_collect_seconds"])
+            pages = json.loads(command(
+                ["gh", "api", "--paginate", "--slurp", f"repos/{repo}/branches?per_page=100"], config))
             for page in pages:
                 for branch in page:
                     if not protected_branch(config, branch["name"]):
@@ -1178,8 +1156,6 @@ def collect(root, config, now=None):
                                                   "updated": date,
                             "open_pr": branch["name"] in open_branches})
         except Exception as exc:
-            observations.entries.pop(repo + ":branches", None)
-            observations.dirty = True
             error(repo + " branches", exc, "branches")
     logs = [(p, "queue") for p in config["paths"]["queue_logs"]] + [(config["paths"]["release_log"], "release")]
     for configured, kind in logs:

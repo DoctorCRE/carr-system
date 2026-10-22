@@ -16,7 +16,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT / "lib"), str(ROOT / "tools")]
+sys.path.insert(0, str(ROOT / "lib"))
 import scheduled_jobs as jobs
 import launchd_calendar
 
@@ -96,40 +96,6 @@ class ReportTests(unittest.TestCase):
             "log_mtimes": {"/logs/test.log": 990},
             "cron": "", "errors": [], "machine_role": "secondary",
             "git": {"ahead": 0, "behind": 0, "branch": "main", "remote_matches": True}}
-
-    def test_cached_observation_rechecks_log_age_and_clears_after_activity(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            log = root / "task.log"
-            log.write_text("synthetic activity")
-            os.utime(log, (990, 990))
-            self.manifest["jobs"][0]["log_path"] = str(log)
-            self.snapshot["log_mtimes"] = {str(log): 990}
-            with patch.object(jobs, "native_manifest", return_value=self.manifest), \
-                 patch.object(jobs, "CANONICAL_CHECKOUT", str(root)), \
-                 patch("flashlib.active_grant", return_value=None):
-                observe = lambda manifest: copy.deepcopy(self.snapshot)
-                first = jobs.check(now=1000, observe=observe)
-                self.assertNotIn("stale_log", [r["code"] for r in first])
-                stale = jobs.check(now=1600, observe=observe)
-                self.assertIn("stale_log", [r["code"] for r in stale])
-                os.utime(log, (1600, 1600))
-                fresh = jobs.check(now=1601, observe=observe)
-                self.assertNotIn("stale_log", [r["code"] for r in fresh])
-
-    def test_cached_schedule_does_not_keep_a_revoked_flash_grant(self):
-        label = "local.flash-desk"
-        self.manifest["jobs"][0]["label"] = label
-        self.snapshot["plists"][label] = self.snapshot["plists"].pop("com.carr.test")
-        self.snapshot["launchctl_print"][label] = self.snapshot["launchctl_print"].pop("com.carr.test")
-        self.snapshot["launchctl_list"] = "-\t0\t" + label + "\n"
-        self.snapshot["flash_grant"] = {"issued_at": 900, "expires_at": 2000}
-        with tempfile.TemporaryDirectory() as folder, \
-             patch.object(jobs, "native_manifest", return_value=self.manifest), \
-             patch.object(jobs, "CANONICAL_CHECKOUT", folder), \
-             patch("flashlib.active_grant", return_value=None):
-            rows = jobs.check(now=1000, observe=lambda manifest: copy.deepcopy(self.snapshot))
-            self.assertIn("unexpected_enabled", [r["code"] for r in rows])
 
     def codes(self, now=1000):
         return [r["code"] for r in jobs.report(self.manifest, self.snapshot, now)]
@@ -494,7 +460,7 @@ class ReportTests(unittest.TestCase):
             self.assertIn('evidence could not be interpreted', watchdog.digest(root, config))
 
     def test_watchdog_files_the_same_loop_key_and_does_not_clear_blinded_evidence(self):
-        sys.path[:0] = [str(ROOT / "lib"), str(ROOT / "tools")]
+        sys.path.insert(0, str(ROOT / "lib"))
         import job_watchdog as watchdog
         config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
         self.snapshot["git"]["behind"] = 3

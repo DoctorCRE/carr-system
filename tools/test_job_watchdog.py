@@ -747,7 +747,63 @@ class IncrementalCollectionTests(unittest.TestCase):
             self.assertEqual(w.resolve_failed_action(root, c, "synthetic", "Inspected absent effect")["status"],
                              "resolved_no_effect")
 
-    def test_machine_inventory_reuse_does_not_freeze_receipt_age(self):
+    def test_launchd_and_git_changes_are_seen_next_tick_without_plist_changes(self):
+        from unittest.mock import patch
+        import copy
+        import job_watchdog as w
+        import scheduled_jobs
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        c["repositories"] = []
+        snapshot = {"plists": {}, "launchctl_list": "", "launchctl_disabled": "",
+                    "launchctl_print": {}, "log_mtimes": {}, "cron": "", "errors": [],
+                    "machine_role": "primary", "git": {"ahead": 0, "behind": 0,
+                    "branch": "main", "remote_matches": True}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(w.sys, "platform", "darwin"), \
+                 patch.object(scheduled_jobs, "check", scheduled_machine.temp_original), \
+                 patch.object(scheduled_jobs, "native_manifest", return_value={"jobs": []}), \
+                 patch.object(scheduled_jobs, "status_path", return_value=root / "status.json"), \
+                 patch.object(scheduled_jobs, "collect", side_effect=lambda _: copy.deepcopy(snapshot)):
+                self.assertEqual(w.collect(root, c, 1000)["scheduled_jobs"], [])
+                snapshot["launchctl_list"] = "-\t0\tcom.carr.new-job\n"
+                snapshot["git"]["behind"] = 1
+                rows = w.collect(root, c, 1120)["scheduled_jobs"]
+                self.assertEqual({r["code"] for r in rows}, {"unknown_job", "behind_main"})
+                snapshot["launchctl_list"] = ""
+                snapshot["git"]["behind"] = 0
+                self.assertEqual(w.collect(root, c, 1240)["scheduled_jobs"], [])
+
+    def test_cleanup_inventory_changes_are_seen_next_tick_without_directory_changes(self):
+        from unittest.mock import patch
+        import job_watchdog as w
+        import machine_cleanup
+        import storage_hygiene
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        c["repositories"] = ["jbookout/carr-system"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            c["repository_roots"]["jbookout/carr-system"] = str(root.resolve())
+            (root / "out").mkdir()
+            (root / "out/machine-cleanup.json").write_text(json.dumps({"last_success_at": 1000}))
+            inventory = []
+            user_tmp = root / "user-tmp"
+            revision = w.file_revision
+            directories = {str(p): revision(p) for p in (Path("/private/tmp"), user_tmp)}
+            def stable_directory_revision(path):
+                return directories[str(path)] if str(path) in directories else revision(path)
+            with patch.object(w.sys, "platform", "darwin"), \
+                 patch.object(w, "command", return_value="[]"), \
+                 patch.object(w, "file_revision", side_effect=stable_directory_revision), \
+                 patch.object(storage_hygiene, "storage_roots", return_value=[user_tmp]), \
+                 patch.object(machine_cleanup, "inventory_findings", side_effect=lambda *a, **k: list(inventory)):
+                self.assertEqual(w.collect(root, c, 1000)["machine_cleanup"], [])
+                inventory.append({"code": "job_clone_bytes", "detail": "clone grew past threshold"})
+                self.assertEqual(w.collect(root, c, 1120)["machine_cleanup"], inventory)
+                inventory.clear()
+                self.assertEqual(w.collect(root, c, 1240)["machine_cleanup"], [])
+
+    def test_cleanup_receipt_age_and_recovery_remain_fresh(self):
         from unittest.mock import patch
         import machine_cleanup
         c = __import__("job_watchdog").load_config(ROOT / "ops/config/job-watchdog.json")
@@ -756,12 +812,13 @@ class IncrementalCollectionTests(unittest.TestCase):
             (root / "out").mkdir()
             receipt = root / "out/machine-cleanup.json"
             receipt.write_text(json.dumps({"status": "completed", "last_success_at": 100}))
-            args = dict(tmp_root=root, roots={}, inventory=[])
-            self.assertEqual(machine_cleanup.health_findings(root, c, now=100, **args), [])
-            rows = machine_cleanup.health_findings(root, c, now=86501, **args)
-            self.assertEqual([r["code"] for r in rows], ["cleanup_stale"])
-            receipt.write_text(json.dumps({"status": "completed", "last_success_at": 86501}))
-            self.assertEqual(machine_cleanup.health_findings(root, c, now=86502, **args), [])
+            args = dict(tmp_root=root, roots={})
+            with patch.object(machine_cleanup, "inventory_findings", side_effect=lambda *a, **k: []):
+                self.assertEqual(machine_cleanup.health_findings(root, c, now=100, **args), [])
+                rows = machine_cleanup.health_findings(root, c, now=86501, **args)
+                self.assertEqual([r["code"] for r in rows], ["cleanup_stale"])
+                receipt.write_text(json.dumps({"status": "completed", "last_success_at": 86501}))
+                self.assertEqual(machine_cleanup.health_findings(root, c, now=86502, **args), [])
 
     def test_unchanged_registry_is_not_rebuilt_but_liveness_and_deadlines_are_fresh(self):
         from unittest.mock import patch
@@ -809,7 +866,6 @@ class GithubBudgetTests(unittest.TestCase):
         c["paths"]["merge_queue"] = "queue.txt"
         c["paths"]["queue_logs"] = []
         c["paths"]["release_log"] = "release.log"
-        c["thresholds"]["remote_collect_seconds"] = 1
         self.c = c
         self.listing = [{"number": 7, "head": {"sha": "a" * 40, "ref": "claude/x",
                          "repo": {"full_name": self.REPO}}, "updated_at": "2026-10-04T10:00:00Z"}]
@@ -912,17 +968,38 @@ class GithubBudgetTests(unittest.TestCase):
         self.assertTrue(any("branch_idle" in error["blinds"] for error in facts["errors"]))
         self.assertFalse(any(branch["repo"] == other for branch in facts["branches"]))
 
-    def test_remote_lists_have_their_own_cadence_and_queue_revision_invalidates_them(self):
-        self.c["thresholds"]["remote_collect_seconds"] = 600
-        first = self.collect(1000)
-        self.assertEqual(self.collect(1120), first)
-        self.assertEqual(self.calls, [])
-        (self.root / "queue.txt").write_text("synthetic queue revision")
-        self.collect(1240)
-        self.assertTrue(any("pulls?state=open" in a[-1] for a in self.calls))
-        self.assertFalse(self.graphql_calls(), "unchanged head keeps the existing detail cache")
-        self.collect(1840)
-        self.assertTrue(any("branches?" in a[-1] for a in self.calls))
+    def test_remote_source_changes_are_seen_next_tick_without_local_changes(self):
+        self.collect(1000)
+        self.branches = [{"name": "codex/new", "commit": {"sha": "b" * 40}}]
+        self.listing.append({**self.listing[0], "number": 8})
+        facts = self.collect(1120)
+        self.assertEqual([pr["number"] for pr in facts["prs"]], [7, 8])
+        self.assertEqual([b["name"] for b in facts["branches"]], ["codex/new"])
+        self.listing = []
+        self.branches = []
+        facts = self.collect(1240)
+        self.assertEqual(facts["prs"], [])
+        self.assertEqual(facts["branches"], [])
+
+    def test_cached_and_fresh_findings_match_including_source_changes(self):
+        def findings():
+            return self.w.detect(self.collect(2000000000), self.c, 2000000000)
+        def fresh():
+            for name in ("out/watchdog/observations.json", self.c["paths"]["pr_cache"]):
+                (self.root / name).unlink(missing_ok=True)
+            return findings()
+        cold = findings()
+        self.assertEqual([f["kind"] for f in cold], ["pr_ci_red"])
+        self.assertEqual(findings(), cold)
+        self.assertEqual(fresh(), cold)
+        self.listing = []
+        self.branches = [{"name": "codex/orphan", "commit": {"sha": "b" * 40}}]
+        warm_changed = findings()
+        self.assertEqual(warm_changed, fresh())
+        self.assertEqual([f["kind"] for f in warm_changed], ["branch_idle"])
+        self.branches = []
+        self.assertEqual(findings(), fresh())
+        self.assertEqual(findings(), [])
 
     def test_unchanged_pr_is_not_recollected_until_the_cache_expires(self):
         first = self.collect(1000)

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Compare full scans using a private tape of real, read-only provider responses."""
+"""Measure complete scans against live read-only sources in isolated local ledgers."""
 import argparse
 import contextlib
 import importlib.util
 import io
 import json
 from pathlib import Path
+import shutil
 import statistics
 import sys
 import tempfile
@@ -13,33 +14,21 @@ import time
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'lib'))
+sys.path[:0] = [str(ROOT / 'lib'), str(ROOT / 'tools')]
 import job_watchdog
+import machine_cleanup
+import scheduled_jobs
 
 
-class ReplayEffects:
+class ReadOnlyEffects:
     def __init__(self, *args):
         pass
 
     def report(self, finding):
         return {}
 
-    def recover(self, finding):
+    def clear(self, finding):
         return {}
-
-
-def configuration():
-    config = job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
-    config['repositories'] = ['jbookout/carr-system']
-    config['repository_roots'] = {'jbookout/carr-system': str(ROOT)}
-    config['vendor_release_watches'] = []
-    config['paths']['merge_queue'] = 'queue.txt'
-    config['paths']['queue_logs'] = []
-    config['paths']['release_log'] = 'release.log'
-    config['paths'].pop('salesforce_refresh', None)
-    config['actions'] = {key: 'report' for key in config['actions']}
-    config['actions']['file_defects'] = False
-    return config
 
 
 def load_baseline(path):
@@ -50,115 +39,117 @@ def load_baseline(path):
     return module
 
 
-def capture(module, path):
-    tape = {'captured_at': time.time(), 'commands': {}}
-    original = module.command
-    last_call = 0
-    def record(argv, config, cwd=None):
-        nonlocal last_call
-        if argv[0] == 'gh':
-            time.sleep(max(0, 2 - (time.monotonic() - last_call)))
-            last_call = time.monotonic()
-        elif argv[:2] != ['git', 'show']:
-            raise AssertionError('capture refuses non-read transport')
-        started = time.perf_counter()
-        output = original(argv, config, cwd)
-        seconds = time.perf_counter() - started
-        if 'pulls?state=open' in argv[-1] or 'branches?' in argv[-1]:
-            limit = 6 if 'pulls?state=open' in argv[-1] else 12
-            output = json.dumps([[item for page in json.loads(output) for item in page][:limit]])
-        tape['commands'][json.dumps(argv)] = {'output': output, 'seconds': seconds}
-        print(json.dumps({'captured_commands': len(tape['commands'])}), flush=True)
-        return output
-    with tempfile.TemporaryDirectory(dir=path.parent) as folder, \
-         patch.object(module.sys, 'platform', 'linux'), patch.object(module, 'command', side_effect=record):
-        facts = module.collect(Path(folder), configuration(), tape['captured_at'])
-        if facts['errors']:
-            raise RuntimeError('capture had collection errors')
-        tape['counts'] = {key: len(facts[key]) for key in ('jobs', 'prs', 'branches', 'errors')}
-    path.write_text(json.dumps(tape))
-    print(json.dumps({'capture': str(path), 'counts': tape['counts'], 'commands': len(tape['commands'])}), flush=True)
+def summary(rows):
+    durations = [row['seconds'] for row in rows]
+    return {'ticks': len(rows), 'total_job_seconds': sum(durations),
+            'mean_job_seconds_per_tick': statistics.mean(durations),
+            'median_job_seconds_per_tick': statistics.median(durations),
+            'range_seconds': [min(durations), max(durations)],
+            'failed_ticks': sum(row['status'] != 'completed' for row in rows),
+            'collection_error_ticks': sum(bool(row.get('collection_errors')) for row in rows)}
 
 
-def replay(module, tape, scans):
-    now = tape['captured_at']
-    calls = 0
-    replayed_seconds = 0
-    warming = True
-    def transport(argv, config, cwd=None):
-        nonlocal calls, replayed_seconds
-        entry = tape['commands'][json.dumps(argv)]
-        if warming:
-            return entry['output']
-        calls += 1
-        replayed_seconds += entry['seconds']
-        time.sleep(entry['seconds'])
-        return entry['output']
-    durations, findings, errors = [], [], 0
-    with tempfile.TemporaryDirectory(dir=ROOT / 'out/watchdog-speed') as folder:
-        root = Path(folder)
-        config = configuration()
-        with patch.object(module.sys, 'platform', 'linux'), \
-             patch.object(module.time, 'time', return_value=now), \
-             patch.object(module, 'command', side_effect=transport), \
-             patch.object(module, 'Effects', ReplayEffects), contextlib.redirect_stdout(io.StringIO()):
-            if module.scan(root, config):
-                raise AssertionError('warmup scan failed')
-        warming = False
-        for index in range(scans):
-            clock = now + (index + 1) * 120
-            with patch.object(module.sys, 'platform', 'linux'), \
-                 patch.object(module.time, 'time', return_value=clock), \
-                 patch.object(module, 'command', side_effect=transport), \
-                 patch.object(module, 'Effects', ReplayEffects), contextlib.redirect_stdout(io.StringIO()):
-                started = time.perf_counter()
-                result = module.scan(root, config)
-                durations.append(time.perf_counter() - started)
-                errors += result != 0
-                rows = module.read_latest(root / config['paths']['findings'])
-                findings.append(sorted((row['key'], row['reason']) for row in rows.values() if not row.get('cleared_at')))
-    return {'durations_seconds': durations, 'total_seconds': sum(durations),
-            'job_hours_per_day_at_120s': statistics.mean(durations) * 720 / 3600,
-            'transport_calls': calls, 'replayed_transport_seconds': replayed_seconds,
-            'errors': errors}, findings
+def ledger_rows(path):
+    rows, started = [], None
+    for line in path.read_text().splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if row.get('key') != 'scan':
+            continue
+        if row['status'] == 'started':
+            started = job_watchdog.epoch(row['at'])
+        elif row['status'] in {'completed', 'failed'} and started is not None:
+            rows.append({**row, 'seconds': job_watchdog.epoch(row['at']) - started})
+            started = None
+    return rows
+
+
+def configuration(source, root):
+    config = job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+    for key in ('registry', 'release_log'):
+        config['paths'][key] = str(job_watchdog.path_at(source, config['paths'][key]))
+    config['repository_roots']['jbookout/carr-system'] = str(root.resolve())
+    config['actions'] = {key: 'report' for key in config['actions']}
+    config['actions']['file_defects'] = False
+    for relative in ('out/watchdog/pr-cache.json', 'out/watchdog/branch-dates.json',
+                     'out/watchdog/vendor-releases.jsonl', 'out/machine-cleanup.json'):
+        if (source / relative).exists():
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source / relative, target)
+    return config
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline', type=Path, required=True)
-    parser.add_argument('--tape', type=Path, required=True)
-    parser.add_argument('--capture', action='store_true')
+    parser.add_argument('--source-root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--runs', type=int, default=5)
-    parser.add_argument('--scans', type=int, default=5)
     args = parser.parse_args()
-    baseline = load_baseline(args.baseline)
-    if args.capture:
-        capture(baseline, args.tape)
-    tape = json.loads(args.tape.read_text())
-    report = {'scope': 'steady-state replay after an untimed cache warmup; sample of six real public PRs and twelve branches with measured transport delays; empty isolated local state; no launchd, cleanup inventory, production effects or live stores',
-              'counts': tape['counts'], 'runs': [], 'scans_per_run': args.scans}
-    for run in range(args.runs):
-        sides = [('before', baseline), ('after', job_watchdog)]
-        if run % 2:
-            sides.reverse()
-        results = {}
-        for side, module in sides:
-            result, findings = replay(module, tape, args.scans)
-            results[side] = (result, findings)
-            print(json.dumps({'run': run + 1, 'side': side, **result}), flush=True)
-        if results['before'][1] != results['after'][1]:
-            raise AssertionError('finding or auto-clear parity failed')
-        if any(results[side][0]['errors'] for side in results):
-            raise AssertionError('replay scan failed')
-        report['runs'].append({side: result[0] for side, result in results.items()})
-    report['finding_parity'] = True
-    report['summary'] = {}
-    for side in ('before', 'after'):
-        means = [statistics.mean(run[side]['durations_seconds']) for run in report['runs']]
-        report['summary'][side] = {'median_mean_scan_seconds': statistics.median(means),
-            'range_mean_scan_seconds': [min(means), max(means)],
-            'median_job_hours_per_day_at_120s': statistics.median(means) * 720 / 3600}
+    source = args.source_root.resolve()
+    original_command = job_watchdog.command
+    original_inventory = machine_cleanup.inventory_findings
+    real_roots = job_watchdog.repository_roots()
+    last_gh = 0
+    metrics = {}
+    def transport(argv, config, cwd=None):
+        nonlocal last_gh
+        if argv[0] == 'gh':
+            time.sleep(max(0, 2 - (time.monotonic() - last_gh)))
+            last_gh = time.monotonic()
+            metrics['github_calls'] += 1
+        elif argv[0] not in {'git', 'ps'}:
+            raise AssertionError('read-only transport refuses ' + argv[0])
+        if cwd and Path(cwd).resolve() in scratch_roots:
+            cwd = source
+        return original_command(argv, config, cwd)
+    def schedule_check(snapshot=None, now=None, **kwargs):
+        started = time.perf_counter()
+        manifest = scheduled_jobs.native_manifest()
+        rows = scheduled_jobs.report(manifest, scheduled_jobs.collect(manifest), now)
+        metrics['scheduled_seconds'] += time.perf_counter() - started
+        metrics['scheduled_observations'] += 1
+        return rows
+    def inventory(config, **kwargs):
+        started = time.perf_counter()
+        kwargs['roots'] = real_roots
+        rows = original_inventory(config, **kwargs)
+        metrics['cleanup_seconds'] += time.perf_counter() - started
+        metrics['cleanup_inventories'] += 1
+        return rows
+    modules = {'before': load_baseline(args.baseline), 'after': job_watchdog}
+    report = {'scope': 'Full live-source scans, all configured PRs/branches, launchd/git, cleanup inventory, registry and logs. Only effects are replaced by successful read-only receipts; all ledgers and caches are isolated. Not deployed-job savings. Sources may change between ticks.',
+              'historical_recent_100': summary(ledger_rows(source / 'out/watchdog/runs.jsonl')[-100:]),
+              'runs': {'before': [], 'after': []}}
+    with tempfile.TemporaryDirectory(prefix='watchdog-measure-') as directory:
+        roots = {side: Path(directory, side) for side in modules}
+        scratch_roots = {root.resolve() for root in roots.values()}
+        configs = {side: configuration(source, root) for side, root in roots.items()}
+        for run in range(-1, args.runs):
+            order = ('before', 'after') if run % 2 == 0 else ('after', 'before')
+            for side in order:
+                metrics = dict.fromkeys(('github_calls', 'scheduled_seconds', 'scheduled_observations',
+                                         'cleanup_seconds', 'cleanup_inventories'), 0)
+                module, root = modules[side], roots[side]
+                started = time.perf_counter()
+                with patch.object(module, 'command', side_effect=transport), \
+                     patch.object(module, 'Effects', ReadOnlyEffects), \
+                     patch.object(scheduled_jobs, 'check', side_effect=schedule_check), \
+                     patch.object(machine_cleanup, 'inventory_findings', side_effect=inventory), \
+                     contextlib.redirect_stdout(io.StringIO()):
+                    exit_code = module.scan(root, configs[side])
+                if metrics['scheduled_observations'] != 1 or metrics['cleanup_inventories'] != 1:
+                    raise AssertionError('full scan must observe launchd/git and cleanup inventory')
+                row = ledger_rows(root / 'out/watchdog/runs.jsonl')[-1]
+                row.update(seconds=time.perf_counter() - started, exit_code=exit_code, **metrics)
+                if run >= 0:
+                    report['runs'][side].append(row)
+                print(json.dumps({'side': side, 'warmup': run < 0, **row}), flush=True)
+                args.output.write_text(json.dumps(report, indent=2) + '\n')
+    report['summary'] = {side: summary(rows) for side, rows in report['runs'].items()}
     args.output.write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report['summary']), flush=True)
 

@@ -23,8 +23,6 @@
   ],
   "thresholds": {
     "scan_seconds": 120,
-    "remote_collect_seconds": 600,
-    "machine_collect_seconds": 600,
     "scan_grace_seconds": 300,
     "silent_seconds": 600,
     "review_idle_seconds": 1800,
