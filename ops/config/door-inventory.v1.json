@@ -289,6 +289,12 @@
       "class": "hand_tool",
       "reason": "The orchestrator runs this local observation collector for one reviewed headless task. It reads device and scheduler state and prints local evidence, with no activation or canonical receipt writes.",
       "evidence": "WR-000014 final source slice; ops/scheduler-observation-receipts-selftest.py exercises synthetic device, prompt, plist, and launchctl observations."
+    },
+    {
+      "path": "tools/benchmark_job_watchdog.py",
+      "class": "hand_tool",
+      "reason": "A PR owner runs complete watchdog comparisons explicitly with a baseline source file and read-only machine evidence; it must not run as a scheduled job or dispatch production effects.",
+      "evidence": "PR #2079 round 1 measurement; python3 tools/benchmark_job_watchdog.py --baseline out/watchdog-speed/baseline.py --source-root /Users/booko/carr-system --output out/watchdog-speed/full-job.json"
     }
   ]
 }
