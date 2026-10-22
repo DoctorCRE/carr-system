@@ -8,13 +8,15 @@
     "unknown": 88,
     "unreferenced-and-empty": 0
   },
-  "generated_at": "2026-10-22T08:21:20.400886+00:00",
+  "generated_at": "2026-10-22T08:28:27.648140+00:00",
   "implementation_sha256": {
-    "lib/table_usage_sql.py": "3fddd3750bf5c1d322709003c9b53b3731cb825e15dd9aa42bddabd6f90a5057",
+    "lib/table_usage_sql.py": "d0d35426bd9d1b6852f56c9187c782ec9c38418e12cbe44a4ac850f611cbb557",
+    "ops/table-usage-census-local-pg-gate.py": "fb0687b0cd75cad8291f9b9777cb65df6de901e9b0bede73a055fd131b1ec386",
+    "ops/table-usage-census-selftest.py": "c41cd9cc31d1cf207239849a180a205533c537d72bfd94a37c5cc3446f8b3b56",
     "ops/table-usage-census.py": "9d0c334cb460846e8608ff9c28b1cdb7bd714d929cc64350a18dbc308cdfad7a"
   },
   "inventory_entries": 380,
-  "measured_source_head": "3795ab8a4e6d5d87bd1566ac0b45fd341815c4f2",
+  "measured_source_head": "4da43ebcaaa026d2049323c4793bd0404371676c",
   "next_step": "Resolve each unknown table's listed uncertainty and obtain missing row/counter metadata; regenerate this proposal, then have Joe confirm the named proposed deletions. No deletion is authorized by this report.",
   "proposed_deletions": [],
   "resolved_sql_examples": [
@@ -77,6 +79,7 @@
   ],
   "schema": "carr-table-usage-source-proof/v1",
   "source_files_considered": 1813,
+  "source_worktree_changes_bound_by_sha256": true,
   "table_classifications": {
     "ops.accepted_eval_golden_membership": "unknown",
     "ops.activation_reliability_telemetry": "referenced",
@@ -586,11 +589,11 @@
     "public.will": "referenced"
   },
   "table_count": 506,
-  "uncertainty_records": 911,
+  "uncertainty_records": 957,
   "verification": {
     "database_fixture": "not run in this read-only desk",
     "production_database": "not connected",
-    "synthetic_tests": 19,
+    "synthetic_tests": 21,
     "type_checked_files": 4
   }
 }

@@ -251,6 +251,31 @@ class ReferenceTests(unittest.TestCase):
                 report = census.build_report([table('other')], references=refs, unresolved=unknown, backup_tables=set())
                 self.assertEqual(report['tables'][0]['classification'], 'unknown')
 
+    def test_returned_sql_builders_resolve_targets_without_executing_source(self):
+        for target in ('"public.alpha"', 'external_table'):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root/'ops').mkdir()
+                (root/'ops/build.py').write_text('def build():\n    return sql.SQL("select * from {}").format(sql.Identifier(' + target + '))')
+                tables = [table('alpha'), table('other')]
+                refs, unknown = census.scan_references(root, tables, ['ops/build.py'], [], [])
+                report = census.build_report(tables, references=refs, unresolved=unknown, backup_tables=set())
+                rows = {row['table']: row for row in report['tables']}
+                self.assertEqual(rows['public.other']['classification'],
+                                 'unknown' if target == 'external_table' else 'unreferenced-and-empty')
+                if target != 'external_table':
+                    self.assertEqual(unknown, [])
+                    self.assertTrue(any(item['kind'] == 'dynamic_sql_bounded' for item in refs['public.alpha']))
+
+    def test_parenthesized_execute_is_unknown_rather_than_a_deletion_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'ops').mkdir()
+            (root/'ops/run.sql').write_text('BEGIN EXECUTE(query); END;')
+            refs, unknown = census.scan_references(root, [table('other')], ['ops/run.sql'], [], [])
+            report = census.build_report([table('other')], references=refs, unresolved=unknown, backup_tables=set())
+            self.assertEqual(report['tables'][0]['classification'], 'unknown')
+
     def test_inventory_and_static_references_have_locations_and_symbols(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

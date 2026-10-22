@@ -101,6 +101,7 @@ def python_queries(text):
     except SyntaxError:
         return [(1, {UNKNOWN})]
     results = []
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
     mutations = {}
     for node in ast.walk(tree):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
@@ -143,14 +144,36 @@ def python_queries(text):
                         scope.args.vararg, scope.args.kwarg):
                 if arg is not None:
                     bindings[arg.arg] = [None]
+        selected = set()
+        for node in nodes:
+            if isinstance(node, ast.Call):
+                name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, 'id', '')
+                if (name.lower() in {'query', 'execute', 'executemany', 'sql', 'identifier'}
+                        or (name == 'format' and isinstance(node.func, ast.Attribute)
+                            and any(SQL_WORD.search(value) for value in _values(node.func.value, bindings)))):
+                    selected.add(node)
+        def nested(node):
+            parent = parents.get(node)
+            while parent is not None:
+                if parent in selected:
+                    return True
+                parent = parents.get(parent)
+            return False
         for node in nodes:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
                 visit(node, bindings)
-            elif isinstance(node, ast.Call):
+            elif node in selected and not nested(node):
                 name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, 'id', '')
-                if name.lower() in {'query', 'execute', 'executemany'} and node.args:
-                    results.append((node.lineno, _values(node.args[0], bindings)))
-            elif isinstance(node, ast.JoinedStr):
+                if name.lower() in {'query', 'execute', 'executemany'}:
+                    query = node.args[0] if node.args else next((arg.value for arg in node.keywords
+                                                               if arg.arg in {'query', 'sql', 'operation'}), None)
+                    values = _values(query, bindings)
+                else:
+                    values = _values(node, bindings)
+                    if name == 'Identifier':
+                        values = {'select * from ' + value for value in values}
+                results.append((node.lineno, values))
+            elif isinstance(node, ast.JoinedStr) and not nested(node):
                 literal = ''.join(str(n.value) for n in node.values if isinstance(n, ast.Constant))
                 if SQL_WORD.search(literal):
                     results.append((node.lineno, _values(node, bindings)))
@@ -277,7 +300,7 @@ def other_queries(text, suffix):
     for match in re.finditer(r'\b([A-Za-z_$][\w$]*)\s*=>', code):
         bindings[match[1]] = [None]
     candidates, covered = [], []
-    pattern = r'\bEXECUTE\s+(?!\()' if sql else r'\b(?:query|execute|executemany)\s*\('
+    pattern = r'\bEXECUTE\b\s*' if sql else r'\b(?:query|execute|executemany)\s*\('
     for match in re.finditer(pattern, code, re.I):
         end = _expression_end(text, match.end(), ';' if sql else ',)')
         expression = text[match.end():end]
