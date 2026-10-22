@@ -2,7 +2,7 @@
 
 Run `python3 scripts/doc-drift/ci.py` after installing
 `scripts/doc-drift/requirements.txt`. CARR calls the same entry point through
-[its CI script](https://github.com/DoctorCRE/carr-system/blob/main/ops/ci.sh)
+[its CI script](https://github.com/jbookout/carr-system/blob/main/ops/ci.sh)
 with the instruction drift option. The checker emits warnings and writes
 `out/doc-drift/report.json`; a parser, fixture or Git failure fails the run.
 
