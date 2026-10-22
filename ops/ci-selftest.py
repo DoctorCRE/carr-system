@@ -32,22 +32,6 @@ def check(label, ok, detail=""):
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-MYPY_PIN_MIN_PYTHON = (3, 10)
-
-def type_check_interpreter_version():
-    venv_python = REPO / ".venv" / "bin" / "python"
-    if venv_python.exists():
-        probe = subprocess.run(
-            [str(venv_python), "-c", "import sys; print(sys.version_info[0], sys.version_info[1])"],
-            capture_output=True, text=True)
-        parts = probe.stdout.split()
-        if probe.returncode == 0 and len(parts) >= 2:
-            return (int(parts[0]), int(parts[1]))
-    return sys.version_info[:2]
-
-def mypy_pin_excludes_this_machine():
-    return type_check_interpreter_version() < MYPY_PIN_MIN_PYTHON
-
 @contextlib.contextmanager
 def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
@@ -186,6 +170,52 @@ def test_strict_turns_skip_into_failure():
           f"rc={rc_strict}")
     check("--strict failure explains why a skip counts",
           "stopped running" in out_strict.lower() or "skipped" in out_strict.lower())
+
+def test_gates_build_hxprobe_before_parallel_selftests():
+    with tempfile.TemporaryDirectory(prefix="carr-hxprobe-gates-") as directory:
+        root = pathlib.Path(directory).resolve()
+        (root / "ops/config").mkdir(parents=True)
+        (root / "vendor/hxprobe").mkdir(parents=True)
+        (root / "bin").mkdir()
+        for name in ("ci.sh", "ci-quarantine.py", "node_test_summary.py", "git_env.py",
+                     "ci-secret-scan.py", "pii_guard.py"):
+            shutil.copy2(REPO / "ops" / name, root / "ops" / name)
+        shutil.copy2(REPO / "bin/with-timeout.py", root / "bin/with-timeout.py")
+        (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
+        (root / "ops/config/ci-check-scope.json").write_text('{}')
+        (root / "vendor/hxprobe/Cargo.toml").touch()
+        (root / "ops/probe-selftest.py").write_text(
+            "from pathlib import Path\n"
+            "assert Path('worker-built').exists(), 'worker not built before pool'\n"
+            "Path('gate-ran').touch()\n")
+        (root / "hooks").mkdir()
+        (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
+        (root / "ops/boot-budget-check.py").write_text("raise SystemExit(0)\n")
+        cargo = root / "bin/cargo"
+        cargo.write_text("#!/bin/sh\n"
+                         'test "$*" = "build --locked" || exit 9\n'
+                         'test "$PWD" = "$CARR_TEST_ROOT/vendor/hxprobe" || exit 10\n'
+                         'test "$CARR_BUILD_FAIL" = 0 || exit 1\n'
+                         'touch "$CARR_TEST_ROOT/worker-built"\n')
+        cargo.chmod(0o755)
+        env = fixture_env()
+        env.update(PATH=str(root / "bin") + os.pathsep + os.environ["PATH"],
+                   CARR_TEST_ROOT=str(root), CARR_CI_GATE_JOBS="2")
+        subprocess.run(["git", "init", "-q", str(root)], env=env, check=True)
+        subprocess.run(["git", "-C", str(root), "add", "ops/ci.sh"], env=env, check=True)
+        subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture", "-c",
+                        "user.email=fixture@example.invalid", "commit", "-qm", "fixture"], env=env, check=True)
+        for failure in ("0", "1"):
+            for name in ("worker-built", "gate-ran"):
+                (root / name).unlink(missing_ok=True)
+            env["CARR_BUILD_FAIL"] = failure
+            result = subprocess.run(["bash", str(root / "ops/ci.sh"), "--strict", "--only", "gates"],
+                                    cwd=root, env=env, capture_output=True, text=True, timeout=30)
+            check(f"gates prepare HxStore worker before pool (build failure={failure})",
+                  (root / "gate-ran").exists() == (failure == "0"), result.stdout + result.stderr)
+            check(f"gates propagate HxStore preparation result (build failure={failure})",
+                  result.returncode == int(failure), result.stdout + result.stderr)
+
 
 def test_hxprobe_runs_locked_checks_and_propagates_failures():
     with tempfile.TemporaryDirectory(prefix="carr-hxprobe-ci-") as directory:
@@ -466,36 +496,25 @@ def test_dep_check_detects_a_stale_lock():
         check("a comment-only edit does NOT invalidate the lock", rc == 0, out)
 
 def test_types_class_catches_a_seeded_type_error():
-    if mypy_pin_excludes_this_machine():
-        found = type_check_interpreter_version()
-        check(
-            "types: ACCEPTED — Python %d.%d is below the mypy pin %d.%d, so mypy "
-            "cannot be installed here and the seeded-error path cannot run"
-            % (found[0], found[1], MYPY_PIN_MIN_PYTHON[0], MYPY_PIN_MIN_PYTHON[1]),
-            True)
-        rc, out = run(["--only", "types"])
-        check("types still reports honestly on the accepted machine (skip, not pass)",
-              rc == 0 and "SKIP" in out.upper(), f"rc={rc} out={out[-400:]}")
-        return
-
-    fixture = "tools/_ci_selftest_types_fixture.py"
+    fixture = "mcp-server/fixture.js"
     with ci_fixture() as root:
         rc, out = run(["--only", "types"], root=root)
         check("types passes on the clean fixture", rc == 0,
               f"rc={rc} out={out[-400:]}")
 
+        original = (root / fixture).read_text()
         (root / fixture).write_text(
-            "# fixture written by ops/ci-selftest.py — removed on exit.\n"
-            "# Module level on purpose: check_untyped_defs = False means an error\n"
-            "# inside an unannotated function body would not be reported at all.\n"
-            "x: int = 'not an int'\n")
+            "/** @type {number} */\n"
+            "const value = 'not a number';\n")
         rc, out = run(["--only", "types"], root=root)
         check("a seeded type error makes the types class FAIL", rc == 1,
               f"rc={rc} out={out[-400:]}")
-        check("the failing run names the types class",
-              "types" in ANSI.sub("", out).lower(), f"out={out[-400:]}")
+        check("the failing run names the seeded type error and types class",
+              re.search(r"FAIL\s+types\b", out) is not None
+              and "fixture.js" in out and "TS2322" in out,
+              f"out={out[-800:]}")
 
-        (root / fixture).unlink()
+        (root / fixture).write_text(original)
         rc, out = run(["--only", "types"], root=root)
     check("removing the seed turns the types class green again", rc == 0,
           f"rc={rc} out={out[-400:]}")
@@ -1207,6 +1226,7 @@ def main(argv=None):
                test_strict_turns_skip_into_failure,
                test_unknown_class_refuses,
                test_hxprobe_runs_locked_checks_and_propagates_failures,
+               test_gates_build_hxprobe_before_parallel_selftests,
                test_gate_shards_execute_a_disjoint_complete_inventory,
                test_migration_partitions_execute_complete_inventory,
                test_hosted_migration_ownership,

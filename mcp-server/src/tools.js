@@ -9204,6 +9204,7 @@ registerTools({
       const actions = await c.query(
         `select n.id, n.owner, n.description,
                 to_jsonb(n.due_on)#>>'{}' as due_on, n.status,
+                to_jsonb(n.hold_until)#>>'{}' as hold_until,
                 to_jsonb(n.updated_at)#>>'{}' as updated_at
            from v_deal_room_action n
           where n.deal_id=$1

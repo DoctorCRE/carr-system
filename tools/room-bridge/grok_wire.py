@@ -22,6 +22,29 @@ PROVIDER_MODEL = "grok-4.7-build"
 EFFORT = "high"
 TIMEOUT_S = 180.0
 MAX_TURNS = 60
+QUOTA_ERROR = re.compile(r"(?:status\s*[:=]?\s*402\b|usage\s+balance\s+exhausted)", re.I)
+
+
+def quota_error_message(stdout: str, stderr: str = "", *, returncode=0) -> str | None:
+    """Return the provider's quota message only for an explicit 402 signal."""
+    for source, plain_text_allowed in ((stdout, bool(returncode)), (stderr, True)):
+        for line in source.splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                event = None
+            if isinstance(event, dict):
+                if event.get("type") not in (None, "error"):
+                    continue
+                message = event.get("message")
+                error = event.get("error")
+                if not isinstance(message, str):
+                    message = error.get("message") if isinstance(error, dict) else error
+                if isinstance(message, str) and QUOTA_ERROR.search(message):
+                    return message.strip()[:1000]
+            elif plain_text_allowed and QUOTA_ERROR.search(line):
+                return line.strip()[:1000]
+    return None
 
 
 def requested_urls(task: str) -> list[str]:
@@ -260,11 +283,16 @@ def provider_receipt(end: dict, cli_version=None, model=MODEL) -> dict:
                "cost_usd": cost if type(cost) in (int, float) else None, "cli_version": cli_version}
 
 
-def parse_result(stdout: str, returncode: int, *, urls: list[str] | None = None,
+def parse_result(stdout: str, returncode: int, *, stderr: str = "", urls: list[str] | None = None,
                  effort=EFFORT, cli_version=None, require_identity=True, model=MODEL) -> dict:
     parsed = parse_stream(stdout.splitlines(), returncode, model=model)
     end = parsed["end"]
     receipt = provider_receipt(end, cli_version, model)
+    provider_message = quota_error_message(stdout, stderr, returncode=returncode)
+    if provider_message:
+        receipt["provider_message"] = provider_message
+        return {"status": "quota_exhausted", "detail": "quota_exhausted", "code": 4,
+                "result": "" if urls else parsed["text"], "receipt": receipt}
     if parsed["code"]:
         return {"status": "failed", "detail": parsed["detail"], "code": parsed["code"],
                 "result": "" if urls else parsed["text"], "receipt": receipt}
@@ -294,8 +322,21 @@ def invoke_cli(prompt: str, *, cwd=None, effort=EFFORT, max_turns=MAX_TURNS,
             "--output-format", "streaming-json", "--single", prompt]
     env = dict(os.environ if env is None else env)
     env.pop("CARR_GROK_RUN_READ_ONLY", None)
-    if not writable:
-        env["CARR_GROK_RUN_READ_ONLY"] = "1"
+    if writable:
+        with tempfile.TemporaryDirectory(prefix=".carr-grok-hooks-",
+                                         dir=Path(cwd or os.getcwd()).resolve()) as state:
+            for key, name in {
+                "CARR_RULE_BOOT_STATE_DIR": "rule-boot-gate",
+                "CARR_HOOK_GUARD_LOG": "hook-guard.log",
+                "CARR_WRITE_EFFECT_STATE": "write-effect-check",
+                "CARR_GITHUB_BURST_STATE": "github-burst-guard-state.json",
+                "DELEGATION_GATE_STATE": "delegation-gate-state.json",
+                "DELEGATION_GATE_LEDGER": "delegation-gate-ledger.jsonl",
+            }.items():
+                env[key] = str(Path(state) / name)
+            return run(argv, cwd=cwd, capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL, timeout=timeout_seconds, env=env)
+    env["CARR_GROK_RUN_READ_ONLY"] = "1"
     return run(argv, cwd=cwd, capture_output=True, text=True,
                stdin=subprocess.DEVNULL, timeout=timeout_seconds, env=env)
 
@@ -324,15 +365,18 @@ def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFOR
         try:
             prompt = prefix + "\n\n" + retrieval_prompt(urls) + task
             if fixture:
-                raw, returncode, cli_version = Path(fixture).read_text(encoding="utf-8"), 0, "fixture"
+                raw, returncode, stderr, cli_version = Path(fixture).read_text(encoding="utf-8"), 0, "", "fixture"
             else:
                 if preflight:
                     cli_version = preflight()
                 proc = invoke(prompt, cwd=cwd, effort=effort, max_turns=max_turns,
                               writable=writable, timeout_seconds=timeout_seconds)
-                raw, returncode = proc.stdout or "", proc.returncode
-            outcome = parse_result(raw, returncode, urls=urls, effort=effort, cli_version=cli_version,
-                                   require_identity=require_identity or retrieval, model=model)
+                raw, returncode, stderr = proc.stdout or "", proc.returncode, proc.stderr or ""
+            outcome = parse_result(
+                raw, returncode, stderr=stderr, urls=urls, effort=effort,
+                cli_version=cli_version, require_identity=require_identity or retrieval,
+                model=model,
+            )
         except PreflightError as error:
             outcome = {"status": "failed", "code": error.code,
                        "detail": "grok_sign_in_required" if error.code == 3 else "grok_preflight_failed"}
