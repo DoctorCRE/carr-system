@@ -25,6 +25,18 @@ synchronous executor used by workers and existing bounded adapters. Execution
 receipts still append to the requested NDJSON results file. Asynchronous desks
 report delivery there and retain their queue reservation until completion.
 
+Headless Codex reconciles answer and native rollout receipts at its deadline.
+Recent item events receive one 300-second grace, except caller-pinned deadlines.
+Completion artifacts can be declared as one JSON line in the task:
+
+    Completion artifact: {"kind":"pushed_head"}
+    Completion artifact: {"kind":"report_line","path":"out/report.txt","contains":"job-id"}
+
+The pushed-head check compares local HEAD with its exact origin branch. Report
+checks require a newly appended complete line containing the job's marker.
+Artifact evidence is recorded separately from the final answer; unverified or
+undeclared artifacts never become a verified delivery claim. No turn is replayed.
+
 Grok desks default to full workspace tools and select the newest standard model
 from `grok models`. Only `send --retrieve` runs read-only source retrieval.
 
@@ -101,6 +113,7 @@ sys.path.insert(0, str(HERE))
 import codex_models  # noqa: E402
 import codex_checkout  # noqa: E402
 from ops.git_env import scrubbed_env  # noqa: E402
+import codex_deadline  # noqa: E402
 import write_ownership  # noqa: E402
 import desks  # noqa: E402
 from desks import AUTOMATIC_CODEX_DESKS, DeskError, Registry  # noqa: E402
@@ -133,6 +146,8 @@ DEFAULT_RESULTS = Path(
 )
 
 CODEX_TIMEOUT_S = float(os.environ.get("CARR_HERMES_CODEX_TIMEOUT", "5400"))
+CODEX_DEADLINE_GRACE_S = 300
+CODEX_ACTIVITY_WINDOW_S = 30
 CODEX_CAPACITY_ATTEMPTS = 6
 CODEX_CAPACITY_BACKOFF_S = 300
 
@@ -320,7 +335,7 @@ def _codex_timeout_activity(output, thread, env):
     return thread_id, activity
 
 
-def _run_headless_process(argv, env, timeout, on_executor, stream_output, **options):
+def _run_headless_process(argv, env, timeout, on_executor, stream_output, *, on_deadline=None, **options):
     """Track a dedicated process group, including children surviving a CLI exit."""
     proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, **options,
                             start_new_session=True, stdout=subprocess.PIPE,
@@ -329,26 +344,46 @@ def _run_headless_process(argv, env, timeout, on_executor, stream_output, **opti
                                                 else (write_ownership.CHECKOUT_FD,)))
     identity = {**write_ownership.process_owner(), 'pid': proc.pid, 'pgid': proc.pid,
                 'start_time': write_ownership.process_start(proc.pid), 'kind': 'process_group'}
-    chunks = []
+    chunks, errors = [], []
+    readers = []
+    last_event_at = None
     reader = None
+    def relay(pipe, target, echo=False):
+        nonlocal last_event_at
+        for line in pipe:
+            target.append(line)
+            if target is chunks and any(event.get('type', '').startswith('item.')
+                                        for event in _codex_events(line)):
+                last_event_at = time.monotonic()
+            if echo:
+                print(line, end='', flush=True)
     try:
         if on_executor:
             on_executor(identity)
-        if stream_output:
-            def relay():
-                with proc.stdout:
-                    for line in proc.stdout:
-                        chunks.append(line)
-                        print(line, end='', flush=True)
-            reader = threading.Thread(target=relay, daemon=True)
-            reader.start()
-            proc.wait(timeout=timeout)
-            reader.join(timeout=timeout)
-            if reader.is_alive():
-                raise subprocess.TimeoutExpired(argv, timeout)
-            stdout, stderr = ''.join(chunks), ''
-        else:
-            stdout, stderr = proc.communicate(timeout=timeout)
+        reader = threading.Thread(target=relay, args=(proc.stdout, chunks, stream_output), daemon=True)
+        readers.append(reader)
+        if proc.stderr is not None:
+            readers.append(threading.Thread(target=relay, args=(proc.stderr, errors), daemon=True))
+        for worker in readers:
+            worker.start()
+        deadline = time.monotonic() + timeout
+        extended = False
+        while True:
+            try:
+                proc.wait(timeout=max(0, deadline - time.monotonic()))
+                for worker in readers:
+                    worker.join(timeout=max(0, deadline - time.monotonic()))
+                if any(worker.is_alive() for worker in readers):
+                    raise subprocess.TimeoutExpired(argv, timeout)
+                break
+            except subprocess.TimeoutExpired:
+                grace = on_deadline(''.join(chunks), last_event_at) if on_deadline else 0
+                if not extended and grace > 0:
+                    extended = True
+                    deadline = time.monotonic() + grace
+                    continue
+                raise
+        stdout, stderr = ''.join(chunks), ''.join(errors)
     except BaseException as exc:
         cleanup_deadline = time.monotonic() + 2
         try:
@@ -363,9 +398,9 @@ def _run_headless_process(argv, env, timeout, on_executor, stream_output, **opti
         except subprocess.TimeoutExpired:
             pass
         if isinstance(exc, subprocess.TimeoutExpired):
-            if reader is not None:
-                reader.join(timeout=2)
-                exc.output = ''.join(chunks)
+            for worker in readers:
+                worker.join(timeout=max(0, cleanup_deadline - time.monotonic()))
+            exc.output = ''.join(chunks)
             while not (confirmed := write_ownership.process_terminated(identity, group=True)):
                 if time.monotonic() >= cleanup_deadline:
                     break
@@ -375,7 +410,7 @@ def _run_headless_process(argv, env, timeout, on_executor, stream_output, **opti
     finally:
         if reader is None or not reader.is_alive():
             proc.stdout.close()
-        if proc.stderr is not None:
+        if proc.stderr is not None and all(not worker.is_alive() for worker in readers):
             proc.stderr.close()
     result = subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
     result.termination_confirmed = write_ownership.process_terminated(identity, group=True)
@@ -506,8 +541,31 @@ def _to_codex(
         if thread:
             argv.append(thread)
         argv.append(task)
+        artifact = codex_deadline.Artifact(task, entry.get('checkout_path') or entry.get('cwd') or Path.cwd(), env)
         process_options = ({'cwd': entry['checkout_workspace']}
                            if not thread and entry.get('checkout_workspace') else {})
+
+        reconciliation = {}
+        started_at = time.time()
+        def reconcile(output):
+            thread_id, _ = _codex_timeout_activity(output, thread, env)
+            native = codex_deadline.native_thread(thread_id, env, started_at)
+            result = last.read_text(encoding='utf-8').strip() if last.exists() else ''
+            reconciliation.update(final_message=bool(result), native_thread=native,
+                                  artifact=artifact.readback())
+            return result or native['result']
+
+        def on_deadline(output, last_event_at):
+            result = reconcile(output)
+            native_at = reconciliation['native_thread']['last_progress_at']
+            active = (last_event_at is not None
+                      and time.monotonic() - last_event_at <= CODEX_ACTIVITY_WINDOW_S) or (
+                      native_at is not None and 0 <= time.time() - native_at <= CODEX_ACTIVITY_WINDOW_S)
+            if (not result and timeout_s is None and active
+                    and not reconciliation.get('grace_seconds')):
+                reconciliation['grace_seconds'] = CODEX_DEADLINE_GRACE_S
+                return CODEX_DEADLINE_GRACE_S
+            return 0
 
         try:
             # stdin=DEVNULL is load-bearing: `codex exec` reads stdin when it
@@ -515,11 +573,11 @@ def _to_codex(
             # pipe makes the run hang or swallow whatever the caller was fed.
             # It is the same reason every command in CLAUDE.md carries
             # `</dev/null`.
-            if provider_run is None and (on_executor or stream_output):
+            if provider_run is None:
                 proc = _run_headless_process(argv, env or os.environ.copy(), limit_s,
-                                          on_executor, stream_output, **process_options)
+                                          on_executor, stream_output, on_deadline=on_deadline, **process_options)
             else:
-                proc = (provider_run or subprocess.run)(
+                proc = provider_run(
                     argv, env=env or os.environ.copy(), capture_output=True,
                     text=True, timeout=limit_s, stdin=subprocess.DEVNULL,
                     **process_options,
@@ -528,11 +586,17 @@ def _to_codex(
             return {"status": "failed", "detail": "codex is not on PATH", 'termination_confirmed': True}
         except subprocess.TimeoutExpired as exc:
             thread_id, activity = _codex_timeout_activity(exc.output, thread, env)
+            result = reconcile(exc.output)
+            if result:
+                return {'status': 'completed', 'result': result, 'thread_id': thread_id,
+                        'resumed': bool(thread), 'deadline_reconciliation': reconciliation,
+                        'termination_confirmed': getattr(exc, 'termination_confirmed', False)}
             detail = (f"no answer in {limit_s:.0f}s; last event {activity['last_event_type']}; "
                       f"hook failures in {activity['source'].replace('_', ' ')} tail: "
                       f"{activity['hook_failures']}")
             return {"status": "timed_out", "detail": detail,
                     'thread_id': thread_id, 'resumed': bool(thread), 'last_activity': activity,
+                    'deadline_reconciliation': reconciliation,
                     **({'termination_confirmed': exc.termination_confirmed}
                        if hasattr(exc, 'termination_confirmed') else {})}
 
@@ -544,7 +608,11 @@ def _to_codex(
         )
         result = last.read_text(encoding="utf-8").strip() if last.exists() else ""
 
+        if reconciliation:
+            result = reconcile(proc.stdout)
+
         base = {"thread_id": thread_id, "resumed": bool(thread),
+                **({'deadline_reconciliation': reconciliation} if reconciliation else {}),
                 **({'termination_confirmed': proc.termination_confirmed}
                    if hasattr(proc, 'termination_confirmed') else {})}
 
