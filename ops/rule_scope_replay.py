@@ -1,7 +1,7 @@
 """Offline selection with independently frozen pre-cutover moment decisions.
 
-This adapter tests migration plumbing. It does not calibrate the live moment
-judge or claim that the synthetic catalog is the production scope catalog.
+This adapter tests migration plumbing against historical selections.
+The synthetic catalog is not the production scope catalog.
 """
 import json
 import re
@@ -80,9 +80,9 @@ class FrozenSelection:
         if key not in self.fixture['moment_decisions']:
             raise ValueError('no_frozen_moment_decision')
         selected = set(self.retirements.active(self.fixture['moment_decisions'][key]))
-        def judge(state, questions):
-            return {'model': 'jev-1.13.0', 'answers': {
-                name: {'type': 'choice', 'confidence': 1.0,
-                       'choice': 'applies' if name[5:] in selected else 'not_applicable'}
-                for name in questions}}
-        return select_rules(self.catalog, event, judge=judge)
+        result = select_rules(self.catalog, event)
+        result['rules'] = sorted(
+            {row['id']: row for row in result['rules'] + [
+                row for row in self.catalog['rules'] if row['id'] in selected]}.values(),
+            key=lambda row: row['id'])
+        return result

@@ -5,8 +5,7 @@ doctrine: engineering-workflow-sop
 
 The map replaced four private path lists that disagreed with each other:
 the source-merge controller's protected paths, the Stop-hook triage's
-high-risk floor, the council runner's security-lens trigger and the Jev code
-partition's noise filter. This suite holds three properties.
+high-risk floor and the council runner's security-lens trigger. This suite holds three properties.
 
   1. NO LOOSENING (rule a6e6ab4e). Every path a consumer protected, floored
      high or armed the security lens on BEFORE the map existed is still so.
@@ -49,9 +48,7 @@ def _load(name, rel):
 
 
 rt = _load("review_tiers", "lib/review_tiers.py")
-jdc = _load("jev_done_checks", "ops/jev_done_checks.py")
 rcr = _load("run_codex_review", "pipelines/run_codex_review.py")
-part = _load("jev_code_partition", "ops/jev_code_partition.py")
 sync = _load("sync_review_tiers", "ops/sync-review-tiers.py")
 
 
@@ -96,13 +93,6 @@ def old_excluded(path):
 # ---------------------------------------------------------------- the consumers
 # Each is driven through its real entry point, with only git stubbed out.
 
-def triage_floor(path):
-    diff = f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-a\n+b\n"
-    result = jdc.triage_review(diff, "")
-    files = result["detail"]["files"]
-    assert list(files) == [path], (path, result)
-    return files[path]["source"] == "deterministic_floor"
-
 
 def lens_armed(paths):
     fake = types.SimpleNamespace(returncode=0, stdout="".join(p + "\n" for p in paths), stderr="")
@@ -112,16 +102,6 @@ def lens_armed(paths):
         return rcr.security_lens_if_triggered("0" * 40) is not None
     finally:
         rcr.subprocess.run = original
-
-
-def partition_kept(paths):
-    fake = types.SimpleNamespace(stdout=b"\0".join(p.encode() for p in paths))
-    original = part.subprocess.run
-    part.subprocess.run = lambda *a, **k: fake
-    try:
-        return set(part.tracked_sources())
-    finally:
-        part.subprocess.run = original
 
 
 def tracked_paths():
@@ -149,9 +129,6 @@ class NoLooseningTests(unittest.TestCase):
         loosened = [p for p in BASELINE["merge_protected"] if rt.tier_for_path(p) < 3]
         self.assertEqual(loosened, [])
 
-    def test_captured_triage_high_paths_still_floor_high(self):
-        loosened = [p for p in BASELINE["triage_high"] if not triage_floor(p)]
-        self.assertEqual(loosened, [])
 
     def test_captured_lens_paths_still_arm_the_lens(self):
         loosened = [p for p in BASELINE["security_lens"] if not lens_armed([p])]
@@ -182,10 +159,6 @@ class ConsistencyTests(unittest.TestCase):
     def paths(self):
         return BASELINE["paths"] + [v["path"] for v in json.loads(VECTORS_PATH.read_text())["vectors"]]
 
-    def test_triage_floor_equals_map(self):
-        for path in self.paths():
-            with self.subTest(path=path):
-                self.assertEqual(triage_floor(path), rt.tier_for_path(path) >= rt.TRIAGE_HIGH_FLOOR_TIER)
 
     def test_security_lens_equals_map(self):
         for path in self.paths():
@@ -199,12 +172,6 @@ class ConsistencyTests(unittest.TestCase):
         self.assertEqual(rt.tier_for_paths(["README.md", "CLAUDE.md"]), 3)
         self.assertEqual(rt.tier_for_paths([]), rt.load()["default_tier"])
 
-    def test_partition_filter_equals_map(self):
-        candidates = [p for p in self.paths() if p.endswith(part.SUFFIXES)]
-        kept = partition_kept(candidates)
-        for path in candidates:
-            with self.subTest(path=path):
-                self.assertEqual(path in kept, not rt.is_review_noise(path))
 
     def test_vectors_equal_this_reader(self):
         doc = json.loads(VECTORS_PATH.read_text())
@@ -407,69 +374,7 @@ class TestEvidenceTests(unittest.TestCase):
 
 
 class MapContentTests(unittest.TestCase):
-    def test_cli_rejects_encodings_the_runtime_cannot_load(self):
-        path = "ops/config/jev-cost-guard.v1.json"
-        before = json.loads((REPO / path).read_text())
-        before["daily_paid_call_cap"] = 1500
-        after = dict(before, daily_paid_call_cap=3000)
-        for encoding in ("utf-8", "utf-8-sig", "utf-16"):
-            for invalid_side in ("base", "head"):
-                with self.subTest(encoding=encoding, side=invalid_side), tempfile.TemporaryDirectory() as tmp:
-                    repo = Path(tmp)
-                    (repo / "lib").mkdir()
-                    (repo / "lib/review_tiers.py").write_bytes((REPO / "lib/review_tiers.py").read_bytes())
-                    (repo / path).parent.mkdir(parents=True)
-                    policy = "ops/config/review-tiers.v1.json"
-                    (repo / policy).write_bytes((REPO / policy).read_bytes())
-                    env = scrubbed_env()
-                    def git(*args):
-                        return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args],
-                            cwd=repo, env=env, check=True, capture_output=True, text=True).stdout.strip()
-                    git("init", "-q")
-                    git("config", "user.name", "Fixture")
-                    git("config", "user.email", "fixture@example.invalid")
-                    revisions = []
-                    for side, content in (("base", before), ("head", after)):
-                        (repo / path).write_bytes(json.dumps(content).encode(
-                            encoding if side == invalid_side else "utf-8"))
-                        git("add", path, policy, "lib/review_tiers.py")
-                        message = repo / "message"
-                        message.write_text(side)
-                        git("commit", "-q", "-F", str(message))
-                        revisions.append(git("rev-parse", "HEAD"))
-                    result = subprocess.run([sys.executable, str(repo / "lib/review_tiers.py"),
-                        "--base", revisions[0], "--head", revisions[1],
-                        "--policy-revision", revisions[0]], cwd=repo, env=env,
-                        check=True, capture_output=True, text=True)
-                    decision = json.loads(result.stdout)
-                    self.assertEqual(decision["lane"], "tunable_scalar" if encoding == "utf-8" else "review")
-                    self.assertEqual(decision["tier"], 1 if encoding == "utf-8" else 3)
 
-    def test_budget_only_change_uses_bounded_lane_with_revision_evidence(self):
-        before = json.loads((REPO / "ops/config/jev-cost-guard.v1.json").read_text())
-        before["daily_paid_call_cap"] = 1500
-        after = dict(before, daily_paid_call_cap=3000)
-        changes = [{"path": "ops/config/jev-cost-guard.v1.json", "before": before, "after": after}]
-        decision = rt.review_decision(changes, base="a" * 40, head="b" * 40,
-                                      policy_revision="c" * 40, diff_digest="sha256:" + "d" * 64)
-        self.assertEqual(decision["lane"], "tunable_scalar")
-        self.assertEqual(decision["tier"], 1)
-        self.assertEqual(decision["head"], "b" * 40)
-        self.assertEqual(decision["policy_revision"], "c" * 40)
-        self.assertEqual(decision["diff_digest"], "sha256:" + "d" * 64)
-        self.assertEqual((decision["code_lines"], decision["change_size"]), (None, "unknown"))
-        for changed in [dict(after, daily_paid_call_cap=True), dict(after, daily_paid_call_cap=-1),
-                        dict(after, daily_paid_call_cap=3001), dict(after, daily_paid_call_cap="3000"),
-                        dict(after, allowed_paths=["*"]), dict(after, command="new authority")]:
-            with self.subTest(after=changed):
-                changes[0]["after"] = changed
-                refused = rt.review_decision(changes, base="a" * 40, head="b" * 40,
-                                             policy_revision="c" * 40, diff_digest="sha256:" + "d" * 64)
-                self.assertEqual(refused["lane"], "review")
-                self.assertEqual(refused["tier"], 3)
-        changes[0].update(after=after, mode_changed=True)
-        self.assertEqual(rt.review_decision(changes, base="a" * 40, head="b" * 40,
-            policy_revision="c" * 40, diff_digest="sha256:" + "d" * 64)["lane"], "review")
 
     def test_tunable_policy_and_strict_json_fail_closed(self):
         with self.assertRaises(ValueError):

@@ -29,7 +29,7 @@ class PromptRules(unittest.TestCase):
                            'data_defects':[{'rule_id':'22222222','reason':gap}] if gap=='missing_scope' else [],
                            'unresolved':[{'rule_id':'22222222','reason':gap}] if gap!='missing_scope' else []}
                 with patch.object(module,'_flash_run',return_value=flash),patch.object(module,'_log') as log,patch('lib.rule_scope_lookup.lookup',return_value=selection):
-                    out=module.build_output('Read a small local file',judge=lambda *_:None)
+                    out=module.build_output('Read a small local file')
                 self.assertNotIn('decision',out)
                 self.assertIn('Full binding text.',out['hookSpecificOutput']['additionalContext'])
                 self.assertIn(gap,log.call_args.args[0]['error'])

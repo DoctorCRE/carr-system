@@ -6,9 +6,7 @@ One map decides how much review a changed path gets (engineering-workflow-sop
 section 15, "Risk tier by path"). Before it, four places each kept their own
 list and they disagreed. The consumers now ask this module:
 
-    ops/jev_done_checks.py        review triage floors a file "high" at tier 3
     pipelines/run_codex_review.py council security lens arms at tier 2
-    ops/jev_code_partition.py     drops review noise before a model reads code
 
 The Worker's merge controller cannot read files at request time, so it reads
 mcp-server/src/review-tiers.generated.js, which ops/sync-review-tiers.py

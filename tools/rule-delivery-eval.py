@@ -1,23 +1,9 @@
 #!/usr/bin/env python3
-"""rule-delivery-eval.py — replay labelled cases through every rule-delivery
-path and report precision, recall and F1 per path and for the system.
+"""Replay labelled cases through deterministic rule-delivery paths.
 
-The logic lives in ops/rule_delivery_eval.py (a library, for the reason
-ops/typesafe_client.py documents); this is its command line.
-
-    tools/rule-delivery-eval.py                       # committed synthetic fixture, Jev off
-    tools/rule-delivery-eval.py --cases ops/fixtures/rule-delivery-eval/cases.v2.json \
-        --split train                                 # the v2 benchmark, train split only
-    tools/rule-delivery-eval.py --cases out/rule-delivery-eval/gold.jsonl \\
-        --jev live --workers 4 --corpus out/rule-delivery-eval/corpus-live.json
-
-DRY RUN ALWAYS. No production log, cache or audit file is written (see the
-library docstring); the only files written are report.json and report.md in
---out-dir. With --jev live the Jev-backed paths make real Jev requests (about
-29 per human case) whose call receipts go to --calls-log (default: nowhere).
-
-Real labelled situations contain partners' words and must stay under out/
-(gitignored). The committed fixture under ops/fixtures/ is synthetic.
+Reports precision, recall and F1 per path and across the system. All model
+classification paths are removed; --doctrine-search adds the read-only store
+search door. Reports go to --out-dir without modifying production logs.
 """
 import argparse
 import json
@@ -84,13 +70,10 @@ def _is_v2(path, ev):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--cases", default=FIXTURE)
-    parser.add_argument("--jev", choices=("off", "live"), default="off")
     parser.add_argument("--workers", type=int, default=1,
-                        help="cases judged concurrently on the Jev-backed paths")
+                        help="concurrent read-only doctrine searches")
     parser.add_argument("--corpus", help="live corpus JSON ({rules:[{id, statement}]}) "
                         "for one-line summaries and untagged live ids")
-    parser.add_argument("--calls-log", default=os.devnull,
-                        help="where Jev call receipts go (default: discarded)")
     parser.add_argument("--out-dir", default=os.path.join(REPO, "out", "rule-delivery-eval"))
     parser.add_argument("--top", type=int, default=10)
     parser.add_argument("--split", choices=("train", "test", "all"),
@@ -101,7 +84,7 @@ def main(argv=None):
                         help="also run the doctrine search door (search-doctrine through "
                         "./run.sh call, read-only) as a doctrine-only path")
     parser.add_argument("--rescore", help="a saved report.json: re-score its deliveries "
-                        "against --cases instead of running the paths again (no Jev)")
+                        "against --cases instead of running the paths again (offline)")
     args = parser.parse_args(argv)
 
     ev = _library()
@@ -126,12 +109,9 @@ def main(argv=None):
         with open(args.rescore, "r", encoding="utf-8") as handle:
             saved = json.load(handle)
         deliveries, errors = ev.deliveries_from_report(saved), saved.get("errors") or {}
-        jev_mode = saved.get("jev")
     else:
-        adapters = ev.build_adapters(REPO, jev=args.jev, calls_log=args.calls_log,
-                                     doctrine_search=args.doctrine_search)
+        adapters = ev.build_adapters(REPO, doctrine_search=args.doctrine_search)
         deliveries, errors = ev.run_adapters(cases, adapters, workers=max(1, args.workers))
-        jev_mode = args.jev
     ev.add_system_rows(deliveries)
     report = ev.score(cases, deliveries,
                       ev.universes(meta, list(deliveries)), meta,
@@ -141,7 +121,6 @@ def main(argv=None):
                       doctrine_paths=set(ev.DOCTRINE_PATHS) & set(deliveries))
     report["split"] = args.split
     report["dry_run"] = True
-    report["jev"] = jev_mode
     report["errors"] = {name: errs for name, errs in errors.items() if errs}
     os.makedirs(args.out_dir, exist_ok=True)
     with open(os.path.join(args.out_dir, "report.json"), "w", encoding="utf-8") as handle:

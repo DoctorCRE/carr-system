@@ -6,7 +6,7 @@ labels and adjudications), the regression intake
 (tools/rule-delivery-eval-intake.py), and the harness's v2 additions (split
 filtering, per-rule-class and fully-served scoring).
 
-Offline: no Jev request, no record-layer call, no write outside a throwaway
+Offline: no model request, no record-layer call, no write outside a throwaway
 directory.
 
 WHAT IS PROVEN:
@@ -39,7 +39,7 @@ WHAT IS PROVEN:
      gold, borderline rules disputed, a hash-placed split; a copied prompt, a
      copied tool-call input, a record name (never echoed), a bare host, a
      machine name, a key or ssh path, a scrub hit, an unknown rule or a
-     duplicate is refused; every refusal happens BEFORE any Jev request (the
+     duplicate is refused; every refusal happens before writing (the
      CLI's main() is run with a stub client that counts requests); the name
      check fails closed; the command line appends to a fixture copy.
   9. The universal-trigger policy: the rules UNIVERSAL_POLICY settles carry
@@ -275,7 +275,7 @@ def test_fixture(gl, ev):
     short = [k for k, a in zip(keys, adjud) if len((a.get("reason") or "").split()) < 6]
     check("every adjudication has a written reason", not short, short[:5])
     # These are reviewed case/action distinctions, not model-score thresholds.
-    # Keep the review receipt separate from the first-pass Jev probabilities.
+    # Keep the review receipt separate from the recorded probabilities.
     repair = json.loads((FIX_DIR / "adjudication-repair.v2.json").read_text())
     current = {(a["case"], a["rule"]): a for a in adjud}
     check("repair: selected original decisions and reviewed outputs remain auditable",
@@ -676,7 +676,7 @@ def test_cli_train():
     with tempfile.TemporaryDirectory(prefix="rule-gold-label-selftest-") as tmp:
         result = subprocess.run(
             [sys.executable, str(EVAL_CLI), "--cases", str(FIXTURE), "--split", "train",
-             "--jev", "off", "--out-dir", tmp],
+             "--out-dir", tmp],
             capture_output=True, text=True, timeout=600, cwd=str(REPO))
         check("eval CLI runs on the v2 train split", result.returncode == 0, result.stderr[-1500:])
         report = Path(tmp) / "report.json"
@@ -686,7 +686,7 @@ def test_cli_train():
             check("report has per-class rows",
                   data["paths"]["system_moment"].get("by_class") is not None)
         result = subprocess.run(
-            [sys.executable, str(EVAL_CLI), "--cases", str(FIXTURE), "--jev", "off",
+            [sys.executable, str(EVAL_CLI), "--cases", str(FIXTURE),
              "--out-dir", tmp],
             capture_output=True, text=True, timeout=600, cwd=str(REPO))
         data = json.loads(report.read_text()) if report.exists() else {}
@@ -732,7 +732,7 @@ def test_intake(gl, doc, labels):
     ok = gl.intake_case(doc, "live-ref-1", rid, live_rules=live, source_text=source,
                         prompt="Ship the feature branch up and raise a review request.",
                         stratum="engineering")
-    check("intake accepts a real paraphrase (partial without Jev)",
+    check("intake accepts a real paraphrase (partial until adjudication)",
           ok["labels"] == "partial" and ok["gold"] == [rid])
     dup = copy.deepcopy(doc)
     dup["cases"].append(case)
@@ -796,7 +796,7 @@ def test_intake(gl, doc, labels):
         names_file.write_text(json.dumps([{"name": "Ada Brightwater", "kind": "person"}]))
         result = subprocess.run(
             [sys.executable, str(INTAKE_CLI), "--case-id", base["id"], "--missed-rule", rid,
-             "--fixture", str(fix), "--corpus", str(corpus), "--no-label",
+             "--fixture", str(fix), "--corpus", str(corpus),
              "--names-file", str(names_file)],
             capture_output=True, text=True, timeout=120, cwd=str(REPO))
         check("intake CLI exits zero", result.returncode == 0, result.stderr[-800:])
@@ -807,29 +807,9 @@ def test_intake(gl, doc, labels):
         test_intake_order(gl, doc, rid, fix, corpus, names_file, Path(tmp))
 
 
-class _StubJev:
-    """Stands in for ops/typesafe_client in-process: records every request."""
-
-    def __init__(self):
-        self.requests = []
-
-    def noul(self, question, true=None, false=None):
-        return {"type": "noul", "instructions": question}
-
-    def ask(self, state, questions, **_kwargs):
-        self.requests.append(state)
-        return {"answers": {qid: {"noul": 0.1} for qid in questions},
-                "usage": {"input_tokens": 1}}
-
-
 def test_intake_order(gl, doc, rid, fix, corpus, names_file, tmp):
-    """NOTHING LEAVES THE MACHINE BEFORE THE CHECKS PASS: run the intake's own
-    main() with a stub in place of the Jev client and count its requests."""
-    os.environ["CARR_JEV_SEMANTIC_CACHE"] = str(tmp / "intake-semantic-cache")
+    """Intake validates names before writing; accepted cases remain partial."""
     cli = load(INTAKE_CLI, "rule_delivery_eval_intake_for_selftest")
-    stub = _StubJev()
-    real_load = cli._load
-    cli._load = lambda name: stub if name == "typesafe_client" else real_load(name)
     before = fix.read_text()
     base = doc["cases"][1]["id"]
     at, dot = "@", "."
@@ -842,27 +822,23 @@ def test_intake_order(gl, doc, rid, fix, corpus, names_file, tmp):
     for label, extra in refusing:
         code = cli.main(["--case-id", base, "--missed-rule", rid, "--fixture", str(fix),
                          "--corpus", str(corpus), "--names-file", str(names_file),
-                         "--stratum", "deals_clients", "--calls-log", str(tmp / "calls.jsonl"),
+                         "--stratum", "deals_clients",
                          *extra])
-        check(f"intake refuses {label} before any Jev request",
-              code == 1 and not stub.requests, (code, len(stub.requests)))
+        check(f"intake refuses {label} before writing",
+              code == 1, code)
     check("a refused intake leaves the fixture byte-identical", fix.read_text() == before)
     code = cli.main(["--case-id", base, "--missed-rule", rid, "--fixture", str(fix),
-                     "--corpus", str(corpus), "--names-file", str(names_file), "--dry-run",
-                     "--calls-log", str(tmp / "calls.jsonl")])
-    check("an accepted intake does reach Jev (so the order test can fail)",
-          code == 0 and len(stub.requests) >= 1, (code, len(stub.requests)))
-    accepted_requests = len(stub.requests)
+                     "--corpus", str(corpus), "--names-file", str(names_file), "--dry-run"])
+    check("an accepted dry-run leaves the fixture unchanged", code == 0 and fix.read_text() == before)
     code = cli.main(["--case-id", base, "--missed-rule", rid, "--fixture", str(fix),
                      "--corpus", str(corpus), "--names-file", str(names_file), "--dry-run",
-                     "--calls-log", str(tmp / "calls.jsonl"),
                      "--tool-call", json.dumps({"tool_name": "SendMessage",
                                                 "tool_input": {"message": "fyi\nBrightwater"}})])
-    check("the CLI refuses a name after a newline in a tool call, before Jev",
-          code == 1 and len(stub.requests) == accepted_requests, (code, len(stub.requests)))
+    check("the CLI refuses a name after a newline in a tool call",
+          code == 1, code)
     missing = tmp / "no-such-names.json"
     code = cli.main(["--case-id", base, "--missed-rule", rid, "--fixture", str(fix),
-                     "--corpus", str(corpus), "--names-file", str(missing), "--no-label"])
+                     "--corpus", str(corpus), "--names-file", str(missing)])
     check("intake refuses when the name check cannot run (fails closed)", code == 2, code)
     for label, content in (("an empty names file", "[]"),
                            ("a names file with no usable name", '[{"name": "", "kind": "person"}]'),
@@ -870,7 +846,7 @@ def test_intake_order(gl, doc, rid, fix, corpus, names_file, tmp):
         empty = tmp / "empty-names.json"
         empty.write_text(content)
         code = cli.main(["--case-id", base, "--missed-rule", rid, "--fixture", str(fix),
-                         "--corpus", str(corpus), "--names-file", str(empty), "--no-label",
+                         "--corpus", str(corpus), "--names-file", str(empty),
                          "--prompt", "Ask Brightwater to confirm.", "--stratum", "deals_clients"])
         check(f"intake refuses {label} like an unreadable record (exit 2)", code == 2, code)
 
@@ -879,12 +855,9 @@ def test_intake_order(gl, doc, rid, fix, corpus, names_file, tmp):
     real_verb = cli._verb
     cli._verb = timeout_verb
     code = cli.main(["--case-id", base, "--missed-rule", rid, "--fixture", str(fix),
-                     "--corpus", str(corpus), "--no-label"])
+                     "--corpus", str(corpus)])
     cli._verb = real_verb
     check("a record-read timeout exits 2, not the refused code 1", code == 2, code)
-    check("nothing reached Jev in any of the fail-closed runs",
-          len(stub.requests) == accepted_requests, len(stub.requests))
-    cli._load = real_load
 
 
 def main() -> int:
