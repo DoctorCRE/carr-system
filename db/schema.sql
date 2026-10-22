@@ -89535,18 +89535,7 @@ CREATE VIEW public.v_deal_room_board AS
     d.invoiced_on,
     d.closed_on,
     d.lane,
-    d.outcome,
-    COALESCE(( SELECT (((('Dr. '::text || regexp_replace(contact.name, '^.*[[:space:]]'::text, ''::text)) || '''s '::text) || d.city) || ' Deal'::text)
-           FROM ( SELECT regexp_replace(COALESCE(NULLIF(c.contact_label, ''::text),
-                        CASE
-                            WHEN (cp.kind = 'person'::text) THEN cp.name
-                            ELSE NULL::text
-                        END, ( SELECT min(p.name) AS min
-                           FROM (public.deal_participant dp
-                             JOIN public.party p ON ((p.id = dp.party_id)))
-                          WHERE ((dp.deal_id = d.id) AND (dp.role = 'client_contact'::text) AND (dp.to_at IS NULL) AND (p.kind = 'person'::text))
-                         HAVING (count(DISTINCT p.name) = 1))), '[[:space:]]*[(][^)]*[)][[:space:]]*$'::text, ''::text) AS name) contact
-          WHERE ((contact.name ~ '^Dr[.]?[[:space:]]+[[:alpha:]][[:alpha:] .-]*[[:alpha:]]$'::text) AND (d.city IS NOT NULL) AND (btrim(d.city) <> ''::text))), d.name) AS short_name
+    d.outcome
    FROM ((((((((public.deal d
      JOIN public.client c ON ((c.id = d.client_id)))
      JOIN public.party cp ON ((cp.id = c.party_id)))
@@ -123038,7 +123027,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0926_jev_receipt_audit_lookup.sql	c6b07553d4e818dcb7da686a9446dd020c660e8fc663637626c06cff2507ab3a	1970-01-01 00:00:00+00
 0927_deal_action_hold_date.sql	ce7522c72d7ab978aeaf70a78362144c65cdde0c310dc3681f596c3f2cab4848	1970-01-01 00:00:00+00
 0932_retire_dead_background_jobs.sql	2920a630039f908deba5fa0d04ec959f180f7fd069b0a908a6d160279d24a2dd	1970-01-01 00:00:00+00
-0933_deal_alert_items.sql	da86eb60fb438169c8c0f4ddace2ae969408ca65d1a90874c32941c178f923f3	1970-01-01 00:00:00+00
+0933_deal_alert_items.sql	469f722bb5005547378d43bed510fb1b4edc98c1fc146ea8d50ae423b0275bb3	1970-01-01 00:00:00+00
 \.
 
 

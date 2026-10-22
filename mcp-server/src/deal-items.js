@@ -1,6 +1,13 @@
 import { isCalendarDate } from './calendar-date.js';
 export const DEAL_ITEMS_SCHEMA = 'deal-items.v1';
 
+export function shortDealHeading(deal) {
+  const contact = String(deal.client_name || '').replace(/\s*\([^)]*\)\s*$/u,'').trim();
+  const doctor = contact.match(/^Dr\.?\s+([\p{L}]+(?:[ .'-][\p{L}]+)*)$/u);
+  const market = deal.market || deal.city;
+  return doctor && market ? `Dr. ${doctor[1].split(/\s+/u).at(-1)}'s ${market} Deal` : deal.name;
+}
+
 const GROUPS = [
   { title: 'Vendor Introductions', matches: /\bvendor introductions?\b|\b(?:lender|attorney).{0,60}\bintro(?:duction)?s?\b|\bintro(?:duction)?s?.{0,60}\b(?:lender|attorney)\b/i },
   { title: 'Prelim Market Study', matches: /\b(?:prelim(?:inary)? market study|market study|purchase sweep)\b/i },
@@ -28,6 +35,16 @@ export function shortFacts(text) {
   });
 }
 
+function factDate(text, sharedDate = null) {
+  const explicit = text.match(/\b\d{4}-\d{2}-\d{2}\b/u)?.[0];
+  if (explicit) return isCalendarDate(explicit) ? explicit : null;
+  const natural = text.match(/\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:uary|ruary|ch|il|e|y|ust|tember|ober|ember)?\b/iu);
+  if (!sharedDate || !natural) return null;
+  const month = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(natural[2].toLowerCase()) + 1;
+  const date = `${sharedDate.slice(0,4)}-${String(month).padStart(2,'0')}-${natural[1].padStart(2,'0')}`;
+  return isCalendarDate(date) ? date : null;
+}
+
 function numberedItems(text, due_on, source_ref) {
   const markers = [...text.matchAll(/\((\d+)\)\s*([A-Z][A-Z ]+?)(?=\s*[,—:-])/gu)];
   if (markers.length < 2) return null;
@@ -41,7 +58,7 @@ function numberedItems(text, due_on, source_ref) {
     const bullets = shared ? [{ date: sharedDate, kind: 'promised', text: shared }] : [];
     for (const sentence of body.split(FACT_BREAK)) {
       for (const fact of sentence.split(/\s*[—;]\s*|,\s+(?!\d)/u).flatMap(shortFacts)) {
-        bullets.push({ date: fact.match(/\b\d{4}-\d{2}-\d{2}\b/u)?.[0] || null, kind: factKind(fact), text: fact.trim() });
+        bullets.push({ date: factDate(fact,sharedDate), kind: factKind(fact), text: fact.trim() });
       }
     }
     return { title: titles[heading] || heading.split(/\s+/u).slice(0,4).join(' '), due_on, status: 'open', source_ref, bullets };

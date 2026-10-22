@@ -4,7 +4,7 @@ import { invoiceTrackerTools } from "./invoice-tracker.js";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.js";
 import { readDealChecklist } from "./deal-checklist.js";
-import { dealItemTools, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.js";
+import { dealItemTools, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.js";
 import { bindReferralDeal } from "./relationship-network.js";
 import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
 import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLeadLifecycle } from "./lead-workspace.js";
@@ -3520,7 +3520,7 @@ export const TOOLS = {
       // never been edited simply has no key — which the client must read as "no
       // base", never as a base of null-meaning-anything.
       const deals = await c.query(
-        `select b.id, b.name, b.short_name, b.type, b.phase, b.owner, b.attention,
+        `select b.id, b.name, b.type, b.phase, b.owner, b.attention,
                 to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step,
                 '${DEAL_ITEMS_SCHEMA}'::text as item_schema_version,
                 coalesce((select jsonb_agg(jsonb_build_object('id',i.id,'title',i.item_title,
@@ -3590,7 +3590,7 @@ export const TOOLS = {
             and ($3::uuid is null or account_client_id=$3::uuid)
           order by started_at desc limit 1`,
         [actor.slug, workspace, args.account_client_id || null]);
-      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows, closed_deals: closedDeals.rows.filter(d => d.outcome === 'won' || !d.outcome && (d.closed_on || d.invoiced_on)), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
+      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows.map(d => ({ ...d, short_name: shortDealHeading(d) })), closed_deals: closedDeals.rows.filter(d => d.outcome === 'won' || !d.outcome && (d.closed_on || d.invoiced_on)), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
         open_session: session.rows[0] || null };
     },
   },
@@ -9161,7 +9161,7 @@ registerTools({
       const s = await resolveSubject(c, args.deal);
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
       let deal = await c.query(
-        `select b.id, b.name, b.short_name, b.phase, b.owner, b.type, b.market as city, b.segment, b.attention,
+        `select b.id, b.name, b.phase, b.owner, b.type, b.market as city, b.segment, b.attention,
                 to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step,
                 (b.next_step is null or b.next_date is null) as next_step_required, b.client_id, b.client_ref, b.client_name,
                 b.account_client_id, b.account_client_ref, b.account_name, b.account_owner,
@@ -9251,7 +9251,7 @@ registerTools({
            from v_deal_room_current_lease where deal_id=$1`, [s.id]);
       const checklist = await readDealChecklist(c, { ...deal.rows[0], lease: lease.rows[0] || null, critical_dates: criticalDates.rows });
       return stripDealPlaceholders({ schema_version: "deal-timeline.v1", checklist, lease: lease.rows[0] || null,
-        deal_id: s.id, ...deal.rows[0], thread: thread.rows,
+        deal_id: s.id, ...deal.rows[0], short_name: shortDealHeading(deal.rows[0]), thread: thread.rows,
         critical_dates: criticalDates.rows, next_actions: actions.rows,
         item_schema_version: DEAL_ITEMS_SCHEMA, items: actions.rows.filter(i => i.title && i.status !== 'dropped')
           .map(({ id,title,due_on,status,bullets,source_ref }) => ({ id,title,due_on,status,bullets,source_ref })),

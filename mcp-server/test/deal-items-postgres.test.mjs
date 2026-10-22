@@ -104,7 +104,7 @@ test('an open next-step package backfills exactly once without losing dates or s
 });
 
 test('short heading uses a recorded doctor contact and market while preserving unknown names', async () => {
-  await c.query("update client set contact_label='Dr. Morgan Example (Synthetic Practice)' where id=(select client_id from deal where id=$1)",[deal]);
+  await c.query("update party set name='Dr. Morgan Example (Synthetic Practice)' where id=(select party_id from client where id=(select client_id from deal where id=$1))",[deal]);
   const result = await TOOLS['deal-room-board'].handler(c,actor,{});
   assert.equal(result.deals.find(d => d.id === deal).short_name,"Dr. Example's Baytown Deal");
 });

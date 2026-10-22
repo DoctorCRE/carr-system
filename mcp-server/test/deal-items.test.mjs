@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { splitDealNextStep, validateDealItem } from '../src/deal-items.js';
+import { splitDealNextStep, validateDealItem, shortDealHeading } from '../src/deal-items.js';
 import { TOOLS } from '../src/tools.js';
 
 test('legacy package splits into three short items while preserving every sourced fact', () => {
@@ -34,10 +34,20 @@ test('numbered commitments keep exactly three items and every shared promise and
   assert.ok(items.every(i => i.bullets.some(b => b.kind === 'promised' && b.date === '2026-08-08')));
   assert.ok(items[1].bullets.some(b => b.text.includes('off-market inventory')));
   assert.ok(items[2].bullets.some(b => b.text.includes('raise it on the package-review call')));
+  assert.equal(items[2].bullets.find(b => b.text.includes('sent 8 Aug via CONGA')).date,'2026-08-08');
   const sourceWords = text.replace(/\([123]\)\s*(?:INTRODUCTIONS|PACKAGE|ETL)/g,'').toLowerCase().match(/[a-z0-9]+/g);
   const detailWords = new Set(items.flatMap(i => i.bullets.map(b => b.text)).join(' ').toLowerCase().match(/[a-z0-9]+/g));
   assert.ok(sourceWords.every(w => detailWords.has(w)),'all source words remain in detail facts');
   assert.ok(items.flatMap(i => i.bullets).every(b => b.text.length <= 240));
+});
+
+test('natural dates without a source year remain unassigned', () => {
+  assert.equal(splitDealNextStep('ETL sent 8 Aug via CONGA awaiting signature.')[0].bullets[0].date,null);
+});
+
+test('short heading uses an explicit recorded doctor name and strips a practice parenthetical', () => {
+  assert.equal(shortDealHeading({ name:'Assignment',client_name:'Dr. Morgan Example (Synthetic Practice)',market:'Baytown' }),"Dr. Example's Baytown Deal");
+  assert.equal(shortDealHeading({ name:'Recorded assignment',client_name:'Synthetic Practice',market:'Baytown' }),'Recorded assignment');
 });
 
 test('item commands expose record-layer writes without a deal-wide completion or note side effect', () => {

@@ -72,14 +72,7 @@ CREATE OR REPLACE VIEW public.v_deal_room_board AS
     d.invoiced_on,
     d.closed_on,
     d.lane,
-    d.outcome,
-    coalesce((select 'Dr. ' || regexp_replace(contact.name,'^.*[[:space:]]','') || '''s ' || d.city || ' Deal'
-      from (select regexp_replace(coalesce(nullif(c.contact_label,''),case when cp.kind='person' then cp.name end,
-        (select min(p.name) from deal_participant dp join party p on p.id=dp.party_id
-          where dp.deal_id=d.id and dp.role='client_contact' and dp.to_at is null and p.kind='person'
-          having count(distinct p.name)=1)),'[[:space:]]*[(][^)]*[)][[:space:]]*$','') as name) contact
-      where contact.name ~ '^Dr[.]?[[:space:]]+[[:alpha:]][[:alpha:] .-]*[[:alpha:]]$'
-        and d.city is not null and btrim(d.city) <> ''),d.name) as short_name
+    d.outcome
    FROM ((((((((public.deal d
      JOIN public.client c ON ((c.id = d.client_id)))
      JOIN public.party cp ON ((cp.id = c.party_id)))
