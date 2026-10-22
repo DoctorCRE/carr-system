@@ -2514,6 +2514,25 @@ class Batching(Base):
         started.wait.assert_not_called()
         started.communicate.assert_not_called()
 
+    def test_ten_noop_ticks_preserve_deployed_identity_without_reconciliation(self):
+        latest = self.fx.commit({"docs/source-only.md": "evaluated source"})
+        runner = FakeRunner()
+        restart = lambda: self.fx.pipeline(runner)
+        restart().store.save({"worker": {"last_released_sha": self.fx.base}})
+        self.assertEqual(restart().tick(["worker"]), 0)
+        for _ in range(10):
+            self.assertEqual(restart().tick(["worker"]), 0)
+        records = self.fx.records()
+        reconciles = [row for row in records if row["status"] == "live_identity_reconciled"]
+        advances = [row for row in records if row["status"] == "no_release_needed"]
+        self.assertEqual(len(reconciles), 0)
+        self.assertEqual(len(advances), 1)
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["last_released_sha"], self.fx.base)
+        self.assertEqual(state["last_evaluated_sha"], latest)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.slice_marks, [])
+
     def test_doc_only_batch_advances_without_release(self):
         latest = self.fx.commit({"docs/n.md": "3", "mcp-server/test/x.test.mjs": "t"})
         runner = FakeRunner()
