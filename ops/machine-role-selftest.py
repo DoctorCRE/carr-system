@@ -8,7 +8,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from lib import machine_role  # noqa: E402
 
-OWNER = machine_role.owner_email(REPO)
+OWNER = machine_role.OWNER_EMAIL
 
 
 def run(label, home_role, email, expected):
@@ -25,9 +25,6 @@ def run(label, home_role, email, expected):
 
 
 def main():
-    if not OWNER:
-        print("FAIL  OWNER_EMAIL unreadable from ops/githooks/pre-push")
-        return 1
     cases = [
         run("no marker, owner email -> primary (old behaviour)", None, OWNER, True),
         run("no marker, other email -> secondary", None, "x@example.com", False),

@@ -38,7 +38,7 @@ SELF_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from git_env import fixture_env, FIXTURE_GIT_CONFIG  # noqa: E402
 sys.path.insert(0, SELF_REPO)
-from lib import launchd_calendar  # noqa: E402
+from lib import launchd_calendar, machine_role  # noqa: E402
 
 # The checkout under test supplies the real hook, the real installer and the
 # real tracked template — a hand-copied template here would let the template
@@ -107,12 +107,6 @@ def keep_maintenance_joined(repo):
     """Persist the fixture-only lifetime rule for nested Git subprocesses."""
     for key, value in FIXTURE_GIT_CONFIG:
         git(repo, "config", key, value)
-
-
-def owner_email():
-    with open(os.path.join(SELF_REPO, "ops", "githooks", "pre-push"),
-              encoding="utf-8") as fh:
-        return re.search(r'^OWNER_EMAIL="([^"]+)"', fh.read(), re.M).group(1)
 
 
 def write_exec(path, body):
@@ -323,7 +317,7 @@ def case_primary_noop(tmp):
 
 def case_owner_fallback_noop(tmp):
     """No local-actor.json: the owner's git identity means primary -> no-op."""
-    repo, home, stubs = build_fixture(tmp, owner_email(), actor_slug=None)
+    repo, home, stubs = build_fixture(tmp, machine_role.OWNER_EMAIL, actor_slug=None)
     before = git(repo, "rev-parse", "HEAD")
     r = run_hook(repo, home, stubs, tmp)
     return {
@@ -362,7 +356,7 @@ def write_role(home, role):
 def case_marker_secondary_converges(tmp):
     """Joe's second Mac: owner email AND joe slug, but marked secondary ->
     it converges like any secondary (the 2026-09-23 Studio move)."""
-    repo, home, stubs = build_fixture(tmp, owner_email(), actor_slug="joe")
+    repo, home, stubs = build_fixture(tmp, machine_role.OWNER_EMAIL, actor_slug="joe")
     write_role(home, "secondary")
     r = run_hook(repo, home, stubs, tmp)
     return {

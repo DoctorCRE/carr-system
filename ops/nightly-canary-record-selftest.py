@@ -99,7 +99,7 @@ check('source is database-owned canonical availability/search joins and direct D
       'distinct on (av.space_id)' in sql and 'order by av.space_id,av.observed_at desc,av.id desc' in sql and 'from space_search s join client' in sql
       and 'revoke all on ops.nightly_availability_canary_source_snapshot,ops.nightly_availability_canary_receipt' in sql)
 check('disposable local PostgreSQL CI discovers the mandatory lease, ACL, drift, and race gate',
-      any(p.path == 'ops/nightly-canary-local-pg-acceptance.py' for p in __import__('db_acceptance_shards').select_programs(0))
+      any(p.path == 'ops/nightly-canary-local-pg-acceptance.py' for p in __import__('db_acceptance_programs').PROGRAMS)
       and 'source replay conflicts with canonical snapshot' in (ROOT/'ops/nightly-canary-local-pg-acceptance.py').read_text()
       and "race(['d'*64,'d'*64])" in (ROOT/'ops/nightly-canary-local-pg-acceptance.py').read_text())
 
