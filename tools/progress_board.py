@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 from http.client import HTTPException
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, Collection, Iterator
+from typing import Any, Callable, Iterator
 from urllib.request import Request, urlopen
 from urllib.parse import urlencode
 
@@ -1975,8 +1975,7 @@ def render(project: str, *, discover: bool = False) -> None:
     (board_dir() / f"{safe_project(project)}.html").unlink(missing_ok=True)
 
 
-def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict[str, Any]],
-                        keep: Collection[str] = ()) -> int:
+def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict[str, Any]]) -> int:
     """Expire old GitHub cards and watchdog projections while retaining their notes."""
     proposed, report = dispose_legacy(state, {}, now_utc())
     archived = report["counts"]["legacy, unverified"]
@@ -1988,7 +1987,7 @@ def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict
     cutoff = now_utc() - RECENT_MERGED
     expired = []
     for task_id, task in state.get("tasks", {}).items():
-        generated = task_id.startswith("wd-") and task.get("pr") is None and task_id not in keep
+        generated = task_id.startswith("wd-") and task.get("pr") is None
         if task.get("pr") is None and not generated:
             continue
         info = facts.get(pr_key(task), {}) if task.get("pr") is not None else {}
@@ -2122,8 +2121,7 @@ def command_dispose_legacy(args: argparse.Namespace) -> None:
 
 def apply_sync(state: dict[str, Any],
                fetched: dict[tuple[str, int], tuple[dict[str, Any] | None, str | None]],
-               evidence: dict[tuple[str, int], str | None] | None = None,
-               keep: Collection[str] = ()) -> bool:
+               evidence: dict[tuple[str, int], str | None] | None = None) -> bool:
     changed = False
     known = {pr_key(task) for task in state.get("tasks", {}).values() if task.get("pr") is not None}
     failed: list[dict[str, str]] = [
@@ -2152,7 +2150,7 @@ def apply_sync(state: dict[str, Any],
             changed = True
         if delivered_live(task, task_repo(task), at, (evidence or {}).get(key)):
             changed = True
-    if retain_recent_cards(state, {key: info for key, (info, error) in fetched.items() if info and not error}, keep):
+    if retain_recent_cards(state, {key: info for key, (info, error) in fetched.items() if info and not error}):
         changed = True
     if fetched and not os.environ.get("PROGRESS_BOARD_SKIP_GH"):
         raw_sync = state.get("github_sync")
@@ -2753,15 +2751,13 @@ def add_v1_cards(state: dict[str, Any], discovered: dict) -> bool:
     return changed
 
 
-def reconcile_state(state: dict[str, Any], fetched: dict, at: str,
-                    preserved_cards: set[str] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Cleanup plan on a copy: drop unprotected watchdog cards, fold duplicate PR cards, then
+def reconcile_state(state: dict[str, Any], fetched: dict, at: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Cleanup plan on a copy: drop watchdog cards, fold duplicate PR cards, then
     apply the scheduled sync rule. GitHub read failures keep cards and fail the check."""
     result = copy.deepcopy(state)
     tasks = result.setdefault("tasks", {})
-    preserved_cards = preserved_cards or set()
     removed = {key: tasks.pop(key) for key in list(tasks)
-               if key.startswith("wd-") and key not in preserved_cards}
+               if key.startswith("wd-")}
     folds = {}
     for task_id in list(tasks):
         task = tasks[task_id]
@@ -2782,7 +2778,7 @@ def reconcile_state(state: dict[str, Any], fetched: dict, at: str,
         removed[task_id] = tasks.pop(task_id)
         folds[task_id] = canonical
     add_v1_cards(result, fetched)
-    apply_sync(result, fetched, keep=preserved_cards)
+    apply_sync(result, fetched)
     failures = [{"card": f"{repo}#{number}", "error": error or "No PR facts"}
                 for (repo, number), (info, error) in fetched.items() if info is None or error]
     failures += [{"card": task_id, "error": "PR not read"} for task_id, task in tasks.items()
@@ -2824,17 +2820,7 @@ def command_reconcile(args: argparse.Namespace) -> None:
             fetched.update(discover_v1())
         except RuntimeError as exc:
             discovery_error = str(exc)
-    watchdog = repo_lib("job_watchdog")
-    config = watchdog.load_config(os.environ.get("CARR_WATCHDOG_CONFIG",
-                                                str(REPO_ROOT / "ops/config/job-watchdog.json")))
-    preserved_cards = set()
-    if os.environ.get("CARR_JOB_BOARD", config["board"]) == args.project:
-        root = board_dir().parent.parent
-        effects = watchdog.Effects(root, config)
-        findings = watchdog.read_latest(watchdog.path_at(root, config["paths"]["findings"]))
-        preserved_cards = {effects.card(finding) for finding in findings.values()
-                           if finding.get("kind") == "vendor_release_fetch_error" and not finding.get("cleared_at")}
-    proposed, report = reconcile_state(initial, fetched, stamp(), preserved_cards)
+    proposed, report = reconcile_state(initial, fetched, stamp())
     if discovery_error:
         report["failures"].append({"card": "V1 discovery", "error": discovery_error})
         report["check_passed"] = False

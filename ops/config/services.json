@@ -410,7 +410,7 @@
     {
       "key": "storage-hygiene",
       "name": "Automatic machine cleanup",
-      "purpose": "Hourly bounded cleanup of clean idle worktrees, finished Codex job clones, old completed desk threads, and stale Chrome clones. Keeps dirty, unpushed, live, and open-PR work. Writes local JSON receipts and reports health through the orchestrator watchdog.",
+      "purpose": "Hourly bounded cleanup of clean idle worktrees, finished Codex job clones, old completed desk threads, and stale Chrome clones. Keeps dirty, unpushed, live, and open-PR work. Writes local JSON receipts.",
       "family": "Local Mac edge",
       "criticality": "medium",
       "owner_actor": "orchestrator",
@@ -423,7 +423,7 @@
           "runs_on": "every",
           "expected_cadence_seconds": 3600,
           "cadence_grace_seconds": 7200,
-          "notes": "Every machine. StartCalendarInterval comes from the shared renderer. Job watchdog enforces a five-minute process-group budget. Source only; no machine installation in this change."
+          "notes": "Every machine. StartCalendarInterval comes from the shared renderer. The explicit agent runner enforces a five-minute process-group budget. Source only; no machine installation in this change."
         }
       ]
     },
@@ -971,7 +971,7 @@
     {
       "key": "job-watchdog",
       "name": "Job watchdog",
-      "purpose": "Scan registered jobs, head-bound pull requests, merge-queue failures and release logs; report findings to the orchestrator and dispatch deterministic recovery actions.",
+      "purpose": "Report local scheduled jobs whose last exit failed, with one log line, and disk free below 10%.",
       "family": "Local Mac edge",
       "criticality": "medium",
       "owner_actor": "joe",
@@ -984,7 +984,7 @@
           "runs_on": "primary",
           "expected_cadence_seconds": 120,
           "cadence_grace_seconds": 300,
-          "notes": "Primary-only schedule. Cadence is a checked projection of ops/config/job-watchdog.json. This draft ships source definitions; the orchestrator owns activation and replacement of the scratch auto-enqueue process. Findings and dated scan completion ledger are durable; scanner makes no model judgments."
+          "notes": "Primary-only schedule. Cadence is a checked projection of ops/config/job-watchdog.json. Read-only checks with local findings and scan ledger. The prompt digest is limited to five lines."
         }
       ]
     },
@@ -1106,10 +1106,6 @@
   "dependencies": [
     {
       "service": "expert-reply-watch",
-      "depends_on": "neon-record-layer"
-    },
-    {
-      "service": "job-watchdog",
       "depends_on": "neon-record-layer"
     },
     {
