@@ -6,6 +6,7 @@ import unittest
 import tempfile
 import json
 import subprocess
+import sys
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +64,48 @@ class ReportTests(unittest.TestCase):
             self.assertIn('Joe', proposal['next_step'])
             self.assertEqual(report['provenance']['catalog_source'], 'migration_declarations_not_live_database')
 
+    def test_real_source_only_with_fake_empty_statistics_has_review_candidates(self):
+        run = subprocess.run([sys.executable, ROOT/'ops/table-usage-census.py', '--source-only'],
+                             cwd=ROOT, capture_output=True, text=True, timeout=300)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        source = json.loads((ROOT/'out/table-usage-census.json').read_text())
+        tables = [dict(row, estimated_rows=0, inserts=0, updates=0, deletes=0) for row in source['tables']]
+        report = census.build_report(tables,
+            references={row['table']: row['references'] for row in source['tables']},
+            unresolved=list(source['unresolved'].values()), backup_tables=None)
+        self.assertGreater(report['counts']['unreferenced-and-empty'], 0, report['counts'])
+        rows = {row['table']: row for row in report['tables']}
+        protected = {'ops.execution_environment_' + suffix: 'bin/schema-snapshot.sh'
+                     for suffix in ('conformance', 'provider', 'provider_event')}
+        protected['public.' + 'retrieval_' + 'phrase'] = 'bin/schema-snapshot.sh'
+        protected['ops.' + 'scac_reference_monitor_' + 'mode_event'] = 'docs/frontier-finding/gen_breakglass_run.py'
+        for name, source_path in protected.items():
+            with self.subTest(table=name):
+                self.assertEqual(rows[name]['classification'], 'referenced')
+                self.assertTrue(any(item['source'] == source_path for item in rows[name]['references']))
+        print('Real source with FAKE empty statistics:', report['counts'])
+
+    def test_cli_scans_tracked_text_outside_former_roots_and_skips_generated_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sources = ['bin/read.sh', 'hooks/check.swift', 'control-room/read.mjs',
+                       'evals/check.py', 'docs/reference.md', 'shared/reader']
+            paths = ['migrations/0001_fixture.sql', 'db/schema.sql', 'vendor/unread.py', 'generated/unread.sql']
+            (root/'migrations').mkdir()
+            (root/paths[0]).write_text('CREATE TABLE public.used(id int);')
+            for source in sources:
+                (root/source).parent.mkdir(parents=True, exist_ok=True)
+                (root/source).write_text('public.used')
+            def git(command, **kwargs):
+                if command[1] == 'ls-files':
+                    return subprocess.CompletedProcess(command, 0, ('\0'.join(paths + sources) + '\0').encode())
+                return subprocess.CompletedProcess(command, 0, 'fixture-head\n')
+            with patch.object(census, 'ROOT', root), patch.object(census, 'source_inventory', return_value=[]), \
+                    patch.object(census.subprocess, 'run', side_effect=git):
+                self.assertEqual(census.main(['--source-only']), 0)
+            report = json.loads((root/'out/table-usage-census.json').read_text())
+            self.assertEqual({item['source'] for item in report['tables'][0]['references']}, set(sources))
+
     def test_shared_unknown_evidence_does_not_expand_quadratically(self):
         tables = [table(f'candidate_{i}') for i in range(100)]
         names = [f'public.candidate_{i}' for i in range(100)]
@@ -108,6 +151,53 @@ class ReportTests(unittest.TestCase):
 
 
 class ReferenceTests(unittest.TestCase):
+    def test_literal_placeholder_prefix_does_not_scope_uncertainty_to_every_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'read.js').write_text('db.query("select * from widget_%"); db.query("update }");')
+            tables = [table('widget_one'), table('unrelated')]
+            refs, unknown = census.scan_references(root, tables, ['read.js'], [], [])
+            report = census.build_report(tables, references=refs, unresolved=unknown, backup_tables=set())
+            self.assertEqual(report['counts']['unreferenced-and-empty'], 1)
+            self.assertTrue(all(item['possible_tables'] == ['public.widget_one'] for item in unknown))
+
+    def test_migration_dependencies_count_but_table_declarations_do_not(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'migrations').mkdir()
+            source = 'migrations/0001_fixture.sql'
+            (root/source).write_text(
+                'CREATE TABLE public.unused(id int);\n'
+                'CREATE TABLE public.child(id int REFERENCES public.parent(id));\n'
+                'CREATE VIEW v AS SELECT * FROM public.viewed;\n'
+                'CREATE TRIGGER t BEFORE UPDATE ON public.triggered FOR EACH ROW EXECUTE FUNCTION f();\n'
+                'CREATE POLICY p ON public.secured USING (true);\n')
+            tables = [table(name) for name in ('unused', 'child', 'parent', 'viewed', 'triggered', 'secured')]
+            refs, unknown = census.scan_references(root, tables, [source], [], [])
+            report = census.build_report(tables, references=refs, unresolved=unknown, backup_tables=set())
+            self.assertEqual({name for name in refs},
+                             {'public.parent', 'public.viewed', 'public.triggered', 'public.secured'})
+            self.assertEqual(report['counts']['unreferenced-and-empty'], 2)
+
+    def test_opaque_calls_and_unread_sensitive_paths_are_notes_without_table_scope(self):
+        fixtures = {
+            'lib/read.py': 'self.query(repo, "query { repository { name } }")\nconn.execute(external_sql)',
+            'lib/read.js': 'api.query(graphql); db.query(externalSql);',
+        }
+        for source, text in fixtures.items():
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root/'lib').mkdir()
+                (root/source).write_text(text)
+                tables = [table('unused')]
+                paths = [source, 'lib/credentials.py', 'lib/database-dump.sql']
+                refs, notes = census.scan_references(root, tables, paths, [], [])
+                report = census.build_report(tables, references=refs, unresolved=notes, backup_tables=set())
+                self.assertEqual(report['counts']['unreferenced-and-empty'], 1)
+                self.assertTrue(notes)
+                self.assertTrue(all(item['possible_tables'] == [] for item in notes))
+                self.assertEqual(report['tables'][0]['uncertainty'], [])
+
     def test_finite_python_table_sources_do_not_taint_unrelated_empty_tables(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -145,7 +235,7 @@ class ReferenceTests(unittest.TestCase):
                 report = census.build_report(tables, references=refs, unresolved=unknown, backup_tables=set())
                 self.assertIn('public.unused', [row['table'] for row in report['proposed_deletions']])
 
-    def test_mutated_or_parameter_table_sources_remain_unknown(self):
+    def test_unbounded_mutated_or_parameter_sources_are_notes(self):
         fixtures = [
             'TABLES = ["public.alpha"]\nTABLES.append(external_table)\n'
             'for name in TABLES:\n    conn.execute(f"select * from {name}")\n',
@@ -158,33 +248,35 @@ class ReferenceTests(unittest.TestCase):
                 (root/'ops/read.py').write_text(text)
                 refs, unknown = census.scan_references(root, [table('alpha'), table('other')], ['ops/read.py'], [], [])
                 report = census.build_report([table('other')], references=refs, unresolved=unknown, backup_tables=set())
-                self.assertEqual(report['tables'][0]['classification'], 'unknown')
+                self.assertEqual(report['tables'][0]['classification'], 'unreferenced-and-empty')
                 self.assertNotIn('public.other', refs)
-                self.assertEqual(report['proposed_deletions'], [])
+                self.assertEqual([row['table'] for row in report['proposed_deletions']], ['public.other'])
+                self.assertTrue(unknown)
+                self.assertTrue(all(item['possible_tables'] == [] for item in unknown))
 
-    def test_schema_scoped_unknowns_and_sql_loop_sources(self):
+    def test_table_prefix_uncertainty_and_sql_loop_sources(self):
         fixtures = {
-            'ops/read.sql': "BEGIN FOREACH target IN ARRAY ARRAY['public.alpha', 'ops.beta'] LOOP "
+            'ops/read.sql': "BEGIN FOREACH target IN ARRAY ARRAY['public.alpha', 'ops.beta_one'] LOOP "
                             "EXECUTE format('SELECT * FROM %s', target); END LOOP; END;",
-            'ops/read.py': 'conn.execute(f"select * from ops.{external_table}")\n',
+            'ops/read.py': 'conn.execute(f"select * from ops.beta_{external_suffix}")\n',
         }
         for source, text in fixtures.items():
             with self.subTest(source=source), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 (root/'ops').mkdir()
                 (root/source).write_text(text)
-                tables = [table('alpha'), dict(table('beta'), schema='ops'), table('unused')]
+                tables = [table('alpha'), dict(table('beta_one'), schema='ops'), table('unused')]
                 refs, unknown = census.scan_references(root, tables, [source], [], [])
                 report = census.build_report(tables, references=refs, unresolved=unknown, backup_tables=set())
                 if source.endswith('.sql'):
                     self.assertEqual(unknown, [])
-                    self.assertTrue(any(item['kind'] == 'dynamic_sql_bounded' for item in refs['ops.beta']))
+                    self.assertTrue(any(item['kind'] == 'dynamic_sql_bounded' for item in refs['ops.beta_one']))
                 else:
-                    self.assertEqual(unknown[0]['possible_tables'], ['ops.beta'])
-                    self.assertNotIn('ops.beta', refs)
+                    self.assertEqual(unknown[0]['possible_tables'], ['ops.beta_one'])
+                    self.assertNotIn('ops.beta_one', refs)
                 self.assertIn('public.unused', [row['table'] for row in report['proposed_deletions']])
 
-    def test_unknown_sql_fragment_cannot_hide_additional_relations(self):
+    def test_unknown_sql_fragment_does_not_infer_unrelated_table_dependencies(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root/'ops').mkdir()
@@ -193,7 +285,7 @@ class ReferenceTests(unittest.TestCase):
             refs, unknown = census.scan_references(root, tables, ['ops/read.py'], [], [])
             report = census.build_report(tables, references=refs, unresolved=unknown, backup_tables=set())
             self.assertEqual({row['table']: row['classification'] for row in report['tables']},
-                             {'public.alpha': 'referenced', 'public.other': 'unknown'})
+                             {'public.alpha': 'referenced', 'public.other': 'unreferenced-and-empty'})
             self.assertNotIn('public.other', refs)
 
     def test_javascript_reassignment_and_postgres_positional_format(self):
@@ -209,7 +301,8 @@ class ReferenceTests(unittest.TestCase):
                 tables = [table('alpha'), table('other')]
                 refs, unknown = census.scan_references(root, tables, [source], [], [])
                 if source.endswith('.js'):
-                    self.assertTrue(any('public.other' in item['possible_tables'] for item in unknown))
+                    self.assertTrue(unknown)
+                    self.assertTrue(all(item['possible_tables'] == [] for item in unknown))
                     self.assertNotIn('public.other', refs)
                 else:
                     self.assertEqual(unknown, [])
@@ -233,11 +326,11 @@ class ReferenceTests(unittest.TestCase):
                     report = census.build_report(tables, references=refs, unresolved=unknown, backup_tables=set())
                     rows = {row['table']: row for row in report['tables']}
                     self.assertEqual(rows['public.other']['classification'],
-                                     'unknown' if external else 'unreferenced-and-empty')
+                                     'unreferenced-and-empty')
                     if not external:
                         self.assertTrue(any(item['kind'] == 'dynamic_sql_bounded' for item in refs['public.beta']))
 
-    def test_javascript_arrow_parameters_and_decrements_do_not_hide_unknown_queries(self):
+    def test_javascript_opaque_queries_remain_visible_as_notes(self):
         fixtures = [
             'const target = "public.alpha"; const read = target => c.query(`select * from ${target}`);',
             'let i = 2; i--; c.query(query);',
@@ -249,7 +342,7 @@ class ReferenceTests(unittest.TestCase):
                 (root/'ops/read.js').write_text(text)
                 refs, unknown = census.scan_references(root, [table('alpha'), table('other')], ['ops/read.js'], [], [])
                 report = census.build_report([table('other')], references=refs, unresolved=unknown, backup_tables=set())
-                self.assertEqual(report['tables'][0]['classification'], 'unknown')
+                self.assertEqual(report['tables'][0]['classification'], 'unreferenced-and-empty')
 
     def test_returned_sql_builders_resolve_targets_without_executing_source(self):
         for target in ('"public.alpha"', 'external_table'):
@@ -262,19 +355,19 @@ class ReferenceTests(unittest.TestCase):
                 report = census.build_report(tables, references=refs, unresolved=unknown, backup_tables=set())
                 rows = {row['table']: row for row in report['tables']}
                 self.assertEqual(rows['public.other']['classification'],
-                                 'unknown' if target == 'external_table' else 'unreferenced-and-empty')
+                                 'unreferenced-and-empty')
                 if target != 'external_table':
                     self.assertEqual(unknown, [])
                     self.assertTrue(any(item['kind'] == 'dynamic_sql_bounded' for item in refs['public.alpha']))
 
-    def test_parenthesized_execute_is_unknown_rather_than_a_deletion_candidate(self):
+    def test_parenthesized_unresolvable_execute_is_a_note(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root/'ops').mkdir()
             (root/'ops/run.sql').write_text('BEGIN EXECUTE(query); END;')
             refs, unknown = census.scan_references(root, [table('other')], ['ops/run.sql'], [], [])
             report = census.build_report([table('other')], references=refs, unresolved=unknown, backup_tables=set())
-            self.assertEqual(report['tables'][0]['classification'], 'unknown')
+            self.assertEqual(report['tables'][0]['classification'], 'unreferenced-and-empty')
 
     def test_inventory_and_static_references_have_locations_and_symbols(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -302,12 +395,12 @@ class ReferenceTests(unittest.TestCase):
                                          "ops/database-dump.sql", "ops/private-key.py"], [],
                 [{"signature": "ops.run_dynamic()", "definition": "begin EXECUTE query; end"}])
             self.assertEqual(refs, {})
-            self.assertEqual({item["kind"] for item in unresolved}, {"dynamic_sql", "excluded_sensitive_path"})
+            self.assertEqual({item["kind"] for item in unresolved}, {"unresolved_call_note", "excluded_sensitive_path"})
             report = census.build_report([table("widget")], references=refs,
                                          unresolved=unresolved, backup_tables=set())
-            self.assertEqual(report["tables"][0]["classification"], "unknown")
+            self.assertEqual(report["tables"][0]["classification"], "unreferenced-and-empty")
 
-    def test_quoted_and_multiline_execute_prevent_false_empty_classification(self):
+    def test_schema_only_and_multiline_opaque_execute_are_notes(self):
         for expression in ("EXECUTE 'SELECT * FROM public.' || quote_ident(table_name);",
                            "EXECUTE\n    query;"):
             for installed in (False, True):
@@ -322,13 +415,13 @@ class ReferenceTests(unittest.TestCase):
                         refs, unresolved = census.scan_references(
                             root, [table("widget")], [] if installed else [source], [],
                             functions if installed else [])
-                        self.assertEqual(unresolved, [{
-                            "kind": "dynamic_sql", "source": "pg_proc" if installed else source,
-                            "line": 2, "possible_tables": ["public.widget"],
-                            "reason": "Unresolved relation identifier or SQL expression.", **({"function": "ops.run_dynamic()"} if installed else {})}])
+                        self.assertEqual(len(unresolved), 1)
+                        self.assertEqual(unresolved[0]['kind'], 'unresolved_call_note')
+                        self.assertEqual(unresolved[0]['possible_tables'], [])
+                        self.assertEqual(unresolved[0]['line'], 2)
                         report = census.build_report([table("widget")], references=refs,
                                                      unresolved=unresolved, backup_tables=set())
-                        self.assertEqual(report["counts"]["unreferenced-and-empty"], 0)
+                        self.assertEqual(report["counts"]["unreferenced-and-empty"], 1)
 
     def test_installed_functions_and_same_file_verbs_are_labeled_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -351,7 +444,7 @@ class ReferenceTests(unittest.TestCase):
                 root, [table("widget")], ["ops/run.sh"],
                 [{"operation": "unknown", "tables_written": "public.widget"}], [])
             self.assertEqual({item["kind"] for item in unresolved},
-                             {"inventory_table_unresolved", "dynamic_sql"})
+                             {"inventory_table_unresolved", "unresolved_call_note"})
 
 
 if __name__ == "__main__":

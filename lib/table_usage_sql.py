@@ -186,15 +186,17 @@ def relation_targets(values, tables):
     referenced, possible = set(), set()
     for value in values:
         matches = list(RELATION.finditer(value))
-        outside_relations = RELATION.sub('', value)
-        if UNKNOWN in outside_relations:
-            possible.update(known)
         for match in matches:
             token = match[1].replace('"', '')
+            if token.split('.')[-1].startswith((UNKNOWN, '%', '{', '$')):
+                continue
             if UNKNOWN in token or any(char in token for char in '{}$%'):
                 pattern = re.escape(token).replace(re.escape(UNKNOWN), '.*')
                 if any(char in token for char in '{}$%'):
-                    pattern = re.escape(token.split('.')[0]) + r'\..*' if '.' in token else '.*'
+                    prefix = re.split(r'[{}$%]', token, maxsplit=1)[0]
+                    if not prefix.split('.')[-1]:
+                        continue
+                    pattern = re.escape(prefix) + '.*'
                 possible.update(name for name in known if re.fullmatch(pattern, name)
                                 or ('.' not in token and re.fullmatch(pattern, name.split('.', 1)[1])))
             else:
@@ -302,8 +304,9 @@ def other_queries(text, suffix):
     candidates, covered = [], []
     pattern = r'\bEXECUTE\b\s*' if sql else r'\b(?:query|execute|executemany)\s*\('
     for match in re.finditer(pattern, code, re.I):
-        end = _expression_end(text, match.end(), ';' if sql else ',)')
-        expression = text[match.end():end]
+        start = match.start() + len('EXECUTE') if sql else match.end()
+        end = _expression_end(text, start, ';' if sql else ',)')
+        expression = text[start:end]
         candidates.append((text.count('\n', 0, match.start()) + 1, _expression(expression, bindings)))
         covered.append((match.start(), end))
     for match in QUOTED.finditer(text):

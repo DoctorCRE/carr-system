@@ -86,20 +86,22 @@ def main():
         assert any(item.get("function") == "ops.census_dynamic(text)" for item in unresolved)
         report = census.build_report(snapshot["tables"], references=refs,
                                      unresolved=unresolved, backup_tables=set(snapshot["backup_tables"]))
-        assert report["counts"] == {"referenced": 1, "unreferenced-and-empty": 0, "unknown": 5}, report["counts"]
+        assert report["counts"] == {"referenced": 1, "unreferenced-and-empty": 1, "unknown": 4}, report["counts"]
+        assert [row['table'] for row in report['proposed_deletions']] == ['ops.census_empty']
+        assert report['proposed_deletions'][0]['approval'] == 'required_from_joe'
         artifact = fixture.root / "out/census.json"
         census.write_report(report, artifact)
         assert json.loads(artifact.read_text())["counts"] == report["counts"]
         cli = subprocess.run([sys.executable, ROOT / "ops/table-usage-census.py"],
                              cwd=ROOT, env={**env, "DATABASE_URL_READER": dsn},
-                             capture_output=True, text=True, timeout=60)
+                             capture_output=True, text=True, timeout=300)
         assert cli.returncode == 0, cli.stderr
         generated = json.loads((ROOT / "out/table-usage-census.json").read_text())
         assert generated["counts"]["referenced"] == 6 and len(generated["tables"]) == 6
         assert generated["provenance"]["transaction_read_only"] == "on"
         assert generated["provenance"]["inventory_entries"] > 0
         print(census.render_summary(report))
-        print("PASS: 17 PostgreSQL fixture checks; owned cluster teardown follows")
+        print("PASS: 19 PostgreSQL fixture checks; owned cluster teardown follows")
     return 0
 
 

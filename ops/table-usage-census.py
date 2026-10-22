@@ -13,7 +13,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from lib.table_usage_sql import python_queries, other_queries, relation_targets
+from lib.table_usage_sql import python_queries, other_queries, relation_targets, SQL_WORD, RELATION, UNKNOWN
 
 
 STATS_RESET_CAVEAT = (
@@ -75,8 +75,9 @@ def build_report(tables, *, references, unresolved, backup_tables):
     }
 
 
-SOURCE_ROOTS = ("mcp-server/src", "ops", "tools", "lib", "pipelines")
-SOURCE_SUFFIXES = {".py", ".js", ".mjs", ".ts", ".tsx", ".sql", ".sh", ".applescript"}
+EXCLUDED_DIRECTORIES = {'.git', '.venv', 'node_modules', 'vendor', 'vendored', 'generated',
+                        'out', 'audits', 'baselines', 'dist', 'build', '__pycache__', 'graphify-out'}
+EXCLUDED_FILES = {'db/schema.sql', 'db/migration-baseline.json'}
 SENSITIVE_PATH = re.compile(r"(?:^|[/_.-])(?:env|credentials?|tokens?|keys?|keychains?|dumps?|secrets?)(?:$|[/_.-])", re.I)
 SYMBOL = re.compile(r"(?:\b(?:async\s+)?def\s+|\bfunction\s+|\b(?:const|let)\s+)([A-Za-z_$][\w$]*)")
 
@@ -108,23 +109,46 @@ def scan_references(root, tables, paths, inventory, functions):
     candidates_emitted = set()
 
     def scan(source, text, signature=None):
-        queries = python_queries(text) if source.endswith('.py') else other_queries(text, '.sql' if signature else Path(source).suffix)
+        suffix = Path(source).suffix
+        if suffix == '.py':
+            queries = python_queries(text)
+        elif signature or suffix in {'.js', '.mjs', '.ts', '.tsx', '.sql', '.sh', '.applescript'}:
+            queries = other_queries(text, '.sql' if signature else suffix)
+        else:
+            queries = []
+        migration = source.startswith('migrations/') and source.endswith('.sql')
+        if migration:
+            dependency_sql = re.sub(
+                r'\b(?:create\s+(?:unlogged\s+)?|alter\s+|drop\s+)table\s+'
+                r'(?:(?:if\s+(?:not\s+)?exists|only)\s+)?[\w."]+',
+                lambda match: re.sub(r'[^\n]', ' ', match[0]), text, flags=re.I)
+            for match in re.finditer(r'\bcreate\s+(?:or\s+replace\s+)?(?:constraint\s+)?'
+                                     r'(?:trigger|policy)\b[^;]*?\bon\s+([\w."]+)', text, re.I):
+                queries.append((text.count('\n', 0, match.start()) + 1, {'select * from ' + match[1]}))
+            for match in RELATION.finditer(dependency_sql):
+                queries.append((dependency_sql.count('\n', 0, match.start()) + 1, {match[0]}))
         seen_queries = set()
         for number, values in queries:
             key = (number, tuple(sorted(values)))
             if key in seen_queries:
                 continue
             seen_queries.add(key)
-            targets, possible = relation_targets(values, tables)
             location = {'source': source, 'line': number}
             if signature:
                 location['function'] = signature
+            sql_values = {value for value in values if SQL_WORD.search(value) or (migration and RELATION.search(value))}
+            targets, possible = relation_targets(sql_values, tables)
+            if sql_values != values or (any(UNKNOWN in value for value in values) and not possible):
+                unresolved.append({'kind': 'unresolved_call_note', **location, 'possible_tables': [],
+                                   'reason': 'Non-SQL or unresolvable expression; no table scope inferred.'})
             for target in targets:
-                references[target].append({'kind': 'dynamic_sql_bounded', **location,
+                references[target].append({'kind': 'migration_dependency' if migration else 'dynamic_sql_bounded', **location,
                                            'resolved_tables': targets})
             if possible:
                 unresolved.append({'kind': 'dynamic_sql', **location, 'possible_tables': possible,
                                    'reason': 'Unresolved relation identifier or SQL expression.'})
+        if migration:
+            return
         symbol = None
         for number, line in enumerate(text.splitlines(), 1):
             declaration = SYMBOL.search(line)
@@ -149,12 +173,17 @@ def scan_references(root, tables, paths, inventory, functions):
     for source in sorted(paths):
         path = root / source
         if SENSITIVE_PATH.search(source):
-            unresolved.append({"kind": "excluded_sensitive_path", "source": source})
-        elif path.suffix in SOURCE_SUFFIXES:
+            unresolved.append({"kind": "excluded_sensitive_path", "source": source, "possible_tables": []})
+        elif path.is_file():
             if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
-                unresolved.append({"kind": "excluded_symlink", "source": source})
+                unresolved.append({"kind": "excluded_symlink", "source": source, "possible_tables": []})
             else:
-                scan(source, path.read_text(encoding="utf-8"))
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    unresolved.append({'kind': 'excluded_nontext', 'source': source, 'possible_tables': []})
+                    continue
+                scan(source, text)
     for function in functions:
         scan("pg_proc", function["definition"], function["signature"])
     return dict(references), unresolved
@@ -271,9 +300,9 @@ def main(argv=None):
     if argv not in ([], ['--source-only']):
         print('usage: table-usage-census.py [--source-only]', file=sys.stderr)
         return 2
-    paths = subprocess.run(['git', 'ls-files', '-z', '--', *SOURCE_ROOTS, 'migrations'], cwd=ROOT,
+    paths = subprocess.run(['git', 'ls-files', '-z'], cwd=ROOT,
                            capture_output=True, check=True).stdout.decode().split('\0')
-    paths = [path for path in paths if path]
+    paths = [path for path in paths if path and path not in EXCLUDED_FILES and not (set(Path(path).parts[:-1]) & EXCLUDED_DIRECTORIES)]
     if argv:
         snapshot = source_catalog(paths)
     else:
@@ -286,7 +315,6 @@ def main(argv=None):
         with psycopg.connect(dsn, connect_timeout=15) as conn:
             snapshot = collect_catalog(conn)
     inventory = source_inventory()
-    paths = [path for path in paths if path.startswith(tuple(part + '/' for part in SOURCE_ROOTS))]
     references, unresolved = scan_references(ROOT, snapshot["tables"],
                                             [path for path in paths if path], inventory, snapshot["functions"])
     report = build_report(snapshot["tables"], references=references, unresolved=unresolved,
@@ -297,7 +325,9 @@ def main(argv=None):
         "catalog_caveat": "Source-only declarations include historical names; row statistics, installed functions and backup membership are unverified." if argv else None,
         "source_head": subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
                                       text=True, check=True).stdout.strip(),
-        "source_roots": SOURCE_ROOTS,
+        "source_roots": ["."],
+        "excluded_directories": sorted(EXCLUDED_DIRECTORIES),
+        "excluded_generated_files": sorted(EXCLUDED_FILES),
         "source_files_considered": len([path for path in paths if path]),
         "inventory_entries": len(inventory),
         "inventory_entries_with_tables_written": sum("tables_written" in item for item in inventory),
@@ -307,9 +337,10 @@ def main(argv=None):
     }
     report["reference_caveat"] = (
         "Lexical matches can include comments, tests and ambiguous names. Symbols are nearest-declaration "
-        "candidates; candidate_verbs share a module and do not prove a call graph. Dynamic SQL and "
-        "excluded sensitive paths produce uncertainty, never a reference. Finite expressions reference only their resolved relations; "
-        "unresolved relation slots are scoped by their known schema/name prefix where possible. "
+        "candidates; candidate_verbs share a module and do not prove a call graph. Unbounded SQL and "
+        "excluded sensitive paths are notes with no inferred table scope. Finite expressions reference only their resolved relations; "
+        "unresolved relation slots require a known table-name prefix to infer a table scope. Schema-only and unbounded slots are notes, "
+        "so this scan does not establish their dependencies. Migration declarations alone are not use. "
         "Static absence never proves runtime absence."
     )
     report["backup_caveat"] = "Membership in the current backup census scope only; not proof of a successful backup."
