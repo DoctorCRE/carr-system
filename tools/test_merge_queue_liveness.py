@@ -381,8 +381,7 @@ class LivenessTests(unittest.TestCase):
                     loop.active = False
                     loop.session()
                     if name == 'update':
-                        self.assertEqual(f.q.db.execute('SELECT outcome FROM entries WHERE id=?', (entry,)).fetchone()[0], 'head_moved')
-                        f.q.enqueue(mq.REPOS[0], 1, f.updated)
+                        self.assertEqual(f.q.db.execute('SELECT outcome FROM entries WHERE id=?', (entry,)).fetchone()[0], 'updated')
                     f.restart()
                     loop.session()
                     self.assertIn((mq.REPOS[0], 1), {(r, n) for r, n, _ in loop.merged})
