@@ -113,8 +113,9 @@ class ReportTests(unittest.TestCase):
                          [("com.carr.test", "program_drift"), ("com.carr.test", "wrong_checkout")])
         line = jobs.render(rows)[-1]
         for text in ("loop scheduled_jobs:com.carr.test:wrong_checkout", "owner orchestrator",
-                     "fix:", "verify:", "auto-clear:", "job-watchdog.py scan"):
+                     "fix:", "verify:", "auto-clear:"):
             self.assertIn(text, line)
+        self.assertNotIn("job-watchdog", line)
 
     def test_working_directory_in_a_nested_worktree_or_symlinked_clone_is_drift(self):
         for actual in ("/machine/carr-system/.claude/worktrees/other", "/tmp/other-clone"):
@@ -388,42 +389,11 @@ class ReportTests(unittest.TestCase):
         self.snapshot["launchctl_print"]["com.carr.test"] = launchctl_print("com.carr.test", argv, live)
         self.assertEqual(jobs.report(self.manifest, self.snapshot, now=1000), [])
 
-    def test_checker_recovery_replaces_stale_watchdog_schedule_banner(self):
-        import job_watchdog as watchdog
-        spec = importlib.util.spec_from_file_location('schedule_cli', ROOT / 'ops/scheduled-jobs-check.py')
-        cli = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cli)
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            manifest = dict(self.manifest, canonical_checkout=raw)
-            status = jobs.status_path(root)
-            row = {"key": "scheduled_jobs:canonical:behind_main", "kind": "scheduled_job_drift",
-                   "subject": "canonical", "reason": "old behind-main warning",
-                   "next_action": "repair fleet-sync", "cleared_at": None}
-            path = root / config['paths']['findings']
-            path.parent.mkdir(parents=True)
-            path.write_text(json.dumps(row) + '\n')
-            with patch.object(jobs, 'status_path', return_value=status), \
-                 patch.object(jobs, 'native_manifest', return_value=manifest), \
-                 patch.object(jobs, 'collect', return_value=self.snapshot), \
-                 patch.object(sys, 'argv', ['scheduled-jobs-check.py', '--now', '1000', '--json']):
-                self.assertEqual(cli.main(), 0)
-            self.assertEqual(watchdog.digest(root, config), '')
-            self.snapshot['git']['behind'] = 3
-            with patch.object(jobs, 'status_path', return_value=status), \
-                 patch.object(jobs, 'native_manifest', return_value=manifest), \
-                 patch.object(jobs, 'collect', return_value=self.snapshot):
-                self.assertEqual(jobs.check(now=1000)[0]['code'], 'behind_main')
-            self.assertIn('scheduled_job_drift', watchdog.digest(root, config))
-            self.assertNotIn('old behind-main warning', watchdog.digest(root, config))
 
     def test_definition_failure_replaces_healthy_observation_and_reaches_banner(self):
-        import job_watchdog as watchdog
         spec = importlib.util.spec_from_file_location('schedule_cli', ROOT / 'ops/scheduled-jobs-check.py')
         cli = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cli)
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
         for error in (ValueError, OSError, KeyError, TypeError):
             with self.subTest(error=error.__name__), tempfile.TemporaryDirectory() as raw:
                 root = Path(raw)
@@ -439,11 +409,8 @@ class ReportTests(unittest.TestCase):
                 rows = json.loads(output.getvalue())
                 self.assertEqual(rows[0]['code'], 'evidence_unavailable')
                 self.assertEqual(json.loads(status.read_text()), rows)
-                self.assertIn('evidence could not be interpreted', watchdog.digest(root, config))
 
     def test_failed_checker_observation_replaces_previous_healthy_status(self):
-        import job_watchdog as watchdog
-        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             manifest = dict(self.manifest, canonical_checkout=raw)
@@ -457,18 +424,7 @@ class ReportTests(unittest.TestCase):
                  patch.object(jobs, 'collect', side_effect=ValueError('bad native evidence')):
                 rows = jobs.check(now=1001)
             self.assertEqual(rows[0]['code'], 'evidence_unavailable')
-            self.assertIn('evidence could not be interpreted', watchdog.digest(root, config))
 
-    def test_watchdog_files_the_same_loop_key_and_does_not_clear_blinded_evidence(self):
-        sys.path.insert(0, str(ROOT / "lib"))
-        import job_watchdog as watchdog
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
-        self.snapshot["git"]["behind"] = 3
-        rows = jobs.report(self.manifest, self.snapshot, now=1000)
-        found = watchdog.detect({"scheduled_jobs": rows}, config, 1000)
-        self.assertEqual(found[0]["key"], "scheduled_jobs:canonical:behind_main")
-        self.assertEqual(found[0]["owner"], "orchestrator")
-        self.assertIn("fleet-sync", found[0]["next_action"])
 
     def test_health_jobs_section_prints_bound_action_and_records_finding(self):
         self.snapshot["git"]["behind"] = 3
@@ -483,81 +439,6 @@ class ReportTests(unittest.TestCase):
                                     capture_output=True, text=True, timeout=15)
             self.assertIn("scheduled_jobs:canonical:behind_main", result.stdout)
             self.assertIn("auto-clear:", result.stdout)
-
-    def test_incomplete_watchdog_scan_retains_previous_drift(self):
-        import job_watchdog as watchdog
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
-        row = {"key": "scheduled_jobs:canonical:behind_main", "kind": "scheduled_job_drift",
-               "subject": "canonical", "reason": "behind", "next_action": "repair fleet-sync",
-               "owner": "orchestrator", "needs_joe": None}
-        class Effects:
-            def report(self, finding):
-                return {}
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            effects = Effects()
-            watchdog.reconcile(root, config, [row], effects, 1000)
-            error = watchdog.finding("collection_error", "scheduled_jobs", "read failed", config,
-                                     blinds=["scheduled_job_drift"])
-            watchdog.reconcile(root, config, [error], effects, 1001)
-            prior = watchdog.read_latest(root / config["paths"]["findings"])[row["key"]]
-            self.assertIsNone(prior["cleared_at"])
-            watchdog.reconcile(root, config, [], effects, 1002)
-            prior = watchdog.read_latest(root / config["paths"]["findings"])[row["key"]]
-            self.assertIsNotNone(prior["cleared_at"])
-
-    def test_complete_scan_closes_the_drift_loop_and_retries_a_failed_closure(self):
-        import job_watchdog as watchdog
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
-        row = {"key": "scheduled_jobs:canonical:behind_main", "kind": "scheduled_job_drift",
-               "subject": "canonical", "reason": "behind", "next_action": "repair fleet-sync",
-               "owner": "orchestrator", "needs_joe": None}
-        class Effects:
-            closed, fail = [], True
-            def report(self, finding):
-                return {"loop_id": "fixture-loop"}
-            def clear(self, finding):
-                if self.fail:
-                    raise RuntimeError("record layer down")
-                self.closed.append(finding["loop_id"])
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            effects = Effects()
-            watchdog.reconcile(root, config, [row], effects, 1000)
-            watchdog.reconcile(root, config, [], effects, 1001)
-            findings = watchdog.read_latest(root / config["paths"]["findings"])
-            self.assertIsNone(findings[row["key"]]["cleared_at"])
-            self.assertEqual(findings["record_error:" + row["key"]]["kind"], "record_error")
-            effects.fail = False
-            watchdog.reconcile(root, config, [], effects, 1002)
-            self.assertEqual(effects.closed, ["fixture-loop"])
-            findings = watchdog.read_latest(root / config["paths"]["findings"])
-            self.assertIsNotNone(findings[row["key"]]["cleared_at"])
-
-    def test_recovery_closes_versioned_loop_and_recurrence_gets_a_new_episode(self):
-        import job_watchdog as watchdog
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
-        row = {"key": "scheduled_jobs:canonical:behind_main", "kind": "scheduled_job_drift",
-               "subject": "canonical", "reason": "behind", "next_action": "repair fleet-sync",
-               "owner": "orchestrator", "needs_joe": None, "first_seen": "episode-one"}
-        responses = [json.dumps({"ok": True, "loop_id": "fixture-loop"}),
-                     json.dumps({"ok": True, "loop": {"loop_id": "fixture-loop", "status": "open", "version": 4}}),
-                     json.dumps({"ok": True, "status": "done"}),
-                     json.dumps({"ok": True, "loop_id": "fixture-loop-two"})]
-        with tempfile.TemporaryDirectory() as raw:
-            effects = watchdog.Effects(Path(raw), config)
-            with patch.object(watchdog, "command", side_effect=responses) as calls:
-                receipt = effects.report(row)
-                self.assertEqual(receipt["loop_id"], "fixture-loop")
-                effects.clear({**row, **receipt})
-                payload = json.loads(calls.call_args_list[-1].args[0][-1])
-                self.assertEqual(payload["base_version"], 4)
-                self.assertEqual(payload["resolution"], "done")
-                self.assertIn("complete scheduled-job scan", payload["outcome"])
-                effects.report({**row, "first_seen": "episode-two"})
-                first = json.loads(calls.call_args_list[0].args[0][-1])
-                second = json.loads(calls.call_args_list[-1].args[0][-1])
-                self.assertNotEqual(first["idempotency_key"], second["idempotency_key"])
 
 
 class ManifestTests(unittest.TestCase):

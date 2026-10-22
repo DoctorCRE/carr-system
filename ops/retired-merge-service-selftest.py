@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Keep the retired merge executor absent and prove each refusal with fixtures."""
 import json
+import os
 from pathlib import Path
 import plistlib
 import subprocess
 import tempfile
+import sys
 import unittest
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from git_env import fixture_env
+
+ENV = fixture_env()
 ROOT = Path(__file__).resolve().parents[1]
 RETIRED = 'merge' + '-queue'
 DECISION = 'Joe decision-history: Merge-queue daemon deleted; merges use GitHub auto-merge bound to the approved head SHA.'
@@ -20,7 +26,7 @@ def violations(root):
                              '--', '.', ':!migrations/**', ':!db/**', ':!ops/evidence/**',
                              ':!audits/**', ':!tools/ci/**', ':!docs/agents/*audit*',
                              ':!**/.env*', ':!**/*credentials*', ':!**/*tokens*',
-                             ':!**/*keys*', ':!**/*keychain*'], capture_output=True, text=True)
+                             ':!**/*keys*', ':!**/*keychain*'], capture_output=True, text=True, env=ENV)
     if labels.returncode not in (0, 1):
         raise RuntimeError(labels.stderr)
     found.extend('retired launchd label in ' + path for path in labels.stdout.splitlines())
@@ -42,7 +48,7 @@ class AbsenceTests(unittest.TestCase):
             config = root / 'ops/config/services.json'
             config.parent.mkdir(parents=True)
             config.write_text('{"services": []}')
-            subprocess.run(['git', 'init', '-q', str(root)], check=True)
+            subprocess.run(['git', 'init', '-q', str(root)], check=True, env=ENV)
             self.assertEqual(violations(root), [])
             retired = root / 'tools' / RETIRED.replace('-', '_')
             retired.mkdir(parents=True)
@@ -50,10 +56,10 @@ class AbsenceTests(unittest.TestCase):
             retired.rmdir()
             label = root / 'renamed.txt'
             label.write_bytes(plistlib.dumps({'Label': 'com.carr.' + RETIRED}))
-            subprocess.run(['git', '-C', str(root), 'add', '--', label.name], check=True)
+            subprocess.run(['git', '-C', str(root), 'add', '--', label.name], check=True, env=ENV)
             self.assertEqual(len(violations(root)), 1, DECISION)
             label.unlink()
-            subprocess.run(['git', '-C', str(root), 'add', '--', label.name], check=True)
+            subprocess.run(['git', '-C', str(root), 'add', '--', label.name], check=True, env=ENV)
             config.write_text(json.dumps({'services': [dict(key='renamed', name='Long-running merge daemon', runtime='launchd')]}))
             self.assertEqual(len(violations(root)), 1, DECISION)
             config.write_text(json.dumps({'services': [dict(key='merge-worker', name='Merge worker', runtime='launchd')]}))
