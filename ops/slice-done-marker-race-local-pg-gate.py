@@ -95,7 +95,7 @@ def disposable_ci_database(dsn: str) -> bool:
     local_disposable = (os.path.isfile(os.path.join(data_path, "PG_VERSION"))
                         and os.path.basename(os.path.dirname(data_path)).startswith("carr-local-pg-ci."))
     hosted_disposable = (os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("CI") == "true"
-                         and os.environ.get("GITHUB_REPOSITORY") == "jbookout/carr-system"
+                         and os.environ.get("GITHUB_REPOSITORY") == "DoctorCRE/carr-system"
                          and data_path == "/var/lib/postgresql/data")
     return (database_name == "carr_ci" and role_name == "carr_ci" and is_superuser is True
             and (local_disposable or hosted_disposable))
