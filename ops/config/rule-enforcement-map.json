@@ -375,8 +375,13 @@
     },
     "control-plane-workflow-manifest": {
       "failure_mode": "The generic ledger runner was deleted. No installed control is claimed at that removed caller.",
-      "implementation": [],
-      "test": []
+      "implementation": [
+        "ops/config/control-plane-workflows.v1.json"
+      ],
+      "test": [
+        "ops/control-plane-selftest.py",
+        "ops/control-plane-db-gate.py"
+      ]
     },
     "costar_lane": {
       "failure_mode": "PreToolUse deny",
@@ -672,8 +677,15 @@
     },
     "verification_status": {
       "failure_mode": "The generic ledger runner was deleted. No installed control is claimed at that removed caller.",
-      "implementation": [],
-      "test": []
+      "implementation": [
+        "migrations/0104_reverify_queue_supersession.sql",
+        "tools/control-plane.py",
+        "lib/control_plane_inputs.py"
+      ],
+      "test": [
+        "ops/control-plane-inputs-selftest.py",
+        "ops/control-plane-db-gate.py"
+      ]
     },
     "versioned_record": {
       "failure_mode": "transaction refusal",
