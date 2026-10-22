@@ -22,6 +22,42 @@ PROVIDER_MODEL = "grok-4.7-build"
 EFFORT = "high"
 TIMEOUT_S = 180.0
 MAX_TURNS = 60
+QUOTA_ERROR = re.compile(r"(?:status\s*[:=]?\s*402\b|usage\s+balance\s+exhausted)", re.I)
+
+
+def quota_error_message(stdout: str, stderr: str = "", *, returncode=0) -> str | None:
+    """Return the provider's quota message only for an explicit 402 signal."""
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            event = None
+        if isinstance(event, dict):
+            if event.get("type") != "error":
+                continue
+            message = event.get("message")
+            error = event.get("error")
+            if not isinstance(message, str):
+                message = error.get("message") if isinstance(error, dict) else error
+            if isinstance(message, str) and QUOTA_ERROR.search(message):
+                return message.strip()[:1000]
+        elif returncode and QUOTA_ERROR.search(line):
+            return line.strip()[:1000]
+    for line in stderr.splitlines():
+        if QUOTA_ERROR.search(line):
+            try:
+                event = json.loads(line)
+            except ValueError:
+                return line.strip()[:1000]
+            if isinstance(event, dict):
+                message = event.get("message")
+                if isinstance(message, str) and message.strip():
+                    return message.strip()[:1000]
+                error = event.get("error")
+                if isinstance(error, dict) and isinstance(error.get("message"), str):
+                    return error["message"].strip()[:1000]
+            return line.strip()[:1000]
+    return None
 
 
 def requested_urls(task: str) -> list[str]:
@@ -216,7 +252,11 @@ def parse_stream(lines, returncode: int = 0, *, model=MODEL) -> dict:
             detail = "grok_invalid_stream"
             break
         if event.get("type") == "error":
-            detail = "grok_error_event"
+            message = event.get("message")
+            if not isinstance(message, str):
+                error = event.get("error")
+                message = error.get("message") if isinstance(error, dict) else None
+            detail = "quota_exhausted" if isinstance(message, str) and QUOTA_ERROR.search(message) else "grok_error_event"
             break
         if event.get("type") == "text":
             if not isinstance(event.get("data"), str):
@@ -260,13 +300,19 @@ def provider_receipt(end: dict, cli_version=None, model=MODEL) -> dict:
                "cost_usd": cost if type(cost) in (int, float) else None, "cli_version": cli_version}
 
 
-def parse_result(stdout: str, returncode: int, *, urls: list[str] | None = None,
+def parse_result(stdout: str, returncode: int, *, stderr: str = "", urls: list[str] | None = None,
                  effort=EFFORT, cli_version=None, require_identity=True, model=MODEL) -> dict:
     parsed = parse_stream(stdout.splitlines(), returncode, model=model)
     end = parsed["end"]
     receipt = provider_receipt(end, cli_version, model)
+    provider_message = quota_error_message(stdout, stderr, returncode=returncode)
+    if provider_message:
+        receipt["provider_message"] = provider_message
+        return {"status": "quota_exhausted", "detail": "quota_exhausted", "code": 4,
+                "result": "" if urls else parsed["text"], "receipt": receipt}
     if parsed["code"]:
-        return {"status": "failed", "detail": parsed["detail"], "code": parsed["code"],
+        return {"status": "quota_exhausted" if parsed["detail"] == "quota_exhausted" else "failed",
+                "detail": parsed["detail"], "code": parsed["code"],
                 "result": "" if urls else parsed["text"], "receipt": receipt}
     if require_identity and not all(isinstance(end.get(key), str) and end[key].strip()
                                     for key in ("requestId", "sessionId")):
@@ -331,8 +377,11 @@ def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFOR
                 proc = invoke(prompt, cwd=cwd, effort=effort, max_turns=max_turns,
                               writable=writable, timeout_seconds=timeout_seconds)
                 raw, returncode = proc.stdout or "", proc.returncode
-            outcome = parse_result(raw, returncode, urls=urls, effort=effort, cli_version=cli_version,
-                                   require_identity=require_identity or retrieval, model=model)
+            outcome = parse_result(
+                raw, returncode, stderr=proc.stderr or "", urls=urls, effort=effort,
+                cli_version=cli_version, require_identity=require_identity or retrieval,
+                model=model,
+            )
         except PreflightError as error:
             outcome = {"status": "failed", "code": error.code,
                        "detail": "grok_sign_in_required" if error.code == 3 else "grok_preflight_failed"}
