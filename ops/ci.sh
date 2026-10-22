@@ -100,8 +100,6 @@ run_quiet() {  # run_quiet <logfile> <cmd...>  — capture output, return status
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/carr-ci.XXXXXX")"
 trap 'rm -rf "$LOGDIR"' EXIT
 
-"$PY" ops/ci-quarantine.py validate || exit 1
-
 INHERIT_ASKED=0
 inherited_abort() {
   [ "$INHERIT_ASKED" = "0" ] || return 0
@@ -270,21 +268,18 @@ PYEOF
     eligible="$eligible $t"
   done
   local pooled_timeout=$(( CI_SELFTEST_TIMEOUT_SECONDS * ${CARR_CI_GATE_JOBS:-4} ))
-  "$PY" ops/ci-quarantine.py snapshot >"$LOGDIR/source-identity.json" || { bad gates "source identity unreadable"; return; }
   export CI_TIMEOUT_HELPER CI_SELFTEST_TIMEOUT_SECONDS LOGDIR PY pooled_timeout
   printf '%s\n' $eligible | xargs -P "${CARR_CI_GATE_JOBS:-4}" -n1 bash -c '
     b="$(basename "$1")"
-    "$PY" ops/ci-quarantine.py run --print-log --test "$1" --log "$LOGDIR/gate-$b.log" \
-      --identity-file "$LOGDIR/source-identity.json" -- \
-      "$PY" "$CI_TIMEOUT_HELPER" "$pooled_timeout" "$PY" "$1" \
-      >"$LOGDIR/gate-$b.report" 2>&1
+    "$PY" "$CI_TIMEOUT_HELPER" "$pooled_timeout" "$PY" "$1" \
+      >"$LOGDIR/gate-$b.log" 2>&1
     echo $? >"$LOGDIR/gate-$b.rc"
   ' _
   local grc
   for t in $eligible; do
     base="$(basename "$t")"
     grc="$(cat "$LOGDIR/gate-$base.rc" 2>/dev/null || echo 1)"
-    cat "$LOGDIR/gate-$base.report"
+    [ "$grc" -eq 0 ] && cat "$LOGDIR/gate-$base.log"
     if [ "$grc" -eq 124 ]; then
       failures="$failures TIMEOUT:$base"
       gates_timed_out=1
@@ -314,9 +309,7 @@ PYEOF
     gate_index=$((gate_index+1))
     [ "$(( (gate_index-1) % GATE_SHARDS + 1 ))" -eq "$GATE_SHARD" ] || continue
     count=$((count+1))
-    "$PY" ops/ci-quarantine.py run --print-log --test "$t" --log "$LOGDIR/gate-$sbase.log" \
-      --identity-file "$LOGDIR/source-identity.json" -- \
-      "$PY" "$CI_TIMEOUT_HELPER" "$CI_SELFTEST_TIMEOUT_SECONDS" "$t"
+    run_quiet "$LOGDIR/gate-$sbase.log" "$PY" "$CI_TIMEOUT_HELPER" "$CI_SELFTEST_TIMEOUT_SECONDS" "$t"
     grc=$?
     if [ "$grc" -eq 124 ]; then
       failures="$failures TIMEOUT:$sbase"

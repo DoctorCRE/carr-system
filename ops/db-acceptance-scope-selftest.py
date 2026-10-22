@@ -59,7 +59,7 @@ check('one DB file among others runs the lane',
 # Derive the lane's own inputs from the files that name them, so the list cannot drift.
 repo = Path(__file__).resolve().parents[1]
 named: set[str] = set()
-for src in ('ops/ci.sh', 'ops/local-pg-ci.py', 'ops/db_acceptance_shards.py'):
+for src in ('ops/ci.sh', 'ops/local-pg-ci.py', 'ops/db_acceptance_programs.py'):
     for lit in re.findall(r'["\']([A-Za-z0-9_./-]+\.(?:py|mjs|sql|sh))["\']', (repo / src).read_text()):
         if '/' in lit and (repo / lit).exists():
             named.add(lit)

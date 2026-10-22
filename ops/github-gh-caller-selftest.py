@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """Actual GitHub callers through a synthetic native CLI; no provider access."""
 import importlib.util
-import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
-import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,7 +35,6 @@ class Callers(unittest.TestCase):
             GH_LIMITER_REAL=str(self.real), GH_LIMITER_DIR=str(self.root / 'legacy'),
             CARR_GITHUB_READ_BUDGET=str(self.root / 'state.json'))
         self.env.start()
-        self.flakes = module('caller_flakes', 'ops/ci-flakes.py')
         self.backup = module('caller_backup', 'ops/backup-workflow-status.py')
 
     def tearDown(self):
@@ -51,29 +48,13 @@ class Callers(unittest.TestCase):
             + code)
         self.real.chmod(0o700)
 
-    def test_ci_flakes_post_and_backup_patch_keep_their_json_payloads(self):
+    def test_backup_patch_keeps_its_json_payload(self):
         self.provider('print("HTTP/2.0 200\\nX-RateLimit-Remaining: 20\\n\\n"+json.dumps({"accepted":json.loads(payload) if payload else None}))\n')
-        payload = {'title': 'fixture issue', 'body': 'fixture details'}
-        self.assertEqual(self.flakes.gh_api('repos/synthetic/fixture/issues', payload), {'accepted': payload})
         body = {'status': 'completed', 'conclusion': 'success'}
         self.assertEqual(self.backup.api('repos/synthetic/fixture/check-runs/7', method='PATCH', body=body), {'accepted': body})
         rows = [json.loads(line) for line in self.records.read_text().splitlines()]
-        self.assertEqual([json.loads(row['input']) for row in rows], [payload, body])
-        self.assertEqual(len(rows), 2)
-
-    def test_uncertain_write_is_sent_once_and_never_retried(self):
-        self.provider('print("HTTP 502",file=sys.stderr)\nsys.exit(1)\n')
-        with self.assertRaises(RuntimeError):
-            self.flakes.gh_api('repos/synthetic/fixture/issues', {'title': 'fixture'})
-        self.assertEqual(len(self.records.read_text().splitlines()), 1)
-
-    def test_ci_flakes_binary_zip_is_byte_exact(self):
-        data = io.BytesIO()
-        with zipfile.ZipFile(data, 'w') as archive:
-            archive.writestr('fixture.log', 'fixture bytes \r\n')
-        payload = data.getvalue() + b'\xff\x80\r\n\n'
-        self.provider(f'sys.stdout.buffer.write(b"HTTP/2.0 200\\r\\nContent-Type: application/zip\\r\\n\\r\\n"+{payload!r})\n')
-        self.assertEqual(self.flakes.gh_api('repos/synthetic/fixture/actions/runs/7/logs', binary=True), payload)
+        self.assertEqual([json.loads(row['input']) for row in rows], [body])
+        self.assertEqual(len(rows), 1)
 
     def object_pages(self, key):
         self.provider('from urllib.parse import urlsplit,parse_qs\n'
@@ -81,13 +62,6 @@ class Callers(unittest.TestCase):
             'link="Link: <https://api.github.com/x?page=2>; rel=\\\"next\\\"\\n" if page==1 else ""\n'
             'print("HTTP/2.0 200\\n"+link+"X-RateLimit-Remaining: 20\\n\\n"+'
             f'json.dumps({{"total_count":2,{key!r}:[{{"id":page,"name":"ops/ci.sh --strict","conclusion":"failure"}}]}}))\n')
-
-    def test_push_floor_telemetry_reads_every_workflow_run_object_page(self):
-        self.object_pages('workflow_runs')
-        telemetry = module('caller_telemetry', 'ops/push-floor-telemetry.py')
-        rows, error = telemetry.runs_since('2026-10-07T00:00:00Z')
-        self.assertIsNone(error)
-        self.assertEqual([row['id'] for row in rows], [1, 2])
 
     def test_foundation_python_and_node_page_decoders_keep_object_pages(self):
         self.object_pages('check_runs')

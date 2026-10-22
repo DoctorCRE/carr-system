@@ -11,26 +11,6 @@ from node_test_summary import FIELDS, test_counts
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = ('mcp-server', 'control-room', 'workspace', 'practice-plugin')
-PREFIX = 'CARR_FLAKE_RESULT '
-
-
-def package_counts(output):
-    receipts = [json.loads(line[len(PREFIX):]) for line in output.splitlines()
-                if line.startswith(PREFIX)]
-    if not receipts:
-        return test_counts(output)
-    total = dict.fromkeys(FIELDS, 0)
-    for receipt in receipts:
-        counts = receipt.get('test_counts')
-        if (receipt.get('first_exit') != 0 or receipt.get('status') != 'passed'
-                or not isinstance(counts, dict) or set(counts) != set(FIELDS)
-                or any(type(value) is not int or value < 0 for value in counts.values())
-                or counts['tests'] != sum(counts[name] for name in FIELDS[1:])):
-            return None
-        for name in FIELDS:
-            total[name] += counts[name]
-    return total
-
 
 def main():
     failed = False
@@ -55,15 +35,7 @@ def main():
                          'npm', '--prefix', package, 'test'], cwd=ROOT,
                         env=env, stdout=output, stderr=subprocess.STDOUT)
                 output = log.read_text(errors='replace')
-                counts = package_counts(output)
-                if result.returncode:
-                    output = '\n'.join(line for line in output.splitlines()
-                                       if not line.startswith(PREFIX)
-                                       or json.loads(line[len(PREFIX):]).get('status') != 'passed')
-                for line in output.splitlines():
-                    if line.startswith('QUARANTINED ') or (
-                            line.startswith(PREFIX) and json.loads(line[len(PREFIX):]).get('status') != 'passed'):
-                        print(line)
+                counts = test_counts(output, multiple=True)
                 if result.returncode:
                     reason = f'command exited {result.returncode}'
                 elif counts is None:

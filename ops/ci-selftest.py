@@ -37,7 +37,7 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/ci-quarantine.py", "ops/node_test_summary.py",
+            "ops/ci.sh", "ops/node_test_summary.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
             "ops/hook-deletion-check.py", "ops/githooks/path-hygiene-check.py",
@@ -55,7 +55,6 @@ def ci_fixture():
             (root / name).mkdir()
             if name not in {"migrations", "mcp-server"}:
                 (root / name / (name.replace("-", "_") + "_fixture.py")).write_text("value: int = 1\n")
-        (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         requirements = "synthetic-package>=1\n"
         (root / "requirements.txt").write_text(requirements)
@@ -109,9 +108,7 @@ def test_freshness_checks_the_tree_without_requiring_main_ancestry():
         root = pathlib.Path(directory)
         (root / "ops/config").mkdir(parents=True)
         (root / "ops/ci.sh").write_bytes(CI.read_bytes())
-        shutil.copy2(REPO / "ops/ci-quarantine.py", root / "ops/ci-quarantine.py")
         shutil.copy2(REPO / "ops/node_test_summary.py", root / "ops/node_test_summary.py")
-        (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         env = fixture_env()
         def git(*args):
@@ -177,11 +174,10 @@ def test_gates_build_hxprobe_before_parallel_selftests():
         (root / "ops/config").mkdir(parents=True)
         (root / "vendor/hxprobe").mkdir(parents=True)
         (root / "bin").mkdir()
-        for name in ("ci.sh", "ci-quarantine.py", "node_test_summary.py", "git_env.py",
+        for name in ("ci.sh", "node_test_summary.py", "git_env.py",
                      "ci-secret-scan.py", "pii_guard.py"):
             shutil.copy2(REPO / "ops" / name, root / "ops" / name)
         shutil.copy2(REPO / "bin/with-timeout.py", root / "bin/with-timeout.py")
-        (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         (root / "vendor/hxprobe/Cargo.toml").touch()
         (root / "ops/probe-selftest.py").write_text(
@@ -223,10 +219,9 @@ def test_hxprobe_runs_locked_checks_and_propagates_failures():
         (root / "ops/config").mkdir(parents=True)
         (root / "vendor/hxprobe").mkdir(parents=True)
         (root / "bin").mkdir()
-        for rel in ("ops/ci.sh", "ops/ci-quarantine.py", "ops/node_test_summary.py",
+        for rel in ("ops/ci.sh", "ops/node_test_summary.py",
                     "ops/ci-secret-scan.py", "ops/pii_guard.py"):
             shutil.copy2(REPO / rel, root / rel)
-        (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         cargo = root / "bin/cargo"
         cargo.write_text("#!/usr/bin/env python3\n"
@@ -404,16 +399,14 @@ def test_gate_shards_execute_a_disjoint_complete_inventory():
             (root / path).write_text("")
         (root / "hooks/gate-integrity.py").write_text("")
         (root / "ops/boot-budget-check.py").write_text("")
-        (root / "ops/ci-quarantine.py").write_text(
-            "import os,pathlib,sys\n"
-            "if sys.argv[1] == 'snapshot': print('{}');sys.exit(0)\n"
-            "path=sys.argv[sys.argv.index('--test')+1]\n"
+        (root / "timeout.py").write_text(
+            "import os,sys\n"
+            "path=sys.argv[-1]\n"
             "with open(os.environ['CALLS'],'a') as out: out.write(path+'\\n')\n"
-            "pathlib.Path(sys.argv[sys.argv.index('--log')+1]).write_text('fixture')\n"
             "sys.exit(7 if path==os.environ.get('FAIL_TEST') else 0)\n")
         prefix = "\n".join(("set -uo pipefail", f"PY={shlex.quote(sys.executable)}",
                               f"LOGDIR={shlex.quote(str(root / 'logs'))}", "FAILED=0",
-                              "CI_SELFTEST_TIMEOUT_SECONDS=1", "CI_TIMEOUT_HELPER=unused",
+                              "CI_SELFTEST_TIMEOUT_SECONDS=1", f"CI_TIMEOUT_HELPER={shlex.quote(str(root / 'timeout.py'))}",
                               "tree_fingerprint() { echo static; }", "ok() { :; }",
                               "bad() { FAILED=1; }", "inherited_abort() { :; }",
                               'run_quiet() { local log="$1"; shift; "$@" >"$log" 2>&1; }',

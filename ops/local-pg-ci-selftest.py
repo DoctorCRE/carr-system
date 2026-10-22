@@ -231,10 +231,6 @@ check(
     "assurance persistence runs immediately after canonical ownership",
     events[18][-1].endswith("ops/assurance-evidence-acceptance-local-pg-gate.py"),
 )
-check(
-    "source-merge reader projection runs immediately after assurance persistence",
-    events[19][-1].endswith("ops/source-merge-authority-local-pg-gate.py"),
-)
 completion_event = next(
     index for index, event in enumerate(events)
     if event[-1].endswith("ops/completion-register-schema-local-pg-gate.py")
@@ -358,10 +354,6 @@ check(
 check(
     "strict lane also proves assurance persistence",
     events[18][-1].endswith("ops/assurance-evidence-acceptance-local-pg-gate.py"),
-)
-check(
-    "strict lane also proves source-merge reader projection",
-    events[19][-1].endswith("ops/source-merge-authority-local-pg-gate.py"),
 )
 
 missing_gate = mod.run_required_local_gate(

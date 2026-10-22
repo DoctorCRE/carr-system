@@ -63,7 +63,7 @@ def relative_imports(roots: list[Path], root: Path) -> frozenset[str]:
 @functools.lru_cache(maxsize=1)
 def proof_inputs() -> frozenset[str]:
     text = (SOURCE_ROOT / 'ops/ci.sh').read_text().split('check_migration_fixtures() {', 1)[1].split('check_binding()', 1)[0]
-    text += (SOURCE_ROOT / 'ops/db_acceptance_shards.py').read_text()
+    text += (SOURCE_ROOT / 'ops/db_acceptance_programs.py').read_text()
     roots = set(re.findall(r'mcp-server/test/[A-Za-z0-9_.-]+\.mjs', text))
     for values in re.findall(r'for proof in ([^;]+); do', text):
         roots.update('mcp-server/test/' + value + '.test.mjs' for value in values.split())

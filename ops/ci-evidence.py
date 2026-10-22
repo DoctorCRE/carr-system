@@ -75,7 +75,7 @@ def contract_digest(root=ROOT):
     digest = hashlib.sha256()
     for name in ('.github/workflows/ci.yml', 'ops/ci.sh', 'ops/ci-unit.py', 'ops/node_test_summary.py',
                  'ops/ci-node-file.mjs',
-                 'ops/ci-quarantine.py', 'requirements.lock',
+                 'requirements.lock',
                  'mcp-server/package-lock.json', '.nvmrc', '.python-version'):
         digest.update(name.encode() + b'\0' + (root / name).read_bytes() + b'\0')
     return digest.hexdigest()
