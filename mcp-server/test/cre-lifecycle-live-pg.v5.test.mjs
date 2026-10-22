@@ -2,6 +2,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, createHash } from "node:crypto";
+import { readMigration } from "./migration-source.testhelper.mjs";
 
 import { digest } from "../src/artifact-trust.js";
 import { ORGANIZATION_TENANT_ID } from "../src/identity.js";
@@ -10,6 +11,12 @@ import {
   v5J102TransitionTruthTable,
   v5J102TransitionContract,
   v5J102MigrationReadiness,
+  assertLifecycleSubject,
+  projectLegacyCompatibilityView,
+  V5_J102_ENGAGEMENT_FIELDS,
+  V5_J102_FIELD_CLASS_REGISTRY,
+  V5_J102_ENGAGEMENT_STATES,
+  V5_J102_RELATIONSHIP_STATES,
 } from "../src/cre-lifecycle.v5.js";
 import { createCreLifecycleStore, v5J102StoreEnvelope } from "../src/cre-lifecycle-store.v5.js";
 import { createRecordSourceAuthorityStore } from "../src/record-source-authority-store.v5.js";
@@ -682,7 +689,7 @@ async function admittedSubject(transition_id, instrument) {
 const TABLE = LIVE ? v5J102TransitionTruthTable() : null;
 
 const UNREACHABLE_STATE_VALUES = Object.freeze([
-  "relationship_state=client_paused", "relationship_state=client_ended",
+  "relationship_state=client_ended",
   "assignment_phase=concluded",
   "negotiation_state=loi_countered", "negotiation_state=loi_rejected",
   "negotiation_state=loi_withdrawn", "negotiation_state=superseded",
@@ -1075,6 +1082,100 @@ async function owner(text, params = []) {
     await c.end();
   }
 }
+
+test("step 2 SQL and kernel agree on engagement facts, vocabulary and migration hold", { skip: SHADOW_SKIP }, async () => {
+  const base = { subject_kind: "engagement", subject_id: "eng-synthetic-step2",
+    relationship_id: "rel-synthetic-step2", engagement_state: "completed",
+    representation_basis: "signed_engagement_letter" };
+  const facts = { effective_date: "2026-10-16", term_end: "2027-10-16",
+    executed_at: "2026-10-19T14:00:00Z", ended_at: "2026-11-01T14:00:00Z",
+    protection_until: "2027-04-30T14:00:00Z", end_reason: "First transaction completed",
+    protected_property_ids: ["property-synthetic-1"], governing_state: "FL" };
+  const [policy] = await owner("select ops.j102_admission_policy() as value");
+  assert.deepEqual(policy.value.engagement_fields, V5_J102_ENGAGEMENT_FIELDS);
+  assert.deepEqual(policy.value.relationship_states, V5_J102_RELATIONSHIP_STATES);
+  assert.deepEqual(policy.value.engagement_states, V5_J102_ENGAGEMENT_STATES);
+  assert.deepEqual(policy.value.reconciliation.field_class_registry, V5_J102_FIELD_CLASS_REGISTRY);
+  const cases = [base, { ...base, ...facts }, { ...base, ...facts, governing_state: "AL" },
+    ...Object.keys(facts).map(field => ({ ...base, [field]: null })),
+    ...Object.entries({ effective_date: "2026-02-30", term_end: "10/16/2027",
+      executed_at: "2026-10-19", ended_at: "2026-02-30T14:00:00Z",
+      protection_until: "2027-04-30T14:00:00", end_reason: 42,
+      protected_property_ids: [null], governing_state: "GA" })
+      .map(([field, value]) => ({ ...base, [field]: value })),
+    { ...base, protected_property_ids: [] }, { ...base, protected_property_ids: "prop-1" },
+    { ...base, end_reason: " " }, { ...base, protected_property_ids: ["bad id"] },
+    { ...base, effective_date: "2028-02-29" }, { ...base, executed_at: "0000-01-01T00:00:00Z" },
+    { ...base, executed_at: "2026-10-19T24:00:00Z" },
+    { ...base, end_reason: "\u00a0trimmed" }, { ...base, end_reason: "bad\u200btext" },
+    { ...base, end_reason: "e\u0301" }, { ...base, end_reason: "x".repeat(1001) },
+    { ...base, protected_property_ids: Array(513).fill("prop-1") }];
+  for (const candidate of cases) {
+    let kernel = true;
+    try { assertLifecycleSubject(candidate); } catch { kernel = false; }
+    const [row] = await owner("select ops.j102_engagement_fields_valid($1::jsonb) as valid", [candidate]);
+    assert.equal(row.valid, kernel, JSON.stringify(candidate));
+  }
+  const [readiness] = await owner("select ops.j102_migration_readiness() as value");
+  assert.equal(readiness.value.decision, "refuse");
+  assert.equal(readiness.value.reason_id, "caller_census_absent");
+  assert.equal(readiness.value.may_retire_callers, false);
+  assert.equal(readiness.value.migration_complete, false);
+  assert.ok(readiness.value.missing_facts.some(fact => fact.fact === "exact_caller_census"));
+});
+
+test("step 2 SQL keeps the legacy projection unchanged across all engagement states", { skip: SHADOW_SKIP }, async () => {
+  const a = await openedAssignment("joe");
+  const [saved] = await owner("select envelope from ops.j102_subject_current where subject_kind='engagement' and subject_id=$1", [a.eng]);
+  const [assignment] = await owner("select ops.j102_subject('assignment',$1) as value", [a.asg]);
+  const kernel = projectLegacyCompatibilityView({ tenant: ORGANIZATION_TENANT_ID,
+    assignment: assignment.value.state });
+  const writeEngagement = async over => {
+    const record = { ...saved.envelope.record, state: { ...saved.envelope.record.state, ...over } };
+    const envelope = { ...saved.envelope, record, record_digest: digest(record) };
+    await owner("update ops.j102_subject_current set envelope=$2, envelope_digest=$3, state_digest=$4 where subject_kind='engagement' and subject_id=$1",
+      [a.eng, envelope, digest(envelope), digest(record.state)]);
+  };
+  for (const engagement_state of V5_J102_ENGAGEMENT_STATES) {
+    await writeEngagement({ engagement_state, effective_date: "2026-10-16",
+      executed_at: "2026-10-19T14:00:00Z", governing_state: "FL" });
+    const [projection] = await owner("select ops.j102_compatibility_view($1,null) as value", [a.asg]);
+    for (const [field, value] of Object.entries(projection.value)) assert.deepEqual(value, kernel[field], field);
+    assert.equal("engagement_state" in projection.value, false);
+    assert.equal("protection_until" in projection.value, false);
+  }
+  await assert.rejects(writeEngagement({ engagement_state: "paused" }), /j102_engagement_state_vocabulary/);
+  await assert.rejects(writeEngagement({ governing_state: "GA" }), /j102_engagement_field_types/);
+  await assert.rejects(writeEngagement({ effective_date: "2026-02-30" }), /j102_engagement_field_types/);
+});
+
+test("step 2 SQL refuses an in-use client_paused state before upgrading", { skip: SHADOW_SKIP }, async () => {
+  const a = await client("joe");
+  const [saved] = await owner("select envelope from ops.j102_subject_current where subject_kind='relationship' and subject_id=$1", [a.rel]);
+  const record = { ...saved.envelope.record, state: { ...saved.envelope.record.state, relationship_state: "client_paused" } };
+  const envelope = { ...saved.envelope, record, record_digest: digest(record) };
+  const migration = readMigration(new URL("../../migrations/0929_j102_engagement_fields.sql", import.meta.url));
+  const guard = migration.slice(0, migration.indexOf("-- Replace the installed literal"));
+  const connection = new pg.Client({ connectionString: OWNER_DSN });
+  await connection.connect();
+  try {
+    await connection.query("set session_replication_role = replica");
+    await connection.query("begin");
+    await assert.rejects(connection.query("update ops.j102_subject_current set envelope=$2, envelope_digest=$3, state_digest=$4 where subject_kind='relationship' and subject_id=$1",
+      [a.rel, envelope, digest(envelope), digest(record.state)]), /j102_relationship_state_vocabulary/);
+    await connection.query("rollback");
+    await connection.query("begin");
+    await connection.query("alter table ops.j102_subject_current drop constraint j102_relationship_state_vocabulary");
+    await connection.query("update ops.j102_subject_current set envelope=$2, envelope_digest=$3, state_digest=$4 where subject_kind='relationship' and subject_id=$1",
+      [a.rel, envelope, digest(envelope), digest(record.state)]);
+    await assert.rejects(connection.query(guard), /j102_client_paused_in_use/);
+  } finally {
+    await connection.query("rollback");
+    await connection.end();
+  }
+  const [restored] = await owner("select ops.j102_subject('relationship',$1) as value", [a.rel]);
+  assert.equal(restored.value.state.relationship_state, "client");
+});
 
 async function legacyRow({ salesforce_id = null, phase, outcome = null, closed_on = null }) {
   const [row] = await owner(
