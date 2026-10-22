@@ -135,7 +135,7 @@ with psycopg.connect(dsn) as conn, conn.cursor() as cur:
     hosted_disposable = (os.environ.get("GITHUB_ACTIONS") == "true"
                          and os.environ.get("CI") == "true"
                          and os.environ.get("CARR_CI_PORTABLE_ONLY") == "1"
-                         and os.environ.get("GITHUB_REPOSITORY") == "jbookout/carr-system"
+                         and os.environ.get("GITHUB_REPOSITORY") == "DoctorCRE/carr-system"
                          and bool(os.environ.get("GITHUB_RUN_ID"))
                          and data_path == "/var/lib/postgresql/data")
     if database_name != "carr_ci" or role_name != "carr_ci" or is_superuser is not True or not (local_disposable or hosted_disposable):
