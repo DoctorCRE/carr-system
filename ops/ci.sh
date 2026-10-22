@@ -44,14 +44,14 @@ while [ "$#" -gt 0 ]; do
       shift ;;
     --migration-part) MIGRATION_PART="${2:-}"; shift ;;
     --list)   LIST=1 ;;
-    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|fixtures|reconstruction|equivalence|shadow] [--gate-shard 1/2|2/2] [--list]"; exit 0 ;;
+    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|gates-serial|gates-isolated|acceptance|fixtures|reconstruction|equivalence|shadow] [--gate-shard 1/2|2/2] [--list]"; exit 0 ;;
     *) echo "ci.sh: unknown argument: $1" >&2; exit 64 ;;
   esac
   shift
 done
 
 case "$MIGRATION_PART" in
-  all|core|proofs|gates|fixtures|reconstruction|equivalence|shadow) ;;
+  all|core|proofs|gates|gates-serial|gates-isolated|acceptance|fixtures|reconstruction|equivalence|shadow) ;;
   *) echo "ci.sh: unknown migration part" >&2; exit 64 ;;
 esac
 
@@ -671,7 +671,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
     return
   fi
 
-  if [ "$MIGRATION_PART" != gates ]; then
+  if [[ "$MIGRATION_PART" != gates* && "$MIGRATION_PART" != acceptance ]]; then
     if ! CARR_RULE_TEST_DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-rule-supersession.log" \
         node --test mcp-server/test/find-rule-supersedes.test.mjs mcp-server/test/one-step-rule-approval.test.mjs; then
       tail -30 "$LOGDIR/migration-rule-supersession.log" >&2
@@ -1053,15 +1053,13 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
     fi
 
     local dsn_read='environ\.get\("(CARR_CI_)?DATABASE_URL"|environ\["(CARR_CI_)?DATABASE_URL"\]|getenv\("(CARR_CI_)?DATABASE_URL"'
-    local db_gate_count=0
-    if [ "$MIGRATION_PART" != proofs ]; then
+    if [[ "$MIGRATION_PART" != proofs && "$MIGRATION_PART" != acceptance ]]; then
       local db_gate_failures="" db_gate_unmarked="" db_gate_declared=""
       _mstep sync
       local db_gates=""
       for g in ops/*-gate.py; do
         [ -f "$g" ] || continue
         if grep -q '^# ci: db-gate' "$g"; then
-          db_gate_count=$((db_gate_count+1))
           db_gates="$db_gates $g"
         elif grep -qE "$dsn_read" "$g"; then
           db_gate_unmarked="$db_gate_unmarked $(basename "$g")"
@@ -1069,7 +1067,9 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
           db_gate_declared="$db_gate_declared\n            $(basename "$g"): $(sed -n 's/^# ci: runs-outside-ci *— *//p' "$g" | head -1)"
         fi
       done
-      if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" $db_gates; then
+      local gate_partition=all
+      case "$MIGRATION_PART" in gates-*) gate_partition="${MIGRATION_PART#gates-}" ;; esac
+      if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" --partition "$gate_partition" $db_gates; then
         db_gate_failures="isolated/serial DB gate runner (see named failures above)"
       fi
       _mstep gates
@@ -1093,7 +1093,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       [ "$FAILED" -eq 0 ] || return
     fi
 
-    ok migration "committed schema loads; ${n:-0} pending migration(s) apply; app-role grants verified live; trigger reads granted; $db_gate_count db acceptance gate program(s) pass (each program reports its own assertions)"
+    ok migration "committed schema loads; ${n:-0} pending migration(s) apply; app-role grants verified live; trigger reads granted; partition $MIGRATION_PART passes (programs report their own assertions)"
   else
     tail -15 "$LOGDIR/migration-grants.log" >&2
     bad migration "the app roles' grants did not survive into the built database"

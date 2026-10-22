@@ -297,8 +297,8 @@ def run_local_ci(
     queued_at: float | None = None,
     job_started_at: float | None = None,
 ) -> int:
-    if migration_part not in {"all", "core", "proofs", "gates"}:
-        raise LocalPGRefusal("local DB lane migration part must be all, core, proofs or gates")
+    if migration_part not in {"all", "core", "proofs", "gates", "gates-serial", "gates-isolated", "acceptance"}:
+        raise LocalPGRefusal("unknown local DB lane migration part")
     if migration_part != "all" and (ci_class != "migration" or report_path is not None or integration_base is not None):
         raise LocalPGRefusal("partitioned migration proof requires the ordinary migration lane")
     programs = select_programs(shard)
@@ -584,7 +584,7 @@ def run_local_ci(
         if exit_code:
             print("local-db-ci: canonical CI failed", file=sys.stderr)
         setup_seconds = time.time() - started
-        if exit_code == 0 and migration_part != "gates":
+        if exit_code == 0 and migration_part in {"all", "core", "acceptance"}:
             acceptance_env = dict(clean_env)
             acceptance_env["PATH"] = f"{binaries.psql.parent}{os.pathsep}{clean_env.get('PATH', '')}"
             acceptance_env["CARR_LOCAL_PG_DSN"] = dsn
@@ -708,7 +708,7 @@ def main() -> int:
         default="migration",
         help="migration is the fast DB lane; strict runs every canonical class locally",
     )
-    parser.add_argument("--migration-part", choices=("all", "core", "proofs", "gates"), default="all",
+    parser.add_argument("--migration-part", choices=("all", "core", "proofs", "gates", "gates-serial", "gates-isolated", "acceptance"), default="all",
                         help="partitioned runs require all sibling verdicts in the hosted aggregate")
     parser.add_argument("--port", type=int, default=55432)
     parser.add_argument("--shard", type=int, choices=(0, 1, 2), default=0,

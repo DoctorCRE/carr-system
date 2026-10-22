@@ -70,7 +70,7 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
           any(st.get('run') == 'ops/ci.sh --strict --only "${{ matrix.classes }}"' for st in main_steps)
           and any('--migration-part proofs' in st.get('run', '') for st in pr_steps)
           and set(pr['jobs']['migration-fixtures']['strategy']['matrix']['part'])
-          == {'reconstruction', 'equivalence', 'shadow', 'gates'})
+          == {'reconstruction', 'equivalence', 'shadow', 'gates-serial', 'gates-isolated', 'acceptance'})
     check('main retains its service and PR limits the shared fixture to unit checks',
           classes['services']['postgres']['image'] in pr['jobs']['classes']['services']['postgres']['image']
           and "contains(matrix.classes, 'unit')" in pr['jobs']['classes']['services']['postgres']['image'])
