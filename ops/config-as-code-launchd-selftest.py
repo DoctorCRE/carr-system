@@ -364,21 +364,26 @@ def retired_launchd_cases() -> list[bool]:
             mod.LAUNCHD_ALT_REPO = {"com.carr.alternate.plist": str(home / "alternate.plist")}
             mod.subprocess.run = fake_launchctl
             names = ("com.carr.retired", "com.carr.current", "com.carr.alternate",
-                     "com.vendor.personal", "local.carr-progress-board", "com.carr.held",
-                     "com.carr.cliproxyapi", "com.carr.fix-train")
+                     "com.carr.declared-link", "com.vendor.personal", "local.carr-progress-board")
             for label in names:
                 (agents / f"{label}.plist").write_text(plist(label))
             (templates / "com.carr.current.plist").write_text(plist("com.carr.current"))
+            (home / "alternate.plist").write_text(plist("com.carr.alternate"))
+            (templates / "com.carr.declared-link.plist").symlink_to(home / "missing-template.plist")
+            retired = ("com.carr.retired", "com.carr.fix-train", "com.carr.cliproxyapi", "com.carr.held")
+            for label in retired:
+                target = agents / f"{label}.plist"
+                target.write_text(plist(label))
+                loaded[label] = str(target)
             hold = home / ".config/carr/launchd-hold"
             hold.parent.mkdir(parents=True)
             hold.write_text("com.carr.held deliberate machine-local hold\n")
             live = agents / "com.carr.retired.plist"
-            loaded["com.carr.retired"] = str(live)
             with contextlib.redirect_stdout(io.StringIO()) as dry:
                 failures = mod.reconcile_retired_launchd(False)
             out.append(check("retirement dry run lists only owned missing templates without effects",
                              failures == [] and "would retire  com.carr.retired.plist" in dry.getvalue()
-                             and dry.getvalue().count("would retire") == 1 and not calls
+                             and dry.getvalue().count("would retire") == len(retired) and not calls
                              and live.exists() and not (home / "Library/LaunchAgents-quarantine").exists(),
                              dry.getvalue()))
             with contextlib.redirect_stdout(io.StringIO()):
@@ -387,9 +392,14 @@ def retired_launchd_cases() -> list[bool]:
             out.append(check("removed template boots out, verifies absent, and preserves bytes in quarantine",
                              failures == [] and not live.exists() and len(quarantined) == 1
                              and quarantined[0].read_text() == plist("com.carr.retired")
-                             and [c[1] for c in calls] == ["print", "bootout", "print"]
-                             and "com.carr.retired" not in loaded, (failures, calls)))
-            out.append(check("current, alternate, machine-local, held and non-carr plists stay untouched",
+                             and [c[1] for c in calls] == ["print", "bootout", "print"] * len(retired)
+                             and not loaded, (failures, calls)))
+            quarantine = home / "Library/LaunchAgents-quarantine/carr-retired"
+            out.append(check("every undeclared CARR label retires despite former exceptions and holds",
+                             all(not (agents / f"{label}.plist").exists()
+                                 and len(copies := list(quarantine.rglob(f"{label}.plist"))) == 1
+                                 and copies[0].read_text() == plist(label) for label in retired)))
+            out.append(check("current, alternate and non-carr plists stay untouched",
                              all((agents / f"{label}.plist").read_text() == plist(label)
                                  for label in names[1:])))
             calls.clear()

@@ -5,7 +5,7 @@ bin/monthly-gate.py loads tools/ops-record.py by a path computed from its own
 `__file__`, so the only way to hand it a fake ledger without touching the real
 one is to copy the unmodified gate into a synthetic root next to a stub
 tools/ops-record.py and run it there. That mirrors
-ops/cc-version-sentinel-selftest.py's approach for bin/cc-version-sentinel.sh,
+the scheduled-task predicate fixtures,
 which faces the same problem (a script that resolves its own dependencies
 relative to its own location, not the caller's).
 
