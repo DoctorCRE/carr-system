@@ -90,7 +90,7 @@ with patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}, clear=True):
 DECLARED_HOSTED = {
     "CARR_LOCAL_PG_ALLOW_HOSTED": "1",
     "GITHUB_ACTIONS": "true",
-    "GITHUB_REPOSITORY": "jbookout/carr-system",
+    "GITHUB_REPOSITORY": "DoctorCRE/carr-system",
     "GITHUB_RUN_ID": "1234567890",
 }
 with patch.dict(os.environ, DECLARED_HOSTED, clear=True):
