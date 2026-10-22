@@ -545,7 +545,7 @@ def _to_codex(
         process_options = ({'cwd': entry['checkout_workspace']}
                            if not thread and entry.get('checkout_workspace') else {})
 
-        reconciliation = {}
+        reconciliation: dict = {}
         started_at = time.time()
         def reconcile(output):
             thread_id, _ = _codex_timeout_activity(output, thread, env)

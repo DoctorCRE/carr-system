@@ -151,7 +151,7 @@ def test_codex_desk_on_a_desktop_held_thread_goes_through_ipc_when_asked():
     with mock.patch.object(dispatch.codex_ipc, "thread_owner", return_value="owner-1"), \
          mock.patch.object(dispatch.codex_ipc, "start_turn",
                            return_value={"status": "delivered", "thread_id": THREAD, "mode": "start"}) as st, \
-         mock.patch.object(dispatch.subprocess, "run",
+         mock.patch.object(dispatch, "_run_headless_process",
                            side_effect=AssertionError("the exec-resume subprocess must not run")):
         out = dispatch._to_codex(entry, "hello", None, live_desktop=True)
     # its own status: the session answers in its window, so no caller that waits
@@ -178,8 +178,8 @@ def test_desktop_route_is_opt_in_so_queue_dispatch_never_repeats_a_turn():
                            side_effect=AssertionError("IPC must not be consulted without opt-in")), \
          mock.patch.object(dispatch.codex_ipc, "start_turn",
                            side_effect=AssertionError("no Desktop turn without opt-in")), \
-         mock.patch.object(dispatch.subprocess, "run", side_effect=lambda argv, **k: ran.append(argv) or Proc()):
-        out = dispatch._to_codex(entry, "hello", None)
+         mock.patch.object(dispatch.subprocess, "run", side_effect=lambda argv, **k: ran.append(argv) or Proc()) as run:
+        out = dispatch._to_codex(entry, "hello", None, provider_run=run)
     assert ran and ran[0][:3] == ["codex", "exec", "resume"]
     assert out.get("status") not in ("delivered", "delivered_live")
 
@@ -264,8 +264,8 @@ def test_codex_desk_without_desktop_owner_still_uses_exec_resume():
         stderr = "boom"
 
     with mock.patch.object(dispatch.codex_ipc, "thread_owner", return_value=None), \
-         mock.patch.object(dispatch.subprocess, "run", side_effect=lambda argv, **k: ran.append(argv) or Proc()):
-        dispatch._to_codex(entry, "hello", None)
+         mock.patch.object(dispatch.subprocess, "run", side_effect=lambda argv, **k: ran.append(argv) or Proc()) as run:
+        dispatch._to_codex(entry, "hello", None, provider_run=run)
     assert ran and ran[0][:3] == ["codex", "exec", "resume"]
 
 
