@@ -77,7 +77,6 @@ def check_exec(label, ok_fn):
 
 nightly=(ROOT/'bin/nightly.sh').read_text()
 matcher=(ROOT/'pipelines/availability_matcher.py').read_text()
-runner=(ROOT/'tools/control-plane.py').read_text()
 sql=read_migration(ROOT, '0227_nightly_availability_canary_record_layer.sql')
 manifest=json.loads((ROOT/'ops/config/control-plane-workflows.v1.json').read_text())
 workflow=next(w for w in manifest['workflows'] if w['key']=='nightly-record-layer')
@@ -92,12 +91,6 @@ check('canary runs only availability matcher from protected stdin',
       and 'nightly canary result:' in nightly and 'carr_take_lock nightly' not in nightly[:nightly.index('case "${1:-}" in')])
 check('child rejects database capability and constrains output to one direct non-symlinked canary run directory',
       'CARR_DB_' in matcher and '_safe_canary_root' in matcher and 'root.parent != base' in matcher and 'root.is_symlink()' in matcher and 'source is vacuous' in matcher and 'os.replace(temp_name, path)' in matcher and 'os.unlink(temp_name)' in matcher)
-check('manifest enables exact v3 isolated canary and code registers its guard',
-      workflow['version']==3 and workflow['execution']['canary']=={'enabled':True,'isolation_guard':'nightly-record-layer.availability-matcher.canary.v1','args':['--canary']}
-      and 'nightly-record-layer.availability-matcher.canary.v1' in (ROOT/'lib/control_plane.py').read_text())
-check('parent alone mints and exact-readbacks a lease-bound source and receipt',
-      'create_nightly_availability_canary_source_snapshot' in runner and 'record_nightly_availability_canary_receipt' in runner
-      and 'resolve_nightly_availability_canary_receipt' in runner and 'nightly canary immutable receipt did not read back' in runner)
 check('database source and receipt bind exact Nightly v3 deterministic canary lease and are append-only',
       "j.definition_key<>'nightly-record-layer' or j.definition_version<>3 or j.mode<>'canary'" in sql
       and 'unique(job_id,attempt)' in sql and 'nightly_availability_canary_source_append_only' in sql
@@ -106,7 +99,7 @@ check('source is database-owned canonical availability/search joins and direct D
       'distinct on (av.space_id)' in sql and 'order by av.space_id,av.observed_at desc,av.id desc' in sql and 'from space_search s join client' in sql
       and 'revoke all on ops.nightly_availability_canary_source_snapshot,ops.nightly_availability_canary_receipt' in sql)
 check('disposable local PostgreSQL CI discovers the mandatory lease, ACL, drift, and race gate',
-      any(p.path == 'ops/nightly-canary-local-pg-acceptance.py' for p in __import__('db_acceptance_shards').select_programs(0))
+      any(p.path == 'ops/nightly-canary-local-pg-acceptance.py' for p in __import__('db_acceptance_programs').PROGRAMS)
       and 'source replay conflicts with canonical snapshot' in (ROOT/'ops/nightly-canary-local-pg-acceptance.py').read_text()
       and "race(['d'*64,'d'*64])" in (ROOT/'ops/nightly-canary-local-pg-acceptance.py').read_text())
 

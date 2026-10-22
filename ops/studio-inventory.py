@@ -123,19 +123,16 @@ def compare(root):
     folder = root / 'out/studio-failover'
     s, m = [json.loads((folder / (h + '.json')).read_text()) for h in ('studio', 'macbook')]
     labels = {p.removesuffix('.plist') for p in PRIMARY_ONLY}
-    captured = {'com.carr.cliproxyapi', 'local.carr-progress-board', 'com.carr.fix-train',
+    captured = {'com.carr.cliproxyapi', 'local.carr-progress-board',
                 'local.ds4-flash-next', 'local.flash-desk'}
     labels.update(captured)
     credentials = {
-        'room-bridge': ['mcp-tokens.env', 'engineering-controller.env'],
         'nightly-record-layer': ['db.env', 'tokens.env', 'healthchecks.env', 'age-key.txt'],
         'nightly-exports-daytime-retry': ['db.env', 'tokens.env'],
         'partner-ping': ['db.env'], 'release-pipeline': ['db.env', 'tokens.env'],
-        'control-plane-tick': ['db.env', 'engineering-controller.env'],
         'job-watchdog': ['db.env', 'mcp-tokens.env'], 'cutover-watch': ['mcp-tokens.env'],
         'delivery-cadence-a05-sweep': ['mcp-tokens.env']}
-    states = {'room-bridge': ['~/.config/carr/room-bridge-state.json', '~/.config/carr/hermes-dispatch-results.jsonl'],
-              'partner-ping': ['~/.config/carr/partner-ping.json'],
+    states = {'partner-ping': ['~/.config/carr/partner-ping.json'],
               'release-pipeline': ['~/carr-system/out/release-pipeline'],
               'local.carr-progress-board': ['~/carr-system/out/boards'],
               'nightly-record-layer': ['~/carr-system/out/backups']}
@@ -167,7 +164,6 @@ def compare(root):
                          'enabled': not installed_role['disabled']})
     manual = [
         ('guarded host startup', 'verify guarded or safely disabled startup on both hosts; bootstrap Studio with failback-to-studio.sh while MacBook is fenced; keep an unprepared returning host off until its old startup jobs are disabled'),
-        ('generated fix-train executable', 'provision and verify out/orch/fix-train.sh from its owning orchestrator'),
         ('local model runtimes', 'provision model binaries and weights; verify their local server endpoints'),
         ('local PostgreSQL instances', 'classify observed test clusters; restore and verify any persistent cluster'),
         ('Model Room profile state', 'restore Hermes profiles and verify non-interactive desk authentication'),
@@ -176,7 +172,7 @@ def compare(root):
     manifest_ref = 'origin/main' if subprocess.run(['git', 'cat-file', '-e',
         'origin/main:ops/config/scheduled-jobs.v1.json'], capture_output=True).returncode == 0 else 'origin/codex/job-manifest-drift'
     scheduled = json.loads(subprocess.check_output(['git', 'show', manifest_ref + ':ops/config/scheduled-jobs.v1.json'], text=True))
-    manifest = {'repository': 'jbookout/carr-system', 'ref': manifest_ref,
+    manifest = {'repository': 'DoctorCRE/carr-system', 'ref': manifest_ref,
                 'captured_machine_role': scheduled.get('captured_machine_role'),
                 'source_sha': subprocess.check_output(['git', 'rev-parse', manifest_ref], text=True).strip(),
                 'path': 'ops/config/scheduled-jobs.v1.json'}

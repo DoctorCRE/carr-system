@@ -1,33 +1,5 @@
 #!/bin/sh
-# pre-push — refuse a direct push to main from anyone but the repo owner.
-#
-# WHY THIS EXISTS. On 2026-08-03 Dell was granted WRITE on carr-system,
-# superseding the read-plus-fork-PR model in team-loops T39 where every change
-# of his went through a pull request Joe approved. That review WAS the guard.
-# GitHub branch protection would replace it, but this repo is private on a free
-# plan and the API refuses: "Upgrade to GitHub Pro or make this repository
-# public to enable this feature." So there is no server-side gate at all.
-#
-# The realistic failure is not malice, it is history. This repo's history was
-# REWRITTEN on 2026-08-01 for the PII purge, which is why Dell re-clones from
-# scratch rather than pulling. A session on a second machine that does not know
-# that can force-push over the purge while doing something entirely reasonable.
-#
-# WHAT THIS IS AND IS NOT. It is an accident-stopper, not a security control.
-# It is a local hook: anyone can bypass it by editing this file, unsetting
-# core.hooksPath, or passing --no-verify. That is fine and expected — it exists
-# to catch the push nobody meant to make, which is the only kind that has ever
-# happened here. If real enforcement is wanted, GitHub Pro at roughly 4 USD a
-# month enables branch protection and this file becomes redundant.
-#
-# HOW IT DECIDES, with no per-machine configuration to forget: the repo owner is
-# identified by git identity. Joe's is set globally on his Mac and matches
-# OWNER_EMAIL below. Any other identity pushing to main is stopped and told to
-# branch instead. An explicit override exists for the case where the owner is on
-# a machine whose identity is not yet configured.
-
-OWNER_EMAIL="64207374+jbookout@users.noreply.github.com"
-PROTECTED="refs/heads/main"
+# Check pushed content locally; GitHub rulesets protect main and its history.
 
 REFS="$(cat)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -37,151 +9,7 @@ export CARR_PUSH_RECEIVER
 printf '%s\n' "$REFS" | python3 "$REPO_ROOT/security/leak_guard.py" \
   --root "$REPO_ROOT" --pre-push --remote "$CARR_PUSH_RECEIVER" || exit 1
 
-# Deliberate escape hatch. Set it for one command, never export it in a profile:
-#   CARR_ALLOW_MAIN_PUSH=1 git push
-if [ "$CARR_ALLOW_MAIN_PUSH" = "1" ]; then
-  exit 0
-fi
-
-# STDIN IS READ ONCE, HERE. Git streams the pushed refs on stdin and a hook gets
-# exactly one pass over them; the owner check below used to consume the stream,
-# which was fine when nothing after it needed the refs. The quality gate now
-# derives the pushed COMMIT RANGE from them, so both readers replay this
-# variable instead of the pipe.
-
-printf '%s\n' "$REFS" | while read -r local_ref local_sha remote_ref remote_sha; do
-  [ "$remote_ref" = "$PROTECTED" ] || continue
-
-  ME="$(git config user.email 2>/dev/null)"
-  [ "$ME" = "$OWNER_EMAIL" ] && continue
-
-  # A deletion or a non-fast-forward is the shape that destroys history.
-  EXTRA=""
-  if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
-    EXTRA="  This push DELETES the branch."
-  elif [ -n "$remote_sha" ] && [ "$remote_sha" != "0000000000000000000000000000000000000000" ]; then
-    if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
-      EXTRA="  This push REWRITES history that is already on the remote — the shape that would undo the 2026-08-01 PII purge."
-    fi
-  fi
-
-  cat >&2 <<EOF
-
-  ────────────────────────────────────────────────────────────────
-  PUSH TO main REFUSED — carr-system pre-push hook
-  ────────────────────────────────────────────────────────────────
-  Pushing as: ${ME:-(no git identity set)}
-  Only the repo owner pushes straight to main.${EXTRA}
-
-  Do this instead:
-
-      git switch -c your-branch-name
-      git push -u origin your-branch-name
-
-  Then open a pull request. Joe reviews and merges. Nothing of yours
-  is blocked by his side and nothing of his is overwritten by yours.
-
-  If you are Joe and this machine has no git identity yet:
-
-      git config --global user.email "$OWNER_EMAIL"
-
-  Genuine one-off override, for this single command only:
-
-      CARR_ALLOW_MAIN_PUSH=1 git push
-
-  ────────────────────────────────────────────────────────────────
-
-EOF
-  exit 1
-done || exit 1
-
-# ---------------------------------------------------------------------------
-# PROGRAM 2 QUALITY GATE, added 2026-08-13.
-#
-# WHY IT IS HERE AND NOT ONLY IN CI. GitHub Actions runs the same checks on every
-# push, but this repo is private on a free plan, so a red CI run cannot BLOCK
-# anything — branch protection and rulesets both refuse with "Upgrade to GitHub
-# Pro" (verified live against both endpoints). Until Pro is enabled, this hook is
-# the only place a failing check actually stops something, so a red tree does not
-# leave the machine.
-#
-# WHAT IT RUNS NOW, AND WHY IT IS LESS THAN IT WAS (2026-08-23 gates council).
-# The paragraph above was written on 2026-08-13, when it was true that "a red CI
-# run cannot BLOCK anything" because the repo was private on a free plan. GitHub
-# Pro was enabled 2026-08-14 and `ops/ci.sh --strict` is now the REQUIRED status
-# check on main: nothing merges red, server-side, whatever this file does. The
-# full ten-class local run stopped being the merge envelope that day and became
-# defence-in-depth paid for in the scarcest resource this shop has -- wall-clock
-# on one contended Mac, times the eleven implementation sessions pushing from it.
-#
-# The council's second chair was explicit that this is a COST TRADE and not a
-# defect finding: the old design was right for its date. What it costs is minutes
-# per push, dominated by the gates class, and what it buys, post-Pro, is catching
-# hosted-CI failures slightly earlier. (This line used to quote a fixed second
-# count for that class. It was measured once and never again, drifted badly, and
-# was still being cited as justification -- so the number is gone rather than
-# refreshed. ops/ci.sh prints the real one on every run.)
-#
-# So the split is now:
-#   * HOSTED keeps the full strict ten-class suite, unchanged, as the gate on
-#     the merge. Nothing was deleted and nothing stopped being checked.
-#   * LOCAL keeps the floor -- the classes that are cheap AND whose failure is
-#     dramatically more expensive to discover later. See check_pushfloor() in
-#     ops/ci.sh for why each member is in it.
-#
-# THE FLOOR IS A SMOKE PATH, TARGETING ABOUT A MINUTE (F4, 2026-09-08). Every
-# check on it is scoped to the pushed diff, so what a push pays for is the
-# selftests of the gates it actually touched. That is a target, not a guarantee:
-# a push that touches several gates pays for several suites, and a slow paired
-# selftest is still slow.
-#
-# What was removed is the one UNBOUNDED item -- check_pushfloor() used to fall
-# back to running the entire gates class whenever the push touched a gate with
-# no paired selftest. The gate is still detected and named; the class runs
-# hosted, where it is the required check that blocks the merge.
-#
-# Nothing is skipped and no timeout is involved. ops/ci.sh prints the floor's
-# own wall-clock on every run, so the cost stays visible rather than remembered
-# -- which is how the stale price above went unnoticed in the first place.
-#
-# WHY A BOUND IS WORTH MORE THAN THE EXTRA COVERAGE. The realistic failure of
-# this hook is not that it misses something; it is that a session facing a
-# six-minute wait reaches for --no-verify, which disables the WHOLE file --
-# owner check, secret scan and all. A floor that always returns quickly is a
-# floor that keeps running.
-#
-# IT STILL CALLS ops/ci.sh AND DEFINES NO CHECKS OF ITS OWN (rule a8c55a47).
-# That is why the subset is expressed as `--only <classes>` rather than as a
-# list of scripts here: a hand-rolled fast suite in this file would be a second
-# implementation, and it would drift from the one CI runs the first time someone
-# added a check to only one of them. The hook chooses classes; it does not
-# define checks.
-#
-# NOT --strict, deliberately. On a laptop there is no throwaway Postgres, so the
-# migration class SKIPs, and under --strict a skip is a failure. Failing every
-# local push over a database that is only ever present in CI would teach everyone
-# to pass --no-verify, which would disable the whole hook rather than one class.
-# CI runs --strict; here a skip is reported and allowed.
-#
-# THE ESCAPE HATCH IS REAL AND STATED. --no-verify skips this, same as it skips
-# the branch guard above. This is an accident-stopper, not a security control:
-# anyone can edit this file or unset core.hooksPath. It exists to catch the push
-# nobody meant to make, which is the only kind that has ever happened here.
-# ---------------------------------------------------------------------------
-
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
-
-# bypass audit item 10 (2026-09-24), REDESIGNED 2026-09-24 (Opus review):
-# CARR_SKIP_CI=1 alone used to skip the floor silently, with no receipt
-# anywhere it was used and printed by the refusal text below as the obvious
-# next move on any failure. A bare skip flag with no stated reason and no
-# trail is exactly the "quiet door" the audit named. A skip now needs a
-# non-empty, non-whitespace-only CARR_SKIP_CI_REASON, AND a receipt that
-# actually lands on disk — a reason of "   " is not a reason, and a skip
-# whose receipt could not be written is not honoured at all: no receipt, no
-# skip, the checks run instead. Fail CLOSED on the receipt write, same
-# direction as everything else in this file that would rather run the checks
-# than silently let one through.
+# The scoped floor catches content failures before upload. Hosted CI runs the full suite.
 _SKIP_REASON_TRIMMED="$(printf '%s' "$CARR_SKIP_CI_REASON" | tr -d '[:space:]')"
 _EFFECTIVE_SKIP_CI="$CARR_SKIP_CI"
 if [ "$CARR_SKIP_CI" = "1" ] 2>/dev/null && [ -z "$_SKIP_REASON_TRIMMED" ]; then
@@ -263,7 +91,7 @@ EOF
     #                not reach the remote, and "it has not happened yet" is the
     #                weakest possible reason to remove that. The gates council
     #                before it ruled the opposite way and in as many words —
-    #                keep owner, no-main and secrets local no matter what. Range-
+    #                keep secrets local no matter what. Range-
     #                scoped it costs about a second. Kept.
     #   migration  — ONLY when the diff touches migrations/. The class is 33s
     #                hosted and needs a throwaway Postgres, so it SKIPs on a

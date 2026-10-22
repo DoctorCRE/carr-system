@@ -467,9 +467,17 @@ class ManifestTests(unittest.TestCase):
             self.assertEqual(jobs.native_manifest(root)["jobs"][0]["interval"],
                              {"StartCalendarInterval": {"Hour": 5, "Minute": 15}})
 
+    def test_native_manifest_has_only_current_cleanup_job(self):
+        manifest = jobs.native_manifest()
+        labels = {job["label"] for job in manifest["jobs"]}
+        self.assertNotIn("com.carr.repo-hygiene-janitor", labels)
+        cleaner = next(job for job in manifest["jobs"] if job["label"] == "com.carr.job-cleaner")
+        self.assertTrue(cleaner["expected_enabled"])
+        self.assertTrue(cleaner["expected_installed"])
+
     def test_definition_only_jobs_are_not_expected_to_run(self):
         manifest = jobs.native_manifest()
-        for label in ("com.carr.repo-hygiene-janitor",):
+        for label in ("com.carr.resource-collector",):
             job = next(j for j in manifest["jobs"] if j["label"] == label)
             self.assertFalse(job["expected_enabled"])
             self.assertFalse(job["expected_installed"])

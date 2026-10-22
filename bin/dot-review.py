@@ -47,7 +47,7 @@ from lib.dot_processes import run_bounded
 REVIEW = runpy.run_path(str(ROOT / "ops/release-pipeline.py"))
 REVIEW_CONFIG = json.loads((ROOT / "ops/config/release-pipeline.v1.json").read_text())
 
-REPOS = {'jbookout/carr-system', 'jbookout/doctorcre-app', 'jbookout/software-factory'}
+REPOS = {'DoctorCRE/carr-system', 'jbookout/doctorcre-app', 'jbookout/software-factory'}
 DOT_MARKER = dot_review_receipts.DOT_MARKER
 SHA = re.compile(r'[0-9a-f]{40}')
 META = re.compile(r'^Dot-Review: (.+)$', re.M)
@@ -177,8 +177,6 @@ def test_commands(tree, files):
                 selected.add(relative)
         if changed.startswith(('bin/dot-', 'out/orch/dot/')):
             selected.update(str(p.relative_to(tree)) for p in candidates if 'dot' in p.name)
-        if changed == 'tools/merge_queue/main.py':
-            selected.add('tools/test_merge_queue.py')
     # Existing CI is the fallback for a changed area with no discoverable module.
     if not selected and (tree / 'ops/ci.sh').exists():
         return [['bash', 'ops/ci.sh', '--only', 'unit']]

@@ -150,7 +150,7 @@ else:
 
 def _identity() -> dict[str, object]:
     return {
-        "repository": "jbookout/carr-system",
+        "repository": "DoctorCRE/carr-system",
         "run_id": 101,
         "run_attempt": 2,
         "head_sha": "a" * 40,
@@ -227,7 +227,7 @@ def _fixture_env(
         **os.environ,
         "PATH": str(bin_dir),
         "GH_TOKEN": "synthetic-fixture-only",
-        "GITHUB_REPOSITORY": "jbookout/carr-system",
+        "GITHUB_REPOSITORY": "DoctorCRE/carr-system",
         "GITHUB_RUN_ID": "101",
         "GITHUB_RUN_ATTEMPT": "2",
         "GITHUB_SHA": "a" * 40,
@@ -486,7 +486,7 @@ def _behavioral_contract() -> None:
             "neutral path creates and reads back neutral, cancels only its run, then waits for kill",
             neutral_item.get("conclusion") == "neutral"
             and create_index >= 0 < readback_index < cancel_index
-            and cancel_urls == ["/repos/jbookout/carr-system/actions/runs/101/cancel"]
+            and cancel_urls == ["/repos/DoctorCRE/carr-system/actions/runs/101/cancel"]
             and alive_after_cancel,
             json.dumps(neutral_calls, sort_keys=True),
         )
@@ -655,7 +655,7 @@ _CHECK_PRODUCERS: dict[str, dict[str, object] | None] = {
 _CHECK_ENVELOPES: dict[str, dict[str, object] | None] = {
     "absent": None,
     "seam_this_head": {
-        "repository": "jbookout/carr-system", "run_id": 99,
+        "repository": "DoctorCRE/carr-system", "run_id": 99,
         "run_attempt": 1, "head_sha": _PROOF_HEAD,
     },
 }
@@ -847,7 +847,7 @@ def _spent_proof_check(proof_id: str = _PROOF_ID) -> dict[str, object]:
     to the current run's own external_id.
     """
     earlier = {
-        "repository": "jbookout/carr-system",
+        "repository": "DoctorCRE/carr-system",
         "run_id": 99,
         "run_attempt": 1,
         "head_sha": _PROOF_HEAD,

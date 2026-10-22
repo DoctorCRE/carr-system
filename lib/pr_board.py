@@ -67,7 +67,7 @@ STALE_DAYS = 7
 WAIT_HOURS = 24
 WINDOW_DAYS = 14
 CLOSE_SUGGEST_DAYS = 3 * STALE_DAYS
-DEFAULT_REPO = "jbookout/carr-system"
+DEFAULT_REPO = "DoctorCRE/carr-system"
 REPORT = SOURCE / "out" / "pr-board.json"
 LOOP_MARKER = "[pr-board:"
 

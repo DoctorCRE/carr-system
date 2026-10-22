@@ -112,8 +112,8 @@ def _reader_args(argv):
         # A parent shell may carry this old ambient variable.  Normal health must
         # not pass it to any child or let a child silently choose a Drive reader.
         os.environ.pop("CARR_VAULT", None)
-    if section not in ("all", "exports", "jobs", "registry", "credentials", "grok-session", "tailscale", "headless", "costs", "uptime", "storage", "sends"):
-        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|grok-session|tailscale|headless|costs|uptime|storage|sends")
+    if section not in ("all", "exports", "jobs", "registry", "credentials", "grok-session", "tailscale", "headless", "costs", "uptime", "sends"):
+        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|grok-session|tailscale|headless|costs|uptime|sends")
     if fixture and recovery:
         raise SystemExit("health-check: --fixture is for hermetic canonical tests only")
     # --act executes every red row's bound action (tools/health_breach.py). It
@@ -766,24 +766,7 @@ print(json.dumps({"registered": sorted(TARGETS), "rows": rows, "retired": retire
                    from ops.v_job_control v join ops.job j on j.id=v.id
                    where v.created_at > now() - interval '40 days' and v.mode='live'
                   order by v.created_at desc;
-                 select 'CPB',
-                        coalesce((select r.activated_at::text
-                                    from ops.calendar_prebrief_runtime_activation_receipt r
-                                    join ops.calendar_prebrief_allowed_calendar a
-                                      on a.sponsor='joe' and a.active_revision_id=r.allowlist_revision_id
-                                    join ops.calendar_prebrief_allowlist_receipt l2
-                                      on l2.id=a.active_revision_id and l2.sponsor='joe'
-                                     and l2.configuration_digest=a.configuration_digest
-                                   where r.id=(select l.id
-                                                 from ops.calendar_prebrief_runtime_activation_receipt l
-                                                where l.sponsor='joe'
-                                                order by l.activated_at desc,l.id desc limit 1)),''),
-                        coalesce((select json_agg(json_build_object(
-                                           'job_id',p.job_id,'attempt',p.attempt,
-                                           'event_count',p.event_count))
-                                    from ops.calendar_prebrief_projection_receipt p
-                                   where p.sponsor='joe'
-                                     and p.captured_at > now() - interval '40 days')::text,'[]')"""
+                 """
         _venv_python = os.path.join(REPO_ROOT, ".venv/bin/python")
         _query_python = _venv_python if os.path.exists(_venv_python) else sys.executable
         p = subprocess.run(
@@ -829,15 +812,6 @@ print(json.dumps({"registered": sorted(TARGETS), "rows": rows, "retired": retire
                         "leased_until": cols[13], "timeout_seconds": int(cols[14]),
                         "completion_receipt_count": int(cols[15]),
                     })
-                elif len(cols) == 3 and cols[0] == "CPB":
-                    try:
-                        receipts = json.loads(cols[2])
-                    except ValueError:
-                        receipts = None
-                    snapshot["calendar_prebrief"] = {
-                        "activated_at": cols[1] or None,
-                        "receipts": receipts if isinstance(receipts, list) else None,
-                    }
             snapshot["job_definitions"] = definitions
             snapshot["jobs"] = rows
         # NO F09 READING IS PERFORMED HERE ANY MORE. This run used to carry one
@@ -1169,125 +1143,6 @@ _GREEN_EVIDENCE: dict = {}
 # but excludes them from its regression diff (review point D).
 
 
-CALENDAR_PREBRIEF_KEY = "calendar-prebrief-projection-joe-daily"
-# The runtime may enqueue only inside 06:30-06:45 America/Chicago and a claim
-# retries once (base 60s, 300s timeout), so a weekday slot is judged an hour on.
-CALENDAR_PREBRIEF_JUDGED_AFTER = timedelta(minutes=60)
-CALENDAR_PREBRIEF_BREACH = (
-    "on breach: update loop #665 (owner joe-desk session) — read "
-    "out/calendar-prebrief-joe-launchd.log and the job's failure_class, fix the named "
-    "gate, verify with the next 06:30 weekday receipt; clears when the latest due slot "
-    "succeeds with event_count > 0")
-
-
-def _calendar_prebrief_standing(snap):
-    """Joe's live calendar prebrief: a missed weekday run, or 0 events 2 runs running.
-
-    Returns (finding_key, detail) pairs. Silent (no finding) while the prebrief is
-    not activated: an allowlist changed after the last activation fences the
-    scheduler by design, and a fenced job is not a missed one. Once activated,
-    every weekday 06:30 America/Chicago slot at or after the activation must end
-    in a succeeded job carrying a projection receipt, and the two latest
-    receipted slots must not both have read zero events — a bounded 52-day window
-    over Joe's primary calendar that is empty two weekdays in a row is a broken
-    source (wrong calendar, lost permission), not a quiet week.
-    """
-    state = snap.get("calendar_prebrief")
-    if not isinstance(state, dict):
-        return []
-    enabled = {d.get("key") for d in snap.get("job_definitions") or [] if isinstance(d, dict)}
-    activated = _iso(state.get("activated_at"))
-    if CALENDAR_PREBRIEF_KEY not in enabled or activated is None:
-        return []
-    receipts = state.get("receipts")
-    counts = {}
-    for row in receipts if isinstance(receipts, list) else [None]:
-        if (not isinstance(row, dict) or not isinstance(row.get("job_id"), str)
-                or type(row.get("attempt")) is not int or type(row.get("event_count")) is not int):
-            return [("calendar_prebrief_unreadable",
-                     f"{CALENDAR_PREBRIEF_KEY} projection receipts unreadable · {CALENDAR_PREBRIEF_BREACH}")]
-        counts[(row["job_id"], row["attempt"])] = row["event_count"]
-    zone = ZoneInfo("America/Chicago")
-    now = _canonical_now(snap)
-    jobs = [j for j in _live_jobs(snap) if j.get("definition_key") == CALENDAR_PREBRIEF_KEY]
-    slots = []
-    # The job ledger read covers 40 days; judge the recent fortnight only.
-    day = max(activated, now - timedelta(days=14)).astimezone(zone).date()
-    while True:
-        slot = datetime(day.year, day.month, day.day, 6, 30, tzinfo=zone)
-        if slot + CALENDAR_PREBRIEF_JUDGED_AFTER > now:
-            break
-        # The scheduler can still enqueue a slot until 06:45 local.
-        if day.isoweekday() <= 5 and slot + timedelta(minutes=15) > activated:
-            slots.append(slot)
-        day += timedelta(days=1)
-    if not slots:
-        return []
-    outcomes = []  # (slot, event_count or None when no receipted success, job state)
-    for slot in slots:
-        match = [j for j in jobs if _iso(j.get("scheduled_for")) == slot.astimezone(timezone.utc)]
-        done = [counts[(j.get("id"), j.get("attempt"))] for j in match
-                if j.get("state") == "succeeded" and (j.get("id"), j.get("attempt")) in counts]
-        outcomes.append((slot, done[0] if done else None,
-                         match[0].get("state") if match else "never scheduled"))
-    findings = []
-    latest_slot, latest_events, latest_state = outcomes[-1]
-    if latest_events is None:
-        missed = sum(1 for _, events, _ in outcomes[-2:] if events is None)
-        findings.append(("calendar_prebrief_missed_run",
-                         f"{CALENDAR_PREBRIEF_KEY} MISSED its "
-                         f"{latest_slot.strftime('%Y-%m-%d %H:%M %Z')} run ({latest_state}); "
-                         f"{missed} of the last {min(2, len(outcomes))} weekday slot(s) missed "
-                         f"· {CALENDAR_PREBRIEF_BREACH}"))
-    read = [(slot, events) for slot, events, _ in outcomes if events is not None]
-    if len(read) >= 2 and read[-1][1] == 0 and read[-2][1] == 0:
-        findings.append(("calendar_prebrief_zero_events",
-                         f"{CALENDAR_PREBRIEF_KEY} read 0 events on its last 2 runs "
-                         f"({read[-2][0].date()}, {read[-1][0].date()}) "
-                         f"· {CALENDAR_PREBRIEF_BREACH}"))
-    return findings
-
-
-CALENDAR_PREBRIEF_LAST_RUN = os.path.join(REPO_ROOT, "out", "calendar-prebrief-joe-last-run.json")
-CALENDAR_PREBRIEF_UNKNOWN_BREACH = (
-    "on breach: attendee intake (rule d7c69aa6) — search mail, research, then create the "
-    "record for each skipped attendee; owner joe-desk session; verify with the next "
-    "prebrief's count; clears at 0")
-
-
-def _calendar_prebrief_unknowns(now, path=CALENDAR_PREBRIEF_LAST_RUN):
-    """Skipped unknown attendees in the latest completed Joe prebrief (migration 0735).
-
-    Since 0735 an outside attendee the record does not know no longer refuses the
-    snapshot; it is skipped and counted. The count is intake debt, not a failure,
-    so it is surfaced here (the runtime's addressless last-run summary is the only
-    place it lives) and cleared by intake. A summary older than four days is
-    ignored: a stale run is the missed-run finding's business, not this one's.
-    The summary is written under the checkout the runtime runs from, so a
-    health run from any other checkout finds no file and stays silent.
-    Returns (finding_key, detail) pairs; never an address.
-    """
-    try:
-        with open(path, encoding="utf-8") as fh:
-            body = json.load(fh)
-    except FileNotFoundError:
-        return []
-    except (OSError, ValueError):
-        return [("calendar_prebrief_unknowns_unreadable",
-                 f"{CALENDAR_PREBRIEF_KEY} last-run summary unreadable · {CALENDAR_PREBRIEF_UNKNOWN_BREACH}")]
-    report = body.get("unknown_attendees") if isinstance(body, dict) else None
-    when = _iso(body.get("scheduled_for")) if isinstance(body, dict) else None
-    if (not isinstance(report, dict) or type(report.get("count")) is not int
-            or report["count"] < 0 or when is None):
-        return [("calendar_prebrief_unknowns_unreadable",
-                 f"{CALENDAR_PREBRIEF_KEY} last-run summary malformed · {CALENDAR_PREBRIEF_UNKNOWN_BREACH}")]
-    if now - when > timedelta(days=4) or report["count"] == 0:
-        return []
-    return [("calendar_prebrief_unknown_attendees",
-             f"{CALENDAR_PREBRIEF_KEY} skipped {report['count']} unknown outside attendee(s) "
-             f"on its {when.date()} run · {CALENDAR_PREBRIEF_UNKNOWN_BREACH}")]
-
-
 # MONITORS NOT YET PROVISIONED (Joe 2026-10-06: "don't just leave them in place and let them
 # block things"). Both checks landed with today's batch before their backing services existed,
 # so their "cannot read" state failed every release's health baseline. Until provisioning lands,
@@ -1385,8 +1240,6 @@ def _host_liveness_rows():
     return module.rows(live, config)
 
 
-
-
 def _cloudflare_spend_row():
     """(line, failed, not_run) from the Cloudflare spend guard's local receipt; no network.
 
@@ -1431,24 +1284,6 @@ def _system_cost_row():
     return snapshot, system_costs.health_row(snapshot, 'nightly collector owns reconciliation')
 
 
-def _branch_janitor_row():
-    sys.path.insert(0, os.path.join(REPO_ROOT, "lib"))
-    from branch_retirement import health
-    return health(REPO_ROOT)
-
-
-def _storage_hygiene_row():
-    if sys.platform != "darwin":
-        return ("SKIP storage hygiene — Studio Data volume check not applicable "
-                "outside macOS", False)
-    import storage_hygiene
-    _tmp, clone_root, _replay = storage_hygiene.storage_roots()
-    used, clones = storage_hygiene.storage_snapshot(
-        Path("/System/Volumes/Data"), clone_root)
-    return (storage_hygiene.health_row(used_bytes=used, clone_count=clones),
-            used > storage_hygiene.DATA_THRESHOLD_BYTES)
-
-
 def _system_sends_row():
     """lib/system_sender.py's own row: today's sends against the cap, shadow vs
     live, kill-switch state, held dedupe claims, config validity. Same reader
@@ -1489,7 +1324,7 @@ def _canonical_health():
             rc = _red('system_costs', _cost_line, hard_error=_cost_snapshot['state'] == 'unavailable'
                       and 'system_costs' not in PROVISIONING_PENDING)
     try:
-        snap = {} if CANONICAL_SECTION in ("grok-session", "storage", "uptime", "sends") else _canonical_snapshot()
+        snap = {} if CANONICAL_SECTION in ("grok-session", "uptime", "sends") else _canonical_snapshot()
     except Exception as exc:
         print(f"canonical health: REFUSED ({type(exc).__name__}: {exc})")
         _red("canonical_health_refused", f"{type(exc).__name__}: {exc}", hard_error=True)
@@ -1505,20 +1340,7 @@ def _canonical_health():
         return 1
 
     print(f"Façade check (rule 28) — {time.strftime('%Y-%m-%d %H:%M')} — canonical receipts, not Drive renders")
-    if CANONICAL_SECTION in ("all", "storage") and not CANONICAL_FIXTURE:
-        try:
-            storage_line, storage_failed = _storage_hygiene_row()
-            print("  " + storage_line)
-            if storage_failed:
-                rc = _red("storage_capacity", storage_line, subject="studio-data-volume",
-                          time_rolling=True)
-        except (OSError, ValueError) as exc:
-            storage_line = (f"storage hygiene unavailable ({type(exc).__name__}) · on breach: "
-                            "owner orchestrator · restore tools/storage_hygiene.py · "
-                            "verify: run.sh health --section storage · auto-clear after readback")
-            print("  WARN " + storage_line)
-            rc = _red("storage_health_unavailable", storage_line,
-                      subject="studio-data-volume", hard_error=True)
+
     if CANONICAL_SECTION in ("all", "jobs") and not CANONICAL_FIXTURE:
         flash_line = flashlib.health_row()
         print("  " + flash_line)
@@ -1673,22 +1495,6 @@ def _canonical_health():
                 detail = f"{job.get('definition_key')} job={job.get('id')} {why}"
                 print(f"  ⚠︎ {detail}")
                 rc = _red("job_stuck", detail, subject=str(job.get("definition_key")))
-            prebrief = _calendar_prebrief_standing(snap)
-            if not CANONICAL_FIXTURE:
-                prebrief += _calendar_prebrief_unknowns(_canonical_now(snap))
-            for key, detail in prebrief:
-                print(f"  ⚠︎ {detail}")
-                # A missed slot is a specific calendar instant, reported like
-                # job_missing_due; zero events is a state, not a clock crossing.
-                # Skipped-attendee counts are intake debt that moves daily. The
-                # key is time_rolling but NOT on the release pipeline's
-                # first-appearance allowlist, so the release gate still diffs it
-                # like doctrine_gate: a first appearance between baseline and
-                # live read fails that release. The finding carries count 1,
-                # so N rising day to day does not.
-                rc = _red(key, detail, subject=CALENDAR_PREBRIEF_KEY,
-                          time_rolling=(key in ("calendar_prebrief_missed_run",
-                                                "calendar_prebrief_unknown_attendees")))
             # THE CARRIED COUNT RIDES ON THE LINE EITHER WAY, same contract the
             # exports section uses for retired targets: a chosen state stays
             # visible rather than becoming silence (rule bd4a6d22).
@@ -1696,7 +1502,7 @@ def _canonical_health():
                 print(f"  -- CARRIED {len(legacy)} definition(s) still on a legacy "
                       f"scheduler, no Control Plane ledger row expected: "
                       f"{', '.join(legacy)}")
-            if not (bad or unreceipted or missing or stuck or prebrief):
+            if not (bad or unreceipted or missing or stuck):
                 print(f"  OK {len(live_jobs)} live job(s), every due window present; "
                       "no terminal failure, stuck state, or unreceipted success")
         # NEITHER OF THE TWO CENSUS SECTIONS CAN TURN THIS PROCESS RED, and
@@ -1996,18 +1802,6 @@ def _canonical_health():
             print(f"  ⚠︎ {'credential health':<18} check failed ({type(e).__name__}: {e})")
             rc = _red("credential_health", f"check failed ({type(e).__name__}: {e})", hard_error=True)
 
-    if CANONICAL_SECTION in ("all", "jobs") and not CANONICAL_FIXTURE:
-        print("Branch retirement — local scheduled receipts")
-        try:
-            line, failed = _branch_janitor_row()
-            print("  " + line)
-            if failed:
-                rc = _red("branch_janitor", line, subject="three-repo-retirement")
-        except Exception as exc:
-            line = (f"branch janitor unavailable ({type(exc).__name__}) · on breach: owner orchestrator "
-                    "· restore lib/branch_retirement.py · verify health · auto-clear after successful readback")
-            print("  WARN " + line)
-            rc = _red("branch_janitor", line, subject="three-repo-retirement")
 
     if CANONICAL_SECTION in ("all", "uptime") and not CANONICAL_FIXTURE:
         line, failed = _uptime.row()
@@ -2338,7 +2132,7 @@ _db_env_line = db_env_parse_failure()
 if _db_env_line is not None:
     print(f"  ⚠︎ {'db.env':<18} UNSOURCEABLE — {DB_ENV} does not parse as shell at line "
           f"{_db_env_line}. Every job that does `set -a; . db.env` (bin/migrate-prod.sh, "
-          f"bin/nightly.sh, bin/control-plane-tick.sh and the rest) "
+          f"bin/nightly.sh and the other scheduled jobs) "
           f"loses ALL of its keys, not just the bad one, and reports its credential missing. "
           f"Fix: single-quote that value  · one bad line disables every credential here")
     rc = 1

@@ -1444,20 +1444,20 @@ async function require0066(c) {
 // ---------- code subjects (0101, loop #211) ----------
 
 // THE ONE REPO. CARR CLAUDE.md rev 10: "the code lives in ONE repo:
-// jbookout/carr-system". A caller who writes `commit:<sha>` and names no repo means
+// DoctorCRE/carr-system". A caller who writes `commit:<sha>` and names no repo means
 // this one, because there is no other. The schema deliberately does NOT hard-code
 // it — a second repo is a real possibility and a schema forbidding it would be a
 // lie — so the default lives here, at the caller's edge, where it is a convenience
 // rather than a constraint.
-const DEFAULT_REPO = "jbookout/carr-system";
+const DEFAULT_REPO = "DoctorCRE/carr-system";
 const SHA_RE = /^[0-9a-f]{7,40}$/i;
 const REPO_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 
 // Parse the forms a reviewing seat actually writes, in the order it writes them:
 //   commit:f7abde7               -> the one repo at that commit
-//   jbookout/carr-system@f7abde7 -> any repo at that commit
-//   repo:jbookout/carr-system    -> the repo itself (a finding about the codebase,
-//   jbookout/carr-system            not about one change)
+//   DoctorCRE/carr-system@f7abde7 -> any repo at that commit
+//   repo:DoctorCRE/carr-system    -> the repo itself (a finding about the codebase,
+//   DoctorCRE/carr-system            not about one change)
 // Returns { repo, sha } with sha null for a repo-level subject.
 function parseCodeRef(raw) {
   const s = String(raw || "").trim();
@@ -3714,7 +3714,7 @@ export const TOOLS = {
 
   "integrity-digest": {
     write: false,
-    description: "The heartbeat's lines: row counts, export freshness (dead-man; stale/last_ok per target), writes_by_dell_24h, norm_owed_open, merge_queue, triage queue.",
+    description: "The heartbeat's lines: row counts, export freshness (dead-man; stale/last_ok per target), writes_by_dell_24h, norm_owed_open, triage queue.",
     inputSchema: { type: "object", properties: {} },
     handler: async (c) => ({ digest: (await c.query("select * from v_integrity_digest")).rows }),
   },

@@ -324,7 +324,7 @@ def main() -> int:
         rc.set_github_secret("postgresql://carr_backup:NEVERPRINT@host/db?sslmode=require")  # ci-secret-scan: allow — hermetic fixture
         gh_environment = cast(dict[str, str], recorded["env"])
         check("GitHub call pins repository, host, and a bounded timeout",
-              recorded["argv"] == ["gh", "secret", "set", "BACKUP_DATABASE_URL", "--repo", "jbookout/carr-system"]
+              recorded["argv"] == ["gh", "secret", "set", "BACKUP_DATABASE_URL", "--repo", "DoctorCRE/carr-system"]
               and gh_environment["GH_HOST"] == "github.com" and recorded["timeout"] == 30)
         rc.subprocess.run = lambda *a, **k: (_ for _ in ()).throw(subprocess.TimeoutExpired("gh", 30))
         check("GitHub timeout is secret-free and resumable", "timed out" in refused(

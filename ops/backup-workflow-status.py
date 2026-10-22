@@ -77,7 +77,7 @@ MAX_CHECK_PAGES = 5
 # that read its own expected value from the environment would be no guard.
 CONTROLLED_FAILURE_EVENT = "workflow_dispatch"
 CONTROLLED_FAILURE_ACTOR = "jbookout"
-CONTROLLED_FAILURE_REPOSITORY = "jbookout/carr-system"
+CONTROLLED_FAILURE_REPOSITORY = "DoctorCRE/carr-system"
 CONTROLLED_FAILURE_REF = "refs/heads/main"
 CONTROLLED_FAILURE_REASON = "approved WR54 controlled failure before dump"
 # The one workflow the reviewed dispatch door below can start. A literal for the
@@ -101,7 +101,7 @@ CONTROLLED_FAILURE_EXIT = 9
 # installation can copy byte for byte, and none of them is consulted now.
 # The app stamp IS the provider's attribution of which installation created a
 # row -- necessary, and on its own nowhere near sufficient. Re-verify the pair:
-#   gh api /repos/jbookout/carr-system/commits/<sha>/check-runs \
+#   gh api /repos/DoctorCRE/carr-system/commits/<sha>/check-runs \
 #     --jq '.check_runs[] | select(.name=="Backup artifact") | .app | {id, slug}'
 # IF EITHER LITERAL IS WRONG THE EXCLUSION SIMPLY NEVER FIRES: the seam's own
 # earlier failure then counts as red and a later proof refuses. That is the

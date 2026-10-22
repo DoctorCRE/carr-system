@@ -11,7 +11,7 @@ test("the published board and durable answer poller pass their CLI contract", (t
   const run = spawnSync("python3", ["-m", "unittest",
     "tools/test-progress-hierarchy.py", "tools/test-progress-board.py", "tools/test-progress-board-consumer-proof.py",
     "tools/test-progress-board-1380.py", "tools/test-progress-board-clean.py",
-    "tools/test-progress-board-size.py", "tools/test-progress-board-rest.py",
+    "tools/test-progress-board-size.py", "tools/test-progress-board-github.py",
   ], {
     cwd: new URL("../../", import.meta.url), encoding: "utf8",
     env: { ...process.env, TMPDIR: root, TMP: root, TEMP: root,

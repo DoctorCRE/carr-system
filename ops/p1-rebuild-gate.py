@@ -359,7 +359,7 @@ def main() -> int:
         # the DB gate verifies exact registry parity; seeding it earlier would
         # fail on a fresh database where job definitions do not yet exist.
         synced = subprocess.run(
-            [sys.executable, str(REPO / "tools" / "control-plane.py"), "sync"],
+            [sys.executable, str(REPO / "tools" / "workflow-registry.py"), "sync"],
             capture_output=True, text=True, timeout=600,
             env={**os.environ, "DATABASE_URL": rebuilt_dsn})
         check("2b1. authority sync populates the FK-bound scheduler registry after definitions",
@@ -379,20 +379,6 @@ def main() -> int:
             jobs_login_detail = f"{type(exc).__name__}: {str(exc)[:160]}"
         check("2c. rebuilt carr_jobs authenticates as session_user/current_user carr_jobs",
               jobs_login_ok, jobs_login_detail)
-
-        # The migration chain existing is not enough: exercise the job ledger,
-        # authority structure and owner-session refusal, retries, leases, receipts, cache, provider
-        # health, and cost admission on the same disposable Neon database.
-        control_plane = subprocess.run(
-            [sys.executable, str(REPO / "ops" / "control-plane-db-gate.py")],
-            capture_output=True, text=True, timeout=900,
-            env={**os.environ, "DATABASE_URL": rebuilt_dsn})
-        check("2d. control-plane ledger, authority structure/owner-refusal gate passes",
-              control_plane.returncode == 0,
-              control_plane.stderr.strip().splitlines()[-1][:200]
-              if control_plane.stderr.strip() else
-              control_plane.stdout.strip().splitlines()[-1][:200]
-              if control_plane.stdout.strip() else "")
 
         # ── 3. the rebuilt database carries the tables the system needs ──────
         missing = []

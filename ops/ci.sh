@@ -20,11 +20,6 @@ if [ "${1:-}" = "--doc-drift" ]; then
   exec "${CARR_DOC_DRIFT_PYTHON:-$PY}" "$REPO/scripts/doc-drift/ci.py" "$@"
 fi
 
-if [ "${1:-}" = "--pr-skills" ]; then
-  node --test mcp-server/test/pr-skills.test.mjs || exit 1
-  exec node ops/check-pr-skills.mjs
-fi
-
 STRICT=0
 ONLY=""
 MIGRATION_PART=all
@@ -98,8 +93,6 @@ run_quiet() {  # run_quiet <logfile> <cmd...>  — capture output, return status
 
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/carr-ci.XXXXXX")"
 trap 'rm -rf "$LOGDIR"' EXIT
-
-"$PY" ops/ci-quarantine.py validate || exit 1
 
 INHERIT_ASKED=0
 inherited_abort() {
@@ -269,21 +262,18 @@ PYEOF
     eligible="$eligible $t"
   done
   local pooled_timeout=$(( CI_SELFTEST_TIMEOUT_SECONDS * ${CARR_CI_GATE_JOBS:-4} ))
-  "$PY" ops/ci-quarantine.py snapshot >"$LOGDIR/source-identity.json" || { bad gates "source identity unreadable"; return; }
   export CI_TIMEOUT_HELPER CI_SELFTEST_TIMEOUT_SECONDS LOGDIR PY pooled_timeout
   printf '%s\n' $eligible | xargs -P "${CARR_CI_GATE_JOBS:-4}" -n1 bash -c '
     b="$(basename "$1")"
-    "$PY" ops/ci-quarantine.py run --print-log --test "$1" --log "$LOGDIR/gate-$b.log" \
-      --identity-file "$LOGDIR/source-identity.json" -- \
-      "$PY" "$CI_TIMEOUT_HELPER" "$pooled_timeout" "$PY" "$1" \
-      >"$LOGDIR/gate-$b.report" 2>&1
+    "$PY" "$CI_TIMEOUT_HELPER" "$pooled_timeout" "$PY" "$1" \
+      >"$LOGDIR/gate-$b.log" 2>&1
     echo $? >"$LOGDIR/gate-$b.rc"
   ' _
   local grc
   for t in $eligible; do
     base="$(basename "$t")"
     grc="$(cat "$LOGDIR/gate-$base.rc" 2>/dev/null || echo 1)"
-    cat "$LOGDIR/gate-$base.report"
+    [ "$grc" -eq 0 ] && cat "$LOGDIR/gate-$base.log"
     if [ "$grc" -eq 124 ]; then
       failures="$failures TIMEOUT:$base"
       gates_timed_out=1
@@ -313,9 +303,7 @@ PYEOF
     gate_index=$((gate_index+1))
     [ "$(( (gate_index-1) % GATE_SHARDS + 1 ))" -eq "$GATE_SHARD" ] || continue
     count=$((count+1))
-    "$PY" ops/ci-quarantine.py run --print-log --test "$t" --log "$LOGDIR/gate-$sbase.log" \
-      --identity-file "$LOGDIR/source-identity.json" -- \
-      "$PY" "$CI_TIMEOUT_HELPER" "$CI_SELFTEST_TIMEOUT_SECONDS" "$t"
+    run_quiet "$LOGDIR/gate-$sbase.log" "$PY" "$CI_TIMEOUT_HELPER" "$CI_SELFTEST_TIMEOUT_SECONDS" "$t"
     grc=$?
     if [ "$grc" -eq 124 ]; then
       failures="$failures TIMEOUT:$sbase"
@@ -437,7 +425,7 @@ check_pushfloor() {
 
   run_quiet "$LOGDIR/pushfloor-hook-deletion.log" "$PY" ops/hook-deletion-check.py \
     || { cat "$LOGDIR/pushfloor-hook-deletion.log" >&2
-         floor_fail hook-deletion "unwire hook scripts in a prior PR before deleting or renaming them"; }
+         floor_fail hook-deletion "remove hook registrations before deleting or renaming their scripts"; }
 
   if [ -n "$changed" ] && [ -f ops/githooks/path-hygiene-check.py ]; then
     local added
@@ -508,7 +496,7 @@ check_pushfloor() {
 
   local gate_surface=""
   if [ -n "$changed" ]; then
-    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(delegation-gate-hook|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
+    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(hook-script-policy|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
   fi
   if [ -n "$gate_surface" ]; then
     ran="$ran gate-closure"
@@ -1054,9 +1042,15 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 
     _mstep triggers
     if ! DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-control-plane-sync.log" \
-         "$PY" tools/control-plane.py sync; then
+         "$PY" tools/workflow-registry.py sync; then
       tail -30 "$LOGDIR/migration-control-plane-sync.log" >&2
       bad migration "control-plane registry sync failed after migrations"
+      return
+    fi
+    if ! DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-service-registry-sync.log" \
+         "$PY" tools/ops-record.py sync-registry; then
+      tail -30 "$LOGDIR/migration-service-registry-sync.log" >&2
+      bad migration "service registry sync failed after migrations"
       return
     fi
 
@@ -1110,8 +1104,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 
 check_binding() {
   local problems="" machine_drift=""
-  run_quiet "$LOGDIR/binding-agent-boot.log" "$PY" ops/agent-boot-contract.py \
-    || { problems="$problems agent-boot"; cat "$LOGDIR/binding-agent-boot.log" >&2; }
   if [ -f mcp-server/wrangler.toml ]; then
     run_quiet "$LOGDIR/binding-wrangler.log" node -e '
       const fs=require("fs"), t=fs.readFileSync("mcp-server/wrangler.toml","utf8");
@@ -1186,10 +1178,16 @@ check_artifact() {
       ok artifact "$shipping verbs; no prior deployment recorded, this would set the baseline"
       ;;
     78)
-      if [ "${CARR_CI_PORTABLE_ONLY:-0}" = "1" ]; then
-            ok artifact "$shipping verbs; shrink guard not run here (portable runner has no ledger credential — the deploy enforces it)"
+      local base
+      base="$(git merge-base HEAD origin/main 2>/dev/null || true)"
+      [ "$base" != "$(git rev-parse HEAD)" ] || base="$(git rev-parse -q --verify 'HEAD^' || true)"
+      if [ -z "$base" ]; then
+        skip artifact "$shipping verbs counted, but no base commit or ledger credential — the shrink comparison did not run"
+      elif sh ops/verb-loss-vs-base.sh "$REPO" "$base" >"$LOGDIR/artifact-count.log" 2>"$LOGDIR/artifact.log"; then
+        ok artifact "$shipping verbs; loss checked by name against base ${base:0:12} and committed retirements"
       else
-        skip artifact "$shipping verbs counted, but no ledger credential — the shrink comparison did not run"
+        cat "$LOGDIR/artifact.log" >&2
+        bad artifact "verb loss against base ${base:0:12} does not match the committed retirement ledger"
       fi
       ;;
     *)

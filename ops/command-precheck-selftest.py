@@ -65,9 +65,6 @@ class NeverDeniesTests(AttendedFixture):
         for forbidden in ("exit(2)", "exit (2)", '"block"', "'block'", "permissionDecision"):
             self.assertNotIn(forbidden, source,
                              f"{forbidden} would let this gate stop a session")
-        dispatcher = (REPO / "hooks" / "delegation-gate.py").read_text(encoding="utf-8")
-        self.assertIn("command_precheck(payload)", dispatcher,
-                      "the dispatch must actually be wired into a hook that runs")
 
     def test_the_library_is_not_a_script_entrypoint(self):
         """A file with a shebang or a main guard is a NEW sealed ingress, and

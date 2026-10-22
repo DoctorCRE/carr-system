@@ -16,8 +16,6 @@ import subprocess
 import sys
 import time
 import signal
-import math
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Protocol, Sequence
@@ -27,7 +25,7 @@ from lib.disposable_pg_fixture import DisposablePostgres
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db_acceptance_shards import select_programs, make_report, write_report
+from db_acceptance_programs import PROGRAMS
 
 
 class LocalPGRefusal(RuntimeError):
@@ -291,25 +289,12 @@ def run_local_ci(
     runner: CommandRunner | None = None,
     integration_base: str | None = None,
     migration_part: str = "all",
-    shard: int = 0,
-    report_path: Path | None = None,
-    queued_at: float | None = None,
-    job_started_at: float | None = None,
 ) -> int:
     if migration_part not in {"all", "core", "proofs", "gates", "gates-serial", "gates-isolated", "acceptance"}:
         raise LocalPGRefusal("unknown local DB lane migration part")
-    if migration_part != "all" and (ci_class != "migration" or report_path is not None or integration_base is not None):
+    if migration_part != "all" and (ci_class != "migration" or integration_base is not None):
         raise LocalPGRefusal("partitioned migration proof requires the ordinary migration lane")
-    programs = select_programs(shard)
-    if shard and integration_base is not None:
-        raise LocalPGRefusal("shard trial cannot replace the integration-base union proof")
-    if report_path is not None and (ci_class != "migration" or integration_base is not None):
-        raise LocalPGRefusal("shadow comparisons require the same migration setup without an integration-base overlay")
-    if any(value is not None and (type(value) not in (int, float) or not math.isfinite(value) or value < 0)
-           for value in (queued_at, job_started_at)):
-        raise LocalPGRefusal("shadow timing must be finite positive Unix timestamps")
-    if job_started_at is not None and (job_started_at > time.time() or (queued_at is not None and queued_at > job_started_at)):
-        raise LocalPGRefusal("shadow queue/setup timing order is invalid")
+    programs = PROGRAMS
     validate_port(port)
     refuse_hosted_execution()
     if ci_class not in {"migration", "strict"}:
@@ -347,37 +332,18 @@ def run_local_ci(
     root = fixture.root
     data = root / "data"
     integration_data = root / "integration-data"
-    # Every shard owns its socket and temporary files as well as TCP/data.
+    # The fixture owns its socket and temporary files as well as TCP/data.
     # Ignore ambient TMPDIR so nested programs cannot share a caller namespace.
     (root / "tmp").mkdir(parents=True)
     (root / "socket").mkdir()
     clean_env["TMPDIR"] = str(root / "tmp")
     dsn = f"postgres://carr_ci@127.0.0.1:{port}/carr_ci"
     exit_code = 0
-    test_results = []
-    started = time.time() if job_started_at is None else job_started_at
-    queued = started if queued_at is None else queued_at
-    setup_seconds = 0.0
-    report_source = None
-    report_tools = None
-    if report_path is not None:
-        if not report_path.is_absolute() or report_path.exists() or report_path.resolve().is_relative_to(repo.resolve()):
-            fixture.close()
-            raise LocalPGRefusal("shadow report needs a new absolute path outside the repository")
-        try:
-            report_source, report_tools = shadow_source_binding(repo, binaries)
-        except Exception:
-            fixture.close()
-            raise
-
-    def failure_detail(result: CommandResult) -> str:
-        return f"subprocess exit {result.returncode}" if report_path is not None else _failure_detail(result)
-
     def setup(command: Sequence[str | Path]) -> bool:
         nonlocal exit_code
         result = fixture.run(command, env=clean_env, cwd=repo, capture=True)
         if result.returncode:
-            print(f"local-db-ci setup failed: {failure_detail(result)}", file=sys.stderr)
+            print(f"local-db-ci setup failed: {_failure_detail(result)}", file=sys.stderr)
             exit_code = result.returncode
             return False
         return True
@@ -460,7 +426,7 @@ def run_local_ci(
         if pre_apply.returncode:
             print(
                 "local-db-ci: pre-0450 baseline migration failed: "
-                f"{failure_detail(pre_apply)}",
+                f"{_failure_detail(pre_apply)}",
                 file=sys.stderr,
             )
             exit_code = pre_apply.returncode
@@ -488,7 +454,7 @@ def run_local_ci(
         if pre_fingerprint.returncode:
             print(
                 "local-db-ci: pre-0450 catalog fingerprint failed: "
-                f"{failure_detail(pre_fingerprint)}",
+                f"{_failure_detail(pre_fingerprint)}",
                 file=sys.stderr,
             )
             exit_code = pre_fingerprint.returncode
@@ -578,11 +544,10 @@ def run_local_ci(
             ci_command.extend(["--only", "migration"])
         if migration_part != "all":
             ci_command.extend(["--strict", "--migration-part", migration_part])
-        result = fixture.run(ci_command, env=ci_env, cwd=repo, capture=report_path is not None)
+        result = fixture.run(ci_command, env=ci_env, cwd=repo, capture=False)
         exit_code = result.returncode
         if exit_code:
             print("local-db-ci: canonical CI failed", file=sys.stderr)
-        setup_seconds = time.time() - started
         if exit_code == 0 and migration_part in {"all", "core", "acceptance"}:
             acceptance_env = dict(clean_env)
             acceptance_env["PATH"] = f"{binaries.psql.parent}{os.pathsep}{clean_env.get('PATH', '')}"
@@ -619,15 +584,10 @@ def run_local_ci(
                             result = fixture.run(command, env=env, cwd=repo, capture=True)
                     except Exception:
                         # Raw exception text can include DSNs, parameters or
-                        # identity data. It is never part of the shadow sink.
+                        # identity data. It is never printed.
                         result = CommandResult(78, "", "acceptance subprocess raised an exception")
-                test_results.append({"id": program.id, "returncode": result.returncode,
-                                     "seconds": time.monotonic() - before})
                 if result.returncode:
-                    if report_path is None:
-                        print(f"local-db-ci: {program.id} failed: {failure_detail(result)}", file=sys.stderr)
-                    else:
-                        print(f"local-db-ci: {program.id} failed (exit {result.returncode}); no raw output in shadow reports", file=sys.stderr)
+                    print(f"local-db-ci: {program.id} failed: {_failure_detail(result)}", file=sys.stderr)
                     exit_code = result.returncode
                     break
                 print(f"local-db-ci: {program.id} acceptance passed ({time.monotonic() - before:.0f}s)")
@@ -635,7 +595,7 @@ def run_local_ci(
                 if validate_candidate(repo, integration_base) != integration_source:
                     raise LocalPGRefusal("integration source changed during canonical candidate proof")
             if exit_code == 0:
-                print(f"local-db-ci: {ci_class} proof and acceptance manifest passed (shard {shard})")
+                print(f"local-db-ci: {ci_class} proof and acceptance manifest passed")
     except KeyboardInterrupt:
         exit_code = 130
     except LocalPGRefusal:
@@ -657,45 +617,7 @@ def run_local_ci(
         if not cleanup:
             print(f"local-db-ci: cleanup unconfirmed; retained {root}; confirm owned postmaster status before retry", file=sys.stderr)
             exit_code = exit_code or 70
-        if report_path is not None:
-            try:
-                # Recheck exact source after tests, before writing evidence.
-                if shadow_source_binding(repo, binaries) != (report_source, report_tools):
-                    exit_code = exit_code or 78
-                finished = time.time()
-                write_report(report_path, make_report(
-                    shard=shard, source=report_source, toolchain=report_tools,
-                    started=started, finished=finished, queued=queued,
-                    setup_seconds=setup_seconds or finished-started, tests=test_results,
-                    cleanup=cleanup, returncode=exit_code, port=port, root=root,
-                ))
-            except Exception:
-                print("local-db-ci: shadow report refused; retain serial gate", file=sys.stderr)
-                exit_code = exit_code or 78
     return exit_code
-
-
-def shadow_source_binding(repo: Path, binaries: PostgresBinaries):
-    """Evidence is commit-bound, never a claim about uncommitted source."""
-    env = scrub_cloud_environment(os.environ)
-    runner = SubprocessRunner()
-    def read(command):
-        result = runner.run(command, env=env, cwd=repo, capture=True)
-        if result.returncode:
-            raise LocalPGRefusal("shadow source/toolchain readback failed")
-        return result.stdout.strip()
-    head = read(["git", "rev-parse", "HEAD"])
-    tree = read(["git", "rev-parse", "HEAD^{tree}"])
-    if read(["git", "status", "--porcelain"]):
-        raise LocalPGRefusal("shadow reports require clean committed source")
-    # PGDG appends its Ubuntu package build in parentheses. Compare the
-    # upstream version, rather than mistaking that suffix for the version.
-    observed = re.fullmatch(r"initdb \(PostgreSQL\) (17\.\d+)(?: \([^()\n]+\))?",
-                            read([binaries.initdb, "--version"]))
-    if observed is None:
-        raise LocalPGRefusal("shadow comparison requires PostgreSQL 17")
-    return ({"head": head, "tree": tree},
-            {"postgres": observed.group(1), "python": read([repository_python(repo), "--version"]).split()[-1], "node": read(["node", "--version"])})
 
 
 def main() -> int:
@@ -710,18 +632,9 @@ def main() -> int:
     parser.add_argument("--migration-part", choices=("all", "core", "proofs", "gates", "gates-serial", "gates-isolated", "acceptance"), default="all",
                         help="partitioned runs require all sibling verdicts in the hosted aggregate")
     parser.add_argument("--port", type=int, default=55432)
-    parser.add_argument("--shard", type=int, choices=(0, 1, 2), default=0,
-                        help="default serial; 1/2 are opt-in shadow acceptance partitions")
-    parser.add_argument("--report", type=Path, help="new outside-repository shadow report")
-    parser.add_argument("--queued-at", type=float, help="workflow run creation Unix timestamp")
-    parser.add_argument("--job-started-at", type=float, help="runner setup start Unix timestamp")
     parser.add_argument("--integration-base", help="exact current-main SHA for restore/forward/consumer union proof")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
-    if args.shard and (args.report is None or args.ci_class != "migration"):
-        parser.error("shadow shards require --class migration and --report")
-    if args.report is None and (args.queued_at is not None or args.job_started_at is not None):
-        parser.error("timing bindings require --report")
     # Piped to a CI log, stdout is block-buffered, so every "acceptance passed"
     # line below stayed invisible until exit: a slow acceptance loop looked
     # like a finished-but-hung step (run 39058940694 on PR #1865).
@@ -735,7 +648,7 @@ def main() -> int:
     try:
         return run_local_ci(
             repo=repo, ci_class=args.ci_class, port=args.port, runner=SubprocessRunner(), integration_base=args.integration_base,
-            migration_part=args.migration_part, shard=args.shard, report_path=args.report, queued_at=args.queued_at, job_started_at=args.job_started_at
+            migration_part=args.migration_part
         )
     except LocalPGRefusal as exc:
         print(f"local-db-ci refused: {exc}", file=sys.stderr)

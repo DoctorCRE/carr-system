@@ -6,16 +6,10 @@ it never maintains a per-desk order. Running work is not preempted.
 The canonical database is beside CARR_HERMES_RESULTS, or the default dispatch
 results file. CARR_WORK_QUEUE_DB selects an explicit isolated store. A job's
 --results destination never selects another queue. SQLite WAL, synchronous
-FULL, BEGIN IMMEDIATE mutations and the runner's nonblocking flock mirror the
-merge executor's locking discipline.
+FULL, BEGIN IMMEDIATE mutations and the runner's nonblocking flock preserve
+executor ownership.
 
 export() returns room-work-queue/v1, including full ordered cards and events.
-merge_order() returns room-work-queue-merges/v1 with revision and ordered
-entries [{card_id, position, merge_run, repo, pr, head}]. The merge run identifies
-the ownership generation, so an old selection cannot own a later run of the
-same pins. Only pinned merging-stage PRs
-appear. Active merges remain projected even while blocked. Consumers must fail
-closed on unreadable data and preserve this order.
 
 board_projection() retains every unfinished card, twenty finished cards and
 one hundred recent events, with explicit omission counts. export() retains
@@ -186,7 +180,7 @@ class WorkQueue:
                 item['thread_id'] = result.get('thread_id')
                 item['claim'] = r['claim']
                 item['ready'] = bool(item['ready'])
-                item['active'] = r['claim'] is not None or self._merge_active(r['card_id'])
+                item['active'] = r['claim'] is not None
                 item['stages'] = [dict(s) for s in self.db.execute(
                     'SELECT stage,enqueued_at,started_at,finished_at,elapsed FROM stage_runs WHERE card_id=? ORDER BY id',
                     (r['card_id'],))]
@@ -198,7 +192,7 @@ class WorkQueue:
                 item['last_event'] = next((e for e in reversed(history) if e['card_id'] == r['card_id']), None)
                 item['merge_position'] = None
                 items.append(item)
-            merging = [i for i in items if i['stage'] == 'merging' or self._merge_active(i['card_id'])]
+            merging = [i for i in items if i['stage'] == 'merging']
             for pos, item in enumerate(merging, 1):
                 item['merge_position'] = pos
             return {'schema': 'room-work-queue/v1', 'revision': history[-1]['id'] if history else 0,
@@ -211,18 +205,9 @@ class WorkQueue:
             self.db.execute('UPDATE stage_runs SET finished_at=?,elapsed=? WHERE id=?',
                             (timestamp(), elapsed, run['id']))
 
-    def _merge_active(self, card):
-        return self.db.execute(
-            "SELECT 1 FROM stage_runs WHERE card_id=? AND stage='merging' "
-            'AND started_at IS NOT NULL AND finished_at IS NULL', (card,)).fetchone() is not None
-
-    def _merge_inflight(self, card, data):
-        # Older active runs did not record pins, so retain ownership conservatively.
-        return data.get('merge_inflight', data['prs'] if self._merge_active(card) else [])
 
     def _stage(self, card, stage, ready):
-        if self._item(card)['stage'] != 'merging' or not self._merge_active(card):
-            self._end_stage(card)
+        self._end_stage(card)
         self.db.execute('UPDATE items SET stage=?,ready=? WHERE card_id=?', (stage, ready, card))
         at = timestamp()
         self.db.execute('INSERT INTO stage_runs(card_id,stage,enqueued_at,finished_at) VALUES(?,?,?,?)',
@@ -302,87 +287,13 @@ class WorkQueue:
             self._event(card, self._state(old), self._state(self._item(card)), actor,
                         f'executor {status}', 'stage')
 
-    def begin_merge(self, card, *, actor, reason, pin=None, expected_order=None):
-        with self.transaction():
-            if expected_order is not None and self._merge_entries() != expected_order:
-                raise QueueChanged('merge order changed before ownership')
-            row = self._item(card)
-            if pin is not None and pin not in json.loads(row['data'])['prs']:
-                raise ValueError('merge head differs from pinned work card')
-            if row['stage'] != 'merging':
-                raise ValueError('merge executor can start only a merging-stage card')
-            data = json.loads(row['data'])
-            if 'merge_inflight' in data or not self._merge_active(card):
-                inflight = self._merge_inflight(card, data)
-                owned = inflight + [p for p in ([pin] if pin is not None else data['prs']) if p not in inflight]
-                if owned != data.get('merge_inflight'):
-                    data['merge_inflight'] = owned
-                    self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
-                    self._event(card, inflight, owned, actor, reason, 'merge_pin_started')
-            run = self.db.execute('SELECT * FROM stage_runs WHERE card_id=? ORDER BY id DESC LIMIT 1', (card,)).fetchone()
-            if run['started_at'] is None:
-                at = timestamp()
-                self.db.execute('UPDATE stage_runs SET started_at=?,started=? WHERE id=?', (at, time.time(), run['id']))
-                self._event(card, {**self._state(row), 'started_at': None},
-                            {**self._state(row), 'started_at': at}, actor, reason, 'merge_started')
-        return self.get(card)
-
-    def advance_merge_pin(self, card, *, repo, pr, head, prepared, main, actor, reason, expected_order):
-        if any(not re.fullmatch(r'[0-9a-f]{40}', sha or '') for sha in (head, prepared, main)) or head == prepared:
-            raise ValueError('regeneration requires distinct pinned and prepared heads and a main SHA')
-        with self.transaction():
-            if self._merge_entries() != expected_order:
-                raise QueueChanged('merge order changed before pin advancement')
-            row = self._item(card)
-            data = json.loads(row['data'])
-            pin = {'repo': repo, 'number': pr, 'head': head}
-            if 'merge_inflight' not in data and self._merge_active(card):
-                raise QueueChanged('legacy_ownership')
-            if row['claim'] or row['stage'] != 'merging' or pin in self._merge_inflight(card, data):
-                raise QueueChanged('pin advancement requires a merging-stage pin without an in-flight merge')
-            if pin not in data['prs'] or pin in data.get('merge_receipts', []) or pin in data.get('merge_stopped', []):
-                raise QueueChanged('regeneration no longer matches an unfinished pinned PR')
-            replacement = {**pin, 'head': prepared}
-            data['prs'][data['prs'].index(pin)] = replacement
-            self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
-            self._event(card, pin, {**replacement, 'main': main}, actor, reason, 'pin_regenerated')
-        return self.get(card)
-
-    def finish_merge(self, card, *, repo, pr, head, merged, actor, reason):
-        """Consume a provider receipt after exact-head ancestry or termination readback."""
-        with self.transaction():
-            old = self._item(card)
-            if old['claim'] or (old['stage'] != 'merging' and not self._merge_active(card)):
-                raise ValueError('merge ownership requires a current merging stage or active merge')
-            data = json.loads(old['data'])
-            pin = {'repo': repo, 'number': pr, 'head': head}
-            if pin not in data['prs']:
-                raise ValueError('merge receipt does not match a pinned PR')
-            if 'merge_inflight' in data:
-                data['merge_inflight'] = [p for p in data['merge_inflight'] if p != pin]
-            receipts = data.setdefault('merge_receipts', [])
-            if merged and pin not in receipts:
-                receipts.append(pin)
-            stopped = data.setdefault('merge_stopped', [])
-            if not merged and pin not in stopped:
-                stopped.append(pin)
-            finished = all(p in receipts or p in stopped for p in data['prs'])
-            self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
-            if finished:
-                self.db.execute("UPDATE stage_runs SET finished_at=?,elapsed=MAX(0,?-COALESCE(started,?)) "
-                                "WHERE card_id=? AND stage='merging' AND finished_at IS NULL",
-                                (timestamp(), time.time(), time.time(), card))
-                self._stage(card, 'blocked' if stopped else 'done', False)
-            self._event(card, self._state(old), self._state(self._item(card)), actor, reason,
-                        'merge_completed' if merged else 'merge_stopped')
-        return self.get(card)
 
     def transition(self, card, stage, *, actor, reason):
         allowed = {'queued': {'blocked', 'parked', 'failed'},
                    'building': {'review', 'blocked', 'failed', 'parked'},
                    'review': {'fixing', 'merging', 'blocked', 'failed', 'parked'},
                    'fixing': {'review', 'blocked', 'failed', 'parked'},
-                   'merging': {'blocked', 'failed', 'parked'}}
+                   'merging': {'done', 'blocked', 'failed', 'parked'}}
         with self.transaction():
             old = self._item(card)
             if old['claim']:
@@ -392,10 +303,6 @@ class WorkQueue:
             if stage == 'merging':
                 data = json.loads(old['data'])
                 self._validate_merge(data)
-                data.pop('merge_receipts', None)
-                data.pop('merge_stopped', None)
-                data.pop('merge_inflight', None)
-                self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
             self._stage(card, stage, False)
             self._event(card, self._state(old), self._state(self._item(card)), actor, reason, 'stage')
         return self.get(card)
@@ -405,8 +312,7 @@ class WorkQueue:
             raise ValueError('requeue stage must be queued, building, review or fixing')
         with self.transaction():
             old = self._item(card)
-            merge_started = self._merge_active(card)
-            if old['claim'] or merge_started:
+            if old['claim']:
                 raise ValueError('active executor requires a completion receipt')
             if stage == 'review' and old['review_round'] >= 3:
                 raise ValueError('three review rounds exhausted')
@@ -427,38 +333,6 @@ class WorkQueue:
             self.db.execute('DELETE FROM desk_quota_stops WHERE desk=?', (desk or old['desk'],))
         return self.get(card)
 
-    def recover_merge_run(self, card, *, expected_revision, verify_effects, actor, reason):
-        """Release a blocked run after the journal owner verifies external effects.
-
-        The verifier runs under this transaction and must hold the merge runner
-        lock. It returns evidence for the audit event, or raises to retain ownership.
-        This operation neither terminates a pin nor queues another executor.
-        """
-        with self.transaction():
-            revision = self.db.execute('SELECT COALESCE(MAX(id),0) FROM events').fetchone()[0]
-            if revision != expected_revision:
-                raise QueueChanged('work queue changed before merge recovery')
-            row = self._item(card)
-            data = json.loads(row['data'])
-            if row['claim'] is not None:
-                raise QueueChanged('source claim still owns the card')
-            if row['stage'] != 'blocked' or not self._merge_active(card):
-                raise QueueChanged('recovery requires a blocked card with an active merge run')
-            if 'merge_inflight' not in data:
-                raise QueueChanged('legacy_ownership')
-            if data['merge_inflight'] != []:
-                raise QueueChanged('in-flight merge ownership remains')
-            evidence = verify_effects(data)
-            runs = [r[0] for r in self.db.execute(
-                "SELECT id FROM stage_runs WHERE card_id=? AND stage='merging' AND finished_at IS NULL", (card,))]
-            now = time.time()
-            self.db.execute("UPDATE stage_runs SET finished_at=?,elapsed=MAX(0,?-COALESCE(started,?)) "
-                            "WHERE card_id=? AND stage='merging' AND finished_at IS NULL",
-                            (timestamp(), now, now, card))
-            self._event(card, {'active': True, 'run_ids': runs, 'revision': revision},
-                        {'active': False, 'run_ids': runs, 'evidence': evidence},
-                        actor, reason, 'merge_run_recovered')
-        return self.get(card)
 
     @staticmethod
     def _validate_fields(fields):
@@ -483,8 +357,6 @@ class WorkQueue:
         with self.transaction():
             row = self._item(card)
             data = json.loads(row['data'])
-            if self._merge_active(card) and 'prs' in fields and fields['prs'] != data['prs']:
-                raise ValueError('active merge requires a completion receipt before replacing pins')
             before = {k: data[k] for k in fields}
             if 'findings' in fields:
                 findings = {f['id']: f for f in data['findings']}
@@ -502,24 +374,6 @@ class WorkQueue:
         if not data['prs'] or any(not re.fullmatch(r'[0-9a-f]{40}', pr.get('head') or '') for pr in data['prs']):
             raise ValueError('merge stage requires PRs with pinned 40-character heads')
 
-    def _merge_entries(self):
-        entries, position = [], 0
-        for row in self.db.execute('SELECT * FROM items ORDER BY position'):
-            if row['stage'] != 'merging' and not self._merge_active(row['card_id']):
-                continue
-            position += 1
-            run = self.db.execute("SELECT MAX(id) FROM stage_runs WHERE card_id=? AND stage='merging'",
-                                  (row['card_id'],)).fetchone()[0]
-            entries.extend(dict(card_id=row['card_id'], position=position, merge_run=run,
-                                repo=pr['repo'], pr=pr['number'], head=pr.get('head'))
-                           for pr in json.loads(row['data'])['prs'])
-        return entries
-
-    def merge_order(self):
-        with self.transaction():
-            return {'schema': 'room-work-queue-merges/v1',
-                    'revision': self.db.execute('SELECT COALESCE(MAX(id),0) FROM events').fetchone()[0],
-                    'entries': self._merge_entries()}
 
     def publication(self):
         return dict(self.db.execute('SELECT * FROM publication WHERE id=1').fetchone())
@@ -627,8 +481,8 @@ def board_projection(path=None):
         projected = {key: clean(value) for key, value in item.items() if key in fields}
         projected['prs'] = [{key: ref[key] for key in ('repo', 'number', 'head') if key in ref}
                             for ref in item.get('prs', []) if isinstance(ref, dict)
-                            and re.fullmatch(r'jbookout/(carr-system|doctorcre-app|software-factory)', str(ref.get('repo', '')))]
-        projected['merge_complete'] = bool(item.get('prs')) and all(ref in item.get('merge_receipts', []) for ref in item['prs'])
+                            and re.fullmatch(r'(DoctorCRE/carr-system|jbookout/(doctorcre-app|software-factory))', str(ref.get('repo', '')))]
+        projected['merge_complete'] = bool(item.get('prs')) and item['stage'] == 'done'
         projected['last_event'] = event(item.get('last_event'))
         projected['stages'] = item.get('stages', [])
         projected['findings'] = [{key: clean(finding[key]) for key in ('id','level','summary','resolved') if key in finding}

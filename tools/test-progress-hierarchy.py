@@ -14,7 +14,7 @@ class HierarchyTests(unittest.TestCase):
             'slices': [{'slice_id': 'queue', 'title': 'Queue ordering'},
                        {'slice_id': 'review', 'title': 'Review checks'}]}}, 'tasks': {
             'one': {'title': 'Queue ordering', 'work_request': 'WR-000014', 'slice_id': 'queue',
-                    'job_id': 'dispatch-a', 'status': 'running', 'repo': 'jbookout/carr-system', 'pr': 1960},
+                    'job_id': 'dispatch-a', 'status': 'running', 'repo': 'DoctorCRE/carr-system', 'pr': 1960},
             'two': {'title': 'Review checks', 'work_request': 'WR-000014', 'slice_id': 'review',
                     'status': 'review', 'repo': 'jbookout/doctorcre-app', 'pr': 316}}}
 
@@ -45,13 +45,13 @@ class HierarchyTests(unittest.TestCase):
     def test_reviewed_summary_replaces_generated_job_and_new_request_copy(self):
         for generated in [False, True]:
             with self.subTest(generated=generated):
-                task = {'title': 'Rebuild Observatory around current navigation', 'pr': 12, 'repo': 'jbookout/carr-system'}
+                task = {'title': 'Rebuild Observatory around current navigation', 'pr': 12, 'repo': 'DoctorCRE/carr-system'}
                 if generated:
                     h.propose_copy(task)
                 b = {'project': 'test', 'tasks': {'one': task}}
                 summary = {'title': 'Observatory navigation', 'description': 'Keep Observatory navigation clear so partners can find their work.'}
-                proposal = h.backfill(b, facts={'jbookout/carr-system#12': {'title': task['title']}}, summaries={'one': summary})
-                request = proposal['requests']['pr:jbookout/carr-system#12']
+                proposal = h.backfill(b, facts={'DoctorCRE/carr-system#12': {'title': task['title']}}, summaries={'one': summary})
+                request = proposal['requests']['pr:DoctorCRE/carr-system#12']
                 self.assertEqual(request['card_title'], summary['title'])
                 self.assertEqual(request['card_description'], summary['description'])
                 applied = h.apply_backfill(b, proposal, lambda *args: {'ok': True, 'human_ref': 'WR-000014'})
@@ -60,9 +60,9 @@ class HierarchyTests(unittest.TestCase):
                 self.assertEqual(card['card_description'], summary['description'])
 
     def test_older_work_placeholders_project_without_changing_summary_proposals(self):
-        tasks = {str(n): {'title': 'Dot research: ?', 'pr': n + 1, 'repo': 'jbookout/carr-system',
+        tasks = {str(n): {'title': 'Dot research: ?', 'pr': n + 1, 'repo': 'DoctorCRE/carr-system',
             'github_state': 'CLOSED' if n % 2 else 'MERGED'} for n in range(81)}
-        tasks['open'] = {'title': 'Dot research: ?', 'pr': 82, 'repo': 'jbookout/carr-system', 'github_state': 'OPEN'}
+        tasks['open'] = {'title': 'Dot research: ?', 'pr': 82, 'repo': 'DoctorCRE/carr-system', 'github_state': 'OPEN'}
         b = {'project': 'test', 'tasks': tasks}
         plan = h.backfill(b)
         self.assertEqual(len(plan['summary_required']), 82)
@@ -103,9 +103,9 @@ class HierarchyTests(unittest.TestCase):
 
     def test_reviewed_summary_updates_new_parent_after_an_unreviewed_related_job(self):
         b = {'project': 'test', 'tasks': {
-            'first': {'title': 'Rebuild Observatory around current navigation', 'repo': 'jbookout/carr-system', 'pr': 12},
-            'second': {'title': 'Rebuild Observatory around navigation', 'repo': 'jbookout/carr-system', 'pr': 13}}}
-        facts = {f'jbookout/carr-system#{t["pr"]}': {'title': t['title'], 'headRefName': 'observatory-navigation'} for t in b['tasks'].values()}
+            'first': {'title': 'Rebuild Observatory around current navigation', 'repo': 'DoctorCRE/carr-system', 'pr': 12},
+            'second': {'title': 'Rebuild Observatory around navigation', 'repo': 'DoctorCRE/carr-system', 'pr': 13}}}
+        facts = {f'DoctorCRE/carr-system#{t["pr"]}': {'title': t['title'], 'headRefName': 'observatory-navigation'} for t in b['tasks'].values()}
         summary = {'title': 'Observatory navigation', 'description': 'Keep Observatory navigation clear so partners can find their work.'}
         plan = h.backfill(b, facts=facts, summaries={'second': summary})
         self.assertEqual(len(plan['requests']), 1)
@@ -146,7 +146,7 @@ class HierarchyTests(unittest.TestCase):
 
     def test_same_job_two_prs_and_review_retries_share_one_number(self):
         b = self.board()
-        b['tasks']['one']['pr_links'] = [{'repo': 'jbookout/carr-system', 'pr': 1960},
+        b['tasks']['one']['pr_links'] = [{'repo': 'DoctorCRE/carr-system', 'pr': 1960},
                                         {'repo': 'jbookout/doctorcre-app', 'pr': 316}]
         b['tasks']['retry'] = {**b['tasks']['one'], 'title': 'Queue fix'}
         view = h.project(b)
@@ -222,7 +222,7 @@ class HierarchyTests(unittest.TestCase):
         self.assertNotIn('plan_id', snap['tasks']['WR14.S1.J1.carr#1960'])
         self.assertTrue(snap['tasks']['WR14.S1.J1.carr#1960']['done'])
         self.assertEqual(snap['hierarchy']['work_requests']['WR14']['counts']['failed'], 1)
-        board.retain_recent_cards(b, {('jbookout/carr-system', 1960): {'state': 'MERGED', 'mergedAt': '2000-01-01T00:00:00Z'}})
+        board.retain_recent_cards(b, {('DoctorCRE/carr-system', 1960): {'state': 'MERGED', 'mergedAt': '2000-01-01T00:00:00Z'}})
         self.assertEqual(len(b['tasks']), 2)
 
     def test_registered_ordinals_and_captured_small_request_need_no_triage(self):
@@ -250,7 +250,7 @@ class HierarchyTests(unittest.TestCase):
         for task in b['tasks'].values():
             task.pop('slice_id')
         b['tasks']['discovered'] = {'title': 'Board cleanup', 'status': 'review',
-                                    'repo': 'jbookout/carr-system', 'pr': 9}
+                                    'repo': 'DoctorCRE/carr-system', 'pr': 9}
         view = h.project(b)
         self.assertIn('WR14.S1.J1.carr#9', view['cards'])
         self.assertIn('discovered', b['later_triage'])
@@ -312,15 +312,15 @@ class HierarchyTests(unittest.TestCase):
     def test_backfill_groups_related_actions_queue_repairs_and_linked_requests(self):
         tasks = {str(n): {'title': 'Imported change', 'repo': repo, 'pr': n} for repo, n in [
             ('jbookout/doctorcre-app',155), ('jbookout/doctorcre-app',156),
-            ('jbookout/carr-system',1678), ('jbookout/carr-system',1682),
-            ('jbookout/carr-system',20), ('jbookout/carr-system',21)]}
+            ('DoctorCRE/carr-system',1678), ('DoctorCRE/carr-system',1682),
+            ('DoctorCRE/carr-system',20), ('DoctorCRE/carr-system',21)]}
         facts = {
             'jbookout/doctorcre-app#155': {'title':'Bump actions/download-artifact from 4 to 8', 'headRefName':'dependabot/github_actions/actions/download-artifact-8'},
             'jbookout/doctorcre-app#156': {'title':'Bump actions/setup-node from 4 to 5', 'headRefName':'dependabot/github_actions/actions/setup-node-5'},
-            'jbookout/carr-system#1678': {'title':'Fix queue spacing', 'headRefName':'queue-spacing-first'},
-            'jbookout/carr-system#1682': {'title':'Repair queue spacing after review', 'headRefName':'queue-spacing-repair'},
-            'jbookout/carr-system#20': {'title':'First delivery', 'body':'Work Request: WR-000014'},
-            'jbookout/carr-system#21': {'title':'Second delivery', 'body':'Work Request: WR-000014'},
+            'DoctorCRE/carr-system#1678': {'title':'Fix queue spacing', 'headRefName':'queue-spacing-first'},
+            'DoctorCRE/carr-system#1682': {'title':'Repair queue spacing after review', 'headRefName':'queue-spacing-repair'},
+            'DoctorCRE/carr-system#20': {'title':'First delivery', 'body':'Work Request: WR-000014'},
+            'DoctorCRE/carr-system#21': {'title':'Second delivery', 'body':'Work Request: WR-000014'},
         }
         plan = h.backfill({'project':'test', 'tasks':tasks}, facts=facts)
         for a,b in [('155','156'), ('1678','1682'), ('20','21')]:
@@ -389,7 +389,7 @@ class HierarchyTests(unittest.TestCase):
                 self.assertNotRegex(row['card_description'], r'^(?:W13|Do not merge|It pairs)')
 
     def test_job_number_wins_over_a_discovered_pr_number(self):
-        for link in [{'pr':1960}, {'pr_links':[{'repo':'jbookout/carr-system','pr':1960}]}]:
+        for link in [{'pr':1960}, {'pr_links':[{'repo':'DoctorCRE/carr-system','pr':1960}]}]:
             with self.subTest(link=link):
                 b = self.board()
                 b['tasks']['one'].pop('pr')
@@ -422,11 +422,11 @@ class HierarchyTests(unittest.TestCase):
 
     def test_clear_standalone_prs_get_work_requests_instead_of_a_maintenance_bucket(self):
         b = {'project':'test', 'tasks':{
-            'one':{'title':'Board cleanup', 'repo':'jbookout/carr-system', 'pr':12},
-            'review':{'title':'Board cleanup', 'repo':'jbookout/carr-system', 'pr':12},
-            'two':{'title':'Merge queue', 'repo':'jbookout/carr-system', 'pr':13}}}
-        facts = {'jbookout/carr-system#12':{'title':'Group progress cards', 'body':'Group related changes so the board is easier to follow.'},
-                 'jbookout/carr-system#13':{'title':'Order the merge queue', 'body':'Keep reviewed changes moving in a predictable order.'}}
+            'one':{'title':'Board cleanup', 'repo':'DoctorCRE/carr-system', 'pr':12},
+            'review':{'title':'Board cleanup', 'repo':'DoctorCRE/carr-system', 'pr':12},
+            'two':{'title':'Merge queue', 'repo':'DoctorCRE/carr-system', 'pr':13}}}
+        facts = {'DoctorCRE/carr-system#12':{'title':'Group progress cards', 'body':'Group related changes so the board is easier to follow.'},
+                 'DoctorCRE/carr-system#13':{'title':'Order the merge queue', 'body':'Keep reviewed changes moving in a predictable order.'}}
         proposal = h.backfill(b, facts=facts)
         self.assertEqual(len(proposal['create_requests']), 2)
         self.assertEqual(proposal['assignments']['one']['request_key'], proposal['assignments']['review']['request_key'])
@@ -450,12 +450,12 @@ class HierarchyTests(unittest.TestCase):
 
     def test_model_copy_is_applied_before_parent_proposals_and_preserves_human_wording(self):
         b = {'project':'test','tasks':{'one':{'title':'Refresh obsolete deployment knowledge and remove dead instructions',
-             'repo':'jbookout/carr-system','pr':12, 'card_title':'My wording', 'card_description':'A person wrote this.'}}}
-        facts = {'jbookout/carr-system#12':{'title':b['tasks']['one']['title'], 'body':'Refresh the instructions used to deliver changes.'}}
+             'repo':'DoctorCRE/carr-system','pr':12, 'card_title':'My wording', 'card_description':'A person wrote this.'}}}
+        facts = {'DoctorCRE/carr-system#12':{'title':b['tasks']['one']['title'], 'body':'Refresh the instructions used to deliver changes.'}}
         self.assertEqual(h.backfill(b, facts=facts)['summary_required'], [])
         proposal = h.backfill(b, facts=facts, summaries={'one':{'title':'Delivery instructions', 'description':'Refresh delivery instructions so operators use the current process.'}})
         self.assertEqual(proposal['summary_required'], [])
-        self.assertEqual(proposal['assignments']['one']['request_key'], 'pr:jbookout/carr-system#12')
+        self.assertEqual(proposal['assignments']['one']['request_key'], 'pr:DoctorCRE/carr-system#12')
         applied = h.apply_backfill(b, proposal, lambda v,a:{'ok':True,'human_ref':'WR-000014'})
         self.assertEqual(applied['tasks']['one']['card_title'], 'My wording')
         self.assertEqual(applied['tasks']['one']['card_description'], 'A person wrote this.')

@@ -231,7 +231,7 @@ async function main() {
               || source?.work_request?.canonical_record_digest !== envelope.state_binding.canonical_record_digest)
             throw new ControllerError({ error: "engineering_source_changed" });
           const scope = accepted.caps?.source_merge;
-          if (!scope || scope.repository !== "jbookout/carr-system" || !Array.isArray(scope.authorized_paths))
+          if (!scope || scope.repository !== "DoctorCRE/carr-system" || !Array.isArray(scope.authorized_paths))
             throw new ControllerError({ error: "engineering_source_scope_missing" });
           const slice = task.engineering_slice;
           const job = {

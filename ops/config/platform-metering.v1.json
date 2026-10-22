@@ -136,14 +136,6 @@
       "required_true": ["release_preflight_green"],
       "required_nonempty": ["performance_budget_ref"],
       "maximums": {"release_candidate_count": 1}
-    },
-    "cognition-provider": {
-      "platform": "anthropic-claude",
-      "installed": true,
-      "installed_enforcement_ref": "tools/control-plane.py:_reserve->ops.admit_job_cost",
-      "required_true": [],
-      "required_nonempty": [],
-      "maximums": {}
     }
   },
   "control_scope": {

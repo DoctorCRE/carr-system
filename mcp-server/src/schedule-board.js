@@ -40,61 +40,13 @@ const SERVICE_SQL = `
      and s.owner_actor=$1
    order by s.runtime,s.name,s.key`;
 
-const CONTROL_SQL = `
-  select d.key, d.version, d.enabled, d.owner_actor, d.recurrence,
-         last.state as last_state, last.ended_at as last_at,
-         last.scheduled_for as last_scheduled_for,
-         receipt.receipt_ref as last_receipt_ref,
-         due.next_due_at, active.state as active_state
-    from ops.job_definition d
-    left join lateral (
-      select id,state,ended_at,scheduled_for,attempt
-        from ops.job where definition_key=d.key and definition_version=d.version
-         and mode='live' and state in ('succeeded','failed','timed_out','cancelled','dead_lettered','skipped')
-       order by ended_at desc,id desc limit 1
-    ) last on true
-    left join lateral (
-      select receipt_ref from ops.job_receipt
-       where job_id=last.id and attempt=last.attempt
-         and ((last.state='succeeded' and kind='completion')
-           or (last.state='failed' and kind='failure')
-           or (last.state='timed_out' and kind in ('timeout','failure'))
-           or (last.state='cancelled' and kind='override')
-           or (last.state='dead_lettered' and kind='dead_letter')
-           or (last.state='skipped' and kind='skipped'))
-       order by created_at desc,id desc limit 1
-    ) receipt on true
-    left join lateral (
-      select case when state='retry_wait' then next_attempt_at else scheduled_for end as next_due_at
-        from ops.job
-       where definition_key=d.key and definition_version=d.version
-         and mode='live' and state in ('queued','retry_wait','running')
-       order by case when state='retry_wait' then next_attempt_at else scheduled_for end,id limit 1
-    ) due on true
-    left join lateral (
-      select state from ops.job
-       where definition_key=d.key and definition_version=d.version
-         and mode='live' and state='running'
-       order by started_at desc,id desc limit 1
-    ) active on true
-   where d.owner_actor in ($1,'system')
-     and coalesce(d.recurrence->>'kind','') <> 'on_demand'
-     and d.version=(select max(version) from ops.job_definition where key=d.key)
-   order by d.key`;
-
 const iso = (value) => {
   if (!value) return null;
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 };
 const actions = () => ({ pause: false, run: false, stop: false });
-const CONTROL_FAILURE_STATES = new Set(["failed", "timed_out", "dead_lettered"]);
 const validSeconds = (value) => Number.isInteger(Number(value)) && Number(value) > 0;
-const recurrenceLabel = (value) => {
-  const cron = typeof value?.cron === "string" ? value.cron.trim() : "";
-  const timezone = typeof value?.timezone === "string" ? value.timezone.trim() : "";
-  return cron ? `Cron: ${cron}${timezone ? ` · ${timezone}` : ""}` : "Schedule unknown";
-};
 
 function serviceJob(row, nowMs) {
   const owner = row.runtime === "claude-code-scheduled-task" ? "claude-code" : row.runtime;
@@ -131,34 +83,11 @@ function serviceJob(row, nowMs) {
   };
 }
 
-function controlJob(row, nowMs) {
-  const at = iso(row.last_at);
-  const receipt = row.last_receipt_ref || null;
-  const lastRun = at && receipt
-    ? { state: row.last_state || "unknown", at, receipt_ref: receipt } : null;
-  const due = row.enabled ? iso(row.next_due_at) : null;
-  const overdue = due !== null && Date.parse(due) < nowMs;
-  let state = "unknown";
-  if (!row.enabled) state = "paused";
-  else if (row.active_state === "running") state = "running";
-  else if (lastRun && CONTROL_FAILURE_STATES.has(lastRun.state)) state = "failed";
-  else if (overdue) state = "missed";
-  else if (due && lastRun?.state === "succeeded") state = "healthy";
-  return {
-    key: row.key, name: row.key.replaceAll(/[._-]/g, " "), owner: "control-plane",
-    state, freshness: due ? (overdue ? "stale" : "fresh") : "unknown",
-    schedule: recurrenceLabel(row.recurrence),
-    last_run: lastRun, next_due_at: due,
-    next_due_basis: due ? "queued_job" : null,
-    actions: actions(),
-  };
-}
-
 export function scheduleBoardTools() {
   return {
     "schedule-board": {
       write: false,
-      description: "Read known scheduled jobs for the verified partner: scheduler evidence, last run receipt, next expected deadline or queued time, freshness, and supported actions. Missing provider evidence stays unknown.",
+      description: "Read known scheduled jobs for the verified partner: scheduler evidence, last run receipt, next expected deadline, freshness, and supported actions. Missing provider evidence stays unknown.",
       inputSchema: { type: "object", additionalProperties: false, properties: {} },
       handler: async (client, actor, _args, { now = () => new Date() } = {}) => {
         const scope = personalScopeForActor(actor);
@@ -167,12 +96,8 @@ export function scheduleBoardTools() {
         const observedAt = iso(now());
         const nowMs = Date.parse(observedAt);
         const serviceRows = (await client.query(SERVICE_SQL, [scope.sponsor])).rows;
-        const controlRows = (await client.query(CONTROL_SQL, [scope.sponsor])).rows;
-        const jobs = [
-          ...serviceRows.map((row) => serviceJob(row, nowMs)),
-          ...controlRows.map((row) => controlJob(row, nowMs)),
-        ];
-        const sources = ["launchd", "claude-code", "control-plane", "cron"].map((owner) => {
+        const jobs = serviceRows.map((row) => serviceJob(row, nowMs));
+        const sources = ["launchd", "claude-code", "cron"].map((owner) => {
           const count = jobs.filter((job) => job.owner === owner).length;
           return { owner, state: count ? "read" : "unknown", count: count || null };
         });

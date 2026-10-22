@@ -110,7 +110,7 @@ LOOP_DENY = [
     ("for-over-gh-list",
      "for pr in $(gh pr list --json number -q '.[].number'); do gh pr view $pr --json state; done"),
     ("for-literal-eleven",
-     "for i in 1 2 3 4 5 6 7 8 9 10 11; do gh api repos/jbookout/carr-system/pulls/$i; done"),
+     "for i in 1 2 3 4 5 6 7 8 9 10 11; do gh api repos/DoctorCRE/carr-system/pulls/$i; done"),
     ("for-literal-six-times-two-gh",
      "for n in 1 2 3 4 5 6; do gh pr view $n; gh pr checks $n; done"),
     ("xargs-gh",
@@ -165,7 +165,7 @@ LOOP_ALLOW = [
     ("until-poll-sleep-30", "until gh run view 123 --exit-status; do sleep 30; done"),
     ("until-poll-sleep-1m", "until gh pr checks 12; do sleep 1m; done"),
     ("single-gh", "gh pr view 12 --json state,mergedAt"),
-    ("paginate", "gh api --paginate repos/jbookout/carr-system/pulls"),
+    ("paginate", "gh api --paginate repos/DoctorCRE/carr-system/pulls"),
     ("graphql", "gh api graphql -f query='query { viewer { login } }'"),
     ("loop-without-gh", "for f in ops/*.py; do python3 -m py_compile $f; done"),
     ("literal-two", "for pr in 1601 1602; do gh pr view $pr --json state; done"),
@@ -499,6 +499,25 @@ def main():
         print(f"FAIL: {HOOK} does not exist")
         return 1
     failures = []
+    sha = 'a' * 40
+    merge_cases = [
+        ('direct merge', 'gh pr merge 12 --squash', 2),
+        ('missing pin', 'gh pr merge 12 --repo example/repo --auto --squash', 2),
+        ('missing auto', 'gh pr merge 12 --repo example/repo --squash --match-head-commit ' + sha, 2),
+        ('pinned auto', 'gh pr merge 12 --repo example/repo --auto --squash --match-head-commit ' + sha, 0),
+        ('admin bypass', 'gh pr merge 12 --repo example/repo --auto --squash --match-head-commit ' + sha + ' --admin', 2),
+        ('approved entry point', 'bash tools/approve-merge.sh example/repo 12 ' + sha, 0),
+        ('queue entry point', 'tools/approve-merge.sh --from-work-queue', 0),
+        ('entry point is no bypass', 'tools/approve-merge.sh --from-work-queue; gh pr merge 99', 2),
+        ('branch update', 'gh pr update-branch 12 --repo example/repo', 0),
+        ('REST merge', 'gh api -X PUT repos/example/repo/pulls/12/merge', 2),
+        ('REST branch update', 'gh api -X PUT repos/example/repo/pulls/12/update-branch', 0),
+        ('GraphQL merge', "gh api graphql -f query='mutation{mergePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'", 2),
+    ]
+    for name, cmd, want in merge_cases:
+        clear_state()
+        code, _ = pre(cmd)
+        expect(failures, 'merge/' + name, code, want)
     for name, cmd in LOOP_DENY:
         clear_state()
         code, err = pre(cmd)
@@ -539,7 +558,7 @@ def main():
     code, _ = pre("gh pr view 1")
     expect(failures, "corrupt-state-fails-open", code, 0)
 
-    total = len(LOOP_DENY) + len(LOOP_ALLOW) + len(BG_DENY) + len(BG_ALLOW) + 90
+    total = len(LOOP_DENY) + len(LOOP_ALLOW) + len(BG_DENY) + len(BG_ALLOW) + len(merge_cases) + 90
     if failures:
         print(f"FAIL github-burst-guard: {len(failures)} failure(s)")
         for f in failures:

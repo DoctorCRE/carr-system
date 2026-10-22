@@ -9,6 +9,8 @@ import sys
 import unittest
 import uuid
 from unittest.mock import MagicMock, patch
+import tempfile
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -122,6 +124,63 @@ class JourneyBindingTests(unittest.TestCase):
         self.assertNotIn(self.owner, str(raised.exception) + self.output.getvalue())
 
 
+class JourneyReadinessTests(unittest.TestCase):
+    def test_readiness_timeout_refuses_before_createdb(self):
+        class Setup(JourneyPostgresTests):
+            pass
+
+        self.addCleanup(Setup.doClassCleanups)
+        fixture = MagicMock(root=pathlib.Path('/tmp/synthetic-journey'))
+        commands = []
+
+        def run(command, **kwargs):
+            executable = pathlib.Path(command[0]).name
+            commands.append(executable)
+            return subprocess.CompletedProcess(command, int(executable == 'pg_isready'), '', '')
+
+        fixture.run.side_effect = run
+        with patch('lib.disposable_pg_fixture.DisposablePostgres', return_value=fixture), \
+                patch('lib.disposable_pg_fixture.postgres_fixture_group', return_value=contextlib.nullcontext()), \
+                patch('shutil.which', return_value='/synthetic/pg_config'), \
+                patch.object(pathlib.Path, 'exists', return_value=True), \
+                patch.object(journey.psycopg, 'connect', return_value=MagicMock()), \
+                patch('time.monotonic', side_effect=[0, 31]), patch('time.sleep'):
+            with self.assertRaisesRegex(RuntimeError, 'did not become ready'):
+                Setup.setUpClass()
+        self.assertNotIn('createdb', commands)
+
+    def test_createdb_waits_for_the_owned_socket_to_accept_connections(self):
+        class Setup(JourneyPostgresTests):
+            pass
+
+        self.addCleanup(Setup.doClassCleanups)
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MagicMock(root=pathlib.Path(directory))
+            probes = 0
+
+            def run(command, **kwargs):
+                nonlocal probes
+                executable = pathlib.Path(command[0]).name
+                if executable == 'pg_isready':
+                    self.assertEqual(str(command[command.index('-h') + 1]), directory)
+                    self.assertLessEqual(kwargs['timeout'], 5)
+                    probes += 1
+                    return subprocess.CompletedProcess(command, int(probes < 3), '', '')
+                if executable == 'createdb' and probes < 3:
+                    return subprocess.CompletedProcess(command, 1, '', 'createdb: Connection refused')
+                return subprocess.CompletedProcess(command, 0, '', '')
+
+            fixture.run.side_effect = run
+            with patch('lib.disposable_pg_fixture.DisposablePostgres', return_value=fixture), \
+                    patch('lib.disposable_pg_fixture.postgres_fixture_group', return_value=contextlib.nullcontext()), \
+                    patch('shutil.which', return_value='/synthetic/pg_config'), \
+                    patch.object(pathlib.Path, 'exists', return_value=True), \
+                    patch.object(journey.psycopg, 'connect', return_value=MagicMock()), \
+                    patch('time.sleep'):
+                Setup.setUpClass()
+            self.assertEqual(probes, 3)
+
+
 class JourneyPostgresTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -142,12 +201,28 @@ class JourneyPostgresTests(unittest.TestCase):
         cls.addClassCleanup(cls.fixture.close)
         root = cls.fixture.root
         for command in ([binary / 'initdb', '-D', root / 'data', '-U', 'neondb_owner', '--auth=trust', '--no-locale', '--encoding=UTF8'],
-                        [binary / 'pg_ctl', '-D', root / 'data', '-l', root / 'postgres.log', '-o', f"-k {root} -h ''", '-w', 'start'],
+                        [binary / 'pg_ctl', '-D', root / 'data', '-l', root / 'postgres.log', '-o', f"-k {root} -h ''", '-w', '-t', '30', 'start'],
                         [binary / 'createdb', '-h', root, '-U', 'neondb_owner', 'neondb'],
                         [binary / 'psql', '-h', root, '-U', 'neondb_owner', '-d', 'neondb', '-v', 'ON_ERROR_STOP=1', '-q', '-f', ROOT / 'db/schema.sql']):
-            result = cls.fixture.run(command, capture_output=True, text=True)
+            starting = command[0] == binary / 'pg_ctl'
+            result = cls.fixture.run(command, capture_output=True, text=True, timeout=35 if starting else None)
             if result.returncode:
                 raise RuntimeError(result.stderr[-3000:])
+            if starting:
+                deadline = time.monotonic() + 30
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise RuntimeError('temporary PostgreSQL did not become ready within 30 seconds')
+                    try:
+                        ready = cls.fixture.run([binary / 'pg_isready', '-h', root, '-U', 'neondb_owner',
+                                                 '-d', 'postgres', '-t', '1'], capture_output=True,
+                                                text=True, timeout=min(5, remaining))
+                    except subprocess.TimeoutExpired:
+                        continue
+                    if ready.returncode == 0:
+                        break
+                    time.sleep(min(0.1, remaining))
         cls.conn = psycopg.connect(host=str(root), user='neondb_owner', dbname='neondb')
         cls.addClassCleanup(cls.conn.close)
         with cls.conn.cursor() as cur:

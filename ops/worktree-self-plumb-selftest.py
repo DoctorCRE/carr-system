@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check the existing SessionStart policy and plumbing contract.
 
-Fleet retirement behavior is covered by branch-janitor-selftest.py.
+Job retirement is covered by job-cleanup-selftest.py.
 """
 from __future__ import annotations
 
@@ -27,9 +27,9 @@ from unittest.mock import patch
 with patch.dict(os.environ, {"CARR_GROK_RUN_READ_ONLY": "1"}), \
         patch("hooks.grok_invocation.bounded_grok_read_only", return_value=True), \
         patch.object(sys, "argv", [HOOK, "--reap"]), \
-        patch.object(mod, "reap_main") as reap:
-    if mod.main() != 0 or reap.called:
-        failures.append("bounded read-only hook dispatched the reaper")
+        patch.object(mod, "run") as hook_run:
+    if mod.main() != 0 or hook_run.called:
+        failures.append("bounded read-only hook dispatched the hook")
 
 
 # Fresh carr-system sessions receive the same product-first policy Codex reads
@@ -101,7 +101,6 @@ with tempfile.TemporaryDirectory() as canon_root, tempfile.TemporaryDirectory() 
             patch.object(mod, "run_git", return_value=wt_root), \
             patch.object(mod, "canonical_root", return_value=os.path.realpath(canon_root)), \
             patch.object(mod, "emit_delivery_policy", return_value=True), \
-            patch.object(mod, "mark_alive", return_value=None), \
             patch.object(_sp, "run", return_value=refusal):
         said = mod.decide({"cwd": wt_root, "hook_event_name": "SessionStart"}).stdout
     if "self-plumb REFUSED" not in said or "requirements.lock" not in said or ".venv" not in said:
@@ -115,8 +114,7 @@ with tempfile.TemporaryDirectory() as canon_root, tempfile.TemporaryDirectory() 
             patch.object(mod, "run_git", return_value=wt_root), \
             patch.object(mod, "canonical_root", return_value=os.path.realpath(canon_root)), \
             patch.object(mod, "emit_delivery_policy", return_value=True), \
-            patch.object(mod, "mark_alive", return_value=None), \
-            patch.object(_sp, "run", return_value=applied):
+                patch.object(_sp, "run", return_value=applied):
         said_ok = mod.decide({"cwd": wt_root, "hook_event_name": "SessionStart"}).stdout
     if "Applied: ok  .venv" not in said_ok or "REFUSED" in said_ok:
         failures.append(f"a successful plumb must report what it applied, not a refusal; got: {said_ok[:200]!r}")
@@ -127,5 +125,3 @@ if failures:
         print("  " + f)
     sys.exit(1)
 print("worktree-self-plumb selftest passed")
-
-# Independently reproduced Dot cases share the offline behavioral fixtures.

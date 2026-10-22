@@ -13,8 +13,6 @@ import io
 import json
 import importlib.util
 import os
-# These tests assert per-render GitHub sync; the production reuse window is covered in test-progress-board-rest.py.
-os.environ["PROGRESS_BOARD_PR_FRESH_SECONDS"] = "0"
 import plistlib
 import runpy
 import shutil
@@ -43,124 +41,93 @@ def fixture_budget(fixture):
         path=fixture.parent / f"github-budget-{os.getpid()}.json",
         clock=itertools.count(step=2).__next__)
 
-# One dispatcher for every gh call the board makes. The fixture file says what
-# each call returns; tests rewrite it between runs.
+# One dispatcher for every gh call the board makes: GitHub's GraphQL API over
+# the fixture file's open and merged PRs. Tests rewrite it between runs.
 FAKE_GH = r'''#!/usr/bin/env python3
-import json, os, sys
+import json, os, re, sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
 fixture_path = Path(os.environ["BOARD_GH_FIXTURE"])
 fixture = json.loads(fixture_path.read_text())
-args = sys.argv[1:]
+args = [arg for arg in sys.argv[1:] if arg != "--include"]
 log = os.environ.get("BOARD_GH_LOG")
 if log:
     with open(log, "a") as fh:
         fh.write(json.dumps(args) + "\n")
-if args[0] != "api" or "graphql" in args[1]:
+if args[:2] != ["api", "graphql"]:
     sys.exit(2)
-parsed = urlparse(args[1])
-path, query = parsed.path, parse_qs(parsed.query)
-parts = path.split("/")
-repo = "/".join(parts[1:3]) if parts[0] == "repos" else ""
+fields = dict(arg.split("=", 1) for arg in args[2:] if "=" in arg)
+repo = f"{fields['owner']}/{fields['name']}"
 if repo in fixture.get("fail", []):
     sys.exit(1)
-def emit(value):
-    page = int(query.get("page", [1])[0])
-    size = int(query.get("per_page", [100])[0])
-    if isinstance(value, list):
-        value = value[(page-1)*size:page*size]
-    print(json.dumps(value))
-def raw(pr, merged=False):
+now = datetime.now(timezone.utc)
+def connection(value):
+    return {"nodes": value} if isinstance(value, list) else value
+def node(pr, state):
     if not isinstance(pr, dict):
         return pr
-    # Preserve malformed-input tests: bad GraphQL-shaped recordings become
-    # bad REST responses, rather than the fixture adapter healing them.
-    if "view" in fixture and (pr.get("state") not in ("OPEN", "CLOSED", "MERGED")
-            or not isinstance(pr.get("isDraft"), bool) or not isinstance(pr.get("headRefOid"), str)
-            or not isinstance(pr.get("author"), dict) or not isinstance(pr["author"].get("login"), str)):
-        return {}
-    state = pr.get("state", "MERGED" if merged else "OPEN")
-    commit = pr.get("mergeCommit")
-    sha = commit.get("oid") if isinstance(commit, dict) else ([] if commit is not None else None)
-    if state == "MERGED" and commit is None:
-        sha = "1" * 40
     decision = pr.get("reviewDecision")
-    return {"number": pr.get("number", 42 if "view" in fixture else None), "state": "open" if state == "OPEN" else "closed",
-            "draft": pr.get("isDraft", False), "head": {"sha": pr.get("headRefOid"), "ref": pr.get("headRefName", "")},
-            "user": pr.get("author"), "merge_commit_sha": sha,
-            "merged_at": pr.get("mergedAt", (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()) if state == "MERGED" else None,
-            "title": pr.get("title", "PR"), "body": pr.get("body", ""), "html_url": pr.get("url", ""),
-            "created_at": pr.get("createdAt", "2026-09-28T00:00:00Z"),
-            "updated_at": pr.get("updatedAt") or datetime.fromtimestamp(fixture_path.stat().st_mtime, timezone.utc).isoformat(),
-            "changed_files": pr.get("changedFiles"),
-            "mergeable": False if pr.get("mergeable") == "CONFLICTING" else True,
-            "mergeable_state": "blocked" if decision == "REVIEW_REQUIRED" else "clean"}
-def selected(number):
-    if "view" in fixture:
-        return fixture["view"]
-    for state in ("open", "merged"):
-        for pr in fixture.get(state, {}).get(repo, []):
-            if pr.get("number") == number:
-                return {**pr, "state": "MERGED" if state == "merged" else "OPEN"}
-    sys.exit(1)
-if parts[0] == "user":
-    if fixture.get("repo_list_fails"):
-        sys.exit(1)
-    emit([{"full_name": name, "archived": False} for name in fixture.get("repos", [])])
-elif len(parts) == 4 and parts[3] == "pulls":
-    emit([raw(pr) for pr in fixture.get("open", {}).get(repo, [])])
-elif len(parts) == 4 and parts[3] == "issues":
-    emit([{"number": pr["number"], "pull_request": {"url": "pr"}} for pr in fixture.get("merged", {}).get(repo, [])])
-elif "compare" in parts:
-    status = fixture.get("compare", {}).get(path)
-    if status is None:
-        sys.exit(1)
-    print(status)
-elif len(parts) == 5 and parts[3] == "pulls":
-    emit(raw(selected(int(parts[4]))))
-elif parts[-1] in ("check-runs", "statuses"):
-    pr = fixture.get("view")
-    if pr is None:
-        pr = next((p for state in ("open", "merged") for p in fixture.get(state, {}).get(repo, [])
-                   if p.get("headRefOid") == parts[4]), None)
-    if not isinstance(pr, dict):
-        sys.exit(1)
-    checks = pr.get("statusCheckRollup")
-    if not isinstance(checks, list):
-        emit({})
-    elif parts[-1] == "check-runs":
-        if any(not isinstance(c, dict) for c in checks):
-            emit({"check_runs": checks})
+    merged = state == "MERGED"
+    files = pr.get("files", [])
+    # Required fields stay as recorded, so a malformed recording stays malformed.
+    return {**pr, "state": state,
+            "number": pr.get("number", 42), "title": pr.get("title", "PR"), "body": pr.get("body", ""),
+            "url": pr.get("url", ""), "createdAt": pr.get("createdAt", "2026-09-28T00:00:00Z"),
+            "updatedAt": pr.get("updatedAt") or datetime.fromtimestamp(fixture_path.stat().st_mtime, timezone.utc).isoformat(),
+            "headRefName": pr.get("headRefName", ""),
+            "mergedAt": pr.get("mergedAt", (now - timedelta(hours=1)).isoformat()) if merged else None,
+            "mergeCommit": (pr.get("mergeCommit") or {"oid": "1" * 40}) if merged else pr.get("mergeCommit"),
+            "mergeable": pr.get("mergeable", "MERGEABLE"),
+            "mergeStateStatus": "BLOCKED" if decision == "REVIEW_REQUIRED" else "CLEAN",
+            "labels": connection(pr.get("labels", [])), "milestone": pr.get("milestone"),
+            "statusCheckRollup": {"contexts": connection(pr.get("statusCheckRollup"))},
+            "comments": connection(pr.get("comments")),
+            "reviews": {"nodes": [{"databaseId": 1, "state": decision, "author": {"login": "reviewer"},
+                                   "authorAssociation": "COLLABORATOR", "submittedAt": "2026-09-28T00:00:00Z"}]
+                        if decision in ("CHANGES_REQUESTED", "APPROVED") else []},
+            "files": connection(files), "changedFiles": pr.get("changedFiles", len(files) if isinstance(files, list) else 0)}
+listed = {"OPEN": [node(pr, "OPEN") for pr in fixture.get("open", {}).get(repo, [])],
+          "MERGED": [node(pr, "MERGED") for pr in fixture.get("merged", {}).get(repo, [])]}
+aliases = re.findall(r"pr(\d+): pullRequest", fields["query"])
+if aliases:
+    found = {}
+    for number in aliases:
+        if "view" in fixture:
+            view = fixture["view"]
+            found[f"pr{number}"] = node({"number": int(number), **view}, view.get("state")) \
+                if isinstance(view, dict) else view
         else:
-            # Leave types intact; the consumer must validate them.
-            emit({"check_runs": [{**c, **({"status": c["status"].lower()} if isinstance(c.get("status"), str) else {}),
-                                   **({"conclusion": c["conclusion"].lower()} if isinstance(c.get("conclusion"), str) else {})}
-                                  for c in checks if "state" not in c]})
-    else:
-        emit([{**c, "state": c["state"].lower()} for c in checks if isinstance(c, dict) and "state" in c])
-elif parts[-1] == "comments":
-    pr = selected(int(parts[4]))
-    comments = pr.get("comments") if isinstance(pr, dict) else None
-    if isinstance(comments, list):
-        emit([{"user": c.get("author"), "author_association": c.get("authorAssociation"),
-               "body": c.get("body"), "created_at": c.get("createdAt")} if isinstance(c, dict) else c for c in comments])
-    else:
-        emit({})
-elif parts[-1] == "reviews":
-    decision = selected(int(parts[4])).get("reviewDecision")
-    emit([{"id": 1, "state": decision, "user": {"login": "reviewer"}, "author_association": "COLLABORATOR",
-           "submitted_at": "2026-09-28T00:00:00Z"}]
-         if decision in ("CHANGES_REQUESTED", "APPROVED") else [])
-elif parts[-1] == "files":
-    emit([{"filename": f["path"]} for f in selected(int(parts[4])).get("files", [])])
-else:
-    sys.exit(2)
+            found[f"pr{number}"] = next((pr for pr in listed["OPEN"] + listed["MERGED"]
+                                         if pr["number"] == int(number)), None)
+            if found[f"pr{number}"] is None:
+                sys.exit(1)
+    print(json.dumps({"data": {"repository": found}}))
+    sys.exit(0)
+result = {}
+closed = sorted(listed["MERGED"], key=lambda pr: str(pr.get("updatedAt")), reverse=True)
+closed_page = int(re.search(r"closed: pullRequests\([^)]*first: (\d+)", fields["query"])[1])
+for kind, rows, size in (("open", listed["OPEN"], 100), ("closed", closed, closed_page)):
+    if fields.get("with" + kind.title()) != "true":
+        continue
+    start = int(fields.get(kind + "After") or 0)
+    result[kind] = {"nodes": rows[start:start + size],
+                    "pageInfo": {"hasNextPage": start + size < len(rows), "endCursor": str(start + size)}}
+print(json.dumps({"data": {"repository": result}}))
 '''
 
 SHA_A = "a" * 40
 SHA_M = "1" * 40
 SHA_R = "2" * 40
+
+
+def every(result):
+    """A fetch_prs stand-in answering every key with one result."""
+    return lambda keys: {key: result for key in keys}
+
+
+def by_pr(fetch):
+    """A fetch_prs stand-in over a per-PR reader (number, repo)."""
+    return lambda keys: {key: fetch(key[1], key[0]) for key in keys}
 
 
 def iso(delta: timedelta = timedelta()) -> str:
@@ -265,19 +232,60 @@ class BoardCase(unittest.TestCase):
 
 
 class ProgressBoardCLI(BoardCase):
+    def test_publication_refreshes_expired_inventory_and_reuses_fresh_cache(self):
+        import system_work_cache as cache
+        self.run_board('init', 'carr-v5', '--title', 'Synthetic board')
+        path = self.root / 'boards/system-work-github-cache.json'
+        stale = {'schema': 'system-work-external.v1', 'items': [], 'complete': True,
+                 'observed_at': iso(timedelta(hours=1)), 'coverage': [], 'completed_pr_history': True}
+        path.write_text(json.dumps(stale))
+        refreshed = {**stale, 'observed_at': iso()}
+        remote = {}
+        def call(verb, args):
+            name = args['board_id']
+            if verb == 'publish-board-snapshot':
+                remote[name] = {'version': 1, 'snapshot_json': copy.deepcopy(args['snapshot'])}
+            return {'ok': True, 'snapshot': copy.deepcopy(remote.get(name)), 'questions': []}
+        with patch.dict(os.environ, self.env), patch.object(BOARD, 'call_verb', call), \
+             patch.object(Path, 'home', return_value=self.root), \
+             patch.object(cache, 'collect_github', return_value={**refreshed, 'pr_heads': []}) as collect, \
+             patch.object(cache, 'unfinished_briefs', return_value=[]):
+            BOARD.publish_board('carr-v5', costs={})
+            self.assertEqual(remote['carr-v5']['snapshot_json']['external_inventory']['observed_at'],
+                             refreshed['observed_at'])
+            self.assertEqual(json.loads(path.read_text()), refreshed)
+            BOARD.publish_board('carr-v5', costs={})
+        collect.assert_called_once()
+
+    def test_publication_reuses_inventory_without_calling_github(self):
+        self.run_board('init', 'carr-v5', '--title', 'Synthetic board')
+        self.fake_gh({})
+        external = {'schema': 'system-work-external.v1', 'items': [], 'complete': True,
+                    'observed_at': iso(), 'coverage': [], 'completed_pr_history': True}
+        (self.root / 'boards/system-work-github-cache.json').write_text(json.dumps(external))
+        remote = {}
+        def call(verb, args):
+            board = args['board_id']
+            if verb == 'publish-board-snapshot':
+                remote[board] = {'version': 1, 'snapshot_json': args['snapshot']}
+            return {'ok': True, 'snapshot': remote.get(board), 'questions': []}
+        with patch.dict(os.environ, self.env), patch.object(BOARD, 'call_verb', call):
+            BOARD.publish_board('carr-v5', costs={})
+        self.assertEqual(self.gh_calls(), [])
+        self.assertEqual(remote['carr-v5']['snapshot_json']['external_inventory']['observed_at'], external['observed_at'])
+
     def test_task_producer_explicitly_classifies_system_work(self):
         self.run_board('init','demo','--title','Synthetic board')
         self.update_legacy_task('demo','repair','--title','Synthetic repair','--status','running','--executor','codex')
         self.assertEqual(self.read_state('demo')['tasks']['repair'].get('domain'),'system')
 
     def test_large_history_publishes_bounded_pages_without_losing_rows(self):
-        import system_work_cache
         self.run_board('init', 'carr-v5', '--title', 'Synthetic board')
         items=[{'id':f'repo:pr:{i}', 'kind':'pull_request', 'title':'Synthetic title '*12,
                 'completed':True,'opened_at':'2026-09-01T00:00:00Z',
                 'last_activity_at':'2026-09-02T00:00:00Z','identity':{}} for i in range(1448)]
         external={'schema':'system-work-external.v1','items':items,'complete':True,
-                  'observed_at':'2026-10-01T00:00:00Z','coverage':[],'completed_pr_history':True,'pr_work_refs':[]}
+                  'observed_at':iso(),'coverage':[],'completed_pr_history':True,'pr_work_refs':[]}
         remote={}
         def call(verb,args):
             board=args['board_id']
@@ -285,7 +293,8 @@ class ProgressBoardCLI(BoardCase):
                 self.assertLessEqual(len(json.dumps(args['snapshot'],separators=(',',':'),ensure_ascii=False)),262144)
                 remote[board]={'version':1,'snapshot_json':args['snapshot']}
             return {'ok':True,'snapshot':remote.get(board),'questions':[]}
-        with patch.dict(os.environ,self.env), patch.object(BOARD,'call_verb',call), patch.object(system_work_cache,'cached_github',return_value=external):
+        (self.root / 'boards/system-work-github-cache.json').write_text(json.dumps(external))
+        with patch.dict(os.environ,self.env), patch.object(BOARD,'call_verb',call):
             BOARD.publish_board('carr-v5')
         manifest=remote['carr-v5']['snapshot_json']['external_inventory']
         restored=[row for page in manifest['pages'] for row in remote[page['board_id']]['snapshot_json']['items']]
@@ -590,7 +599,7 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
     def test_backfill_uses_pr_title_and_retains_existing_task_history(self):
         state = {"tasks": {
             "pr": {"title": "PR 42", "executor": "gpt-6-sol high (Codex)",
-                   "pr": 42, "repo": "jbookout/carr-system", "status": "done",
+                   "pr": 42, "repo": "DoctorCRE/carr-system", "status": "done",
                    "stage_history": [{"stage": "review", "at": "earlier"}]},
             "other": {"title": "Check CRM capture", "executor": "orchestrator",
                       "status": "running", "note": "Verify that captured mail reaches the CRM."},
@@ -599,9 +608,9 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
         def lookup(number, repo):
             calls.append((number, repo))
             return {"title": "Show model and effort on board cards", "body": "The board now names each model.",
-                    "url": "https://github.com/jbookout/carr-system/pull/42", "headRefOid": "a" * 40}
+                    "url": "https://github.com/DoctorCRE/carr-system/pull/42", "headRefOid": "a" * 40}
         self.assertEqual(BOARD.backfill_state(state, lookup), 2)
-        self.assertEqual(calls, [(42, "jbookout/carr-system")])
+        self.assertEqual(calls, [(42, "DoctorCRE/carr-system")])
         self.assertEqual(state["tasks"]["pr"]["summary"], "Show model and effort on board cards.")
         self.assertEqual(state["tasks"]["pr"]["stage_history"], [{"stage": "review", "at": "earlier"}])
         self.assertEqual(state["tasks"]["other"]["summary"], "Verify that captured mail reaches the CRM.")
@@ -765,20 +774,20 @@ class PullRequestStatus(BoardCase):
         self.update_legacy_task("demo", "app", "--title", "App fix", "--status", "running", "--executor", "Codex",
                        "--pr", "85", "--repo", "jbookout/doctorcre-app")
         state = self.read_state("demo")
-        self.assertEqual(state["tasks"]["carr"]["repo"], "jbookout/carr-system")
+        self.assertEqual(state["tasks"]["carr"]["repo"], "DoctorCRE/carr-system")
         self.assertEqual(state["tasks"]["app"]["repo"], "jbookout/doctorcre-app")
         del state["tasks"]["carr"]["repo"]  # JSON written before --repo existed
         self.write_state("demo", state)
         carr = {**self.VALID, "number": 85, "state": "MERGED", "mergeCommit": {"oid": SHA_M}}
         app = {**self.VALID, "number": 85, "comments": []}
         self.fake_gh({"open": {"jbookout/doctorcre-app": [app]},
-                      "merged": {"jbookout/carr-system": [carr]}})
+                      "merged": {"DoctorCRE/carr-system": [carr]}})
         self.run_board("render", "demo")
         state = self.read_state("demo")
         self.assertEqual(state["tasks"]["carr"]["pr_phase"], "Merged")
         self.assertEqual(state["tasks"]["app"]["pr_phase"], "Awaiting review")
         self.assertNotIn("repo", state["tasks"]["carr"])
-        self.assertEqual(BOARD.task_repo(state["tasks"]["carr"]), "jbookout/carr-system")
+        self.assertEqual(BOARD.task_repo(state["tasks"]["carr"]), "DoctorCRE/carr-system")
 
     def test_changing_pr_identity_offline_discards_previous_pr_status(self):
         self.start()
@@ -860,14 +869,13 @@ class PullRequestStatus(BoardCase):
         task = self.read_state("demo")["tasks"]["a"]
         self.assertEqual(task["stage"], "merged")
         self.assertIn("the workstation delivery target", task["release_wait"])
-        self.assertEqual([c for c in self.gh_calls() if "/compare/" in c[1]], [])
 
-    def test_all_repos_card_in_an_exact_release_needs_no_compare(self):
-        card = {**exercise_fields(SHA_M), "status": "review", "stage": "merged", "merge_sha": SHA_M, "pr": 7, "repo": "jbookout/carr-system"}
+    def test_all_repos_card_in_an_exact_release_needs_no_ancestry_check(self):
+        card = {**exercise_fields(SHA_M), "status": "review", "stage": "merged", "merge_sha": SHA_M, "pr": 7, "repo": "DoctorCRE/carr-system"}
         release = {"sha": SHA_M, "lane": "worker", "ts": "2026-09-29T12:00:00+00:00", "source": "releases.jsonl"}
         with patch.object(BOARD, "latest_release", return_value=release), \
-             patch.object(BOARD, "compare_status", side_effect=AssertionError("compare called")):
-            self.assertTrue(BOARD.auto_live(card, "jbookout/carr-system", iso(), ["mcp-server/src/a.js"]))
+             patch.object(BOARD, "release_contains", side_effect=AssertionError("ancestry checked")):
+            self.assertTrue(BOARD.auto_live(card, "DoctorCRE/carr-system", iso(), ["mcp-server/src/a.js"]))
         self.assertEqual(card["stage"], "live")
         self.assertIn("verified worker release", card["evidence"])
 
@@ -886,9 +894,9 @@ class PullRequestStatus(BoardCase):
             os.environ.pop("PROGRESS_BOARD_SKIP_PROBE", None)
             with patch.object(BOARD, "probe_json", lambda url: probes.get(url)):
                 BOARD.RELEASE_CACHE.clear()
-                carr = BOARD.latest_release("jbookout/carr-system")
+                carr = BOARD.latest_release("DoctorCRE/carr-system")
                 app = BOARD.latest_release("jbookout/doctorcre-app")
-                wait = BOARD.release_wait_reason("jbookout/carr-system")
+                wait = BOARD.release_wait_reason("DoctorCRE/carr-system")
         BOARD.RELEASE_CACHE.clear()
         self.assertEqual((carr["sha"], carr["lane"]), (SHA_R, "worker"))
         self.assertEqual((app["sha"], app["source"]), ("7" * 40, "live probe"))
@@ -903,7 +911,7 @@ class PullRequestStatus(BoardCase):
                                  "status": "failed", "step": "canary", "detail": "canary pending"}) + "\n")
         evidence = {"value": None}
         with patch.dict(os.environ, self.env), \
-             patch.object(BOARD, "fetch_pr", return_value=(merged, None)), \
+             patch.object(BOARD, "fetch_prs", every((merged, None))), \
              patch.object(BOARD, "deployed_release", return_value=None), \
              patch.object(BOARD, "deployment_evidence", lambda info, release: evidence["value"]):
             BOARD.RELEASE_CACHE.clear()
@@ -1104,10 +1112,9 @@ class AllRepositoriesBoard(BoardCase):
         return base
 
     def fixture_all(self):
-        carr = "jbookout/carr-system"
+        carr = "DoctorCRE/carr-system"
         app = "jbookout/doctorcre-app"
         return {
-            "repos": ["jbookout/carr-system", "jbookout/tour-lab"],
             "open": {
                 carr: [
                     self.pr(1, isDraft=True, headRefName="codex/draft-work"),
@@ -1123,7 +1130,6 @@ class AllRepositoriesBoard(BoardCase):
                 carr: [self.pr(7, mergedAt=iso(timedelta(hours=1)), mergeCommit={"oid": SHA_M}),
                        self.pr(8, mergedAt=iso(timedelta(hours=1)), mergeCommit={"oid": "8" * 40})],
             },
-            "compare": {f"repos/jbookout/carr-system/compare/{SHA_M}...{'8' * 40}": "ahead"},
         }
 
     def test_builds_every_repository_from_gh_grouped_with_stages(self):
@@ -1134,8 +1140,7 @@ class AllRepositoriesBoard(BoardCase):
         self.assertEqual(state["kind"], "all-repos")
         self.assertEqual(state["project"], "all-repos")
         repos = [row["repo"] for row in state["repos"]]
-        self.assertEqual(repos[:3], ["jbookout/carr-system", "jbookout/doctorcre-app", "jbookout/software-factory"])
-        self.assertIn("jbookout/tour-lab", repos)
+        self.assertEqual(repos, ["DoctorCRE/carr-system", "jbookout/doctorcre-app", "jbookout/software-factory"])
         tasks = state["tasks"]
         expect = {
             "carr-system-1": ("build", "running", "Draft", False),
@@ -1171,17 +1176,16 @@ class AllRepositoriesBoard(BoardCase):
         self.assertFalse(BOARD.is_stale(tasks["carr-system-5"]))
         self.assertIn("consumer proof", tasks["carr-system-7"]["release_wait"])
         counts = {row["repo"]: (row["open"], row["merged"]) for row in state["repos"]}
-        self.assertEqual(counts["jbookout/carr-system"], (6, 2))
+        self.assertEqual(counts["DoctorCRE/carr-system"], (6, 2))
         self.assertEqual(counts["jbookout/doctorcre-app"], (1, 0))
         snapshot = BOARD.board_snapshot(state)
         self.assertEqual(snapshot["kind"], "all-repos")
         self.assertEqual(snapshot["repos"], state["repos"])
-        discovery = [c for c in self.gh_calls() if c[0] == "api" and "/issues?" in c[1]]
-        self.assertTrue(discovery and "state=closed" in discovery[0][1] and "since=" in discovery[0][1])
+        self.assertEqual(len(self.gh_calls()), len(BOARD.CORE_REPOS), "one GraphQL read per repository")
 
     def test_same_pr_number_in_two_repositories_never_collides(self):
         fixture = self.fixture_all()
-        fixture["open"] = {"jbookout/carr-system": [self.pr(93, title="CARR 93")],
+        fixture["open"] = {"DoctorCRE/carr-system": [self.pr(93, title="CARR 93")],
                            "jbookout/doctorcre-app": [self.pr(93, title="App 93")]}
         fixture["merged"] = {}
         self.fake_gh(fixture)
@@ -1190,16 +1194,16 @@ class AllRepositoriesBoard(BoardCase):
         self.assertEqual(tasks["carr-system-93"]["title"], "CARR 93")
         self.assertEqual(tasks["doctorcre-app-93"]["title"], "App 93")
         self.assertEqual({(t["repo"], t["pr"]) for t in tasks.values()},
-                         {("jbookout/carr-system", 93), ("jbookout/doctorcre-app", 93)})
+                         {("DoctorCRE/carr-system", 93), ("jbookout/doctorcre-app", 93)})
         self.assertEqual(BOARD.card_key("jbookout/doctorcre-app", 93), "doctorcre-app-93")
-        self.assertNotEqual(BOARD.card_key("jbookout/doctorcre-app", 93), BOARD.card_key("jbookout/carr-system", 93))
+        self.assertNotEqual(BOARD.card_key("jbookout/doctorcre-app", 93), BOARD.card_key("DoctorCRE/carr-system", 93))
 
     def test_one_repository_failing_keeps_its_previous_cards(self):
         fixture = self.fixture_all()
         self.fake_gh(fixture)
         self.run_board("render", "all-repos")
         before = {k: v for k, v in self.read_state("all-repos")["tasks"].items() if k.startswith("doctorcre-app-")}
-        self.set_fixture({**fixture, "fail": ["jbookout/doctorcre-app"], "open": {"jbookout/carr-system": []}})
+        self.set_fixture({**fixture, "fail": ["jbookout/doctorcre-app"], "open": {"DoctorCRE/carr-system": []}})
         self.run_board("render", "all-repos")
         state = self.read_state("all-repos")
         after = {k: v for k, v in state["tasks"].items() if k.startswith("doctorcre-app-")}
@@ -1213,8 +1217,7 @@ class AllRepositoriesBoard(BoardCase):
         self.fake_gh(fixture)
         self.run_board("render", "all-repos")
         prior = self.read_state("all-repos")
-        self.set_fixture({**fixture, "repo_list_fails": True,
-                          "fail": list(fixture["open"]) + ["jbookout/software-factory", "jbookout/tour-lab"]})
+        self.set_fixture({**fixture, "fail": list(BOARD.CORE_REPOS)})
         result = self.run_board("render", "all-repos", check=False)
         self.assertEqual(result.returncode, 0)
         after = self.read_state("all-repos")
@@ -1223,9 +1226,9 @@ class AllRepositoriesBoard(BoardCase):
 
     def test_snapshot_stays_under_the_server_limit(self):
         tasks = {f"carr-system-{n}": {"title": "t" * 200, "summary": "s" * 160, "status": "done", "stage": "live",
-                                      "evidence": "e" * 200, "repo": "jbookout/carr-system", "pr": n, **exercise_fields(),
+                                      "evidence": "e" * 200, "repo": "DoctorCRE/carr-system", "pr": n, **exercise_fields(),
                                       "completed_at": f"2026-09-{1 + n % 28:02d}T00:00:00Z"} for n in range(600)}
-        tasks["carr-system-open"] = {"title": "Open", "status": "running", "stage": "build", "repo": "jbookout/carr-system", "pr": 9999}
+        tasks["carr-system-open"] = {"title": "Open", "status": "running", "stage": "build", "repo": "DoctorCRE/carr-system", "pr": 9999}
         snapshot = BOARD.board_snapshot({"project": "all-repos", "kind": "all-repos", "tasks": tasks})
         self.assertIn("carr-system-open", snapshot["tasks"])
         self.assertLessEqual(BOARD.snapshot_size(snapshot), BOARD.SNAPSHOT_LIMIT)
@@ -1670,7 +1673,7 @@ def load_release_pipeline():
 
 
 class ReviewRound1420(BoardCase):
-    """jbookout/carr-system#1420 review findings 1-11, each reproduced."""
+    """DoctorCRE/carr-system#1420 review findings 1-11, each reproduced."""
 
     OPEN = GitHubSync.OPEN
     pr = AllRepositoriesBoard.pr
@@ -1711,12 +1714,12 @@ class ReviewRound1420(BoardCase):
 
         def fetch(number, repo):
             # A has read head A but pauses before applying it. B finishes first.
-            with patch.object(BOARD, "fetch_pr", return_value=(new, None)):
+            with patch.object(BOARD, "fetch_prs", every((new, None))):
                 BOARD.render("demo")
             completed.append(self.read_state("demo"))
             return old, None
 
-        with self.in_process(PROGRESS_BOARD_SKIP_GH=""), patch.object(BOARD, "fetch_pr", fetch):
+        with self.in_process(PROGRESS_BOARD_SKIP_GH=""), patch.object(BOARD, "fetch_prs", by_pr(fetch)):
             BOARD.render("demo")
         winner = completed[0]
         self.assertEqual(winner["tasks"]["a"]["review_verdict"], "BLOCK")
@@ -1739,7 +1742,7 @@ class ReviewRound1420(BoardCase):
         self.assertEqual([p.name for p in (self.root / "boards").iterdir() if p.suffix == ".tmp"], [])
 
     def test_1_superseded_all_repos_render_keeps_newer_cards_and_sync_time(self):
-        repo = "jbookout/carr-system"
+        repo = "DoctorCRE/carr-system"
         old = self.pr(42, comments=[{
             "author": {"login": "jbookout"}, "authorAssociation": "OWNER",
             "body": "APPROVE\nReviewed-SHA: " + f"{42:040d}",
@@ -1756,7 +1759,7 @@ class ReviewRound1420(BoardCase):
             return [old], []
 
         with self.in_process(), \
-             patch.object(BOARD, "list_repositories", return_value=[repo]), \
+             patch.object(BOARD, "CORE_REPOS", (repo,)), \
              patch.object(BOARD, "read_repository", side_effect=read):
             BOARD.build_all_repos()
         winner = completed[0]
@@ -1774,7 +1777,7 @@ class ReviewRound1420(BoardCase):
                 BOARD.main(["note", "demo", "--text", "written while GitHub was being read"])
             return copy.deepcopy(self.OPEN), None
         with self.in_process(PROGRESS_BOARD_LOCAL_ONLY="1", PROGRESS_BOARD_SKIP_GH=""), \
-             patch.object(BOARD, "fetch_pr", fetch), patch("sys.stderr", new_callable=io.StringIO):
+             patch.object(BOARD, "fetch_prs", by_pr(fetch)), patch("sys.stderr", new_callable=io.StringIO):
             BOARD.render("demo")
         state = self.read_state("demo")
         self.assertEqual(state["notes"][0]["text"], "written while GitHub was being read")
@@ -1800,27 +1803,12 @@ class ReviewRound1420(BoardCase):
     def test_2_every_recent_merged_pr_is_listed_with_true_counts(self):
         merged = [self.pr(n, mergedAt=iso(timedelta(hours=1)), mergeCommit={"oid": f"{n:040x}"})
                   for n in range(1, 230)]
-        self.fake_gh({"repos": [], "open": {}, "merged": {"jbookout/carr-system": merged}})
+        self.fake_gh({"open": {}, "merged": {"DoctorCRE/carr-system": merged}})
         self.run_board("render", "all-repos")
         state = self.read_state("all-repos")
         self.assertEqual(len([k for k in state["tasks"] if k.startswith("carr-system-")]), 229)
-        row = next(r for r in state["repos"] if r["repo"] == "jbookout/carr-system")
+        row = next(r for r in state["repos"] if r["repo"] == "DoctorCRE/carr-system")
         self.assertEqual((row["open"], row["merged"]), (0, 229))
-
-    def test_2_a_list_that_fills_the_cap_is_an_incomplete_read(self):
-        from urllib.parse import parse_qs, urlparse
-        rows = [{"number": n} for n in range(8)]
-        def page(args, timeout=30):
-            params = parse_qs(urlparse(args[1]).query)
-            number, size = int(params["page"][0]), int(params["per_page"][0])
-            return rows[(number - 1) * size:number * size]
-        with patch.object(BOARD, "REST_PAGE_SIZE", 2), patch.object(BOARD, "REST_MAX_ROWS", 4), \
-             patch.object(BOARD, "gh_json", page):
-            with self.assertRaisesRegex(RuntimeError, "incomplete"):
-                BOARD.rest_rows("repos/jbookout/carr-system/pulls?state=open")
-        with patch.object(BOARD, "REST_PAGE_SIZE", 2), patch.object(BOARD, "REST_MAX_ROWS", 16), \
-             patch.object(BOARD, "gh_json", page):
-            self.assertEqual(len(BOARD.rest_rows("repos/jbookout/carr-system/pulls?state=open")), 8)
 
     # 3 ── the whole payload fits the server contract
     def test_3_the_complete_snapshot_is_measured_and_fitted(self):
@@ -1877,16 +1865,15 @@ class ReviewRound1420(BoardCase):
         block = {"author": {"login": "jbookout"}, "authorAssociation": "OWNER",
                  "body": "REVIEW: BLOCKED\nReviewed-SHA: " + f"{1:040d}", "createdAt": "2026-09-30T10:00:00Z"}
         approve = {**block, "body": "APPROVE\nReviewed-SHA: " + f"{2:040d}"}
-        self.fake_gh({"repos": [], "merged": {},
-                      "open": {"jbookout/carr-system": [self.pr(1, comments=[block]), self.pr(2, comments=[approve])]}})
+        self.fake_gh({"merged": {},
+                      "open": {"DoctorCRE/carr-system": [self.pr(1, comments=[block]), self.pr(2, comments=[approve])]}})
         self.run_board("render", "all-repos")
         tasks = self.read_state("all-repos")["tasks"]
         self.assertEqual((tasks["carr-system-1"]["pr_phase"], tasks["carr-system-1"]["review_verdict"]),
                          ("Review blocked", "BLOCK"))
         self.assertEqual((tasks["carr-system-2"]["pr_phase"], tasks["carr-system-2"]["review_verdict"]),
                          ("Ready to merge", "APPROVE"))
-        comments_calls = [c for c in self.gh_calls() if c[0] == "api" and "/comments?" in c[1]]
-        self.assertEqual(len(comments_calls), 2)
+        self.assertEqual(len(self.gh_calls()), len(BOARD.CORE_REPOS), "comments come with the repository read")
 
     def test_4_board_and_release_pipeline_agree_on_every_verdict_shape(self):
         pipeline = load_release_pipeline()
@@ -1909,7 +1896,7 @@ class ReviewRound1420(BoardCase):
                     else:
                         expected = "APPROVE" if pipeline.reviewed_header_sha(last["body"]) == SHA_A else "Not recorded"
                     self.assertEqual(BOARD.review_verdict({"headRefOid": SHA_A, "comments": comments},
-                                                          "jbookout/carr-system"), expected)
+                                                          "DoctorCRE/carr-system"), expected)
         self.assertEqual(pipeline.verdict("REVIEW: BLOCKED", cfg), "block")
 
     # 5 ── the scheduled job runs from the repository
@@ -2053,9 +2040,9 @@ class ReviewRound1420(BoardCase):
                 (["docs/runbook.md"], "merged", "outside the worker release paths"),
                 (["mcp-server/src/board-answers.js", "mcp-server/test/x.test.mjs", "mcp-server/README.md"], "merged", "consumer proof")):
             with self.subTest(files=files):
-                card = {"status": "done", "stage": "merged", "merge_sha": SHA_M, "pr": 7, "repo": "jbookout/carr-system"}
+                card = {"status": "done", "stage": "merged", "merge_sha": SHA_M, "pr": 7, "repo": "DoctorCRE/carr-system"}
                 with patch.dict(os.environ, self.env), patch.object(BOARD, "latest_release", return_value=release):
-                    BOARD.auto_live(card, "jbookout/carr-system", iso(), files)
+                    BOARD.auto_live(card, "DoctorCRE/carr-system", iso(), files)
                 self.assertEqual(card["stage"], stage)
                 if wait:
                     self.assertIn(wait, card["release_wait"])
@@ -2071,15 +2058,15 @@ class ReviewRound1420(BoardCase):
         self.fake_gh(fixture)
         self.run_board("render", "all-repos")
         before = {k: v for k, v in self.read_state("all-repos")["tasks"].items() if k.startswith("carr-system-")}
-        self.set_fixture({**fixture, "open": {**fixture["open"], "jbookout/carr-system": [{}]},
-                          "merged": {"jbookout/carr-system": [{}]}})
+        self.set_fixture({**fixture, "open": {**fixture["open"], "DoctorCRE/carr-system": [{}]},
+                          "merged": {"DoctorCRE/carr-system": [{}]}})
         self.run_board("render", "all-repos")
         state = self.read_state("all-repos")
         self.assertEqual({k: v for k, v in state["tasks"].items() if k.startswith("carr-system-")}, before)
-        row = next(r for r in state["repos"] if r["repo"] == "jbookout/carr-system")
+        row = next(r for r in state["repos"] if r["repo"] == "DoctorCRE/carr-system")
         self.assertIn("malformed", row["error"])
         self.assertEqual((row["open"], row["merged"]), (6, 2))
-        self.assertIn("jbookout/carr-system", [f["repo"] for f in state["github_sync"]["failed"]])
+        self.assertIn("DoctorCRE/carr-system", [f["repo"] for f in state["github_sync"]["failed"]])
 
     # 8 ── a malformed probe is unknown evidence
     def test_8_a_malformed_release_probe_leaves_the_release_unverified(self):
@@ -2090,8 +2077,8 @@ class ReviewRound1420(BoardCase):
                 os.environ.pop("PROGRESS_BOARD_SKIP_PROBE", None)
                 BOARD.RELEASE_CACHE.clear()
                 BOARD.RELEASE_ERRORS.clear()
-                self.assertIsNone(BOARD.latest_release("jbookout/carr-system"))
-                self.assertIn("release probe", BOARD.release_wait_reason("jbookout/carr-system"))
+                self.assertIsNone(BOARD.latest_release("DoctorCRE/carr-system"))
+                self.assertIn("release probe", BOARD.release_wait_reason("DoctorCRE/carr-system"))
         BOARD.RELEASE_CACHE.clear()
         BOARD.RELEASE_ERRORS.clear()
         with patch.dict(os.environ, {"PROGRESS_BOARD_RELEASES": str(self.root / "none")}), \
@@ -2190,7 +2177,7 @@ class DeliveryTargetRelease(BoardCase):
                     response.__enter__.return_value.read.side_effect = error
                     kwargs = {"return_value": response} if isinstance(error, IncompleteRead) else {"side_effect": error}
                     with patch.object(BOARD, "urlopen", **kwargs), \
-                         patch.object(BOARD, "fetch_pr", return_value=(merged_view("a" * 40), None)), \
+                         patch.object(BOARD, "fetch_prs", every((merged_view("a" * 40), None))), \
                          patch.object(BOARD, "publish_board") as publish, \
                          patch.object(BOARD, "poll_board_answers") as poll, \
                          patch.object(BOARD, "publish_needs_joe_local") as local:
@@ -2235,7 +2222,7 @@ class DeliveryTargetRelease(BoardCase):
                     "status": "done", "stage": "merged", "delivery_target": target,
                     "executor": "codex", "updated_at": BOARD.stamp()}}
                 BOARD.write_json(state)
-                with patch.object(BOARD, "fetch_pr", return_value=(merged_view(fix), None)), \
+                with patch.object(BOARD, "fetch_prs", every((merged_view(fix), None))), \
                      patch.object(BOARD, "deployed_release", return_value=(source, deployed, "https://example.invalid/release")):
                     BOARD.render("demo")
                 task = BOARD.read_state("demo")["tasks"]["fix"]
@@ -2272,7 +2259,7 @@ class DeliveryTargetRelease(BoardCase):
                 BOARD.write_json(state)
                 with patch.object(BOARD, "RELEASE_TARGETS", {BOARD.DEFAULT_PR_REPO: (source, "https://example.invalid/release")}), \
                      patch.object(BOARD, "urlopen", return_value=response), \
-                     patch.object(BOARD, "fetch_pr", return_value=(merged_view(sha), None)):
+                     patch.object(BOARD, "fetch_prs", every((merged_view(sha), None))):
                     BOARD.render("demo")
                 task = BOARD.read_state("demo")["tasks"]["install"]
                 self.assertEqual(task["stage"], "merged")
@@ -2330,7 +2317,7 @@ class DeliveryTargetRelease(BoardCase):
             "commit", "-m", "Unreleased")
         newer = git("rev-parse", "HEAD")
         for repo, identity in (
-            ("jbookout/carr-system", {"ok": True, "env": {"value": "production"},
+            ("DoctorCRE/carr-system", {"ok": True, "env": {"value": "production"},
                                       "git_sha": {"value": released}}),
             ("jbookout/doctorcre-app", {"service": "doctorcre-app", "environment": "production",
                                        "source_commit": released}),
@@ -2348,7 +2335,7 @@ class DeliveryTargetRelease(BoardCase):
                 from unittest.mock import MagicMock
                 response = MagicMock()
                 response.__enter__.return_value.read.return_value = json.dumps(identity).encode()
-                with patch.dict(os.environ, self.env), patch.object(BOARD, "fetch_pr", info), \
+                with patch.dict(os.environ, self.env), patch.object(BOARD, "fetch_prs", by_pr(info)), \
                      patch.object(BOARD, "RELEASE_TARGETS", {repo: (source, "https://example.invalid/release")}, create=True), \
                      patch.object(BOARD, "urlopen", return_value=response):
                     BOARD.render(project)
@@ -2388,7 +2375,7 @@ class DeliveryTargetRelease(BoardCase):
                 response.__enter__.return_value.read.return_value = json.dumps(identity, default=str).encode()
                 kwargs = {"side_effect": identity} if isinstance(identity, Exception) else {"return_value": response}
                 with patch.dict(os.environ, self.env), \
-                     patch.object(BOARD, "fetch_pr", return_value=(merged_view("a" * 40), None)), \
+                     patch.object(BOARD, "fetch_prs", every((merged_view("a" * 40), None))), \
                      patch.object(BOARD, "urlopen", **kwargs):
                     BOARD.render("demo")
                 task = self.read_state("demo")["tasks"]["pending"]
@@ -2398,11 +2385,11 @@ class DeliveryTargetRelease(BoardCase):
 
 class RetentionTests(unittest.TestCase):
     def test_old_closed_cards_drop_but_their_notes_and_questions_survive(self):
-        state = {"tasks": {"old": {"repo": "jbookout/carr-system", "pr": 1, "title": "Old",
+        state = {"tasks": {"old": {"repo": "DoctorCRE/carr-system", "pr": 1, "title": "Old",
                    "note": "Keep this finding", "question_ids": ["q1"]},
-                   "active": {"repo": "jbookout/carr-system", "pr": 2}},
+                   "active": {"repo": "DoctorCRE/carr-system", "pr": 2}},
                  "questions": {"q1": {"question": "Keep?"}}, "notes": ["Human note"]}
-        BOARD.retain_recent_cards(state, {("jbookout/carr-system", 1): {"state": "MERGED",
+        BOARD.retain_recent_cards(state, {("DoctorCRE/carr-system", 1): {"state": "MERGED",
                                   "mergedAt": "2020-01-01T00:00:00Z"}})
         self.assertEqual(list(state["tasks"]), ["active"])
         self.assertEqual(state["task_notes"]["old"]["note"], "Keep this finding")

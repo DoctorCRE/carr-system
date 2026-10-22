@@ -84,7 +84,9 @@ def sandbox_profile(work, *, reads=(), execs=(), port=None):
     # Node needs only openssl.cnf, including its resolved file target when symlinked.
     # Keep this literal exception separate from recursive reads: private/certs stay denied.
     openssl = sorted({path for p in ("/opt/homebrew/etc/openssl@3/openssl.cnf",
-                                    "/usr/local/etc/openssl@3/openssl.cnf")
+                                    "/usr/local/etc/openssl@3/openssl.cnf",
+                                    "/opt/homebrew/etc/openssl@4/openssl.cnf",
+                                    "/usr/local/etc/openssl@4/openssl.cnf")
                       if os.path.isfile(p) for path in (p, os.path.realpath(p))})
     openssl_read = ("(allow file-read* " + " ".join(f'(literal "{p}")' for p in openssl) + ")"
                     if openssl else "")

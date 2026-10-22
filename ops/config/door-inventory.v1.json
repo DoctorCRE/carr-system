@@ -289,6 +289,18 @@
       "class": "hand_tool",
       "reason": "The orchestrator runs this local observation collector for one reviewed headless task. It reads device and scheduler state and prints local evidence, with no activation or canonical receipt writes.",
       "evidence": "WR-000014 final source slice; ops/scheduler-observation-receipts-selftest.py exercises synthetic device, prompt, plist, and launchctl observations."
+    },
+    {
+      "path": "evals/context-hooks/make_report.py",
+      "class": "hand_tool",
+      "reason": "Manually renders the fixed-base context-hook comparison report; it is not a runtime or scheduled entrypoint.",
+      "evidence": "evals/context-hooks/make_report.py main() binds its baseline and writes the evaluation report."
+    },
+    {
+      "path": "evals/model-routing/make_report.py",
+      "class": "hand_tool",
+      "reason": "Manually renders the model-routing evaluation report; it is not a runtime or scheduled entrypoint.",
+      "evidence": "evals/model-routing/make_report.py main() consumes evaluation fixtures and writes report artifacts."
     }
   ]
 }

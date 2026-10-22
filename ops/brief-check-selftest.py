@@ -326,7 +326,7 @@ class BlockingReview(unittest.TestCase):
             subprocess.run(["git", "init", "-q", directory], check=True, env=fixture_env())
             subprocess.run(["git", "-C", directory, "remote", "add", "origin", "https://github.com/wrong/repo.git"], check=True, env=fixture_env())
             with self.assertRaises(bc.BriefError):
-                bc._bound_base(directory, "jbookout/carr-system", "a" * 40)
+                bc._bound_base(directory, "DoctorCRE/carr-system", "a" * 40)
 
     def test_09_hash_conflict_invalidates_verdicts_and_exit_status(self):
         data = pr(1544)
