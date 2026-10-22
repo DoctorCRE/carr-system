@@ -175,6 +175,7 @@ class WorkQueue:
                 item = {**data, **{k: r[k] for k in
                         ('card_id', 'position', 'stage', 'desk', 'ready', 'review_round')}}
                 item['result_status'] = result.get('status')
+                item['required_skills'] = json.loads(r['options']).get('required_skills', [])
                 item['result_detail'] = str(result.get('detail') or '')[:500]
                 item['dispatch_ref'] = result.get('msg_id')
                 item['thread_id'] = result.get('thread_id')
