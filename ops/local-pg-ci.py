@@ -191,7 +191,7 @@ def hosted_execution_is_declared(source: Mapping[str, str] | None = None) -> boo
     return (
         env.get("CARR_LOCAL_PG_ALLOW_HOSTED") == "1"
         and env.get("GITHUB_ACTIONS", "").lower() == "true"
-        and env.get("GITHUB_REPOSITORY") == "jbookout/carr-system"
+        and env.get("GITHUB_REPOSITORY") == "DoctorCRE/carr-system"
         and bool(env.get("GITHUB_RUN_ID"))
     )
 
