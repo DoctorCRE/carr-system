@@ -1,5 +1,6 @@
 """Bounded source expressions for the evidence-only table census. Never execute code."""
 import ast
+from bisect import bisect_left, bisect_right
 from itertools import product
 from math import prod
 import re
@@ -208,10 +209,34 @@ def relation_targets(values, tables):
 QUOTED = re.compile(r"`(?:\\.|[^`\\])*`|'(?:''|\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"", re.S)
 
 
+_PREPARED: dict[str, tuple[list[str], ast.expr | None]] = {}
+
+
+def _prepared(text):
+    """Quoted tokens and the parsed expression for `text`; neither depends on bindings."""
+    cached = _PREPARED.get(text)
+    if cached is None:
+        tokens = []
+        def replace(match):
+            tokens.append(match[0])
+            return '__literal_' + str(len(tokens) - 1)
+        normalized = QUOTED.sub(replace, text.strip()).replace('||', '+')
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', SyntaxWarning)
+                node = ast.parse(normalized, mode='eval').body
+        except (ValueError, SyntaxError):
+            node = None
+        cached = _PREPARED[text] = (tokens, node)
+    return cached
+
+
 def _expression(text, bindings):
+    tokens, node = _prepared(text)
+    if node is None:
+        return {UNKNOWN}
     literals = {}
-    def replace(match):
-        token = match[0]
+    for token in tokens:
         key = '__literal_' + str(len(literals))
         if token.startswith('`'):
             parts, end = [], 0
@@ -229,14 +254,6 @@ def _expression(text, bindings):
             except (SyntaxError, ValueError):
                 values = {token[1:-1].replace("''", "'")}
         literals[key] = [ast.Constant(value=value) for value in values]
-        return key
-    normalized = QUOTED.sub(replace, text.strip()).replace('||', '+')
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', SyntaxWarning)
-            node = ast.parse(normalized, mode='eval').body
-    except (ValueError, SyntaxError):
-        return {UNKNOWN}
     return _values(node, dict(bindings, **literals))
 
 
@@ -287,14 +304,16 @@ def other_queries(text, suffix):
         for match in re.finditer(r'\b(\w+)\.(?:push|unshift|splice)\s*\(', code):
             end = _expression_end(text, match.end(), ')')
             definitions.append((match[1], text[match.end():end]))
+    previous = {}
     for _ in range(len(definitions) + 1):
-        previous = {name: {getattr(node, 'value', None) for node in nodes} for name, nodes in bindings.items()}
         fresh = {}
         for name, expression in definitions:
             fresh.setdefault(name, []).extend(ast.Constant(value=value) for value in _expression(expression, bindings))
         bindings = fresh
-        if {name: {getattr(node, 'value', None) for node in nodes} for name, nodes in bindings.items()} == previous:
+        current = {name: {getattr(node, 'value', None) for node in nodes} for name, nodes in bindings.items()}
+        if current == previous:
             break
+        previous = current
     # A function parameter cannot be narrowed by an unrelated file-level assignment.
     for match in re.finditer(r'\bfunction\s*\w*\s*\(([^)]*)\)|\(([^)]*)\)\s*=>', code):
         for name in re.findall(r'[A-Za-z_$][\w$]*', match[1] or match[2] or ''):
@@ -302,18 +321,27 @@ def other_queries(text, suffix):
     for match in re.finditer(r'\b([A-Za-z_$][\w$]*)\s*=>', code):
         bindings[match[1]] = [None]
     candidates, covered = [], []
+    newlines = [offset for offset, char in enumerate(text) if char == '\n']
     pattern = r'\bEXECUTE\b\s*' if sql else r'\b(?:query|execute|executemany)\s*\('
     for match in re.finditer(pattern, code, re.I):
         start = match.start() + len('EXECUTE') if sql else match.end()
         end = _expression_end(text, start, ';' if sql else ',)')
         expression = text[start:end]
-        candidates.append((text.count('\n', 0, match.start()) + 1, _expression(expression, bindings)))
+        candidates.append((bisect_left(newlines, match.start()) + 1, _expression(expression, bindings)))
         covered.append((match.start(), end))
+    spans = []
+    for start, end in sorted(covered):
+        if spans and start <= spans[-1][1]:
+            spans[-1][1] = max(spans[-1][1], end)
+        else:
+            spans.append([start, end])
+    span_starts = [start for start, _ in spans]
     for match in QUOTED.finditer(text):
-        if any(start <= match.start() < end for start, end in covered):
+        slot = bisect_right(span_starts, match.start()) - 1
+        if slot >= 0 and match.start() < spans[slot][1]:
             continue
         if SQL_WORD.search(match[0]) and RELATION.search(match[0]):
             values = _expression(match[0], bindings)
             values = {re.sub(r'\$[A-Za-z_]\w*', UNKNOWN, value) for value in values}
-            candidates.append((text.count('\n', 0, match.start()) + 1, values))
+            candidates.append((bisect_left(newlines, match.start()) + 1, values))
     return candidates

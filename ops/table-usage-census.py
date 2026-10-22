@@ -84,6 +84,13 @@ SQLISH = re.compile(
     r"\b(?:select\b.*\bfrom\b|insert\s+into\b|update\s+[\w\".]|delete\s+from\b|"
     r"alter\s+table\b|create\s+(?:unlogged\s+)?table\b|truncate(?:\s+table)?\b|references\b|join\b)", re.I)
 
+DOLLAR_QUOTE = re.compile(r'\$[A-Za-z_0-9]*\$')
+PLAIN_RUN = re.compile(r'''[^-/$'"]+''')
+LINE_REMAINDER = re.compile(r'[^\n]*')
+NOT_NEWLINE = re.compile(r'[^\n]')
+BLOCK_RUN = re.compile(r'[^/*]+')
+QUOTE_RUN = {"'": re.compile(r"[^'\\]+"), '"': re.compile(r'[^"]+')}
+
 
 def strip_sql_comments_and_literals(text, *, strip_literals=True):
     output = []
@@ -98,8 +105,11 @@ def strip_sql_comments_and_literals(text, *, strip_literals=True):
                 index += len(dollar_quote)
                 dollar_quote = None
             else:
-                output.append('\n' if text[index] == '\n' else (' ' if strip_literals else text[index]))
-                index += 1
+                end = text.find(dollar_quote, index)
+                end = len(text) if end < 0 else end
+                segment = text[index:end]
+                output.append(NOT_NEWLINE.sub(' ', segment) if strip_literals else segment)
+                index = end
         elif block_depth:
             if text.startswith('/*', index):
                 block_depth += 1
@@ -109,10 +119,17 @@ def strip_sql_comments_and_literals(text, *, strip_literals=True):
                 block_depth -= 1
                 output.extend('  ')
                 index += 2
+            elif run := BLOCK_RUN.match(text, index):
+                output.append(NOT_NEWLINE.sub(' ', run[0]))
+                index = run.end()
             else:
                 output.append('\n' if text[index] == '\n' else ' ')
                 index += 1
         elif quote:
+            if run := QUOTE_RUN[quote].match(text, index):
+                output.append(run[0] if quote == '"' or not strip_literals else NOT_NEWLINE.sub(' ', run[0]))
+                index = run.end()
+                continue
             char = text[index]
             output.append(char if quote == '"' or not strip_literals else ('\n' if char == '\n' else ' '))
             index += 1
@@ -126,14 +143,14 @@ def strip_sql_comments_and_literals(text, *, strip_literals=True):
                 output.append('\n' if text[index] == '\n' else (' ' if strip_literals else text[index]))
                 index += 1
         elif text.startswith('--', index):
-            while index < len(text) and text[index] != '\n':
-                output.append(' ')
-                index += 1
+            end = LINE_REMAINDER.match(text, index).end()
+            output.append(' ' * (end - index))
+            index = end
         elif text.startswith('/*', index):
             block_depth = 1
             output.extend('  ')
             index += 2
-        elif match := re.match(r'\$[A-Za-z_0-9]*\$', text[index:]):
+        elif match := DOLLAR_QUOTE.match(text, index):
             dollar_quote = match[0]
             output.extend(' ' * len(dollar_quote) if strip_literals else dollar_quote)
             index += len(dollar_quote)
@@ -141,6 +158,9 @@ def strip_sql_comments_and_literals(text, *, strip_literals=True):
             quote = text[index]
             output.append(text[index] if quote == '"' or not strip_literals else ' ')
             index += 1
+        elif run := PLAIN_RUN.match(text, index):
+            output.append(run[0])
+            index = run.end()
         else:
             output.append(text[index])
             index += 1
