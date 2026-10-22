@@ -42,7 +42,9 @@ from typing import Any, Callable, Iterable
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from tools.staging_database_credential import profile as staging_credential_profile
+from tools.staging_database_credential import (
+    CredentialRefusal, file_state, profile as staging_credential_profile,
+)
 from lib.credential_file import SOURCE_BYTES as CREDENTIAL_FILE_SOURCE_BYTES, credential, read_env_file  # noqa: E402
 from lib.github_reader import SOURCE_BYTES as GITHUB_READER_SOURCE_BYTES, GitHubReader, GitHubUnreadable  # noqa: E402
 from lib.secret_redaction import SOURCE_BYTES as REDACTION_SOURCE_BYTES, redact_text, sensitive_env_values  # noqa: E402
@@ -1274,13 +1276,13 @@ class Pipeline:
         self.unattended_preflight(lane_cfg)
         self.deploy_env()
         root = expand(self.cfg.get("credential_dir", "~/.config/carr"))
-        # Rollback always requires reader + writer. Migration-created profiles
-        # may legitimately be absent before their first cutover.
+        credential_states = {}
         for label in ("reader", "writer"):
-            path = staging_credential_profile(label, config_root=root).paths.final
-            if not path.is_file():
-                raise Blocked("staging_credential_missing", f"staging {label} rollback credential file is absent",
-                              capability=f"staging_{label}_credential")
+            try:
+                credential_states[label] = file_state(staging_credential_profile(label, config_root=root).paths)
+            except CredentialRefusal as exc:
+                raise Blocked("staging_credential_missing", f"staging {label} credential file state is unsafe",
+                              capability=f"staging_{label}_credential") from exc
         lane_state = state.setdefault("worker", {})
         counters = lane_state.setdefault("staging_prerequisite_incomplete", {})
         try:
@@ -1300,10 +1302,17 @@ class Pipeline:
         if staging.get("authority_role") is False:
             raise Blocked("staging_authority_role_missing", "staging carr_authority_joe role is absent",
                           capability="staging_authority_role_missing")
+        # Reader and writer are not migration-created seats. Their provisioner
+        # can create or resume them, but cannot recover a lost local credential.
+        for label, credential_state in credential_states.items():
+            if credential_state == "absent" and staging["login_roles"][label]:
+                raise Blocked("staging_credential_missing", f"staging {label} role exists but its credential is absent",
+                              capability=f"staging_{label}_credential")
         self.dependency_evidence["staging-prerequisite"] = evidence_digest(staging)
         files = {}
         for name in ("db.env", "mcp-tokens.env", CLOUDFLARE_TOKEN_FILE,
-                     "staging-reader.env", "staging-writer.env"):
+                     "staging-reader.env", "staging-writer.env",
+                     "staging-reader.env.pending", "staging-writer.env.pending"):
             try:
                 stat = (root / name).stat()
                 files[name] = [stat.st_dev, stat.st_ino, stat.st_mode, stat.st_size,
@@ -1718,7 +1727,15 @@ class Pipeline:
             role = cur.fetchone()
             if role not in ((0,), (1,)):
                 raise ValueError("missing role-existence acknowledgement")
-        return {"authority_role": role == (1,), "candidate": {key: getattr(candidate, key) for key in
+            login_roles = {}
+            for label in ("reader", "writer"):
+                cur.execute("select count(*) from pg_authid where rolname=%s",
+                            (staging_credential_profile(label).role_name,))
+                exists = cur.fetchone()
+                if exists not in ((0,), (1,)):
+                    raise ValueError("missing login-role-existence acknowledgement")
+                login_roles[label] = exists == (1,)
+        return {"authority_role": role == (1,), "login_roles": login_roles, "candidate": {key: getattr(candidate, key) for key in
                 ("project_id", "branch_id", "endpoint_id", "endpoint_host")}, "ledger": ledger}
 
     def reconcile_staging_failure(self, state: dict, lane: str, base: str, repo_dir: Path) -> None:

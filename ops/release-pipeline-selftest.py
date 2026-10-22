@@ -381,13 +381,13 @@ class Fixture:
         # state into any commit made after a tick.
         (self.repo / ".git" / "info" / "exclude").write_text(".venv\nout/\n")
         self.cred = tmp / "cred"
-        self.cred.mkdir()
+        self.cred.mkdir(mode=0o700)
         (self.cred / "db.env").write_text(
             "NEON_API_KEY='v'\nCARR_DB_JOBS_URL='v'\nCARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL='v'\n")
         (self.cred / "mcp-tokens.env").write_text("CARR_MCP_PROBE_TOKEN=v\n")
         (self.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
         for filename in ('staging-reader.env', 'staging-writer.env'):
-            (self.cred / filename).touch()
+            (self.cred / filename).touch(mode=0o600)
         # A stub `.venv/bin/python`, matching the real checkout's layout, so
         # the fail-closed venv check added for the coordinator's dangling-
         # symlink fix (a real run found `ln -s` happily linking a MISSING
@@ -451,7 +451,7 @@ class Fixture:
                            call_verb=lambda verb, args: (verbs.append((verb, args)) or (True, {"ok": True})),
                            slice_marker=slice_marker, controller_blobs=loaded,
                            dry_run=dry_run, env=env, today="2026-09-30", out=lambda _s: None)
-        pipe.staging_ledger = lambda: {"candidate": "fixture", "ledger": {"fixture": "digest"}, "authority_role": True}
+        pipe.staging_ledger = lambda: {"candidate": "fixture", "ledger": {"fixture": "digest"}, "authority_role": True, "login_roles": {"reader": True, "writer": True}}
         pipe.sleep = lambda _seconds: None
         return pipe
 
@@ -486,21 +486,32 @@ class EarlyWorkerPrerequisites(Base):
         self.assertIn('staging-app-writer', runner.names())
         self.assertEqual(self.fx.records()[-1]['status'], 'shipped')
 
-    def test_missing_staging_rollback_files_stop_before_network_or_setup(self):
+    def test_fresh_roles_without_credentials_reach_provisioner(self):
+        self.fx.commit({'mcp-server/src/a.js': '1'})
+        for label in ('reader', 'writer'):
+            (self.fx.cred / f'staging-{label}.env').unlink()
+        live = {'sha': self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.staging_ledger = lambda: {'candidate': 'fixture', 'authority_role': True,
+                                     'login_roles': {'reader': False, 'writer': False}}
+        self.assertEqual(pipe.tick(['worker']), 0)
+        self.assertIn('staging-app-writer', runner.names())
+        self.assertEqual(self.fx.records()[-1]['status'], 'shipped')
+
+    def test_existing_role_without_credentials_blocks_before_setup(self):
         self.fx.commit({'mcp-server/src/a.js': '1'})
         for filename in ('staging-reader.env', 'staging-writer.env'):
             with self.subTest(filename=filename):
                 path = self.fx.cred / filename
-                path.touch()
                 path.unlink()
                 runner = FakeRunner()
                 pipe = self.fx.pipeline(runner)
-                pipe.staging_ledger = mock.Mock(side_effect=AssertionError('network ran'))
                 self.assertEqual(pipe.tick(['worker']), 3)
                 self.assertEqual(self.fx.records()[-1]['reason'], 'staging_credential_missing')
-                pipe.staging_ledger.assert_not_called()
                 self.assertNotIn('worktree', runner.names())
-                path.touch()
+                self.assertNotIn('staging-app-writer', runner.names())
+                path.touch(mode=0o600)
 
     def test_absent_authority_role_blocks_before_setup(self):
         self.fx.commit({'mcp-server/src/a.js': '1'})
@@ -516,7 +527,7 @@ class EarlyWorkerPrerequisites(Base):
         sha = self.fx.commit({'mcp-server/src/a.js': '1'})
         live = {'sha': self.fx.base}
         pipe = self.fx.pipeline(FakeRunner(live=live), live=live)
-        role = {'candidate': 'fixture', 'authority_role': False}
+        role = {'candidate': 'fixture', 'authority_role': False, 'login_roles': {'reader': True, 'writer': True}}
         pipe.staging_ledger = lambda: dict(role)
         pipe.now = lambda: 1000
         self.assertEqual(pipe.tick(['worker']), 3)
@@ -530,7 +541,7 @@ class EarlyWorkerPrerequisites(Base):
         pipe.now = lambda: 10000
         self.assertEqual(pipe.tick(['worker']), 3)
         self.assertEqual(self.fx.records()[-1]['reason'], 'staging_credential_missing')
-        path.touch()
+        path.touch(mode=0o600)
         pipe.now = lambda: 20000
         self.assertEqual(pipe.tick(['worker']), 0)
         self.assertEqual(self.fx.records()[-1]['status'], 'shipped')
@@ -1565,7 +1576,7 @@ class RejectionReconciliation(Base):
         module["derive_dsn"] = mock.Mock(return_value=module["SecretDsn"](scope, "private-dsn-canary"))
         cursor = mock.MagicMock()
         cursor.__enter__.return_value = cursor
-        cursor.fetchone.side_effect = [("schema_migrations",), (1,)]
+        cursor.fetchone.side_effect = [("schema_migrations",), (1,), (0,), (1,)]
         cursor.fetchall.return_value = [("0001_fixture.sql", "a" * 64)]
         conn = mock.MagicMock()
         conn.__enter__.return_value = conn
@@ -1575,6 +1586,9 @@ class RejectionReconciliation(Base):
         with mock.patch.object(rp.runpy, "run_path", return_value=module):
             snapshot = rp.Pipeline.staging_ledger(self.pipe)
         self.assertTrue(snapshot['authority_role'])
+        self.assertEqual(snapshot['login_roles'], {'reader': False, 'writer': True})
+        for role_name in ('app_reader', 'app_writer'):
+            cursor.execute.assert_any_call('select count(*) from pg_authid where rolname=%s', (role_name,))
         cursor.execute.assert_any_call('select count(*) from pg_authid where rolname=%s', ('carr_authority_joe',))
         self.assertNotIn('rolpassword', str(cursor.execute.call_args_list))
         digest = rp.evidence_digest(snapshot)
@@ -5582,10 +5596,10 @@ class DeployCredential(unittest.TestCase):
         tmp = Path(self._tmp.name)
         self.home = tmp / "home"
         self.cred = self.home / ".config" / "carr"
-        self.cred.mkdir(parents=True)
+        self.cred.mkdir(parents=True, mode=0o700)
         self.fx = Fixture(tmp)
         for name in ("db.env", "mcp-tokens.env", "staging-reader.env", "staging-writer.env"):
-            (self.cred / name).write_text((self.fx.cred / name).read_text())
+            shutil.copy2(self.fx.cred / name, self.cred / name)
         self._home = mock.patch.dict(os.environ, {"HOME": str(self.home)})
         self._home.start()
         self.lines: list[str] = []
