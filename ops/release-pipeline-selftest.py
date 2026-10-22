@@ -774,18 +774,17 @@ class LegacyHealthPromotion(Base):
         pipe.store.save(state)
         source_only = self.fx.commit({'docs/after-health.md': 'source only'})
         self.assertEqual(pipe.tick(['worker']), 0)
-        self.assertEqual(pipe.store.load()['worker']['last_released_sha'], source_only)
+        self.assertEqual(pipe.store.load()['worker']['last_released_sha'], row['sha'])
+        self.assertEqual(pipe.store.load()['worker']['last_evaluated_sha'], source_only)
         self.assertEqual(pipe.store.records()[-1]['status'], 'no_release_needed')
         self.assertEqual(pipe.store.load()['worker']['failed_step'], 'health')
         self.assertEqual(runner.calls, [])
+        for _ in range(10):
+            self.assertEqual(pipe.tick(['worker']), 0)
         target = self.fx.commit({'mcp-server/src/a.js': 'health repair'})
         self.assertEqual(pipe.tick(['worker']), 0, pipe.store.records()[-1])
         receipts = [r for r in pipe.store.records() if r['status'] == 'live_identity_reconciled']
-        self.assertEqual(len(receipts), 1)
-        self.assertEqual(receipts[0]['from_sha'], source_only)
-        self.assertEqual(receipts[0]['sha'], row['sha'])
-        self.assertEqual(receipts[0]['legacy_promotion']['promotion_receipt_digest'],
-                         rp.evidence_digest(pipe.store.records()[0]))
+        self.assertEqual(receipts, [])
         self.assertEqual(runner.names().count('upload'), 1)
         self.assertEqual(runner.names().count('promote'), 1)
         self.assertIn('health-baseline', runner.names())
@@ -1838,7 +1837,8 @@ class ReleaseJournalRecovery(Base):
         self.assertEqual(restart().tick(["worker"]), 0)
         self.assertEqual(len(runner.calls), before)
         state = self.fx.state()["worker"]
-        self.assertEqual(state["last_released_sha"], reverted)
+        self.assertEqual(state["last_released_sha"], prior)
+        self.assertEqual(state["last_evaluated_sha"], reverted)
         self.assertNotIn("pending_promotion", state)
         retired = [row for row in self.fx.records() if row["status"] == "promotion_retired"]
         self.assertEqual([row["sha"] for row in retired], [promoted])
@@ -1866,7 +1866,7 @@ class ReleaseJournalRecovery(Base):
         original = pipe.store.save
 
         def save(state):
-            if state["worker"].get("last_released_sha") == reverted:
+            if not state["worker"].get("pending_promotion"):
                 raise RecoveryCrash()
             original(state)
 
@@ -1876,7 +1876,8 @@ class ReleaseJournalRecovery(Base):
         self.assertEqual(state["last_released_sha"], prior)
         self.assertEqual(state["pending_promotion"]["sha"], promoted)
         self.assertEqual(restart().tick(["worker"]), 0)
-        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], reverted)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], prior)
+        self.assertEqual(self.fx.state()["worker"]["last_evaluated_sha"], reverted)
         self.assertNotIn("pending_promotion", self.fx.state()["worker"])
         self.assertEqual(len([row for row in self.fx.records() if row["status"] == "promotion_retired"]), 1)
 
@@ -1891,7 +1892,8 @@ class ReleaseJournalRecovery(Base):
         self.assertFalse([row for row in self.fx.records() if row["status"] == "promotion_retired"])
         live["version"] = PRIOR
         self.assertEqual(restart().tick(["worker"]), 0)
-        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], reverted)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], prior)
+        self.assertEqual(self.fx.state()["worker"]["last_evaluated_sha"], reverted)
 
     def test_late_acknowledgement_of_retired_promotion_still_allows_newer_fix(self):
         prior, promoted, reverted, live, runner, restart = self.rollback_revert_case()
@@ -2259,7 +2261,8 @@ class ReleaseJournalRecovery(Base):
                 with mock.patch.object(again, "release_target", return_value=latest):
                     self.assertEqual(again.tick(["worker"]), 0)
                 self.assertEqual(len(runner.calls), before)
-                self.assertEqual(self.fx.state()["worker"].get("last_released_sha"), head)
+                self.assertEqual(self.fx.state()["worker"].get("last_released_sha"), latest)
+                self.assertEqual(self.fx.state()["worker"].get("last_evaluated_sha"), head)
                 self.assertEqual(self.fx.state()["worker"]["failed_sha"], latest)
                 self.assertFalse([row for row in self.fx.records() if row.get("lane") == "worker" and row["status"] == "shipped"])
 
@@ -2540,7 +2543,8 @@ class Batching(Base):
         pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
         self.assertEqual(pipe.tick(["worker"]), 0)
         self.assertEqual(runner.calls, [])
-        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(self.fx.state()["worker"]["last_evaluated_sha"], latest)
         self.assertEqual(self.fx.records()[-1]["status"], "no_release_needed")
 
     def test_unicode_named_worker_source_is_not_skipped_as_docs_only(self):

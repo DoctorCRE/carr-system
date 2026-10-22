@@ -1458,6 +1458,15 @@ class Pipeline:
                 raise Blocked("promotion_unresolved", "checkpoint cannot advance while promotion intent is unresolved")
             self.store.resolve_promotion(state, lane, resolution)
         lane_state["last_released_sha"] = sha
+        lane_state["last_evaluated_sha"] = sha
+        if not self.dry_run:
+            self.store.save(state)
+
+    def advance_source_checkpoint(self, state: dict, lane: str, sha: str) -> None:
+        lane_state = state.setdefault(lane, {})
+        if lane_state.get("pending_promotion"):
+            raise Blocked("promotion_unresolved", "source checkpoint cannot advance while promotion intent is unresolved")
+        lane_state["last_evaluated_sha"] = sha
         if not self.dry_run:
             self.store.save(state)
 
@@ -1987,6 +1996,8 @@ class Pipeline:
                     raise Blocked("bootstrap_unreceipted", "live source identity has no durable shipped checkpoint")
                 self.out(f"release-pipeline[{lane}]: main {sha[:12]} is already released")
                 return 0
+            if sha == lane_state.get("last_evaluated_sha") and not lane_state.get("pending_promotion"):
+                return 0
             if not self.dry_run and live is not None:
                 live_sha = (live.get("git_sha") or {}).get("value") if lane == "worker" else live.get("source_commit")
                 if live_sha == sha:
@@ -2040,19 +2051,18 @@ class Pipeline:
                 if not self.dry_run and not lane_state.get("last_released_sha"):
                     raise Blocked("bootstrap_unreceipted", "source-only advancement has no durable prior release checkpoint")
                 if not self.dry_run:
-                    resolution = None
                     if lane_state.get("pending_promotion"):
                         if self.canary_verdict(self.github_factory(lane_cfg["github_repo"]), lane_cfg, sha) != "green":
                             raise Blocked("canary_pending", "source-only replacement requires its own green canary")
                         replacement_live = self.http(lane_cfg["live_release_url"])
                         resolution = self.promotion_replacement(state, lane, sha, replacement_live)
                         live_sha = replacement_live["git_sha"]["value"]
+                        self.advance_checkpoint(state, lane, live_sha, resolution=resolution)
                         if classify(self.changed_paths(live_sha, sha), lane_cfg)[0]:
-                            self.advance_checkpoint(state, lane, live_sha, resolution=resolution)
                             return 0
                     self.store.record_durable({"lane": lane, "sha": sha, "from_sha": base,
                                                "status": "no_release_needed", "run_id": self.run_id})
-                    self.advance_checkpoint(state, lane, sha, resolution=resolution)
+                    self.advance_source_checkpoint(state, lane, sha)
                 return 0
             if lane == "worker":
                 result = self.release_worker(lane_cfg, base, sha, state, lane)
