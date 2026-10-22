@@ -1945,6 +1945,26 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.calls('merge')[0][-1], self.updated)
         self.assertFalse(any('/comments' in str(a) for a in self.load()['calls']))
 
+    def test_author_commit_after_daemon_update_supersedes_without_advancing_pin(self):
+        self.pr(state='behind')
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
+        self.q.tick()
+        self.git('switch', '-q', '-c', 'author-after-update', self.updated)
+        (self.remote / 'file.txt').write_text('new author change\n')
+        self.git('commit', '-qam', 'unreviewed author change')
+        author_head = self.git('rev-parse', 'HEAD').strip()
+        self.git('switch', '-q', 'main')
+        self.load()
+        self.pr(head=author_head)
+        self.restart()
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries').fetchone()
+        self.assertEqual((row['phase'], row['outcome']), ('superseded', 'head_moved'))
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.merge_order()['entries'][0]['head'], self.approved)
+            self.assertFalse(any(event['kind'] == 'pin_regenerated' for event in work.export()['history']))
+        self.assertEqual(self.calls('merge'), [])
+
     def conflicting_preparation(self, paths):
         self.git('switch', '-q', '-c', 'branch-1', self.approved)
         for path in paths:

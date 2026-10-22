@@ -1062,6 +1062,25 @@ class Queue:
                                (e['repo'], e['pr'], e['approved'])).fetchone():
                 raise QueueChanged('held_during_regeneration')
             return False
+        update = self.db.execute("SELECT * FROM actions WHERE kind='update' AND phase IN ('issued','done') "
+                                 'AND repo=? AND pr=? AND head=?',
+                                 (e['repo'], e['pr'], e['approved'])).fetchone()
+        if update:
+            self.fetch(e['repo'], e['approved'], head)
+            ancestor = self.git(e['repo'], 'merge-base', e['approved'], head).strip()
+            commits = self.git(e['repo'], 'log', '--format=%H', '--no-merges', '--first-parent',
+                               f'{e["approved"]}..{head}').strip()
+            if ancestor == e['approved'] and not commits:
+                with WorkQueue(default_path()) as work:
+                    work.advance_merge_pin(card_id, repo=e['repo'], pr=e['pr'], head=e['approved'],
+                                           prepared=head, main=p['base']['sha'], actor='merge-daemon',
+                                           reason=f'journal entry {e["id"]}: verified daemon merge-only update',
+                                           expected_order=expected_order)
+                with self.db:
+                    self.db.execute("UPDATE actions SET phase='done' WHERE key=?", (update['key'],))
+                self.report(e, 'updated', f'Advanced work pin from {e["approved"]} to {head}; hosted CI required',
+                            'done')
+                return True
         actions = self.db.execute("SELECT * FROM actions WHERE kind='regen' AND phase='done' "
                                   'AND repo=? AND pr=? AND head=? AND receipt IS NOT NULL',
                                   (e['repo'], e['pr'], e['approved'])).fetchall()
