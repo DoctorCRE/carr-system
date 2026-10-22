@@ -23,7 +23,6 @@
       "hooks/canonical-edit-gate.py",
       "hooks/costar-lane-gate.py",
       "hooks/draft-export-gate.py",
-      "hooks/executor-tier-gate.py",
       "hooks/gate-integrity.py",
       "hooks/github-burst-guard.py",
       "hooks/guard-unattended.py",
