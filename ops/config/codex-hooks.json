@@ -6,17 +6,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ ! -f \"{{REPO}}/hooks/rule-boot-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
-            "timeout": 5,
-            "additionalContextLimit": 5000
-          }
-        ]
-      },
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
             "command": "if [ ! -f \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\"}}'; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/rule-pack-preuse-reselection.py",
             "timeout": 20,
             "additionalContextLimit": 10000
@@ -52,30 +41,9 @@
             "timeout": 10
           }
         ]
-      },
-      {
-        "matcher": "^(Bash|exec_command|Read|Grep|Glob|WebFetch|apply_patch|functions\\.(exec|apply_patch)|mcp__(carr|carr_records)__.*)$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if [ ! -e \"{{REPO}}/hooks/delegation-gate.py\" ] && [ ! -L \"{{REPO}}/hooks/delegation-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/delegation-gate.py; skipping\" >&2; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/delegation-gate.py",
-            "timeout": 3
-          }
-        ]
       }
     ],
     "PostToolUse": [
-      {
-        "matcher": "Bash|mcp__.*__standing[-_]context",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if [ ! -f \"{{REPO}}/hooks/rule-boot-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
-            "timeout": 5,
-            "additionalContextLimit": 5000
-          }
-        ]
-      },
       {
         "matcher": "^(Write|Edit|MultiEdit|apply_patch|functions\\.(apply_patch|exec))$",
         "hooks": [
@@ -96,46 +64,11 @@
             "command": "if [ ! -f \"{{REPO}}/hooks/gate-integrity.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/gate-integrity.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/gate-integrity.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/gate-integrity.py",
             "timeout": 15,
             "additionalContextLimit": 5000
-          },
-          {
-            "type": "command",
-            "command": "if [ ! -f \"{{REPO}}/hooks/rule-boot-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
-            "timeout": 5,
-            "additionalContextLimit": 5000
-          }
-        ]
-      },
-      {
-        "matcher": "^(startup|resume|compact)$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if [ ! -e \"{{REPO}}/ops/codex-continuity-hook.py\" ] && [ ! -L \"{{REPO}}/ops/codex-continuity-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/ops/codex-continuity-hook.py; skipping\" >&2; exit 0; fi; CARR_MCP_CLIENT_PROFILE=codex-continuity /usr/bin/env python3 {{REPO}}/ops/codex-continuity-hook.py",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "^(startup|resume)$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if [ ! -e \"{{REPO}}/hooks/session-presence-hook.py\" ] && [ ! -L \"{{REPO}}/hooks/session-presence-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/session-presence-hook.py; skipping\" >&2; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/session-presence-hook.py codex",
-            "timeout": 5
           }
         ]
       }
     ],
     "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if [ ! -e \"{{REPO}}/hooks/session-presence-hook.py\" ] && [ ! -L \"{{REPO}}/hooks/session-presence-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/session-presence-hook.py; skipping\" >&2; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/session-presence-hook.py codex",
-            "timeout": 5
-          }
-        ]
-      },
       {
         "hooks": [
           {

@@ -326,9 +326,6 @@ def test_hosted_migration_ownership():
     check("required aggregate waits for independent fixtures", "migration-fixtures" in wf["jobs"]["checks"]["needs"])
     aggregate = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Fail unless every class group succeeded")
     with tempfile.TemporaryDirectory() as directory:
-        fake = pathlib.Path(directory) / "python3"
-        fake.write_text("#!/bin/sh\nexit 0\n")
-        fake.chmod(0o755)
         for full, fixtures, classes, draft, expected in (
             ("true", "success", "success", "false", 0), ("false", "skipped", "success", "false", 0),
             ("", "skipped", "success", "false", 1), ("true", "failure", "success", "false", 1),
@@ -338,8 +335,11 @@ def test_hosted_migration_ownership():
             ("true", "skipped", "success", "false", 1),
         ):
             result = subprocess.run(["bash", "-e", "-c", aggregate["run"]], capture_output=True, text=True,
-                                    env={**scrubbed_env(), "PATH": directory + os.pathsep + os.environ["PATH"],
-                                         "DB_FULL": full, "CI_DRAFT": draft, "FIXTURES_RESULT": fixtures, "CLASSES_RESULT": classes})
+                                    env={**scrubbed_env(), "PATH": str(pathlib.Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
+                                         "CI_DRAFT": draft, "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary"),
+                                         "CI_NEEDS": json.dumps({"scope": {"result": "success", "outputs": {"full": full}},
+                                                                 "classes": {"result": classes},
+                                                                 "migration-fixtures": {"result": fixtures}})})
             check(f"aggregate scope={full!r} fixtures={fixtures} classes={classes}", result.returncode == expected)
     record = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Record the tested tree and class contract")
     check("not-applicable proof cannot be reused as full main evidence", "full != 'false'" in record.get("if", ""))
@@ -351,7 +351,9 @@ def test_migration_partitions_execute_complete_inventory():
         root = pathlib.Path(directory)
         shim = root / "program"
         shim.write_text('#!/bin/bash\necho "$*" >> "$CALLS"\n'
-                        '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && exit 9\nexit 0\n')
+                        '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && exit 9\n'
+                        'if [[ "$*" == *"ci-migration-gates.py"* && "$*" != *"--sql-proof"* '
+                        '&& ! -f "$SERVICE_CATALOG" ]]; then exit 9; fi\nexit 0\n')
         shim.chmod(0o755)
         (root / "psql").symlink_to(shim)
         body = _ci_function_body("check_migration_fixtures", "check_binding")
@@ -360,15 +362,18 @@ def test_migration_partitions_execute_complete_inventory():
             "bad() { FAILED=1; }", "ok() { :; }", "skip() { FAILED=1; }",
             'run_quiet() { local log="$1"; shift; echo "$*" >> "$CALLS"; '
             '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && return 9; '
+            '[[ "$*" == *"tools/ops-record.py sync-registry"* ]] && touch "$SERVICE_CATALOG"; '
             'printf "r03_recovered_health\\njoe,3,3,3,0,0,0,0,1,0,0,0,0,0,No open\\n'
             'r03_actor_mismatch_health\\njoe,4,3,3,0,1,1,1,1,0,0,0,0,0,On missing\\n" > "$log"; }'))
         def run(part, fail=""):
             calls = root / "calls"
             calls.write_text("")
+            (root / "service-catalog").unlink(missing_ok=True)
             result = subprocess.run(["bash", "-c", prefix + f"\nMIGRATION_PART={part}\n" + body +
                                      '\ncheck_migration; exit "$FAILED"'], cwd=REPO,
                 env={**scrubbed_env(), "PATH": directory + os.pathsep + os.environ["PATH"],
                      "CALLS": str(calls), "CARR_CI_DATABASE_URL": "postgres://ci@127.0.0.1:55432/ci",
+                     "SERVICE_CATALOG": str(root / "service-catalog"),
                      "FAIL_PROGRAM": fail}, capture_output=True, text=True)
             return result.returncode, set(calls.read_text().splitlines())
         fixtures = {}
@@ -391,6 +396,9 @@ def test_migration_partitions_execute_complete_inventory():
               "node --test" in call or "ci-migration-gates.py --logdir" in call
               for call in fixtures["acceptance"]))
         check("a failing partition fails the migration verdict", run("reconstruction", "schema-reconstruction-selftest.py")[0] == 1)
+        rc, calls = run("gates-serial", "tools/ops-record.py sync-registry")
+        check("service-catalog bootstrap failure stops database gates", rc == 1 and not any(
+              "ci-migration-gates.py --logdir" in call for call in calls))
 
 
 def test_gate_shards_execute_a_disjoint_complete_inventory():
@@ -586,12 +594,7 @@ UNCOLLECTED_BY_DECISION = {
         "unittest package under tools/dictation-rig/tests/ that this lane did "
         "not run or vouch for. Named here so it is a known gap with an owner "
         "rather than an invisible one; collecting it is a follow-up that must "
-        "run it first. Same status as tools/partner-line/tests/test_watch.py.",
-    "tools/partner-line/tests/test_watch.py":
-        "Offline and correct, but not evaluated by this unit — see the "
-        "tools/dictation-rig entry. Its docstring claims no live socket and no "
-        "network, so it is a good candidate to collect; this lane owned "
-        "ops/ci.sh and ops/ci-selftest.py only and did not run it.",
+        "run it first.",
     "tools/doc-convo/bin/test-brain-stream.sh":
         "Not evaluated by this unit. It lives in a bin/ directory beside the "
         "convo server rather than in a tests/ directory, and the three "

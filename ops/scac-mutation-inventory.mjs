@@ -524,12 +524,10 @@ export function fullInventory(tools = defaultTools) {
 export function renderCurrentContracts(tools, source) {
   const rows = mcpInventory(tools);
   const operations = Object.fromEntries(rows.map(row => [row.operation,
-    Object.fromEntries(["ingress_key", "source_locator", "source_digest", "schema_digest",
+    Object.fromEntries(["ingress_key", "source_locator", "schema_digest",
       "write", "human_only", "authority_only", "delegates_to"].map(key => [key, row[key]])),
   ]));
   return source
-    .replace(/export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "[0-9a-f]{64}";/,
-      `export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "${sha256(operations)}";`)
     .replace(/export const SCAC_MUTATION_OPERATIONS = Object.freeze\(\{[\s\S]*?\n\}\);/,
       `export const SCAC_MUTATION_OPERATIONS = Object.freeze(${JSON.stringify(operations, null, 2)});`);
 }

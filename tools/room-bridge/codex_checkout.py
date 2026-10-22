@@ -87,4 +87,4 @@ def instruction(checkout: dict[str, str]) -> str:
     return (f"Job checkout: {checkout['checkout_path']}\n"
             'Change into this standalone repository and read its AGENTS.md before working. '
             'Commit and push from this checkout. Its parent is the fresh Codex workspace; '
-            'a resumed desk keeps its existing cwd. The checkout is retained after the turn.\n\n')
+            'a resumed desk keeps its existing cwd. The runner retires this checkout after the turn once its work is safely pushed.\n\n')

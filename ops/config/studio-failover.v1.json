@@ -39,13 +39,6 @@
       "enabled": true
     },
     {
-      "label": "com.carr.fix-train",
-      "source": "ops/launchd/com.carr.fix-train.plist",
-      "credentials": [],
-      "state": [],
-      "enabled": true
-    },
-    {
       "label": "com.carr.job-watchdog",
       "source": "ops/launchd/com.carr.job-watchdog.plist",
       "credentials": [
@@ -110,19 +103,6 @@
       "enabled": true
     },
     {
-      "label": "com.carr.room-bridge",
-      "source": "ops/launchd/com.carr.room-bridge.plist",
-      "credentials": [
-        "~/.config/carr/mcp-tokens.env",
-        "~/.config/carr/engineering-controller.env"
-      ],
-      "state": [
-        "~/.config/carr/room-bridge-state.json",
-        "~/.config/carr/hermes-dispatch-results.jsonl"
-      ],
-      "enabled": true
-    },
-    {
       "label": "com.carr.tailscale-up",
       "source": "ops/launchd/com.carr.tailscale-up.plist",
       "credentials": [],
@@ -157,10 +137,6 @@
     {
       "name": "guarded host startup",
       "prerequisite": "verify guarded or safely disabled startup on both hosts; bootstrap Studio with failback-to-studio.sh while MacBook is fenced; keep an unprepared returning host off until its old startup jobs are disabled"
-    },
-    {
-      "name": "generated fix-train executable",
-      "prerequisite": "provision and verify out/orch/fix-train.sh from its owning orchestrator"
     },
     {
       "name": "local model runtimes",

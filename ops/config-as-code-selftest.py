@@ -37,15 +37,6 @@ TASK_SOURCE = (Path(REPO) / "ops/scheduled-tasks/calendar-fetch-daily.SKILL.md")
 setattr(mod, "PREREQUISITE_CHECK", lambda _repo: [])
 
 
-def copy_continuity_contract(repo: Path) -> None:
-    for relative in (
-        "ops/config/claude-continuity-hooks.json",
-        "ops/claude-continuity-hook.py",
-        "mcp-server/continuity-stdio-proxy.mjs",
-    ):
-        destination = repo / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes((Path(REPO) / relative).read_bytes())
 
 DESIRED = {"hooks": {
     "Stop": [{"hooks": [{
@@ -167,16 +158,12 @@ def main():
         config.mkdir(parents=True)
         launchd.mkdir(parents=True)
         tasks.mkdir(parents=True)
-        copy_continuity_contract(repo)
         hooks_source = {"PreToolUse": []}
         (config / "hooks.json").write_text(
             json.dumps(hooks_source, indent=2) + "\n", encoding="utf-8"
         )
         mod.REPO = str(repo)
         mod.SETTINGS = str(home / ".claude" / "settings.json")
-        mod.CLAUDE_CONTINUITY_MODE_FILE = str(
-            home / ".config/carr/claude-continuity-mode.json")
-        mod.CLAUDE_MCP_CONFIG = str(home / ".claude.json")
         mod.TASKS_SRC = str(home / ".claude" / "scheduled-tasks")
         mod.TASKS_REPO = str(tasks)
         mod.TASKS_QUARANTINE = str(
@@ -343,7 +330,7 @@ def main():
             "HOME", "REPO", "SETTINGS", "TASKS_SRC", "TASKS_REPO", "TASKS_QUARANTINE",
             "LAUNCHD_SRC", "LAUNCHD_REPO", "HOOKS_REPO", "CODEX_HOOKS_SRC",
             "CODEX_HOOKS_REPO", "CODEX_CONFIG", "CODEX_PERMISSIONS_REPO",
-            "CLAUDE_CONTINUITY_MODE_FILE", "CLAUDE_MCP_CONFIG",
+
         ]}
         token_comment_home = token_comment_case_home / "home"
         mod.HOME = str(token_comment_home)
@@ -351,15 +338,11 @@ def main():
         hooks = {"PreToolUse": []}
         (token_comment_home / ".claude").mkdir(parents=True, exist_ok=True)
         token_comment_case_settings.write_text(json.dumps({"hooks": hooks}, indent=2) + "\n", encoding="utf-8")
-        copy_continuity_contract(token_comment_case_repo)
         (token_comment_case_config / "hooks.json").write_text(
             json.dumps(hooks, indent=2) + "\n", encoding="utf-8"
         )
         mod.REPO = str(token_comment_case_repo)
         mod.SETTINGS = str(token_comment_case_settings)
-        mod.CLAUDE_CONTINUITY_MODE_FILE = str(
-            token_comment_home / ".config/carr/claude-continuity-mode.json")
-        mod.CLAUDE_MCP_CONFIG = str(token_comment_home / ".claude.json")
         mod.TASKS_SRC = str(token_comment_home / ".claude" / "scheduled-tasks")
         mod.TASKS_REPO = str(token_comment_case_repo / "ops" / "scheduled-tasks")
         mod.TASKS_QUARANTINE = str(token_comment_home / ".claude" / "scheduled-tasks-quarantine" / "carr-primary-only")

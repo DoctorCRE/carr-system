@@ -51,7 +51,7 @@ def publication_body(meta, report, known_secrets=()):
 
 def receipt_directory():
     return Path(os.environ.get('CARR_DOT_REVIEW_RECEIPTS',
-                               str(Path.home() / '.local/state/carr/merge-queue/relay')))
+                               str(Path.home() / '.local/state/carr/dot-review/relay')))
 
 
 def anchor_database():

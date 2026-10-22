@@ -37,15 +37,12 @@ exactly as they bind Joe, with zero mechanical enforcement on his side today.
     ops/config-as-code.py pull       # machine -> repo (capture what is live)
     ops/config-as-code.py install    # repo -> machine (deploy; needs --apply)
     ops/config-as-code.py reinstall-launchd-calendar [--apply] [--kickstart]
-    ops/config-as-code.py install-codex-continuity --apply
-    ops/config-as-code.py verify-codex-continuity
     ops/config-as-code.py install-codex-continuity-mcp --apply
     ops/config-as-code.py verify-codex-continuity-mcp
     ops/config-as-code.py install-progress-board [--repo CANONICAL] --apply
     ops/config-as-code.py install-flash-on-demand [--apply]
     ops/config-as-code.py verify-progress-board [--repo CANONICAL]
     ops/config-as-code.py check-launchd-main-paths
-    ops/config-as-code.py remove-codex-continuity --apply
 
 `check` is what belongs in run.sh health: it answers "is the live config still
 the config we think we have", which is the question nobody could answer tonight.
@@ -68,7 +65,6 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib.machine_prerequisites import machine_prerequisites, prerequisite_failure_report
-from lib import claude_continuity_config as continuity_config
 from lib import machine_role
 from lib import launchd_calendar
 from lib import launchd_hold
@@ -200,22 +196,10 @@ LAUNCHD_ALT_REPO = {
         REPO, "tools", "dictation-rig", "launchd", "com.carr.call-mode.plist"
     ),
 }
-# These labels are managed outside this installer: Homebrew's local proxy
-# and the orchestrator's out/orch fix train. Their CARR prefix is not ownership.
-LAUNCHD_MACHINE_LOCAL = frozenset({
-    "com.carr.cliproxyapi.plist",
-    "com.carr.fix-train.plist",
-})
 HOOKS_REPO = os.path.join(REPO, "ops", "config", "hooks.json")
 CODEX_HOOKS_SRC = os.path.join(HOME, ".codex", "hooks.json")
 CODEX_HOOKS_REPO = os.path.join(REPO, "ops", "config", "codex-hooks.json")
 CODEX_CONFIG = os.path.join(HOME, ".codex", "config.toml")
-CLAUDE_CONTINUITY_MODE_FILE = os.path.join(
-    HOME, ".config", "carr", "claude-continuity-mode.json"
-)
-CLAUDE_MCP_CONFIG = os.path.join(HOME, ".claude.json")
-CODEX_CONTINUITY_EVENTS = ("SessionStart",)
-CODEX_CONTINUITY_APP_EVENTS = {"SessionStart": "sessionStart"}
 CODEX_APP_SERVER_TIMEOUT_SECONDS = 15
 CODEX_APP_SERVER_OUTPUT_LIMIT = 4 * 1024 * 1024
 CODEX_PERMISSIONS_REPO = os.path.join(REPO, "ops", "config", "codex-permissions.toml")
@@ -232,8 +216,6 @@ TOKENS = [(tok, real) for tok, real in
           (("{{VAULT}}", VAULT), ("{{REPO}}", REPO), ("{{HOME}}", HOME)) if real]
 
 from lib.launchd_scope import PRIMARY_ONLY, SECONDARY_ONLY, HOST_ONLY, allowed_on_machine
-
-
 
 
 # A LaunchAgent that invokes this installer cannot unload its own label and
@@ -545,50 +527,9 @@ def raw_live_hooks_block():
     return document.get("hooks")
 
 
-def _read_claude_mcp_config():
-    raw = read(CLAUDE_MCP_CONFIG)
-    if raw is None:
-        return {}
-    if len(raw.encode("utf-8")) > continuity_config.MAX_CONFIG_BYTES:
-        raise RuntimeError(f"Claude MCP configuration is too large: {CLAUDE_MCP_CONFIG}")
-    try:
-        document = json.loads(raw)
-    except Exception as exc:
-        raise RuntimeError(f"Claude MCP configuration is invalid: {CLAUDE_MCP_CONFIG}") from exc
-    if not isinstance(document, dict):
-        raise RuntimeError("Claude MCP configuration root must be an object")
-    return document
-
-
-def claude_continuity_state(live_hooks, *, require_complete):
-    """Validate the independent continuity receipt, hooks, and MCP binding."""
-    contract = continuity_config.load(REPO)
-    mode = continuity_config.read_mode(CLAUDE_CONTINUITY_MODE_FILE, contract)
-    installed = mode in continuity_config.MODES
-    continuity_config.validate_hooks(
-        live_hooks, contract, require_complete=installed and require_complete
-    )
-    mcp = _read_claude_mcp_config()
-    continuity_config.validate_mcp(mcp, contract, required=installed)
-    servers = mcp.get("mcpServers") if isinstance(mcp, dict) else None
-    has_mcp = isinstance(servers, dict) and continuity_config.MCP_SERVER_NAME in servers
-    if not installed and (continuity_config.has_overlay(live_hooks) or has_mcp):
-        raise RuntimeError(
-            "Claude continuity hooks or MCP binding exist without a valid installed mode; "
-            "use install-claude-continuity.py remove --apply"
-        )
-    return contract, mode
-
-
 def live_hooks_block():
-    """Return the base hook projection after validating the live overlay."""
-    live = raw_live_hooks_block()
-    contract, mode = claude_continuity_state(
-        {} if live is None else live, require_complete=True
-    )
-    if live is None:
-        return None
-    return continuity_config.strip_installed_overlay(live, contract, mode)
+    """Return the native Claude hook configuration."""
+    return raw_live_hooks_block()
 
 
 def live_codex_hooks():
@@ -669,80 +610,6 @@ def merge_codex_carr_hooks(live, desired):
         desired_groups = (desired_hooks or {}).get(event, [])
         retained.extend(json.loads(json.dumps(desired_groups)) if isinstance(desired_groups, list) else [])
         live_hooks[event] = retained
-    result["hooks"] = live_hooks
-    return result
-
-
-def is_codex_continuity_hook_command(command):
-    """Recognize only the continuity wrapper owned by the narrow installer."""
-    if not isinstance(command, str):
-        return False
-    candidate = command.replace("\\", "/").lower()
-    return ("/carr-system/ops/codex-continuity-hook.py" in candidate or
-            "/my drive/carr ai/ops/codex-continuity-hook.py" in candidate or
-            "{{repo}}/ops/codex-continuity-hook.py" in candidate)
-
-
-def merge_codex_continuity_hooks(live, desired):
-    """Merge continuity groups while preserving all other Codex configuration."""
-    result = json.loads(json.dumps(live if isinstance(live, dict) else {}))
-    live_hooks = result.get("hooks")
-    if not isinstance(live_hooks, dict):
-        live_hooks = {}
-    desired_hooks = desired.get("hooks") if isinstance(desired, dict) else {}
-    if not isinstance(desired_hooks, dict):
-        desired_hooks = {}
-    # Also visit live events that still carry a continuity hook, so an install
-    # clears them from events the adapter no longer uses.
-    stale = {event for event, groups in live_hooks.items() if isinstance(groups, list) and any(
-        isinstance(group, dict) and isinstance(hook, dict) and
-        is_codex_continuity_hook_command(hook.get("command"))
-        for group in groups for hook in group.get("hooks", []))}
-    for event in stale | set(CODEX_CONTINUITY_EVENTS):
-        groups = live_hooks.get(event, [])
-        groups = groups if isinstance(groups, list) else []
-        pending = copy.deepcopy(desired_hooks.get(event, []))
-        retained = []
-        for group in groups:
-            if not isinstance(group, dict):
-                retained.append(group)
-                continue
-            handlers = group.get("hooks", [])
-            owns_continuity = any(isinstance(hook, dict) and
-                                  is_codex_continuity_hook_command(hook.get("command"))
-                                  for hook in handlers)
-            if owns_continuity:
-                clone = dict(group)
-                clone["hooks"] = [hook for hook in handlers
-                                  if not (isinstance(hook, dict) and
-                                          is_codex_continuity_hook_command(hook.get("command")))]
-                if pending:
-                    replacement = pending.pop(0)
-                    if clone["hooks"]:
-                        clone["hooks"] = []
-                        for hook in handlers:
-                            if (isinstance(hook, dict) and
-                                    is_codex_continuity_hook_command(hook.get("command"))):
-                                clone["hooks"].extend(replacement["hooks"])
-                                replacement = {"hooks": []}
-                            else:
-                                clone["hooks"].append(hook)
-                    else:
-                        clone = replacement
-                # Codex keys include the group index. Keep an empty slot on
-                # removal so later unrelated groups retain their trust keys.
-                retained.append(clone)
-            elif not handlers and pending and (
-                    {key: value for key, value in group.items() if key != "hooks"} ==
-                    {key: value for key, value in pending[0].items() if key != "hooks"}):
-                retained.append(pending.pop(0))
-            else:
-                retained.append(group)
-        retained.extend(pending)
-        if retained or event in CODEX_CONTINUITY_EVENTS:
-            live_hooks[event] = retained
-        else:
-            live_hooks.pop(event, None)
     result["hooks"] = live_hooks
     return result
 
@@ -972,90 +839,6 @@ def codex_app_server_request(method, params):
                 process.wait(timeout=2)
 
 
-def canonical_codex_continuity_hooks():
-    """Load and validate the exact rendered continuity hook contracts from the repo."""
-    source = read(CODEX_HOOKS_REPO)
-    if source is None:
-        raise RuntimeError(f"no tracked Codex hooks at {CODEX_HOOKS_REPO}")
-    try:
-        document = json.loads(concrete(source))
-    except Exception as exc:
-        raise RuntimeError(f"{CODEX_HOOKS_REPO} is not valid JSON ({exc})") from exc
-    hooks = document.get("hooks") if isinstance(document, dict) else None
-    if not isinstance(hooks, dict):
-        raise RuntimeError(f"{CODEX_HOOKS_REPO} must contain a hooks object")
-    desired = {"hooks": {}}
-    contracts = []
-    for event in CODEX_CONTINUITY_EVENTS:
-        groups = hooks.get(event, [])
-        if not isinstance(groups, list):
-            raise RuntimeError(f"{event} must contain a continuity group array")
-        matches = [
-            (group, handler)
-            for group in groups if isinstance(group, dict)
-            and isinstance(group.get("hooks"), list)
-            for handler in group["hooks"] if isinstance(handler, dict)
-            and is_codex_continuity_hook_command(handler.get("command"))
-        ]
-        if len(matches) != 1:
-            raise RuntimeError(f"{event} must contain exactly one continuity handler")
-        group, handler = matches[0]
-        desired["hooks"][event] = [{**group, "hooks": [handler]}]
-        if (handler.get("type") != "command" or
-                not isinstance(handler.get("command"), str) or
-                not isinstance(handler.get("timeout"), int) or
-                isinstance(handler.get("timeout"), bool)):
-            raise RuntimeError(f"{event} continuity handler shape is invalid")
-        contracts.append({
-            "eventName": CODEX_CONTINUITY_APP_EVENTS[event],
-            "command": handler["command"],
-            "matcher": group.get("matcher"),
-            "handlerType": handler["type"],
-            "timeoutSec": handler["timeout"],
-        })
-    return desired, contracts
-
-
-def codex_continuity_hook_entries(contracts, require_trusted=False):
-    """Return the exact continuity user hook instances observed by Codex itself."""
-    response = codex_app_server_request("hooks/list", {"cwds": [REPO]})
-    data = response.get("data")
-    if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict):
-        raise RuntimeError("hooks/list did not return exactly one requested working directory")
-    listing = data[0]
-    if listing.get("errors"):
-        raise RuntimeError("hooks/list reported hook configuration errors")
-    hooks = listing.get("hooks")
-    if not isinstance(hooks, list):
-        raise RuntimeError("hooks/list returned no hook array")
-    source_path = os.path.realpath(CODEX_HOOKS_SRC)
-    candidates = []
-    for contract in contracts:
-        matches = [hook for hook in hooks if isinstance(hook, dict) and
-                   os.path.realpath(str(hook.get("sourcePath") or "")) == source_path and
-                   all(hook.get(field) == value for field, value in contract.items())]
-        if len(matches) != 1:
-            raise RuntimeError("hooks/list did not uniquely match the canonical "
-                               f"{contract['eventName']} continuity hook")
-        candidates.append(matches[0])
-    keys = set()
-    for hook in candidates:
-        key = hook.get("key")
-        current_hash = hook.get("currentHash")
-        if (hook.get("source") != "user" or hook.get("handlerType") != "command" or
-                hook.get("enabled") is not True or not isinstance(key, str) or not key or
-                not isinstance(current_hash, str) or
-                not re.fullmatch(r"sha256:[0-9a-f]{64}", current_hash)):
-            raise RuntimeError("hooks/list returned malformed continuity hook metadata")
-        if key in keys:
-            raise RuntimeError("hooks/list returned a duplicate continuity hook key")
-        keys.add(key)
-        if require_trusted and hook.get("trustStatus") != "trusted":
-            raise RuntimeError(f"{hook.get('eventName')} continuity hook is "
-                               f"{hook.get('trustStatus') or 'not trusted'}")
-    return candidates
-
-
 def _codex_user_config_layer():
     response = codex_app_server_request(
         "config/read", {"cwd": REPO, "includeLayers": True})
@@ -1080,27 +863,6 @@ def _codex_user_config_layer():
     return layer
 
 
-def _without_continuity_trust(config, keys):
-    """Mask only selected trust tables so every unrelated value can be compared."""
-    masked = copy.deepcopy(config)
-    hooks = masked.get("hooks")
-    if not isinstance(hooks, dict):
-        return masked
-    state = hooks.get("state")
-    if isinstance(state, dict):
-        for key in keys:
-            state.pop(key, None)
-        if not state:
-            hooks.pop("state", None)
-    if not hooks:
-        masked.pop("hooks", None)
-    return masked
-
-
-def _hook_trust_state(config):
-    hooks = config.get("hooks") if isinstance(config, dict) else None
-    state = hooks.get("state") if isinstance(hooks, dict) else None
-    return state if isinstance(state, dict) else {}
 
 
 def _write_codex_config_edits(edits, expected_version):
@@ -1115,87 +877,6 @@ def _write_codex_config_edits(edits, expected_version):
             os.path.realpath(CODEX_CONFIG)):
         raise RuntimeError("config/batchWrite did not confirm an effective user-config write")
     return _codex_user_config_layer()
-
-
-def _restore_codex_continuity_trust(before_config, keys):
-    """Restore selected trust tables without reverting unrelated concurrent config."""
-    current = _codex_user_config_layer()
-    current_config = current["config"]
-    before_state = _hook_trust_state(before_config)
-    current_state = _hook_trust_state(current_config)
-    edits = []
-    for key in keys:
-        prior = before_state.get(key)
-        if key in before_state and current_state.get(key) != prior:
-            edits.append({"keyPath": f"hooks.state.{json.dumps(key)}",
-                          "value": copy.deepcopy(prior), "mergeStrategy": "replace"})
-        elif key not in before_state and key in current_state:
-            edits.append({"keyPath": f"hooks.state.{json.dumps(key)}",
-                          "value": None, "mergeStrategy": "upsert"})
-    if not edits:
-        return
-    restored = _write_codex_config_edits(edits, current["version"])
-    if (_without_continuity_trust(current_config, keys) !=
-            _without_continuity_trust(restored["config"], keys)):
-        raise RuntimeError("trust rollback changed unrelated Codex configuration")
-    restored_state = _hook_trust_state(restored["config"])
-    if any((key in before_state) != (key in restored_state) or
-           (key in before_state and restored_state.get(key) != before_state.get(key))
-           for key in keys):
-        raise RuntimeError("trust rollback did not restore prior continuity entries")
-
-
-def persist_codex_continuity_trust(entries, contracts, remove=False):
-    """Atomically upsert or delete only the continuity app-server-derived trust tables."""
-    before = _codex_user_config_layer()
-    config = before["config"]
-    state = _hook_trust_state(config)
-    expected = {entry["key"]: entry["currentHash"] for entry in entries}
-    if remove:
-        if all(key not in state for key in expected):
-            print("  Codex continuity hook trust already absent")
-            return 0
-    elif (all(state.get(key) == {"trusted_hash": current_hash}
-              for key, current_hash in expected.items()) and
-          all(entry.get("trustStatus") == "trusted" for entry in entries)):
-        print("  Codex continuity hooks already trusted")
-        return 0
-
-    edits = []
-    for key, current_hash in expected.items():
-        quoted = json.dumps(key)
-        edits.append({
-            "keyPath": (f"hooks.state.{quoted}" if remove else
-                        f"hooks.state.{quoted}.trusted_hash"),
-            "value": None if remove else current_hash,
-            "mergeStrategy": "upsert",
-        })
-    try:
-        after = _write_codex_config_edits(edits, before["version"])
-        after_state = _hook_trust_state(after["config"])
-        if _without_continuity_trust(config, expected) != _without_continuity_trust(
-                after["config"], expected):
-            raise RuntimeError("config/batchWrite changed unrelated Codex configuration")
-        if remove:
-            if any(key in after_state for key in expected):
-                raise RuntimeError("config/batchWrite left continuity trust entries behind")
-            print("  REMOVED   Codex continuity hook trust entries")
-            return 0
-        if any(after_state.get(key) != {"trusted_hash": current_hash}
-               for key, current_hash in expected.items()):
-            raise RuntimeError("config/batchWrite did not persist exact continuity hook hashes")
-        verified = codex_continuity_hook_entries(contracts, require_trusted=True)
-        observed = {entry["key"]: entry["currentHash"] for entry in verified}
-        if observed != expected:
-            raise RuntimeError("hooks/list changed continuity identity during trust installation")
-        print("  TRUSTED   Codex continuity hooks using authoritative current hashes")
-        return 0
-    except RuntimeError as exc:
-        try:
-            _restore_codex_continuity_trust(config, expected)
-        except RuntimeError as rollback_exc:
-            raise RuntimeError(f"{exc}; trust rollback failed ({rollback_exc})") from exc
-        raise
 
 
 def cmd_install_codex_continuity_mcp(apply=False):
@@ -1256,157 +937,6 @@ def cmd_install_codex_continuity_mcp(apply=False):
     return 0
 
 
-def cmd_verify_codex_continuity():
-    """Read-only proof that Codex will automatically execute the continuity hooks."""
-    try:
-        _, contracts = canonical_codex_continuity_hooks()
-        entries = codex_continuity_hook_entries(contracts, require_trusted=True)
-    except RuntimeError as exc:
-        print(f"ERROR: Codex continuity trust verification failed ({exc}).")
-        return 1
-    for entry in entries:
-        print(f"  TRUSTED   {entry['eventName']}: {entry['currentHash']}")
-    print("  Codex hooks/list confirms the continuity hooks are trusted")
-    return 0
-
-
-def _write_codex_hooks_text(raw):
-    """Atomically write or restore hooks.json after validating its object shape."""
-    if raw is None:
-        if os.path.exists(CODEX_HOOKS_SRC):
-            os.unlink(CODEX_HOOKS_SRC)
-        return
-    parsed = json.loads(raw)
-    if not isinstance(parsed, dict):
-        raise RuntimeError("Codex hooks restore content is not a JSON object")
-    parent = os.path.dirname(CODEX_HOOKS_SRC)
-    os.makedirs(parent, exist_ok=True)
-    temp_path = None
-    try:
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=parent,
-                                         prefix=".codex-continuity-", delete=False) as fh:
-            temp_path = fh.name
-            fh.write(raw)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(temp_path, CODEX_HOOKS_SRC)
-        check = json.loads(read(CODEX_HOOKS_SRC))
-        if not isinstance(check, dict):
-            raise RuntimeError("written Codex hooks are not a JSON object")
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            os.unlink(temp_path)
-
-
-def cmd_install_codex_continuity(apply, remove=False):
-    """Install only the CARR continuity hook groups owned by Codex.
-
-    This intentionally has no relationship to the broad machine reconciler:
-    it never reads or writes Claude settings, Codex permissions, LaunchAgents,
-    scheduled tasks, git configuration, or any other global client state.
-    """
-    try:
-        canonical_desired, contracts = canonical_codex_continuity_hooks()
-    except RuntimeError as exc:
-        print(f"ERROR: Codex continuity hook source is invalid ({exc}).")
-        return 1
-    desired = ({"hooks": {event: [] for event in CODEX_CONTINUITY_EVENTS}}
-               if remove else canonical_desired)
-
-    raw_live = read(CODEX_HOOKS_SRC)
-    if raw_live is None:
-        if remove:
-            print("  No Codex continuity hook file exists; nothing to remove")
-            return 0
-        live = {}
-        print(f"  Codex continuity hooks: {'WILL CREATE' if apply else 'would create'} {CODEX_HOOKS_SRC}")
-    else:
-        try:
-            live = json.loads(raw_live)
-        except Exception as exc:
-            print(f"ERROR: {CODEX_HOOKS_SRC} is not valid JSON ({exc}) — refusing to touch it.")
-            return 1
-        if not isinstance(live, dict):
-            print(f"ERROR: {CODEX_HOOKS_SRC} must contain a JSON object — refusing to touch it.")
-            return 1
-
-    merged = merge_codex_continuity_hooks(live, desired)
-    rendered = json.dumps(merged, indent=2) + "\n"
-    unchanged = raw_live is not None and raw_live == rendered
-    if unchanged and (remove or not apply):
-        print("  Codex continuity hooks already match the repo (unrelated configuration preserved)")
-        return 0
-    if not apply:
-        print(f"  Codex continuity hooks: would write {CODEX_HOOKS_SRC}")
-        action = "remove-codex-continuity" if remove else "install-codex-continuity"
-        print(f"\nDRY RUN — nothing written. Re-run with `{action} --apply`.")
-        return 0
-
-    # Removal must capture Codex's exact keys and prior trust state before
-    # hooks.json stops exposing them. Its trust deletion is phase one; if the
-    # hook rewrite fails, only those trust tables are restored. Install is
-    # the inverse: hooks.json is phase one and is restored if trust phase two
-    # refuses.
-    entries = None
-    removal_config = None
-    if remove:
-        try:
-            entries = codex_continuity_hook_entries(contracts)
-            removal_config = _codex_user_config_layer()["config"]
-            persist_codex_continuity_trust(entries, contracts, remove=True)
-        except RuntimeError as exc:
-            print(f"ERROR: Codex continuity trust removal failed ({exc}).")
-            return 1
-
-    if not unchanged:
-        parent = os.path.dirname(CODEX_HOOKS_SRC)
-        os.makedirs(parent, exist_ok=True)
-        backup = CODEX_HOOKS_SRC + ".bak-codex-continuity"
-        had_live = raw_live is not None
-        if had_live:
-            shutil.copy2(CODEX_HOOKS_SRC, backup)
-        try:
-            _write_codex_hooks_text(rendered)
-        except Exception as exc:
-            rollback_errors = []
-            try:
-                _write_codex_hooks_text(raw_live)
-            except Exception as rollback_exc:
-                rollback_errors.append(f"hooks rollback failed ({rollback_exc})")
-            if remove and removal_config is not None and entries is not None:
-                try:
-                    _restore_codex_continuity_trust(
-                        removal_config, {entry["key"] for entry in entries})
-                except RuntimeError as rollback_exc:
-                    rollback_errors.append(f"trust rollback failed ({rollback_exc})")
-            suffix = ("; " + "; ".join(rollback_errors)) if rollback_errors else ""
-            print(f"ERROR: Codex continuity hook write failed ({exc}){suffix}.")
-            return 1
-        print(f"  WROTE OK  {CODEX_HOOKS_SRC} "
-              f"(backup: {backup if had_live else 'none; new file'})")
-    else:
-        print("  Codex continuity hooks already match the repo "
-              "(unrelated configuration preserved)")
-
-    if remove:
-        return 0
-    try:
-        entries = codex_continuity_hook_entries(contracts)
-        persist_codex_continuity_trust(entries, contracts)
-    except RuntimeError as exc:
-        try:
-            _write_codex_hooks_text(raw_live)
-        except Exception as rollback_exc:
-            print("ERROR: Codex continuity trust update failed "
-                  f"({exc}); hooks rollback failed ({rollback_exc}).")
-            return 1
-        action = "removal" if remove else "installation"
-        print(f"ERROR: Codex continuity trust {action} failed ({exc}); "
-              "prior hooks restored.")
-        return 1
-    return 0
-
-
 # A DEFINITION-ONLY TASK IS NOT A MISSING JOB. Four calendar-prebrief contracts
 # live in the repository and say, in their own bodies, "This definition is
 # disabled. Do not create, enable, or invoke any scheduler." Their activation
@@ -1428,7 +958,6 @@ def is_definition_only_task(text):
 def launchd_off_reason(filename, body, holds=None):
     label = launchd_calendar.plist_label(body or "") or filename.removesuffix(".plist")
     return launchd_hold.off_reason(label, HOME, holds=holds)
-
 
 
 def pairs(holds=None):
@@ -1759,11 +1288,6 @@ def _cmd_check(holds):
         if prerequisite_report:
             print(prerequisite_report)
             return 1
-        mode = continuity_config.read_mode(
-            CLAUDE_CONTINUITY_MODE_FILE, continuity_config.load(REPO)
-        )
-        if mode in continuity_config.MODES:
-            print(f"  Claude continuity overlay and dedicated MCP binding verified; mode={mode}")
         print(f"config-as-code: OK — {len(configured_pairs)} items, repo matches machine")
         return 0
     if not drift and unversioned:
@@ -1836,7 +1360,7 @@ def cmd_pull(apply):
     try:
         configured_pairs = pairs(holds)
     except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
-        print(f"ERROR: Claude continuity configuration is invalid ({exc}); refusing to capture it.")
+        print(f"ERROR: Claude hook configuration is invalid ({exc}); refusing to capture it.")
         return 1
     wrote = 0
     for label, live, repo_path in configured_pairs:
@@ -1859,23 +1383,19 @@ def cmd_pull(apply):
 
 
 def reconcile_retired_launchd(apply):
-    """Retire unheld CARR definitions absent from both source registries.
+    """Unload and quarantine CARR definitions absent from the repository.
 
-    Explicit machine-local exceptions and holds retain their definitions.
+    Holds prevent activation of declared jobs, not retirement of deleted jobs.
     Labels outside com.carr.*, including local.carr-progress-board, are never owned here.
     """
     failures = []
     if not os.path.isdir(LAUNCHD_REPO):
         print(f"  RETIRE FAILED  template directory is unavailable: {LAUNCHD_REPO}")
         return [LAUNCHD_REPO]
-    holds = launchd_hold.read_holds(HOME)
     for filename in carr_plists():
-        if (filename in LAUNCHD_MACHINE_LOCAL or filename in LAUNCHD_ALT_REPO
-                or os.path.lexists(os.path.join(LAUNCHD_REPO, filename))):
+        if os.path.lexists(launchd_repo_path(filename)):
             continue
         label = filename.removesuffix(".plist")
-        if launchd_hold.off_reason(label, HOME, holds=holds):
-            continue
         live = os.path.join(LAUNCHD_SRC, filename)
         try:
             if os.path.islink(live) or not os.path.isfile(live):
@@ -2143,7 +1663,7 @@ def install_launchd_plist(filename, dest, body, body_matches, *, timeout=15):
     # matching file and matching launchctl path cannot mask an old definition.
     with open(pending, "w", encoding="utf-8") as fh:
         fh.write(hashlib.sha256(body.encode("utf-8")).hexdigest() + "\n")
-    if not body_matches:
+    if installed_sha256(dest) != hashlib.sha256(body.encode("utf-8")).hexdigest():
         with open(dest, "w", encoding="utf-8") as fh:
             fh.write(body)
 
@@ -2365,16 +1885,6 @@ def cmd_install(apply):
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         print(f"  HOLD REFUSED: {exc}")
         return 1
-    if os.path.exists(os.path.join(LAUNCHD_REPO, "local.ds4-flash-next.plist")):
-        from tools import flash_install
-        if apply:
-            try:
-                flash_install.install(Path(REPO), Path(HOME))
-            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-                print(f"ERROR: Flash off-by-default convergence failed: {exc}")
-                return 1
-        else:
-            print("  Would converge Flash off-by-default and install the expiry watcher on this machine")
     settings_existed = os.path.exists(SETTINGS)
     raw = read(SETTINGS) if settings_existed else "{}"
     if not settings_existed:
@@ -2390,28 +1900,7 @@ def cmd_install(apply):
         print(f"ERROR: no native hooks block at {HOOKS_REPO}. Restore it from the repository.")
         return 1
 
-    try:
-        base_planned = json.loads(concrete(src))
-        live_hooks = cfg.get("hooks", {})
-        contract, continuity_mode = claude_continuity_state(
-            live_hooks, require_complete=False
-        )
-        planned = continuity_config.render_effective_hooks(
-            base_planned, live_hooks, contract, continuity_mode
-        )
-    except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
-        print(f"ERROR: Claude continuity configuration is invalid ({exc}); "
-              "settings left untouched.")
-        return 1
-
-    if continuity_mode in continuity_config.MODES:
-        present = all(
-            continuity_config.observed_entries(live_hooks.get(event)) == wanted
-            for event, wanted in contract.hooks.items()
-        )
-        action = "PRESERVE" if present else "RESTORE"
-        print(f"  Claude continuity overlay: WILL {action} five canonical entries; "
-              f"mode={continuity_mode}; dedicated MCP binding verified")
+    planned = json.loads(concrete(src))
 
     # REFUSE A BLOCK WHOSE SCRIPTS ARE NOT THERE (added after 2026-08-24).
     # Settings apply on the very next prompt of every session, so a hooks block
@@ -3132,12 +2621,6 @@ def main():
         return cmd_install_codex_continuity_mcp(apply)
     if mode == "verify-codex-continuity-mcp":
         return cmd_install_codex_continuity_mcp(False)
-    if mode == "install-codex-continuity":
-        return cmd_install_codex_continuity(apply)
-    if mode == "remove-codex-continuity":
-        return cmd_install_codex_continuity(apply, remove=True)
-    if mode == "verify-codex-continuity":
-        return cmd_verify_codex_continuity()
     if mode == "install":
         return cmd_install(apply)
     if mode == "install-flash-on-demand":
