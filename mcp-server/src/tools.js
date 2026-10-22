@@ -3325,23 +3325,54 @@ export const TOOLS = {
 
   "today-triage": {
     write: false,
-    description: "What needs attention now: due actions, critical dates inside 14 days, and untriaged ingest. Critical dates lead, then oldest due dates. Defaults to all owners; partners selects both partners, their machine seats, and unowned rows before limiting. Returns items, total, has_more, and next_cursor.",
+    description: "What needs attention now: due actions, critical dates inside 14 days, and untriaged ingest. Critical dates due today through 14 days lead; remaining rows follow oldest-first, with kind and id breaking ties. Optional owners='partners' selects both partners, machine seats, and unowned rows before limiting; default 'all' preserves shared triage. Optional limit is 1..50 (default 50). Pass next_cursor as cursor with the same owners filter to continue. Returns items, total for the filtered queue, has_more, and next_cursor. Continuation uses live rows and pins ordering to the first page's business date; it is not a snapshot.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       owners: { type: "string", enum: ["all", "partners"] },
       limit: { type: "integer", minimum: 1, maximum: 50 },
+      cursor: { type: "string", minLength: 1, maxLength: 1000 },
     } },
     handler: async (c, _actor, args) => {
       const owners = args.owners ?? "all";
       const limit = args.limit ?? 50;
-      const rows = (await c.query(`select *, count(*) over() as triage_total
+      if (!["all", "partners"].includes(owners) || !Number.isInteger(limit) || limit < 1 || limit > 50)
+        throw new ToolError({ error: "triage_page_invalid" });
+      let after = null;
+      if (args.cursor !== undefined) {
+        try {
+          if (typeof args.cursor !== "string" || !args.cursor.length || args.cursor.length > 1000) throw Error();
+          after = JSON.parse(atob(args.cursor));
+          if (!after || after.v !== 1 || after.owners !== owners || !isCalendarDate(after.on)
+              || ![0, 1].includes(after.rank)
+              || !(after.due_on === null || isCalendarDate(after.due_on))
+              || !["next_action", "post_call_action", "critical_date", "ingest"].includes(after.item_kind)
+              || typeof after.id !== "string" || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(after.id)) throw Error();
+        } catch { throw new ToolError({ error: "triage_cursor_invalid" }); }
+      }
+      const rows = (await c.query(`with scoped as (
+        select *, coalesce($4::date, current_date)::text as triage_on,
+          case when item_kind = 'critical_date'
+            and due_on between coalesce($4::date, current_date) and coalesce($4::date, current_date) + 14
+            then 0 else 1 end as triage_rank
         from v_today_triage
         where ($1::text = 'all' or owner is null or lower(owner) = any($2::text[]))
-        order by case when item_kind = 'critical_date' then 0 else 1 end,
-          due_on nulls last, item_kind, id
-        limit $3`, [owners, [...TODO_OWNER_PARTNER.keys()], limit + 1])).rows;
+      ), totals as (select count(*) as triage_total from scoped)
+      select page.*, totals.triage_total from totals left join lateral (
+        select * from scoped
+        where $5::integer is null or (triage_rank, coalesce(due_on, 'infinity'::date), item_kind, id)
+          > ($5::integer, coalesce($6::date, 'infinity'::date), $7::text, $8::uuid)
+        order by triage_rank, due_on nulls last, item_kind, id
+        limit $3
+      ) page on true`, [owners, [...TODO_OWNER_PARTNER.keys()], limit + 1,
+        after?.on ?? null, after?.rank ?? null, after?.due_on ?? null, after?.item_kind ?? null, after?.id ?? null])).rows;
       const total = Number(rows[0]?.triage_total ?? rows.length);
-      const items = rows.slice(0, limit).map(({ triage_total, ...row }) => row);
-      return { items, total, has_more: rows.length > limit, next_cursor: null };
+      const page = rows.filter(row => !(row.id === null && row.item_kind === null));
+      const has_more = page.length > limit;
+      const last = page[Math.min(page.length, limit) - 1];
+      const next_cursor = has_more ? btoa(JSON.stringify({ v: 1, owners, on: last.triage_on,
+        rank: last.triage_rank, due_on: last.due_on instanceof Date ? last.due_on.toISOString().slice(0, 10) : last.due_on,
+        item_kind: last.item_kind, id: last.id })) : null;
+      const items = page.slice(0, limit).map(({ triage_total, triage_rank, triage_on, ...row }) => row);
+      return { items, total, has_more, next_cursor };
     },
   },
 

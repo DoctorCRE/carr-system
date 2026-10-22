@@ -40,11 +40,12 @@ async function rows(values) {
 const call = args => executeRegisteredTool(db, JOE, 'today-triage', args);
 
 test('morning brief filters autonomous backlog before its page and places imminent critical dates first', async () => {
+  const near = (await db.query("select (current_date + 3)::text as day")).rows[0].day;
   await rows([
     ...Array.from({ length: 55 }, (_, i) => [i + 1, 'next_action', 'claude', '2020-01-01']),
     [61, 'next_action', 'joe-local', '2026-01-01'],
     [62, 'post_call_action', 'dell-local', '2026-01-01'],
-    [63, 'critical_date', null, '2026-12-01'],
+    [63, 'critical_date', null, near],
   ]);
   const result = await executeRegisteredTool(db, JOE, 'morning-brief', {});
   assert.deepEqual(result.sections.today.items.map(row => row.id), [id(63), id(61), id(62)]);
