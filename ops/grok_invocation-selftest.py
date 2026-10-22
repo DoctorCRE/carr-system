@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,8 @@ from unittest.mock import patch
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 from hooks import grok_invocation
+sys.path.insert(0, str(REPO / 'tools/room-bridge'))
+import grok_wire
 
 class GrokBootTests(unittest.TestCase):
 

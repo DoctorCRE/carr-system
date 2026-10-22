@@ -1,0 +1,35 @@
+{
+  "schema": "outlook-grammar-sources/v1",
+  "sources": [
+    {
+      "role": "survey",
+      "path": "audits/wr443-outlook-route-survey.json",
+      "pr": 2040,
+      "revision": "913029145c56534c1b6d516bd88a0d43950b5551",
+      "sha256": "a1826c6c18e5d4c393fc577b7244714dbbdd985ff2968e5d4a4b9f376d9492ee",
+      "state": "MERGED",
+      "merge_commit": "913029145c56534c1b6d516bd88a0d43950b5551",
+      "merged_at": "2026-10-21T04:38:52Z"
+    },
+    {
+      "role": "grammar",
+      "path": "audits/wr443-deeplink-grammar.json",
+      "pr": 2041,
+      "revision": "7432eac46324f2e4db8f9e852d9402c630bfb1af",
+      "sha256": "2c7bc66729e245658a8c99264931dd2e8c7cdac994e99a710d51fd592ac27888",
+      "state": "OPEN",
+      "merge_commit": null,
+      "merged_at": null
+    },
+    {
+      "role": "send",
+      "path": "audits/wr443-send-by-id.json",
+      "pr": 2042,
+      "revision": "8f69356aac9162b1b03ffa4b3c7b33e38872cdcb",
+      "sha256": "e05e96761b3bf6e67f101386fc6f4dfee2da4646a8bcba50cfbb51caa7a23c6d",
+      "state": "OPEN",
+      "merge_commit": null,
+      "merged_at": null
+    }
+  ]
+}
