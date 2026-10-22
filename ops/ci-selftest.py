@@ -32,22 +32,6 @@ def check(label, ok, detail=""):
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-MYPY_PIN_MIN_PYTHON = (3, 10)
-
-def type_check_interpreter_version():
-    venv_python = REPO / ".venv" / "bin" / "python"
-    if venv_python.exists():
-        probe = subprocess.run(
-            [str(venv_python), "-c", "import sys; print(sys.version_info[0], sys.version_info[1])"],
-            capture_output=True, text=True)
-        parts = probe.stdout.split()
-        if probe.returncode == 0 and len(parts) >= 2:
-            return (int(parts[0]), int(parts[1]))
-    return sys.version_info[:2]
-
-def mypy_pin_excludes_this_machine():
-    return type_check_interpreter_version() < MYPY_PIN_MIN_PYTHON
-
 @contextlib.contextmanager
 def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
@@ -466,38 +450,25 @@ def test_dep_check_detects_a_stale_lock():
         check("a comment-only edit does NOT invalidate the lock", rc == 0, out)
 
 def test_types_class_catches_a_seeded_type_error():
-    if mypy_pin_excludes_this_machine():
-        found = type_check_interpreter_version()
-        check(
-            "types: ACCEPTED — Python %d.%d is below the mypy pin %d.%d, so mypy "
-            "cannot be installed here and the seeded-error path cannot run"
-            % (found[0], found[1], MYPY_PIN_MIN_PYTHON[0], MYPY_PIN_MIN_PYTHON[1]),
-            True)
-        rc, out = run(["--only", "types"])
-        check("types still reports honestly on the accepted machine (skip, not pass)",
-              rc == 0 and "SKIP" in out.upper(), f"rc={rc} out={out[-400:]}")
-        return
-
-    fixture = "tools/_ci_selftest_types_fixture.py"
+    fixture = "mcp-server/fixture.js"
     with ci_fixture() as root:
         rc, out = run(["--only", "types"], root=root)
         check("types passes on the clean fixture", rc == 0,
               f"rc={rc} out={out[-400:]}")
 
+        original = (root / fixture).read_text()
         (root / fixture).write_text(
-            "# fixture written by ops/ci-selftest.py — removed on exit.\n"
-            "# Module level on purpose: check_untyped_defs = False means an error\n"
-            "# inside an unannotated function body would not be reported at all.\n"
-            "x: int = 'not an int'\n")
+            "/** @type {number} */\n"
+            "const value = 'not a number';\n")
         rc, out = run(["--only", "types"], root=root)
         check("a seeded type error makes the types class FAIL", rc == 1,
               f"rc={rc} out={out[-400:]}")
         check("the failing run names the seeded type error and types class",
               re.search(r"FAIL\s+types\b", out) is not None
-              and "_ci_selftest_types_fixture.py" in out and "[assignment]" in out,
+              and "fixture.js" in out and "TS2322" in out,
               f"out={out[-800:]}")
 
-        (root / fixture).unlink()
+        (root / fixture).write_text(original)
         rc, out = run(["--only", "types"], root=root)
     check("removing the seed turns the types class green again", rc == 0,
           f"rc={rc} out={out[-400:]}")
