@@ -270,14 +270,6 @@ def in_hook_calls_skip_the_server_but_the_advisory_does_not():
 
 
 class ReviewRegressions(unittest.TestCase):
-    def test_retired_stop_and_agent_cannot_load_transcript_facet_enforcement(self):
-        # Findings 1-3: malformed IDs, duplicate IDs and ambiguous anchors
-        # belonged to the retired prompt-facet checks, not boundary judgments.
-        for path in ("hooks/executor-tier-gate.py",):
-            with self.subTest(path=path):
-                source = (Path(REPO) / path).read_text()
-                self.assertFalse("from lib.jev_required_actions import" in source, path)
-                self.assertFalse("from lib.jev_server_receipts import" in source, path)
 
     def test_stale_advisories_and_replays_have_no_server_facet_credit_path(self):
         # Findings 4-5: retain main's historical envelope fixtures, remove

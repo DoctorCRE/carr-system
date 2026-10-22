@@ -1,6 +1,9 @@
 ## What changed
 <!-- Describe the user-visible change or repair. -->
 
+## Decisions
+<!-- Explain the design choices needed to review this change. -->
+
 ## How verified
 <!-- Name the checks and any remaining limits. -->
 
