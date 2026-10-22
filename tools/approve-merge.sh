@@ -43,4 +43,20 @@ if jq -e '.autoMergeRequest != null' <<< "$snapshot" >/dev/null; then
   exit 0
 fi
 sleep 2
-gh pr merge "$pr" --repo "$repo" --auto --squash --match-head-commit "$approved_sha"
+if merge_output=$(gh pr merge "$pr" --repo "$repo" --auto --squash --match-head-commit "$approved_sha" 2>&1); then
+  printf '%s\n' "$merge_output"
+  exit 0
+fi
+case "$merge_output" in
+  'Pull request is in clean status'|'GraphQL: Pull request is in clean status (enablePullRequestAutoMerge)'|\
+  'Auto merge is not allowed for this repository'|'GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)')
+    sleep 2
+    if ! gh pr merge "$pr" --repo "$repo" --squash --match-head-commit "$approved_sha"; then
+      exit 1
+    fi
+    ;;
+  *)
+    printf '%s\n' "$merge_output" >&2
+    exit 1
+    ;;
+esac

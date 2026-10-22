@@ -29,6 +29,9 @@ if sys.argv[1:3] == ['pr', 'view']:
 elif sys.argv[1:3] == ['pr', 'merge'] and '--auto' in sys.argv and os.environ.get('GH_TEST_AUTO_ERROR'):
     print(os.environ['GH_TEST_AUTO_ERROR'], file=sys.stderr)
     sys.exit(2)
+elif sys.argv[1:3] == ['pr', 'merge'] and os.environ.get('GH_TEST_MERGE_ERROR'):
+    print(os.environ['GH_TEST_MERGE_ERROR'], file=sys.stderr)
+    sys.exit(3)
 elif sys.argv[1:3] != ['pr', 'merge']:
     sys.exit('unexpected GitHub command')
 ''')
@@ -76,6 +79,49 @@ elif sys.argv[1:3] != ['pr', 'merge']:
             ['pr', 'merge', '12', '--repo', 'example/repo', '--auto', '--squash', '--match-head-commit', SHA],
             ['pr', 'merge', '12', '--repo', 'example/repo', '--squash', '--match-head-commit', SHA],
         ])
+
+    def test_disabled_auto_merge_merges_immediately_for_exact_head(self):
+        self.env['GH_TEST_AUTO_ERROR'] = 'GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)'
+        result = self.run_command('example/repo', '12', SHA)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls()[1:], [
+            ['pr', 'merge', '12', '--repo', 'example/repo', '--auto', '--squash', '--match-head-commit', SHA],
+            ['pr', 'merge', '12', '--repo', 'example/repo', '--squash', '--match-head-commit', SHA],
+        ])
+
+    def test_plain_known_messages_also_allow_the_pinned_fallback(self):
+        for message in ('Pull request is in clean status', 'Auto merge is not allowed for this repository'):
+            with self.subTest(message=message):
+                if self.log.exists():
+                    self.log.unlink()
+                self.env['GH_TEST_AUTO_ERROR'] = message
+                result = self.run_command('example/repo', '12', SHA)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(self.calls()), 3)
+                self.assertEqual(self.calls()[-1], ['pr', 'merge', '12', '--repo', 'example/repo',
+                                                  '--squash', '--match-head-commit', SHA])
+
+    def test_other_auto_merge_errors_print_and_exit_one_without_fallback(self):
+        for message in ('API unavailable', 'Pull request is in clean status but permission was denied',
+                        'Pull request is in clean status\nAPI unavailable'):
+            with self.subTest(message=message):
+                if self.log.exists():
+                    self.log.unlink()
+                self.env['GH_TEST_AUTO_ERROR'] = message
+                result = self.run_command('example/repo', '12', SHA)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stderr, message + '\n')
+                self.assertEqual(len(self.calls()), 2)
+                self.assertIn('--auto', self.calls()[-1])
+
+    def test_immediate_merge_failure_prints_and_exits_one(self):
+        self.env['GH_TEST_AUTO_ERROR'] = 'Pull request is in clean status'
+        self.env['GH_TEST_MERGE_ERROR'] = 'Head changed before merge'
+        result = self.run_command('example/repo', '12', SHA)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, 'Head changed before merge\n')
+        self.assertEqual(len(self.calls()), 3)
+        self.assertEqual(self.calls()[-1][-2:], ['--match-head-commit', SHA])
 
     def test_missing_label_evidence_refuses(self):
         del self.pr['labels']
