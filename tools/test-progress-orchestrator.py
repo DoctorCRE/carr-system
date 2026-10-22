@@ -149,8 +149,7 @@ def publication_sequence():
             claimed=q.claim(eligible_desks={'cx-app2'},actor='runner',owner={})
             q.finish('search',claimed['claim'],{'status':'completed'},actor='worker')
             q.transition('search','merging',actor='orchestrator',reason='Independent review passed');publish()
-            q.finish_merge('search',repo='jbookout/doctorcre-app',pr=12,head='a'*40,merged=True,
-                           actor='provider',reason='Provider confirmed the merge')
+            q.transition('search','done',actor='provider',reason='Provider confirmed the approved head merged')
             state['tasks']['source'].update(stage='merged',pr_phase='Merged',merge_sha='a'*40)
             publish()
             state['tasks']['source'].update(**exercise_fields(source='a'*40,repo='jbookout/doctorcre-app'),stage='live',status='done')

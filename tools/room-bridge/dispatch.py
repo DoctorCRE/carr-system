@@ -17,7 +17,7 @@ to route costs the tokens the routing was supposed to save.
 `send` saves a card in the durable work queue and returns its queued receipt.
 The detached runner claims cards in the current global order when their desk
 and a Codex slot are free. `prioritize`, `requeue`, `show`, `history`, `export`
-and `merge-order` all use that same store.
+and `queue` all use that same store.
 
 The worker resolves the current Codex family at execution time and records the
 executor model and effort on the card. The `dispatch()` function is the

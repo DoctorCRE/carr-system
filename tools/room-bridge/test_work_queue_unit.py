@@ -84,9 +84,6 @@ class WorkQueueTests(unittest.TestCase):
         self.q.update('A', actor='fixer', reason='fixed', findings=[
             {'id': 'f1', 'level': 'P1', 'summary': 'Lost ordering', 'resolved': True}])
         self.q.transition('A', 'merging', actor='orchestrator', reason='reviews passed')
-        merging = self.q.merge_order()
-        self.assertEqual(merging['schema'], 'room-work-queue-merges/v1')
-        self.assertEqual([(e['card_id'], e['pr'], e['head']) for e in merging['entries']], [('A', 1960, 'a' * 40)])
         card = self.q.get('A')
         self.assertEqual((card['findings_opened'], card['findings_resolved'], card['merge_position']), (1, 1, 1))
         self.assertGreaterEqual(card['total_time_s'], 0)
@@ -223,105 +220,6 @@ with WorkQueue(Path(sys.argv[2])) as q:
             with self.assertRaises(sqlite3.OperationalError):
                 reader.enqueue('B', desk='sol', task='refused write', actor='test')
         self.assertEqual(len(self.q.export()['items']), 1)
-
-    def test_merge_executor_start_is_idempotent_and_records_stage_timing(self):
-        self.add('A')
-        claim = self.q.claim(eligible_desks={'sol'}, actor='runner', owner={})
-        self.q.finish('A', claim['claim'], {'status': 'completed'}, actor='worker')
-        self.q.update('A', actor='reviewer', reason='approved', prs=[
-            {'repo': 'jbookout/carr-system', 'number': 1960, 'head': 'a' * 40}])
-        self.q.transition('A', 'merging', actor='orchestrator', reason='reviews passed')
-        self.q.begin_merge('A', actor='merge-daemon', reason='pinned head claimed')
-        revision = self.q.export()['revision']
-        self.q.begin_merge('A', actor='merge-daemon', reason='restart readback')
-        self.assertEqual(self.q.export()['revision'], revision)
-        self.assertTrue(self.q.get('A')['active'])
-        with self.assertRaisesRegex(ValueError, 'completion receipt'):
-            self.q.requeue('A', stage='fixing', actor='test', reason='cannot preempt merge')
-        self.assertIsNotNone(self.q.get('A')['stages'][-1]['started_at'])
-        self.q.finish_merge('A', repo='jbookout/carr-system', pr=1960, head='a' * 40,
-                            merged=True, actor='merge-daemon', reason='provider receipt')
-        merged = self.q.get('A')['stages'][-2]
-        self.assertIsNotNone(merged['finished_at'])
-        self.assertGreaterEqual(merged['elapsed'], 0)
-
-    def test_later_pin_can_advance_while_another_pin_merge_is_in_flight(self):
-        self.add('A')
-        claim = self.q.claim(eligible_desks={'sol'}, actor='runner', owner={})
-        self.q.finish('A', claim['claim'], {'status': 'completed'}, actor='worker')
-        pins = [dict(repo='jbookout/carr-system', number=n, head='a' * 40) for n in (1, 2)]
-        self.q.update('A', actor='reviewer', reason='reviewed', prs=pins)
-        self.q.transition('A', 'merging', actor='test', reason='review complete')
-        self.q.begin_merge('A', pin=pins[0], actor='merge-daemon', reason='first pin in flight')
-        arguments = dict(repo='jbookout/carr-system', head='a' * 40, prepared='b' * 40,
-                         main='c' * 40, actor='merge-daemon', reason='verified regeneration',
-                         expected_order=self.q.merge_order()['entries'])
-        with WorkQueue(self.path) as restarted:
-            with self.assertRaises(QueueChanged):
-                restarted.advance_merge_pin('A', pr=1, **arguments)
-            restarted.advance_merge_pin('A', pr=2, **arguments)
-            self.assertEqual(restarted.get('A')['prs'], [pins[0], {**pins[1], 'head': 'b' * 40}])
-            self.assertTrue(restarted.get('A')['active'])
-
-    def test_regenerated_pin_preserves_other_prs_and_requires_current_selection(self):
-        self.add('A')
-        claim = self.q.claim(eligible_desks={'sol'}, actor='runner', owner={})
-        self.q.finish('A', claim['claim'], {'status': 'completed'}, actor='worker')
-        pins = [dict(repo='jbookout/carr-system', number=n, head='a' * 40) for n in (1, 2)]
-        self.q.update('A', actor='reviewer', reason='reviewed', prs=pins)
-        self.q.transition('A', 'merging', actor='test', reason='review complete')
-        order = self.q.merge_order()['entries']
-        arguments = dict(repo='jbookout/carr-system', pr=1, head='a' * 40, prepared='b' * 40,
-                         main='c' * 40, actor='merge-daemon', reason='verified regeneration', expected_order=order)
-        self.q.advance_merge_pin('A', **arguments)
-        self.assertEqual(self.q.get('A')['prs'], [{**pins[0], 'head': 'b' * 40}, pins[1]])
-        revision = self.q.export()['revision']
-        with self.assertRaises(QueueChanged):
-            self.q.advance_merge_pin('A', **arguments)
-        self.assertEqual(self.q.export()['revision'], revision)
-        arguments['expected_order'] = self.q.merge_order()['entries']
-        arguments['head'] = 'b' * 40
-        arguments['prepared'] = 'd' * 40
-        self.q.begin_merge('A', actor='merge-daemon', reason='provider merge starting')
-        revision = self.q.export()['revision']
-        with self.assertRaises(QueueChanged):
-            self.q.advance_merge_pin('A', **arguments)
-        self.assertEqual(self.q.export()['revision'], revision)
-        self.assertEqual(self.q.get('A')['prs'][0]['head'], 'b' * 40)
-
-    def test_legacy_merge_ownership_requires_manual_repin_after_first_receipt_and_restart(self):
-        self.add('A')
-        claim = self.q.claim(eligible_desks={'sol'}, actor='runner', owner={})
-        self.q.finish('A', claim['claim'], {'status': 'completed'}, actor='worker')
-        pins = [dict(repo='jbookout/carr-system', number=n, head='a' * 40) for n in (1, 2)]
-        self.q.update('A', actor='reviewer', reason='reviewed', prs=pins)
-        self.q.transition('A', 'merging', actor='test', reason='review complete')
-        self.q.begin_merge('A', pin=pins[0], actor='merge-daemon', reason='first pin in flight')
-        # Historical active stores predate per-pin ownership records.
-        with self.q.db:
-            self.q.db.execute("UPDATE items SET data=json_remove(data, '$.merge_inflight') WHERE card_id='A'")
-        self.q.begin_merge('A', pin=pins[0], actor='merge-daemon', reason='restart ownership readback')
-        self.q.finish_merge('A', repo='jbookout/carr-system', pr=1, head='a' * 40,
-                            merged=True, actor='merge-daemon', reason='first merge confirmed')
-        with WorkQueue(self.path) as restarted:
-            with self.assertRaisesRegex(QueueChanged, '^legacy_ownership$'):
-                restarted.advance_merge_pin('A', repo='jbookout/carr-system', pr=2,
-                                            head='a' * 40, prepared='b' * 40, main='c' * 40,
-                                            actor='merge-daemon', reason='verified regeneration',
-                                            expected_order=restarted.merge_order()['entries'])
-            self.assertEqual(restarted.get('A')['prs'], pins)
-            self.assertTrue(restarted.get('A')['active'])
-            self.assertEqual(restarted.get('A')['merge_receipts'], [pins[0]])
-            with self.assertRaisesRegex(ValueError, 'completion receipt'):
-                restarted.update('A', actor='human', reason='must reconcile legacy ownership first',
-                                 prs=[pins[0], {**pins[1], 'head': 'b' * 40}])
-            restarted.finish_merge('A', repo='jbookout/carr-system', pr=2, head='a' * 40,
-                                   merged=False, actor='human', reason='provider confirms no pending merge')
-            restarted.update('A', actor='human', reason='manual repin after provider reconciliation',
-                             prs=[{**pins[1], 'head': 'b' * 40}])
-            restarted.requeue('A', stage='review', actor='human', reason='resume existing review path')
-            restarted.transition('A', 'merging', actor='human', reason='manually repinned')
-            self.assertEqual(restarted.merge_order()['entries'][0]['head'], 'b' * 40)
 
 
 if __name__ == '__main__':
