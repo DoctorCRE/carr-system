@@ -267,19 +267,15 @@ export function personalScopeForActor(actor) {
 }
 
 /**
- * Server-derived owners allowed for set-next-action. Every actor may keep a
- * ball in its own queue. Only the separately provisioned Hermes CoS door may
- * hand a ball to its verified sponsor; plain Hermes and human sessions remain
- * own-ball-only even when sponsor metadata is present.
+ * Server-derived owners allowed for set-next-action. Any authenticated caller
+ * may keep a ball in its own queue or hand one to either partner (Joe
+ * 2026-10-20, agent seats may own-assign to-dos). created_by still records the
+ * real runtime, so the hand-off is attributable. This widens who a to-do may be
+ * assigned to; it grants no other authority.
  */
 export function permittedActionOwnerSlugs(actor) {
-  const owners = [];
-  if (actor && typeof actor.slug === "string") owners.push(actor.slug);
-  if (actor?.hermesCos !== true || actor?.via !== "hermes-cos-token") return owners;
-  const scope = personalScopeForActor(actor);
-  if (scope.status === "personal" && isKnownPartner(scope.sponsor) &&
-      !owners.includes(scope.sponsor)) owners.push(scope.sponsor);
-  return owners;
+  if (!actor || typeof actor.slug !== "string") return [];
+  return [...new Set([actor.slug, ...PARTNER_SLUGS])];
 }
 
 /**

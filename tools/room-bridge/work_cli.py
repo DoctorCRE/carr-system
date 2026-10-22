@@ -5,6 +5,8 @@ import re
 import uuid
 
 import codex_models
+import business_routing
+from desks import DeskError
 from work_queue import WorkQueue, STAGES, EXECUTABLE, default_path
 import work_runner
 
@@ -43,7 +45,8 @@ def send(args, task, registry, results):
     codex = entry['kind'] in codex_models.CODEX_KINDS
     options = dict(fresh=args.fresh, stream_output=args.stream_output, retrieval=args.retrieve,
                    family=args.family, effort=args.effort, writes=args.writes, checkout=args.checkout,
-                   codex=codex, allow_phrasing=args.allow_phrasing, result_path=str(results.resolve()), registry_path=str(registry.path.resolve()))
+                   codex=codex, brief_kind=args.brief, posture=entry.get('posture'),
+                   allow_phrasing=args.allow_phrasing, result_path=str(results.resolve()), registry_path=str(registry.path.resolve()))
     card_id = args.card_id or f'job:{uuid.uuid4()}'
     path = default_path()
     with WorkQueue(path) as queue:
@@ -60,6 +63,32 @@ def send(args, task, registry, results):
                                  effort=args.effort or entry.get('effort', ''))
     work_runner.kick(path, registry.path, results)
     return {'status': 'queued', 'card_id': card_id, 'stage': card['stage'], 'position': card['position'], 'db': str(path)}
+
+
+def send_business(args, task, registry, results):
+    card_id = args.card_id or f'job:{uuid.uuid4()}'
+    path = default_path()
+    with WorkQueue(path) as queue:
+        if any(card['card_id'] == card_id for card in queue.export()['items']):
+            raise ValueError('card already exists; use another source for another business task')
+        route = business_routing.select(registry, results)
+        description = (args.description or '') + '\n\nBusiness routing: ' + json.dumps(route, sort_keys=True)
+        name = route['chosen']
+        entry = registry.resolve(name) if name else {}
+        options = dict(fresh=True, stream_output=False, retrieval=False, family=None, effort=None,
+                       brief_kind='business', posture='record-layer',
+                       writes=None, checkout=None, codex=entry.get('kind') == 'codex-session',
+                       allow_phrasing=args.allow_phrasing, result_path=str(results.resolve()),
+                       registry_path=str(registry.path.resolve()))
+        card = queue.enqueue(card_id, desk=name or '__no_record_layer_desk__', task=task, actor=args.actor,
+                             options=options, title=args.title or '', description=description,
+                             family=entry.get('family') or '', effort=entry.get('effort') or '')
+        if not name:
+            queue.transition(card_id, 'failed', actor=args.actor, reason='no_record_layer_desk')
+            raise DeskError('no_record_layer_desk', 'every record-layer desk is unavailable; reasons recorded on card')
+    work_runner.kick(path, registry.path, results)
+    return {'status': 'queued', 'card_id': card_id, 'desk': name, 'business_route': route,
+            'stage': card['stage'], 'position': card['position'], 'db': str(path)}
 
 
 def handle(args, registry, results):

@@ -9,7 +9,8 @@ export async function readLeadWorkspace(c, args = {}) {
   // One statement is one PostgreSQL snapshot, also on the stateless HTTP
   // reader. UUID equality stays in PostgreSQL, including mixed-case input.
   const row = (await c.query(`with board as materialized (
-      select * from v_lead_workspace
+      select w.*, p.prospect_client_id,p.prospect_client_version,p.prospect_engagement_status
+        from v_lead_workspace w left join v_lead_prospect_engagement p on p.lead_id=w.id
     ) select coalesce((select jsonb_agg(to_jsonb(b) order by b.stage_sort,b.score desc nulls last,b.name,b.id)
         from board b),'[]'::jsonb) as leads,
       (select to_jsonb(b)||d.detail from board b join v_lead_workspace_detail d on d.id=b.id
