@@ -17,14 +17,6 @@
   },
   "board": "carr-v5",
   "board_github_enabled": false,
-  "machine_cleanup": {
-    "checkout_age_seconds": 604800,
-    "thread_age_seconds": 172800,
-    "max_seconds": 240,
-    "max_items": 200,
-    "test_temp_age_seconds": 21600,
-    "test_temp_max_items": 1000
-  },
   "thresholds": {
     "branch_idle_seconds": 10800,
     "command_timeout_seconds": 30,
