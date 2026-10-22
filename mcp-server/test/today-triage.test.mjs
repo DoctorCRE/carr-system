@@ -53,3 +53,31 @@ test('morning brief filters autonomous backlog before its page and places immine
   assert.equal(result.sections.today.has_more, false);
   assert.equal(result.sections.today.next_cursor, null);
 });
+
+test('triage pages equal and null dates across kinds without dropping or repeating rows', async () => {
+  await rows([
+    [1, 'next_action', 'joe', '2020-01-01'],
+    [1, 'post_call_action', 'dell', '2020-01-01'],
+    [2, 'next_action', null, '2020-01-01'],
+    [3, 'ingest', null, null],
+    [4, 'next_action', 'dell-local', null],
+    [5, 'next_action', 'claude', '2019-01-01'],
+  ]);
+  const first = await call({ owners: 'partners', limit: 2 });
+  assert.equal(first.total, 5);
+  assert.equal(first.has_more, true);
+  assert.equal(typeof first.next_cursor, 'string');
+  const second = await call({ owners: 'partners', limit: 2, cursor: first.next_cursor });
+  const third = await call({ owners: 'partners', limit: 2, cursor: second.next_cursor });
+  assert.deepEqual([first, second, third].flatMap(page => page.items.map(row => [row.item_kind, row.id])), [
+    ['next_action', id(1)], ['next_action', id(2)], ['post_call_action', id(1)], ['ingest', id(3)], ['next_action', id(4)],
+  ]);
+  for (const page of [first, second, third]) assert.equal(page.total, 5);
+  assert.equal(third.has_more, false);
+  assert.equal(third.next_cursor, null);
+  await assert.rejects(call({ owners: 'all', cursor: first.next_cursor }), error =>
+    error instanceof ToolError && error.payload.error === 'triage_cursor_invalid');
+  const broad = await call({});
+  assert.equal(broad.total, 6);
+  assert.equal(broad.items[0].owner, 'claude');
+});
