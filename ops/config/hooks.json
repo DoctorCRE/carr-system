@@ -220,15 +220,6 @@
           "timeout": 5
         }
       ]
-    },
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -e \"{{REPO}}/hooks/session-presence-hook.py\" ] && [ ! -L \"{{REPO}}/hooks/session-presence-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/session-presence-hook.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/session-presence-hook.py claude",
-          "timeout": 5
-        }
-      ]
     }
   ],
   "SubagentStart": [
@@ -242,32 +233,13 @@
       ]
     }
   ],
-  "SessionEnd": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -e \"{{REPO}}/hooks/session-presence-hook.py\" ] && [ ! -L \"{{REPO}}/hooks/session-presence-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/session-presence-hook.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/session-presence-hook.py claude",
-          "timeout": 5
-        }
-      ]
-    }
-  ],
+  "SessionEnd": [],
   "UserPromptSubmit": [
     {
       "hooks": [
         {
           "type": "command",
           "command": "if [ ! -e \"{{REPO}}/hooks/job-watchdog-digest.py\" ] && [ ! -L \"{{REPO}}/hooks/job-watchdog-digest.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/job-watchdog-digest.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/job-watchdog-digest.py",
-          "timeout": 5
-        }
-      ]
-    },
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -e \"{{REPO}}/hooks/session-presence-hook.py\" ] && [ ! -L \"{{REPO}}/hooks/session-presence-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/session-presence-hook.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/session-presence-hook.py claude",
           "timeout": 5
         }
       ]

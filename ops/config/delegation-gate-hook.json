@@ -42,7 +42,6 @@
       "hooks/delegation-gate.py",
       "hooks/job-watchdog-digest.py",
       "hooks/machine-converge.py",
-      "hooks/session-presence-hook.py",
       "hooks/worktree-self-plumb.py",
       "ops/claude-continuity-hook.py",
       "ops/codex-continuity-hook.py",

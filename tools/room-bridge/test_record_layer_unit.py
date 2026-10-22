@@ -65,7 +65,7 @@ class WireTests(unittest.TestCase):
                 'sandbox': 'danger-full-access', 'add_dirs': ['/ignored']},
                 'Draft for someone@example.test.', env={'PATH': '/usr/bin',
                     'CODEX_API_KEY': 'synthetic', 'CARR_MCP_TOKEN': 'synthetic',
-                    'UNRELATED_SECRET': 'must-not-inherit'}, live_desktop=True, provider_run=run)
+                    'UNRELATED_SECRET': 'must-not-inherit'}, provider_run=run)
         owner.assert_not_called()
         self.assertEqual(result['status'], 'completed')
         self.assertEqual(result['result'], 'Synthetic business reply.')

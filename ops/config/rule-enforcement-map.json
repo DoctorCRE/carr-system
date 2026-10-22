@@ -410,7 +410,7 @@
         "tools/room-bridge/desks.py"
       ],
       "test": [
-        "ops/room-bridge-selftest.py"
+        "tools/room-bridge/test_dispatch_unit.py"
       ]
     },
     "delegation_tripwire": {

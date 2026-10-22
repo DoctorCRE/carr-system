@@ -127,15 +127,13 @@ def compare(root):
                 'local.ds4-flash-next', 'local.flash-desk'}
     labels.update(captured)
     credentials = {
-        'room-bridge': ['mcp-tokens.env', 'engineering-controller.env'],
         'nightly-record-layer': ['db.env', 'tokens.env', 'healthchecks.env', 'age-key.txt'],
         'nightly-exports-daytime-retry': ['db.env', 'tokens.env'],
         'partner-ping': ['db.env'], 'release-pipeline': ['db.env', 'tokens.env'],
         'control-plane-tick': ['db.env', 'engineering-controller.env'],
         'job-watchdog': ['db.env', 'mcp-tokens.env'], 'cutover-watch': ['mcp-tokens.env'],
         'delivery-cadence-a05-sweep': ['mcp-tokens.env']}
-    states = {'room-bridge': ['~/.config/carr/room-bridge-state.json', '~/.config/carr/hermes-dispatch-results.jsonl'],
-              'partner-ping': ['~/.config/carr/partner-ping.json'],
+    states = {'partner-ping': ['~/.config/carr/partner-ping.json'],
               'release-pipeline': ['~/carr-system/out/release-pipeline'],
               'local.carr-progress-board': ['~/carr-system/out/boards'],
               'nightly-record-layer': ['~/carr-system/out/backups']}

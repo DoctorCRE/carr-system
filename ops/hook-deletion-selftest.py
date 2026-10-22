@@ -13,6 +13,43 @@ CHECK = REPO / 'ops/hook-deletion-check.py'
 
 
 class HookDeletion(unittest.TestCase):
+    def test_only_preexisting_optional_hooks_can_be_deleted_with_all_registrations(self):
+        for optional_at_base, still_wired in ((True, False), (True, True), (False, False)):
+            with self.subTest(optional_at_base=optional_at_base, still_wired=still_wired), \
+                 tempfile.TemporaryDirectory() as raw:
+                repo = Path(raw)
+                def git(*args):
+                    return subprocess.run(['git', '-C', str(repo), *args], check=True,
+                                          capture_output=True, text=True, env=fixture_env()).stdout.strip()
+                git('init', '-q')
+                git('config', 'user.name', 'Synthetic test')
+                git('config', 'user.email', 'fixture@example.invalid')
+                (repo / 'hooks').mkdir()
+                (repo / 'hooks/optional.py').write_text('pass\n')
+                (repo / 'ops/config').mkdir(parents=True)
+                config = repo / 'ops/config/hooks.json'
+                config.write_text(json.dumps({'Stop': [{'hooks': [{
+                    'command': 'python {{REPO}}/hooks/optional.py'}]}]}))
+                policy = repo / 'ops/config/delegation-gate-hook.json'
+                policy.write_text(json.dumps({'missing_script_policy': {
+                    'optional': ['hooks/optional.py'] if optional_at_base else [],
+                    'safety': [] if optional_at_base else ['hooks/optional.py']}}))
+                git('add', 'hooks/optional.py', 'ops/config/hooks.json',
+                    'ops/config/delegation-gate-hook.json')
+                git('commit', '-qm', 'Wire hook with its existing safety classification')
+                base = git('rev-parse', 'HEAD')
+                if not still_wired:
+                    config.write_text('{}')
+                policy.write_text(json.dumps({'missing_script_policy': {
+                    'optional': ['hooks/optional.py'], 'safety': []}}))
+                git('rm', 'hooks/optional.py')
+                git('add', 'ops/config/hooks.json', 'ops/config/delegation-gate-hook.json')
+                git('commit', '-qm', 'Delete hook')
+                result = subprocess.run(['python3', str(CHECK), '--repo', str(repo), '--base', base],
+                                        capture_output=True, text=True)
+                expected = 0 if optional_at_base and not still_wired else 1
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+
     def test_target_spellings_cannot_bypass_deletion_check(self):
         for target in ('{{REPO}}/hooks/safety/old.py', 'hooks/old.py', './hooks/old.py',
                        'hooks/safety/../old.py', '{{REPO}}/hooks/../hooks/old.py',

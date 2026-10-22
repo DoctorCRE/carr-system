@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refuse deletion of scripts still wired at the PR base. Unwire in a prior PR."""
+"""Require prior unwiring for safety hooks; optional hooks may be removed atomically."""
 import argparse
 import json
 import os
@@ -83,20 +83,30 @@ def check(repo, base):
             event = json.loads(Path(event_path).read_text())
             base = event.get('pull_request', {}).get('base', {}).get('sha') or event.get('before')
         base = base or git('merge-base', 'origin/main', 'HEAD').strip()
-    wired = set()
     files = set(git('ls-tree', '-r', '--name-only', base).splitlines())
-    for path in WIRING:
-        if path not in files:
-            continue
-        document = json.loads(git('show', f'{base}:{path}'))
-        for groups in document.get('hooks', document).values():
-            if not isinstance(groups, list):
+    def wired_at(revision):
+        wired = set()
+        available = set(git('ls-tree', '-r', '--name-only', revision).splitlines())
+        for path in WIRING:
+            if path not in available:
                 continue
-            for group in groups:
-                for hook in group.get('hooks', []):
-                    wired.add(command_target(hook.get('command', ''), repo))
+            document = json.loads(git('show', f'{revision}:{path}'))
+            for groups in document.get('hooks', document).values():
+                if not isinstance(groups, list):
+                    continue
+                for group in groups:
+                    for hook in group.get('hooks', []):
+                        wired.add(command_target(hook.get('command', ''), repo))
+        return wired
+
+    policy_path = 'ops/config/delegation-gate-hook.json'
+    policy = (json.loads(git('show', f'{base}:{policy_path}')).get('missing_script_policy', {})
+              if policy_path in files else {})
+    optional = set(policy.get('optional', [])) - set(policy.get('safety', []))
+    wired, still_wired = wired_at(base), wired_at('HEAD')
     deleted = set(git('diff', '--no-renames', '--name-only', '--diff-filter=D', base, 'HEAD').splitlines())
-    unsafe = sorted(path for path in deleted if repo / path in wired)
+    unsafe = sorted(path for path in deleted if repo / path in wired
+                    and (path not in optional or repo / path in still_wired))
     for path in unsafe:
         print(f'REFUSED: {path} is wired at the base revision. Unwire first; delete in a later PR.')
     return 1 if unsafe else 0

@@ -120,19 +120,6 @@
       "enabled": true
     },
     {
-      "label": "com.carr.room-bridge",
-      "source": "ops/launchd/com.carr.room-bridge.plist",
-      "credentials": [
-        "~/.config/carr/mcp-tokens.env",
-        "~/.config/carr/engineering-controller.env"
-      ],
-      "state": [
-        "~/.config/carr/room-bridge-state.json",
-        "~/.config/carr/hermes-dispatch-results.jsonl"
-      ],
-      "enabled": true
-    },
-    {
       "label": "com.carr.tailscale-up",
       "source": "ops/launchd/com.carr.tailscale-up.plist",
       "credentials": [],

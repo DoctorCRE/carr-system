@@ -291,7 +291,7 @@ class InventoryTests(unittest.TestCase):
         for path, expected in [("ops/jev_deal_read.py", "app_runtime"),
                                ("tools/dictation-rig/bin/post_call_jev.py", "app_runtime"),
                                ("hooks/lint-gate.py", "system_work"),
-                               ("tools/room-bridge/queue_grammar.py", "system_work")]:
+                               ("tools/room-bridge/dispatch.py", "system_work")]:
             kind, procedure = inv.classify(path)
             self.assertEqual(kind, expected)
             self.assertTrue(procedure)

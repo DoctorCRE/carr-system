@@ -114,7 +114,7 @@ class HookCommands(unittest.TestCase):
 
     def test_missing_optional_hook_warns_and_passes(self):
         for source, event, template in commands():
-            if 'session-presence-hook.py' not in template:
+            if 'machine-converge.py' not in template:
                 continue
             with self.subTest(source=source, event=event), fixture(template) as (script, run):
                 result = run()
@@ -147,8 +147,6 @@ class HookCommands(unittest.TestCase):
                 self.assertIn('payload', result.stdout)
                 if 'continuity' in script.name:
                     self.assertIn('continuity', result.stdout)
-                if 'session-presence' in script.name:
-                    self.assertIn('codex' if 'codex' in source else 'claude', result.stdout)
                 script.unlink()
                 script.mkdir()
                 result = run('')
