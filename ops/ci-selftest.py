@@ -492,8 +492,10 @@ def test_types_class_catches_a_seeded_type_error():
         rc, out = run(["--only", "types"], root=root)
         check("a seeded type error makes the types class FAIL", rc == 1,
               f"rc={rc} out={out[-400:]}")
-        check("the failing run names the types class",
-              "types" in ANSI.sub("", out).lower(), f"out={out[-400:]}")
+        check("the failing run names the seeded type error and types class",
+              re.search(r"FAIL\s+types\b", out) is not None
+              and "_ci_selftest_types_fixture.py" in out and "[assignment]" in out,
+              f"out={out[-800:]}")
 
         (root / fixture).unlink()
         rc, out = run(["--only", "types"], root=root)
