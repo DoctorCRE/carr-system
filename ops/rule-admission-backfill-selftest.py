@@ -43,8 +43,19 @@ def main() -> int:
     cognition=admission_contract("5e89c211","shared",
                                  reviewed["rule_controls"]["5e89c211"],
                                  reviewed["control_catalog"])
-    check("deleted cognition dispatcher is not advertised as installed enforcement",
-          cognition["state"]=="needs_revision" and cognition["enforcement_points"]==[])
+    point=cognition["enforcement_points"]
+    check("cognition-token rule backfills as machine-enforceable",
+          cognition["state"]=="admitted" and cognition["enforcement_class"]=="machine_enforceable"
+          and cognition["binding_moment"]=="before a cognition workflow is registered or dispatched")
+    check("cognition-token rule carries installed manifest and database fixtures",
+          cognition["fixture_refs"]==["ops/control-plane-db-gate.py", "ops/control-plane-selftest.py"]
+          and len(point)==1 and point[0]["control_key"]=="control-plane-workflow-manifest"
+          and point[0]["enforcement_class"]=="deny_gate")
+    check("cognition-token admission contract matches actual typed dispatcher boundary",
+          cognition["input_contract"]["required"]==[
+              "execution", "input_schema_version", "output_schema_version", "budget",
+              "canonical_write_authority"]
+          and cognition["projection"]["targets"]==["workflow-manifest", "typed-broker"])
     # WHO OWNS THE ROW. Added 2026-08-23 after the first real run against
     # Production stopped on migration 0228's immutability trigger: the backfill
     # tried to rewrite the contract of a rule Joe had already approved.

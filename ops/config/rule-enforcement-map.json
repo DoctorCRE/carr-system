@@ -374,7 +374,7 @@
       ]
     },
     "control-plane-workflow-manifest": {
-      "failure_mode": "The generic ledger runner was deleted. No installed control is claimed at that removed caller.",
+      "failure_mode": "control-plane manifest loading and the cognition dispatcher refuse an untyped, unbudgeted, or canonical-write-authorized cognition contract before it is registered or dispatched",
       "implementation": [
         "ops/config/control-plane-workflows.v1.json"
       ],
@@ -676,7 +676,7 @@
       ]
     },
     "verification_status": {
-      "failure_mode": "The generic ledger runner was deleted. No installed control is claimed at that removed caller.",
+      "failure_mode": "expired or unstamped volatile subjects are surfaced as explicitly not-current re-verification work; they are never relabeled verified",
       "implementation": [
         "migrations/0104_reverify_queue_supersession.sql",
         "tools/control-plane.py",
@@ -710,9 +710,11 @@
     "weekly_social_route": {
       "failure_mode": "weekly proposal is rejected before acceptance",
       "implementation": [
+        "lib/control_plane_runner.py",
         "tools/social-batch-candidates.py"
       ],
       "test": [
+        "ops/control-plane-runner-selftest.py",
         "ops/client-asset-controls-selftest.py"
       ]
     },
@@ -1138,9 +1140,8 @@
       "binding_moment": "canonical enrichment and deal-history queue construction",
       "category": "session_task_rail",
       "control": "verification_status",
-      "enforcement_class": "unbuilt",
-      "exceptions": "identity corrections remain proposals requiring the owning partner; contextual human decisions must still identify an unverified record as such",
-      "planned_control": "The generic ledger runner was deleted. Reassess enforcement at a real caller before admitting this contract."
+      "enforcement_class": "surfacing",
+      "exceptions": "identity corrections remain proposals requiring the owning partner; contextual human decisions must still identify an unverified record as such"
     },
     "5e896ed6": {
       "category": "judgment_advisory",
@@ -1198,9 +1199,8 @@
       "binding_moment": "before a cognition workflow is registered or dispatched",
       "category": "hard_pre_action",
       "control": "control-plane-workflow-manifest",
-      "enforcement_class": "unbuilt",
-      "exceptions": "This boundary does not decide whether an otherwise valid task genuinely needs AI; it refuses only untyped, unbudgeted, write-authorized, or unregistered cognition contracts.",
-      "planned_control": "The generic ledger runner was deleted. Reassess enforcement at a real caller before admitting this contract."
+      "enforcement_class": "deny_gate",
+      "exceptions": "This boundary does not decide whether an otherwise valid task genuinely needs AI; it refuses only untyped, unbudgeted, write-authorized, or unregistered cognition contracts."
     },
     "5f8c661d": {
       "category": "judgment_advisory",
