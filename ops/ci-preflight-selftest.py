@@ -27,6 +27,19 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual(mod.main(["--collection-only"]), 0)
             collect.assert_called_once()
 
+    def test_seeded_dependency_check_uses_a_small_disposable_tree(self):
+        mod = load("ci_fixture", "ci-selftest.py")
+        with mod.ci_fixture() as root:
+            self.assertNotEqual(root, ROOT)
+            self.assertLess(len(list(root.rglob("*.py"))), 32)
+            rc, output = mod.run(["--only", "dependency"], root=root)
+            self.assertEqual(rc, 0, output)
+            (root / "requirements.txt").write_text("synthetic-package>=2\n")
+            rc, output = mod.run(["--only", "dependency"], root=root)
+            self.assertEqual(rc, 1, output)
+            self.assertIn("STALE", output)
+        self.assertFalse(root.exists())
+
     def test_missing_or_duplicated_hosted_class_is_red(self):
         original = (ROOT / '.github/workflows/ci.yml').read_text()
         canary = (ROOT / '.github/workflows/main-canary.yml').read_text()
