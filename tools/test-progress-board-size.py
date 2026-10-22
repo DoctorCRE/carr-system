@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import importlib.util
+import os
 import unittest
 import json
 import tempfile
@@ -67,6 +68,10 @@ class CostSnapshotTests(unittest.TestCase):
 
 
 class SnapshotSizeTests(unittest.TestCase):
+    def setUp(self):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(patch.dict(os.environ, {"CARR_WORK_QUEUE_DB": str(root / "work-queue.sqlite3")}))
+
     def test_trimming_removes_defaults_no_remaining_card_inherits(self):
         for field, value in (("title", "X" * 240000),
                              ("stage_history", [{"stage": "merged", "entered_at": "2026-10-18T12:00:00Z"}] * 5000)):

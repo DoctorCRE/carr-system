@@ -4,8 +4,64 @@
     "CFBundleShortVersionString": "16.114",
     "CFBundleVersion": "16.114.26101123"
   },
+  "reconciliation": {
+    "binary": {
+      "architecture": "arm64",
+      "binary": "Contents/MacOS/Microsoft Outlook",
+      "build": "16.114.26101123",
+      "bytes": 211731024,
+      "sha256": "729e211992b71ed7979813269815d563473c4821674e7e0d89b356fc7125900c"
+    },
+    "binary_sources": {
+      "Contents/Frameworks/HxCore.framework/Versions/A/HxCore": {
+        "bytes": 54938208,
+        "sha256": "681f68b80339aad839d65f18c3e76caa2bb6ed03c9cd765abc6156487fbfbc91"
+      },
+      "Contents/MacOS/Microsoft Outlook": {
+        "bytes": 211731024,
+        "sha256": "729e211992b71ed7979813269815d563473c4821674e7e0d89b356fc7125900c"
+      }
+    },
+    "method": "audit-guided reconstruction of raw-value getters and traced dispatch; no general disassembler",
+    "provenance": {
+      "schema": "outlook-grammar-sources/v1",
+      "sources": [
+        {
+          "merge_commit": "913029145c56534c1b6d516bd88a0d43950b5551",
+          "merged_at": "2026-10-21T04:38:52Z",
+          "path": "audits/wr443-outlook-route-survey.json",
+          "pr": 2040,
+          "revision": "913029145c56534c1b6d516bd88a0d43950b5551",
+          "role": "survey",
+          "sha256": "a1826c6c18e5d4c393fc577b7244714dbbdd985ff2968e5d4a4b9f376d9492ee",
+          "state": "MERGED"
+        },
+        {
+          "merge_commit": null,
+          "merged_at": null,
+          "path": "audits/wr443-deeplink-grammar.json",
+          "pr": 2041,
+          "revision": "7432eac46324f2e4db8f9e852d9402c630bfb1af",
+          "role": "grammar",
+          "sha256": "2c7bc66729e245658a8c99264931dd2e8c7cdac994e99a710d51fd592ac27888",
+          "state": "OPEN"
+        },
+        {
+          "merge_commit": null,
+          "merged_at": null,
+          "path": "audits/wr443-send-by-id.json",
+          "pr": 2042,
+          "revision": "8f69356aac9162b1b03ffa4b3c7b33e38872cdcb",
+          "role": "send",
+          "sha256": "e05e96761b3bf6e67f101386fc6f4dfee2da4646a8bcba50cfbb51caa7a23c6d",
+          "state": "OPEN"
+        }
+      ]
+    },
+    "runtime_acceptance": "untested"
+  },
   "schema": "outlook-surface-atlas/v1",
-  "scope": "static declarations and binary URL literals; runtime behavior untested",
+  "scope": "static declarations, binary URL literals and audited arm64 grammar; runtime behavior untested",
   "skipped_symlinks": [
     "Contents/Frameworks/ADAL4.framework/ADAL4",
     "Contents/Frameworks/ADAL4.framework/Resources",
@@ -3372,6 +3428,660 @@
           "immutableID"
         ],
         "scheme": "ms-outlook"
+      }
+    },
+    "url_query_vocabulary:bundle:\"emails\"": {
+      "claim": "audited arm64 constants and control flow; runtime acceptance untested",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "audit": "grammar",
+          "evidence_id": "email_keys",
+          "length": 236,
+          "offset": 143402304,
+          "sha256": "7fb71b4addba72239f3197f176460a103611eb9d45d2ab825685f59418c89f16",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x101fde540"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "url_query_vocabulary",
+      "owner": "bundle",
+      "value": {
+        "host": "emails",
+        "query_keys": [
+          "account",
+          "attachments",
+          "bcc",
+          "body",
+          "cc",
+          "from",
+          "immutableID",
+          "signature",
+          "subject",
+          "to"
+        ],
+        "runtime_acceptance": "untested",
+        "scheme": "ms-outlook"
+      }
+    },
+    "url_query_vocabulary:bundle:\"events\"": {
+      "claim": "audited arm64 constants and control flow; runtime acceptance untested",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "audit": "grammar",
+          "evidence_id": "event_keys",
+          "length": 364,
+          "offset": 143406324,
+          "sha256": "c29a5509703bd782fb10928013ba687375c805fe51a0c44999f107b86be2c14a",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x101fdf4f4"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "url_query_vocabulary",
+      "owner": "bundle",
+      "value": {
+        "host": "events",
+        "query_keys": [
+          "account",
+          "attendees",
+          "calendar",
+          "date",
+          "end",
+          "iCal",
+          "immutableID",
+          "instanceID",
+          "isallday",
+          "location",
+          "restID",
+          "seriesMasterID",
+          "start",
+          "title",
+          "view"
+        ],
+        "runtime_acceptance": "untested",
+        "scheme": "ms-outlook"
+      }
+    },
+    "url_reconstructed:bundle:[\"emails\", \"/new\"]": {
+      "claim": "audited arm64 constants and control flow; runtime acceptance untested",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "audit": "grammar",
+          "evidence_id": "attachment_paths",
+          "length": 100,
+          "offset": 157264664,
+          "sha256": "785b5e070525f131f964b9817215ecbc45ca47ada3c21c0dbd8061ce5e19e7eb",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x102d16b18"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "email_account_decimal",
+          "length": 364,
+          "offset": 143403140,
+          "sha256": "2a9aa156870f8fc4a250e74e400e15615f39b3149b211df2fb0d11e7c91d8eae",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x101fde884"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "email_account_parse",
+          "length": 32,
+          "offset": 143402840,
+          "sha256": "4774d86b8486fbc33b7842f855813975b1a55e12cf129803ee5ee6b955a72d25",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x101fde758"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "email_accounts",
+          "length": 316,
+          "offset": 157265064,
+          "sha256": "362aaad5a2141c2f37c718fa5146a171302825af09f48d2fb847d8e1f9094b70",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x102d16ca8"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "email_keys",
+          "length": 236,
+          "offset": 143402304,
+          "sha256": "7fb71b4addba72239f3197f176460a103611eb9d45d2ab825685f59418c89f16",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x101fde540"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "email_new_bridge",
+          "length": 224,
+          "offset": 157269284,
+          "sha256": "9304a1d0da216d7933302590f3240c837f6c79df763f3c5865fedc32f18040e3",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x102d17d24"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "email_new_fields",
+          "length": 248,
+          "offset": 157268536,
+          "sha256": "a55b7e2eba34a7f518fd4dc7685e3431114d0de2ccd8b12bb9cd9e700ef0987c",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x102d17a38"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "email_new_objc_stub",
+          "length": 20,
+          "offset": 166470784,
+          "sha256": "4dc67bce24bddb46995af02740802959949e5dfb821db2572728e7ed80a67d2b",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x1035de480"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "email_new_selector",
+          "length": 102,
+          "offset": 176041761,
+          "sha256": "bef6bb6b8688ddcaa8bda37b06464d3a05cf78ece56c220a76e1e9e1b7a1fab2",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x103efef21"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E15",
+          "length": 36,
+          "offset": 143402840,
+          "sha256": "ae7d220da78712052363f8e01199e09257ed2831e256d14dfa3b78ac31044201",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "_$s13OlkCocoaUtils25EmailsCanonicalOutlookURLC14queryAccountIDSo8NSNumberCSgyF",
+          "vm_address": "0x101fde758"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E16",
+          "length": 24,
+          "offset": 143403496,
+          "sha256": "0b584622b7bc49ee4f849ea979271756b9ecdb4456fff0b2faee43f32792434c",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": null,
+          "vm_address": "0x101fde9e8"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E17",
+          "length": 20,
+          "offset": 143404152,
+          "sha256": "3a02e9015b70591a26064914ca7faa1edd7dffb40cb05950111f7f21956e7d95",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": null,
+          "vm_address": "0x101fdec78"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E18",
+          "length": 72,
+          "offset": 157265092,
+          "sha256": "bd59e310c234b349d672aa736a224cab2f21bf20b3fcc63f74d8b0415ab7cfb7",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": null,
+          "vm_address": "0x102d16cc4"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E19",
+          "length": 8,
+          "offset": 157265216,
+          "sha256": "ec54e213c9bb3b3fe7c9103d29a40e3d962b091d032fd5eae6688b17e3304266",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": null,
+          "vm_address": "0x102d16d40"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E20",
+          "length": 24,
+          "offset": 157265340,
+          "sha256": "6fd35c4432af496e4c851dd23b8f6ed2b8edd386b0e045f156a8c1debb3b1a99",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": null,
+          "vm_address": "0x102d16dbc"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E21",
+          "length": 20,
+          "offset": 113799548,
+          "sha256": "f88ac56b3e059354979f7378259644e1a81338ddd7011bf11003cafc3846f698",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "-[OlxRecord hash]",
+          "vm_address": "0x1003a317c"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E22",
+          "length": 4,
+          "offset": 110761924,
+          "sha256": "b623c5c32aa33e5e48bd7007b103496fe8b34323978477a198263374830d5878",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "-[OhxAccount recordUID]",
+          "vm_address": "0x1000bd7c4"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E23",
+          "length": 24,
+          "offset": 110762328,
+          "sha256": "8a6770a73a2322332047f95d5d98e24d42b8369c11bdd528b978545c66811551",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "-[OhxRecordUID hash]",
+          "vm_address": "0x1000bd958"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E27",
+          "length": 16,
+          "offset": 156789884,
+          "sha256": "18f99d6fee20a811eeedb5ca3c6a7bf35e24606a5402126219f90dc2dd5370c0",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "+[OlkUIKit accountIDKeyString]",
+          "vm_address": "0x102ca2c7c"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E35",
+          "length": 88,
+          "offset": 35229652,
+          "sha256": "7c45a12e5dada80e65fe0851f88d646561b47f304a86a82a89b01812e80219a8",
+          "source": "Contents/Frameworks/HxCore.framework/Versions/A/HxCore",
+          "symbol": "-[HxObjectID hash]",
+          "vm_address": "0x6ecfd4"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "url_reconstructed",
+      "owner": "bundle",
+      "value": {
+        "host": "emails",
+        "path": "/new",
+        "query_keys": [
+          "account",
+          "attachments",
+          "bcc",
+          "body",
+          "cc",
+          "from",
+          "signature",
+          "subject",
+          "to"
+        ],
+        "runtime_acceptance": "untested",
+        "scheme": "ms-outlook",
+        "static_dispatch": "parsed_forwarded"
+      }
+    },
+    "url_reconstructed:bundle:[\"emails\", \"/open/message\"]": {
+      "claim": "audited arm64 constants and control flow; runtime acceptance untested",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "audit": "grammar",
+          "evidence_id": "email_dispatch",
+          "length": 332,
+          "offset": 157269808,
+          "sha256": "4cdbbe9515c71fd0a669961fbc83a805b0bd089ebf97e1b8bd3a33f142171a8f",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x102d17f30"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "email_open_ids",
+          "length": 96,
+          "offset": 157266456,
+          "sha256": "a215286bf03326345ff9acee9e87082aaa0bc447085be98b30b3516b77a0961b",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x102d17218"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E06",
+          "length": 136,
+          "offset": 157269884,
+          "sha256": "71d3ba29f5423da98c70a658dfe74c7fd9640d463d0da54f35968c53d67c96e8",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": null,
+          "vm_address": "0x102d17f7c"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E07",
+          "length": 80,
+          "offset": 157266456,
+          "sha256": "ed131e9718ef29e9750f404ae5f63963ff007d7a532fbf7c5ae522b51d98fc53",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": null,
+          "vm_address": "0x102d17218"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E08",
+          "length": 20,
+          "offset": 143387832,
+          "sha256": "dc2dfd22c3677e48f60b00d4ac3fdbf3ed5f5d41d34f81f3a58992310d72a68d",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "_$sSS13OlkCocoaUtilsE54reverseReplacingOccurrencesOfExchangeWebSafeCharactersSSyF",
+          "vm_address": "0x101fdacb8"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E09",
+          "length": 28,
+          "offset": 157266704,
+          "sha256": "e73b62a88082d1927d3fd82c05b28b61dccd7b9b2eb8ada49a03059088fe0a05",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "OlkEmailsDeepLinkActionHandler.openMessage(_:) recovered name",
+          "vm_address": "0x102d17310"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E10",
+          "length": 48,
+          "offset": 133374612,
+          "sha256": "4e0c2f86991a5a12e8dad5aea0d830dab92d82c8d73c1a8681592b8952290fb8",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "+[OhxAccountActions retrieveMessageWithServerID:forAccount:completionBlock:]",
+          "vm_address": "0x10164e294"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E11",
+          "length": 36,
+          "offset": 133374780,
+          "sha256": "a024da183ff17f8fbda04e1bc51fd6c456b2a9bab59c75cdbf37722e95faa7fc",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": null,
+          "vm_address": "0x10164e33c"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E12",
+          "length": 20,
+          "offset": 133374892,
+          "sha256": "933d68fd1f24e90039ab6de27ac4a7fd05b617c2092be5273fc1d1874ecf5e17",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": null,
+          "vm_address": "0x10164e3ac"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E13",
+          "length": 40,
+          "offset": 133945580,
+          "sha256": "6e4443034fc953cc5c54e076d772f5eb6e95e3b7834e8495d73f17fa33ebe743",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "-[OhxMessage serverId]",
+          "vm_address": "0x1016d98ec"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E14",
+          "length": 24,
+          "offset": 133954904,
+          "sha256": "4d210924246fef2a2e5f58cb595a91838e9361deff57a52f93965f71575633ed",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "-[OhxMessage serverID]",
+          "vm_address": "0x1016dbd58"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E15",
+          "length": 36,
+          "offset": 143402840,
+          "sha256": "ae7d220da78712052363f8e01199e09257ed2831e256d14dfa3b78ac31044201",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "_$s13OlkCocoaUtils25EmailsCanonicalOutlookURLC14queryAccountIDSo8NSNumberCSgyF",
+          "vm_address": "0x101fde758"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E16",
+          "length": 24,
+          "offset": 143403496,
+          "sha256": "0b584622b7bc49ee4f849ea979271756b9ecdb4456fff0b2faee43f32792434c",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": null,
+          "vm_address": "0x101fde9e8"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E17",
+          "length": 20,
+          "offset": 143404152,
+          "sha256": "3a02e9015b70591a26064914ca7faa1edd7dffb40cb05950111f7f21956e7d95",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": null,
+          "vm_address": "0x101fdec78"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E18",
+          "length": 72,
+          "offset": 157265092,
+          "sha256": "bd59e310c234b349d672aa736a224cab2f21bf20b3fcc63f74d8b0415ab7cfb7",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": null,
+          "vm_address": "0x102d16cc4"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E19",
+          "length": 8,
+          "offset": 157265216,
+          "sha256": "ec54e213c9bb3b3fe7c9103d29a40e3d962b091d032fd5eae6688b17e3304266",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": null,
+          "vm_address": "0x102d16d40"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E20",
+          "length": 24,
+          "offset": 157265340,
+          "sha256": "6fd35c4432af496e4c851dd23b8f6ed2b8edd386b0e045f156a8c1debb3b1a99",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": null,
+          "vm_address": "0x102d16dbc"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E21",
+          "length": 20,
+          "offset": 113799548,
+          "sha256": "f88ac56b3e059354979f7378259644e1a81338ddd7011bf11003cafc3846f698",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "-[OlxRecord hash]",
+          "vm_address": "0x1003a317c"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E22",
+          "length": 4,
+          "offset": 110761924,
+          "sha256": "b623c5c32aa33e5e48bd7007b103496fe8b34323978477a198263374830d5878",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "-[OhxAccount recordUID]",
+          "vm_address": "0x1000bd7c4"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E23",
+          "length": 24,
+          "offset": 110762328,
+          "sha256": "8a6770a73a2322332047f95d5d98e24d42b8369c11bdd528b978545c66811551",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "-[OhxRecordUID hash]",
+          "vm_address": "0x1000bd958"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E27",
+          "length": 16,
+          "offset": 156789884,
+          "sha256": "18f99d6fee20a811eeedb5ca3c6a7bf35e24606a5402126219f90dc2dd5370c0",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "symbol": "+[OlkUIKit accountIDKeyString]",
+          "vm_address": "0x102ca2c7c"
+        },
+        {
+          "audit": "send",
+          "evidence_id": "E35",
+          "length": 88,
+          "offset": 35229652,
+          "sha256": "7c45a12e5dada80e65fe0851f88d646561b47f304a86a82a89b01812e80219a8",
+          "source": "Contents/Frameworks/HxCore.framework/Versions/A/HxCore",
+          "symbol": "-[HxObjectID hash]",
+          "vm_address": "0x6ecfd4"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "url_reconstructed",
+      "owner": "bundle",
+      "value": {
+        "host": "emails",
+        "path": "/open/message",
+        "query_keys": [
+          "account",
+          "from",
+          "immutableID"
+        ],
+        "runtime_acceptance": "untested",
+        "scheme": "ms-outlook",
+        "static_dispatch": "lookup_then_open_ui"
+      }
+    },
+    "url_reconstructed:bundle:[\"emails\", \"/send\"]": {
+      "claim": "audited arm64 constants and control flow; runtime acceptance untested",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "audit": "grammar",
+          "evidence_id": "email_dispatch",
+          "length": 332,
+          "offset": 157269808,
+          "sha256": "4cdbbe9515c71fd0a669961fbc83a805b0bd089ebf97e1b8bd3a33f142171a8f",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x102d17f30"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "email_path_enum",
+          "length": 172,
+          "offset": 143404368,
+          "sha256": "e2723ca16f618ad94024a907ca322fb3c986cbc3a9b5cb7ed8b1d102d1242733",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x101fded50"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "email_send_false",
+          "length": 32,
+          "offset": 157270328,
+          "sha256": "355c711a0edb12aaf2ac83f8bf3d9f735264d9684304e6365318d59457243441",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x102d18138"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "url_reconstructed",
+      "owner": "bundle",
+      "value": {
+        "host": "emails",
+        "path": "/send",
+        "query_keys": [],
+        "runtime_acceptance": "untested",
+        "scheme": "ms-outlook",
+        "static_dispatch": "unhandled_false"
+      }
+    },
+    "url_reconstructed:bundle:[\"events\", \"/new\"]": {
+      "claim": "audited arm64 constants and control flow; runtime acceptance untested",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "audit": "grammar",
+          "evidence_id": "event_keys",
+          "length": 364,
+          "offset": 143406324,
+          "sha256": "c29a5509703bd782fb10928013ba687375c805fe51a0c44999f107b86be2c14a",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x101fdf4f4"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "event_new_bridge",
+          "length": 64,
+          "offset": 157298004,
+          "sha256": "9a25e8f134f5dd0570183f1e349add40f117d180e654f1e158d2ecd777e39899",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x102d1ed54"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "event_new_dates_attendees",
+          "length": 264,
+          "offset": 157296828,
+          "sha256": "6bee37b4e2dd11b5d11cadae4ae0ff55c105eef17d155e479e949b281a70db54",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x102d1e8bc"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "event_new_fields",
+          "length": 168,
+          "offset": 157296336,
+          "sha256": "8ead3caf8edc476122ec8adb9bb123c4f9a813cc3ca4e619442a15570497ceae",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x102d1e6d0"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "event_new_objc_stub",
+          "length": 20,
+          "offset": 166504768,
+          "sha256": "615a43773d3e7c12cf73be09956d223eb51661360c72ca4468f09f80e7485a3d",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x1035e6940"
+        },
+        {
+          "audit": "grammar",
+          "evidence_id": "event_new_selector",
+          "length": 86,
+          "offset": 176080829,
+          "sha256": "da9da8f7c4ad04b825a542467d00be061fc0c8dfbb29ff488b9a7e8f784566c2",
+          "source": "Contents/MacOS/Microsoft Outlook",
+          "vm_address": "0x103f087bd"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "url_reconstructed",
+      "owner": "bundle",
+      "value": {
+        "host": "events",
+        "path": "/new",
+        "query_keys": [
+          "attendees",
+          "end",
+          "isallday",
+          "location",
+          "start",
+          "title"
+        ],
+        "runtime_acceptance": "untested",
+        "scheme": "ms-outlook",
+        "static_dispatch": "parsed_forwarded"
       }
     },
     "url_scheme:Contents/Info.plist:\"com.googleusercontent.apps.445112211283-8hj5uor2tp387i59rq1caep2rr5lnkcj\"": {
