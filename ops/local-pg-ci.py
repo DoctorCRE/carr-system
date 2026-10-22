@@ -291,11 +291,16 @@ def run_local_ci(
     port: int,
     runner: CommandRunner | None = None,
     integration_base: str | None = None,
+    migration_part: str = "all",
     shard: int = 0,
     report_path: Path | None = None,
     queued_at: float | None = None,
     job_started_at: float | None = None,
 ) -> int:
+    if migration_part not in {"all", "core", "proofs", "gates", "gates-serial", "gates-isolated", "acceptance"}:
+        raise LocalPGRefusal("unknown local DB lane migration part")
+    if migration_part != "all" and (ci_class != "migration" or report_path is not None or integration_base is not None):
+        raise LocalPGRefusal("partitioned migration proof requires the ordinary migration lane")
     programs = select_programs(shard)
     if shard and integration_base is not None:
         raise LocalPGRefusal("shard trial cannot replace the integration-base union proof")
@@ -572,12 +577,14 @@ def run_local_ci(
             ci_command.append("--strict")
         else:
             ci_command.extend(["--only", "migration"])
+        if migration_part != "all":
+            ci_command.extend(["--strict", "--migration-part", migration_part])
         result = fixture.run(ci_command, env=ci_env, cwd=repo, capture=report_path is not None)
         exit_code = result.returncode
         if exit_code:
             print("local-db-ci: canonical CI failed", file=sys.stderr)
         setup_seconds = time.time() - started
-        if exit_code == 0:
+        if exit_code == 0 and migration_part in {"all", "core", "acceptance"}:
             acceptance_env = dict(clean_env)
             acceptance_env["PATH"] = f"{binaries.psql.parent}{os.pathsep}{clean_env.get('PATH', '')}"
             acceptance_env["CARR_LOCAL_PG_DSN"] = dsn
@@ -701,6 +708,8 @@ def main() -> int:
         default="migration",
         help="migration is the fast DB lane; strict runs every canonical class locally",
     )
+    parser.add_argument("--migration-part", choices=("all", "core", "proofs", "gates", "gates-serial", "gates-isolated", "acceptance"), default="all",
+                        help="partitioned runs require all sibling verdicts in the hosted aggregate")
     parser.add_argument("--port", type=int, default=55432)
     parser.add_argument("--shard", type=int, choices=(0, 1, 2), default=0,
                         help="default serial; 1/2 are opt-in shadow acceptance partitions")
@@ -727,7 +736,7 @@ def main() -> int:
     try:
         return run_local_ci(
             repo=repo, ci_class=args.ci_class, port=args.port, runner=SubprocessRunner(), integration_base=args.integration_base,
-            shard=args.shard, report_path=args.report, queued_at=args.queued_at, job_started_at=args.job_started_at
+            migration_part=args.migration_part, shard=args.shard, report_path=args.report, queued_at=args.queued_at, job_started_at=args.job_started_at
         )
     except LocalPGRefusal as exc:
         print(f"local-db-ci refused: {exc}", file=sys.stderr)

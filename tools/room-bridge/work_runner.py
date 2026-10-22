@@ -154,7 +154,7 @@ def main(argv=None):
                 def publish():
                     if os.environ.get('PROGRESS_BOARD_LOCAL_ONLY') == '1':
                         raise RuntimeError('board publication disabled by PROGRESS_BOARD_LOCAL_ONLY')
-                    progress_board.publish_board('carr-v5', refresh_inventory=False)
+                    progress_board.publish_orchestrator(progress_board.read_state('carr-v5'))
                 queue.publish(publish)
             return 0
         lock = Resources._try(args.db.with_suffix('.runner.lock'))

@@ -40,6 +40,8 @@ class HostedVerdict(unittest.TestCase):
             {'id': 118174315239, 'run_attempt': 1, 'status': 'in_progress',
              'conclusion': None, 'name': 'ops/ci.sh --strict'},
         ]
+        groups = [job['name'].split('--only ', 1)[1] for job in self.jobs if '--only ' in job['name']]
+        self.enterContext(patch.object(evidence, 'class_groups', return_value=groups))
 
     def response(self, jobs):
         return subprocess.CompletedProcess([], 0, stdout=json.dumps([
@@ -59,6 +61,29 @@ class HostedVerdict(unittest.TestCase):
         self.assertIn('migration: PASSED', summary)
         self.assertIn('unit: PASSED', summary)
         self.assertNotIn('INCOMPLETE', summary)
+
+    def test_not_applicable_migration_is_truthful_and_green(self):
+        with patch.dict(os.environ, DB_FULL='false'), \
+                patch('subprocess.run', return_value=self.response(self.jobs)):
+            self.assertEqual(evidence.hosted_verdict(), 0)
+        self.assertIn('migration: NOT APPLICABLE (receipt)', self.summary.read_text())
+        self.assertNotIn('migration: PASSED', self.summary.read_text())
+
+    def test_not_applicable_receipt_does_not_end_api_settling_early(self):
+        stale = copy.deepcopy(self.jobs)
+        stale[2].update(status='in_progress', conclusion=None)
+        with patch.dict(os.environ, DB_FULL='false'), \
+                patch('subprocess.run', side_effect=[self.response(stale), self.response(self.jobs)]), \
+                patch('time.sleep'):
+            self.assertEqual(evidence.hosted_verdict(), 0)
+
+    def test_draft_reports_deferred_proofs_without_claiming_success(self):
+        jobs = [j for j in self.jobs if not j['name'].endswith(('--only gates', '--only migration'))]
+        with patch.dict(os.environ, CI_DRAFT='true'), \
+                patch('subprocess.run', return_value=self.response(jobs)):
+            self.assertEqual(evidence.hosted_verdict(), 0)
+        self.assertIn('migration: DEFERRED (draft)', self.summary.read_text())
+        self.assertIn('gates: DEFERRED (draft)', self.summary.read_text())
 
     def test_earlier_success_cannot_mask_failed_current_class(self):
         os.environ['GITHUB_RUN_ATTEMPT'] = '2'

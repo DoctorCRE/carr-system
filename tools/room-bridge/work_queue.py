@@ -11,7 +11,9 @@ merge executor's locking discipline.
 
 export() returns room-work-queue/v1, including full ordered cards and events.
 merge_order() returns room-work-queue-merges/v1 with revision and ordered
-entries [{card_id, position, repo, pr, head}]. Only pinned merging-stage PRs
+entries [{card_id, position, merge_run, repo, pr, head}]. The merge run identifies
+the ownership generation, so an old selection cannot own a later run of the
+same pins. Only pinned merging-stage PRs
 appear. Active merges remain projected even while blocked. Consumers must fail
 closed on unreadable data and preserve this order.
 
@@ -416,6 +418,39 @@ class WorkQueue:
             self._event(card, self._state(old), self._state(self._item(card)), actor, reason, 'requeue')
         return self.get(card)
 
+    def recover_merge_run(self, card, *, expected_revision, verify_effects, actor, reason):
+        """Release a blocked run after the journal owner verifies external effects.
+
+        The verifier runs under this transaction and must hold the merge runner
+        lock. It returns evidence for the audit event, or raises to retain ownership.
+        This operation neither terminates a pin nor queues another executor.
+        """
+        with self.transaction():
+            revision = self.db.execute('SELECT COALESCE(MAX(id),0) FROM events').fetchone()[0]
+            if revision != expected_revision:
+                raise QueueChanged('work queue changed before merge recovery')
+            row = self._item(card)
+            data = json.loads(row['data'])
+            if row['claim'] is not None:
+                raise QueueChanged('source claim still owns the card')
+            if row['stage'] != 'blocked' or not self._merge_active(card):
+                raise QueueChanged('recovery requires a blocked card with an active merge run')
+            if 'merge_inflight' not in data:
+                raise QueueChanged('legacy_ownership')
+            if data['merge_inflight'] != []:
+                raise QueueChanged('in-flight merge ownership remains')
+            evidence = verify_effects(data)
+            runs = [r[0] for r in self.db.execute(
+                "SELECT id FROM stage_runs WHERE card_id=? AND stage='merging' AND finished_at IS NULL", (card,))]
+            now = time.time()
+            self.db.execute("UPDATE stage_runs SET finished_at=?,elapsed=MAX(0,?-COALESCE(started,?)) "
+                            "WHERE card_id=? AND stage='merging' AND finished_at IS NULL",
+                            (timestamp(), now, now, card))
+            self._event(card, {'active': True, 'run_ids': runs, 'revision': revision},
+                        {'active': False, 'run_ids': runs, 'evidence': evidence},
+                        actor, reason, 'merge_run_recovered')
+        return self.get(card)
+
     @staticmethod
     def _validate_fields(fields):
         if fields.keys() - FIELDS:
@@ -464,7 +499,9 @@ class WorkQueue:
             if row['stage'] != 'merging' and not self._merge_active(row['card_id']):
                 continue
             position += 1
-            entries.extend(dict(card_id=row['card_id'], position=position,
+            run = self.db.execute("SELECT MAX(id) FROM stage_runs WHERE card_id=? AND stage='merging'",
+                                  (row['card_id'],)).fetchone()[0]
+            entries.extend(dict(card_id=row['card_id'], position=position, merge_run=run,
                                 repo=pr['repo'], pr=pr['number'], head=pr.get('head'))
                            for pr in json.loads(row['data'])['prs'])
         return entries
@@ -559,5 +596,33 @@ def board_projection(path=None):
     snapshot['items'] = [i for i in snapshot['items'] if i['stage'] not in TERMINAL or i['card_id'] in retained]
     history_count = len(snapshot['history'])
     snapshot['history'] = snapshot['history'][-100:]
+    def clean(value):
+        if not isinstance(value, str):
+            return value
+        if re.search(r'@|/(?:Users|home|private|tmp)/|(?:token|secret|password|authorization)\s*[:=]|[a-f0-9]{32,}', value, re.I):
+            return 'Details withheld'
+        return value.splitlines()[0][:220] if value else ''
+    event_fields = {'id', 'card_id', 'at', 'actor', 'reason', 'kind'}
+    def event(row):
+        if not row:
+            return None
+        return {key: clean(value) for key, value in row.items() if key in event_fields}
+    fields = {'card_id', 'position', 'stage', 'desk', 'ready', 'review_round', 'wr', 'slice',
+              'title', 'agent', 'family', 'model', 'effort', 'ci_state', 'active',
+              'total_time_s', 'findings_opened', 'findings_resolved', 'merge_position', 'timing_unknown'}
+    for item in snapshot['items']:
+        projected = {key: clean(value) for key, value in item.items() if key in fields}
+        projected['prs'] = [{key: ref[key] for key in ('repo', 'number', 'head') if key in ref}
+                            for ref in item.get('prs', []) if isinstance(ref, dict)
+                            and re.fullmatch(r'jbookout/(carr-system|doctorcre-app|software-factory)', str(ref.get('repo', '')))]
+        projected['merge_complete'] = bool(item.get('prs')) and all(ref in item.get('merge_receipts', []) for ref in item['prs'])
+        projected['last_event'] = event(item.get('last_event'))
+        projected['stages'] = item.get('stages', [])
+        projected['findings'] = [{key: clean(finding[key]) for key in ('id','level','summary','resolved') if key in finding}
+                                 for finding in item.get('findings', [])]
+        item.clear()
+        item.update(projected)
+    snapshot['history'] = [event(row) for row in snapshot['history']]
+    snapshot['publication'] = {key: value for key, value in snapshot.get('publication', {}).items() if key != 'error'}
     snapshot['omitted'] = {'finished': max(0, len(finished) - 20), 'events': max(0, history_count - 100)}
     return snapshot

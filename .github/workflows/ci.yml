@@ -1,97 +1,6 @@
-# carr-system CI — Program 2, the automated-quality gate.
-#
-# THIS FILE CONTAINS NO CHECK LOGIC ON PURPOSE. Every check lives in ops/ci.sh,
-# which ops/githooks/pre-push also calls. Rule a8c55a47: a manual path and an
-# automated path doing the same job must be the same code. If a check were
-# written here it would run in CI and not at push time, and the two would drift
-# without anyone noticing — which is the failure this whole design avoids.
-#
-# WHAT THIS ENFORCES. The `checks` job IS a required status check: repository
-# ruleset "main: CI must be green" (id 20824501) targets refs/heads/main and
-# requires the context `ops/ci.sh --strict`. A red result blocks the merge.
-#
-# SINCE 2026-09-23 THE CLASSES RUN IN PARALLEL (Joe's ruling, audit item 3 of
-# 8). One job ran all eleven ci.sh classes in sequence and the last 15 main runs
-# took 11 to 17 minutes, median 13, of which gates was 252s and migration 268s.
-# The `classes` job below is a matrix of class groups, each running
-# `ops/ci.sh --strict --only <its classes>`, so a PR waits for the slowest
-# group rather than the sum. The `checks` job keeps the required context NAME
-# and is now a gate: it needs every class job, runs even when one is red, and
-# fails unless all of them succeeded. Nothing that pins the context (the
-# ruleset, the backup workflow) had to move.
-# ops/ci-selftest.py proves every CLASS_ORDER class runs in exactly one group.
-#
-# The paragraph that stood here until 2026-08-20 said the opposite — that CI
-# "cannot REQUIRE a green result before a merge, because this repo is private on
-# a free GitHub plan" and that both the branch-protection and rulesets APIs
-# refuse. That was true when it was written on 2026-08-13 and false within hours:
-# the account moved to Pro and the ruleset was created at 19:58 the same day. It
-# then sat here for a week describing its own enforcement as a future condition.
-# Filed as defect 384e7deb, the 21st recorded instance of a dated observation
-# being read as present state. The lesson worth keeping is in the shape of the
-# original sentence: it carried its own verification date in a parenthetical,
-# which is the tell that a claim is a snapshot rather than a standing property.
-#
-# BECAUSE IT IS REQUIRED, path filters are a trap here. Skipping this workflow
-# for docs-only changes would leave the required context unreported, and a
-# required check that never reports blocks the merge instead of speeding it.
-# Reducing spend has to come from run COUNT or from crossing a billing minute
-# (see the caching note below), never from not running on some commits.
-#
-# ACTIONS ARE PINNED TO COMMIT SHAs, not to tags. Doctrine: "Pin dependencies and
-# CI actions" (end-state BDUF, s15 Security/supply chain). A tag is mutable — v7
-# can be moved to point at new code by anyone who controls the action repo, which
-# is a supply-chain hole in the very thing that gates supply-chain checks. The
-# human-readable version is in the trailing comment.
-
+# Required CI always reports; ops/db-acceptance-scope.py owns database applicability.
 name: CI
 
-# THERE IS NO push TRIGGER, and the reason is measured rather than assumed.
-#
-# It used to run on every push to main, which is the moment AFTER a merge has
-# already landed. That run enforces nothing: the ruleset checks this context on
-# the pull request, so by the time a push-to-main run starts, the merge it would
-# have judged is in. Its only value was telling us main had broken. Over the six
-# days after CI stabilised (2026-08-14 onward) it produced 131 successes, 52
-# CANCELLED, and 1 failure across 184 runs. Two things follow. It caught one real
-# break in six days, and it was already silently reporting nothing 28% of the
-# time, because merges land faster than a four-minute run finishes and the
-# concurrency group below cancels the earlier one. A net with a 28% hole that
-# fires once a week is not the safety net it looks like, and it was costing
-# roughly 20 of the ~45 daily runs.
-#
-# WHAT STILL CATCHES A BROKEN main, on a weekday, within minutes: the
-# pull_request event builds refs/pull/N/merge, which is the PR head merged into
-# CURRENT main. Main's content is inside every PR run. When this trigger was cut
-# (PR #379, 2026-08-20, at ~44 merges a day) that was the only weekday cover: strict mode
-# was off, so a PR tested against an older main could still merge and break it,
-# and the next PR turned red instead — the one 2026-08-18 break surfaced that way
-# and was fixed 88 minutes later by the next merge.
-#
-# STRICT MODE IS NOW ON, and it is load-bearing rather than optional. The ruleset
-# "main: CI must be green" (id 20824501) has
-# strict_required_status_checks_policy=true; check it with
-#   gh api repos/jbookout/carr-system/rulesets/20824501
-# PR #833 (2026-09-01, governed automatic source merge) made it a precondition:
-# the merge endpoint conditionally binds only the PR head SHA, so strict mode is
-# the protected-main half of that transaction — if main moves after the checks
-# ran, GitHub marks the PR out of date and refuses the merge. The source-merge
-# controller refuses ruleset_strict_update_missing if strict mode is disabled.
-# Do not turn it off to save CI minutes.
-#
-# THE COST IT CARRIES, which PR #379 predicted correctly: every open PR has to be
-# brought up to date and re-run CI each time main moves before it can merge. That
-# is paid deliberately; a stale-base merge breaking main is now refused at the
-# source instead of discovered by the next PR.
-#
-# THE SCHEDULE IS STILL THE BACKSTOP FOR QUIET PERIODS — overnight and weekends,
-# when no PR is opening and nothing else would look. Strict mode stops a stale
-# PR from breaking main; it does not catch main going red on its own (a moved
-# dependency, a date-sensitive test) while nobody is opening PRs. Weekends are not
-# workdays for either partner, so that is exactly the window with no other cover.
-#
-# ready_for_review runs every class; historical draft retries stay isolated.
-# After a base retarget, reopen the PR to test its new merge ref.
 on:
   merge_group:
     types: [checks_requested]
@@ -111,39 +20,54 @@ permissions:
   contents: read
 
 jobs:
+  scope:
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Decide database proof applicability
+        id: scope
+        run: python3 ops/db-acceptance-scope.py --receipt db-scope.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: db-scope
+          path: db-scope.json
+          if-no-files-found: error
+
   classes:
-    name: ops/ci.sh --strict --only ${{ matrix.classes }}
+    needs: scope
+    if: ${{ !cancelled() }}
+    name: ${{ matrix.gate_shard == 2 && 'Gates selftests shard 2 of 2' || format('ops/ci.sh --strict --only {0}', matrix.classes) }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
+        gate_shard: [1, 2]
         # 2026-10-01 run 36928008916: this combined group took 310s (unit
         # 228s, types 36s, secret 33s, other classes 13s), below ten minutes.
         # Keep gates and migration in separate jobs. Every class
         # must appear in exactly one group (ops/ci-selftest.py verifies this).
         classes:
-          - "pushfloor unit types contract secret dependency binding artifact freshness"
+          - "pushfloor unit types contract secret binding artifact freshness"
           - "gates"
           - "migration"
-        # Keep fast feedback on draft pushes without starting expensive runners.
-        exclude: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.draft && '[{"classes":"gates"},{"classes":"migration"}]' || '[]') }}
-    # Both PR 1121 and PR 1406 exhausted a 20-minute migration job while
-    # their separate database acceptance passed. Preserve measured headroom
-    # and cover that lane's declared budget without extending other groups.
-    # zsh setup retains its own bounded deadline below. 35 -> 45 on 2026-10-17:
-    # the db lane sat at 33-34 min and 10 of 25 runs were cancelled at the cap.
+          - "hxprobe"
+          - "dependency"
+        # The second dimension partitions only gates. Drafts keep their fast classes.
+        exclude: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.draft && '[{"classes":"dependency","gate_shard":2},{"classes":"pushfloor unit types contract secret binding artifact freshness","gate_shard":2},{"classes":"hxprobe","gate_shard":2},{"classes":"gates"},{"classes":"migration"}]' || '[{"classes":"dependency","gate_shard":2},{"classes":"pushfloor unit types contract secret binding artifact freshness","gate_shard":2},{"classes":"migration","gate_shard":2},{"classes":"hxprobe","gate_shard":2}]') }}
     timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
 
     services:
-      # The migration class needs a database to apply 130 forward migrations to.
-      # It is a throwaway container on loopback, which is what lets ops/ci.sh
-      # enforce its loopback-only rule with no override: production is not
-      # reachable from here even if someone tried.
       postgres:
-        image: mirror.gcr.io/library/postgres:17@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
+        image: ${{ contains(matrix.classes, 'unit') && 'mirror.gcr.io/library/postgres:17@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3' || '' }}
         env:
           POSTGRES_USER: carr_ci
-          POSTGRES_PASSWORD: carr_ci
+          POSTGRES_PASSWORD: postgres
           POSTGRES_DB: carr_ci
         ports: ["5432:5432"]
         options: >-
@@ -152,50 +76,29 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # FULL HISTORY, for the freshness class only. actions/checkout defaults
-          # to a depth of 1, which is why nothing here could ever have caught a
-          # lost update: with no history there is no merge-base, so "has this
-          # branch seen main's latest change to this file" is unanswerable. Every
-          # other class reads the tree as it stands and does not care.
+          # Migration identity and historical snapshot proofs read pinned commits.
           fetch-depth: 0
 
-      # DO NOT ADD `cache:` TO THE TWO SETUP ACTIONS BELOW without re-measuring.
-      # It was tried on this branch on 2026-08-20, when a whole run took about
-      # four minutes, measured end to end against a real cache hit, and it made
-      # the job SLOWER. Numbers, baseline against cache-hit run (2026-08-20):
-      #
-      #   setup-python      0s -> 5s    (restoring the cache)
-      #   setup-node        7s -> 10s   (restoring the cache)
-      #   pip install      15s -> 11s   (the only real saving, 4s)
-      #   npm ci            6s -> 6s    (no change at all)
-      #
-      # Restoring costs 8s to save 4s. The reason is that `cache: pip` and
-      # `cache: npm` cache the DOWNLOAD caches, not the installed trees — pip
-      # still unpacks and installs every package, and `npm ci` still builds
-      # node_modules from scratch. Downloading was never the expensive half.
-      #
-      # The billing mechanic that made this look attractive is real: GitHub
-      # bills each JOB rounded UP to the whole minute, so only crossing a
-      # 60-second line saves anything. The 2026-08-20 reasoning (18 runs, 203s
-      # to 275s, median 249s, a 240s line in reach) no longer describes the job:
-      # in the week of 2026-09-23 the last 15 hosted runs took 14 to 18 minutes
-      # each, against the then-current ceiling, and almost all of that was
-      # ops/ci.sh --strict doing genuine work. The dependency-cache conclusion
-      # above was measured on the four-minute job and has not been re-measured
-      # at this length. Spend still has to come out of run COUNT, not from
-      # trimming seconds off setup.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: matrix.classes != 'migration' || needs.scope.outputs.full != 'false'
         with:
           node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            mcp-server/package-lock.json
+            practice-plugin/package-lock.json
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: matrix.classes != 'migration' || needs.scope.outputs.full != 'false'
         with:
           python-version-file: .python-version
 
       - name: Install Python dependencies from the lock
+        if: matrix.classes != 'migration' || needs.scope.outputs.full != 'false'
         # The LOCK, not requirements.txt. requirements.txt is the loose
         # human-facing declaration; the lock is its pinned resolution, and
         # installing the lock is what makes this run reproducible. ci.sh's
@@ -204,20 +107,25 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.lock
 
+      # ci verifies lock integrity; the strict dependency class owns npm audit.
       - name: Install Node dependencies
+        if: matrix.classes != 'migration' || needs.scope.outputs.full != 'false'
         run: |
-          npm --prefix mcp-server ci
-          npm --prefix practice-plugin ci
+          npm --prefix mcp-server ci --no-audit
+          npm --prefix practice-plugin ci --no-audit
 
       - name: Identify the runner image for the zsh archive
+        if: matrix.classes != 'migration' || needs.scope.outputs.full != 'false'
         id: zsh-image
         run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
       - name: Restore zsh package archives
+        if: matrix.classes != 'migration' || needs.scope.outputs.full != 'false'
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: ${{ runner.temp }}/zsh-debs/*.deb
           key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh') }}
       - name: Install zsh
+        if: matrix.classes != 'migration' || needs.scope.outputs.full != 'false'
         # bin/review-council-runner.sh has a #!/bin/zsh shebang and its test
         # invokes it by that interpreter. Use the runner's installed shell
         # when available; otherwise try its indexes before refreshing them.
@@ -236,9 +144,7 @@ jobs:
         run: ops/ci-zsh.sh
 
       - name: Install PostgreSQL 17
-        # Role-migration fixtures own clusters so roles cannot leak into the
-        # service container used by the migration class.
-        if: contains(matrix.classes, 'gates') || matrix.classes == 'migration'
+        if: contains(matrix.classes, 'gates') || (matrix.classes == 'migration' && needs.scope.outputs.full != 'false')
         run: |
           set -euo pipefail
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -247,43 +153,9 @@ jobs:
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-17
+          sudo apt-get install -y -qq postgresql-17 postgresql-18 postgresql-client-18
           /usr/lib/postgresql/17/bin/initdb --version
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
-
-      - name: Install PostgreSQL 18 server for the migration shadow
-        # ops/migration-shadow.py builds its own loopback cluster on production's
-        # major (18) from the base branch's db/schema.sql and applies this
-        # change's migrations to it. No main cluster is created, so nothing
-        # competes with the service container's port.
-        if: contains(matrix.classes, 'migration')
-        run: |
-          set -euo pipefail
-          sudo install -d /usr/share/postgresql-common/pgdg /etc/postgresql-common/createcluster.d
-          echo "create_main_cluster = false" | sudo tee /etc/postgresql-common/createcluster.d/no-main-cluster.conf > /dev/null
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-18
-          /usr/lib/postgresql/18/bin/initdb --version
-
-      - name: Create the Neon admin role the migrations expect
-        # Migration 0005 grants the privilege bundles to neondb_owner, which
-        # exists on every Neon project and on no vanilla Postgres. Without it the
-        # migration set is not rehearsable anywhere except production, which
-        # defeats the point of rehearsing. Creating it here models Neon's
-        # environment rather than editing a migration that is already applied.
-        env:
-          PGPASSWORD: carr_ci
-        run: |
-          psql -h localhost -U carr_ci -d carr_ci -v ON_ERROR_STOP=1 -c \
-            "do \$\$ begin
-               if not exists (select 1 from pg_roles where rolname = 'neondb_owner') then
-                 create role neondb_owner;
-               end if;
-             end \$\$;"
 
       - name: Verify edge incident delivery
         if: matrix.classes == 'gates'
@@ -295,30 +167,94 @@ jobs:
 
       - name: Run this group's check classes
         env:
-          # ops/ci.sh refuses any DSN that is not loopback. This one is the
-          # service container above.
-          CARR_CI_DATABASE_URL: postgres://carr_ci:carr_ci@localhost:5432/carr_ci # ci-secret-scan: allow — throwaway container credential, loopback only, dies with the runner
           # Excludes the checks whose dependency cannot exist on a runner
           # (installed Claude Code settings, macOS launchd). Each one prints its
           # reason in the output; nothing is dropped silently.
+          CARR_CI_DATABASE_URL: ${{ contains(matrix.classes, 'unit') && 'postgres://carr_ci:postgres@localhost:5432/carr_ci' || '' }} # ci-secret-scan: allow - disposable loopback fixture
           GH_TOKEN: ${{ github.token }}
           CARR_CI_PORTABLE_ONLY: "1"
-          # The migration shadow drops its regenerated db/schema.sql here; the
-          # next step uploads it when the class fails, so a stale snapshot is
-          # one download and one commit away from fixed.
-          CARR_SHADOW_ARTIFACT_DIR: ${{ runner.temp }}/migration-shadow
-        run: ops/ci.sh --strict --only "${{ matrix.classes }}"
-      - name: Upload the migration shadow's regenerated db/schema.sql
-        if: ${{ failure() && contains(matrix.classes, 'migration') }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: migration-shadow-schema-${{ github.sha }}
-          path: ${{ runner.temp }}/migration-shadow/schema.sql
-          if-no-files-found: ignore
-          retention-days: 7
+          CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+          CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
+          LC_ALL: C
+        run: |
+          if [ "${{ matrix.classes }}" = migration ]; then
+            if [ "${{ needs.scope.outputs.full }}" = false ]; then
+              echo "migration: not applicable; see db-scope receipt" | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              python3 ops/migration-open-pr-gate.py
+              python ops/local-pg-ci.py --class migration --migration-part proofs
+            fi
+          else
+            if [ "${{ matrix.classes }}" = gates ]; then
+              ops/ci.sh --strict --only gates --gate-shard "${{ matrix.gate_shard }}/2"
+            else
+              ops/ci.sh --strict --only "${{ matrix.classes }}"
+            fi
+          fi
       - name: Require a written pull request description
         if: ${{ github.event_name == 'pull_request' && matrix.classes == 'gates' }}
         run: python3 ops/pr-description-check.py
+
+  migration-fixtures:
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.full != 'false' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    name: Migration ${{ matrix.part }}
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [reconstruction, equivalence, shadow, gates-serial, gates-isolated, acceptance]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - name: Install proof dependencies
+        run: |
+          python -m pip install -r requirements.lock
+          npm --prefix mcp-server ci --no-audit
+      - name: Install PostgreSQL 17
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-17 postgresql-18 postgresql-client-18
+          /usr/lib/postgresql/17/bin/initdb --version
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+
+      - name: Prove independent migration fixture
+        if: matrix.part != 'acceptance' && !startsWith(matrix.part, 'gates-')
+        env:
+          CARR_CI_PORTABLE_ONLY: "1"
+          CARR_SHADOW_ARTIFACT_DIR: ${{ runner.temp }}/migration-shadow
+        run: ops/ci.sh --strict --only migration --migration-part "${{ matrix.part }}"
+      - name: Prove database programs on their own migrated cluster
+        if: matrix.part == 'acceptance' || startsWith(matrix.part, 'gates-')
+        env:
+          CARR_CI_PORTABLE_ONLY: "1"
+          CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+          CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
+        run: python ops/local-pg-ci.py --class migration --migration-part "${{ matrix.part }}"
+      - name: Retain a regenerated schema on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: migration-fixture-schema-${{ matrix.part }}
+          path: ${{ runner.temp }}/migration-shadow/schema.sql
+          if-no-files-found: ignore
+
 
   checks:
     # THE REQUIRED CONTEXT. Its name is what the ruleset requires, so it must
@@ -329,7 +265,7 @@ jobs:
     # the merge silently instead of saying why.
     name: ops/ci.sh --strict
     runs-on: ubuntu-24.04
-    needs: classes
+    needs: [scope, classes, migration-fixtures]
     permissions:
       contents: read
       actions: read
@@ -341,17 +277,26 @@ jobs:
           ref: ${{ github.sha }}
       - name: Fail unless every class group succeeded
         env:
+          CI_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+          DB_FULL: ${{ needs.scope.outputs.full }}
+          FIXTURES_RESULT: ${{ needs.migration-fixtures.result }}
           CLASSES_RESULT: ${{ needs.classes.result }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 ops/ci-evidence.py verdict
           if [ "$CLASSES_RESULT" != "success" ]; then
             echo "aggregate matrix result: $CLASSES_RESULT"
             exit 1
           fi
+          if [ "$FIXTURES_RESULT" != success ] && ! { { [ "$DB_FULL" = false ] || [ "$CI_DRAFT" = true ]; } && [ "$FIXTURES_RESULT" = skipped ]; }; then
+            echo "migration fixtures: $FIXTURES_RESULT (database scope=$DB_FULL)"
+            exit 1
+          fi
+          python3 ops/ci-evidence.py verdict
       - name: Record the tested tree and class contract
+        if: needs.scope.outputs.full != 'false' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
         run: python3 ops/ci-evidence.py record --output ci-evidence.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: needs.scope.outputs.full != 'false' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
         with:
           name: ci-tree-evidence
           path: ci-evidence.json

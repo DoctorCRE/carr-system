@@ -27,19 +27,35 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual(mod.main(["--collection-only"]), 0)
             collect.assert_called_once()
 
+    def test_seeded_dependency_check_uses_a_small_disposable_tree(self):
+        mod = load("ci_fixture", "ci-selftest.py")
+        with mod.ci_fixture() as root:
+            self.assertNotEqual(root, ROOT)
+            self.assertLess(len(list(root.rglob("*.py"))), 32)
+            rc, output = mod.run(["--only", "dependency"], root=root)
+            self.assertEqual(rc, 0, output)
+            (root / "requirements.txt").write_text("synthetic-package>=2\n")
+            rc, output = mod.run(["--only", "dependency"], root=root)
+            self.assertEqual(rc, 1, output)
+            self.assertIn("STALE", output)
+        self.assertFalse(root.exists())
+
     def test_missing_or_duplicated_hosted_class_is_red(self):
         original = (ROOT / '.github/workflows/ci.yml').read_text()
+        canary = (ROOT / '.github/workflows/main-canary.yml').read_text()
         for replacement in ('pushfloor types', 'pushfloor unit unit types'):
             with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
                 (root / '.github/workflows').mkdir(parents=True)
                 (root / '.github/workflows/ci.yml').write_text(
                     original.replace('pushfloor unit types', replacement))
+                (root / '.github/workflows/main-canary.yml').write_text(canary)
                 mod = load('ci_membership', 'ci-selftest.py')
                 with patch.object(mod, 'REPO', root), contextlib.redirect_stdout(io.StringIO()):
                     mod.test_each_class_runs_in_exactly_one_hosted_group()
-                self.assertEqual(len(mod.RESULTS), 1)
+                self.assertEqual(len(mod.RESULTS), 2)
                 self.assertFalse(mod.RESULTS[0][1], mod.RESULTS)
+                self.assertTrue(mod.RESULTS[1][1], mod.RESULTS)
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,10 +23,12 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'ops'))
+sys.path.insert(0, str(ROOT / 'tools'))
 sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
 sys.path.insert(0, str(ROOT))
 from work_queue import WorkQueue, QueueChanged, default_path
 from git_env import scrubbed_env
+from regen import REGENERATED_OUTPUTS
 from lib.carr_paths import canonical_checkout
 from lib.secret_redaction import redacted_tail, sensitive_env_values
 from lib.github_rate_limit import GitHubReadBudget, GitHubReadPaused, GitHubBudgetLockTimeout, resource_for, split_response
@@ -306,7 +308,8 @@ class Queue:
             raise WaitExpired(f'{stopped["detail"]}; stopped; reconcile before retry')
         failure = self.db.execute('SELECT * FROM github_failures WHERE scope=? AND key=?',
                                   (scope, key)).fetchone()
-        if (failure and read and entry is None and not failure['stopped']
+        if (failure and read and entry is None
+                and (not failure['stopped'] or (scope == 'automatic' and failure['entry_id'] is None))
                 and time.time() >= failure['failed_at'] + BOUNDS['github_retry']['seconds']):
             with self.db:
                 self.db.execute('DELETE FROM github_failures WHERE scope=? AND key=?', (scope, key))
@@ -478,15 +481,20 @@ class Queue:
                                 (repo, n, head)).fetchone()
             if cur.rowcount:
                 self.event(repo, n, 'queued', f'Queued head {head}', e['id'])
-            elif rearm and e['phase'] == 'exhausted':
+            elif rearm and e['outcome'] not in ('head_moved', 'held') and (e['phase'] == 'exhausted' or (
+                    e['phase'] == 'blocked' and e['tested'] is None
+                    and e['outcome'] in ('github_exhausted', 'discovery_exhausted'))):
                 with self.github_scope(f'enqueue:{e["id"]}'):
                     current = self.pr(repo, n)
                 if current['head']['sha'] != e['approved']:
                     self.report(e, 'head_moved', 'Live head differs from the approved SHA; exhausted entry retained')
                     return e['id']
+                if self.held(current):
+                    self.report(e, 'held', 'do_not_merge label present; entry retained')
+                    return e['id']
                 self._clear_reads(e['id'])
                 self.db.execute("UPDATE entries SET phase='pending',outcome='requeued',note=? WHERE id=?", (note, e['id']))
-                self.event(repo, n, 'requeued', f'Rearmed exhausted head {head}; merge and CI caps retained', e['id'])
+                self.event(repo, n, 'requeued', f'Rearmed {e["phase"]} head {head}; merge and CI caps retained', e['id'])
         return e['id']
 
     def submit(self, repo, numbers, log=None):
@@ -494,7 +502,7 @@ class Queue:
             raise ValueError('expected authorized repo and positive PR numbers')
         for n in bounded_items('snapshot', numbers):
             p = self.pr(repo, n)
-            entry = self.enqueue(repo, n, p['head']['sha'], 'submitted through mq.sh', rearm=False)
+            entry = self.enqueue(repo, n, p['head']['sha'], 'submitted through mq.sh')
             result = f'ENQUEUED {n} {p["head"]["sha"]} entry={entry}'
             print(result, flush=True)
             if log is not None:
@@ -502,9 +510,10 @@ class Queue:
                     stream.write(f'{repo} {result}\n')
 
     def event(self, repo, n, outcome, detail, entry_id=None):
-        prev = self.db.execute('SELECT outcome,detail FROM events WHERE repo=? AND pr=? ORDER BY id DESC LIMIT 1', (repo, n)).fetchone()
-        if prev and tuple(prev) == (outcome, detail):
-            return
+        prev = self.db.execute('SELECT outcome,detail,created FROM events WHERE repo=? AND pr=? ORDER BY id DESC LIMIT 1', (repo, n)).fetchone()
+        if prev and tuple(prev)[:2] == (outcome, detail):
+            if outcome != 'discovery_unreadable' or time.time() < prev['created'] + BOUNDS['discovery']['seconds']:
+                return
         self.db.execute('INSERT INTO events(entry_id,repo,pr,outcome,detail,created) VALUES(?,?,?,?,?,?)',
                         (entry_id, repo, n, outcome, detail, time.time()))
 
@@ -669,7 +678,7 @@ class Queue:
     def conflict(self, repo, p):
         n, head = p['number'], p['head']['sha']
         self.fetch(repo, head)
-        base = p['base']['sha']
+        base = self.git(repo, 'rev-parse', 'origin/main').strip() if p['base']['ref'] == 'main' else p['base']['sha']
         self.fetch(repo, base)
         d = self.state / 'repos' / (repo.split('/')[-1] + '.git')
         merge = subprocess.run(['git', '-C', str(d), 'merge-tree', '--write-tree', '--name-only',
@@ -682,6 +691,10 @@ class Queue:
         files = files[:files.index('')] if '' in files else files
         if not files:
             raise RuntimeError('conflicting-files readback empty')
+        if repo == REPOS[0]:
+            files = [path for path in files if path not in REGENERATED_OUTPUTS]
+        if not files:
+            return False
         brief_dir = self.root / 'out/orch/queue/codex'
         brief_dir.mkdir(parents=True, exist_ok=True)
         brief = brief_dir / f"merge-conflict-{repo.split('/')[-1]}-{n}-{head}.txt"
@@ -698,7 +711,7 @@ class Queue:
             self.db.execute('INSERT OR IGNORE INTO actions(key,kind,repo,pr,head,payload) VALUES(?,?,?,?,?,?)',
                             (key, 'dispatch', repo, n, head, str(brief)))
             self.event(repo, n, 'conflict', f'Fix brief {brief}; files: {", ".join(files)}')
-        return True
+        return files
 
     def dispatch_conflicts(self):
         with self.runner_lock():
@@ -1141,18 +1154,17 @@ class Queue:
                     return False
                 return True
             head = p['head']['sha']
-            if p.get('mergeable') is False or p['mergeable_state'] == 'dirty':
-                if not self.conflict(repo, p):
-                    if self.wait(e, 'mergeability', 'waiting_mergeability', 'GitHub conflict result is stale; waiting for recomputation'):
-                        return True
+            conflicting = p.get('mergeable') is False or p['mergeable_state'] == 'dirty'
+            if conflicting:
+                files = self.conflict(repo, p)
+                if files:
+                    self.report(e, 'conflict', f'Conflicts require review: {", ".join(files)}', 'conflict')
                     return False
-                self.report(e, 'conflict', f'Conflict brief filed for {head}', 'conflict')
-                return False
             if self.behind(repo, p) and p.get('mergeable') is True:
                 self.action('update', repo, n, head, 'main')
                 self.report(e, 'updating', f'Waiting for clean update of {head}')
                 return True
-            if p['mergeable_state'] == 'unknown' or p.get('mergeable') is None:
+            if not conflicting and (p['mergeable_state'] == 'unknown' or p.get('mergeable') is None):
                 if self.wait(e, 'mergeability', 'waiting_mergeability', 'GitHub mergeability is unknown'):
                     return True
                 return False
@@ -1366,6 +1378,83 @@ class Queue:
                 "SELECT * FROM entries WHERE phase IN ('blocked','exhausted') ORDER BY id").fetchall()):
             self.reconcile_merged(e)
         return [dict(r) for r in bounded_items('snapshot', self.db.execute('SELECT * FROM entries ORDER BY id'))]
+
+    def recover_work_card(self, card_id, *, expected_revision, actor, reason):
+        """End stale card ownership, retaining all journal and per-pin facts."""
+        with self.runner_lock(), self.github_scope(f'recover-work-card:{card_id}'):
+            journal = sqlite3.connect(self.state / 'queue.sqlite3', timeout=BOUNDS['sqlite']['seconds'])
+            try:
+                revision = journal.execute('PRAGMA data_version').fetchone()[0]
+
+                def verify(data):
+                    evidence = self._verify_recovery_effects(data)
+                    if self._verify_recovery_effects(data) != evidence:
+                        raise QueueChanged('provider or journal changed during recovery observation')
+                    # Fence local journal writers through the work-queue commit. GitHub
+                    # has no read transaction; two matching passes only bound observation.
+                    journal.execute('BEGIN IMMEDIATE')
+                    if journal.execute('PRAGMA data_version').fetchone()[0] != revision:
+                        raise QueueChanged('merge journal changed during recovery observation')
+                    return evidence
+
+                with WorkQueue(default_path()) as work:
+                    return work.recover_merge_run(card_id, expected_revision=expected_revision,
+                                                  verify_effects=verify, actor=actor, reason=reason)
+            finally:
+                journal.close()
+
+    def _verify_recovery_effects(self, data):
+        evidence = []
+        for pin in bounded_items('snapshot', data['prs']):
+            repo, n = pin['repo'], pin['number']
+            entries = [dict(e) for e in self.db.execute(
+                'SELECT * FROM entries WHERE repo=? AND pr=? ORDER BY id', (repo, n))]
+            actions = [dict(a) for a in self.db.execute(
+                'SELECT * FROM actions WHERE repo=? AND pr=? ORDER BY key', (repo, n))]
+            if not any(e['approved'] == pin['head'] for e in entries):
+                raise QueueChanged(f'missing pinned journal evidence for {repo}#{n}')
+            for e in bounded_items('snapshot', entries):
+                merged = (dict(repo=repo, number=n, head=e['approved']) in data.get('merge_receipts', [])
+                          and e['phase'] == 'done' and e['merged_commit'])
+                unissued = (e['phase'] in ('pending', 'done', 'blocked', 'exhausted', 'conflict', 'superseded', 'review')
+                            and e['tested'] is None and e['merge_attempts'] == 0 and e['merged_commit'] is None)
+                if not (merged or unissued):
+                    raise QueueChanged(f'unresolved merge journal entry {e["id"]}')
+            if any(a['phase'] != 'done' for a in bounded_items('snapshot', actions)):
+                raise QueueChanged(f'unresolved provider action for {repo}#{n}')
+            p = self.pr(repo, n)
+            if type(p.get('merged')) is not bool or p['number'] != n:
+                raise QueueChanged(f'incomplete provider truth for {repo}#{n}')
+            if p['head']['sha'] != pin['head']:
+                raise QueueChanged(f'provider head differs from pinned head for {repo}#{n}')
+            if p.get('merged') is True:
+                if (pin not in data.get('merge_receipts', [])
+                        or not any(e['merged_commit'] == p.get('merge_commit_sha') and e['merged_commit']
+                                   for e in entries)):
+                    raise QueueChanged(f'unconsumed provider merge for {repo}#{n}')
+            elif pin in data.get('merge_receipts', []):
+                raise QueueChanged(f'provider contradicts merge receipt for {repo}#{n}')
+            pending = p['state'] == 'open' and self.merge_pending(repo, n, p['head']['sha'])
+            if pending:
+                raise QueueChanged(f'provider still owns a merge for {repo}#{n}')
+            for a in bounded_items('snapshot', actions):
+                if a['kind'] == 'regen':
+                    try:
+                        receipt = json.loads(Path(a['receipt']).read_text())
+                    except (OSError, ValueError, TypeError):
+                        raise QueueChanged('regeneration receipt is unreadable') from None
+                    if receipt != dict(head=a['head'], main=a['payload'], prepared=pin['head'], branch=p['head']['ref']):
+                        raise QueueChanged('unconsumed regeneration effect')
+            evidence.append(dict(pin=pin,
+                                 entries=[{k: e[k] for k in ('id', 'approved', 'phase', 'tested', 'merged_commit', 'merge_attempts')}
+                                          for e in entries],
+                                 actions=[{k: a[k] for k in ('key', 'kind', 'phase', 'head', 'receipt')}
+                                          for a in actions],
+                                 provider=dict(head=p['head']['sha'], branch=p['head']['ref'],
+                                               base=p['base'], state=p['state'], merged=p['merged'],
+                                               merge_commit=p.get('merge_commit_sha'),
+                                               updated_at=p.get('updated_at'), pending=pending)))
+        return evidence
 
     def reconcile(self, entry, retry=False):
         with self.runner_lock(), self.github_scope(f'reconcile:{entry}'):
@@ -1646,6 +1735,11 @@ def main():
     action_reconcile = sub.add_parser('reconcile-action')
     action_reconcile.add_argument('key')
     action_reconcile.add_argument('--retry', action='store_true')
+    recover = sub.add_parser('recover-work-card', help='release a blocked merge run after journal/provider checks')
+    recover.add_argument('card_id')
+    recover.add_argument('--expected-revision', type=int, required=True)
+    recover.add_argument('--actor', required=True)
+    recover.add_argument('--reason', required=True)
     installer = sub.add_parser('install-agent')
     installer.add_argument('--output', type=Path)
     installer.add_argument('--apply', action='store_true')
@@ -1688,6 +1782,9 @@ def main():
         q.reconcile(a.entry, a.retry)
     elif a.cmd == 'reconcile-action':
         q.reconcile_action(a.key, a.retry)
+    elif a.cmd == 'recover-work-card':
+        print(json.dumps(q.recover_work_card(a.card_id, expected_revision=a.expected_revision,
+                                            actor=a.actor, reason=a.reason), indent=2))
     else:
         print(json.dumps(q.status(), indent=2))
 
