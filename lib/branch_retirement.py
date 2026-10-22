@@ -17,8 +17,8 @@ sys.path.insert(0, str(SOURCE / "ops"))
 sys.path.insert(0, str(SOURCE))
 from git_env import scrubbed_env
 from lib.cleanup_budget import BudgetExhausted, bounded, check
-import job_watchdog
-from job_watchdog import protected_branch, repository_roots
+import local_jobs
+from local_jobs import protected_branch, repository_roots
 
 CLASSES = ("merged", "superseded", "abandoned", "live")
 
@@ -302,7 +302,7 @@ class FleetReaper:
         self.provider = provider or GitHub()
         self.process_probe = process_probe
         self.ownership_probe = ownership_probe or (lambda p: ownership(self.root, p))
-        self.config = config or job_watchdog.load_config(SOURCE / "ops/config/job-watchdog.json")
+        self.config = config or local_jobs.load_config(SOURCE / "ops/config/local-jobs.json")
         self.clock = clock
         self.branch_idle = self.config["thresholds"]["branch_idle_seconds"]
         self.tree_idle = hook.REAP_MIN_IDLE_S
