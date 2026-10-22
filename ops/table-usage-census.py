@@ -59,7 +59,7 @@ SOURCE_SUFFIXES = {".py", ".js", ".mjs", ".ts", ".tsx", ".sql", ".sh", ".applesc
 SENSITIVE_PATH = re.compile(r"(?:^|[/_.-])(?:env|credentials?|tokens?|keys?|keychains?|dumps?|secrets?)(?:$|[/_.-])", re.I)
 SYMBOL = re.compile(r"(?:\b(?:async\s+)?def\s+|\bfunction\s+|\b(?:const|let)\s+)([A-Za-z_$][\w$]*)")
 DYNAMIC_SQL = re.compile(
-    r"\bEXECUTE\s+(?!['\"])[\w$]|\b(?:sql\.)?(?:Identifier|SQL)\s*\(|"
+    r"\bEXECUTE\b|\b(?:sql\.)?(?:Identifier|SQL)\s*\(|"
     r"(?:from|join|into|update|table)\s+[\"']?(?:\{|\$|%[sI])|"
     r"\b(?:query|execute|executemany)\s*\(\s*[A-Za-z_]\w*\s*[,)]|"
     r"\bsql`|\b(?:sql|query)\s*\+", re.I)
