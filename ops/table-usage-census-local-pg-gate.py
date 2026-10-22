@@ -95,7 +95,7 @@ def main():
                              capture_output=True, text=True, timeout=60)
         assert cli.returncode == 0, cli.stderr
         generated = json.loads((ROOT / "out/table-usage-census.json").read_text())
-        assert generated["counts"]["referenced"] == 1 and len(generated["tables"]) == 6
+        assert generated["counts"]["referenced"] == 6 and len(generated["tables"]) == 6
         assert generated["provenance"]["transaction_read_only"] == "on"
         assert generated["provenance"]["inventory_entries"] > 0
         print(census.render_summary(report))
