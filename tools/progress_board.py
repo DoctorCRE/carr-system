@@ -2612,10 +2612,8 @@ def publish_paged_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     while True:
         counts = {**{key: value for key, value in preview["omitted"].items() if value}, **omitted}
         notice["text"] = ("Board preview. Omitted from this preview: " + json.dumps(counts, sort_keys=True) +
-                          ". Full snapshot: read-progress-board board_id=" + snapshot["project"] +
-                          "; pagination.pages lists the board_id and version of every page. "
-                          "Read those pages in order, join snapshot_json.content, verify pagination.digest "
-                          "as UTF-8 SHA-256, and parse JSON. Queue overview: "
+                          ". All records remain in the published snapshot pages. "
+                          "Retrieve them with read-progress-board using pagination.pages. Full queue overview: "
                           "https://app.doctorcre.com/progress-board?board=orchestrator")
         try:
             fit_snapshot(preview)
