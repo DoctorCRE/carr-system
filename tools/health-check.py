@@ -1662,7 +1662,7 @@ def _canonical_health():
                     print("  OK scheduled jobs match manifest; canonical main is current")
             except Exception as exc:
                 _detail = (f"scheduled job check unreadable ({type(exc).__name__}) · on breach: "
-                           "job-watchdog.py scan files/updates loop scheduled_jobs:checker:evidence_unavailable · "
+                           "loop scheduled_jobs:checker:evidence_unavailable · "
                            "owner orchestrator · fix: restore the manifest and machine evidence reader · "
                            "verify: python3 ops/scheduled-jobs-check.py · auto-clear: next complete scan")
                 print("  WARN " + _detail)
