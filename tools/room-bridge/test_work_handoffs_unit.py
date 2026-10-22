@@ -198,6 +198,46 @@ class HandoffTests(unittest.TestCase):
         self.assertTrue(self.queue.get('second')['ready'])
         self.assertFalse(self.provider.released)
 
+    def test_new_head_resets_the_consecutive_no_progress_budget(self):
+        self.build()
+        self.flow.tick()
+        self.review('REQUEST_CHANGES')
+        self.flow.tick()
+        for _ in range(2):
+            self.finish('builder', {'status': 'completed', 'pr': PR})
+            self.flow.tick()
+        changed = {**PR, 'head': 'b' * 40}
+        self.finish('builder', {'status': 'completed', 'pr': changed})
+        self.flow.tick()
+        self.provider.snapshot['head'] = changed['head']
+        self.review('REQUEST_CHANGES', head=changed['head'])
+        self.flow.tick()
+        for attempt in range(1, 4):
+            self.finish('builder', {'status': 'completed', 'pr': changed})
+            self.flow.tick()
+            card = self.queue.get('job')
+            self.assertEqual((card['stage'], card['review_round']),
+                             ('fixing', 2) if attempt < 3 else ('blocked', 2))
+        self.assertEqual(card['last_event']['reason'], 'no new commits cap')
+
+    def test_third_unchanged_fix_blocks_across_reconciler_restarts(self):
+        self.build()
+        self.flow.tick()
+        self.review('REQUEST_CHANGES')
+        self.flow.tick()
+        for attempt in range(1, 4):
+            self.finish('builder', {'status': 'completed', 'pr': PR})
+            with WorkQueue(self.path) as restarted:
+                Handoffs(restarted, self.desks, self.provider).tick()
+                card = restarted.get('job')
+                self.assertEqual((card['stage'], card['ready'], card['review_round']),
+                                 ('fixing', True, 1) if attempt < 3 else ('blocked', False, 1))
+        self.assertEqual(card['last_event']['reason'], 'no new commits cap')
+        self.flow.tick()
+        self.assertEqual(self.queue.candidates(), [])
+        self.assertEqual(self.queue.merge_order()['entries'], [])
+        self.assertFalse(self.provider.released)
+
     def test_unchanged_fix_returns_to_builder_without_spending_review_round(self):
         self.build()
         self.flow.tick()

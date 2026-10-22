@@ -19,6 +19,7 @@ ROOT = HERE.parents[1]
 spec = importlib.util.spec_from_file_location('handoff_review_contract', ROOT / 'ops/release-pipeline.py')
 assert spec is not None and spec.loader is not None
 REVIEW = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = REVIEW
 spec.loader.exec_module(REVIEW)
 REVIEW_RULES = json.loads((ROOT / 'ops/config/release-pipeline.v1.json').read_text())['worker']
 REPOS = {'jbookout/carr-system'}
@@ -116,12 +117,16 @@ class Handoffs:
         if pin is None:
             return
         if completion['stage'] == 'fixing' and pin in data['prs']:
+            attempts = data['handoff'].get('no_change_attempts', 0) + 1
+            data['handoff']['no_change_attempts'] = attempts
+            capped = attempts >= 3
             builder = data['handoff']['builder']
             task = (f"no new commits for {pin['repo']} PR #{pin['number']} at {pin['head']}. "
                     f"Make the requested source fixes before returning.\nFindings: {json.dumps(data['findings'])}\n\n"
                     + builder['task'])
-            self.queue.handoff(row, stage='fixing', desk=builder['desk'], task=task,
-                               options=json.loads(row['options']), data=data, reason='no new commits')
+            self.queue.handoff(row, stage='blocked' if capped else 'fixing', desk=builder['desk'], task=task,
+                               options=json.loads(row['options']), data=data,
+                               reason='no new commits cap' if capped else 'no new commits')
             return
         self._queue_review(row, data, pin, desks, reason='builder completion queued independent review')
 
