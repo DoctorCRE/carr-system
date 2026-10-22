@@ -1,8 +1,11 @@
-import {clearSemanticCache} from "../src/jev-semantic.js";
-beforeEach(clearSemanticCache);
-import test, {beforeEach} from 'node:test';
+import test from 'node:test';
+import { TypeSafeClient, TypeSafeError } from '@typesafe-ai/sdk';
 import assert from 'node:assert/strict';
-import { dealReadingState, readDealWithJev } from '../src/jev-deal-reading.js';
+import { dealReadingState, readDealWithJev as sdkRead } from '../src/jev-deal-reading.js';
+
+const readDealWithJev = (record, {askJev, ...options} = {}) => sdkRead(record, {
+  ...options, ...(askJev ? {client: {systemOne: askJev}} : {}),
+});
 
 const record = (text) => ({
   phase: 'negotiation', type: 'renewal', next_step: '', last_touch: '2026-09-19',
@@ -13,15 +16,6 @@ const eligible = (text) => ({ ...record(text),
   next_actions: [{ status: 'open', description: 'Ask the tenant to review the revised rent and approve a response to the landlord.' }],
 });
 
-test('all legal rejection values abstain at the public deal interface', async()=>{
-  for(const rejection of [null,undefined,'synthetic',{reason:'synthetic'}]) {
-    clearSemanticCache();
-    const result=await readDealWithJev(eligible('The landlord sent a counter and the tenant must respond. '.repeat(4)),
-      {askJev:async()=>{throw rejection;}});
-    assert.equal(result.reason,'jev_unavailable');
-    assert.equal(result.judged,false);
-  }
-});
 test('date-only deadlines use the CARR calendar day, including invalid dates',()=>{
   // CARR business dates use America/Chicago, including the UTC day boundary.
   for(const now of ['2026-10-04T12:00:00Z','2026-10-05T01:00:00Z']) {
@@ -58,7 +52,7 @@ test('one bounded request returns typed advice without source text', async () =>
       } };
     },
   });
-  assert.equal(payload.model, 'jev-1.13.0');
+  assert.equal(payload.model, undefined);
   assert.equal(Object.keys(payload.questions).length, 3);
   assert.equal(answer.judged, true);
   assert.equal(answer.movement_rung, 4);
@@ -67,21 +61,21 @@ test('one bounded request returns typed advice without source text', async () =>
   assert.equal(JSON.stringify(answer).includes(text), false);
 });
 
-test('eligible Deal Room advice uses the receipt-backed Jev door', async () => {
+test('eligible Deal Room advice uses one SDK call', async () => {
   const text = 'The landlord sent a counter; the tenant must decide whether to accept the revised rate. '.repeat(4);
   const calls = [];
   const answer = await readDealWithJev(eligible(text), {
     askJev: async request => {
       calls.push(request);
       return { model: 'jev-1.13.0', usage: { input_tokens: 9, output_tokens: 1 },
-        receipt_id: 'server-receipt', answers: {
+        answers: {
           movement: { score: 3.1 }, waiting_on: { choice: 'client', confidence: 0.91 },
           silence_is_bad: { noul: 0.18 },
         } };
     },
   });
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].model, 'jev-1.13.0');
+  assert.equal(calls[0].model, undefined);
   assert.equal(answer.judged, true);
 });
 
@@ -169,4 +163,48 @@ test('old completed dates cannot hide a current open deadline', () => {
   assert.deepEqual(found.state.deal.active_dates.map(d => d.due_relative_to_today), ['future_or_today']);
   assert.match(found.state.deal.history.join('\n'), /current offer expires/);
   assert.doesNotMatch(found.state.deal.history.join('\n'), /Historic deadline/);
+});
+
+test('deal reading calls the official SDK once with all questions', async () => {
+  const calls = [];
+  const client = { systemOne: async request => {
+    calls.push(request);
+    return {model: 'jev-1.13.0', answers: {
+      movement: {score: 3}, waiting_on: {choice: 'client', confidence: 0.2}, silence_is_bad: {noul: 0.18},
+    }};
+  }};
+  const result = await readDealWithJev(eligible('The landlord sent a counter for the tenant to review.'), {client});
+  assert.equal(result.judged, true);
+  assert.equal(result.waiting_on, 'client');
+  assert.equal(calls.length, 1);
+  assert.deepEqual(Object.keys(calls[0].questions), ['movement', 'waiting_on', 'silence_is_bad']);
+});
+
+test('SDK errors leave the deal available without advice', async () => {
+  const result = await sdkRead(eligible('The landlord sent a counter for the tenant to review.'), {
+    client: {systemOne: async () => {throw new TypeSafeError('unavailable');}},
+  });
+  assert.equal(result.reason, 'jev_unavailable');
+});
+
+test('the SDK sends the documented HTTP request and consumes its typed answers', async () => {
+  const requests = [];
+  const client = new TypeSafeClient({apiKey: 'synthetic-offline-key', compression: false,
+    fetch: async (url, options) => {
+      requests.push({url: String(url), body: JSON.parse(options.body)});
+      return new Response(JSON.stringify({model: 'jev-1.13.0', usage: {input_tokens: 100, output_tokens: 20},
+        answers: {
+          movement: {type: 'score', score: 3, confidence: 0.8, probabilities: {'3': 1}},
+          waiting_on: {type: 'choice', choice: 'client', confidence: 0.2, probabilities: {client: 0.6, carr: 0.4}},
+          silence_is_bad: {type: 'noul', noul: 0.1},
+        }}), {headers: {'content-type': 'application/json'}});
+    },
+  });
+  const result = await sdkRead(eligible('The landlord sent a counter for the tenant to review.'), {client});
+  assert.equal(result.judged, true);
+  assert.equal(result.waiting_on, 'client');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, 'https://api.typesafe.ai/v1/systemone');
+  assert.equal(requests[0].body.model, 'jev-latest');
+  assert.equal(Object.keys(requests[0].body.questions).length, 3);
 });

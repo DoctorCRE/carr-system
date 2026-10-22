@@ -1276,7 +1276,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
           return g;
         };
         // Scoped boot returns short gists for the always-present Layer 0.
-        // Jev and the pack/trigger index fetch binding text when the task needs
+        // The pack/trigger index fetches binding text when the task needs
         // it. An explicit detail=full or rule_ids lookup still returns full text.
         const shape = (r, withQuote) => {
           const id = String(r.id).slice(0, 8);

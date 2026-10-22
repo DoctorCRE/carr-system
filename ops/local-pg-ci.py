@@ -209,7 +209,6 @@ def scrub_cloud_environment(source: Mapping[str, str]) -> dict[str, str]:
         "LC_ALL",
         "LC_CTYPE",
         # CI may explicitly forbid live Jev spend; this is a nonsecret mode.
-        "CARR_JEV_OFFLINE_REPLAY",
         "LOGNAME",
         "PATH",
         "SHELL",

@@ -736,9 +736,7 @@ class Pipeline:
         log.parent.mkdir(parents=True, exist_ok=True)
         venv = self.repo / ".venv" / "bin" / "python"
         env = {k: v for k, v in self.env.items() if k in ("HOME", "PATH", "LANG")}
-        # Its Jev calls are attributed to this job (ops/config/jev-call-sites.v1.json);
         # with the stripped environment they would otherwise be refused as unattributed.
-        env["CARR_JEV_JOB"] = "release-pipeline.slice-marker"
         with open(log, "ab") as sink:
             proc = subprocess.Popen([str(venv if venv.exists() else sys.executable),
                                      str(self.repo / "ops" / "slice-done-marker.py"), "--release-key", release_key],

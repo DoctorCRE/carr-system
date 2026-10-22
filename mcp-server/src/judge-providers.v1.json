@@ -1,4 +1,0 @@
-{
-  "schema": "carr-judge-providers/v1",
-  "providers": {"system_work": "jev", "app_runtime": "jev"}
-}

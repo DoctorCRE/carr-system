@@ -23,7 +23,7 @@
 // THE AMENDMENT ALSO SETS THE CEILING, and this file is built under it. Its
 // runtime_effect_status is NOT_ACTIVATED and the absence behaviour of
 // step:governed-correspondence-internal-update-independent-receipt is "DENY
-// internal updates; no fallback to general J1 receipt, code tests, high Jev
+// internal updates; no fallback to general J1 receipt, code tests, classifier
 // probability, or doctrine approval". So every judgment below ends in a
 // PROPOSAL. None of them writes, none of them claims authority, and every
 // result carries `automatic_internal_update: false` with the gate that denies it
