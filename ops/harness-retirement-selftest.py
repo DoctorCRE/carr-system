@@ -44,6 +44,13 @@ class HarnessRetirement(unittest.TestCase):
         self.assertNotIn(old['command'], commands)
         self.assertEqual(installer['merge_codex_carr_hooks'](actual, desired), actual)
 
+    def test_control_catalog_compiles_native_guidance_without_retired_gates(self):
+        catalog = runpy.run_path(str(ROOT / 'ops/sync_control_catalog.py'))
+        controls = {row['control_key']: row for row in catalog['compile_catalog']()}
+        self.assertEqual(controls['delegation_guidance']['enforcement_class'], 'surfacing')
+        self.assertNotIn('delegation_tripwire', controls)
+        self.assertNotIn('executor_tier', controls)
+
     def test_native_instructions_deliver_every_core_card(self):
         cards = json.loads((ROOT / 'ops/config/rule-cards.v1.json').read_text())['cards']
         core = [c for c in cards if c['placement'] == 'CORE']
