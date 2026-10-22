@@ -45,6 +45,14 @@ test('natural dates without a source year remain unassigned', () => {
   assert.equal(splitDealNextStep('ETL sent 8 Aug via CONGA awaiting signature.')[0].bullets[0].date,null);
 });
 
+test('numbered headings cannot invent outstanding work or produce invalid one-word titles', () => {
+  const items = splitDealNextStep('(1) PACKAGE, send closing documents to counsel. (2) ETL — signed 2026-10-20; schedule kickoff call.');
+  assert.deepEqual(items.map(i => i.title),['send closing documents to','signed 2026-10-20']);
+  const generic = splitDealNextStep('(1) LEGAL, ask counsel for comments. (2) FINANCING, compare lender terms.');
+  assert.deepEqual(generic.map(i => i.title),['ask counsel for comments','compare lender terms']);
+  for (const item of [...items,...generic]) assert.doesNotThrow(() => validateDealItem(item));
+});
+
 test('short heading uses an explicit recorded doctor name and strips a practice parenthetical', () => {
   assert.equal(shortDealHeading({ name:'Assignment',client_name:'Dr. Morgan Example (Synthetic Practice)',market:'Baytown' }),"Dr. Example's Baytown Deal");
   assert.equal(shortDealHeading({ name:'Recorded assignment',client_name:'Synthetic Practice',market:'Baytown' }),'Recorded assignment');

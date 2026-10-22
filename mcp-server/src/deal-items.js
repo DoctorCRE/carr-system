@@ -50,7 +50,6 @@ function numberedItems(text, due_on, source_ref) {
   if (markers.length < 2) return null;
   const shared = text.slice(0, markers[0].index).trim();
   const sharedDate = shared.match(/\b\d{4}-\d{2}-\d{2}\b/u)?.[0] || null;
-  const titles = { INTRODUCTIONS: 'Vendor Introductions', PACKAGE: 'Prelim Market Study', ETL: 'ETL not completed' };
   return markers.map((marker,index) => {
     const heading = marker[2].trim();
     const body = text.slice(marker.index + marker[0].length, markers[index + 1]?.index ?? text.length)
@@ -61,7 +60,10 @@ function numberedItems(text, due_on, source_ref) {
         bullets.push({ date: factDate(fact,sharedDate), kind: factKind(fact), text: fact.trim() });
       }
     }
-    return { title: titles[heading] || heading.split(/\s+/u).slice(0,4).join(' '), due_on, status: 'open', source_ref, bullets };
+    const group = GROUPS.find(g => g.matches.test(`${heading} ${body}`));
+    const words = shortFacts(body)[0]?.replace(/[.]$/u,'').split(/\s+/u).slice(0,4) || [];
+    const title = heading === 'INTRODUCTIONS' ? 'Vendor Introductions' : group?.title || (words.length >= 2 ? words.join(' ') : `${heading} follow-up`);
+    return { title, due_on, status: 'open', source_ref, bullets };
   });
 }
 
