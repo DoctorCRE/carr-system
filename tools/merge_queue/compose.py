@@ -20,6 +20,8 @@ def compose(request, regenerate):
         git(repo, 'checkout', '-q', '-b', 'batch', request['base'])
         git(repo, 'config', 'user.name', 'jbookout')
         git(repo, 'config', 'user.email', 'jbookout@users.noreply.github.com')
+        members = []
+        message = repo / '.git/batch-message'
         for member in request['members']:
             previous = git(repo, 'rev-parse', 'HEAD')
             git(repo, 'merge', '--no-commit', '--no-ff', member['head'], check=False)
@@ -29,8 +31,11 @@ def compose(request, regenerate):
                     return dict(request=request, conflict=member['pr'], detail=f'source conflict: {path}')
                 git(repo, 'restore', '--source='+previous, '--staged', '--worktree', '--', path)
             if (repo / '.git/MERGE_HEAD').exists():
-                git(repo, 'commit', '-q', '-m', f'Merge #{member["pr"]} at {member["head"]}')
+                message.write_text(f'Merge #{member["pr"]} at {member["head"]}\n')
+                git(repo, 'commit', '-q', '-F', str(message))
             git(repo, 'merge-base', '--is-ancestor', member['head'], 'HEAD')
+            members.append(dict(pr=member['pr'], head=member['head'],
+                                tree=git(repo, 'write-tree')))
         if request['repo'] == 'jbookout/carr-system':
             regenerate(repo)
         changed = set(filter(None, git(repo, 'diff', '--name-only', '-z').split('\0')))
@@ -38,12 +43,18 @@ def compose(request, regenerate):
         if changed:
             git(repo, 'add', '--', *sorted(changed))
         tree = git(repo, 'write-tree')
-        parents = [request['base'], *dict.fromkeys(m['head'] for m in request['members'])]
-        args = [arg for parent in parents for arg in ('-p', parent)]
-        message = 'Merge queue batch\n\n' + '\n'.join(f'Merges #{m["pr"]} at {m["head"]}' for m in request['members'])
-        candidate = git(repo, 'commit-tree', tree, *args, '-m', message)
+        members[-1]['tree'] = tree
+        candidate = request['base']
+        # Original merge ancestry is needed for stacked branches, but published
+        # history contains only the ordered squash commits.
+        for member in members:
+            message.write_text(f'Merge queue squash #{member["pr"]}\n\n'
+                               f'Pinned head: {member["head"]}\n')
+            candidate = git(repo, 'commit-tree', member['tree'], '-p', candidate,
+                            '-F', str(message))
+            member['commit'] = candidate
         git(repo, 'push', '--quiet', 'origin', f'{candidate}:refs/heads/{request["branch"]}')
-        return dict(request=request, candidate=candidate, tree=tree)
+        return dict(request=request, candidate=candidate, tree=tree, members=members)
 
 
 def main():
