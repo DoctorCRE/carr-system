@@ -2,7 +2,7 @@
 // This is a non-authorizing source/build guard. The sealed DB registry is SIEP-11's sole metadata authority; SIEP-18 owns atomic admission.
 export const SCAC_MUTATION_REGISTRY_VERSION = "scac-mutation-registry.v118";
 export const SCAC_MUTATION_REGISTRY_DIGEST = "dc6f7a39d9a6879f73d92fde3081f87b79dc6c23dfa45052dc2c5d599f5fdbfd";
-export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "e88694f05098ba7a3c60a8b9b6fb018937041f58d0951e480f37d8f66468020b";
+export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "c204c8b4fed0a616fefc5f2e486105801948fde05b3ef214be51f38ab0e46318";
 export const SCAC_MUTATION_DB_CATALOG_BASELINE_DIGEST = "b37445be9897851115806e549a6595c9f42f5d252af58ae7dc0cda328ec32877";
 export const SCAC_MUTATION_DB_METADATA_AUTHORITY = true;
 export const SCAC_MUTATION_RUNTIME_PROJECTION_AUTHORIZING = false;
@@ -260,7 +260,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "admit-engineering-slice": {
     "ingress_key": "mcp-tool:admit-engineering-slice",
     "source_locator": "mcp-server/src/engineering-runtime.js",
-    "source_digest": "7ab6d129320223217135434bd9ebb4ab57d492c4e0b5ef14ed46758ce183684c",
+    "source_digest": "ba19c950e02ee21cf53b9c7393e226ad12952840ac08e6ed85aebd309e726f25",
     "schema_digest": "94d3474b810d1feb048d28cdc72649bc1c989c5078f1891ac13cbc4d7035ce1e",
     "write": true,
     "human_only": false,
@@ -1152,7 +1152,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "engineering-passport": {
     "ingress_key": "mcp-tool:engineering-passport",
     "source_locator": "mcp-server/src/engineering-runtime.js",
-    "source_digest": "7ab6d129320223217135434bd9ebb4ab57d492c4e0b5ef14ed46758ce183684c",
+    "source_digest": "ba19c950e02ee21cf53b9c7393e226ad12952840ac08e6ed85aebd309e726f25",
     "schema_digest": "9f7ca1c347f0d401620474afbc2182fd5c3fe885857f372ceacafbd974681451",
     "write": false,
     "human_only": false,
@@ -1162,7 +1162,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "engineering-passport-source": {
     "ingress_key": "mcp-tool:engineering-passport-source",
     "source_locator": "mcp-server/src/engineering-runtime.js",
-    "source_digest": "7ab6d129320223217135434bd9ebb4ab57d492c4e0b5ef14ed46758ce183684c",
+    "source_digest": "ba19c950e02ee21cf53b9c7393e226ad12952840ac08e6ed85aebd309e726f25",
     "schema_digest": "9f7ca1c347f0d401620474afbc2182fd5c3fe885857f372ceacafbd974681451",
     "write": false,
     "human_only": false,
@@ -1172,7 +1172,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "engineering-progress": {
     "ingress_key": "mcp-tool:engineering-progress",
     "source_locator": "mcp-server/src/engineering-runtime.js",
-    "source_digest": "7ab6d129320223217135434bd9ebb4ab57d492c4e0b5ef14ed46758ce183684c",
+    "source_digest": "ba19c950e02ee21cf53b9c7393e226ad12952840ac08e6ed85aebd309e726f25",
     "schema_digest": "9f7ca1c347f0d401620474afbc2182fd5c3fe885857f372ceacafbd974681451",
     "write": false,
     "human_only": false,
@@ -1182,7 +1182,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "engineering-writer-runtime-preflight": {
     "ingress_key": "mcp-tool:engineering-writer-runtime-preflight",
     "source_locator": "mcp-server/src/engineering-runtime.js",
-    "source_digest": "7ab6d129320223217135434bd9ebb4ab57d492c4e0b5ef14ed46758ce183684c",
+    "source_digest": "ba19c950e02ee21cf53b9c7393e226ad12952840ac08e6ed85aebd309e726f25",
     "schema_digest": "d746974fa9afd5e951f76f9af38954b0ad7f436f2120dc974da65e5ee39f856f",
     "write": false,
     "human_only": false,
@@ -3003,7 +3003,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "register-engineering-slice-plan": {
     "ingress_key": "mcp-tool:register-engineering-slice-plan",
     "source_locator": "mcp-server/src/engineering-runtime.js",
-    "source_digest": "7ab6d129320223217135434bd9ebb4ab57d492c4e0b5ef14ed46758ce183684c",
+    "source_digest": "ba19c950e02ee21cf53b9c7393e226ad12952840ac08e6ed85aebd309e726f25",
     "schema_digest": "bc4197a3208df401ee21893d2e064f2f6a54b8d304a419d7e462bafca47acfc6",
     "write": true,
     "human_only": false,
@@ -3248,7 +3248,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "review-engineering-slice": {
     "ingress_key": "mcp-tool:review-engineering-slice",
     "source_locator": "mcp-server/src/engineering-runtime.js",
-    "source_digest": "7ab6d129320223217135434bd9ebb4ab57d492c4e0b5ef14ed46758ce183684c",
+    "source_digest": "ba19c950e02ee21cf53b9c7393e226ad12952840ac08e6ed85aebd309e726f25",
     "schema_digest": "d3888d2c919455bb57d46773f03cf488a5264642a654026c549c8a5036bf0c97",
     "write": true,
     "human_only": false,
@@ -3528,7 +3528,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "source-merge-authority": {
     "ingress_key": "mcp-tool:source-merge-authority",
     "source_locator": "mcp-server/src/engineering-runtime.js",
-    "source_digest": "7ab6d129320223217135434bd9ebb4ab57d492c4e0b5ef14ed46758ce183684c",
+    "source_digest": "ba19c950e02ee21cf53b9c7393e226ad12952840ac08e6ed85aebd309e726f25",
     "schema_digest": "3a91a6b0c04b3e0a053fd67e9121700b3b4155aaf4547cfb94aa3c22a282cccf",
     "write": false,
     "human_only": false,

@@ -25,7 +25,6 @@ export function suiteBatches(files, browserFiles = []) {
 }
 
 async function main() {
-  const repo = path.dirname(ROOT);
   // Chrome's cold first launch must not compete with the bulk MCP test pool.
   // Keep the browser shim intact (its inventory test enforces all imports),
   // Run the timing-sensitive launch fixtures alone too, then run the rest
