@@ -85,6 +85,7 @@ def run_release_verify(payload: str, *, version: str = VERSION,
 def main() -> int:
     print("cloudflare-version-promotion-selftest: upload is not promotion")
     deploy = DEPLOY.read_text(encoding="utf-8")
+    uploader = (DEPLOY.parent.parent / 'tools/worker-upload-readback.py').read_text(encoding='utf-8')
     record = RECORD.read_text(encoding="utf-8")
     verifier = VERIFY_RELEASE.read_text(encoding="utf-8") if VERIFY_RELEASE.exists() else ""
 
@@ -124,12 +125,14 @@ def main() -> int:
     upload_body = upload.group("body") if upload else ""
     promote_body = promote.group("body") if promote else ""
 
-    check("2. upload invokes `wrangler versions upload`",
-          '"$WRANGLER" versions upload' in upload_body,
+    check("2. upload delegates to the reconciled versions uploader",
+          'tools/worker-upload-readback.py' in upload_body and '--upload-common-dir' in upload_body
+          and "[wrangler, 'versions', 'upload', *args]" in uploader,
           "provider upload block missing")
     check("2b. upload never activates traffic",
           "versions deploy" not in upload_body
-          and re.search(r'"\$WRANGLER"\s+deploy(?:\s|$)', upload_body) is None,
+          and re.search(r'"\$WRANGLER"\s+deploy(?:\s|$)', upload_body) is None
+          and "'deploy'" not in uploader,
           "upload block contains a traffic/source deploy command")
     check("2c. upload binds the returned version into the approval plan",
           "release-manifest.py\" bind-provider" in upload_body
@@ -137,7 +140,7 @@ def main() -> int:
           and "RELEASE_PLAN_HASH" in upload_body,
           "provider identity is not part of the post-upload approval hash")
     check("2d. upload reads only Wrangler's named Worker Version ID",
-          "Worker Version ID:" in upload_body,
+          "Worker Version ID:" in uploader,
           "an unrelated UUID in provider output could be promoted")
     check("3. promotion deploys the exact supplied version at 100 percent",
           '"$WRANGLER" versions deploy "${PROVIDER_VERSION_ID}@100" --yes' in promote_body,

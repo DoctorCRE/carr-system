@@ -167,6 +167,12 @@ with open(os.environ["FAKE_CALLS"], "a") as fh:
 url = next(a for a in argv if a.startswith("https://"))
 out = argv[argv.index("-o") + 1] if "-o" in argv else None
 authed = f"Authorization: Bearer {os.environ['FAKE_TOKEN']}" in stdin
+if "/workers/scripts/carr-mcp/versions?" in url:
+    if not authed:
+        sys.exit(22)
+    print(json.dumps({"success": True, "result": {"items":
+        [{"id": os.environ["FAKE_V1"]}] if state.get("uploaded") else []}}))
+    sys.exit(0)
 if "/workers/services/" in url:
     if not authed:
         sys.exit(22)
@@ -320,6 +326,7 @@ def run(source: str, *, tags: list[str], state: dict, toml: str | None = None,
         (tmp / "repo" / "ops").symlink_to(REPO / "ops")
         (tmp / "repo" / "lib").symlink_to(REPO / "lib")
         (tmp / "worker" / "wrangler.toml").write_text(toml, encoding="utf-8")
+        (tmp / "repo" / "wrangler.toml").write_text(toml, encoding="utf-8")
         for path, body in ((tmp / "bin" / "wrangler", FAKE_WRANGLER), (tmp / "bin" / "curl", FAKE_CURL),
                            (tmp / "repo" / "tools" / "ops-record.py", FAKE_OPS_RECORD),
                            (tmp / "repo" / "tools" / "release-manifest.py", FAKE_RELEASE_MANIFEST)):
@@ -353,7 +360,6 @@ def run(source: str, *, tags: list[str], state: dict, toml: str | None = None,
             "EXPECTED_SCHEMA_HIGHEST_MIGRATION": "0590_selftest.sql",
             "EXPECTED_SCHEMA_APPLIED_COUNT": "5",
             "CARR_READBACK_ATTEMPTS": "2", "CARR_READBACK_SLEEP": "0",
-            "CARR_UPLOAD_RETRY_SLEEP": "0",
             "FAKE_STATE": str(tmp / "state.json"), "FAKE_CALLS": str(calls),
             "FAKE_TOKEN": TOKEN, "FAKE_V0": V0, "FAKE_V1": V1, "FAKE_VS": VS,
             "REAL_OPS_RECORD": str(REPO / "tools" / "ops-record.py"),
@@ -447,7 +453,9 @@ def main() -> int:
     # A. current main: no [[migrations]] at all
     res = run(source, tags=[], state={})
     check("A. no declared migration: the ordinary upload is the candidate", res["rc"] == 0
-          and f"Worker Version ID: {V1}" in res["out"] and f"provider version: {V1}" in res["out"],
+          and len(wrangler_calls(res, "versions", "upload")) == 1
+          and wrangler_calls(res, "versions", "view", V1)
+          and f"provider version: {V1}" in res["out"],
           res["all"][-600:])
     check("A. no declared migration: no metadata or attachment read, no deploy, no record",
           services_reads(res) == 0 and attachment_reads(res) == 0 and not wrangler_calls(res, "deploy")
@@ -579,9 +587,14 @@ def main() -> int:
 
     for kind in ("network", "auth", "network_after_version"):
         res = run(source, tags=[], state={"upload_failures": [kind]})
-        check(f"U. {kind}: unverifiable upload stops after one write",
-              res["rc"] == 1 and len(wrangler_calls(res, "versions", "upload")) == 1
-              and "unverifiable" in res["err"], res["all"][-700:])
+        if kind == "network":
+            check("U. connectivity failure retries after verified absence",
+                  res["rc"] == 0 and len(wrangler_calls(res, "versions", "upload")) == 2,
+                  res["all"][-700:])
+        else:
+            check(f"U. {kind}: unverifiable upload stops after one write",
+                  res["rc"] == 1 and len(wrangler_calls(res, "versions", "upload")) == 1
+                  and "unverifiable" in res["err"], res["all"][-700:])
     res = run(source, tags=[TAG1], state={"applied_tag": TAG1},
               env_extra={"PROBE_TOKENS_FILE": "/private/probe-tokens.json"})
     uploads = wrangler_calls(res, "versions", "upload")
@@ -848,7 +861,7 @@ def main() -> int:
           and attachment_reads(res) == 0 and not wrangler_calls(res, "deploy"), res["all"][-600:])
 
     # E. source wiring
-    upload_at = source.index('VERSION_UPLOAD_OUTPUT="$("$WRANGLER" versions upload')
+    upload_at = source.index('PROVIDER_VERSION_ID="$("$PY" "$REPO/tools/worker-upload-readback.py"')
     call_at = source.rfind("\n  apply_pending_do_migration\n", 0, upload_at)
     branch_at = source.index('if [ "$VERSION_MODE" = "upload" ]; then\n  if [ -n "$FOUNDATION_ASSURANCE_STAGING_PROVIDER" ]')
     adopt_at = source.index('  if [ -n "$DO_MIGRATION_VERSION_ID" ]; then\n    PROVIDER_VERSION_ID="$DO_MIGRATION_VERSION_ID"\n  else\n')

@@ -42,6 +42,7 @@ from typing import Any, Callable, Iterable
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
+from tools.staging_database_credential import profile as staging_credential_profile
 from lib.credential_file import SOURCE_BYTES as CREDENTIAL_FILE_SOURCE_BYTES, credential, read_env_file  # noqa: E402
 from lib.github_reader import SOURCE_BYTES as GITHUB_READER_SOURCE_BYTES, GitHubReader, GitHubUnreadable  # noqa: E402
 from lib.secret_redaction import SOURCE_BYTES as REDACTION_SOURCE_BYTES, redact_text, sensitive_env_values  # noqa: E402
@@ -600,15 +601,16 @@ def blocker_loop(capability: str, detail: str, *, remedy: str = "", recovery: st
     """Route health repairs to their lane and credentials to their decider."""
     continuation = recovery or ("It stops at that step every tick until this "
                                 "exists; nothing is released meanwhile.")
-    health_repair = capability in {"health_baseline_hard_error", "health_baseline_stalled"}
-    if health_repair:
-        blocker_detail = f"The authorized release-repair lane must restore and verify the health baseline: {detail}"
+    release_repair = capability in {"health_baseline_hard_error", "health_baseline_stalled",
+                                  "staging_prerequisite_unavailable", "staging_authority_role_missing"}
+    if release_repair:
+        blocker_detail = f"The authorized release-repair lane must restore and verify the release prerequisite: {detail}"
     elif capability == CONTROLLER_STALE:
         blocker_detail = ("The canonical checkout's owner must commit or move its local changes so fleet-sync "
                           f"can fast-forward it to origin/main: {detail}")
     else:
         blocker_detail = f"Joe is the provisioning decider for the named unattended credential: {detail}; Joe grants it"
-    repair_lane = health_repair or capability == CONTROLLER_STALE
+    repair_lane = release_repair or capability == CONTROLLER_STALE
     args = {"kind": "open_loop", "owner": "Claude" if repair_lane else "Joe", "domain": "system", "marker": "none",
             "blocker": "other_lane" if repair_lane else "capability", "blocker_detail": blocker_detail,
             **({} if repair_lane else {"residue_kind": "provider_login",
@@ -834,9 +836,8 @@ class Pipeline:
         res.log = str(log)
         findings, complete = read_health_findings(res.out, findings_path)
         self.dependency_evidence[name] = evidence_digest({"rc": res.rc, "complete": complete, "findings": findings})
-        release_findings = [row for row in findings if row["key"] not in {
-            "studio_failover_evidence", "credential_health", "branch_janitor", "storage_capacity",
-            "repo_loose_work", "jev_call_receipt_integrity", "rule_enforcement", "feature_switch_retirement"}]
+        # The release scanner already excludes machine-wide watchdogs.
+        release_findings = [row for row in findings if row["key"] != "feature_switch_retirement"]
         if complete and findings and not release_findings and res.rc == 1:
             res.rc = 0
         return res, release_findings, complete
@@ -1272,17 +1273,37 @@ class Pipeline:
         """Probe live staging before setup; cache only source-bound authentication."""
         self.unattended_preflight(lane_cfg)
         self.deploy_env()
+        root = expand(self.cfg.get("credential_dir", "~/.config/carr"))
+        # Rollback always requires reader + writer. Migration-created profiles
+        # may legitimately be absent before their first cutover.
+        for label in ("reader", "writer"):
+            path = staging_credential_profile(label, config_root=root).paths.final
+            if not path.is_file():
+                raise Blocked("staging_credential_missing", f"staging {label} rollback credential file is absent",
+                              capability=f"staging_{label}_credential")
+        lane_state = state.setdefault("worker", {})
+        counters = lane_state.setdefault("staging_prerequisite_incomplete", {})
         try:
             staging = self.staging_ledger()
             if not staging.get("candidate"):
                 raise ValueError("configured staging candidate does not exist")
         except Exception as exc:
+            n = int(counters.get(sha, 0)) + 1
+            counters[sha] = n
+            if not self.dry_run:
+                self.store.save(state)
             raise Blocked("staging_prerequisite_unavailable",
-                          "staging writer endpoint/ledger read unavailable; no release setup ran") from exc
+                          f"staging writer endpoint/ledger read unavailable (attempt {n}); no release setup ran",
+                          capability="staging_prerequisite_unavailable" if n >= 3 else None) from exc
+        if counters.pop(sha, None) is not None and not self.dry_run:
+            self.store.save(state)
+        if staging.get("authority_role") is False:
+            raise Blocked("staging_authority_role_missing", "staging carr_authority_joe role is absent",
+                          capability="staging_authority_role_missing")
         self.dependency_evidence["staging-prerequisite"] = evidence_digest(staging)
-        root = expand(self.cfg.get("credential_dir", "~/.config/carr"))
         files = {}
-        for name in ("db.env", "mcp-tokens.env", CLOUDFLARE_TOKEN_FILE):
+        for name in ("db.env", "mcp-tokens.env", CLOUDFLARE_TOKEN_FILE,
+                     "staging-reader.env", "staging-writer.env"):
             try:
                 stat = (root / name).stat()
                 files[name] = [stat.st_dev, stat.st_ino, stat.st_mode, stat.st_size,
@@ -1643,7 +1664,7 @@ class Pipeline:
     # signal. An elapsed interval permits a fresh judgment, never a promotion.
     LIVE_REJECTIONS = frozenset({"github_unreadable", "bootstrap_unknown", "toolchain_integrity",
         "live_identity_unreadable", "credential_missing", "health_baseline_unavailable", "health_baseline_stalled", "staging_prerequisite_unavailable",
-        "health_baseline_hard_error"})
+        "health_baseline_hard_error", "staging_credential_missing", "staging_authority_role_missing"})
 
     def rejection_inputs(self, lane: str, base: str, sha: str) -> str:
         return evidence_digest({"candidate": sha, "base": base, "config": self.cfg,
@@ -1693,7 +1714,11 @@ class Pipeline:
             if row is None:
                 raise ValueError("missing ledger acknowledgement")
             ledger = module["exact_ledger"](cur) if row[0] is not None else None
-        return {"candidate": {key: getattr(candidate, key) for key in
+            cur.execute("select count(*) from pg_authid where rolname=%s", ("carr_authority_joe",))
+            role = cur.fetchone()
+            if role not in ((0,), (1,)):
+                raise ValueError("missing role-existence acknowledgement")
+        return {"authority_role": role == (1,), "candidate": {key: getattr(candidate, key) for key in
                 ("project_id", "branch_id", "endpoint_id", "endpoint_host")}, "ledger": ledger}
 
     def reconcile_staging_failure(self, state: dict, lane: str, base: str, repo_dir: Path) -> None:

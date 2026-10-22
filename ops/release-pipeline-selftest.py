@@ -386,6 +386,8 @@ class Fixture:
             "NEON_API_KEY='v'\nCARR_DB_JOBS_URL='v'\nCARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL='v'\n")
         (self.cred / "mcp-tokens.env").write_text("CARR_MCP_PROBE_TOKEN=v\n")
         (self.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
+        for filename in ('staging-reader.env', 'staging-writer.env'):
+            (self.cred / filename).touch()
         # A stub `.venv/bin/python`, matching the real checkout's layout, so
         # the fail-closed venv check added for the coordinator's dangling-
         # symlink fix (a real run found `ln -s` happily linking a MISSING
@@ -449,7 +451,7 @@ class Fixture:
                            call_verb=lambda verb, args: (verbs.append((verb, args)) or (True, {"ok": True})),
                            slice_marker=slice_marker, controller_blobs=loaded,
                            dry_run=dry_run, env=env, today="2026-09-30", out=lambda _s: None)
-        pipe.staging_ledger = lambda: {"candidate": "fixture", "ledger": {"fixture": "digest"}}
+        pipe.staging_ledger = lambda: {"candidate": "fixture", "ledger": {"fixture": "digest"}, "authority_role": True}
         pipe.sleep = lambda _seconds: None
         return pipe
 
@@ -472,6 +474,70 @@ class Base(unittest.TestCase):
 
 
 class EarlyWorkerPrerequisites(Base):
+    def test_missing_staging_rollback_files_stop_before_network_or_setup(self):
+        self.fx.commit({'mcp-server/src/a.js': '1'})
+        for filename in ('staging-reader.env', 'staging-writer.env'):
+            with self.subTest(filename=filename):
+                path = self.fx.cred / filename
+                path.touch()
+                path.unlink()
+                runner = FakeRunner()
+                pipe = self.fx.pipeline(runner)
+                pipe.staging_ledger = mock.Mock(side_effect=AssertionError('network ran'))
+                self.assertEqual(pipe.tick(['worker']), 3)
+                self.assertEqual(self.fx.records()[-1]['reason'], 'staging_credential_missing')
+                pipe.staging_ledger.assert_not_called()
+                self.assertNotIn('worktree', runner.names())
+                path.touch()
+
+    def test_absent_authority_role_blocks_before_setup(self):
+        self.fx.commit({'mcp-server/src/a.js': '1'})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner)
+        pipe.staging_ledger = lambda: {'candidate': 'fixture', 'ledger': {}, 'authority_role': False}
+        self.assertEqual(pipe.tick(['worker']), 3)
+        self.assertEqual(self.fx.records()[-1]['reason'], 'staging_authority_role_missing')
+        self.assertNotIn('worktree', runner.names())
+        self.assertNotIn('health-baseline', runner.names())
+
+    def test_repaired_role_or_file_is_rechecked_after_the_hold(self):
+        sha = self.fx.commit({'mcp-server/src/a.js': '1'})
+        live = {'sha': self.fx.base}
+        pipe = self.fx.pipeline(FakeRunner(live=live), live=live)
+        role = {'candidate': 'fixture', 'authority_role': False}
+        pipe.staging_ledger = lambda: dict(role)
+        pipe.now = lambda: 1000
+        self.assertEqual(pipe.tick(['worker']), 3)
+        rejection = self.fx.state()['worker']
+        rejection['rejection']['evidence'] = []
+        pipe.now = lambda: 2000
+        self.assertFalse(pipe.rejection_waits(rejection, 'worker', self.fx.base, sha))
+        role['authority_role'] = True
+        path = self.fx.cred / 'staging-reader.env'
+        path.unlink()
+        pipe.now = lambda: 10000
+        self.assertEqual(pipe.tick(['worker']), 3)
+        self.assertEqual(self.fx.records()[-1]['reason'], 'staging_credential_missing')
+        path.touch()
+        pipe.now = lambda: 20000
+        self.assertEqual(pipe.tick(['worker']), 0)
+        self.assertEqual(self.fx.records()[-1]['status'], 'shipped')
+
+    def test_staging_outage_escalates_once_then_recovers(self):
+        self.fx.commit({'mcp-server/src/a.js': '1'})
+        verbs = []
+        live = {'sha': self.fx.base}
+        pipe = self.fx.pipeline(FakeRunner(live=live), verbs=verbs, live=live)
+        pipe.staging_ledger = mock.Mock(side_effect=OSError('unavailable'))
+        for attempt in range(5):
+            pipe.now = lambda: attempt * 10000
+            self.assertEqual(pipe.tick(['worker']), 0 if attempt < 2 else 3)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0][1]['owner'], 'Claude')
+        pipe.staging_ledger = lambda: {'candidate': 'fixture', 'authority_role': True}
+        self.assertEqual(pipe.tick(['worker']), 0)
+        self.assertFalse(self.fx.state()['worker'].get('staging_prerequisite_incomplete'))
+
     def test_unreachable_staging_stops_before_worktree_or_baseline(self):
         target = self.fx.commit({'mcp-server/src/a.js': '1'})
         runner = FakeRunner()
@@ -1487,7 +1553,7 @@ class RejectionReconciliation(Base):
         module["derive_dsn"] = mock.Mock(return_value=module["SecretDsn"](scope, "private-dsn-canary"))
         cursor = mock.MagicMock()
         cursor.__enter__.return_value = cursor
-        cursor.fetchone.return_value = ("schema_migrations",)
+        cursor.fetchone.side_effect = [("schema_migrations",), (1,)]
         cursor.fetchall.return_value = [("0001_fixture.sql", "a" * 64)]
         conn = mock.MagicMock()
         conn.__enter__.return_value = conn
@@ -1496,6 +1562,9 @@ class RejectionReconciliation(Base):
         module["psycopg"] = psycopg
         with mock.patch.object(rp.runpy, "run_path", return_value=module):
             snapshot = rp.Pipeline.staging_ledger(self.pipe)
+        self.assertTrue(snapshot['authority_role'])
+        cursor.execute.assert_any_call('select count(*) from pg_authid where rolname=%s', ('carr_authority_joe',))
+        self.assertNotIn('rolpassword', str(cursor.execute.call_args_list))
         digest = rp.evidence_digest(snapshot)
         self.assertRegex(digest, r"^[0-9a-f]{64}$")
         self.assertEqual(snapshot["ledger"]["migration_ledger"], {"0001_fixture.sql": "a" * 64})
@@ -3315,9 +3384,7 @@ def _finding(key, detail, *, subject="", count=1, hard_error=False, time_rolling
             "hard_error": hard_error, "time_rolling": time_rolling}
 
 
-RULE_GAPS_98 = _finding("rule_enforcement", "98 active rule gaps", count=98)
-RULE_GAPS_97 = _finding("rule_enforcement", "97 active rule gaps", count=97)
-RULE_GAPS_99 = _finding("rule_enforcement", "99 active rule gaps", count=99)
+RETIREMENT = _finding("feature_switch_retirement", "switch retirement overdue")
 
 
 def scheduled_job_findings(snapshot):
@@ -3390,12 +3457,10 @@ class HealthCompleteMarkerDoesNotDrift(unittest.TestCase):
 
 
 class ReleaseHealthScope(Base):
-    def test_unrelated_machine_errors_do_not_block_the_release(self):
+    def test_retirement_hygiene_does_not_block_scoped_release_health(self):
         target = self.fx.commit({'mcp-server/src/a.js': '1'})
         unrelated = [_finding(key, 'unrelated machine finding', hard_error=True)
-                     for key in ('studio_failover_evidence', 'credential_health',
-                                 'branch_janitor', 'storage_capacity', 'repo_loose_work',
-                                 'jev_call_receipt_integrity')]
+                     for key in ('feature_switch_retirement',)]
         live = {'sha': self.fx.base}
         runner = FakeRunner(live=live, health_baseline_findings=unrelated,
                             health_findings=unrelated)
@@ -3405,6 +3470,12 @@ class ReleaseHealthScope(Base):
         self.assertEqual(live['sha'], target)
         commands = [a for n, a in runner.calls if n in ('health-baseline', 'health')]
         self.assertTrue(all('--section' in a and a[a.index('--section') + 1] == 'release' for a in commands))
+
+    def test_unexpected_scanner_finding_is_fail_closed(self):
+        self.fx.commit({'mcp-server/src/a.js': '1'})
+        runner = FakeRunner(health_baseline_findings=[_finding('rule_enforcement', 'unexpected scanner output', hard_error=True)])
+        self.assertEqual(self.fx.pipeline(runner).tick(['worker']), 3)
+        self.assertNotIn('promote', runner.names())
 
     def test_unexplained_baseline_failure_blocks_before_any_apply(self):
         self.fx.commit({'mcp-server/src/a.js': '1'})
@@ -3459,8 +3530,8 @@ class HealthGate(Base):
     def test_standing_finding_present_before_and_after_does_not_fail(self):
         self.fx.commit({"mcp-server/src/a.js": "1"})
         live = {"sha": self.fx.base}
-        runner = FakeRunner(live=live, health_baseline_findings=[RULE_GAPS_98],
-                            health_findings=[RULE_GAPS_98])
+        runner = FakeRunner(live=live, health_baseline_findings=[RETIREMENT],
+                            health_findings=[RETIREMENT])
         self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
         self.assertIn("health-baseline", runner.names())
         self.assertIn("health", runner.names())
@@ -3470,8 +3541,8 @@ class HealthGate(Base):
         new_finding = _finding("feature_switch_pending_deploy", "required verb absent (latest status failed)",
                                subject="vendors.xlsx")
         live = {"sha": self.fx.base}
-        runner = FakeRunner(live=live, health_baseline_findings=[RULE_GAPS_98],
-                            health_findings=[RULE_GAPS_98, new_finding])
+        runner = FakeRunner(live=live, health_baseline_findings=[RETIREMENT],
+                            health_findings=[RETIREMENT, new_finding])
         self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 1)
         rec = self.fx.records()[-1]
         self.assertEqual(rec["step"], "health")
@@ -3481,7 +3552,7 @@ class HealthGate(Base):
         self.assertTrue(findings_log.name.endswith("health-new-findings.log"))
         text = findings_log.read_text()
         self.assertIn("feature_switch_pending_deploy", text)
-        self.assertNotIn("rule_enforcement", text)  # the unchanged standing finding is NOT dumped in
+        self.assertNotIn("feature_switch_retirement", text)
 
     def test_an_unavailable_live_read_is_never_a_pass_even_with_no_findings(self):
         self.fx.commit({"mcp-server/src/a.js": "1"})
@@ -3504,7 +3575,7 @@ class HealthGate(Base):
         self.fx.commit({"mcp-server/src/a.js": "1"})
         live = {"sha": self.fx.base}
         runner = FakeRunner(live=live, health_baseline_marker=False,
-                            health_findings=[RULE_GAPS_98])
+                            health_findings=[RETIREMENT])
         self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
         self.assertEqual(self.fx.records()[-1]["status"], "blocked")
         self.assertEqual(self.fx.records()[-1]["reason"], "health_baseline_unavailable")
@@ -5501,7 +5572,7 @@ class DeployCredential(unittest.TestCase):
         self.cred = self.home / ".config" / "carr"
         self.cred.mkdir(parents=True)
         self.fx = Fixture(tmp)
-        for name in ("db.env", "mcp-tokens.env"):
+        for name in ("db.env", "mcp-tokens.env", "staging-reader.env", "staging-writer.env"):
             (self.cred / name).write_text((self.fx.cred / name).read_text())
         self._home = mock.patch.dict(os.environ, {"HOME": str(self.home)})
         self._home.start()

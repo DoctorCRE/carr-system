@@ -1608,43 +1608,14 @@ if (live.get("git_sha") or {}).get("value")!=sha or (live.get("worker_version") 
     else
       set --
     fi
-    set +e
+    UPLOAD_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)" \
+      || fail "upload lock storage is unavailable; refusing upload."
     PROVIDER_VERSION_ID="$("$PY" "$REPO/tools/worker-upload-readback.py" --wrangler "$WRANGLER" \
-      --sha "$HEAD_SHA" --digest "$CANDIDATE_MANIFEST_DIGEST")"
-    READBACK_RC=$?
-    set -e
-    if [ "$READBACK_RC" -eq 0 ]; then
-      [ -z "$PROBE_TOKENS_FILE" ] || fail "existing candidate cannot attest requested probe secret rotation."
-      echo "  reconciled already-published candidate $PROVIDER_VERSION_ID"
-    elif [ "$READBACK_RC" -eq 3 ]; then
-      UPLOAD_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)" \
-        || fail "upload claim storage is unavailable; refusing upload."
-      UPLOAD_CLAIMS="$UPLOAD_COMMON_DIR/carr-upload-claims"
-      mkdir -p "$UPLOAD_CLAIMS"
-      mkdir "$UPLOAD_CLAIMS/$CANDIDATE_MANIFEST_DIGEST" 2>/dev/null \
-        || fail "a prior upload was claimed but cannot be reconciled; refusing a second upload."
-      set +e
-      VERSION_UPLOAD_OUTPUT="$("$WRANGLER" versions upload "$@" --tag "carr-$HEAD_SHA" --var "GIT_SHA:$HEAD_SHA" \
-        --var "CANDIDATE_MANIFEST:$CANDIDATE_MANIFEST" \
-        --var "CANDIDATE_MANIFEST_DIGEST:$CANDIDATE_MANIFEST_DIGEST" 2>&1)"
-      VERSION_UPLOAD_RC=$?
-      set -e
-      printf '%s\n' "$VERSION_UPLOAD_OUTPUT"
-      PROVIDER_VERSION_ID="$(printf '%s\n' "$VERSION_UPLOAD_OUTPUT" \
-        | sed -nE 's/^.*Worker Version ID:[[:space:]]*([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}).*$/\1/p' \
-        | tail -n 1 | tr 'A-F' 'a-f')"
-      if [ -n "$PROVIDER_VERSION_ID" ]; then
-        PROVIDER_VERSION_ID="$("$PY" "$REPO/tools/worker-upload-readback.py" --wrangler "$WRANGLER" \
-          --sha "$HEAD_SHA" --digest "$CANDIDATE_MANIFEST_DIGEST" --version "$PROVIDER_VERSION_ID")" \
-          || fail "uploaded provider version identity is unverifiable; upload will not be repeated."
-      else
-        PROVIDER_VERSION_ID="$("$PY" "$REPO/tools/worker-upload-readback.py" --wrangler "$WRANGLER" \
-          --sha "$HEAD_SHA" --digest "$CANDIDATE_MANIFEST_DIGEST")" \
-          || fail "upload outcome is unverifiable (exit $VERSION_UPLOAD_RC); upload will not be repeated."
-      fi
-    else
-      fail "provider readback is unavailable; refusing upload."
-    fi
+      --sha "$HEAD_SHA" --digest "$CANDIDATE_MANIFEST_DIGEST" \
+      --upload-common-dir "$UPLOAD_COMMON_DIR" -- "$@" --tag "carr-$HEAD_SHA" --var "GIT_SHA:$HEAD_SHA" \
+      --var "CANDIDATE_MANIFEST:$CANDIDATE_MANIFEST" \
+      --var "CANDIDATE_MANIFEST_DIGEST:$CANDIDATE_MANIFEST_DIGEST")" \
+      || fail "provider upload/readback failed closed; no candidate was accepted."
   fi
   if [ -n "$FOUNDATION_ASSURANCE_STAGING_PROVIDER" ]; then
     WR95_FINAL_VERSION_JSON="$(mktemp "${TMPDIR:-/tmp}/wr95-final-version.XXXXXX")"
