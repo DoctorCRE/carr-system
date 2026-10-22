@@ -166,7 +166,7 @@ class FakeRunner:
             lines.append(rp.HEALTH_COMPLETE_MARKER)
         return "\n".join(lines) + ("\n" if lines else "")
 
-    def run(self, argv, *, cwd, log, env, timeout=3600):
+    def run(self, argv, *, cwd, log, env, timeout=3600, read_only=()):
         stem = log.stem
         name = stem.split("-", 1)[1] if stem[:2].isdigit() else stem
         self.calls.append((name, list(argv)))
@@ -260,8 +260,8 @@ def install_toolchain_wrangler(repo: Path) -> Path:
 class InstallingRunner(FakeRunner):
     """FakeRunner whose `wrangler-install` step writes the binary, as npm ci does."""
 
-    def run(self, argv, *, cwd, log, env, timeout=3600):
-        res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+    def run(self, argv, *, cwd, log, env, timeout=3600, read_only=()):
+        res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout, read_only=read_only)
         if log.stem.endswith("wrangler-install") and res.rc == 0:
             bin_ = Path(cwd) / "node_modules/.bin/wrangler"
             bin_.parent.mkdir(parents=True, exist_ok=True)
@@ -774,18 +774,17 @@ class LegacyHealthPromotion(Base):
         pipe.store.save(state)
         source_only = self.fx.commit({'docs/after-health.md': 'source only'})
         self.assertEqual(pipe.tick(['worker']), 0)
-        self.assertEqual(pipe.store.load()['worker']['last_released_sha'], source_only)
+        self.assertEqual(pipe.store.load()['worker']['last_released_sha'], row['sha'])
+        self.assertEqual(pipe.store.load()['worker']['last_evaluated_sha'], source_only)
         self.assertEqual(pipe.store.records()[-1]['status'], 'no_release_needed')
         self.assertEqual(pipe.store.load()['worker']['failed_step'], 'health')
         self.assertEqual(runner.calls, [])
+        for _ in range(10):
+            self.assertEqual(pipe.tick(['worker']), 0)
         target = self.fx.commit({'mcp-server/src/a.js': 'health repair'})
         self.assertEqual(pipe.tick(['worker']), 0, pipe.store.records()[-1])
         receipts = [r for r in pipe.store.records() if r['status'] == 'live_identity_reconciled']
-        self.assertEqual(len(receipts), 1)
-        self.assertEqual(receipts[0]['from_sha'], source_only)
-        self.assertEqual(receipts[0]['sha'], row['sha'])
-        self.assertEqual(receipts[0]['legacy_promotion']['promotion_receipt_digest'],
-                         rp.evidence_digest(pipe.store.records()[0]))
+        self.assertEqual(receipts, [])
         self.assertEqual(runner.names().count('upload'), 1)
         self.assertEqual(runner.names().count('promote'), 1)
         self.assertIn('health-baseline', runner.names())
@@ -1007,6 +1006,22 @@ class LegacyHealthPromotion(Base):
 
 
 class WorkerIdentityReconciliation(Base):
+    def test_repointing_live_to_older_source_reevaluates_unchanged_main(self):
+        released = self.fx.commit({"mcp-server/src/a.js": "release"})
+        head = self.fx.commit({"docs/source-only.md": "evaluated"})
+        live = {"sha": released}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": released}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        live["sha"] = self.fx.base
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertIn("promote", runner.names())
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], head)
+        reconciles = [row for row in self.fx.records() if row["status"] == "live_identity_reconciled"]
+        self.assertEqual([(row["from_sha"], row["sha"]) for row in reconciles], [(released, self.fx.base)])
+
     def failed_worker_readback(self):
         latest = self.fx.commit({'mcp-server/src/a.js': 'legacy promoted'})
         live = {'sha': latest, 'version': VERSION}
@@ -1817,6 +1832,17 @@ class CheckpointOwnership(unittest.TestCase):
 
 
 class ReleaseJournalRecovery(Base):
+    def test_source_evaluation_after_retirement_does_not_hide_a_later_live_rollback(self):
+        prior, promoted, head, live, runner, restart = self.rollback_revert_case()
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_evaluated_sha"], head)
+        self.assertEqual(self.fx.state()["worker"]["last_evaluated_from"], prior)
+        promotions = runner.names().count("promote")
+        live.update(sha=self.fx.base, version=PRIOR)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(runner.names().count("promote"), promotions + 1)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], head)
+
     def rollback_revert_case(self):
         prior = self.fx.commit({"mcp-server/src/a.js": "baseline"})
         live = {"sha": self.fx.base, "version": PRIOR}
@@ -1838,7 +1864,8 @@ class ReleaseJournalRecovery(Base):
         self.assertEqual(restart().tick(["worker"]), 0)
         self.assertEqual(len(runner.calls), before)
         state = self.fx.state()["worker"]
-        self.assertEqual(state["last_released_sha"], reverted)
+        self.assertEqual(state["last_released_sha"], prior)
+        self.assertEqual(state["last_evaluated_sha"], reverted)
         self.assertNotIn("pending_promotion", state)
         retired = [row for row in self.fx.records() if row["status"] == "promotion_retired"]
         self.assertEqual([row["sha"] for row in retired], [promoted])
@@ -1866,7 +1893,7 @@ class ReleaseJournalRecovery(Base):
         original = pipe.store.save
 
         def save(state):
-            if state["worker"].get("last_released_sha") == reverted:
+            if not state["worker"].get("pending_promotion"):
                 raise RecoveryCrash()
             original(state)
 
@@ -1876,7 +1903,8 @@ class ReleaseJournalRecovery(Base):
         self.assertEqual(state["last_released_sha"], prior)
         self.assertEqual(state["pending_promotion"]["sha"], promoted)
         self.assertEqual(restart().tick(["worker"]), 0)
-        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], reverted)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], prior)
+        self.assertEqual(self.fx.state()["worker"]["last_evaluated_sha"], reverted)
         self.assertNotIn("pending_promotion", self.fx.state()["worker"])
         self.assertEqual(len([row for row in self.fx.records() if row["status"] == "promotion_retired"]), 1)
 
@@ -1891,7 +1919,8 @@ class ReleaseJournalRecovery(Base):
         self.assertFalse([row for row in self.fx.records() if row["status"] == "promotion_retired"])
         live["version"] = PRIOR
         self.assertEqual(restart().tick(["worker"]), 0)
-        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], reverted)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], prior)
+        self.assertEqual(self.fx.state()["worker"]["last_evaluated_sha"], reverted)
 
     def test_late_acknowledgement_of_retired_promotion_still_allows_newer_fix(self):
         prior, promoted, reverted, live, runner, restart = self.rollback_revert_case()
@@ -2259,7 +2288,8 @@ class ReleaseJournalRecovery(Base):
                 with mock.patch.object(again, "release_target", return_value=latest):
                     self.assertEqual(again.tick(["worker"]), 0)
                 self.assertEqual(len(runner.calls), before)
-                self.assertEqual(self.fx.state()["worker"].get("last_released_sha"), head)
+                self.assertEqual(self.fx.state()["worker"].get("last_released_sha"), latest)
+                self.assertEqual(self.fx.state()["worker"].get("last_evaluated_sha"), head)
                 self.assertEqual(self.fx.state()["worker"]["failed_sha"], latest)
                 self.assertFalse([row for row in self.fx.records() if row.get("lane") == "worker" and row["status"] == "shipped"])
 
@@ -2427,6 +2457,84 @@ class ReleaseJournalRecovery(Base):
 
 
 class Batching(Base):
+    def test_legacy_evaluated_head_without_a_base_is_reevaluated(self):
+        head = self.fx.commit({"mcp-server/src/a.js": "release"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base, "last_evaluated_sha": head}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertIn("promote", runner.names())
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], head)
+
+    def test_evaluated_head_still_reports_an_unchanged_rejection(self):
+        head = self.fx.commit({"docs/source-only.md": "evaluated"})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner)
+        state = {"worker": {"last_released_sha": self.fx.base,
+                            "last_evaluated_sha": head, "last_evaluated_from": self.fx.base}}
+        pipe.remember_rejection(state, "worker", self.fx.base, head, "canary_pending")
+        output = []
+        pipe.out = output.append
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertTrue(any("unchanged rejection" in line for line in output), output)
+        self.assertEqual(runner.calls, [])
+
+    def test_evaluated_head_with_repaired_prerequisite_retries(self):
+        head = self.fx.commit({"mcp-server/src/a.js": "release"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base,
+                                   "last_evaluated_sha": head, "last_evaluated_from": self.fx.base,
+                                   "failed_sha": head, "failed_step": "venv-source-missing"}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertIn("promote", runner.names())
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], head)
+
+    def test_clear_failed_retries_an_evaluated_head_without_a_new_merge(self):
+        head = self.fx.commit({"mcp-server/src/a.js": "release"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base,
+                                   "last_evaluated_sha": head,
+                                   "last_evaluated_from": self.fx.base,
+                                   "failed_sha": head, "failed_step": "upload"}})
+        rp.clear_failed(pipe.store, "worker", head, "repair verified", repo_dir=self.fx.repo)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertIn("promote", runner.names())
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], head)
+
+    def test_evaluated_head_still_reports_its_recorded_failure(self):
+        head = self.fx.commit({"mcp-server/src/a.js": "release"})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base,
+                                   "last_evaluated_sha": head,
+                                   "last_evaluated_from": self.fx.base,
+                                   "failed_sha": head, "failed_step": "upload"}})
+        output = []
+        pipe.out = output.append
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertTrue(any("failed at upload" in line for line in output), output)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], head)
+        self.assertEqual(runner.calls, [])
+
+    def test_evaluated_head_releases_again_after_checkpoint_moves_backward(self):
+        released = self.fx.commit({"mcp-server/src/a.js": "release"})
+        head = self.fx.commit({"docs/source-only.md": "evaluated"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base,
+                                   "last_evaluated_sha": head,
+                                   "last_evaluated_from": released}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertIn("promote", runner.names())
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], head)
+        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
+
     def test_offline_live_poll_never_waits_on_the_wall_clock(self):
         with mock.patch.object(rp.time, "sleep", side_effect=AssertionError("real sleep in offline fixture")):
             pipe = self.fx.pipeline(FakeRunner())
@@ -2514,6 +2622,25 @@ class Batching(Base):
         started.wait.assert_not_called()
         started.communicate.assert_not_called()
 
+    def test_ten_noop_ticks_preserve_deployed_identity_without_reconciliation(self):
+        latest = self.fx.commit({"docs/source-only.md": "evaluated source"})
+        runner = FakeRunner()
+        restart = lambda: self.fx.pipeline(runner)
+        restart().store.save({"worker": {"last_released_sha": self.fx.base}})
+        self.assertEqual(restart().tick(["worker"]), 0)
+        for _ in range(10):
+            self.assertEqual(restart().tick(["worker"]), 0)
+        records = self.fx.records()
+        reconciles = [row for row in records if row["status"] == "live_identity_reconciled"]
+        advances = [row for row in records if row["status"] == "no_release_needed"]
+        self.assertEqual(len(reconciles), 0)
+        self.assertEqual(len(advances), 1)
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["last_released_sha"], self.fx.base)
+        self.assertEqual(state["last_evaluated_sha"], latest)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.slice_marks, [])
+
     def test_doc_only_batch_advances_without_release(self):
         latest = self.fx.commit({"docs/n.md": "3", "mcp-server/test/x.test.mjs": "t"})
         runner = FakeRunner()
@@ -2521,7 +2648,8 @@ class Batching(Base):
         pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
         self.assertEqual(pipe.tick(["worker"]), 0)
         self.assertEqual(runner.calls, [])
-        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(self.fx.state()["worker"]["last_evaluated_sha"], latest)
         self.assertEqual(self.fx.records()[-1]["status"], "no_release_needed")
 
     def test_unicode_named_worker_source_is_not_skipped_as_docs_only(self):
@@ -4387,7 +4515,7 @@ class CandidateStaging(Base):
         owner = self
 
         class Provider:
-            def run(self, argv, *, cwd, log, env, timeout=3600):
+            def run(self, argv, *, cwd, log, env, timeout=3600, read_only=()):
                 owner.calls.append((log.stem, list(argv), dict(env)))
                 if argv[0] == "git":
                     proc = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True)
@@ -4600,7 +4728,7 @@ fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
   ', process.env.CLOUDFLARE_API_TOKEN || "none"); console.log("Worker Version ID: VERSION")');
 """.replace("VERSION", VERSION)
 
-        def run(argv, *, cwd, log, env, timeout=3600):
+        def run(argv, *, cwd, log, env, timeout=3600, read_only=()):
             if argv == ["npm", "run", "build"]:
                 build_observations.append((dict(env), list(cwd.glob("wrangler.*"))))
                 result = real.run([node, "-e", payload, str(marker)], cwd=cwd, log=log, env=env)
@@ -4612,7 +4740,7 @@ fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
                 self.assertEqual(result.rc, 0, result.out)
                 config = Path(argv[argv.index("--config") + 1]).read_text()
                 self.assertEqual(json.loads(config)["env"]["staging"]["name"], "trusted-staging")
-            return original(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+            return original(argv, cwd=cwd, log=log, env=env, timeout=timeout, read_only=read_only)
 
         pipe.env.update({"NODE_OPTIONS": "candidate-option", "NPM_CONFIG_USERCONFIG": "deploy-config",
                          "ARBITRARY_DEPLOY_SECRET": "synthetic"})
@@ -4904,6 +5032,39 @@ class AppLane(Base):
         cfg = self.fx.config()
         cfg["app"]["enabled"] = True
         return cfg
+
+    def test_unevaluated_base_still_blocks_an_unreceipted_live_target(self):
+        head = self.fx.commit({"src/worker.js": "release"})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, cfg=self.cfg())
+        pipe.http = lambda _url: {"source_commit": head, "environment": "production"}
+        pipe.store.save({"app": {"last_released_sha": self.fx.base,
+                                "last_evaluated_sha": head, "last_evaluated_from": head}})
+        self.assertEqual(pipe.tick(["app"]), 0)
+        self.assertEqual([row.get("reason") for row in self.fx.records()], ["live_target_unreceipted"])
+        self.assertEqual(self.fx.state()["app"]["last_released_sha"], self.fx.base)
+        self.assertEqual(runner.calls, [])
+
+    def test_source_only_noop_ticks_do_not_poll_live_http(self):
+        head = self.fx.commit({"docs/app-source-only.md": "evaluated"})
+        runner = FakeRunner()
+        http = mock.Mock(return_value={"source_commit": self.fx.base, "environment": "production"})
+
+        def restart():
+            pipe = self.fx.pipeline(runner, cfg=self.cfg())
+            pipe.http = http
+            return pipe
+
+        restart().store.save({"app": {"last_released_sha": self.fx.base}})
+        self.assertEqual(restart().tick(["app"]), 0)
+        http.assert_called_once()
+        http.reset_mock()
+        for _ in range(10):
+            self.assertEqual(restart().tick(["app"]), 0)
+        http.assert_not_called()
+        self.assertEqual(self.fx.state()["app"]["last_evaluated_sha"], head)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(len([row for row in self.fx.records() if row["status"] == "no_release_needed"]), 1)
 
     def test_app_build_toolchain_tampering_refuses_production_publication(self):
         self.fx.commit({"src/worker.js": "new main"})
@@ -6312,7 +6473,7 @@ class SchemaSnapshotGhRunner(FakeRunner):
         self.list_rc = list_rc
         self.closed: list[tuple[int, str]] = []
 
-    def run(self, argv, *, cwd, log, env, timeout=3600):
+    def run(self, argv, *, cwd, log, env, timeout=3600, read_only=()):
         if argv[:3] == ["gh", "pr", "list"]:
             self.calls.append(("gh-pr-list", list(argv)))
             assert "isCrossRepository" in argv[argv.index("--json") + 1], "fork flag not requested"
@@ -6335,7 +6496,7 @@ class SchemaSnapshotGhRunner(FakeRunner):
         if argv[:3] == ["git", "status", "--porcelain"] and log.stem.endswith("schema-diff"):
             self.calls.append(("schema-diff", list(argv)))
             return rp.Result(0, " M db/schema.sql\n")      # the shadow rewrote the snapshot
-        res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+        res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout, read_only=read_only)
         if log.stem.endswith("schema-pr") and res.rc == 0:
             self.open_prs[self.new_pr] = argv[argv.index("--head") + 1]
             if self.pr_create_out is not None:
@@ -6353,9 +6514,9 @@ class RealGitRunner(FakeRunner):
         self.schema = schema            # what bin/migrate-prod.sh dumps from production
         self.shadow_schema = schema if shadow_schema is None else shadow_schema   # what the PG 18 shadow writes
 
-    def run(self, argv, *, cwd, log, env, timeout=3600):
+    def run(self, argv, *, cwd, log, env, timeout=3600, read_only=()):
         if argv[0] != "git":
-            res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+            res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout, read_only=read_only)
             if log.stem.endswith("migrate-apply"):
                 (Path(cwd) / "db/schema.sql").write_text(self.schema)
             if log.stem.endswith("schema-shadow"):
@@ -6375,7 +6536,7 @@ class ExactMainAppGuardRunner(RealGitRunner):
         self.guard_observations = []
         self.live = kw.get("live")
 
-    def run(self, argv, *, cwd, log, env, timeout=3600):
+    def run(self, argv, *, cwd, log, env, timeout=3600, read_only=()):
         if argv[:2] == ["node", "scripts/release-production.mjs"]:
             head = git(Path(cwd), "rev-parse", "HEAD")
             tracking = git(Path(cwd), "rev-parse", "refs/remotes/origin/main")
@@ -6386,8 +6547,8 @@ class ExactMainAppGuardRunner(RealGitRunner):
             if isinstance(self.live, dict):
                 self.live["source_commit"] = head
                 self.live["environment"] = "production"
-            return super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
-        result = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+            return super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout, read_only=read_only)
+        result = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout, read_only=read_only)
         if log.stem.endswith("app-build") and self.on_build is not None:
             self.on_build()
         return result
@@ -6600,6 +6761,148 @@ class TokenCheckWrangler(Base):
 
     def toolchain(self) -> Path:
         return self.fx.repo / "out/release-pipeline/toolchain"
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS release host sandbox")
+    def test_cf_cache_uses_run_directory_without_changing_pinned_contents(self):
+        home = self.fx.wrangler.parents[2]
+        self.fx.wrangler.write_text(
+            f"#!{sys.executable}\n"
+            "import json, os\nfrom pathlib import Path\n"
+            "override = os.environ.get('CLOUDFLARE_CF_FETCH_PATH')\n"
+            "cache = os.environ.get('MINIFLARE_CACHE_DIR')\n"
+            "modules = Path('node_modules/.mf')\n"
+            "local = Path('.wrangler/cache')\n"
+            "default = modules if modules.exists() or (not local.exists() and Path('node_modules').exists()) else local\n"
+            "path = Path(override) if override else (Path(cache) / 'cf.json' if cache else default / 'cf.json')\n"
+            "path.parent.mkdir(parents=True, exist_ok=True)\n"
+            "path.write_text('{}')\n"
+            "print(json.dumps({'cache': str(path.resolve()), 'env': dict(os.environ)}))\n")
+        receipt = home.with_name(home.name + ".sha256")
+        receipt.write_text(rp.toolchain_digest(home) + "\n")
+        recorded = receipt.read_text()
+        pipe = self.fx.pipeline(rp.Runner())
+        wrangler = pipe.auth_wrangler()
+        settings = {"XDG_CONFIG_HOME": str(self.fx.tmp / "config"),
+                    "XDG_CACHE_HOME": str(self.fx.tmp / "cache"),
+                    "TMPDIR": str(self.fx.tmp / "tmp")}
+        pipe.env.update(settings)
+        result = pipe.step("wrangler-auth", [str(wrangler), "whoami"], home)
+        observed = json.loads(result.out)
+        self.assertTrue(Path(observed["cache"]).is_relative_to(pipe.run_dir.resolve()))
+        self.assertEqual(observed["env"]["HOME"], pipe.env["HOME"])
+        for name in ("MINIFLARE_CACHE_DIR", "CLOUDFLARE_CF_FETCH_PATH", "WRANGLER_CACHE_DIR",
+                     "WRANGLER_LOG_PATH"):
+            self.assertTrue(Path(observed["env"][name]).resolve().is_relative_to(pipe.run_dir.resolve()), name)
+        for name, value in settings.items():
+            self.assertEqual(observed["env"][name], value, name)
+        self.assertFalse((home / "node_modules/.mf").exists())
+        self.assertEqual(rp.toolchain_digest(home), recorded.strip())
+        self.assertEqual(receipt.read_text(), recorded)
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS release host sandbox")
+    def test_wrangler_child_cannot_write_into_pinned_install_even_if_it_ignores_cache_env(self):
+        home = self.fx.wrangler.parents[2]
+        self.fx.wrangler.write_text(
+            f"#!{sys.executable}\n"
+            "import subprocess, sys\n"
+            "subprocess.run([sys.executable, '-c', \"from pathlib import Path; import sys; Path(sys.argv[1]).write_text('drift')\", sys.argv[1]], check=True)\n")
+        receipt = home.with_name(home.name + ".sha256")
+        receipt.write_text(rp.toolchain_digest(home) + "\n")
+        recorded = receipt.read_text()
+        pipe = self.fx.pipeline(rp.Runner())
+        wrangler = pipe.auth_wrangler()
+        for target in (home / "node_modules/injected.js", wrangler, receipt):
+            with self.subTest(target=target):
+                with self.assertRaises(rp.StepFailed):
+                    pipe.step("wrangler-auth", [str(wrangler), str(target)], home)
+                self.assertEqual(rp.toolchain_digest(home), recorded.strip())
+                self.assertEqual(receipt.read_text(), recorded)
+
+    def test_unavailable_write_sandbox_refuses_before_starting_wrangler(self):
+        pipe = self.fx.pipeline(rp.Runner())
+        wrangler = pipe.auth_wrangler()
+        with mock.patch.object(rp.sys, "platform", "linux"), \
+                mock.patch.object(rp.subprocess, "run") as command:
+            with self.assertRaises(rp.Blocked) as refusal:
+                pipe.step("wrangler-auth", [str(wrangler), "whoami"], self.fx.repo)
+        self.assertEqual(refusal.exception.reason, "toolchain_write_isolation")
+        command.assert_not_called()
+
+    def test_runtime_cache_link_into_pinned_install_refuses_before_any_write(self):
+        pipe = self.fx.pipeline(rp.Runner())
+        wrangler = pipe.auth_wrangler()
+        home = wrangler.parents[2]
+        recorded = rp.toolchain_digest(home)
+        root = pipe.run_dir / "runtime"
+        root.mkdir(parents=True)
+        (root / "miniflare").symlink_to(home, target_is_directory=True)
+        with self.assertRaises(rp.Blocked) as refusal:
+            pipe.step("wrangler-auth", [str(wrangler), "whoami"], self.fx.repo)
+        self.assertEqual(refusal.exception.reason, "toolchain_runtime_path")
+        self.assertEqual(rp.toolchain_digest(home), recorded)
+
+    def test_git_and_github_steps_keep_their_existing_login_configuration(self):
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner)
+        for command in ("git", "gh"):
+            pipe.step("schema-" + command, [command, "--version"], self.fx.repo)
+            observed = runner.envs["schema-" + command]
+            for name in ("HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "TMPDIR", "GH_CONFIG_DIR"):
+                self.assertEqual(observed.get(name), pipe.env.get(name), name)
+
+    def test_non_wrangler_steps_preserve_home_for_nested_git_and_github(self):
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner)
+        home = self.fx.repo / "login-home"
+        (home / ".wrangler").mkdir(parents=True)
+        pipe.env["HOME"] = str(home)
+        for index, argv in enumerate((
+                ["./run.sh", "health"], ["npm", "ci"],
+                ["bin/deploy-worker.sh"], ["python", "ops/smoke.py"])):
+            name = f"home-check-{index}"
+            pipe.step(name, argv, self.fx.repo)
+            self.assertEqual(runner.envs[name]["HOME"], str(home), argv)
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS release host sandbox")
+    def test_wrapped_step_keeps_global_git_url_rewrite_for_nested_fetch(self):
+        home = self.fx.repo / "login-home"
+        config = home / ".config/git/config"
+        config.parent.mkdir(parents=True)
+        config.write_text(f'[url "{self.fx.origin.as_uri()}"]\n'
+                          '    insteadOf = fixture:origin\n')
+        env = fixture_env({"PATH": os.environ["PATH"], "HOME": str(home), "LANG": "C"})
+        del env["GIT_CONFIG_GLOBAL"]
+        pipe = self.fx.pipeline(rp.Runner())
+        pipe.auth_wrangler()
+        result = pipe.step("nested-git-fetch", ["/bin/sh", "-c",
+            "git fetch --no-write-fetch-head fixture:origin HEAD"], self.fx.repo, env=env)
+        self.assertEqual(result.rc, 0)
+
+    def test_non_wrangler_steps_preserve_github_config(self):
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner)
+        home = self.fx.repo / "login-home"
+        for index, (settings, expected) in enumerate((
+                ({}, home / ".config/gh"),
+                ({"XDG_CONFIG_HOME": str(home / "xdg")}, home / "xdg/gh"),
+                ({"GH_CONFIG_DIR": str(home / "custom"),
+                  "XDG_CONFIG_HOME": str(home / "xdg")}, home / "custom"))):
+            env = {key: value for key, value in pipe.env.items()
+                   if key not in {"GH_CONFIG_DIR", "XDG_CONFIG_HOME"}}
+            env.update(HOME=str(home), **settings)
+            name = f"github-config-check-{index}"
+            pipe.step(name, ["./run.sh", "health"], self.fx.repo, env=env)
+            observed = runner.envs[name]
+            config = observed.get("GH_CONFIG_DIR") or str(
+                Path(observed.get("XDG_CONFIG_HOME") or Path(observed["HOME"]) / ".config") / "gh")
+            self.assertEqual(config, str(expected))
+
+    def test_command_before_toolchain_install_does_not_need_package_files(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        for name in rp.TOOLCHAIN_FILES:
+            (self.fx.repo / "mcp-server" / name).unlink()
+        result = pipe.step("check", ["python", "--version"], self.fx.repo)
+        self.assertEqual(result.rc, 0)
 
     def test_reused_toolchain_requires_its_recorded_content_digest(self):
         for damage in ("binary", "dependency", "receipt", "escaping-link"):

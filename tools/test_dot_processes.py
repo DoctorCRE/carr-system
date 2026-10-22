@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import fcntl
-import json
+from contextlib import ExitStack
 import os
 from pathlib import Path
 import signal
@@ -12,7 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -22,72 +22,74 @@ from lib import dot_processes as processes
 class BoundedProcessTests(unittest.TestCase):
     def escaped_child(self, *, parent_delay, hide_attached=False, outside_cwd=False, initial_cwd=None):
         with tempfile.TemporaryDirectory(prefix='dot-process-test-') as tmp, \
-                tempfile.TemporaryDirectory(prefix='dot-process-outside-') as outside:
-            tree = Path(tmp)
-            inventory, marker, parent = tree / 'inventory.json', tree / 'marker', tree / 'parent.json'
-            child_code = (
-                'import json,os,time;from pathlib import Path\n' +
-                (f'os.chdir({outside!r})\n' if outside_cwd else '') +
-                f'p=Path({str(inventory)!r});until=time.monotonic()+.9\n'
-                'while time.monotonic()<until:\n'
-                ' temporary=p.with_suffix(".tmp");temporary.write_text(json.dumps(dict(pid=os.getpid(),ppid=os.getppid(),uid=os.getuid(),'
-                'mark=os.environ.get("CARR_FLASH_CONTAIN"))));temporary.replace(p)\n'
-                ' time.sleep(.005)\n'
-                f'Path({str(marker)!r}).write_text("survived")\n'
-            )
-            code = (
-                'import json,os,subprocess,sys,time;from pathlib import Path\n'
-                f'Path({str(parent)!r}).write_text(json.dumps(dict(pid=os.getpid(),ppid=os.getppid())))\n'
-                f'subprocess.Popen([sys.executable,"-c",{child_code!r}],env={{}},start_new_session=True,cwd={initial_cwd!r})\n'
-                f'time.sleep({parent_delay!r})\n'
-            )
-            actual_run = subprocess.run
-            orphan_observed = False
-            def fixture_ps(argv, **kwargs):
-                nonlocal orphan_observed
-                if argv[0] != 'ps':
-                    return actual_run(argv, **kwargs)
-                row = None
-                try:
-                    row = json.loads(inventory.read_text())
-                except (OSError, ValueError):
-                    pass
-                own = f'{os.getpid()} {os.getppid()}'
-                with_uid = any('uid=' in arg for arg in argv)
-                if with_uid:
-                    own += f' {os.getuid()}'
-                rows = [own]
-                try:
-                    parent_row = json.loads(parent.read_text())
-                    rows.append(f"{parent_row['pid']} {parent_row['ppid']}" +
-                                (f' {os.getuid()}' if with_uid else ''))
-                except (OSError, ValueError):
-                    pass
-                if row:
-                    orphan_observed |= row['ppid'] == 1
-                    if not hide_attached or row['ppid'] == 1:
-                        rows.append(f"{row['pid']} {row['ppid']}" +
-                                    (f" {row['uid']}" if with_uid else ''))
-                if any('command=' in arg for arg in argv):
-                    rows = []
-                return subprocess.CompletedProcess(argv, 0, stdout='\n'.join(rows), stderr='')
-            try:
-                with patch.object(subprocess, 'run', side_effect=fixture_ps):
-                    status, _ = processes.run_bounded(
-                        [sys.executable, '-c', code], tree, {}, timeout=.3, limit=1024)
-                row = json.loads(inventory.read_text())
-                self.assertEqual(status, 'timeout')
-                self.assertIsNone(row['mark'])
-                self.assertTrue(orphan_observed, 'fixture never observed the real PPID 1 orphan')
-                time.sleep(.85)
-                print(f'orphan parent-delay={parent_delay}: status={status} marker-exists={marker.exists()}')
-                self.assertFalse(marker.exists())
-            finally:
-                try:
-                    row = json.loads(inventory.read_text())
-                    os.kill(row['pid'], signal.SIGKILL)
-                except (OSError, ValueError):
-                    pass
+                tempfile.TemporaryFile() as stdout, ExitStack() as stack:
+            tree = Path(tmp).resolve()
+            uid = os.geteuid()
+            caller = processes._Process(os.getpid(), os.getppid(), uid, 1)
+            root = processes._Process(700001, caller.pid, uid, 101)
+            attached = processes._Process(700002, root.pid, uid, 102)
+            orphan = processes._Process(attached.pid, 1, uid, attached.start)
+            child = Mock(pid=root.pid, stdout=stdout, returncode=0)
+            now = 0
+            spawned = False
+            observed = []
+
+            def spawn(*args, **kwargs):
+                nonlocal spawned
+                self.assertEqual(kwargs['env'], {})
+                self.assertTrue(kwargs['start_new_session'])
+                spawned = True
+                return child
+
+            def inventory():
+                rows = {caller.pid: caller}
+                if spawned:
+                    if now < parent_delay:
+                        rows[root.pid] = root
+                        if not hide_attached:
+                            rows[attached.pid] = attached
+                    else:
+                        rows[orphan.pid] = orphan
+                    observed.append(rows)
+                return rows
+
+            def identity(pid):
+                return {caller.pid: caller, root.pid: root if now < parent_delay else None,
+                        attached.pid: attached if now < parent_delay else orphan}.get(pid)
+
+            def cwd(pid):
+                if pid == attached.pid:
+                    return Path('/outside') if outside_cwd else Path(initial_cwd or tree)
+                return tree
+
+            def select(timeout):
+                nonlocal now
+                now += timeout
+                return []
+
+            selector = Mock()
+            selector.__enter__ = Mock(return_value=selector)
+            selector.__exit__ = Mock(return_value=False)
+            selector.select.side_effect = select
+            stack.enter_context(patch.object(processes.time, 'monotonic', side_effect=lambda: now))
+            stack.enter_context(patch.object(processes, '_start_boundary', return_value=100))
+            stack.enter_context(patch.object(processes, '_inventory', side_effect=inventory))
+            stack.enter_context(patch.object(processes, '_process', side_effect=identity))
+            stack.enter_context(patch.object(processes, '_cwd', side_effect=cwd))
+            stack.enter_context(patch.object(subprocess, 'Popen', side_effect=spawn))
+            stack.enter_context(patch.object(processes.selectors, 'DefaultSelector', return_value=selector))
+            kill = stack.enter_context(patch.object(os, 'kill'))
+            status, output = processes.run_bounded(['fixture'], tree, {}, timeout=.3, limit=1024)
+            self.assertEqual((status, output), ('timeout', ''))
+            self.assertTrue(any(rows.get(orphan.pid) == orphan for rows in observed))
+            if hide_attached:
+                self.assertFalse(any(rows.get(attached.pid) == attached for rows in observed))
+            elif parent_delay:
+                self.assertTrue(any(rows.get(attached.pid) == attached for rows in observed))
+            self.assertEqual(kill.call_args_list,
+                             [call(orphan.pid, signal.SIGSTOP), call(orphan.pid, signal.SIGKILL)])
+            child.kill.assert_called_once_with()
+            child.wait.assert_called_once_with(timeout=1)
 
     def test_reparented_child_with_empty_environment_is_killed(self):
         self.escaped_child(parent_delay=.08)

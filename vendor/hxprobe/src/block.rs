@@ -71,26 +71,54 @@ fn read_header(mm: &[u8], off: usize) -> Option<Header> {
 /// declared inflated length all agree. Callers can therefore trust the bytes
 /// they get back.
 pub fn parse(mm: &[u8], off: usize) -> Option<Block> {
-    let h = read_header(mm, off)?;
+    parse_checked(mm, off).ok()
+}
+
+#[derive(Clone, Copy)]
+pub enum ParseError {
+    TruncatedHeader,
+    InvalidInflatedLength,
+    TruncatedPayload,
+    HeaderCrcMismatch,
+    PayloadCrcMismatch,
+    InvalidLz4,
+}
+
+impl ParseError {
+    pub fn reason_code(self) -> &'static str {
+        match self {
+            Self::TruncatedHeader => "truncated_header",
+            Self::InvalidInflatedLength => "invalid_inflated_length",
+            Self::TruncatedPayload => "truncated_payload",
+            Self::HeaderCrcMismatch => "header_crc_mismatch",
+            Self::PayloadCrcMismatch => "payload_crc_mismatch",
+            Self::InvalidLz4 => "invalid_lz4",
+        }
+    }
+}
+
+pub fn parse_checked(mm: &[u8], off: usize) -> Result<Block, ParseError> {
+    let h = read_header(mm, off).ok_or(ParseError::TruncatedHeader)?;
 
     // Guard against absurd lengths before allocating anything.
-    if h.inflated_len == 0
-        || h.inflated_len > 32 << 20
-        || off + PAYLOAD + h.payload_len > mm.len()
-    {
-        return None;
+    if h.inflated_len == 0 || h.inflated_len > 32 << 20 {
+        return Err(ParseError::InvalidInflatedLength);
+    }
+    if off + PAYLOAD + h.payload_len > mm.len() {
+        return Err(ParseError::TruncatedPayload);
     }
 
     if crc32(&mm[off + 4..off + 0x20]) != h.crc_header {
-        return None;
+        return Err(ParseError::HeaderCrcMismatch);
     }
     let end = off + PAYLOAD + h.payload_len;
     if crc32(&mm[off + 8..end]) != h.crc_body {
-        return None;
+        return Err(ParseError::PayloadCrcMismatch);
     }
 
-    let data = lz::decode_exact(&mm[off + PAYLOAD..end], h.inflated_len)?;
-    Some(Block { kind: h.kind, data })
+    let data =
+        lz::decode_exact(&mm[off + PAYLOAD..end], h.inflated_len).ok_or(ParseError::InvalidLz4)?;
+    Ok(Block { kind: h.kind, data })
 }
 
 /// Offsets of every block header in the file.
@@ -114,7 +142,11 @@ fn crc32(data: &[u8]) -> u32 {
         for (i, e) in t.iter_mut().enumerate() {
             let mut c = i as u32;
             for _ in 0..8 {
-                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+                c = if c & 1 != 0 {
+                    0xEDB8_8320 ^ (c >> 1)
+                } else {
+                    c >> 1
+                };
             }
             *e = c;
         }
