@@ -20,6 +20,38 @@ from ops.git_env import fixture_env
 
 
 class DispatchTimeoutTests(unittest.TestCase):
+    def run_job(self, script, *, task='inspect', stream=False):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(catalog_fixture())
+        subprocess.run(['git', 'init', '-q', str(root)], env=fixture_env(), check=True)
+        reg = desks.Registry(root / 'desks.json')
+        reg.register('timeout', 'codex-session', family='sol', effort='high', cwd=str(root))
+        fake = root / 'codex'
+        fake.write_text(f'#!{sys.executable}\n' + script)
+        fake.chmod(0o755)
+        env = fixture_env({**os.environ, 'PATH': f'{root}:{os.environ["PATH"]}'})
+        with contextlib.redirect_stdout(io.StringIO()):
+            row = dispatch.dispatch('timeout', task.replace('$ROOT', str(root)), registry=reg,
+                env=env, writes=['src/*'], results_path=root / 'results.jsonl',
+                codex_timeout_s=0.5, stream_output=stream)
+        self.assertEqual(json.loads((root / 'results.jsonl').read_text().splitlines()[-1]), row)
+        with write_ownership.checkout_writer(root):
+            pass
+        return row, root
+
+    def test_completed_at_deadline_recovers_answer_and_report(self):
+        row, root = self.run_job("""
+import pathlib, sys, time
+root = pathlib.Path(__file__).parent
+(root / 'report.txt').write_text('delivery receipt\\n')
+pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text('Report delivered.')
+time.sleep(30)
+""", task='inspect\nCompletion artifact: {"kind":"report_line","path":"$ROOT/report.txt","contains":"delivery receipt"}')
+        self.assertEqual(row['status'], 'completed')
+        self.assertEqual(row['result'], 'Report delivered.')
+        self.assertTrue(row['termination_confirmed'])
+        self.assertEqual(row['deadline_reconciliation']['artifact']['status'], 'verified')
+
     def test_timeout_without_rollout_uses_captured_bytes(self):
         with tempfile.TemporaryDirectory() as tmp, catalog_fixture():
             root = Path(tmp)
