@@ -125,7 +125,7 @@ class StagingSessionTests(unittest.TestCase):
         calls = []
         def run(args, **kwargs):
             calls.append((list(map(str, args[3:])), kwargs))
-            return subprocess.CompletedProcess(args, 0, "provider output containing a secret", "")
+            return subprocess.CompletedProcess(args, 0, SECRET, TOKEN)
         child_env = MODULE.provider_environment({"PATH": "/bin", "DATABASE_URL_WRITER": "forbidden", "CLOUDFLARE_API_TOKEN": "wrong"}, TOKEN)
         self.assertEqual(child_env["CLOUDFLARE_API_TOKEN"], TOKEN)
         self.assertNotIn("DATABASE_URL_WRITER", child_env)
@@ -139,16 +139,70 @@ class StagingSessionTests(unittest.TestCase):
         self.assertEqual(wrangler[0][0][1:], ["secret", "put", "E2E_SESSION_SECRET", "--env", "staging"])
         self.assertEqual(wrangler[0][1]["input"], SECRET + "\n")
         self.assertIn("GIT_SHA:" + SHA, wrangler[1][0])
+        github = [call for call in calls if call[0][0] == "gh"]
+        self.assertEqual([call[0] for call in github], [
+            ["gh", "auth", "status", "--hostname", "github.com"],
+            ["gh", "secret", "set", "E2E_SESSION_SECRET", "--repo", "jbookout/doctorcre-app", "--env", "staging"],
+        ])
+        self.assertEqual(github[1][1]["input"], wrangler[0][1]["input"])
+        self.assertLess(calls.index(github[1]), calls.index(wrangler[0]))
+        for args, kwargs in github:
+            self.assertNotIn(SECRET, " ".join(args))
+            self.assertTrue(kwargs["capture_output"])
+            self.assertNotIn("CLOUDFLARE_API_TOKEN", kwargs.get("env", {}))
         for args, kwargs in wrangler:
             self.assertEqual(args[args.index("--env") + 1], "staging")
             self.assertNotIn(SECRET, " ".join(args))
             self.assertTrue(kwargs["capture_output"])
             self.assertEqual(kwargs["env"]["CI"], "true")
 
+    def test_missing_or_unauthenticated_github_refuses_before_provider_operations(self):
+        for missing in (True, False):
+            with self.subTest(missing=missing):
+                calls = []
+                def run(args, **kwargs):
+                    command = list(map(str, args[3:]))
+                    calls.append(command)
+                    if command[0] == "gh":
+                        if missing:
+                            raise FileNotFoundError(SECRET)
+                        return subprocess.CompletedProcess(args, 1, SECRET, TOKEN)
+                    return subprocess.CompletedProcess(args, 0, "", "")
+                output = io.StringIO()
+                with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(output):
+                    with self.assertRaisesRegex(MODULE.StagingRefusal, "GitHub CLI is missing or unauthenticated") as caught:
+                        MODULE.provision_and_deploy(fake_checkout(Path(directory) / "repo"), SHA, SECRET,
+                                                    MODULE.provider_environment({}, TOKEN), run=run)
+                self.assertEqual(calls, [["gh", "auth", "status", "--hostname", "github.com"]])
+                self.assertNotIn(SECRET, str(caught.exception) + output.getvalue())
+                self.assertNotIn(TOKEN, str(caught.exception) + output.getvalue())
+
+    def test_github_secret_failure_refuses_before_provider_write_and_suppresses_output(self):
+        calls = []
+        def run(args, **kwargs):
+            command = list(map(str, args[3:]))
+            calls.append(command)
+            failed = command[:3] == ["gh", "secret", "set"]
+            return subprocess.CompletedProcess(args, int(failed), SECRET, TOKEN)
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(output), \
+                patch.object(MODULE.time, "sleep"):
+            with self.assertRaisesRegex(MODULE.StagingRefusal, "GitHub staging secret update failed") as caught:
+                MODULE.provision_and_deploy(fake_checkout(Path(directory) / "repo"), SHA, SECRET,
+                                            MODULE.provider_environment({}, TOKEN), run=run)
+        self.assertTrue(any(command[:3] == ["gh", "secret", "set"] for command in calls))
+        self.assertFalse(any("wrangler" in Path(command[0]).name for command in calls))
+        self.assertNotIn(SECRET, str(caught.exception) + output.getvalue())
+        self.assertNotIn(TOKEN, str(caught.exception) + output.getvalue())
+        self.assertNotIn("synchronized", output.getvalue())
+
     def test_failed_provider_output_is_suppressed(self):
         def run(args, **kwargs):
-            return subprocess.CompletedProcess(args, 1, SECRET, TOKEN)
-        with tempfile.TemporaryDirectory() as directory, self.assertRaises(MODULE.StagingRefusal) as caught:
+            command = list(map(str, args[3:]))
+            failed = "wrangler" in Path(command[0]).name
+            return subprocess.CompletedProcess(args, int(failed), SECRET, TOKEN)
+        with tempfile.TemporaryDirectory() as directory, patch.object(MODULE.time, "sleep"), \
+                self.assertRaises(MODULE.StagingRefusal) as caught:
             MODULE.provision_and_deploy(fake_checkout(Path(directory) / "repo"), SHA, SECRET,
                                         MODULE.provider_environment({}, TOKEN), run=run)
         self.assertNotIn(TOKEN, str(caught.exception))

@@ -93,15 +93,25 @@ def provision_and_deploy(repo: Path, sha: str, secret: str, child_env: dict, *, 
     if not os.access(wrangler, os.X_OK):
         raise StagingRefusal("wrangler is missing or not executable at " + str(wrangler)
                              + "; run `npm ci` in " + str(repo / "mcp-server"))
+    try:
+        checked_run(["gh", "auth", "status", "--hostname", "github.com"], cwd=repo, run=run)
+    except StagingRefusal:
+        raise StagingRefusal("GitHub CLI is missing or unauthenticated; no provider writes performed; output suppressed") from None
     child_env = {**child_env, "CLOUDFLARE_ACCOUNT_ID": config["account_id"]}
     checked_run([sys.executable, repo / "ops/deploy-attachment-check.py", repo / "mcp-server/wrangler.toml", "staging"],
                 cwd=repo, env=child_env, run=run)
     checked_run([sys.executable, repo / "tools/release-manifest.py", "doctorcre-artifact", "materialize",
                  "--pin", repo / "ops/config/doctorcre-artifact.v1.json", "--root", repo / "out/doctorcre-artifacts"],
                 cwd=repo, env=child_env, run=run)
+    time.sleep(2)
+    try:
+        checked_run(["gh", "secret", "set", "E2E_SESSION_SECRET", "--repo", "jbookout/doctorcre-app", "--env", "staging"],
+                    cwd=repo, input=secret + "\n", run=run)
+    except StagingRefusal:
+        raise StagingRefusal("GitHub staging secret update failed; no provider writes performed; output suppressed") from None
     checked_run([wrangler, "secret", "put", "E2E_SESSION_SECRET", "--env", "staging"],
                 cwd=repo / "mcp-server", env=child_env, input=secret + "\n", run=run)
-    print("E2E secret provisioned to carr-mcp-staging; value suppressed", flush=True)
+    print("E2E secret synchronized to GitHub staging and carr-mcp-staging; value suppressed", flush=True)
     checked_run([wrangler, "deploy", "--env", "staging", "--var", "GIT_SHA:" + sha],
                 cwd=repo / "mcp-server", env=child_env, run=run)
     print("CARR staging candidate deployed at " + sha, flush=True)
