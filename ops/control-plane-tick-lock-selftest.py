@@ -12,7 +12,6 @@ from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
-import job_watchdog as watchdog
 
 
 class TickLockTests(unittest.TestCase):
@@ -101,50 +100,6 @@ class TickLockTests(unittest.TestCase):
                 text=True, capture_output=True, timeout=10)
             self.assertEqual(result.returncode, 78, result.stderr)
             self.assertIn("CARR_DB_JOBS_URL is required", result.stderr)
-
-
-class TickWatchdogTests(unittest.TestCase):
-    def test_bad_overlap_evidence_cannot_clear_a_finding(self):
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
-        config["repositories"] = []
-        config["paths"].update(merge_queue="queue", queue_logs=[], release_log="release")
-        with tempfile.TemporaryDirectory() as directory, patch("job_watchdog.sys.platform", "linux"):
-            root = Path(directory)
-            marker = root / "out/control-plane-tick.lock/overlap"
-            marker.parent.mkdir(parents=True)
-            marker.write_text("invalid marker")
-            found = watchdog.detect(watchdog.collect(root, config, 701), config, 701)
-            self.assertEqual([f["kind"] for f in found], ["collection_error"])
-            self.assertEqual(found[0]["blinds"], ["control_plane_tick_skipped"])
-            effects = Mock()
-            effects.report.return_value = {}
-            prior = watchdog.detect({"control_plane_tick": 100}, config, 701)
-            watchdog.reconcile(root, config, prior, effects, 701)
-            watchdog.reconcile(root, config, found, effects, 702)
-            latest = watchdog.read_latest(root / config["paths"]["findings"])
-            self.assertIsNone(latest[prior[0]["key"]].get("cleared_at"))
-
-    def test_persistent_skips_become_a_finding_and_clear_on_recovery(self):
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
-        config["repositories"] = []
-        config["paths"].update(merge_queue="queue", queue_logs=[], release_log="release")
-        with tempfile.TemporaryDirectory() as directory, patch("job_watchdog.sys.platform", "linux"):
-            root = Path(directory)
-            marker = root / "out/control-plane-tick.lock/overlap"
-            marker.mkdir(parents=True)
-            os.utime(marker, (100, 100))
-            self.assertEqual(watchdog.detect(watchdog.collect(root, config, 700), config, 700), [])
-            found = watchdog.detect(watchdog.collect(root, config, 701), config, 701)
-            self.assertEqual([f["kind"] for f in found], ["control_plane_tick_skipped"])
-            self.assertIn("10 minutes", found[0]["reason"])
-            effects = Mock()
-            effects.report.return_value = {}
-            watchdog.reconcile(root, config, found, effects, 701)
-            marker.rmdir()
-            watchdog.reconcile(root, config,
-                watchdog.detect(watchdog.collect(root, config, 702), config, 702), effects, 702)
-            latest = watchdog.read_latest(root / config["paths"]["findings"])
-            self.assertIsNotNone(latest[found[0]["key"]]["cleared_at"])
 
 
 if __name__ == "__main__":

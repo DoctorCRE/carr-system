@@ -713,9 +713,9 @@ def main(argv: list[str] | None = None) -> int:
     started = time.monotonic()
     if args.machine:
         import importlib.util
-        from job_watchdog import load_config, repository_roots
+        from local_jobs import load_config, repository_roots
         from machine_cleanup import run as clean_machine
-        config = load_config(REPO / "ops/config/job-watchdog.json")
+        config = load_config(REPO / "ops/config/local-jobs.json")
         config["machine_cleanup"]["max_seconds"] = min(config["machine_cleanup"]["max_seconds"], args.max_seconds)
         spec = importlib.util.spec_from_file_location("cleanup_worktree_hook", REPO / "hooks/worktree-self-plumb.py")
         assert spec is not None and spec.loader is not None

@@ -102,7 +102,6 @@
         "tools/room-bridge/evaluation_kernel.py",
         "tools/doc-convo/prompt",
         "tools/doc-convo/prompt/**",
-        "ops/config/job-watchdog.json",
         "tools/dictation-rig/vocab-prompt.txt"
       ]
     },

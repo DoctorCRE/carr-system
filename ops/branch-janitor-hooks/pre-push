@@ -5,9 +5,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
-from job_watchdog import load_config, protected_branch
+from local_jobs import load_config, protected_branch
 
-config = load_config(Path(__file__).resolve().parents[1] / "config/job-watchdog.json")
+config = load_config(Path(__file__).resolve().parents[1] / "config/local-jobs.json")
 
 rows = [line.split() for line in sys.stdin if line.strip()]
 expected = ["(delete)", "0" * 40, os.environ.get("CARR_RETIRE_REF"),

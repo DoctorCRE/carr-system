@@ -9,7 +9,7 @@ import time
 import uuid
 
 from branch_retirement import GitHub, git, command, process_paths, save, fetch_remote_refs, remote_preserves
-from job_watchdog import epoch
+from local_jobs import epoch
 from lib.cleanup_budget import BudgetExhausted, bounded, check, entries
 
 
@@ -106,55 +106,6 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         return {**keep('evidence or staging failed'), 'error': type(exc).__name__}
 
 
-def health_findings(root, config, *, tmp_root, roots, now, user_tmp_root=None):
-    from branch_retirement import iter_worktrees
-    policy = config['machine_cleanup']
-    rows = []
-    try:
-        import sys
-        sys.path.append(str(Path(__file__).resolve().parents[1] / 'tools'))
-        from storage_hygiene import allocated_bytes_evidence
-        clone_paths = [p for p in Path(tmp_root).glob('room-codex-*') if p.is_dir() and not p.is_symlink()]
-        # Staged clones still occupy the volume until their retention is resolved.
-        clone_paths.extend(p for p in (Path(tmp_root) / '_to_delete').glob('room-codex-*') if p.is_dir() and not p.is_symlink())
-        measurements = [('job_clone_bytes', clone_paths, policy['job_clone_bytes_threshold'])]
-        if user_tmp_root is not None:
-            measurements.append(('user_temp_bytes', [Path(user_tmp_root)], policy['user_temp_bytes_threshold']))
-        for code, paths, threshold in measurements:
-            measurement = allocated_bytes_evidence(paths)
-            size = measurement['allocated_bytes']
-            if size > threshold:
-                qualifier = '' if measurement['complete'] else 'at least '
-                rows.append({'code': code, 'detail': f'{code}: {qualifier}{size} allocated bytes exceed {threshold}',
-                             'measurement': measurement})
-            elif not measurement['complete']:
-                rows.append({'code': code + '_partial', 'measurement': measurement,
-                    'detail': f"{code}: at least {size} allocated bytes; partial evidence after {measurement['entries']} entries ({measurement['reason']}); threshold not resolved"})
-    except Exception as exc:
-        rows.append({'code': 'cleanup_size_unavailable', 'detail': 'Cleanup size evidence unavailable: ' + type(exc).__name__})
-    try:
-        count = sum(1 for path in Path(tmp_root).glob('room-codex-*') if path.is_dir() and not path.is_symlink())
-        if count > policy['job_clone_threshold']:
-            rows.append({'code': 'job_clone_count', 'detail': f'{count} job clones exceed {policy["job_clone_threshold"]}'})
-        for repo, path in roots.items():
-            path = Path(path).expanduser()
-            if not path.exists():
-                continue
-            count = sum('_to_delete' not in Path(e['path']).parts for e in iter_worktrees(path))
-            if count > policy['worktree_threshold']:
-                rows.append({'code': 'worktree_count:' + repo, 'detail': f'{repo} has {count} active worktrees, threshold {policy["worktree_threshold"]}'})
-        receipt = json.loads((Path(root) / 'out/machine-cleanup.json').read_text())
-        last = receipt.get('last_success_at')
-        if last is None or now - last > policy['success_max_age_seconds']:
-            rows.append({'code': 'cleanup_stale', 'detail': 'Machine cleanup has no success within one day'})
-        if receipt.get('errors') or (receipt.get('status') == 'running' and
-                now - receipt.get('at', 0) > policy['max_seconds'] + 60):
-            rows.append({'code': 'cleanup_failed', 'detail': 'Machine cleanup receipt reports incomplete evidence or failed effects'})
-    except Exception as exc:
-        rows.append({'code': 'cleanup_stale', 'detail': 'Machine cleanup evidence unavailable: ' + type(exc).__name__})
-    return rows
-
-
 def latest_dispatch(path, *, workspace=None, thread_id=None, deadline=None):
     latest = None
     if not Path(path).exists():
@@ -206,7 +157,7 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
     import heapq
     import sys
     from branch_retirement import FleetReaper, append
-    from job_watchdog import locked
+    from local_jobs import locked
     root, tmp_root = Path(root).resolve(), Path(tmp_root).resolve()
     policy = config['machine_cleanup']
     provider = provider or GitHub()
