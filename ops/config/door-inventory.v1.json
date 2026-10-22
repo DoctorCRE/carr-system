@@ -289,6 +289,12 @@
       "class": "hand_tool",
       "reason": "The orchestrator runs this local observation collector for one reviewed headless task. It reads device and scheduler state and prints local evidence, with no activation or canonical receipt writes.",
       "evidence": "WR-000014 final source slice; ops/scheduler-observation-receipts-selftest.py exercises synthetic device, prompt, plist, and launchctl observations."
+    },
+    {
+      "path": "ops/rule-scope-cache-benchmark.py",
+      "class": "hand_tool",
+      "reason": "A human runs it by hand against a base ref to measure warmed rule-scope lookups before and after a cache change; it is a measurement tool, not a scheduled or hooked job.",
+      "evidence": "Usage line in the script header and ops/fixtures/rule-scope-cache-benchmark.v1.json record the command that was run by hand"
     }
   ]
 }
