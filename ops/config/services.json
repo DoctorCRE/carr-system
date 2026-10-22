@@ -488,24 +488,6 @@
       ]
     },
     {
-      "key": "control-plane-tick",
-      "name": "CARR control-plane ledger tick",
-      "purpose": "Local launchd adapter that gives the job ledger a once-per-minute opportunity to enqueue due work. It does not execute workflows or own their schedules.",
-      "family": "Local Mac edge",
-      "criticality": "high",
-      "owner_actor": "joe",
-      "repo_path": "bin/control-plane-tick.sh",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.control-plane-tick.plist",
-          "runs_on": "primary",
-          "notes": "Definition only: this repository change neither installs nor enables the agent. The tick has no ops.run heartbeat because it is itself a jobs-role ledger client; its durable effect is the idempotent ledger enqueue, and legacy schedules remain independently active until accepted cutover evidence and approval."
-        }
-      ]
-    },
-    {
       "key": "cc-version-sentinel",
       "name": "Claude Code version sentinel",
       "purpose": "Watches for a Claude Code release that changes hook or settings behaviour.",
@@ -1238,11 +1220,6 @@
       "service": "room-bridge",
       "depends_on": "neon-record-layer",
       "note": "Every poll cycle reads/writes the partner room through the deployed Worker (tools/call-verb.py) \u2014 no direct database connection."
-    },
-    {
-      "service": "control-plane-tick",
-      "depends_on": "neon-record-layer",
-      "note": "The ledger is the tick's sole authority and state owner."
     },
     {
       "service": "keepalive-probe",

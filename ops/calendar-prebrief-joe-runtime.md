@@ -14,7 +14,7 @@ authority readback first, atomically changes the runtime profile from `false`
 to `true`, and bootstraps, kickstarts, and reads back the exact LaunchAgent.
 
 The manifest remains disabled as the bootstrap default. The sole live exception
-is authority-managed: generic control-plane sync preserves it only while the
+is authority-managed: workflow registry sync preserves it only while the
 latest Joe activation receipt matches the current allowlist. A changed
 allowlist fences both scheduling and claiming until a new explicit activation.
 

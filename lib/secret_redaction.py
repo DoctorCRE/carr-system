@@ -1,18 +1,4 @@
-"""Best-effort redaction of secrets from untrusted child-process output.
-
-Deterministic control-plane entrypoints run without ledger, provider, owner,
-or live-ingest credentials in their own environment (see
-``tools/control-plane.py``'s ``_execute_deterministic``). That boundary keeps
-a child from being HANDED a secret; it does not stop the child's stdout or
-stderr from ECHOING one anyway -- a misconfigured downstream call, a stack
-trace that prints a DSN, a copy-pasted example. Failure evidence is the one
-place raw child output is about to be written into a stored receipt, so it is
-the one place this module is required to run first.
-
-This is deliberately best-effort, not a guarantee: secret shapes evolve and a
-genuinely novel one can still slip through. It is layered defense on top of
-the credential-exclusion boundary above, not a replacement for it.
-"""
+"""Redact credential values from bounded child-process evidence."""
 from __future__ import annotations
 
 import re
@@ -74,7 +60,7 @@ def _redact_assigned_value(match: re.Match[str]) -> str:
 
 # Env-var NAMES the runner treats as credential-shaped -- the same words that
 # already keep a deterministic child's environment free of ledger, provider,
-# owner and live-ingest secrets (tools/control-plane.py, ``_execute_deterministic``).
+# owner and live-ingest secrets.
 SENSITIVE_ENV_NAME = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|URL", re.IGNORECASE)
 
 # Below this length a "secret" value is common noise ("1", "true", "") and

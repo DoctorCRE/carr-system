@@ -2,7 +2,7 @@
 // This is a non-authorizing source/build guard. The sealed DB registry is SIEP-11's sole metadata authority; SIEP-18 owns atomic admission.
 export const SCAC_MUTATION_REGISTRY_VERSION = "scac-mutation-registry.v118";
 export const SCAC_MUTATION_REGISTRY_DIGEST = "dc6f7a39d9a6879f73d92fde3081f87b79dc6c23dfa45052dc2c5d599f5fdbfd";
-export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "d7d8b617806f4fc554cba0abc1bbfa068c5b32e9c4f0958d0d65e9f02cfa6484";
+export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "9c8cf8af6cac106cafbeb5693747146ebbc5699a1b045b944dbc9f27d9f4b5df";
 export const SCAC_MUTATION_DB_CATALOG_BASELINE_DIGEST = "b37445be9897851115806e549a6595c9f42f5d252af58ae7dc0cda328ec32877";
 export const SCAC_MUTATION_DB_METADATA_AUTHORITY = true;
 export const SCAC_MUTATION_RUNTIME_PROJECTION_AUTHORIZING = false;
@@ -3348,7 +3348,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "schedule-board": {
     "ingress_key": "mcp-tool:schedule-board",
     "source_locator": "mcp-server/src/schedule-board.js",
-    "source_digest": "ecc2b91d1cc2e499b7c66b05d2f5a904420236af61dc0041c0fb7bd0ece4d2a7",
+    "source_digest": "24e227497a387359765ef89f7e24cfbb8685598b4b71688c43979b5b443caf65",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,

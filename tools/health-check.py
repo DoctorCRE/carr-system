@@ -2491,7 +2491,7 @@ _db_env_line = db_env_parse_failure()
 if _db_env_line is not None:
     print(f"  ⚠︎ {'db.env':<18} UNSOURCEABLE — {DB_ENV} does not parse as shell at line "
           f"{_db_env_line}. Every job that does `set -a; . db.env` (bin/migrate-prod.sh, "
-          f"bin/nightly.sh, bin/control-plane-tick.sh and the rest) "
+          f"bin/nightly.sh and the other scheduled jobs) "
           f"loses ALL of its keys, not just the bad one, and reports its credential missing. "
           f"Fix: single-quote that value  · one bad line disables every credential here")
     rc = 1

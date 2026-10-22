@@ -8,8 +8,6 @@ import unittest
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from lib.control_plane_facts import evaluate_stage
-from lib.loadpy import load_module_from_path
 PASS = "  RESTORE REHEARSAL: PASS\n  teardown: branch br-synthetic deleted\n"
 
 
@@ -49,20 +47,6 @@ class RestoreReportTests(unittest.TestCase):
             'synthetic', PASS, sys.executable], cwd=REPO, capture_output=True, text=True)
         self.assertEqual(result.returncode, 7)
 
-    def test_runtime_validation_requires_the_same_completed_report(self):
-        cp = load_module_from_path('restore_report_cp', str(REPO / 'tools/control-plane.py'))
-        workflow = next(w for w in cp.load_manifest()['workflows']
-                        if w['key'] == 'restore-rehearse-weekly')
-        for text, expected in ((PASS, True), ('RESTORE REHEARSAL: PASS\n', False),
-                               (PASS + 'REHEARSAL FAILED: interrupted\n', False)):
-            evidence = {'entrypoint': 'run.sh', 'args': ['restore-rehearse'],
-                        'mode': 'live', 'exit_code': 0, 'stdout_tail': text}
-            collector = cp.RuntimeWorkflowFactCollector(workflow,
-                {'scheduled_for': '2026-10-19T12:00:00Z'}, execution=evidence)
-            self.assertEqual(evaluate_stage(workflow, 'validation', collector), expected)
-            completed = cp.RuntimeWorkflowFactCollector(workflow, collector.payload,
-                execution=evidence, receipt_ref='job:synthetic', receipt_evidence=evidence)
-            self.assertEqual(evaluate_stage(workflow, 'completion', completed), expected)
 
 
 if __name__ == '__main__':
