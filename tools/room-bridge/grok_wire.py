@@ -322,8 +322,21 @@ def invoke_cli(prompt: str, *, cwd=None, effort=EFFORT, max_turns=MAX_TURNS,
             "--output-format", "streaming-json", "--single", prompt]
     env = dict(os.environ if env is None else env)
     env.pop("CARR_GROK_RUN_READ_ONLY", None)
-    if not writable:
-        env["CARR_GROK_RUN_READ_ONLY"] = "1"
+    if writable:
+        with tempfile.TemporaryDirectory(prefix=".carr-grok-hooks-",
+                                         dir=Path(cwd or os.getcwd()).resolve()) as state:
+            for key, name in {
+                "CARR_RULE_BOOT_STATE_DIR": "rule-boot-gate",
+                "CARR_HOOK_GUARD_LOG": "hook-guard.log",
+                "CARR_WRITE_EFFECT_STATE": "write-effect-check",
+                "CARR_GITHUB_BURST_STATE": "github-burst-guard-state.json",
+                "DELEGATION_GATE_STATE": "delegation-gate-state.json",
+                "DELEGATION_GATE_LEDGER": "delegation-gate-ledger.jsonl",
+            }.items():
+                env[key] = str(Path(state) / name)
+            return run(argv, cwd=cwd, capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL, timeout=timeout_seconds, env=env)
+    env["CARR_GROK_RUN_READ_ONLY"] = "1"
     return run(argv, cwd=cwd, capture_output=True, text=True,
                stdin=subprocess.DEVNULL, timeout=timeout_seconds, env=env)
 
