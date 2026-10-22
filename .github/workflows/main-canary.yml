@@ -48,10 +48,11 @@ jobs:
       fail-fast: false
       matrix:
         classes:
-          - "pushfloor unit types contract secret dependency binding artifact freshness"
+          - "pushfloor unit types contract secret binding artifact freshness"
           - "gates"
           - "migration"
           - "hxprobe"
+          - "dependency"
     timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
 
     services:
@@ -71,11 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # FULL HISTORY, for the freshness class only. actions/checkout defaults
-          # to a depth of 1, which is why nothing here could ever have caught a
-          # lost update: with no history there is no merge-base, so "has this
-          # branch seen main's latest change to this file" is unanswerable. Every
-          # other class reads the tree as it stands and does not care.
+          # Migration identity and historical snapshot proofs read pinned commits.
           fetch-depth: 0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

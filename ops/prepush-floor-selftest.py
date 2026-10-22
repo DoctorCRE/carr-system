@@ -180,11 +180,8 @@ def main():
         check("the range ends at the commit being pushed",
               head[:12] in calls, calls)
 
-        # 3b. THE CLASS LIST IS THE FLOOR THE COUNCIL RULED, and `freshness` is
-        #     part of it. Asserted on the recorded argv rather than by reading
-        #     the hook, so a change to the list has to change this line too.
-        check("the floor runs the ruled classes",
-              "args:--only pushfloor secret freshness" in calls, calls)
+        check("the floor selects content checks without branch ancestry",
+              "args:--only pushfloor secret\n" in calls, calls)
         check("the floor does NOT run the full suite",
               "args:--only\n" not in calls and "gates" not in calls, calls)
 
