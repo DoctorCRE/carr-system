@@ -144,16 +144,25 @@ jobs:
         run: ops/ci-zsh.sh
 
       - name: Install PostgreSQL 17
+        timeout-minutes: 20
         if: contains(matrix.classes, 'gates') || (matrix.classes == 'migration' && needs.scope.outputs.full != 'false')
         run: |
           set -euo pipefail
           sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+          sudo curl -fsSL --retry 3 --max-time 60 -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
             "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-17 postgresql-18 postgresql-client-18
+          # apt.postgresql.org has stalled for 30+ minutes; bound each attempt.
+          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30)
+          for attempt in 1 2 3; do
+            if timeout 240 sudo apt-get "${apt_opts[@]}" update -qq \
+              && timeout 360 sudo apt-get "${apt_opts[@]}" install -y -qq postgresql-17 postgresql-18 postgresql-client-18; then
+              break
+            fi
+            [ "$attempt" -lt 3 ] || exit 1
+            sleep 15
+          done
           /usr/lib/postgresql/17/bin/initdb --version
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
@@ -222,15 +231,24 @@ jobs:
           python -m pip install -r requirements.lock
           npm --prefix mcp-server ci --no-audit
       - name: Install PostgreSQL 17
+        timeout-minutes: 20
         run: |
           set -euo pipefail
           sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+          sudo curl -fsSL --retry 3 --max-time 60 -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
             "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-17 postgresql-18 postgresql-client-18
+          # apt.postgresql.org has stalled for 30+ minutes; bound each attempt.
+          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30)
+          for attempt in 1 2 3; do
+            if timeout 240 sudo apt-get "${apt_opts[@]}" update -qq \
+              && timeout 360 sudo apt-get "${apt_opts[@]}" install -y -qq postgresql-17 postgresql-18 postgresql-client-18; then
+              break
+            fi
+            [ "$attempt" -lt 3 ] || exit 1
+            sleep 15
+          done
           /usr/lib/postgresql/17/bin/initdb --version
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
