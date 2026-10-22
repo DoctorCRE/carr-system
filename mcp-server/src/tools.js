@@ -3325,9 +3325,24 @@ export const TOOLS = {
 
   "today-triage": {
     write: false,
-    description: "What needs attention now: due next-actions (next_action.due_on, suppressed by hold_until), critical_date rows inside 14 days, untriaged ingest items. The morning-brief substrate.",
-    inputSchema: { type: "object", properties: {} },
-    handler: async (c) => ({ items: (await c.query("select * from v_today_triage order by due_on nulls last limit 50")).rows }),
+    description: "What needs attention now: due actions, critical dates inside 14 days, and untriaged ingest. Critical dates lead, then oldest due dates. Defaults to all owners; partners selects both partners, their machine seats, and unowned rows before limiting. Returns items, total, has_more, and next_cursor.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      owners: { type: "string", enum: ["all", "partners"] },
+      limit: { type: "integer", minimum: 1, maximum: 50 },
+    } },
+    handler: async (c, _actor, args) => {
+      const owners = args.owners ?? "all";
+      const limit = args.limit ?? 50;
+      const rows = (await c.query(`select *, count(*) over() as triage_total
+        from v_today_triage
+        where ($1::text = 'all' or owner is null or lower(owner) = any($2::text[]))
+        order by case when item_kind = 'critical_date' then 0 else 1 end,
+          due_on nulls last, item_kind, id
+        limit $3`, [owners, [...TODO_OWNER_PARTNER.keys()], limit + 1])).rows;
+      const total = Number(rows[0]?.triage_total ?? rows.length);
+      const items = rows.slice(0, limit).map(({ triage_total, ...row }) => row);
+      return { items, total, has_more: rows.length > limit, next_cursor: null };
+    },
   },
 
   "morning-brief": {
@@ -3361,14 +3376,14 @@ export const TOOLS = {
 
       // Partner visibility is shared; autonomous queues stay out of the brief.
       const today = await section(async () => {
-        const value = await executeRegisteredTool(c, actor, "today-triage", {});
+        const value = await executeRegisteredTool(c, actor, "today-triage", { owners: "partners" });
         const items = [];
         for (const row of value.items) {
           const owner_partner = row?.owner ? TODO_OWNER_PARTNER.get(String(row.owner).toLowerCase()) : null;
           if (owner_partner === undefined) continue;
           items.push({ ...row, owner_partner });
         }
-        return { items };
+        return { ...value, items };
       });
       const claimCard = await section(async () => {
         const value = await executeRegisteredTool(c, actor, "claim-card", { limit: 5, include_needs_contact: false });
