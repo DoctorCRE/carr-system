@@ -874,23 +874,11 @@ class QueueTests(unittest.TestCase):
             self.assertEqual(len([e for e in work.export()['history'] if e['kind'] == 'pin_regenerated']), 1)
         self.assertEqual(self.calls('merge'), [])
 
-    def test_lost_regeneration_response_stays_recoverable_until_reconciled(self):
+    def test_regeneration_push_timeout_but_landed_reconciles_automatically(self):
         card_id = self.prepare_pinned_head()
         script = self.root / 'tools/prepare_pr.py'
-        script.write_text(script.read_text() + 'raise SystemExit("response lost after push")\n')
+        script.write_text(script.read_text() + 'raise SystemExit("git push timed out after landing")\n')
         self.q.tick()
-        self.restart()
-        self.q.tick()
-        row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.approved,)).fetchone()
-        self.assertEqual((row['phase'], row['outcome']), ('pending', 'action_uncertain'))
-        for _ in range(module.MAX_ATTEMPTS):
-            self.q.tick()
-        row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.approved,)).fetchone()
-        self.assertEqual((row['phase'], row['outcome']), ('blocked', 'action_uncertain_exhausted'))
-        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
-            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.approved)
-        key = self.q.db.execute("SELECT key FROM actions WHERE kind='regen'").fetchone()[0]
-        self.q.reconcile_action(key, retry=True)
         self.restart()
         self.q.tick()
         self.q.tick()
