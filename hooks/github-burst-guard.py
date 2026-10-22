@@ -11,11 +11,12 @@ lockout. Joe ordered a rule (74ddb23c, "never burst GitHub") and enforcement;
 this hook is the enforcement.
 
 WHAT IT REFUSES (PreToolUse, Bash and the Codex exec shapes):
-  0. Direct PR merges and branch updates. Use tools/mq.sh to enqueue into the existing daemon.
+  0. Direct PR merges without pinned squash auto-merge. Use tools/approve-merge.sh.
      Scan the full text after joining continuation lines, including quoted prose
      and nested shell bodies. Explicit GET reads remain allowed. A standalone
-     tools/merge_queue/main.py invocation is the merge owner's entry point.
-     Naming mq.sh beside a direct mutation does not exempt that mutation.
+     tools/approve-merge.sh invocation checks the open PR, head and labels.
+     Naming the script beside a direct mutation does not exempt that mutation.
+     Branch updates are allowed.
   1. A shell loop — for / while / until, or xargs / parallel — that runs `gh`
      with no `sleep N` (N >= 2) inside it. Allowed: the same loop with that
      sleep, which covers the `until gh ...; do sleep 30; done` poll; and a
@@ -485,19 +486,19 @@ def pending_ticks(state, now):
             if isinstance(v, (int, float)) and now - v < TICK_PENDING_TTL}
 
 
-def merge_queue_reason(cmd):
+def merge_approval_reason(cmd):
     source = cmd.replace('\\\n', '')
-    daemon = _PREFIX + _INTERP + r"(?:\S*/)?tools/merge_queue/main\.py(?:\s+[^;&|\n]*)?"
-    if re.fullmatch(r"\s*" + daemon + r"\s*", source) and not re.search(r'[$`<>]', source):
-        return None
     scan = re.sub(r"['\"`]", '', source)
     repo_options = r"(?:(?:-R|--repo|--hostname)(?:=|\s*)\S+\s+)*"
-    direct = re.search(r"\bgh\s+" + repo_options + r"pr\s+" + repo_options + r"(?:merge|update-branch)\b", scan)
+    pinned = (r"\bgh\s+pr\s+merge\s+[1-9][0-9]*\s+--repo\s+[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
+              r"\s+--auto\s+--squash\s+--match-head-commit\s+[0-9a-f]{40}(?=\s*(?:$|[;&|\n]))")
+    direct = re.search(r"\bgh\s+" + repo_options + r"pr\s+" + repo_options + r"merge\b",
+                       re.sub(pinned, '', scan))
     graphql = re.search(r"\bgh\s+" + repo_options + r"api\s+graphql\b", scan) and re.search(
-        r"\b(?:mergePullRequest|updatePullRequestBranch)\b", scan)
+        r"\b(?:mergePullRequest|enablePullRequestAutoMerge)\b", scan)
     rest = False
     for statement in re.split(r"[;|&\n()]", scan):
-        if not re.search(r"\bpulls/[^/\s]+/(?:merge|update-branch)\b", statement):
+        if not re.search(r"\bpulls/[^/\s]+/merge\b", statement):
             continue
         methods = re.findall(r"(?:-X\s*|--(?:method|request)(?:=|\s+))(\S+)", statement)
         if any(method.upper() != 'GET' for method in methods) or (
@@ -505,15 +506,15 @@ def merge_queue_reason(cmd):
             rest = True
             break
     if direct or rest or graphql:
-        return ('MERGE QUEUE GUARD: only the existing merge-queue daemon may merge or update branches. '
-                'Use tools/mq.sh PR... or tools/mq.sh --queue owner/repo queue-file log-file to enqueue pinned heads.')
+        return ('MERGE APPROVAL GUARD: direct merges require squash auto-merge bound to an approved head. '
+                'Use tools/approve-merge.sh <owner/repo> <pr> <approved_sha>.')
     return None
 
 
 def pre_verdict(cmd, now, key="-"):
     """Return a refusal reason, or None to allow. Notes when an allowed tick
     starts; only PostToolUse (observe_tick) stamps the window."""
-    reason = merge_queue_reason(cmd)
+    reason = merge_approval_reason(cmd)
     if reason:
         return reason
     scan = mask_quoted_data(inert_stripped(cmd))
@@ -796,7 +797,7 @@ def main():
             return 2
         return 0
     except UninspectableCommand as exc:
-        print(f'MERGE QUEUE GUARD: {exc} Enqueue with tools/mq.sh.', file=sys.stderr)
+        print(f'MERGE APPROVAL GUARD: {exc} Use tools/approve-merge.sh.', file=sys.stderr)
         return 2
     except Exception as exc:                       # fail OPEN
         log(f"ALLOW(internal-error) {type(exc).__name__}: {exc}")

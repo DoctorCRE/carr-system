@@ -584,24 +584,6 @@
       ]
     },
     {
-      "key": "merge-queue",
-      "name": "Serial reviewed-head merge queue",
-      "purpose": "Durable per-repository FIFO merging of independently reviewed heads with green hosted checks. Persists mutation intent and wait deadlines, stops failed entries with reasons, and resumes the next PR. Activation requires current canonical main and completed hold migration.",
-      "family": "Local Mac edge",
-      "criticality": "high",
-      "owner_actor": "joe",
-      "repo_path": "tools/merge_queue/main.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.merge-queue.plist",
-          "runs_on": "primary",
-          "notes": "Continuous service with bounded per-entry waits; queue.sqlite3 and queue.log carry progress and stopped-state reasons. No periodic scheduled-run heartbeat is claimed."
-        }
-      ]
-    },
-    {
       "key": "npi-sweep-weekly",
       "name": "Weekly NPI new-provider sweep",
       "purpose": "NPPES weekly file to territory lead digest and hot-leads dashboard.",

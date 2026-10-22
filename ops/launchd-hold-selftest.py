@@ -455,8 +455,9 @@ class DeclaredDisabledTests(unittest.TestCase):
         sys.path.insert(0, str(ROOT / "lib"))
         sys.path.insert(0, str(ROOT / "ops"))
         import scheduled_jobs
-        declared_off = {j["label"] for j in scheduled_jobs.native_manifest(ROOT)["jobs"]
-                        if j["scheduler"] == "launchd" and not j["expected_installed"]}
+        with patch.object(scheduled_jobs.launchd_hold, "read_holds", return_value={}):
+            declared_off = {j["label"] for j in scheduled_jobs.native_manifest(ROOT)["jobs"]
+                            if j["scheduler"] == "launchd" and not j["expected_installed"]}
         self.assertIn("com.carr.resource-collector", declared_off)
         for label in sorted(declared_off):
             if not label.startswith("com.carr."):

@@ -111,7 +111,8 @@ def script_profile_reads_openssl_config_but_keeps_sibling_config_private():
     script = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(script)
     configs = [os.path.join(p, "openssl.cnf") for p in
-               ("/opt/homebrew/etc/openssl@3", "/usr/local/etc/openssl@3")
+               ("/opt/homebrew/etc/openssl@3", "/usr/local/etc/openssl@3",
+                "/opt/homebrew/etc/openssl@4", "/usr/local/etc/openssl@4")
                if os.path.isfile(os.path.join(p, "openssl.cnf"))]
     if not configs:
         raise SkipTest("no installed Homebrew OpenSSL config")
@@ -142,34 +143,30 @@ def openssl_private_and_certs_files_are_denied_by_every_profile():
     work = _work()
     profiles = (fr.sandbox_profile(work), flash_wire._flash_run_module().sandbox_profile(work),
                 script.sandbox_profile(work))
-    roots = [p for p in ("/opt/homebrew/etc/openssl@3", "/usr/local/etc/openssl@3") if os.path.isdir(p)]
+    roots = [p for p in ("/opt/homebrew/etc/openssl@3", "/usr/local/etc/openssl@3",
+                         "/opt/homebrew/etc/openssl@4", "/usr/local/etc/openssl@4") if os.path.isdir(p)]
     if not roots:
         raise SkipTest("no installed Homebrew OpenSSL tree")
     with ExitStack() as cleanup:
         for root in roots:
             for subdir in ("private", "certs"):
                 folder = os.path.join(root, subdir)
-                files = [os.path.join(d, name) for d, _, names in os.walk(folder)
-                         for name in names if os.path.isfile(os.path.join(d, name))]
-                if not files:
-                    if not os.path.isdir(folder):
-                        os.mkdir(folder)
-                        cleanup.callback(os.rmdir, folder)
-                    probe = cleanup.enter_context(tempfile.NamedTemporaryFile(prefix="flash-read-probe-", dir=folder))
-                    probe.write(b"HARMLESS-READ-PROBE")
-                    probe.flush()
-                    files = [probe.name]
-                for path in files:
-                    # Verify the file is readable outside the sandbox without printing its contents.
-                    with open(path, "rb") as fh:
-                        fh.read(1)
-                    program = (f"try:\n open({path!r}, 'rb').read(1)\n"
-                               "except PermissionError:\n print('READ_DENIED')\n"
-                               "else:\n raise AssertionError('OpenSSL descendant was readable')\n")
-                    for profile in profiles:
-                        code, out = fr.bounded_run([fr.SANDBOX_EXEC, "-p", profile,
-                                                   sys.executable, "-c", program], work, 30)
-                        assert code == 0 and "READ_DENIED" in out, f"{subdir} read was not denied: {code} {out}"
+                if not os.path.isdir(folder):
+                    os.mkdir(folder)
+                    cleanup.callback(os.rmdir, folder)
+                probe = cleanup.enter_context(tempfile.NamedTemporaryFile(prefix="flash-read-probe-", dir=folder))
+                probe.write(b"HARMLESS-READ-PROBE")
+                probe.flush()
+                path = probe.name
+                with open(path, "rb") as fh:
+                    assert fh.read() == b"HARMLESS-READ-PROBE"
+                program = (f"try:\n open({path!r}, 'rb').read(1)\n"
+                           "except PermissionError:\n print('READ_DENIED')\n"
+                           "else:\n raise AssertionError('OpenSSL descendant was readable')\n")
+                for profile in profiles:
+                    code, out = fr.bounded_run([fr.SANDBOX_EXEC, "-p", profile,
+                                               sys.executable, "-c", program], work, 30)
+                    assert code == 0 and "READ_DENIED" in out, f"{subdir} read was not denied: {code} {out}"
 
 
 # A harmless stand-in secret under a throwaway home the profile does not list. Real key files are not named, because
