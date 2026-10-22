@@ -70,9 +70,9 @@ class CheckoutDispatchTests(unittest.TestCase):
         return subprocess.CompletedProcess(argv, 0, '{"type":"turn.completed"}\n', '')
 
     def send(self, desk='cx', **kwargs):
-        with patch.object(dispatch.subprocess, 'run', side_effect=self.execute):
-            row = dispatch.dispatch(desk, 'repair it', registry=self.reg,
-                                    results_path=self.results, env=self.env, **kwargs)
+        row = dispatch.dispatch(desk, 'repair it', registry=self.reg,
+                                results_path=self.results, env=self.env,
+                                provider_run=self.execute, **kwargs)
         workspace = Path(row['checkout_workspace'])
         self.addCleanup(lambda: shutil.rmtree(workspace, ignore_errors=True))
         return row

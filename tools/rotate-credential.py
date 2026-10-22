@@ -132,7 +132,7 @@ MINT_QUERY = "sslmode=require"
 # The GitHub repository secret the cloud nightly reads. Same script, same role,
 # same database — see .github/workflows/backup-nightly.yml.
 GITHUB_SECRET = "BACKUP_DATABASE_URL"
-GITHUB_REPOSITORY = "jbookout/carr-system"
+GITHUB_REPOSITORY = "DoctorCRE/carr-system"
 GITHUB_HOST = "github.com"
 GITHUB_TIMEOUT_SECONDS = 30
 
