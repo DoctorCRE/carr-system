@@ -77,11 +77,21 @@
         ]
       },
       {
-        "matcher": "^(Write|Edit|MultiEdit|apply_patch|functions\\.(apply_patch|exec))$",
+        "matcher": "^(Write|Edit|MultiEdit|apply_patch|functions\\.apply_patch)$",
         "hooks": [
           {
             "type": "command",
             "command": "if [ ! -f \"{{REPO}}/hooks/lint-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/lint-gate.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/lint-gate.py\"}'; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/lint-gate.py",
+            "timeout": 40
+          }
+        ]
+      },
+      {
+        "matcher": "^functions\\.exec$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ ! -f \"{{REPO}}/hooks/lint-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/lint-gate.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/lint-gate.py\"}'; exit 0; fi; payload=$(cat); case \"$payload\" in *tools.apply_patch*|*'\\u'*) printf '%s' \"$payload\" | /usr/bin/env python3 {{REPO}}/hooks/lint-gate.py ;; esac",
             "timeout": 40
           }
         ]

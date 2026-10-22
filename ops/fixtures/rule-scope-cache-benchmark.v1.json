@@ -1,0 +1,82 @@
+{
+  "surface": "local subprocess and registered handler; synthetic store; no network",
+  "baseline_ref": "ee939f4149fe34311902c56efa94e7a7849e8603",
+  "errors": 0,
+  "runs_per_side": 5,
+  "samples_ms": {
+    "before": [
+      158.058,
+      146.663,
+      141.885,
+      147.135,
+      148.862
+    ],
+    "after": [
+      141.545,
+      148.332,
+      154.454,
+      148.065,
+      149.482
+    ]
+  },
+  "medians_ms": {
+    "before": 147.135,
+    "after": 148.332
+  },
+  "response_bytes": {
+    "before": [
+      338272,
+      338272,
+      338272,
+      338272,
+      338272
+    ],
+    "after": [
+      282,
+      282,
+      282,
+      282,
+      282
+    ]
+  },
+  "command": "python3 ops/rule-scope-cache-benchmark.py ee939f4149fe34311902c56efa94e7a7849e8603",
+  "verdict": "No measurable local latency difference; unchanged response bytes reduced. Deployed candidate latency unverified.",
+  "limiter": "Separate cProfile run: 1.545 of 1.591 seconds in child runner, 1.521 seconds in poll. Not part of reported timings.",
+  "host": "18 logical CPUs; observed load averages 15.47, 13.19, 11.21. Sides alternated to share host noise.",
+  "live_baseline": {
+    "samples_ms": [
+      416.972,
+      334.247,
+      349.944,
+      383.069,
+      328.529
+    ],
+    "median_ms": 349.944,
+    "rules_selected": 0,
+    "runs": 5,
+    "after": "unverified; conditional contract not deployed"
+  },
+  "no_patch_exec_lint": {
+    "samples_ms": {
+      "before": [
+        52.675,
+        61.946,
+        54.031,
+        63.185,
+        44.905
+      ],
+      "after": [
+        12.3,
+        10.779,
+        9.763,
+        9.192,
+        10.28
+      ]
+    },
+    "medians_ms": {
+      "before": 54.031,
+      "after": 10.28
+    },
+    "errors": 0
+  }
+}

@@ -47,6 +47,27 @@ def fixture(template):
 
 
 class HookCommands(unittest.TestCase):
+    def test_codex_exec_launches_lint_only_for_embedded_patch_operations(self):
+        config = json.loads((REPO/'ops/config/codex-hooks.json').read_text())
+        templates = [h['command'] for group in config['hooks']['PostToolUse']
+                     if re.search(group['matcher'], 'functions.exec')
+                     for h in group['hooks'] if 'lint-gate.py' in h['command']]
+        self.assertEqual(len(templates), 1)
+        with fixture(templates[0]) as (script, run):
+            script.write_text('import sys\nprint(sys.stdin.read(), end="")\n')
+            for code in ('text(await tools.exec_command({cmd:"git diff"}));',
+                         'text(await tools.clock__curr_time({}));'):
+                result = run(json.dumps(dict(tool_name='functions.exec', tool_input=dict(code=code))))
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, '')
+            payload = json.dumps(dict(tool_name='functions.exec', tool_input=dict(code=
+                'text(await tools.apply_patch("*** Begin Patch\\n*** Update File: lib/a.py\\n*** End Patch"));')))
+            result = run(payload)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), payload)
+            escaped = payload.replace('tools.apply_patch', '\\u0074ools.apply_patch')
+            self.assertEqual(run(escaped).stdout.strip(), escaped)
+
     def test_installer_discovers_only_the_invoked_script(self):
         installer = runpy.run_path(str(REPO / 'ops/config-as-code.py'))
         command_target = runpy.run_path(str(REPO / 'ops/hook-deletion-check.py'))['command_target']
@@ -142,7 +163,7 @@ class HookCommands(unittest.TestCase):
             with self.subTest(source=source, event=event, command=template), fixture(template) as (script, run):
                 script.write_text('import os, sys\nprint(sys.stdin.read())\nprint(sys.argv[1:])\n'
                                   'print(os.environ.get("CARR_MCP_CLIENT_PROFILE", ""))\nsys.exit(2)\n')
-                result = run()
+                result = run('payload tools.apply_patch')
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertIn('payload', result.stdout)
                 if 'continuity' in script.name:

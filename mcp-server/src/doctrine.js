@@ -923,6 +923,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
       inputSchema: { type: "object", properties: {
         detail: { type: "string", enum: ["gist", "full", "boot", "scopes"], description: "gist (DEFAULT) = one line per rule, no human_quote. full = every rule's complete text; ~180KB at 147 rules, which overflows a tool result on most clients. Prefer gist + rule_ids. boot = the gated RULE BOOT: a single digest page with no rule text, carrying the digest that hooks/rule-boot-gate.py requires a context to have fetched before it allows other tools. Fetch rule text with rule_ids or the per-call rule lookup. scopes = machine lookup input: all sponsor-visible active rules, including introduction rules, with original scope and complete binding text. This catalog is not a delivery receipt or a boot replacement." },
         page: { type: "integer", minimum: 1, description: "detail=boot only: the boot is a single digest page, so the only valid value is 1 (DEFAULT 1)." },
+        scope_cache: { type: "object", description: "detail=scopes only. Previously received identity and corpus_digest. Omit rules only when both still match the authenticated catalog; this does not select a sponsor." },
         rule_ids: { type: "array", items: { type: "string" }, description: "Short ids (the 8-char form the gist prints, e.g. '4e104d4c'). These rules come back in FULL regardless of detail — the lookup path for 'read the binding text before acting on a gist'." },
         workflow: { type: "string", description: "Optional current workflow key used to select applicable typed constraints after registry activation. It is ALSO read as a rule pack name: pass the pack the observed work belongs to and its rules compile into the payload. `rule_delivery.pack_index` lists the names and what triggers each." },
         packs: { type: "array", items: { type: "string" }, description: "Rule packs to compile, when the work spans more than one (git AND a deal, say). Loading is MONOTONIC by design — a pack adds rules and never removes Layer 0. Unknown names come back in rule_delivery.packs_not_found rather than silently loading nothing." },
@@ -957,10 +958,17 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
               /* standing-context:scope-catalog */`, [who])).rows;
           const material = JSON.stringify({ sponsor: who, rules });
           const corpusDigest = await sha256hex(material);
+          const identity = { organization_tenant_id: organizationTenantForActor(actor),
+            sponsoring_human_id: who, agent_principal_id: actor.slug, runtime_principal: actor.slug };
+          const cached = args.scope_cache;
+          if (cached?.corpus_digest === corpusDigest && cached.identity
+              && Object.keys(identity).every(key => cached.identity[key] === identity[key])
+              && Object.keys(cached.identity).length === Object.keys(identity).length) {
+            return { ok: true, schema: "rule-scope-catalog/v1", corpus_digest: corpusDigest,
+              identity, not_modified: true };
+          }
           return { ok: true, schema: "rule-scope-catalog/v1", corpus_digest: corpusDigest,
-            identity: { organization_tenant_id: organizationTenantForActor(actor),
-              sponsoring_human_id: who, agent_principal_id: actor.slug,
-              runtime_principal: actor.slug }, rules };
+            identity, rules };
         }
         // THE GATED RULE BOOT (mcp-server/src/rule-boot.js). Its own branch,
         // ahead of every other read: it needs only the sponsor-scoped rule

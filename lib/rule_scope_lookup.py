@@ -12,11 +12,14 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 from typing import Callable
 
 from lib.rule_operations import structural_matches
+from lib.rule_delivery_preuse import digest
 
 REPO = Path(__file__).resolve().parent.parent
+CACHE_DIR = REPO / "out/rule-scope-cache"
 MATCH_KEYS = ("tools", "verbs", "bash_patterns", "path_globs")
 MODEL = "jev-1.13.0"
 MAX_QUESTIONS = json.loads((REPO / "mcp-server/src/jev-request-contract.v1.json").read_text())["max_questions"]
@@ -160,25 +163,93 @@ def select_rules(catalog: dict, event: dict, *, judge: Callable | None = None) -
             "models": sorted(models), "complete": not defects and not unresolved}
 
 
+def _cache_path(session_id: str | None, agent_id: str | None) -> Path | None:
+    from lib.rule_routes import _context_epoch
+    epoch = _context_epoch(session_id, agent_id) if session_id else None
+    return CACHE_DIR / digest([session_id, agent_id, epoch]) if epoch else None
+
+
+def _cache_key(catalog: dict) -> str:
+    return digest([catalog['identity'], catalog['corpus_digest']])
+
+
+def _read_catalog(directory: Path | None) -> dict | None:
+    if directory is None:
+        return None
+    try:
+        key = (directory / 'current').read_text()
+        if not re.fullmatch(r'[0-9a-f]{64}', key):
+            return None
+        entry = json.loads((directory / (key + '.json')).read_text())
+        catalog = entry['catalog']
+        if _cache_key(catalog) == key and digest(catalog) == entry['checksum']:
+            return catalog
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return None
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(text)
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _write_catalog(directory: Path | None, catalog: dict) -> None:
+    if directory is None:
+        return
+    try:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        key = _cache_key(catalog)
+        _atomic_write(directory / (key + '.json'), json.dumps(
+            {'catalog': catalog, 'checksum': digest(catalog)}, ensure_ascii=False))
+        _atomic_write(directory / 'current', key)
+    except OSError:
+        pass  # Disk cache availability never changes an authoritative selection.
+
+
 def lookup(event: dict, *, runner: Callable = subprocess.run,
+           session_id: str | None = None, agent_id: str | None = None,
            judge: Callable | None = None) -> dict:
-    """Read current sponsor-scoped records once and select for any hook event.
+    """Revalidate the sponsor-bound catalog on every event, then select locally.
 
     The caller supplies its admitted, bounded cognition adapter for moments.
-    Without that adapter deterministic selection is the complete selection. No credentials,
-    runtime settings, delivery receipts, or local rule snapshots are written.
+    Only catalogs are cached, never event selections or delivery receipts.
+    Reuse requires a live exact identity and digest confirmation. No epoch means
+    no reuse. Store failure never serves cached records.
     """
+    directory = _cache_path(session_id, agent_id)
+    cached = _read_catalog(directory)
+    args: dict = {'detail': 'scopes'}
+    if cached is not None:
+        args['scope_cache'] = {k: cached[k] for k in ('identity', 'corpus_digest')}
     env = {k: v for k, v in os.environ.items()
            if k not in {"DATABASE_URL", "CARR_BREAK_GLASS", "CARR_BREAK_GLASS_REASON", "CARR_MCP_CLIENT_PROFILE"}}
     try:
-        response = runner([str(REPO / "run.sh"), "call", "standing-context", '{"detail":"scopes"}'],
+        response = runner([str(REPO / "run.sh"), "call", "standing-context", json.dumps(args)],
                           cwd=str(REPO), env=env, capture_output=True, text=True, timeout=15, check=False)
         if response.returncode != 0:
             raise RuntimeError("scope_catalog_unavailable")
         catalog = json.loads(response.stdout)
     except Exception:
         raise RuntimeError("scope_catalog_unavailable") from None
-    return select_rules(catalog, event, judge=judge)
+    if catalog.get('not_modified') is True:
+        if (cached is None or catalog.get('ok') is not True
+                or catalog.get('schema') != 'rule-scope-catalog/v1'
+                or catalog.get('identity') != cached['identity']
+                or catalog.get('corpus_digest') != cached['corpus_digest']):
+            raise ValueError('invalid_scope_cache_confirmation')
+        catalog = cached
+    selection = select_rules(catalog, event, judge=judge)
+    if catalog is not cached:
+        _write_catalog(directory, catalog)
+    return selection
 
 
 def moment_judge(session_id: str, *, deadline: float | None = None) -> Callable:

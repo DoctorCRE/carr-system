@@ -224,6 +224,8 @@ def process(payload, *, runner=subprocess.run, judge=None, dedupe=True):
         if payload.get('last_assistant_message'):
             current['response'] = payload['last_assistant_message']
         selection = lookup(current, runner=runner,
+                           session_id=payload['session_id'],
+                           agent_id=payload.get('agent_id') or payload.get('agentId'),
                            judge=judge)
         if not valid_local_identity(selection['identity']):
             return refused(event)

@@ -19,6 +19,42 @@ spec.loader.exec_module(hook)
 
 
 class DeliveryTests(unittest.TestCase):
+    def test_cached_catalog_preserves_recorded_rules_cards_and_event_receipts(self):
+        fixture = json.loads((REPO/'ops/fixtures/rule-scope-compatibility.v1.json').read_text())
+        source = {'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': 'a'*64,
+                  'identity': {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
+                               'sponsoring_human_id': 'joe'},
+                  'rules': [dict(id=rid, statement='Recorded rule ' + rid, scope=scope, personal_to=None)
+                            for rid, scope in fixture['structural_scopes'].items()]}
+        transfers = []
+        def runner(command, **kwargs):
+            args = json.loads(command[-1])
+            hit = args.get('scope_cache') == {k: source[k] for k in ('identity', 'corpus_digest')}
+            transfers.append(not hit)
+            response = ({k: v for k, v in source.items() if k != 'rules'} | {'not_modified': True}) if hit else source
+            return subprocess.CompletedProcess(command, 0, json.dumps(response), '')
+        with tempfile.TemporaryDirectory() as raw, patch('lib.rule_scope_lookup.CACHE_DIR', Path(raw)), \
+                patch('lib.rule_routes._context_epoch', return_value='recorded-epoch'):
+            for i, entry in enumerate(fixture['structural_calls']):
+                payload = dict(hook_event_name='PreToolUse', session_id='recorded', turn_id='turn',
+                               tool_use_id=f'call-{i}', prompt='Review this change', cwd=str(REPO), **entry['call'])
+                expected_selection = dict(schema='rule-scope-selection/v1', identity=source['identity'],
+                    corpus_digest=source['corpus_digest'], rules=sorted(
+                        [r for r in source['rules'] if r['id'] in entry['ids']], key=lambda r: r['id']),
+                    data_defects=[], unresolved=[], selection_mode='deterministic', models=[], complete=True)
+                with patch.object(hook, 'lookup', return_value=expected_selection):
+                    expected = hook.process(payload, dedupe=False)
+                actual = hook.process(payload, runner=runner, dedupe=False)
+                self.assertEqual(actual, expected, f'recorded event {i}')
+                if actual is None:
+                    continue
+                receipt = json.loads(actual['hookSpecificOutput']['additionalContext'])
+                self.assertTrue(validate_lookup_receipt(receipt, repo=REPO))
+                self.assertEqual(receipt['tool_use_id'], f'call-{i}')
+                self.assertEqual(receipt['tool_input_sha256'], digest(payload['tool_input']))
+            self.assertGreater(len(transfers), 350)
+            self.assertEqual(sum(transfers), 1)
+
     def invoke(self, rows, *, event='PreToolUse', **options):
         source = {'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': 'a'*64,
                   'identity': {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',

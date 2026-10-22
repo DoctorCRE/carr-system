@@ -43,6 +43,9 @@ def command_target(command, repo):
             if token not in {'[', 'printf', 'exit', 'fi'} and not re.fullmatch(r'[A-Za-z_]\w*=.*', token):
                 raise ValueError(f'unsupported hook guard command: {token}')
             statement_start = False
+    exec_filter = 'payload=$(cat); case "$payload" in *tools.apply_patch*|*\'\\u\'*) printf \'%s\' "$payload" | '
+    if invocation.startswith(exec_filter) and invocation.endswith(' ;; esac'):
+        invocation = invocation[len(exec_filter):-len(' ;; esac')]
     tokens = shlex.split(invocation)
     if '$(' in invocation or any(re.search(r'[;|&<>`\n]', token) for token in tokens):
         raise ValueError(f'unsupported hook command: {invocation}')

@@ -77,6 +77,14 @@ class SurfaceScopingTests(unittest.TestCase):
     def v(self, rel):
         return os.path.join(lint.VAULT, rel)
 
+    def test_exec_still_extracts_explicit_patch_targets(self):
+        base = dict(tool_name='functions.exec', cwd='/tmp/fixture')
+        self.assertEqual(lint._changed_code_paths(dict(base, tool_input=dict(code=
+            'text(await tools.exec_command({cmd:"git diff"}));'))), [])
+        code = 'text(await tools.apply_patch("*** Begin Patch\\n*** Update File: lib/a.py\\n*** Move to: lib/b.py\\n*** End Patch"));'
+        self.assertEqual(lint._changed_code_paths(dict(base, tool_input=dict(code=code))),
+                         ['/tmp/fixture/lib/a.py', '/tmp/fixture/lib/b.py'])
+
     def test_surfaces_map_by_first_matching_fragment(self):
         cases = {
             "Marketing/Social Media/post.md": "social",
