@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TOOLS } from '../src/tools.js';
 
-const source = 'uptime-monitor:availability:v1';
+for (const source of ['uptime-monitor:availability:v1', 'repair-loop:jev:availability:v1']) {
 const actor = (slug) => ({ id: slug === 'a' ? '10000000-0000-0000-0000-000000000001' : '10000000-0000-0000-0000-000000000002', slug, human: false, via: 'local-token', client_id: slug });
 const args = (key, source_note = source) => ({ idempotency_key: key, kind: 'open_loop', domain: 'system', owner: 'claude',
   title: 'DoctorCRE uptime monitoring unavailable', body: 'Restore the monitor', source_note,
@@ -32,7 +32,7 @@ class Records {
   }
 }
 
-test('monitor incident identity survives distinct principals without weakening replay authority', async () => {
+test(`${source} survives distinct principals without weakening replay authority`, async () => {
   const db = new Records();
   const first = await TOOLS['add-loop'].handler(db, actor('a'), args('a-open'));
   await assert.rejects(() => TOOLS['add-loop'].handler(db, actor('b'), args('a-open')), error => error.message === 'key_reuse');
@@ -46,14 +46,14 @@ test('monitor incident identity survives distinct principals without weakening r
   assert.equal(db.loops.length, 2);
 });
 
-test('ordinary source notes continue to allow separate loops', async () => {
+test(`${source} does not deduplicate ordinary source notes`, async () => {
   const db = new Records();
   await TOOLS['add-loop'].handler(db, actor('a'), args('a', 'https://example.com'));
   await TOOLS['add-loop'].handler(db, actor('b'), args('b', 'https://example.com'));
   assert.equal(db.loops.length, 2);
 });
 
-test('concurrent monitor writers return one incident under the transaction lock', async () => {
+test(`${source} concurrent writers return one incident under the transaction lock`, async () => {
   const db = new Records();
   let writer = Promise.resolve();
   let readers = 0;
@@ -81,3 +81,5 @@ test('concurrent monitor writers return one incident under the transaction lock'
   assert.equal(first.loop_id, second.loop_id);
   assert.equal(db.loops.length, 1);
 });
+
+}

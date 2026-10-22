@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Hermetic behavior checks for the Jev outage health row and bound loop."""
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 import os
 import tempfile
 import unittest
@@ -21,7 +23,61 @@ def loop_reply(name, row):
     return {"loop": row, "amended": False, "amendments": []} if name == "read-loop" else row
 
 
+class IncidentRecords:
+    """Record-verb adapter with shared incident ownership, separate from local files."""
+    def __init__(self, barrier=None):
+        self.loops = {}
+        self.lock = threading.Lock()
+        self.barrier = barrier
+
+    def __call__(self, name, payload):
+        if name == "add-loop" and self.barrier:
+            self.barrier.wait(timeout=5)
+        with self.lock:
+            if name == "add-loop":
+                identity = payload.get("source_note")
+                found = next((row for row in self.loops.values()
+                              if identity and row.get("source_note") == identity
+                              and row["status"] == "open"), None)
+                if found:
+                    return {"ok": True, "loop_id": found["loop_id"], "deduplicated": True}
+                loop_id = f"incident-{len(self.loops) + 1}"
+                self.loops[loop_id] = dict(payload, loop_id=loop_id, version=1, status="open")
+                return {"ok": True, "loop_id": loop_id}
+            if name == "read-loop":
+                row = self.loops.get(payload.get("loop_id"))
+                if "source_note" in payload:
+                    row = next((row for row in self.loops.values()
+                                if row.get("source_note") == payload["source_note"]
+                                and row["status"] == "open"), None)
+                return {"loop": dict(row) if row else None}
+            row = self.loops[payload["loop_id"]]
+            if payload["base_version"] != row["version"]:
+                return {"ok": False, "refused": True, "error": "version_conflict"}
+            if name == "update-loop":
+                row.update({key: value for key, value in payload.items()
+                            if key not in ("idempotency_key", "base_version")})
+            elif name == "close-loop":
+                row["status"] = payload["resolution"]
+            else:
+                raise AssertionError(name)
+            row["version"] += 1
+            return {"ok": True, "loop_id": row["loop_id"]}
+
+
 class OutageTests(unittest.TestCase):
+    def test_lost_state_reattaches_to_one_record_incident(self):
+        records = IncidentRecords()
+        warning = {"status": "warn", "reason": "state_unreadable"}
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            self.assertEqual(health.reconcile(warning, state, records), "opened")
+            original = json.loads(state.read_text())["loop_id"]
+            state.unlink()
+            self.assertEqual(health.reconcile(warning, state, records), "open")
+            self.assertEqual(json.loads(state.read_text())["loop_id"], original)
+            self.assertEqual(len(records.loops), 1)
+
     def test_refused_loop_read_reports_error_and_preserves_open_loop(self):
         from unittest import mock
         from lib.record_call import VerbResult
