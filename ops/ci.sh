@@ -28,16 +28,32 @@ fi
 
 STRICT=0
 ONLY=""
+MIGRATION_PART=all
+GATE_SHARD=1
+GATE_SHARDS=1
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --strict) STRICT=1 ;;
     --only)   ONLY="$ONLY $(echo "${2:-}" | tr ',' ' ')"; shift ;;
+    --gate-shard)
+      case "${2:-}" in
+        1/2) GATE_SHARD=1; GATE_SHARDS=2 ;;
+        2/2) GATE_SHARD=2; GATE_SHARDS=2 ;;
+        *) echo "ci.sh: gate shard must be 1/2 or 2/2" >&2; exit 64 ;;
+      esac
+      shift ;;
+    --migration-part) MIGRATION_PART="${2:-}"; shift ;;
     --list)   LIST=1 ;;
-    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--list]"; exit 0 ;;
+    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|fixtures] [--gate-shard 1/2|2/2] [--list]"; exit 0 ;;
     *) echo "ci.sh: unknown argument: $1" >&2; exit 64 ;;
   esac
   shift
 done
+
+case "$MIGRATION_PART" in
+  all|core|fixtures) ;;
+  *) echo "ci.sh: migration part must be all, core or fixtures" >&2; exit 64 ;;
+esac
 
 CLASS_ORDER="pushfloor unit types contract gates secret dependency migration binding artifact freshness hxprobe"
 
@@ -203,7 +219,7 @@ tree_fingerprint() {
 }
 
 check_gates() {
-  local failures="" count=0 skiplist="" gates_timed_out=0
+  local failures="" count=0 skiplist="" gates_timed_out=0 gate_index=0
   export CARR_HOOK_FIXTURE=1
 
   local tree_before; tree_before="$(tree_fingerprint)"
@@ -236,6 +252,8 @@ PYEOF
       printf '        \033[33mnot run\033[0m  %s — %s\n' "$base" "$why" >&2
       continue
     fi
+    gate_index=$((gate_index+1))
+    [ "$(( (gate_index-1) % GATE_SHARDS + 1 ))" -eq "$GATE_SHARD" ] || continue
     count=$((count+1))
     eligible="$eligible $t"
   done
@@ -281,6 +299,8 @@ PYEOF
       printf '        \033[33mnot run\033[0m  %s — %s\n' "$sbase" "$swhy" >&2
       continue
     fi
+    gate_index=$((gate_index+1))
+    [ "$(( (gate_index-1) % GATE_SHARDS + 1 ))" -eq "$GATE_SHARD" ] || continue
     count=$((count+1))
     "$PY" ops/ci-quarantine.py run --print-log --test "$t" --log "$LOGDIR/gate-$sbase.log" \
       --identity-file "$LOGDIR/source-identity.json" -- \
@@ -540,7 +560,47 @@ check_dependency() {
   fi
 }
 
+check_migration_fixtures() {
+  if ! run_quiet "$LOGDIR/migration-reconstruction.log" \
+       "$PY" ops/schema-reconstruction-selftest.py --postgres; then
+    tail -30 "$LOGDIR/migration-reconstruction.log" >&2
+    bad migration "snapshot reconstruction did not reach the exact source migration ledger"
+    return
+  fi
+  if ! run_quiet "$LOGDIR/migration-production-proof-fixture.log" \
+       "$PY" ops/migration-production-proof-selftest.py --postgres; then
+    tail -30 "$LOGDIR/migration-production-proof-fixture.log" >&2
+    bad migration "production equivalence proof failed against the offline database fixture"
+    return
+  fi
+  local shadow_rc=0 shadow_note
+  "$PY" ops/migration-shadow.py ${CARR_SHADOW_ARTIFACT_DIR:+--artifact-dir "$CARR_SHADOW_ARTIFACT_DIR"} \
+    > "$LOGDIR/migration-shadow.log" 2>&1 || shadow_rc=$?
+  case "$shadow_rc" in
+    0) if ! run_quiet "$LOGDIR/schema-snapshot-rebuild.log" "$PY" ops/schema-snapshot-rebuild-test.py; then
+         tail -30 "$LOGDIR/schema-snapshot-rebuild.log" >&2
+         bad migration "db/schema.sql loses an applied seed update during snapshot refresh and rebuild"
+         return
+       fi
+       shadow_note="; $(sed -n 's/^migration-shadow: \([0-9]* pending migration(s) applied\).*/\1/p' "$LOGDIR/migration-shadow.log" | head -1) on a PostgreSQL 18 shadow; refreshed snapshot restores with reviewed seeds intact" ;;
+    3) if [ "$STRICT" = "1" ]; then
+         cat "$LOGDIR/migration-shadow.log" >&2
+         bad migration "the migration shadow needs PostgreSQL 18 server binaries (CI installs postgresql-18)"
+         return
+       fi
+       shadow_note="; migration shadow not run (no PostgreSQL 18 here)" ;;
+    *) tail -60 "$LOGDIR/migration-shadow.log" >&2
+       bad migration "migration shadow: pending migrations did not apply over the base snapshot, or db/schema.sql is not what they produce"
+       return ;;
+  esac
+  ok migration "independent reconstruction and production-equivalence fixtures pass$shadow_note"
+}
+
 check_migration() {
+  if [ "$MIGRATION_PART" = fixtures ]; then
+    check_migration_fixtures
+    return
+  fi
   if ! run_quiet "$LOGDIR/migration-open-pr.log" "$PY" ops/migration-open-pr-gate.py; then
     cat "$LOGDIR/migration-open-pr.log" >&2
     bad migration "an earlier PR or main owns a migration slot; run ./run.sh regen --pr <number>"
@@ -596,20 +656,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
   fi
 
   _mstep load
-  if ! run_quiet "$LOGDIR/migration-reconstruction.log" \
-       "$PY" ops/schema-reconstruction-selftest.py --postgres; then
-    tail -30 "$LOGDIR/migration-reconstruction.log" >&2
-    bad migration "snapshot reconstruction did not reach the exact source migration ledger"
-    return
-  fi
-  _mstep reconstruction
-  if ! run_quiet "$LOGDIR/migration-production-proof-fixture.log" \
-       "$PY" ops/migration-production-proof-selftest.py --postgres; then
-    tail -30 "$LOGDIR/migration-production-proof-fixture.log" >&2
-    bad migration "production equivalence proof failed against the offline database fixture"
-    return
-  fi
-  _mstep production-proof-fixture
   if ! DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration.log" "$PY" tools/migrate.py --apply --yes; then
     tail -30 "$LOGDIR/migration.log" >&2
     bad migration "a pending migration did not apply to the committed schema"
@@ -1028,29 +1074,12 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       return
     fi
 
-    local shadow_rc=0 shadow_note
-    "$PY" ops/migration-shadow.py ${CARR_SHADOW_ARTIFACT_DIR:+--artifact-dir "$CARR_SHADOW_ARTIFACT_DIR"} \
-      > "$LOGDIR/migration-shadow.log" 2>&1 || shadow_rc=$?
-    _mstep shadow
-    case "$shadow_rc" in
-      0) if ! run_quiet "$LOGDIR/schema-snapshot-rebuild.log" "$PY" ops/schema-snapshot-rebuild-test.py; then
-           tail -30 "$LOGDIR/schema-snapshot-rebuild.log" >&2
-           bad migration "db/schema.sql loses an applied seed update during snapshot refresh and rebuild"
-           return
-         fi
-         shadow_note="; $(sed -n 's/^migration-shadow: \([0-9]* pending migration(s) applied\).*/\1/p' "$LOGDIR/migration-shadow.log" | head -1) on a PostgreSQL 18 shadow; refreshed snapshot restores with reviewed seeds intact" ;;
-      3) if [ "$STRICT" = "1" ]; then
-           cat "$LOGDIR/migration-shadow.log" >&2
-           bad migration "the migration shadow needs PostgreSQL 18 server binaries (CI installs postgresql-18)"
-           return
-         fi
-         shadow_note="; migration shadow not run (no PostgreSQL 18 here)" ;;
-      *) tail -60 "$LOGDIR/migration-shadow.log" >&2
-         bad migration "migration shadow: pending migrations did not apply over the base snapshot, or db/schema.sql is not what they produce"
-         return ;;
-    esac
+    if [ "$MIGRATION_PART" = all ]; then
+      check_migration_fixtures
+      [ "$FAILED" -eq 0 ] || return
+    fi
 
-    ok migration "committed schema loads; ${n:-0} pending migration(s) apply; app-role grants verified live; trigger reads granted; $db_gate_count db acceptance gate program(s) pass (each program reports its own assertions)$shadow_note"
+    ok migration "committed schema loads; ${n:-0} pending migration(s) apply; app-role grants verified live; trigger reads granted; $db_gate_count db acceptance gate program(s) pass (each program reports its own assertions)"
   else
     tail -15 "$LOGDIR/migration-grants.log" >&2
     bad migration "the app roles' grants did not survive into the built database"

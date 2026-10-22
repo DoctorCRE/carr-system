@@ -68,6 +68,9 @@ class Controls(unittest.TestCase):
         events = {'opened', 'synchronize', 'reopened', 'ready_for_review', 'converted_to_draft'}
         for filename in ('ci.yml', 'db-acceptance.yml', 'doc-drift.yml'):
             wf = workflow(filename)
+            if filename == 'db-acceptance.yml':
+                self.assertEqual(set(wf['on']), {'workflow_dispatch'})
+                continue
             self.assertEqual(set(wf['on']['pull_request']['types']), events)
             previous = None
             for action in events:
@@ -83,8 +86,13 @@ class Controls(unittest.TestCase):
                 if filename == 'ci.yml':
                     matrix = wf['jobs']['classes']['strategy']['matrix']
                     excluded = expression(matrix['exclude'], e)
-                    groups = [g for g in matrix['classes'] if {'classes': g} not in excluded]
-                    self.assertEqual(excluded, [{'classes': 'gates'}, {'classes': 'migration'}] if draft else [])
+                    actual = [(group, shard) for group in matrix['classes'] for shard in matrix['gate_shard']
+                              if not any(all({'classes': group, 'gate_shard': shard}.get(k) == v
+                                             for k, v in row.items()) for row in excluded)]
+                    expected = [(group, shard) for group in matrix['classes']
+                                if not draft or group not in ('gates', 'migration')
+                                for shard in ([1, 2] if group == 'gates' else [1])]
+                    self.assertEqual(actual, expected)
                     self.assertTrue(expression(wf['jobs']['checks']['if'], e))
                     self.assertEqual(load('ci-evidence').class_groups(), matrix['classes'])
                 elif filename == 'db-acceptance.yml':
@@ -97,7 +105,8 @@ class Controls(unittest.TestCase):
                 self.assertNotEqual(group, expression(wf['concurrency']['group'], {**e, 'run_id': 11}))
                 self.assertFalse(expression(wf['concurrency']['cancel-in-progress'], e))
                 if filename == 'ci.yml':
-                    self.assertEqual(expression(wf['jobs']['classes']['strategy']['matrix']['exclude'], e), [])
+                    exclusions = expression(wf['jobs']['classes']['strategy']['matrix']['exclude'], e)
+                    self.assertTrue(all(row.get('gate_shard') == 2 and row['classes'] != 'gates' for row in exclusions))
                     self.assertTrue(expression(wf['jobs']['checks']['if'], e))
                 elif filename == 'db-acceptance.yml':
                     self.assertTrue(expression(wf['jobs']['acceptance']['if'], e))
@@ -106,8 +115,8 @@ class Controls(unittest.TestCase):
         wf = workflow()
         self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
         self.assertIn('always()', wf['jobs']['checks']['if'])
-        self.assertNotIn('if', wf['jobs']['classes'])
-        self.assertEqual(wf['jobs']['checks']['needs'], 'classes')
+        self.assertEqual(wf['jobs']['classes']['if'], '${{ always() }}')
+        self.assertEqual(set(wf['jobs']['checks']['needs']), {'scope', 'classes', 'migration-fixtures'})
         steps = wf['jobs']['checks']['steps']
         verdict = next(step for step in steps if step.get('name') == 'Fail unless every class group succeeded')
         self.assertIn('python3 ops/ci-evidence.py verdict', verdict['run'])

@@ -66,9 +66,13 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
           classes.get('if') == "${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}")
     main_steps = classes['steps']
     pr_steps = pr['jobs']['classes']['steps']
-    check('class execution and environment match PR CI',
-          main_steps == [st for st in pr_steps if st.get('name') != 'Require a written pull request description'])
-    check('service containers match PR CI', classes['services'] == pr['jobs']['classes']['services'])
+    check('main retains the full default class while PR partitions the same proof',
+          any(st.get('run') == 'ops/ci.sh --strict --only "${{ matrix.classes }}"' for st in main_steps)
+          and any('--migration-part core' in st.get('run', '') for st in pr_steps)
+          and any('--migration-part fixtures' in st.get('run', '')
+                  for st in pr['jobs']['migration-fixtures']['steps']))
+    check('main owns its disposable service while PR runner owns its cluster',
+          'postgres' in classes['services'] and 'services' not in pr['jobs']['classes'])
     aggregate = main['jobs']['canary']
     check('one aggregate main canary always reports',
           aggregate['name'] == 'main canary' and 'always()' in aggregate['if'])

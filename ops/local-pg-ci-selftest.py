@@ -284,6 +284,26 @@ check("ordinary children receive no ambient secrets", all(
     for event, env in zip(events, child_envs)
 ))
 
+core_events_start = len(events)
+with (
+    patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
+    patch.object(mod, "port_is_available", return_value=True),
+):
+    result = mod.run_local_ci(repo=REPO, ci_class="migration", port=55432,
+                              runner=FakeRunner(), migration_part="core")
+core_events = events[core_events_start:]
+check("core partition remains strict and runs the full acceptance manifest",
+      result == 0 and any(event[-3:] == ("--strict", "--migration-part", "core") for event in core_events)
+      and any(event[-1].endswith("tools/test-f03-production-migration.py") for event in core_events)
+      and any("--verify-only" in event for event in core_events))
+for invalid in ("fixtures", "unknown"):
+    try:
+        mod.run_local_ci(repo=REPO, ci_class="migration", port=55432, runner=FakeRunner(), migration_part=invalid)
+    except mod.LocalPGRefusal:
+        check(f"local lane refuses migration part {invalid}", True)
+    else:
+        check(f"local lane refuses migration part {invalid}", False)
+
 events.clear()
 with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),

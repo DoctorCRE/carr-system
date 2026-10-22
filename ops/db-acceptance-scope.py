@@ -1,14 +1,13 @@
 """Decide whether the hosted disposable-Postgres lane must run in full.
 
-The lane (`local-db-ci --class migration`) takes 34-45 minutes. A PR whose
-diff touches no migration, schema, or record-layer database file cannot change
-its verdict, so the workflow skips the install and the run and still reports
-green. Schedule, manual runs and anything this script cannot decide stay full.
+One path inventory covers the canonical class, its disposable runner and all
+acceptance programs. A PR outside this inventory records not applicable. Schedule, manual runs and anything this script cannot decide stay full.
 
 Prints `full=true|false` (and appends it to $GITHUB_OUTPUT when set).
 """
 from __future__ import annotations
 
+import argparse
 import fnmatch
 import json
 import os
@@ -23,21 +22,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # Any match runs the full lane. fnmatch `*` crosses `/`, so `dir/*` is a tree.
 FULL_PATTERNS = (
-    'migrations/*', 'db/*', 'lib/*', 'mcp-server/src/*',
-    'mcp-server/test/codex-continuity*',
+    'migrations/*', 'db/*', 'lib/*', 'ops/*', 'tools/*', 'bin/*',
+    'mcp-server/src/*', 'mcp-server/test/*',
     'mcp-server/package.json', 'mcp-server/package-lock.json',
-    'bin/schema-snapshot.sh', 'run.sh', 'requirements.lock',
-    '.python-version', '.nvmrc',
-    '.github/workflows/db-acceptance.yml',
-    'ops/ci.sh', 'ops/local-pg-ci*', 'ops/db-*', 'ops/db_*',
-    'ops/*migration*', 'ops/*schema*', 'ops/*postgres*', 'ops/*-pg-*',
-    'ops/*acceptance*', 'ops/*rule-delivery*', 'ops/*canonical-ownership*',
-    'ops/config/rule-enforcement-map*', 'ops/config/*migration*',
-    'tools/migrat*', 'tools/test_migr*', 'tools/*schema*', 'tools/git_env.py',
-    'tools/renumber-at-merge*', 'tools/*f03*', 'ops/*f03*', 'ops/*.sql',
-    'mcp-server/test/*pg*', 'mcp-server/test/*f03*',
-    'mcp-server/test/find-rule-supersedes*', 'mcp-server/test/catch-me-up-writer-route*',
-    'mcp-server/test/one-step-rule-approval*',
+    'run.sh', 'requirements*', '.python-version', '.nvmrc',
+    '.github/workflows/ci.yml', '.github/workflows/db-acceptance.yml',
 )
 
 
@@ -49,24 +38,46 @@ def changed_paths(event: dict) -> list[str] | None:
     pr = event.get('pull_request')
     if not pr:
         return None
-    base, head = 'origin/' + pr['base']['ref'], pr['head']['sha']
+    base, head = pr['base'].get('sha', 'origin/' + pr['base']['ref']), pr['head']['sha']
     out = subprocess.run(['git', 'diff', '--name-only', '--no-renames', f'{base}...{head}'], cwd=ROOT, env=scrubbed_env(),
                          capture_output=True, text=True, check=True, timeout=120).stdout
     return [line for line in out.splitlines() if line]
 
 
-def decide() -> bool:
+def classify() -> tuple[bool, list[str] | None, str]:
     if os.environ.get('GITHUB_EVENT_NAME') != 'pull_request':
-        return True
+        return True, None, 'non-PR event requires full proof'
     try:
         paths = changed_paths(json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()))
-    except (KeyError, OSError, ValueError, subprocess.SubprocessError):
-        return True  # cannot decide: run everything
-    return True if paths is None else needs_full(paths)
+    except (KeyError, TypeError, AttributeError, OSError, ValueError, subprocess.SubprocessError):
+        return True, None, 'diff unavailable; run full proof'
+    if paths is None:
+        return True, None, 'PR identity unavailable; run full proof'
+    full = needs_full(paths)
+    return full, paths, 'database input changed' if full else 'no database input changed'
+
+
+def decide() -> bool:
+    return classify()[0]
 
 
 def main() -> int:
-    full = decide()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--receipt', type=Path)
+    args = parser.parse_args()
+    full, paths, reason = classify()
+    receipt = {'schema': 'carr-db-scope/v1', 'full': full,
+               'status': 'required' if full else 'not applicable',
+               'paths': paths, 'reason': reason,
+               'event': os.environ.get('GITHUB_EVENT_NAME'),
+               'tested_sha': os.environ.get('GITHUB_SHA'),
+               'patterns': FULL_PATTERNS}
+    if args.receipt:
+        args.receipt.write_text(json.dumps(receipt, indent=2) + '\n')
+    print(json.dumps(receipt))
+    if os.environ.get('GITHUB_STEP_SUMMARY'):
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+            summary.write('Database migration proof: ' + receipt['status'] + '\n')
     line = f'full={"true" if full else "false"}'
     print(line)
     if os.environ.get('GITHUB_OUTPUT'):

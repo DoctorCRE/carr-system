@@ -31,16 +31,15 @@ for path in ('migrations/0363_x.sql', 'db/schema.sql', 'mcp-server/src/tools.js'
              'bin/schema-snapshot.sh', 'run.sh', '.github/workflows/db-acceptance.yml',
              'ops/config/rule-enforcement-map.json', 'ops/ci.sh'):
     check(f'{path} runs the full lane', scope.needs_full([path]))
-for path in ('hooks/rule-pack-preuse-reselection.py', 'ops/config/gate-baseline.json',
-             'ops/rule-pack-preuse-reselection-selftest.py', 'tools/flash-run.py', 'README.md',
-             'docs/agents/domain.md', 'tools/regen.py', '.github/workflows/ci.yml'):
+for path in ('hooks/rule-pack-preuse-reselection.py', 'web/app.js', 'README.md',
+             'docs/agents/domain.md'):
     check(f'{path} alone skips the lane', not scope.needs_full([path]))
 check('one DB file among others runs the lane',
       scope.needs_full(['README.md', 'hooks/a.py', 'migrations/0400_y.sql']))
 # Derive the lane's own inputs from the files that name them, so the list cannot drift.
 repo = Path(__file__).resolve().parents[1]
 named: set[str] = set()
-for src in ('ops/local-pg-ci.py', 'ops/db_acceptance_shards.py'):
+for src in ('ops/ci.sh', 'ops/local-pg-ci.py', 'ops/db_acceptance_shards.py'):
     for lit in re.findall(r'["\']([A-Za-z0-9_./-]+\.(?:py|mjs|sql|sh))["\']', (repo / src).read_text()):
         if '/' in lit and (repo / lit).exists():
             named.add(lit)
