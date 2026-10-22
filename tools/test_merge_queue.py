@@ -2293,8 +2293,8 @@ class QueueTests(unittest.TestCase):
         self.q.enqueue(module.REPOS[0],1,self.approved);self.q.tick()
         self.load();self.data['update_reject']=False;self.save();self.q.tick();self.q.tick()
         self.assertEqual(self.calls('merge'), [])
-        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], 'head_moved')
-        self.q.enqueue(module.REPOS[0], 1, self.updated);self.q.tick()
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], 'updated')
+        self.q.tick()
         self.assertEqual(len(self.calls('merge')),1)
 
     def test_operator_can_reconcile_interrupted_update(self):

@@ -594,7 +594,7 @@ class Queue:
             try:
                 stdout, stderr = process.communicate(timeout=BOUNDS['regeneration']['seconds'])
             except subprocess.TimeoutExpired:
-                stdout, stderr = '', 'regeneration transport deadline expired'
+                stdout, stderr = None, ''
             finally:
                 self.preparation_process = None
                 try:
@@ -603,7 +603,7 @@ class Queue:
                     pass
                 process.wait()
             self.check_cancelled()
-            if process.returncode:
+            if process.returncode or stdout is None:
                 action = self.db.execute('SELECT * FROM actions WHERE key=?', (key,)).fetchone()
                 return self.reconcile_preparation(action, self.pr(repo, n))
         output = json.loads(stdout)
@@ -1084,7 +1084,7 @@ class Queue:
                               merged=merged, actor='merge-daemon',
                               reason=f'journal entry {e["id"]}: verified provider {"merge on main" if merged else "closed without merge"}')
 
-    def advance_regenerated_pin(self, e, card_id, p, expected_order):
+    def advance_prepared_pin(self, e, card_id, p, expected_order):
         head = p['head']['sha']
         if (e['tested'] is not None or head == e['approved'] or p['state'] != 'open'
                 or p.get('draft') or p['base']['ref'] != 'main'):
@@ -1101,53 +1101,46 @@ class Queue:
         actions = self.db.execute("SELECT * FROM actions WHERE kind='regen' AND phase IN ('issued','done') "
                                   'AND repo=? AND pr=? AND head=? AND receipt IS NOT NULL',
                                   (e['repo'], e['pr'], e['approved'])).fetchall()
-        if update or actions:
-            self.fetch(e['repo'], e['approved'], head)
-            repo_path = self.state / 'repos' / (e['repo'].split('/')[-1] + '.git')
-            ancestor = subprocess.run(['git', '-C', str(repo_path), 'merge-base', '--is-ancestor',
-                                       e['approved'], head], capture_output=True, env=scrubbed_env(),
-                                      timeout=BOUNDS['command']['seconds'])
-            if ancestor.returncode == 1:
-                return False
-            if ancestor.returncode != 0:
-                raise RuntimeError('approved head ancestry readback failed')
-            commits = self.git(e['repo'], 'log', '--format=%H', '--no-merges', '--first-parent',
-                               f'{e["approved"]}..{head}').strip()
-            if commits:
-                return False
-            if update:
-                with WorkQueue(default_path()) as work:
-                    work.advance_merge_pin(card_id, repo=e['repo'], pr=e['pr'], head=e['approved'],
-                                           prepared=head, main=p['base']['sha'], actor='merge-daemon',
-                                           reason=f'journal entry {e["id"]}: verified daemon merge-only update',
-                                           expected_order=expected_order)
-                with self.db:
-                    self.db.execute("UPDATE actions SET phase='done' WHERE key=?", (update['key'],))
-                self.report(e, 'updated', f'Advanced work pin from {e["approved"]} to {head}; hosted CI required',
-                            'done')
-                return True
-        for action in bounded_items('snapshot', actions):
-            try:
-                receipt = json.loads(Path(action['receipt']).read_text())
-            except (OSError, ValueError):
-                continue
-            if receipt != dict(head=e['approved'], main=action['payload'], prepared=head, branch=p['head']['ref']):
-                continue
-            with self.db:
-                self.db.execute("UPDATE actions SET phase='done' WHERE key=?", (action['key'],))
-            with WorkQueue(default_path()) as work:
-                work.advance_merge_pin(card_id, repo=e['repo'], pr=e['pr'], head=e['approved'],
-                                       prepared=head, main=receipt['main'], actor='merge-daemon',
-                                       reason=f'journal entry {e["id"]}: verified regeneration receipt {action["receipt"]}',
-                                       expected_order=expected_order)
-            self.report(e, 'regenerated', f'Advanced work pin from {e["approved"]} to {head}; hosted CI required',
-                        'done')
-            return True
-        if self.db.execute("SELECT 1 FROM actions WHERE kind='regen' AND phase='issued' "
-                           'AND repo=? AND pr=? AND head=?',
-                           (e['repo'], e['pr'], e['approved'])).fetchone():
-            raise ActionUncertain('Regeneration may have pushed; reconcile-action before advancing the pin')
-        return False
+        if not update and not actions:
+            return False
+        self.fetch(e['repo'], e['approved'], head)
+        repo_path = self.state / 'repos' / (e['repo'].split('/')[-1] + '.git')
+        ancestor = subprocess.run(['git', '-C', str(repo_path), 'merge-base', '--is-ancestor',
+                                   e['approved'], head], capture_output=True, env=scrubbed_env(),
+                                  timeout=BOUNDS['command']['seconds'])
+        if ancestor.returncode == 1:
+            return False
+        if ancestor.returncode != 0:
+            raise RuntimeError('approved head ancestry readback failed')
+        if self.git(e['repo'], 'log', '--format=%H', '--no-merges', '--first-parent',
+                    f'{e["approved"]}..{head}').strip():
+            return False
+        selected = update
+        main = p['base']['sha']
+        reason = 'verified daemon merge-only update'
+        if not selected:
+            for action in bounded_items('snapshot', actions):
+                try:
+                    receipt = json.loads(Path(action['receipt']).read_text())
+                except (OSError, ValueError):
+                    continue
+                if receipt == dict(head=e['approved'], main=action['payload'], prepared=head, branch=p['head']['ref']):
+                    selected, main = action, receipt['main']
+                    reason = f'verified regeneration receipt {action["receipt"]}'
+                    break
+        if not selected:
+            if any(action['phase'] == 'issued' for action in actions):
+                raise ActionUncertain('Regeneration may have pushed; reconcile-action before advancing the pin')
+            return False
+        with self.db:
+            self.db.execute("UPDATE actions SET phase='done' WHERE key=?", (selected['key'],))
+        with WorkQueue(default_path()) as work:
+            work.advance_merge_pin(card_id, repo=e['repo'], pr=e['pr'], head=e['approved'],
+                                   prepared=head, main=main, actor='merge-daemon',
+                                   reason=f'journal entry {e["id"]}: {reason}', expected_order=expected_order)
+        self.report(e, 'updated' if update else 'regenerated',
+                    f'Advanced work pin from {e["approved"]} to {head}; hosted CI required', 'done')
+        return True
 
     def _tick_entry(self, e, card_id, expected_order):
         repo, n = e['repo'], e['pr']
@@ -1179,7 +1172,7 @@ class Queue:
                 self.report(e, 'closed', 'PR closed without merge', 'done')
                 return False
             if p['head']['sha'] != e['approved']:
-                if self.advance_regenerated_pin(e, card_id, p, expected_order):
+                if self.advance_prepared_pin(e, card_id, p, expected_order):
                     return True
                 self.report(e, 'head_moved', 'Live head differs from the approved SHA',
                             'superseded' if e['tested'] is None else None)
@@ -1233,7 +1226,7 @@ class Queue:
                 return False
             if self.prepare(repo, p):
                 current = self.pr(repo, n)
-                if not self.advance_regenerated_pin(e, card_id, current, expected_order):
+                if not self.advance_prepared_pin(e, card_id, current, expected_order):
                     self.report(e, 'regenerated', f'Prepared from {head}; waiting for matching regeneration receipt and provider head')
                 return True
             if not self.green(repo, n, head):
