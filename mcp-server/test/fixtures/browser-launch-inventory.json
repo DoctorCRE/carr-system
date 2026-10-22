@@ -86,7 +86,7 @@
   {
     "name": "CDP test helper",
     "path": "new-package/test/shared.mjs",
-    "source": "import { launchTestChrome } from \"../../dealroom/test/chrome-launch.mjs\";\nawait launchTestChrome(t, chrome);",
+    "source": "import { launchTestChrome } from \"../../mcp-server/test/helpers/chrome-launch.mjs\";\nawait launchTestChrome(t, chrome);",
     "allowed": true
   },
   {
@@ -97,7 +97,7 @@
   },
   {
     "name": "the shared CDP launcher",
-    "path": "dealroom/test/chrome-launch.mjs",
+    "path": "mcp-server/test/helpers/chrome-launch.mjs",
     "source": "spawn(chrome, [\"--headless=new\"]);",
     "allowed": true
   },
@@ -146,13 +146,13 @@
   {
     "name": "the shared CDP tool helper",
     "path": "tools/capture.mjs",
-    "source": "import { launchChrome } from \"../dealroom/test/chrome-launch.mjs\";\nconst browser = await launchChrome(executable);\ntry { await capture(browser); } finally { await browser.close(); }",
+    "source": "import { launchChrome } from \"../mcp-server/test/helpers/chrome-launch.mjs\";\nconst browser = await launchChrome(executable);\ntry { await capture(browser); } finally { await browser.close(); }",
     "allowed": true
   },
   {
     "name": "an unowned test launch through the low-level helper",
     "path": "workspace/test/unowned.mjs",
-    "source": "import { launchChrome } from \"../../dealroom/test/chrome-launch.mjs\";\nawait launchChrome(chrome);",
+    "source": "import { launchChrome } from \"../../mcp-server/test/helpers/chrome-launch.mjs\";\nawait launchChrome(chrome);",
     "allowed": false
   },
   {

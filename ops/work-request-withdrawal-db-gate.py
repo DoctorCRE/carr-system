@@ -21,8 +21,8 @@ WHAT IT PROVES, in the order a reader would want it:
                            an earlier revision of this design would have made a
                            withdrawn row raise work_request_not_found, which is
                            the capability erasing the record it exists to write
-  captured only, for a decline
-                           a triaged request cannot be declined, at two layers
+  triaged decline          preserves triage and withdrawal receipts; ready and
+                           later states refuse with their state named
   triaged supersession     0888: a triaged request with nothing downstream is
                            superseded, keeps its triage fields, and its triage
                            receipt stays readable through superseded_by; one
@@ -327,6 +327,39 @@ def main() -> int:
         with rollback_only_connection(dsn) as conn:
             cur = conn.cursor()
             actor = fixture(cur)
+            grant_settable_runtime_roles(cur, "carr_writer")
+            for state, version in (("captured", 1), ("triaged", 2)):
+                request = capture(cur, f"Sponsored {state} decline")
+                if state == "triaged":
+                    triage(cur, request)
+                cur.execute("select set_config('carr.acting_actor_slug','codex',true)")
+                cur.execute("set local role carr_writer")
+                try:
+                    refuses_named(cur,
+                        "select ops.decline_sourced_work_request(%s,%s,'r','codex',%s)",
+                        (request, version, uuid.uuid4()), "sponsored_actor_required:",
+                        f"an unsponsored agent declining a {state} request")
+                finally:
+                    cur.execute("reset role")
+                card = cur.execute("select state,version from ops.work_request_card(%s,'carr-internal')",
+                                   (request,)).fetchone()
+                if card != (state, version):
+                    raise RuntimeError(f"refused {state} decline changed the request: {card}")
+                cur.execute("select set_config('carr.acting_actor_slug','joe-local',true),"
+                            " set_config('carr.sponsoring_human_slug','joe',true)")
+                cur.execute("set local role carr_writer")
+                try:
+                    row = cur.execute(
+                        "select state,version from ops.decline_sourced_work_request(%s,%s,'r','joe-local',%s)",
+                        (request, version, uuid.uuid4())).fetchone()
+                finally:
+                    cur.execute("reset role")
+                if row != ("declined", version + 1):
+                    raise RuntimeError(f"Joe's sponsored local {state} decline did not land: {row}")
+                cur.execute("select set_config('carr.sponsoring_human_slug','',true)")
+                print(f"PASS: {state} decline refuses an unsponsored writer and accepts Joe's sponsored local actor")
+            cur.execute("select set_config('carr.acting_actor_slug','joe',true),"
+                        " set_config('carr.sponsoring_human_slug','',true)")
             junk, real, third = capture(cur, "Junk"), capture(cur, "Real"), capture(cur, "Third")
 
             # --- supersede, and the record must survive it -------------------
@@ -400,7 +433,7 @@ def main() -> int:
                          "closed_at=now(),version=version+1 where ref=%s", (real,),
                     "an unreceipted UPDATE into a terminal state")
 
-            # --- captured only, for a decline -------------------------------------
+            # --- stale versions cannot withdraw ----------------------------------
             refuses(cur, "select ops.decline_sourced_work_request(%s,2,'r','joe',%s)",
                     (real, str(uuid.uuid4())), "withdrawing at a version that is not the captured one")
 
@@ -408,8 +441,36 @@ def main() -> int:
             retired, successor, planned = capture(cur, "Retired"), capture(cur, "Successor"), capture(cur, "Planned")
             for ref in (retired, planned):
                 triage(cur, ref)
-            refuses(cur, "select ops.decline_sourced_work_request(%s,2,'r','joe',%s)",
-                    (retired, str(uuid.uuid4())), "declining a triaged request")
+            declined = capture(cur, "Answered request")
+            triage(cur, declined)
+            decline_key = uuid.uuid4()
+            reason = "already answered; no further work remains"
+            row = cur.execute(
+                "select state,version,exit_reason from ops.decline_sourced_work_request(%s,2,%s,'joe',%s)",
+                (declined, reason, decline_key)).fetchone()
+            if row != ("declined", 3, reason):
+                raise RuntimeError(f"triaged decline did not land: {row}")
+            card = cur.execute(
+                "select state,triage_classification,triaged_by_actor_slug,exit_reason,closed_at"
+                " from ops.work_request_card(%s,'carr-internal')", (declined,)).fetchone()
+            if card[:4] != ("declined", "operational", "joe", reason) or card[4] is None:
+                raise RuntimeError(f"triaged decline lost its history on the card: {card}")
+            receipt = cur.execute(
+                "select r.base_version,r.result_version,r.final_state,r.exit_reason,a.slug"
+                " from ops.work_request_withdrawal_receipt r join public.actor a on a.id=r.withdrawn_by_actor_id"
+                " where r.idempotency_key=%s", (decline_key,)).fetchone()
+            if receipt != (2, 3, "declined", reason, "joe"):
+                raise RuntimeError(f"triaged decline lost its withdrawal receipt: {receipt}")
+            kept = cur.execute(
+                "select r.classification,r.base_version,r.result_version from ops.work_request_triage_receipt r"
+                " join ops.work_request w on w.id=r.work_request_id where w.ref=%s", (declined,)).fetchall()
+            if kept != [("operational", 1, 2)]:
+                raise RuntimeError(f"triaged decline lost its triage receipt: {kept}")
+            message = refuses_named(cur,
+                "select ops.decline_sourced_work_request(%s,3,'r','joe',%s)",
+                (declined, uuid.uuid4()), "work_request_not_declinable:", "declining an already declined request")
+            if "state declined" not in message:
+                raise RuntimeError(f"decline refusal did not name its state: {message}")
             refuses_named(cur, "select ops.supersede_sourced_work_request(%s,1,'r',%s,'joe',%s)",
                           (retired, successor, str(uuid.uuid4())), "work_request_not_supersedable",
                           "superseding a triaged request at its captured version")
@@ -478,9 +539,41 @@ def main() -> int:
             if still != ("triaged", 2):
                 raise RuntimeError(f"a refused supersession moved the planned request: {still}")
 
+            row = cur.execute(
+                "select state,version from ops.decline_sourced_work_request(%s,2,'answered','joe',%s)",
+                (planned, uuid.uuid4())).fetchone()
+            if row != ("declined", 3):
+                raise RuntimeError(f"a triaged request carrying plan history was not declined: {row}")
+            if cur.execute("select count(*) from ops.sourced_work_request_plan p"
+                           " join ops.work_request w on w.id=p.work_request_id where w.ref=%s",
+                           (planned,)).fetchone()[0] != 1:
+                raise RuntimeError("decline discarded the existing plan history")
+
+            ready = capture(cur, "Ready request")
+            triage(cur, ready)
+            plan_hash = cur.execute(
+                "select plan_hash from ops.propose_sourced_work_request_plan(%s,2,'Bounded scope',%s,%s,"
+                "'safe:recovery:stop','safe:observability:ops-run',%s,%s)",
+                (ready, runbook, Jsonb([]), Jsonb({"max_steps": 2, "max_duration_minutes": 10}),
+                 uuid.uuid4())).fetchone()[0]
+            cur.execute("set session authorization carr_authority_joe")
+            try:
+                cur.execute("select * from ops.accept_sourced_work_request_plan(%s,2,%s,%s)",
+                            (ready, plan_hash, uuid.uuid4()))
+            finally:
+                cur.execute("reset session authorization")
+            message = refuses_named(cur,
+                "select ops.decline_sourced_work_request(%s,3,'r','joe',%s)",
+                (ready, uuid.uuid4()), "work_request_not_declinable:", "declining ready work")
+            if "state ready" not in message:
+                raise RuntimeError(f"the ready refusal does not name its state: {message}")
+            if cur.execute("select state,version from ops.work_request where ref=%s", (ready,)).fetchone() != ("ready", 3):
+                raise RuntimeError("a refused decline changed the ready request")
+
         print(f"PASS: decline and supersede land with receipts; a withdrawn request stays "
               f"readable on the card with reason, closing time and successor; both leave the "
-              f"queue; a triaged request with nothing downstream is superseded with its triage "
+              f"queue; triaged decline preserves intake and plan history, ready decline names its state; "
+              f"a triaged request with nothing downstream is superseded with its triage "
               f"receipt intact, one with a plan is refused by name; {REFUSALS} refusals hold")
         return 0
     except Exception as exc:

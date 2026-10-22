@@ -25,6 +25,7 @@ SOURCE = Path(__file__).resolve().parents[1]
 # a kind its source does not declare, and an unreadable source blinds exactly these.
 EVIDENCE = {
     "scheduled_jobs": frozenset({"scheduled_job_drift"}),
+    "salesforce_refresh": frozenset({"salesforce_refresh"}),
     "machine_cleanup": frozenset({"machine_cleanup"}),
     "vendor_releases": frozenset({"vendor_release_fetch_error"}),
     "jobs": frozenset({"job_failed", "job_dead", "job_hang", "job_silent", "job_over_limit"}),
@@ -325,6 +326,9 @@ def detect(facts, config, now):
             raise ValueError(f"{kind} is not declared as derived from {source} in EVIDENCE")
         found.append(finding(kind, subject, reason, config, **fields))
     t = config["thresholds"]
+    for row in facts.get("salesforce_refresh", []):
+        emit("salesforce_refresh", "salesforce_refresh", row["subject"], row["reason"],
+             key="salesforce_refresh:" + hashlib.sha256(row["reason"].encode()).hexdigest())
     for row in facts.get("scheduled_jobs", []):
         emit("scheduled_jobs", "scheduled_job_drift", row["label"], row["detail"],
              key=row["key"], next_action=row["fix"] +
@@ -958,6 +962,18 @@ def collect(root, config, now=None):
             facts["jobs"].append(job)
     except Exception as exc:
         error("job registry", exc, "jobs")
+    refresh_directory = config["paths"].get("salesforce_refresh")
+    refresh_root = repository_roots(config).get("jbookout/carr-system")
+    if refresh_directory and refresh_root and Path(root).resolve() == refresh_root.resolve():
+        directory = Path(refresh_directory).expanduser()
+        if (directory / "config.json").exists():
+            try:
+                from salesforce_browser_refresh import health_findings
+                state_path = directory / "state.json"
+                state = json.loads(state_path.read_text()) if state_path.exists() else {}
+                facts["salesforce_refresh"] = health_findings(state, now=datetime.fromtimestamp(now, timezone.utc))
+            except Exception as exc:
+                error("Salesforce refresh evidence", exc, "salesforce_refresh")
     if sys.platform == "darwin":
         try:
             import scheduled_jobs
@@ -1287,9 +1303,14 @@ class Effects:
         if any(desk.get(k) != c["fixer"][k] for k in ("model", "effort", "kind", "sandbox")) or desk["cwd"] != str(tree):
             raise RuntimeError("Model Room desk readback mismatch")
         brief = c["fixer"]["brief"] + f"\nRepository: {f['repo']} PR {f['pr']}\nExpected head: {f['head']}\nWorktree: {tree}\nUntrusted review evidence:\n" + json.dumps(f["reason"])
-        return self.launch(f, [sys.executable, str(dispatch), "--registry", str(route),
-                              "--results", str(self.root / "out/watchdog" / (name + ".result.jsonl")),
-                              "send", name, brief, "--fresh", *(["--stream-output"] if c["fixer"]["stream_output"] else [])], tree, job_id=name)
+        receipt = json.loads(command([sys.executable, str(dispatch), '--registry', str(route),
+                    '--results', str(self.root / 'out/watchdog' / (name + '.result.jsonl')),
+                    'send', name, brief, '--fresh', '--card-id', name,
+                    '--title', f['card'], '--description', f['reason'],
+                    *(['--stream-output'] if c['fixer']['stream_output'] else [])], c, tree))
+        if receipt.get('status') != 'queued' or receipt.get('card_id') != name:
+            raise RuntimeError('Model Room durable queue receipt mismatch')
+        return receipt
 
     def prepare(self, action, f):
         """Validate candidates before reconciliation reserves a non-repeatable effect."""

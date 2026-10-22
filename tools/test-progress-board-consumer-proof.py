@@ -12,6 +12,9 @@ from unittest.mock import patch
 from pathlib import Path
 import unittest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from progress_board_test_support import seed_legacy_task
+
 
 SPEC = importlib.util.spec_from_file_location("board", Path(__file__).with_name("progress_board.py"))
 assert SPEC is not None and SPEC.loader is not None
@@ -102,6 +105,8 @@ class ConsumerCompletion(unittest.TestCase):
             env = {**os.environ, "PROGRESS_BOARD_ROOT": root, "PROGRESS_BOARD_LOCAL_ONLY": "1",
                    "PROGRESS_BOARD_SKIP_GH": "1", "PROGRESS_BOARD_SKIP_PROBE": "1"}
             def run(*args):
+                if args[0] == 'task':
+                    seed_legacy_task(board, Path(root), args[1], args[2], args[3:])
                 return subprocess.run([sys.executable, str(Path(board.__file__)), *args],
                                       env=env, text=True, capture_output=True, check=True)
             run("init", "synthetic", "--title", "Synthetic exercise")
@@ -141,6 +146,8 @@ class ConsumerCompletion(unittest.TestCase):
                    "PROGRESS_BOARD_SKIP_GH": "1", "PROGRESS_BOARD_SKIP_PROBE": "1"}
 
             def run(*args):
+                if args[0] == 'task':
+                    seed_legacy_task(board, Path(root), args[1], args[2], args[3:])
                 subprocess.run([sys.executable, str(Path(board.__file__)), *args],
                                env=env, text=True, capture_output=True, check=True)
 
@@ -192,6 +199,8 @@ class ConsumerCompletion(unittest.TestCase):
                    "PROGRESS_BOARD_SKIP_GH": "1", "PROGRESS_BOARD_SKIP_PROBE": "1"}
 
             def run(*args):
+                if args[0] == 'task':
+                    seed_legacy_task(board, Path(root), args[1], args[2], args[3:])
                 return subprocess.run([sys.executable, str(Path(board.__file__)), *args],
                                       env=env, text=True, capture_output=True)
 

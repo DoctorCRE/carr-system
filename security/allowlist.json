@@ -190,6 +190,48 @@
       "sha256": "f8dd7ee9c6081f4c626e6ac948d8e8079ee04f636379191ce1a5a5d688b156c3",
       "rule": "opaque-binary",
       "reason": "Inspected screenshot of the synthetic V2 slice 11 board fixture. All cards and shell examples are synthetic; no client data. Exception binds only this path and these exact image bytes."
+    },
+    {
+      "path": "ops/rule-claim-gate-selftest.py",
+      "sha256": "15946b9193562e81d294a7c8b58a816a54cd68b9d4403ed94045f259b6afd285",
+      "rule": "pii-email",
+      "reason": "Exact rule-claim Git fixture revision. The email-shaped strings are GitHub SSH transport endpoints using the public git service account, not personal contact data."
+    },
+    {
+      "path": "ops/rule-claim-gate-selftest.py",
+      "sha256": "3dc7c54a7fd5750ebb588830076c67d49023985c806f60690174e5f65e674bab",
+      "rule": "pii-email",
+      "reason": "Exact rule-claim Git fixture revision. The email-shaped strings are GitHub SSH transport endpoints using the public git service account, not personal contact data."
+    },
+    {
+      "path": "ops/rule-claim-gate-selftest.py",
+      "sha256": "d350ba2f6421a0409db41c56cd78215dc13381cf0b5a081bcd21348e0ee99954",
+      "rule": "pii-email",
+      "reason": "Exact rule-claim Git fixture revision. The email-shaped strings are GitHub SSH transport endpoints using the public git service account, not personal contact data."
+    },
+    {
+      "path": "ops/rule-claim-gate-selftest.py",
+      "sha256": "3699f73795a4272ff04c5f3ef40bc273736723927cf186599059b8b08b4c69c7",
+      "rule": "pii-email",
+      "reason": "Exact rule-claim Git fixture revision. The email-shaped strings are GitHub SSH transport endpoints using the public git service account, not personal contact data."
+    },
+    {
+      "path": "ops/release-pipeline-selftest.py",
+      "sha256": "15a57161129168a52c1af01af1274e9f14d84f705a29c2e2406efa07d160a322",
+      "rule": "pii-email",
+      "reason": "Synthetic URL userinfo redaction regressions introduced in b027694e; opaque-fixture-access-token and fixture-password are test constants, not personal contact data or real credentials."
+    },
+    {
+      "path": "ops/release-pipeline-selftest.py",
+      "sha256": "b944ff4f74a8aa4083b64cb77b62346236eaa60dab8066a6390fac52c47d1347",
+      "rule": "pii-email",
+      "reason": "Synthetic URL userinfo redaction regressions introduced in 4abfa0b2; opaque-fixture-access-token and fixture-password are test constants, not personal contact data or real credentials."
+    },
+    {
+      "path": "vendor/hxprobe/src/record.rs",
+      "sha256": "7669221ae4871f570e53b9cdffab9ed878692658da93cca3af0e96f9b41af110",
+      "rule": "pii-email",
+      "reason": "Public example addresses in source comments from ukd1/hxstore-reverse-engineering commit 191b54e42757687806202f8f696e9066f0514e11, retained only for the byte-verbatim import commit. Final source comments use example.test. This qualification binds only this path and the exact upstream blob; no client data or private store was used."
     }
   ]
 }

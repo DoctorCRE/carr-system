@@ -55,6 +55,7 @@ from lib.control_plane_scheduler_cutover import (CutoverRefusal, scheduler_launc
                                                   scheduler_surface_rows)  # noqa: E402
 from lib.control_plane_workflow_truth import UNREADABLE, workflow_truth  # noqa: E402
 from lib.secret_redaction import redacted_tail, sensitive_env_values  # noqa: E402
+from lib.restore_rehearsal_report import report as restore_report  # noqa: E402
 
 MANIFEST_PATH = REPO / "ops" / "config" / "control-plane-workflows.v1.json"
 SCHEDULER_CUTOVER_REGISTRY_PATH = REPO / "ops" / "config" / "control-plane-scheduler-cutover.v1.json"
@@ -377,6 +378,8 @@ def enqueue_due(manifest: dict[str, Any], instant: datetime,
     if mode not in {"shadow", "canary", "live", "replay"}:
         raise ValueError(f"invalid job mode: {mode}")
     due = due_workflows(manifest, instant)
+    if not due:
+        return []
     # Resolve every deterministic canary contract before opening a database
     # transaction.  A live-equivalent command must not even produce a queued
     # canary job that could later be mistaken for acceptance evidence.
@@ -427,6 +430,8 @@ def enqueue_due_auto(manifest: dict[str, Any], instant: datetime) -> list[dict[s
     one workflow, never an ungated one.
     """
     due = due_workflows(manifest, instant)
+    if not due:
+        return []
     rows: list[dict[str, str]] = []
     with connect() as conn, conn.cursor() as cur:
         resolved = _resolve_auto_modes(cur, due)
@@ -669,6 +674,8 @@ class RuntimeWorkflowFactCollector:
         text = evidence.get('stdout_tail')
         if not isinstance(text, str):
             return False
+        if self.workflow['key'] == 'restore-rehearse-weekly' and self.mode in ('live', 'canary'):
+            return restore_report(text)['verdict'] == 'PASS'
         markers: dict[tuple[str, str], tuple[str, ...]] = {
             ('calendar-fetch-daily', 'shadow'): (r'calendar-capture: source=eventkit mode=shadow scanned=\d+ exact=\d+ domain=\d+ unknown=\d+ writes=0 failed=0',),
             ('calendar-fetch-daily', 'canary'): (r'calendar-capture: canary-result \{"contact_count":\d+,"domain_count":\d+,"exact_count":\d+,"snapshot_digest":"[0-9a-f]{64}","source_snapshot_id":"[0-9a-f-]{36}","unknown_count":\d+\}',),
@@ -680,8 +687,6 @@ class RuntimeWorkflowFactCollector:
             ('notes-sweep-hourly', 'live'): (r'notes-sweep: source=.+ posted=\d+ duplicate=\d+ failed=0 still_queued=0',),
             ('renewal-radar-source-daily', 'live'): (r'renewal-source: result \{',),
             ('restore-rehearse-weekly', 'shadow'): (r'PREFLIGHT OK — every check that runs before anything is created has passed\.', r'Nothing was created, decrypted or charged for\.'),
-            ('restore-rehearse-weekly', 'canary'): (r'RESTORE REHEARSAL: PASS',),
-            ('restore-rehearse-weekly', 'live'): (r'RESTORE REHEARSAL: PASS',),
         }
         required = markers.get((self.workflow['key'], self.mode))
         if required is None or not all(re.search(marker, text) is not None for marker in required):
@@ -913,8 +918,8 @@ class RuntimeWorkflowFactCollector:
                     return False
             text = self.execution.get('stdout_tail', '')
             if fact == 'calendar.summary_failed_zero': return 'failed=0' in text
-            if fact == 'restore.pass_line': return 'REHEARSAL PASS' in text
-            if fact == 'restore.throwaway_branch_deleted': return 'branch deleted' in text.lower()
+            if fact in ('restore.pass_line', 'restore.throwaway_branch_deleted'):
+                return self._command_evidence_valid(self.execution)
             if fact == 'notes.summary_and_durable_receipt_reconcile':
                 return 'failed=0' in text and 'still_queued=0' in text
             if fact == 'notes.unposted_call_recordings_only':

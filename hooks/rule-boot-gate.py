@@ -106,7 +106,11 @@ def decide(payload):
                            payload.get("source"),
                            agent_id=payload.get("agent_id") or payload.get("agentId"))
         core = core_cards()
-        print(f"{text}\n\n{core}" if core else text)
+        context = f"{text}\n\n{core}" if core else text
+        # Native Grok provides both event dialects; observe-only hooks read
+        # systemMessage rather than Claude's plain stdout.
+        print(json.dumps({"systemMessage": context})
+              if payload.get("hookEventName") == "session_start" else context)
         return 0
     if event == "SubagentStart":
         emit("allow", core_cards(), event)
@@ -129,8 +133,8 @@ def decide(payload):
 
 
 def main():
-    from hooks.grok_invocation import grok_session
-    if grok_session():
+    from hooks.grok_invocation import bounded_grok_read_only
+    if bounded_grok_read_only():
         return 0
     return run(decide, parse_error=_parse_error)
 

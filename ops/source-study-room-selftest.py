@@ -52,7 +52,7 @@ class ResearchDeskTests(unittest.TestCase):
         class Registry:
             def resolve(self, name):
                 return {'kind': 'codex-session', 'model': 'fixture-model', 'effort': 'high'}
-        with patch.object(dispatch, '_run_codex_process', side_effect=AssertionError('unconfined runner')):
+        with patch.object(dispatch, '_run_headless_process', side_effect=AssertionError('unconfined runner')):
             with self.assertRaises(DeskError):
                 dispatch.dispatch('source-study', 'fixture', registry=Registry(),
                                   stream_output=True, provider_run=lambda *_: None)
@@ -237,6 +237,7 @@ print(json.dumps({'type': 'turn.completed'}))
         provider = job / 'bin/grok'
         provider.write_text('#!/usr/bin/env python3\n' +
                             'from pathlib import Path; import json, sys\n' +
+                            "assert sys.argv[sys.argv.index('--sandbox') + 1] == 'read-only'\n" +
                             f'try: Path({str(outside)!r}).read_text()\n' +
                             'except OSError: pass\nelse: sys.exit(99)\n' +
                             "print(json.dumps({'type': 'text', 'data': 'RAW SOURCE'}))\n" +

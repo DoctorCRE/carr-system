@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
 
 const JOE = { id: "10000000-0000-0000-0000-000000000002", slug: "joe", human: true, via: "test" };
-const BOT = { ...JOE, human: false, slug: "claude" };
+const BOT = { ...JOE, human: false, slug: "claude", sponsoring_human_slug: "joe" };
+const LOCAL = { ...BOT, slug: "joe-local", via: "local-token", native_agent_verified: true };
 const KEY = "10000000-0000-0000-0000-000000000099";
 const DECLINE = { idempotency_key: KEY, human_ref: "WR-000032", base_version: 1,
   exit_reason: "captured by mistake from a schema probe; nothing to build" };
@@ -28,12 +29,11 @@ class WithdrawFake {
     const sql = text.replace(/\s+/g, " ").trim(); this.calls.push({ sql, params });
     if (sql.startsWith("select pg_advisory_xact_lock")) return { rows: [] };
     if (sql.startsWith("select request_hash, response")) { const row = this.toolCalls.get(params[0]); return { rows: row ? [row] : [] }; }
-    // The functions select "for update" on state='captured' and version=
-    // p_base_version and raise when nothing matches; a stale version reaching the
-    // handler as zero rows is the shape the handler has to turn into a conflict.
     if (sql.includes("decline_sourced_work_request")) {
-      if (params[1] !== 1) return { rows: [] };
-      this.state = "declined"; this.version = 2;
+      if (this.refusal) throw new Error(this.refusal);
+      if (params[1] !== this.version)
+        throw new Error(`work_request_version_conflict: ${params[0]} is ${this.state} at version ${this.version}`);
+      this.state = "declined"; this.version += 1;
       return { rows: [{ ref: "WR-000032", state: this.state, version: this.version,
         exit_reason: params[2], closed_at: "2026-08-28T00:00:00Z" }] };
     }
@@ -92,6 +92,61 @@ test("decline records the reason, the closing time and one audit event", async (
   assert.equal(event.params[4], ID, "the event names the withdrawn row, not a null subject");
   assert.equal(JSON.parse(event.params[7]).state, "declined");
   assert.equal(JSON.parse(event.params[6]).state, "captured");
+});
+
+for (const from of ["captured", "triaged"]) {
+  test(`an unsponsored agent cannot decline a ${from} request`, async () => {
+    const db = new WithdrawFake({ from });
+    const actor = { ...BOT, slug: "codex", sponsoring_human_slug: null };
+    const out = await rejected(() => executeRegisteredTool(db, actor, "decline-work-request",
+      { ...DECLINE, base_version: db.version }));
+    assert.equal(out.error, "sponsored_actor_required");
+    assert.equal(out.authorization_class, "unsponsored_agent");
+    assert.equal(db.calls.length, 0);
+    assert.equal(db.state, from);
+  });
+
+  test(`Joe's sponsored local actor can decline a ${from} request`, async () => {
+    const db = new WithdrawFake({ from });
+    const out = await executeRegisteredTool(db, LOCAL, "decline-work-request",
+      { ...DECLINE, base_version: db.version });
+    assert.equal(out.state, "declined");
+    const call = db.calls.find(x => x.sql.includes("decline_sourced_work_request"));
+    assert.equal(call.params[3], "joe-local");
+  });
+
+  test(`the database sponsorship refusal stays named for a ${from} request`, async () => {
+    const detail = "sponsored_actor_required: declining a Work Request requires an active human actor or a sponsored agent";
+    const db = new WithdrawFake({ from, refusal: detail });
+    const out = await rejected(() => executeRegisteredTool(db, LOCAL, "decline-work-request",
+      { ...DECLINE, base_version: db.version }));
+    assert.deepEqual(out, { error: "sponsored_actor_required", human_ref: DECLINE.human_ref, detail });
+  });
+}
+
+test("decline preserves the triaged origin in its audit event", async () => {
+  const db = new WithdrawFake({ from: "triaged" });
+  const out = await executeRegisteredTool(db, BOT, "decline-work-request", { ...DECLINE, base_version: 2 });
+  assert.deepEqual([out.state, out.version, out.exit_reason], ["declined", 3, DECLINE.exit_reason]);
+  const event = db.calls.find(x => x.sql.startsWith("insert into event"));
+  assert.deepEqual(JSON.parse(event.params[6]), { state: "triaged", version: 2 });
+  assert.equal(event.params[1], BOT.id);
+});
+
+test("decline returns a clean refusal naming each disallowed state", async () => {
+  for (const state of ["ready", "in_progress", "confirmed_closed", "declined", "superseded"]) {
+    const detail = `work_request_not_declinable: WR-000032 is in state ${state}; only captured or triaged requests may be declined`;
+    const db = new WithdrawFake({ from: state, refusal: detail });
+    const out = await rejected(() => executeRegisteredTool(db, JOE, "decline-work-request", DECLINE));
+    assert.deepEqual(out, { error: "work_request_not_declinable", human_ref: "WR-000032", detail });
+    assert.equal(db.calls.some(x => x.sql.startsWith("insert into event")), false);
+  }
+});
+
+test("decline leaves unexpected database failures visible", async () => {
+  const db = new WithdrawFake({ refusal: "connection terminated unexpectedly" });
+  await assert.rejects(() => executeRegisteredTool(db, JOE, "decline-work-request", DECLINE),
+    error => !(error instanceof ToolError) && /connection terminated/.test(error.message));
 });
 
 test("supersede carries the successor through to the result and the event", async () => {

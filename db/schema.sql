@@ -10987,30 +10987,48 @@ CREATE FUNCTION ops.decline_sourced_work_request(p_work_request text, p_base_ver
     AS $$
 declare
   v_id uuid;
-  v_actor uuid;
+  v_actor public.actor%rowtype;
+  v_state text;
+  v_version integer;
+  v_sourced boolean;
   v_now timestamp with time zone := now();
 begin
   if p_exit_reason is null or btrim(p_exit_reason) = '' then
-    raise exception 'a withdrawal must record why';
+    raise exception 'withdrawal_reason_missing: a withdrawal must record why';
   end if;
-  select a.id into v_actor from public.actor a where a.slug = p_actor_slug;
-  if v_actor is null then
-    raise exception 'unknown actor %', p_actor_slug;
+  select a.* into v_actor from public.actor a where a.slug = p_actor_slug;
+  if v_actor.id is null then
+    raise exception 'unknown_actor: unknown actor %', p_actor_slug;
+  end if;
+  if not coalesce(v_actor.active and (
+    v_actor.kind = 'human'
+    or (v_actor.kind = 'automation'
+        and nullif(btrim(current_setting('carr.sponsoring_human_slug', true)), '') in ('joe', 'dell'))
+  ), false) then
+    raise exception 'sponsored_actor_required: declining a Work Request requires an active human actor or a sponsored agent'
+      using errcode = '42501';
   end if;
 
-  select w.id into v_id from ops.work_request w
-   where w.ref = p_work_request and w.capture_idempotency_key is not null
-     and w.state = 'captured' and w.version = p_base_version
-   for update;
+  select w.id, w.state, w.version, w.capture_idempotency_key is not null
+    into v_id, v_state, v_version, v_sourced from ops.work_request w
+   where w.ref = p_work_request for update;
   if v_id is null then
-    raise exception 'no captured sourced Work Request % at version %', p_work_request, p_base_version;
+    raise exception 'work_request_not_found: no Work Request %', p_work_request;
+  end if;
+  if v_state not in ('captured','triaged') or not v_sourced then
+    raise exception 'work_request_not_declinable: % is in state %; only captured or triaged sourced requests may be declined',
+      p_work_request, v_state;
+  end if;
+  if v_version <> p_base_version then
+    raise exception 'work_request_version_conflict: % is in state % at version %, not version %',
+      p_work_request, v_state, v_version, p_base_version;
   end if;
 
   insert into ops.work_request_withdrawal_receipt
     (work_request_id, idempotency_key, base_version, result_version, final_state,
      exit_reason, superseded_by, withdrawn_by_actor_id, withdrawn_at)
   values (v_id, p_idempotency_key, p_base_version, p_base_version + 1, 'declined',
-          p_exit_reason, null, v_actor, v_now)
+          p_exit_reason, null, v_actor.id, v_now)
   on conflict (idempotency_key) do nothing;
 
   update ops.work_request w
@@ -11623,7 +11641,7 @@ CREATE TABLE ops.work_request (
     CONSTRAINT work_request_program_ordinal_positive CHECK (((program_ordinal IS NULL) OR (program_ordinal > 0))),
     CONSTRAINT work_request_shape_disposition_complete CHECK ((((shape_disposition IS NULL) AND (shape_fixed_surface_ref IS NULL) AND (shape_rationale IS NULL) AND (shape_decided_by_actor_id IS NULL) AND (shape_decided_at IS NULL)) OR ((shape_disposition = 'required'::text) AND (shape_fixed_surface_ref IS NULL) AND (shape_rationale IS NOT NULL) AND (btrim(shape_rationale) <> ''::text) AND (shape_decided_by_actor_id IS NOT NULL) AND (shape_decided_at IS NOT NULL)) OR ((shape_disposition = 'not_required'::text) AND (shape_fixed_surface_ref IS NOT NULL) AND (btrim(shape_fixed_surface_ref) <> ''::text) AND (shape_rationale IS NOT NULL) AND (btrim(shape_rationale) <> ''::text) AND (shape_decided_by_actor_id IS NOT NULL) AND (shape_decided_at IS NOT NULL)))),
     CONSTRAINT work_request_shape_disposition_valid CHECK (((shape_disposition IS NULL) OR (shape_disposition = ANY (ARRAY['required'::text, 'not_required'::text])))),
-    CONSTRAINT work_request_sourced_capture_shape CHECK ((((capture_idempotency_key IS NULL) AND (organization_tenant_id IS NULL) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL)) OR ((capture_idempotency_key IS NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key = ANY (ARRAY['carr-ai-engineering-suite-v1'::text, 'carr-system-integrity-elimination-v1'::text])) AND (program_ordinal IS NOT NULL) AND (program_ordinal > 0) AND (NOT (requester_actor IS DISTINCT FROM 'joe'::text)) AND (NOT (owner_actor IS DISTINCT FROM 'joe'::text))) OR ((capture_idempotency_key IS NOT NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NOT NULL) AND (doctrine_revision_id IS NOT NULL) AND (sourced_capture_sequence IS NOT NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL) AND (origin_ref IS NOT NULL) AND (origin_ref ~ '^doctrine:[a-z0-9][a-z0-9-]*#[a-z0-9][a-z0-9-]*$'::text) AND (((state = 'captured'::text) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['triaged'::text, 'ready'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (((triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = 'superseded'::text) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL))) AND (exit_reason IS NOT NULL) AND (btrim(exit_reason) <> ''::text) AND (closed_at IS NOT NULL) AND (((state = 'declined'::text) AND (superseded_by IS NULL)) OR ((state = 'superseded'::text) AND (superseded_by IS NOT NULL)))))))),
+    CONSTRAINT work_request_sourced_capture_shape CHECK ((((capture_idempotency_key IS NULL) AND (organization_tenant_id IS NULL) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL)) OR ((capture_idempotency_key IS NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key = ANY (ARRAY['carr-ai-engineering-suite-v1'::text, 'carr-system-integrity-elimination-v1'::text])) AND (program_ordinal IS NOT NULL) AND (program_ordinal > 0) AND (NOT (requester_actor IS DISTINCT FROM 'joe'::text)) AND (NOT (owner_actor IS DISTINCT FROM 'joe'::text))) OR ((capture_idempotency_key IS NOT NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NOT NULL) AND (doctrine_revision_id IS NOT NULL) AND (sourced_capture_sequence IS NOT NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL) AND (origin_ref IS NOT NULL) AND (origin_ref ~ '^doctrine:[a-z0-9][a-z0-9-]*#[a-z0-9][a-z0-9-]*$'::text) AND (((state = 'captured'::text) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['triaged'::text, 'ready'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (((triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL))) AND (exit_reason IS NOT NULL) AND (btrim(exit_reason) <> ''::text) AND (closed_at IS NOT NULL) AND (((state = 'declined'::text) AND (superseded_by IS NULL)) OR ((state = 'superseded'::text) AND (superseded_by IS NOT NULL)))))))),
     CONSTRAINT work_request_state_check CHECK ((state = ANY (ARRAY['captured'::text, 'triaged'::text, 'ready'::text, 'claimed'::text, 'in_progress'::text, 'verification'::text, 'awaiting_release'::text, 'released'::text, 'confirmed_closed'::text, 'needs_joe'::text, 'blocked'::text, 'declined'::text, 'superseded'::text, 'failed'::text])))
 );
 
@@ -27148,7 +27166,8 @@ begin
       from ops.jev_call_receipt r
      where not exists (
        select 1 from public.tool_call t
-        where t.idempotency_key = r.idempotency_key
+        where t.verb in ('ask-jev', 'ask-jev-attempt')
+          and t.idempotency_key = r.idempotency_key
           and t.verb = case when r.model_answered = 'jev-attempt-pending'
                             then 'ask-jev-attempt' else 'ask-jev' end
           and t.actor_id = r.actor_id
@@ -27185,7 +27204,8 @@ begin
     into v_calls, v_tokens, v_unknown
     from ops.jev_call_receipt r
     left join public.tool_call t
-      on t.idempotency_key = r.idempotency_key
+      on t.verb in ('ask-jev', 'ask-jev-attempt')
+     and t.idempotency_key = r.idempotency_key
      and t.verb = case when r.model_answered = 'jev-attempt-pending'
                        then 'ask-jev-attempt' else 'ask-jev' end
      and t.actor_id = r.actor_id
@@ -65448,7 +65468,22 @@ begin
     return new;
   end if;
 
-  raise exception 'sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged, triaged shape-disposition, triaged-to-ready, captured-to-withdrawn, or triaged-to-superseded transitions';
+  if old.state = 'triaged'
+     and new.state = 'declined'
+     and new.version = old.version + 1
+     and (to_jsonb(new) - array['state','exit_reason','closed_at','version','updated_at'])
+           is not distinct from
+         (to_jsonb(old) - array['state','exit_reason','closed_at','version','updated_at'])
+     and exists (
+       select 1 from ops.work_request_withdrawal_receipt r
+        where r.work_request_id = old.id and r.base_version = old.version
+          and r.result_version = new.version and r.final_state = 'declined'
+          and r.exit_reason = new.exit_reason and r.superseded_by is null
+     ) then
+    return new;
+  end if;
+
+  raise exception 'sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged, triaged shape-disposition, triaged-to-ready, captured-to-withdrawn, or triaged-to-withdrawn transitions';
 end;
 $$;
 
@@ -84300,8 +84335,17 @@ CREATE TABLE public.client (
     deal_type_label text,
     possible_duplicate_label text,
     notes text,
-    specialty_type_label text
+    specialty_type_label text,
+    prospect_engagement_status text DEFAULT 'active'::text NOT NULL,
+    CONSTRAINT client_prospect_engagement_status_check CHECK ((prospect_engagement_status = ANY (ARRAY['active'::text, 'inactive'::text])))
 );
+
+
+--
+-- Name: COLUMN client.prospect_engagement_status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.client.prospect_engagement_status IS 'Explicit prospect engagement. Independent of lifecycle status and per-deal operating state. Active until explicitly returned to Leads.';
 
 
 --
@@ -87719,6 +87763,19 @@ COMMENT ON VIEW public.v_client_account IS 'Every live client with the national 
 
 
 --
+-- Name: v_client_engagement_status; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_client_engagement_status AS
+ SELECT id AS client_id,
+    status AS client_status,
+    version AS client_version,
+    prospect_engagement_status
+   FROM public.client
+  WHERE (merged_into IS NULL);
+
+
+--
 -- Name: v_client_lease_radar; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -89391,7 +89448,8 @@ CREATE VIEW public.v_deal_board AS
     d.notes_path,
     d.invoiced_on,
     d.closed_on,
-    d.lane
+    d.lane,
+    d.client_id
    FROM ((((((public.deal d
      JOIN public.client c ON ((c.id = d.client_id)))
      JOIN public.party pc ON ((pc.id = c.party_id)))
@@ -89436,7 +89494,9 @@ CREATE VIEW public.v_deal_room_board AS
           ORDER BY n.updated_at DESC, n.id DESC
          LIMIT 1), ( SELECT n.text
            FROM public.deal_note n
-          WHERE ((n.deal_id = d.id) AND (n.kind = 'next_step'::text))
+          WHERE ((n.deal_id = d.id) AND (n.kind = 'next_step'::text) AND (NOT (EXISTS ( SELECT 1
+                   FROM public.event e
+                  WHERE ((e.subject_type = 'deal'::text) AND (e.subject_id = d.id) AND (e.field = 'next_step'::text) AND (e.new_value ? 'superseded_action_ids'::text) AND (e.recorded_at >= n.created_at))))))
           ORDER BY n.created_at DESC, n.id DESC
          LIMIT 1)) AS next_step,
     d.city AS market,
@@ -89477,7 +89537,7 @@ CREATE VIEW public.v_deal_room_board AS
      LEFT JOIN public.deal_market_assignment dma ON ((dma.deal_id = d.id)))
      LEFT JOIN public.v_last_touch lt ON (((lt.subject_type = 'deal'::text) AND (lt.subject_id = d.id))))
      LEFT JOIN public.actor pa ON ((pa.id = d.parked_by)))
-  WHERE (d.invoiced_on IS NULL);
+  WHERE ((d.invoiced_on IS NULL) AND ((c.status <> 'prospect'::text) OR (c.prospect_engagement_status = 'active'::text)));
 
 
 --
@@ -89549,6 +89609,18 @@ CREATE VIEW public.v_deal_room_activity AS
    FROM (public.activity x
      JOIN public.actor a ON ((a.id = x.actor_id)))
   WHERE (x.deal_id IS NOT NULL);
+
+
+--
+-- Name: v_deal_room_commission; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_deal_room_commission AS
+ SELECT deal_id,
+    id AS commission_id,
+    status,
+    received_on
+   FROM public.commission;
 
 
 --
@@ -89715,6 +89787,19 @@ CREATE VIEW public.v_deal_room_phase_change AS
    FROM public.event e
   WHERE ((subject_type = 'deal'::text) AND (field = 'phase'::text))
   ORDER BY subject_id, e.recorded_at DESC, id DESC;
+
+
+--
+-- Name: v_deal_room_phase_start; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_deal_room_phase_start AS
+ SELECT subject_id AS deal_id,
+    (new_value ->> 'phase'::text) AS phase,
+    ((min(occurred_at) AT TIME ZONE 'America/Chicago'::text))::date AS started_on
+   FROM public.event e
+  WHERE ((subject_type = 'deal'::text) AND (field = 'phase'::text) AND (NULLIF((new_value ->> 'phase'::text), ''::text) IS NOT NULL) AND ((old_value ->> 'phase'::text) IS DISTINCT FROM (new_value ->> 'phase'::text)))
+  GROUP BY subject_id, (new_value ->> 'phase'::text);
 
 
 --
@@ -90801,6 +90886,20 @@ CREATE VIEW public.v_lead_hot AS
      JOIN public.party p ON ((p.id = l.party_id)))
      LEFT JOIN public.v_last_touch lt ON (((lt.subject_type = 'lead'::text) AND (lt.subject_id = l.id))))
   WHERE (NOT l.suppressed);
+
+
+--
+-- Name: v_lead_prospect_engagement; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_lead_prospect_engagement AS
+ SELECT l.id AS lead_id,
+    c.id AS prospect_client_id,
+    c.version AS prospect_client_version,
+    c.prospect_engagement_status
+   FROM (public.lead l
+     JOIN public.client c ON ((c.id = l.client_id)))
+  WHERE ((c.status = 'prospect'::text) AND (c.merged_into IS NULL));
 
 
 --
@@ -102783,6 +102882,20 @@ CREATE INDEX source_capture_session_trgm ON public.source_capture USING gin (ses
 --
 
 CREATE INDEX tool_call_correlation_idx ON public.tool_call USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
+
+
+--
+-- Name: tool_call_jev_receipt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX tool_call_jev_receipt_idx ON public.tool_call USING btree (verb) WHERE (verb = ANY (ARRAY['ask-jev'::text, 'ask-jev-attempt'::text]));
+
+
+--
+-- Name: tool_call_jev_settlement_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX tool_call_jev_settlement_idx ON public.tool_call USING btree (idempotency_key, actor_id, ((response ->> 'receipt_id'::text))) WHERE ((verb = 'ask-jev-attempt'::text) AND ((response ->> 'cache_hit'::text) = 'true'::text));
 
 
 --
@@ -120285,7 +120398,12 @@ grant select on table public.v_claim_card to carr_jobs;
 grant select on table public.v_claim_card to carr_reader;
 grant select on table public.v_claim_card to carr_writer;
 grant select on table public.v_claim_card to dot_reader;
+grant select on table public.v_client_account to carr_reader;
+grant select on table public.v_client_account to carr_writer;
 grant select on table public.v_client_account to dot_reader;
+grant select on table public.v_client_engagement_status to carr_reader;
+grant select on table public.v_client_engagement_status to carr_writer;
+grant select on table public.v_client_engagement_status to dot_reader;
 grant select on table public.v_client_lease_radar to carr_reader;
 grant select on table public.v_client_lease_radar to dot_reader;
 grant select on table public.v_code_finding to carr_exporter;
@@ -120350,6 +120468,9 @@ grant select on table public.v_deal_room_activity to dot_reader;
 grant select on table public.v_deal_room_board to carr_reader;
 grant select on table public.v_deal_room_board to carr_writer;
 grant select on table public.v_deal_room_board to dot_reader;
+grant select on table public.v_deal_room_commission to carr_reader;
+grant select on table public.v_deal_room_commission to carr_writer;
+grant select on table public.v_deal_room_commission to dot_reader;
 grant select on table public.v_deal_room_critical_date to carr_reader;
 grant select on table public.v_deal_room_critical_date to dot_reader;
 grant select on table public.v_deal_room_current_lease to carr_reader;
@@ -120374,6 +120495,9 @@ grant select on table public.v_deal_room_participant to dot_reader;
 grant select on table public.v_deal_room_phase_change to carr_reader;
 grant select on table public.v_deal_room_phase_change to carr_writer;
 grant select on table public.v_deal_room_phase_change to dot_reader;
+grant select on table public.v_deal_room_phase_start to carr_reader;
+grant select on table public.v_deal_room_phase_start to carr_writer;
+grant select on table public.v_deal_room_phase_start to dot_reader;
 grant select on table public.v_deal_room_premises to carr_reader;
 grant select on table public.v_deal_room_premises to carr_writer;
 grant select on table public.v_deal_room_premises to dot_reader;
@@ -120460,6 +120584,9 @@ grant select on table public.v_lead_client_link to carr_writer;
 grant select on table public.v_lead_client_link to dot_reader;
 grant select on table public.v_lead_hot to carr_reader;
 grant select on table public.v_lead_hot to dot_reader;
+grant select on table public.v_lead_prospect_engagement to carr_reader;
+grant select on table public.v_lead_prospect_engagement to carr_writer;
+grant select on table public.v_lead_prospect_engagement to dot_reader;
 grant select on table public.v_lead_stage_transition to carr_authority;
 grant select on table public.v_lead_stage_transition to carr_writer;
 grant select on table public.v_lead_stage_transition to dot_reader;
@@ -122864,6 +122991,15 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0907_approve_rule_trusted_search_path.sql	3a3f54caee7a1bb2fa308ac1aa45710630ae98774f23f98ba6de325dc7a44cee	2026-10-18 10:30:31.947739+00
 0908_retire_markdown_rule_refresh.sql	b17833bec736169cc9315ce1e3845092ff2d0333f84794150620ee86a021f018	2026-10-19 07:24:09.849152+00
 0909_retire_glanceable_lead_control.sql	83db61a97c4b34410b952ba8a548e51f7efc3d951f80507dba28663172a4f81c	2026-10-19 09:01:48.196914+00
+0911_deal_board_client_identity.sql	6f62eede059f4f6d133f02130425be53be290c516fc1d46c9955ef4a2a9570de	2026-10-19 19:39:36.097535+00
+0913_grant_v_client_account.sql	41c63090478d8601ca34a0e28b8f1e39d11174a8c8654fcba0b2bf1db386512d	2026-10-20 02:44:25.440195+00
+0914_decline_triaged_work_request.sql	4ada097a9c240a41bda98bf648422b43408351fe14244296345725e790636120	2026-10-20 04:03:18.028402+00
+0916_deal_phase_start_dates.sql	09e479005c0a49bd54666e1ff8f82900afcbaf75e83885c13d52bb2d0444992a	2026-10-20 21:34:43.817985+00
+0920_prospect_engagement_status.sql	f09cf9bc89d7f248e69dad0fb5f5e657113119115f4b423b17a11155394a3c40	1970-01-01 00:00:00+00
+0922_deal_checklist_commissions.sql	8edbca77f0e994b1c0a18e6e0a9d0d42ab226852188107dc7141e6f3d5af539d	1970-01-01 00:00:00+00
+0923_deal_status_next_step.sql	705736e4c549801b820d7844447b9c84a63c5db8a1c67c306a27debfa24d83be	1970-01-01 00:00:00+00
+0924_jev_attempt_settlement_lookup.sql	20eb98baf8e1075c9bd90f3ab12447787b112492207c5219a085117ba8e4646d	1970-01-01 00:00:00+00
+0926_jev_receipt_audit_lookup.sql	c6b07553d4e818dcb7da686a9446dd020c660e8fc663637626c06cff2507ab3a	1970-01-01 00:00:00+00
 \.
 
 

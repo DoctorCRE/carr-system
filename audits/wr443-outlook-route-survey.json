@@ -1,0 +1,693 @@
+{
+  "schema": "wr443-outlook-route-survey/v1",
+  "work_request": "WR-000443",
+  "slice": "ROUTE-SURVEY",
+  "sizing": "medium",
+  "subject": "New Outlook for Mac 16.114 (16.114.26101123), /Applications/Microsoft Outlook.app",
+  "outcome": "Probe Outlook-targeted mailto, canonical emails/new and events/new, .emltpl, and ICS preview first. Static evidence establishes the registrations and mail/event router vocabulary. No Outlook behavior was executed. No unattended send interface is proven.",
+  "evidence_file": "audits/wr443-outlook-route-evidence.json",
+  "scope": {
+    "performed": "Read app-bundle files only, public primary documentation, release notes, and firsthand forum reports. Extracted ASCII strings across 211 Mach-O files, with an additional ASCII/UTF-16LE scheme-literal search. Research artifacts only.",
+    "not_performed": "No Outlook launch, Apple event, UI interaction, URL/file opening with Outlook, setting change, app patch, live mail-store/Group Containers access, credential/token/key/keychain/DB dump/.env read, decryption, production record write, Microsoft 365/Graph/SMTP/EWS call, or merge.",
+    "prior_observations": "Assignment supplied zero Exchange accounts via New Outlook AppleScript, read-only X-Unsent EML with Import and no body, no window for ms-outlook://compose, and Chrome as default mailto handler. These were not repeated or independently verified."
+  },
+  "classification_procedure": [
+    "Is the door advertised in the shipped plist/metadata? If yes, classify as registered, not working.",
+    "Is there a literal URL, enum cluster, builder, or handler name? If yes, record the exact static evidence.",
+    "Does primary Mac documentation describe the behavior? If yes, classify as documented with applicability limits.",
+    "Was Outlook exercised this session? No. All reconstructed routes and field effects remain untested."
+  ],
+  "glossary": {
+    "door": "An app-owned registration, file workflow, Apple-event interface, or UI action that code could invoke. A named resource alone is a candidate.",
+    "literal": "A contiguous complete scheme-bearing binary string.",
+    "reconstructed_route": "A proposed URL assembled from separately recovered tokens. The accepted grammar is unverified.",
+    "draft": "An editable outgoing message. An incoming message imported into a folder named Drafts does not meet this definition without checking editability.",
+    "discard_only_probe": "A supervised future inspection that closes with Discard or Cancel and never invokes Send, Save, or Import. Compose may autosave, so use an isolated disposable test profile."
+  },
+  "rank_basis": "Order by useful compose/create coverage, strength of this Mac build's evidence, then unproven steps and risk. The top five are probe priorities, not working claims.",
+  "ranked_table": [
+    {
+      "rank": 1,
+      "door": "mailto explicitly targeted to Outlook",
+      "evidence": "Info.plist advertises mailto. OhxMailToURLParser, parseMailToUrl:, messageFromMailToUrl:, and Mailto Handled exist. Apple Launch Services defines dispatch; RFC 6068 defines header/body syntax.",
+      "expected_steps": "Run P1; inspect To/Cc/Bcc/subject/body; close and discard. Compare attachment separately.",
+      "risk": "Low dispatch risk; medium autosave risk. cc/bcc/body behavior in 16.114 is unverified. attachment is not a standard mailto file contract.",
+      "probe_id": "P1"
+    },
+    {
+      "rank": 2,
+      "door": "ms-outlook://emails/new",
+      "evidence": "EmailsCanonicalOutlookURL and OlkEmailsDeepLinkActionHandler. Reflection at 0x44eeec7-0x44eef3f includes new/open/send and recipient/body/attachments fields.",
+      "expected_steps": "Run P2 with synthetic fields; inspect editable compose and account; close and discard.",
+      "risk": "Medium. Accepted grammar, array separators, attachment representation, account selection, and New/Legacy gating remain unverified. Do not probe /send.",
+      "probe_id": "P2"
+    },
+    {
+      "rank": 3,
+      "door": "ms-outlook://events/new",
+      "evidence": "EventsCanonicalOutlookURL.createEventURLForStartTime and createEventBaseURLComponents. Reflection new/edit/open/join and start/end/title/location/attendees. Missing default calendar/start time diagnostics.",
+      "expected_steps": "Run P3 without attendees; inspect dates/timezone/title/location/calendar; cancel.",
+      "risk": "Medium. Strong calendar lead, but no full create URL literal. Date format and field effects need a Mac probe.",
+      "probe_id": "P3"
+    },
+    {
+      "rank": 4,
+      "door": ".emltpl template workflow",
+      "evidence": "Editor/Default document registration; Open Message Template and Email Template resources; OpenTemplateViaHxStaging and showOpenTemplatePanel. Microsoft documents Mail From Template.",
+      "expected_steps": "Run P4; inspect editability/body. Compare File > New > Mail From Template if Finder-style opening yields a Temporary Item; discard.",
+      "risk": "Medium. Synthetic MIME is only a format hypothesis. A firsthand 2025 New Outlook report describes a noneditable Temporary Item after Finder open.",
+      "probe_id": "P4"
+    },
+    {
+      "rank": 5,
+      "door": ".ics preview and import",
+      "evidence": "ICS Editor/Default registration. OlkImportICSFileWindowController, OlkImportICSPreviewViewController, importICSFile:toFolder:resultCompletionBlock:. Microsoft documents Add Event > Import.",
+      "expected_steps": "Run P5; inspect preview/times/target calendar; cancel before Import or Save.",
+      "risk": "Medium. Import can create/sync records. Preview is not proof of editable compose, silent add, or persistence.",
+      "probe_id": "P5"
+    },
+    {
+      "rank": 6,
+      "door": ".eml viewer then Import EML to a folder",
+      "evidence": "OLImportEMLFolderPickerController, importEMLFiles:toFolder:, importEMLToFolder:, and tooltip Import EML file to a folder. sdef import eml returns incoming message.",
+      "expected_steps": "Inspect whether Drafts is offered in a future folder picker; cancel. A mutation test must check outgoing status and editability separately.",
+      "risk": "Medium/high. No verified Import-to-Drafts compose path. Assignment's X-Unsent result did not produce compose. No command-line Drafts importer recovered."
+    },
+    {
+      "rank": 7,
+      "door": ".vcs, .msg, .oft, olk15Message, olk15Event",
+      "evidence": "VCS Viewer/Alternate, MSG/OFT Editor/Default, and native olk15 Viewer/Default registrations.",
+      "expected_steps": "Use synthetic specimens in a separate supervised viewer/import/compose classification; cancel.",
+      "risk": "Medium. Registration does not prove New Outlook support. Mac ICS instructions do not establish VCS behavior. Do not synthesize native store records."
+    },
+    {
+      "rank": 8,
+      "door": "UI compose and commit via keyboard/accessibility",
+      "evidence": "Microsoft documents Cmd+N, mail Send Cmd+Return, Save Cmd+S, attachment Cmd+E. New UI has saveEvent:, saveEventAsDraft:, and sendMessage:.",
+      "expected_steps": "A later UI probe can fill synthetic data. Send/save validation is outside discard-only scope.",
+      "risk": "High for commit. Wrong window/account and invitation sends are possible. No discard-only test can verify delivery."
+    },
+    {
+      "rank": 9,
+      "door": "Canonical /send and existing-item routes",
+      "evidence": "Mail Paths includes send. Full WordMail literal ms-outlook://emails/message/open?immutableID=. Event paths include edit/open/join and identifiers.",
+      "expected_steps": "Catalog only. Do not run /send. Existing-item routes require account/message IDs this task does not read.",
+      "risk": "High. Unknown whether /send sends a draft, creates a message, prompts, or is gated. Its name is not a send contract."
+    },
+    {
+      "rank": 10,
+      "door": "AppleScript make/send, calendar make/send meeting, import eml/ics",
+      "evidence": "sdef make corecrel line 326; outgoing message outm 1808; send mailsend 1835; import eml MSOEimem 1889; calendar event cEvt 2398; send meeting OECaCsmg 2526; import ics MSOEimic 2605.",
+      "expected_steps": "Keep as a Legacy interface and possible negative control. No Apple events in this survey.",
+      "risk": "New Outlook make/send unestablished. Primary integration-vendor documentation says AppleScript remains unsupported. Zero-account observation does not directly test make/send."
+    },
+    {
+      "rank": 11,
+      "door": "Handoff compose/view and INSendMessageIntent",
+      "evidence": "Main NSUserActivityTypes advertises compose.mail, view.mail, INShareFocusStatusIntent, INSendMessageIntent. continueUserActivity and serverMessageID/emailAddress keys exist.",
+      "expected_steps": "Find a supported continuation payload contract before attempting a sender.",
+      "risk": "High uncertainty. Identity-based continuation is not an arbitrary local mail/event API. No subject/body/event schema or implemented Siri send-handler contract recovered."
+    },
+    {
+      "rank": 12,
+      "door": "NSServices and share extension",
+      "evidence": "No NSServices in the parsed Info.plists. Only .appex is CalendarWidgetExtension, com.apple.widgetkit-extension.",
+      "expected_steps": "Exclude from payload probe priorities for this bundle.",
+      "risk": "Bounded negative. Runtime registration is not excluded. No registered message/event accepting Service or Share extension found."
+    },
+    {
+      "rank": 13,
+      "door": "App Intents / Shortcuts",
+      "evidence": "Main actions: FocusFilterIntent(profile). Widget actions: TimelineWidgetAppIntent(direction).",
+      "expected_steps": "Exclude these two declared actions from compose/send/create-event probes.",
+      "risk": "No payload fields in those actions. Does not exclude UI automation through Shortcuts or older Siri intent mechanisms."
+    },
+    {
+      "rank": 14,
+      "door": "Universal links, OAuth redirects, embedded MetaOS routers",
+      "evidence": "UniversalCanonicalOutlookURL has mail/applink/read/compose, allowed hosts and identity. Two com.microsoft.office.outlook literal paths are OAuth redirects. MetaOS legacy handlers exist.",
+      "expected_steps": "Keep OAuth out of payload probes. Treat embedded web-module handlers as internal until a local invocation contract is found.",
+      "risk": "High uncertainty and identity/auth dependencies. No supported external local SDK established."
+    }
+  ],
+  "routes": {
+    "literal_inventory": "Three unique complete scheme-bearing literals across the 211 scanned Mach-O files, deduplicated by file/text. Additional UTF-16LE scan found no extra literal. Evidence file records source paths and offsets.",
+    "literal_routes": [
+      {
+        "pattern": "ms-outlook://emails/message/open?immutableID=",
+        "path": "Frameworks/WordMail.framework/Versions/A/WordMail",
+        "offset_hex": "0x4257ec0"
+      },
+      {
+        "pattern": "com.microsoft.office.outlook:/mac/google/oauth2redirect",
+        "path": "MacOS/Microsoft Outlook",
+        "offset_hex": "0x3bbec72"
+      },
+      {
+        "pattern": "com.microsoft.office.outlook:/mac/icloud/oauth2redirect",
+        "path": "MacOS/Microsoft Outlook",
+        "offset_hex": "0x3bbee18"
+      }
+    ],
+    "registered_schemes": [
+      "mailto",
+      "ms-outlook",
+      "com.microsoft.office.outlook"
+    ],
+    "development_schemes": "ms-outlook-dev and com.microsoft.office.outlook-dev occur in binary/debug resources. The runtime main Info.plist does not register them.",
+    "canonical_mail": {
+      "host": "emails",
+      "path_cases": [
+        "open",
+        "new",
+        "send",
+        "subMessage",
+        "subConversation",
+        "unknown"
+      ],
+      "raw_path_strings": [
+        "open",
+        "new",
+        "send",
+        "message",
+        "conversa + tion fragments",
+        "unknown"
+      ],
+      "query_case_names": [
+        "from",
+        "to",
+        "cc",
+        "bcc",
+        "subject",
+        "body",
+        "attachments",
+        "signature",
+        "immutableID",
+        "accountID"
+      ],
+      "raw_query_evidence": "Complete printable runs include from, subject, account, cc, bcc, to, body. signature and attachments have split immediate fragments, so exact wire spelling/value representation is unproven. accountID is a case name; account appears as a raw string.",
+      "candidate_patterns": [
+        "ms-outlook://emails/new?...",
+        "ms-outlook://emails/open?...",
+        "ms-outlook://emails/send?...",
+        "ms-outlook://emails/message/open?immutableID=...",
+        "ms-outlook://emails/open/message/?account=...",
+        "ms-outlook://emails/conversation/open?..."
+      ],
+      "grammar_limit": "Only message/open?immutableID= is a full literal. The embedded hub has ://emails/open/message/?account=. Other combinations are reconstructed, not an exhaustive accepted grammar. No ms-outlook://compose literal recovered."
+    },
+    "canonical_event": {
+      "host": "events",
+      "path_cases": [
+        "new",
+        "edit",
+        "open",
+        "join"
+      ],
+      "query_case_names": [
+        "calendarMainViewMode",
+        "date",
+        "title",
+        "start",
+        "end",
+        "location",
+        "attendees",
+        "isAllDay",
+        "restID",
+        "iCalUID",
+        "instanceID",
+        "seriesMasterID",
+        "folderID",
+        "accountID",
+        "immutableID"
+      ],
+      "raw_query_strings": [
+        "view",
+        "date",
+        "title",
+        "start",
+        "end",
+        "location",
+        "account",
+        "calendar",
+        "isallday",
+        "restID",
+        "iCal",
+        "instanceID",
+        "seriesMasterID",
+        "immutableID"
+      ],
+      "mapping_candidates": {
+        "calendarMainViewMode": "view",
+        "isAllDay": "isallday",
+        "iCalUID": "iCal",
+        "folderID": "calendar",
+        "accountID": "account"
+      },
+      "view_case_names": [
+        "singleDay",
+        "multipleDay",
+        "month"
+      ],
+      "view_raw_strings": [
+        "multiday",
+        "month"
+      ],
+      "candidate_patterns": [
+        "ms-outlook://events",
+        "ms-outlook://events/new?...",
+        "ms-outlook://events/edit?...",
+        "ms-outlook://events/open?...",
+        "ms-outlook://events/join?..."
+      ],
+      "builders": [
+        "createEventURLForStartTime(_:origin:)",
+        "createEventBaseURLComponents(origin:)",
+        "openEventDetailsURLForMeeting(stableMeetingID:accountID:origin:)",
+        "joinEventURLForMeeting(stableMeetingID:accountID:origin:)",
+        "navigateInCalendarURLForDate(_:allDay:calendarMainViewMode:origin:)"
+      ],
+      "grammar_limit": "No complete scheme-bearing event URL literal recovered. Field case names and raw constants are separate evidence. Formats, delimiters, required fields, ordering, and mode gates need supervised validation. No body/description/attachment field in this event QueryParams cluster."
+    },
+    "common_query_cases": [
+      "origin",
+      "widgetKind",
+      "widgetFamily"
+    ],
+    "common_raw_values": [
+      "widget",
+      "upnextagenda",
+      "systemsmall",
+      "systemmedium",
+      "systemlarge",
+      "systemextralarge"
+    ],
+    "com_microsoft_office_outlook": "Only complete recovered paths are the Google/iCloud OAuth callbacks. Registration alongside ms-outlook does not prove aliasing for emails/events. No compose/send/create-event literal for this scheme recovered.",
+    "universal_links": "Separate HTTPS handler evidence includes outlook.cloud.microsoft, mail/applink/read/compose, MBX/OID/PUID/SMTP selectors, immutableID, allowedHosts and missing appLink/subpath/account failures. Do not transplant these paths onto custom schemes.",
+    "router_class_names": [
+      "OlkCocoaUtils.CanonicalOutlookURL",
+      "OlkCocoaUtils.EmailsCanonicalOutlookURL",
+      "OlkCocoaUtils.EventsCanonicalOutlookURL",
+      "OlkCocoaUtils.UniversalCanonicalOutlookURL",
+      "OlkCocoaUtils.DeepLinkingUtils",
+      "OlkUIKit.OlkDeepLinkActionHandler",
+      "OlkUIKit.OlkEmailsDeepLinkActionHandler",
+      "OlkUIKit.OlkEventsDeepLinkActionHandler",
+      "OlkUIKit.OlkUniversalDeepLinkActionHandler",
+      "OhxMailToURLParser",
+      "StURLHandler",
+      "MetaOSHubSDKmacOS.ChatLegacyDeepLinkHandler",
+      "MetaOSHubSDKmacOS.FileLegacyDeepLinkHandler",
+      "MetaOSHubSDKmacOS.NavigateToAppLegacyDeepLinkHandler",
+      "MetaOSHubSDKmacOS.CalendarLegacyDeepLinkHandler",
+      "MetaOSHubSDKmacOS.MailHandoffMessageHandler"
+    ],
+    "x_callback_url": "No x-callback-url literal recovered in scanned Mach-O files or matching allowed resources. No corresponding class identified. Dynamic construction remains unproven.",
+    "unclassified_marker": "The main binary has _phx beside Unexpected Custom URL Path at 0x3b11e70. Its grammar and effect are not established, so it is not presented as a payload route."
+  },
+  "mailto": {
+    "answer": "Outlook advertises and parses mailto; static evidence does not determine whether every cc/bcc/body/attachment value is honored by New Outlook 16.114. Becoming default selects the recipient app and does not establish parser behavior. open -b explicitly targets Outlook without a default change.",
+    "parameters": [
+      {
+        "name": "to",
+        "assessment": "Standard recipient/header syntax; runtime effect untested."
+      },
+      {
+        "name": "cc",
+        "assessment": "Standard header syntax; runtime effect untested."
+      },
+      {
+        "name": "bcc",
+        "assessment": "Standard header syntax; verify the hidden field; runtime effect untested."
+      },
+      {
+        "name": "subject",
+        "assessment": "Standard percent-encoded header; runtime effect untested."
+      },
+      {
+        "name": "body",
+        "assessment": "RFC 6068 text body, not arbitrary HTML/MIME; Unicode/newline handling untested."
+      },
+      {
+        "name": "attachment",
+        "assessment": "No standardized local attachment parameter in RFC 6068 or New Outlook Mac public contract recovered. Canonical router attachments does not establish mailto support."
+      }
+    ],
+    "per_user_handler": "LSSetDefaultHandlerForURLScheme(CFSTR(\"mailto\"), CFSTR(\"com.microsoft.Outlook\")) sets the current user preferred handler; check OSStatus. LSCopyDefaultHandlerForURLScheme reads it. Neither was invoked. Avoid editing Launch Services databases.",
+    "app_setting": "Binary imports _LSSetDefaultHandlerForURLScheme and has isDefaultMailClient/setIsOutlookDefaultMailClient. sdef lines 688-700 advertises system default mail application, which also changes EML association, and default-everything. This is static/Legacy evidence, not verified New UI behavior. Current Microsoft reader guidance uses Apple Mail > Settings > General > Default email reader > Microsoft Outlook. Outlook Tools > Accounts default sending account is a different setting.",
+    "default_probe": "Use open -b com.microsoft.Outlook. Chrome can remain default."
+  },
+  "file_behaviors": {
+    "eml": "Viewer, incoming-message import, and outgoing draft creation are distinct. Folder import exists; Drafts eligibility and editability are unknown. sdef import eml returns incoming message. No verified Import-to-Drafts-to-compose path. Assignment's X-Unsent result is consistent with viewer/import.",
+    "emltpl": "Editor registration, template panel resources and OpenTemplateViaHxStaging support a compose candidate. Microsoft documents .emltpl through File > New > Mail From Template. A renamed MIME fixture is not a guaranteed native template. If rejected, compare a synthetic native template saved by this build before concluding the route fails. A firsthand New Outlook report warns of Finder Temporary Items.",
+    "ics": "Import preview and a calendar-target import API exist. Microsoft Mac guidance describes drag to calendar then Add Event > Import. Shell-open behavior remains untested. Cancel preview; persistence is intentionally untested.",
+    "vcs": "Viewer/Alternate text/x-vCalendar registration, unlike ICS Editor/Default. No New Outlook-specific add/import behavior established. Windows Import/Export wizard documentation is not Mac evidence.",
+    "additional_types": "MSG/OFT/native olk15 registrations are cataloged. No live store specimen or DB dump read."
+  },
+  "integration_registrations": {
+    "services": "No NSServices in parsed Info.plists. Apple Services advertise input pasteboard types and NSMessage. Runtime registration cannot be excluded.",
+    "extensions": "Recursive .appex inventory found only CalendarWidgetExtension.appex, extension point com.apple.widgetkit-extension. No share activation rule or com.apple.share-services extension found.",
+    "activities": [
+      "com.microsoft.Office.Outlook.compose.mail",
+      "com.microsoft.Office.Outlook.view.mail",
+      "INShareFocusStatusIntent",
+      "INSendMessageIntent"
+    ],
+    "handoff_payload": "serverMessageID/emailAddress keys, accountIDKeyString/accountEmailAddressKeyString, and updateMessageUserInfoEntries(_:inConversationID:inEmailAddress:) indicate message/account continuation. No arbitrary subject/body/event payload schema or direct local entry point recovered.",
+    "siri": "INSendMessageIntent declaration does not establish a send implementation. No implemented handleSendMessage/confirmSendMessage/resolveRecipientsForSendMessage contract identified; absence of dynamically implemented behavior remains unproven.",
+    "app_intents": [
+      {
+        "bundle": "main",
+        "action": "FocusFilterIntent",
+        "parameters": [
+          "profile"
+        ]
+      },
+      {
+        "bundle": "CalendarWidgetExtension",
+        "action": "TimelineWidgetAppIntent",
+        "parameters": [
+          "direction"
+        ]
+      }
+    ]
+  },
+  "scripting_and_legacy": {
+    "answer": "sdef vocabulary and class mappings are present, but New Outlook make/send/calendar-create success is unestablished. Public primary integration-vendor guidance says AppleScript remains unsupported. No Apple event sent. Prior zero-account result does not directly test make/send.",
+    "source_conflict": "Older forum claims and roadmap estimates implied future support. April 2026 Microsoft External Staff Q&A still reported unsupported. C-Command reports August 2026 cancellation and reiterates it in its September release note. Retrieved Microsoft roadmap view did not expose item 88537, so cancellation is attributed to C-Command, not independently claimed from Microsoft roadmap.",
+    "legacy_in_16_114": "Legacy code/preferences still exist statically: EnableNewOutlook, IsRunningNewOutlook, RevertToLegacy, switch availability logic, Legacy Outlook label, and revert/relaunch prompts. Visibility for this user's license/account/policy is unverified; live preferences were not read.",
+    "documented_preference": "Microsoft documents com.microsoft.Outlook / EnableNewOutlook integer values: 0 hides switch; 1 shows default off; 2 shows default on; 3 enables New with switch hidden. No defaults command run. IsRunningNewOutlook is an implementation marker, not a recommended write contract.",
+    "support_limit": "Microsoft says legacy Exchange Online operation ends starting October 2026, with licensed on-premises continuation through October 2029. A legacy switch is not a dependable workaround for New Outlook mailbox automation. No mode change proposed."
+  },
+  "shortcuts": {
+    "mail_send": "Cmd+Return is documented for the open Mac mail message. Not pressed.",
+    "mail_draft": "Cmd+S saves open mail into Drafts. Cmd+E adds an attachment.",
+    "event_save": "Cmd+S is documented generically as Save an item. The Mac calendar table does not give a separate Save event chord. New UI has saveEvent:, saveEventAsDraft:, and Save this event. Cmd+S-to-final-event-commit in this build remains unverified; event draft saving is distinct.",
+    "accessible_commit": "Microsoft VoiceOver instructions focus Save and close, then Control+Option+Space. This is focused-button activation, not a global event-save shortcut.",
+    "scope": "No Send/Save/Import action included in the five probe commands. Actual send/persistence is outside discard-only scope."
+  },
+  "supervised_probes": {
+    "status": "Commands prepared for a future supervised run. None executed.",
+    "all_required_steps": [
+      "Use an isolated disposable Outlook test profile with synthetic data and no pending Outbox.",
+      "Run fixture setup once in a fresh shell.",
+      "Run one selected probe command.",
+      "Inspect the named fields without clicking Send, Save, or Import.",
+      "Close the window and choose Discard or Cancel.",
+      "Check that the synthetic subject is absent from Drafts, Outbox, and the selected test calendar."
+    ],
+    "fixture_setup_command": "WR443_PROBE_DIR=$(mktemp -d /private/tmp/wr443-probe.XXXXXX)\nexport WR443_PROBE_DIR\npython3 - <<'PYFIX'\nimport os,pathlib\nfrom email.message import EmailMessage\nfrom email.policy import SMTP\np=pathlib.Path(os.environ['WR443_PROBE_DIR'])\n(p/'attachment.txt').write_text('WR443 synthetic attachment. Do not send.\\n')\nm=EmailMessage(policy=SMTP)\nm['Subject']='WR443 template probe - DISCARD'\nm['X-Unsent']='1'\nm.set_content('WR443 synthetic body. No recipients. Discard only.')\n(p/'template.emltpl').write_bytes(m.as_bytes())\n(p/'message.eml').write_bytes(m.as_bytes())\nical='BEGIN:VCALENDAR\\r\\nVERSION:2.0\\r\\nPRODID:-//WR443//Discard probe//EN\\r\\nBEGIN:VEVENT\\r\\nUID:wr443-discard@example.invalid\\r\\nDTSTAMP:20990101T000000Z\\r\\nDTSTART:20990115T160000Z\\r\\nDTEND:20990115T163000Z\\r\\nSUMMARY:WR443 ICS probe - DISCARD\\r\\nDESCRIPTION:Synthetic no-attendee event. Cancel before import.\\r\\nEND:VEVENT\\r\\nEND:VCALENDAR\\r\\n'\n(p/'event.ics').write_bytes(ical.encode('ascii'))\nprint(p)\nPYFIX",
+    "fixture_caveat": "MIME with .emltpl extension is a format hypothesis. A failed fixture does not refute the native template workflow. Compare a native synthetic template saved by the operator before drawing that conclusion. This setup was not executed in the survey.",
+    "commands": [
+      {
+        "id": "P1",
+        "door": "mailto",
+        "command": "open -b com.microsoft.Outlook 'mailto:probe-to@example.invalid?cc=probe-cc%40example.invalid&bcc=probe-bcc%40example.invalid&subject=WR443%20mailto%20DISCARD&body=Line%201%0D%0ALine%202%20%26%20Unicode%20%E2%9C%93'",
+        "check": "Inspect To/Cc/Bcc/subject. Body should show two lines, ampersand and checkmark. Record missing/encoded fields; discard."
+      },
+      {
+        "id": "P2",
+        "door": "Canonical mail new",
+        "command": "open -b com.microsoft.Outlook 'ms-outlook://emails/new?to=probe-to%40example.invalid&cc=probe-cc%40example.invalid&bcc=probe-bcc%40example.invalid&subject=WR443%20canonical%20mail%20DISCARD&body=Line%201%0D%0ALine%202'",
+        "check": "Record editable compose, fields and account; no window/read-only/error is a failure of this hypothesis. Discard."
+      },
+      {
+        "id": "P3",
+        "door": "Canonical event new",
+        "command": "open -b com.microsoft.Outlook 'ms-outlook://events/new?title=WR443%20event%20DISCARD&start=2099-01-15T16%3A00%3A00Z&end=2099-01-15T16%3A30%3A00Z&location=Synthetic%20test&isallday=false'",
+        "check": "Inspect synthetic dates, local timezone conversion, duration, title/location and calendar. A window on the current date is not success. Cancel without Save."
+      },
+      {
+        "id": "P4",
+        "door": "Template file open",
+        "command": "open -b com.microsoft.Outlook \"$WR443_PROBE_DIR/template.emltpl\"",
+        "check": "Record editable compose versus Temporary Item, attachment, viewer, error, or import prompt. Inspect body; discard. Compare File > New > Mail From Template separately."
+      },
+      {
+        "id": "P5",
+        "door": "ICS file open",
+        "command": "open -b com.microsoft.Outlook \"$WR443_PROBE_DIR/event.ics\"",
+        "check": "Record preview/import/compose/viewer/error, target calendar and synthetic times. Cancel before Import or Save. No persistence claim."
+      }
+    ],
+    "attachment_comparison_command": "python3 - <<'PYURL'\nimport os,pathlib,subprocess,urllib.parse\n# Select ONE base/key pair per supervised run, after discarding the baseline.\nbase,key='mailto:probe-to@example.invalid','attachment'\n# For the canonical email variant, replace only the previous line with:\n# base,key='ms-outlook://emails/new','attachments'\nparams={'subject':'WR443 attachment DISCARD','body':'Synthetic file only',\n        key:(pathlib.Path(os.environ['WR443_PROBE_DIR'])/'attachment.txt').as_uri()}\nu=base+'?'+urllib.parse.urlencode(params,quote_via=urllib.parse.quote)\nsubprocess.run(['open','-b','com.microsoft.Outlook',u],check=True)\nPYURL",
+    "attachment_check": "A file chip must name attachment.txt. Successful open exit status is not support. attachments is the canonical enum spelling hypothesis; rejection does not settle singular attachment or array syntax.",
+    "future_controls": {
+      "scheme_alias": "After successful ms-outlook /emails/new or /events/new, replace only the scheme with com.microsoft.office.outlook and inspect/discard. No alias assumed.",
+      "vcs": "Use a genuine synthetic vCalendar 1.0 specimen, not a renamed ICS. Inspect/cancel.",
+      "applescript": "A separately authorized recipient-free make/open test may persist a draft. Never include send in discard-only AppleScript.",
+      "import_to_drafts": "Picker inspection is discard-only; import and editability validation require disposable-profile mutation authorization."
+    }
+  },
+  "decisions": [
+    {
+      "id": "D1",
+      "question": "Does static evidence prove working behavior?",
+      "answer": "No. Separate registration, literal, documentation and runtime status.",
+      "tradeoff": "Requested behavior may remain unknown; avoid false certainty."
+    },
+    {
+      "id": "D2",
+      "question": "Which calendar route deserves a probe?",
+      "answer": "events/new with start/end from this Mac build's builder and raw constants.",
+      "tradeoff": "Reconstructed grammar may fail; do not copy mobile startdt/enddt advice."
+    },
+    {
+      "id": "D3",
+      "question": "Change the mailto default?",
+      "answer": "No. Target Outlook with open -b; document the per-user API without calling it.",
+      "tradeoff": "Tests parser dispatch without proving the settings UI."
+    },
+    {
+      "id": "D4",
+      "question": "Does Drafts folder import establish an outgoing draft?",
+      "answer": "No. Require editability and outgoing status; rank native templates higher.",
+      "tradeoff": "No verified import-to-draft shortcut offered."
+    },
+    {
+      "id": "D5",
+      "question": "Can direct send be tested discard-only?",
+      "answer": "No. Catalog /send and Cmd+Return but omit all commit actions from executable commands.",
+      "tradeoff": "Send and event persistence stay untested."
+    },
+    {
+      "id": "D6",
+      "question": "Enable Legacy to use the sdef?",
+      "answer": "No. Record static legacy evidence and support limits; preserve New Outlook scope.",
+      "tradeoff": "No profile/mode mutation or workaround."
+    },
+    {
+      "id": "D7",
+      "question": "Add a runtime integration or general scanner?",
+      "answer": "No. Commit two bounded JSON research artifacts with hashes, offsets, cited conclusions and future commands.",
+      "tradeoff": "No maintained tool, runtime code, setting writer or production record."
+    },
+    {
+      "id": "D8",
+      "question": "How to handle prior probes and roadmap conflicts?",
+      "answer": "Attribute prior probes to the assignment and cancellation to C-Command; do not assert independently verified Microsoft cancellation.",
+      "tradeoff": "More qualified conclusions, with source conflict visible."
+    }
+  ],
+  "verification": {
+    "runtime_outlook_tests_run": 0,
+    "reason": "Outlook execution/interaction forbidden. Syntax checks are not behavior tests.",
+    "artifact_checks": {
+      "checks_passed": 553,
+      "checks_failed": 0,
+      "categories": {
+        "json_and_schema": 2,
+        "bundle_hash_and_size": 219,
+        "source_offsets": 274,
+        "scheme_literals": 3,
+        "localized_values": 15,
+        "sdef_excerpts": 8,
+        "intent_metadata": 2,
+        "build": 1,
+        "scan_count": 1,
+        "ranked_doors": 1,
+        "top_five": 1,
+        "no_services": 1,
+        "one_widget": 1,
+        "shell_syntax_only": 7,
+        "embedded_python_compile_only": 2,
+        "explicit_outlook_target": 5,
+        "no_commit_probe": 5,
+        "probe_query_encoding": 3,
+        "five_commands": 1,
+        "decisions_and_sources": 1
+      },
+      "outlook_runtime_tests": 0
+    },
+    "ci": "ops/ci.sh --only secret passed; separate staged secret scan passed. Full hosted CI status is reported in the PR/closeout, not inferred from these checks."
+  },
+  "design_and_debt_pass": {
+    "codebase-design": "No implementation interface added. Report distinguishes dispatch, parse, compose, import and commit so future probes cross explicit seams.",
+    "zero-tech-debt": "Two research artifacts only; no speculative SDK, compatibility alias, fallback, flag or setting writer."
+  },
+  "skills_used": [
+    "grill-with-docs",
+    "mattpocock-skills:grilling (frontier answered autonomously)",
+    "mattpocock-skills:domain-modeling",
+    "Prove It Works",
+    "poteto-mode",
+    "technical-writing",
+    "unslop",
+    "mattpocock-skills:pr",
+    "codebase-design",
+    "zero-tech-debt"
+  ],
+  "sources": [
+    {
+      "id": "A1",
+      "title": "Apple Launch Services Concepts",
+      "url": "https://developer.apple.com/library/archive/documentation/Carbon/Conceptual/LaunchServicesConcepts/LSCConcepts/LSCConcepts.html",
+      "supports": "Info.plist claims and scheme-based app binding; not query grammar."
+    },
+    {
+      "id": "A2",
+      "title": "Apple LSSetDefaultHandlerForURLScheme",
+      "url": "https://developer.apple.com/documentation/coreservices/1447760-lssetdefaulthandlerforurlscheme?preferredLanguage=occ",
+      "supports": "Sets user preferred handler; indexed Apple text supplies signature. Normal page is JavaScript gated."
+    },
+    {
+      "id": "A3",
+      "title": "Apple Preparing a Scripting Definition File",
+      "url": "https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ScriptableCocoaApplications/SApps_creating_sdef/SAppsCreateSdef.html",
+      "supports": "sdef is static scripting terminology/mappings."
+    },
+    {
+      "id": "A4",
+      "title": "Apple Services Properties",
+      "url": "https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/SysServices/Articles/properties.html",
+      "supports": "NSServices advertises data types and methods. Uppercase URL initially failed; lowercase page retrieved by search."
+    },
+    {
+      "id": "A5",
+      "title": "Apple Configuring App Intents runtime behavior",
+      "url": "https://developer.apple.com/documentation/appintents/configuring-the-runtime-behavior-of-your-app-intents",
+      "supports": "Metadata may reside in app, extension and framework bundles."
+    },
+    {
+      "id": "A6",
+      "title": "Apple Dive into App Intents, WWDC22",
+      "url": "https://developer.apple.com/videos/play/wwdc2022/10032/",
+      "supports": "Compile-time action metadata extraction."
+    },
+    {
+      "id": "A7",
+      "title": "Apple NSUserActivity",
+      "url": "https://developer.apple.com/documentation/foundation/nsuseractivity",
+      "supports": "System-mediated activity continuation such as Handoff."
+    },
+    {
+      "id": "M1",
+      "title": "Microsoft Office for Mac 16.114 release notes",
+      "url": "https://learn.microsoft.com/en-us/officeupdates/release-notes-office-for-mac#october-14-2026",
+      "supports": "Installed build matches 26101123. Notes describe rail, meeting provider and fixes, not automation support."
+    },
+    {
+      "id": "M2",
+      "title": "Microsoft Outlook for Mac features",
+      "url": "https://support.microsoft.com/en-us/outlook/outlook-for-mac-features",
+      "supports": "Open/save EML and event draft saving; does not promise outgoing EML drafts."
+    },
+    {
+      "id": "M3",
+      "title": "Microsoft email templates for Mac",
+      "url": "https://support.microsoft.com/en-us/outlook/can-i-create-email-templates-in-outlook-for-mac",
+      "supports": "Built-in .emltpl creation and Mail From Template; no portable file schema or 16.114 shell-open contract."
+    },
+    {
+      "id": "M4",
+      "title": "Microsoft Import iCal items into Outlook for Mac",
+      "url": "https://support.microsoft.com/en-au/outlook/import-ical-items-into-outlook-for-mac",
+      "supports": "ICS drag to calendar, Add Event > Import, calendar choice. Not proof of shell-open or VCS."
+    },
+    {
+      "id": "M5",
+      "title": "Microsoft Keyboard shortcuts in Outlook for Mac",
+      "url": "https://support.microsoft.com/en-gb/accessibility/outlook/mac/keyboard-shortcuts-in-outlook-for-mac",
+      "supports": "Mac portion: mail Cmd+Return, save/draft Cmd+S, attachment Cmd+E, appointment Cmd+N. iOS section excluded."
+    },
+    {
+      "id": "M6",
+      "title": "Microsoft screen-reader appointment guidance for Mac",
+      "url": "https://support.microsoft.com/en-us/accessibility/outlook/mac/use-a-screen-reader-to-schedule-appointments-or-meetings-in-outlook-for-mac",
+      "supports": "Focus Save and close and activate with VoiceOver."
+    },
+    {
+      "id": "M7",
+      "title": "Microsoft default account and email reader for Mac",
+      "url": "https://support.microsoft.com/en-us/outlook/set-an-account-as-the-default-in-outlook-for-mac",
+      "supports": "Default account differs from reader; reader uses Apple Mail Settings."
+    },
+    {
+      "id": "M8",
+      "title": "Microsoft Set preferences for Outlook for Mac",
+      "url": "https://learn.microsoft.com/en-us/microsoft-365-apps/mac/preferences-outlook",
+      "supports": "EnableNewOutlook integer controls. No live preference read/write."
+    },
+    {
+      "id": "M9",
+      "title": "Microsoft Outlook for Mac overview",
+      "url": "https://support.microsoft.com/en-us/outlook/outlook-for-mac",
+      "supports": "Revert to Legacy and separate mode accounts; current applicability depends on support/policy/license."
+    },
+    {
+      "id": "M10",
+      "title": "Microsoft End of support for legacy Outlook for Mac",
+      "url": "https://support.microsoft.com/en-us/outlook/end-of-support-for-legacy-outlook-for-mac",
+      "supports": "Exchange Online retirement versus licensed on-premises continuation."
+    },
+    {
+      "id": "F1",
+      "title": "Firsthand New Outlook Mac template regression",
+      "url": "https://learn.microsoft.com/en-us/answers/questions/4712840/templates-no-longer-work-through-finder-shortcut",
+      "supports": "May 2025 author reports Finder-open Temporary Item. Not current build proof; repair advice not followed."
+    },
+    {
+      "id": "F2",
+      "title": "Microsoft Q&A New Outlook AppleScript, April 2026",
+      "url": "https://learn.microsoft.com/en-us/answers/questions/5862509/outlook-for-mac-office-365",
+      "supports": "External Staff moderator says unsupported and dates slipped; forum guidance, not a product contract."
+    },
+    {
+      "id": "F3",
+      "title": "Microsoft Q&A events/new dates",
+      "url": "https://learn.microsoft.com/en-sg/answers/questions/2241688/ms-outlook-events-new-create-new-event",
+      "supports": "Author clarifies mobile issue. startdt/enddt and start/end suggestions failed. Not Mac grammar."
+    },
+    {
+      "id": "V1",
+      "title": "C-Command Legacy Outlook and AppleScript support",
+      "url": "https://c-command.com/spamsieve/help/end-of-support-for-lega",
+      "supports": "Primary integration-vendor account reports no New Outlook AppleScript and August 2026 cancellation. Attribute cancellation to vendor."
+    },
+    {
+      "id": "V2",
+      "title": "C-Command SpamSieve 3.3.2 release note",
+      "url": "https://c-command.com/blog/2026/09/18/spamsieve-3-3-2/",
+      "supports": "Vendor reiterates changed Outlook support and abandoned AppleScript plans."
+    },
+    {
+      "id": "M11",
+      "title": "Microsoft roadmap query 88537",
+      "url": "https://www.microsoft.com/en-us/microsoft-365/roadmap?filters=&searchterms=88537",
+      "supports": "Retrieved view did not expose item status; no direct cancellation conclusion."
+    },
+    {
+      "id": "R1",
+      "title": "RFC 6068 mailto URI scheme",
+      "url": "https://www.rfc-editor.org/rfc/rfc6068",
+      "supports": "Header/text body syntax and percent encoding; no general local attachment contract."
+    },
+    {
+      "id": "T1",
+      "title": "Tool documentation",
+      "location": "man strings(1), plutil(1), open(1), osascript(1); xcrun swift-demangle --help; gh pr create --help; ops/ci.sh --list/source; git help",
+      "supports": "Static extraction; open -b explicit targeting; osascript not run; demangle names only; PR body-file and branch workflow."
+    }
+  ],
+  "observed_at_chicago": "2026-10-20T22:02:59.717939-05:00"
+}

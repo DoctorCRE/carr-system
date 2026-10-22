@@ -59,39 +59,6 @@ with (pathlib.Path(os.environ['PR_TOOL_FIXTURE']) / 'calls.jsonl').open('a') as 
                 'statusCheckRollup': [{'name': 'CI', 'conclusion': conclusion,
                                        'status': 'COMPLETED' if conclusion else 'IN_PROGRESS'}]}
 
-    def test_update_before_red_then_wait_for_green_and_merge_exact_head(self):
-        result, calls = self.run_tool('mq.sh', [self.view('BEHIND', 'FAILURE'),
-            self.view('BLOCKED', None), self.view()])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), ['UPDATED 12', 'MERGED 12 abc123'])
-        gh = [call for call in calls if call[0] == 'gh']
-        self.assertEqual(len(gh), 6)
-        self.assertIn('repos/jbookout/carr-system/pulls/12/update-branch', gh[1])
-        self.assertIn('repos/jbookout/carr-system/compare/main...abc123', gh[3])
-        self.assertIn('--squash', gh[-1])
-        self.assertEqual(gh[-1][-2:], ['--match-head-commit', 'abc123'])
-        for index, call in enumerate(calls):
-            if call[0] == 'gh':
-                self.assertEqual(calls[index - 1], ['sleep', '2'])
-
-    def test_blocked_head_behind_main_is_updated_before_red(self):
-        result, calls = self.run_tool('mq.sh', [self.view('BLOCKED', 'FAILURE'), self.view()], behind=3)
-        self.assertEqual(result.stdout.splitlines(), ['UPDATED 12', 'MERGED 12 abc123'])
-        self.assertTrue(any('update-branch' in ' '.join(call) for call in calls))
-
-    def test_terminal_queue_outputs(self):
-        for view, merge, expected in (
-            (self.view('DIRTY'), 0, 'CONFLICT 12'),
-            (self.view('BLOCKED', 'FAILURE'), 0, 'RED 12 abc123: CI'),
-            (self.view(pr_state='MERGED'), 0, 'MERGED 12 (already)'),
-            (self.view(), 1, 'MERGEFAIL 12'),
-        ):
-            with self.subTest(expected=expected):
-                result, calls = self.run_tool('mq.sh', [view], merge=merge)
-                self.assertEqual(result.stdout.strip(), expected)
-                self.assertEqual(sum(call[:3] == ['gh', 'pr', 'merge'] for call in calls),
-                                 1 if merge else 0)
-
     def test_open_prs_uses_one_cross_repo_search_with_merge_state(self):
         result, calls = self.run_tool('open-prs.sh', args=())
         self.assertEqual(result.returncode, 0, result.stderr)

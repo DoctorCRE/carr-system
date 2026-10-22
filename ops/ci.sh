@@ -39,11 +39,12 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-CLASS_ORDER="pushfloor unit types contract gates secret dependency migration binding artifact freshness"
+CLASS_ORDER="pushfloor unit types contract gates secret dependency migration binding artifact freshness hxprobe"
 
 class_desc() {
   case "$1" in
-    freshness) echo "source includes the current main revision" ;;
+    hxprobe) echo "vendored HxStore reader tests and release build with locked dependencies" ;;
+    freshness) echo "integration index has no unresolved merge entries" ;;
     pushfloor)  echo "seeded defect that must not leave the machine (local pre-push floor)" ;;
     unit)       echo "seeded failing unit test" ;;
     types)      echo "seeded shape mistake in a data hand-off" ;;
@@ -107,6 +108,17 @@ fail_tail() {  # fail_tail <logfile>
   rm -f "$window" "$window.redacted"
 }
 
+check_hxprobe() {
+  if run_quiet "$LOGDIR/hxprobe.log" bash -c \
+      'cd "$1/vendor/hxprobe" && cargo test --locked && cargo build --release --locked' _ "$REPO"; then
+    cat "$LOGDIR/hxprobe.log"
+    ok hxprobe "locked Rust tests and release build passed"
+  else
+    fail_tail "$LOGDIR/hxprobe.log"
+    bad hxprobe "locked Rust tests or release build failed"
+  fi
+}
+
 check_unit() {
   if run_quiet "$LOGDIR/unit.log" "$PY" ops/ci-unit.py; then
     cat "$LOGDIR/unit.log"
@@ -118,10 +130,13 @@ check_unit() {
 }
 
 check_freshness() {
-  if git merge-base --is-ancestor origin/main HEAD; then
-    ok freshness "source includes origin/main"
+  local unresolved
+  if ! unresolved="$(git ls-files --unmerged)"; then
+    bad freshness "integration index could not be read"
+  elif [ -n "$unresolved" ]; then
+    bad freshness "integration tree has unresolved merge entries"
   else
-    bad freshness "merge origin/main before pushing"
+    ok freshness "integration index has no unresolved merge entries"
   fi
 }
 

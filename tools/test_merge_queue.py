@@ -80,6 +80,7 @@ if a[:2]==['pr','merge']:
  assert '--squash' in a and a[a.index('--match-head-commit')+1]==p['head']['sha']
  p['merged']=True;p['state']='closed';p['merge_commit_sha']=d['merge_sha']
  subprocess.run(['git','-C',d['remote'],'update-ref','refs/heads/main',d['merge_sha']],check=True)
+ if d.get('merge_landed_error'): save();print('gh: response lost after merge (HTTP 502)',file=sys.stderr);sys.exit(1)
  save();sys.exit()
 raise AssertionError(a)
 '''
@@ -89,7 +90,632 @@ assert spec is not None and spec.loader is not None
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
+class RequiredChecksPendingTests(unittest.TestCase):
+    def run_checks(self, returncode, stdout, stderr):
+        done = subprocess.CompletedProcess([], returncode, stdout=stdout, stderr=stderr)
+        with patch.object(module.subprocess, 'run', return_value=done):
+            return module.command(['gh', 'pr', 'checks', '7', '-R', 'o/r', '--required', '--json', 'bucket'])
+
+    def test_unreported_required_checks_read_as_none_yet(self):
+        # The required aggregate check reports only when CI finishes; until then gh exits 1 with no output.
+        out = self.run_checks(1, '', "no required checks reported on the 'feature' branch\n")
+        self.assertEqual(json.loads(out), [])
+
+    def test_other_checks_failures_still_raise(self):
+        with self.assertRaises(module.CommandFailed):
+            self.run_checks(1, '', 'some other failure\n')
+
+
 class QueueTests(unittest.TestCase):
+    def test_work_card_consumes_verified_merge_after_lost_response(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        command = module.command
+        def lost_response(argv, **kwargs):
+            result = command(argv, **kwargs)
+            if argv[:3] == ['gh', 'pr', 'merge']:
+                raise module.CommandFailed('lost response')
+            return result
+        with patch.object(module, 'command', side_effect=lost_response):
+            self.q.tick()
+        self.assertEqual(self.q.db.execute('SELECT outcome,merged_commit FROM entries').fetchone()[:],
+                         ('merged', self.merge_sha))
+        self.restart()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            card = work.get(f'{module.REPOS[0]}#1@{self.updated}')
+            self.assertEqual(card['stage'], 'done')
+            self.assertEqual(card['merge_receipts'], [dict(repo=module.REPOS[0], number=1, head=self.updated)])
+            self.assertEqual(work.merge_order()['entries'], [])
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_work_card_records_each_verified_pin_once_while_other_pin_waits(self):
+        self.pr(1, head=self.updated)
+        self.pr(2, head=self.updated, draft=True)
+        self.q.enqueue = module.Queue.enqueue.__get__(self.q)
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+            work.enqueue('multi', desk='multi', task='synthetic merge', actor='test')
+            claim = work.claim(eligible_desks={'multi'}, actor='test', owner={})
+            work.finish('multi', claim['claim'], {'status': 'completed'}, actor='test')
+            work.update('multi', actor='test', reason='fixture pins', prs=[
+                dict(repo=module.REPOS[0], number=n, head=self.updated) for n in (1, 2)])
+            work.transition('multi', 'merging', actor='test', reason='fixture reviewed')
+        self.q.tick()
+        self.q.tick()
+        self.restart()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            card = work.get('multi')
+            self.assertEqual(card['stage'], 'merging')
+            self.assertEqual(card['merge_receipts'], [dict(repo=module.REPOS[0], number=1, head=self.updated)])
+            self.assertEqual(len([e for e in work.export()['history'] if e['kind'] == 'merge_completed']), 1)
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_later_regenerated_pin_advances_after_first_pr_merges(self):
+        card_id = self.prepare_pinned_head()
+        self.pr(2, head=self.updated)
+        self.q.enqueue = module.Queue.enqueue.__get__(self.q)
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+            work.update(card_id, actor='test', reason='first PR precedes regenerating PR', prs=[
+                dict(repo=module.REPOS[0], number=2, head=self.updated),
+                dict(repo=module.REPOS[0], number=1, head=self.approved)])
+        self.load()['required'] = [{'bucket': 'pass'}]
+        self.save()
+        self.q.tick()
+        self.q.tick()
+        self.load()['required'] = [{'bucket': 'pending'}]
+        self.save()
+        self.restart()
+        self.q.tick()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            card = work.get(card_id)
+            self.assertEqual(card['prs'][1]['head'], self.updated)
+            self.assertEqual(card['stage'], 'merging')
+            self.assertEqual(card['merge_receipts'], [dict(repo=module.REPOS[0], number=2, head=self.updated)])
+            self.assertEqual(len([e for e in work.export()['history'] if e['kind'] == 'pin_regenerated']), 1)
+        self.assertEqual(len(self.calls('merge')), 1)
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries WHERE pr=1 AND approved=?',
+                                         (self.updated,)).fetchone()[0], 'waiting_ci')
+
+    def test_legacy_card_regeneration_requires_manual_repin_after_first_merge(self):
+        card_id = self.prepare_pinned_head()
+        self.pr(2, head=self.updated)
+        self.q.enqueue = module.Queue.enqueue.__get__(self.q)
+        first = dict(repo=module.REPOS[0], number=2, head=self.updated)
+        later = dict(repo=module.REPOS[0], number=1, head=self.approved)
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+            work.update(card_id, actor='test', reason='legacy multi-PR card', prs=[first, later])
+            work.begin_merge(card_id, pin=first, actor='test', reason='first merge started')
+            with work.db:
+                work.db.execute("UPDATE items SET data=json_remove(data, '$.merge_inflight') WHERE card_id=?",
+                                (card_id,))
+        self.load()['required'] = [{'bucket': 'pass'}]
+        self.save()
+        self.q.tick()
+        self.q.tick()
+        self.load()['required'] = [{'bucket': 'pending'}]
+        self.save()
+        self.restart()
+        self.q.tick()
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE pr=1 AND approved=?',
+                                (self.approved,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome']), ('blocked', 'needs_repin'))
+        event = self.q.db.execute('SELECT * FROM events WHERE entry_id=? ORDER BY id DESC',
+                                  (row['id'],)).fetchone()
+        self.assertEqual(event['detail'], 'legacy_ownership')
+        action = dict(self.q.db.execute("SELECT * FROM actions WHERE kind='regen' AND pr=1").fetchone())
+        receipt = Path(action['receipt']).read_text()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+            card = work.get(card_id)
+            self.assertEqual(card['prs'], [first, later])
+            self.assertEqual(card['merge_receipts'], [first])
+            self.assertTrue(card['active'])
+            self.assertFalse(any(e['kind'] == 'pin_regenerated' for e in work.export()['history']))
+            work.finish_merge(card_id, repo=later['repo'], pr=1, head=self.approved, merged=False,
+                              actor='human', reason='provider confirms no pending merge on remaining legacy pin')
+            work.update(card_id, actor='human', reason='manual re-pin after reconciliation',
+                        prs=[{**later, 'head': self.updated}])
+            work.requeue(card_id, stage='review', actor='human', reason='review manual re-pin')
+            work.transition(card_id, 'merging', actor='human', reason='reviewed prepared head')
+        self.restart()
+        self.q.tick()
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries WHERE pr=1 AND approved=?',
+                                         (self.updated,)).fetchone()[0], 'waiting_ci')
+        self.assertEqual(Path(action['receipt']).read_text(), receipt)
+        self.assertEqual(self.q.db.execute("SELECT attempts FROM actions WHERE kind='regen'").fetchone()[0], 1)
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_verified_merge_survives_later_provider_read_failure(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.tick()
+        self.data = self.load()
+        self.data['gh_failure'] = dict(prefix=['api', f'repos/{module.REPOS[0]}/pulls?state=open&per_page=100&page=1'], malformed=True)
+        self.save()
+        self.q.tick()
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], 'merged')
+        self.data = self.load()
+        self.data['api_failure'] = dict(path=f'repos/{module.REPOS[0]}/pulls/1', status=404)
+        self.save()
+        for _ in range(module.MAX_ATTEMPTS + 1):
+            self.restart()
+            self.q.tick()
+            self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], 'merged')
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_verified_merge_never_reissues_after_contradictory_readback(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.tick()
+        self.data = self.load()
+        self.data['gh_failure'] = dict(prefix=['api', f'repos/{module.REPOS[0]}/pulls?state=open&per_page=100&page=1'], malformed=True)
+        self.save()
+        self.q.tick()
+        self.data = self.load()
+        self.data['prs'][module.REPOS[0]+'#1'].update(merged=False, state='open')
+        self.save()
+        self.restart()
+        self.q.tick()
+        self.assertEqual(len(self.calls('merge')), 1)
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], 'merged')
+
+    def test_status_reconciles_while_daemon_holds_runner_lock(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.tick()
+        with self.q.db:
+            self.q.db.execute("UPDATE entries SET phase='blocked',outcome='github_exhausted'")
+        with self.q.runner_lock():
+            result = subprocess.run([sys.executable, str(ENTRY), '--state', str(self.state),
+                                     '--root', str(self.root), 'status'],
+                                    text=True, capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout)[0]['outcome'], 'merged')
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_merge_errors_reconcile_landed_commit_before_failure_handling(self):
+        command = module.command
+        errors = (module.CommandFailed('lost response'), module.ActionRejected('HTTP 403'),
+                  module.MergeRejected('provider rejection'), module.WaitExpired('response timeout'),
+                  module.GitHubExhausted('retry cap'))
+        for n, error in enumerate(errors, 1):
+            with self.subTest(error=type(error).__name__):
+                self.pr(n, head=self.updated)
+                self.q.enqueue(module.REPOS[0], n, self.updated)
+                def lost_response(argv, **kwargs):
+                    result = command(argv, **kwargs)
+                    if argv[:3] == ['gh', 'pr', 'merge']:
+                        raise error
+                    return result
+                with patch.object(module, 'command', side_effect=lost_response):
+                    self.q.tick()
+                self.assertEqual(self.q.db.execute('SELECT outcome FROM entries WHERE pr=?', (n,)).fetchone()[0], 'merged')
+                self.restart()
+                self.q.tick()
+                self.assertEqual(len(self.calls('merge')), n)
+
+    def test_post_merge_refresh_exhaustion_preserves_success_across_restart(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.tick()
+        self.data = self.load()
+        self.data['gh_failure'] = dict(prefix=['api', f'repos/{module.REPOS[0]}/pulls?state=open&per_page=100&page=1'], malformed=True)
+        self.save()
+        for _ in range(module.MAX_ATTEMPTS + 1):
+            self.q.tick()
+            self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], 'merged')
+            self.restart()
+        self.assertEqual(self.q.db.execute('SELECT phase FROM entries').fetchone()[0], 'done')
+        self.assertEqual(len(self.calls('merge')), 1)
+        self.assertEqual(self.q.db.execute("SELECT COUNT(*) FROM events WHERE outcome='refresh_exhausted'").fetchone()[0], 1)
+
+    def test_expired_retry_deadline_does_not_hide_landed_merge(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.tick()
+        with self.q.db:
+            self.q.db.execute('INSERT INTO waits(owner,kind,deadline) VALUES(?,?,?)', ('entry:1', 'github_retry', 1))
+        self.q.tick()
+        self.assertEqual(self.q.db.execute('SELECT phase,outcome FROM entries').fetchone()[:], ('done', 'merged'))
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_status_accepts_approved_patch_when_main_advanced(self):
+        self.pr()
+        self.data['prs'][module.REPOS[0]+'#1'].update(merged=True, state='closed', merge_commit_sha=self.merge_sha)
+        self.save()
+        self.git('update-ref', 'refs/heads/main', self.merge_sha)
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
+        with self.q.db:
+            self.q.db.execute("UPDATE entries SET phase='blocked',outcome='github_exhausted'")
+        self.assertNotEqual(self.git('rev-parse', self.approved+'^{tree}'), self.git('rev-parse', self.merge_sha+'^{tree}'))
+        self.assertEqual(self.q.status()[0]['outcome'], 'merged')
+        self.assertEqual(self.q.status()[0]['phase'], 'done')
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_status_rejects_unmerged_or_unproven_commits(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.git('update-ref', 'refs/heads/main', self.merge_sha)
+        cases = {
+            'open': dict(merged=False, state='open'),
+            'closed_unmerged': dict(merged=False),
+            'inconsistent_state': dict(state='open'),
+            'missing_commit': dict(merge_commit_sha=None),
+            'invalid_commit': dict(merge_commit_sha='invalid'),
+            'off_main': dict(merge_commit_sha=self.changed),
+            'wrong_head': dict(head={'sha': self.changed, 'ref': 'branch-1'}),
+            'wrong_base': dict(base={'sha': self.main, 'ref': 'other'}),
+        }
+        for name, changes in cases.items():
+            with self.subTest(case=name):
+                self.data = self.load()
+                p = self.pr(head=self.updated)
+                p.update(merged=True, state='closed', merge_commit_sha=self.merge_sha)
+                p.update(changes)
+                self.save()
+                with self.q.db:
+                    self.q.db.execute("UPDATE entries SET phase='blocked',outcome='github_exhausted'")
+                self.assertEqual(self.q.status()[0]['outcome'], 'github_exhausted')
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_tick_does_not_accept_inconsistent_merged_state(self):
+        self.pr(head=self.updated)
+        self.data['prs'][module.REPOS[0]+'#1'].update(merged=True, state='open', merge_commit_sha=self.merge_sha)
+        self.save()
+        self.git('update-ref', 'refs/heads/main', self.merge_sha)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.tick()
+        row = self.q.db.execute('SELECT phase,outcome FROM entries').fetchone()
+        self.assertNotEqual(row['phase'], 'done')
+        self.assertNotIn(row['outcome'], ('merged', 'already_merged'))
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_status_rejects_wrong_content_on_main_including_whitespace(self):
+        self.pr()
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
+        for content in ('unreviewed\n', ' reviewed\n'):
+            with self.subTest(content=content):
+                (self.remote / 'file.txt').write_text(content)
+                self.git('add', 'file.txt')
+                tree = self.git('write-tree').strip()
+                wrong = self.git('commit-tree', tree, '-p', self.main, '-m', 'wrong merge').strip()
+                self.git('update-ref', 'refs/heads/main', wrong)
+                self.data = self.load()
+                self.data['prs'][module.REPOS[0]+'#1'].update(merged=True, state='closed', merge_commit_sha=wrong)
+                self.save()
+                with self.q.db:
+                    self.q.db.execute("UPDATE entries SET phase='exhausted',outcome='github_exhausted'")
+                self.assertEqual(self.q.status()[0]['outcome'], 'github_exhausted')
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_status_recovers_after_read_timeout_without_rearming_merge(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.tick()
+        with self.q.db:
+            self.q.db.execute("UPDATE entries SET phase='blocked',outcome='github_exhausted',github_attempts=4")
+        command = module.command
+        def timeout_read(argv, **kwargs):
+            if argv[:3] == ['gh', 'api', f'repos/{module.REPOS[0]}/pulls/1']:
+                raise module.WaitExpired('read timeout')
+            return command(argv, **kwargs)
+        with patch.object(module, 'command', side_effect=timeout_read):
+            self.assertEqual(self.q.status()[0]['outcome'], 'github_exhausted')
+        with patch.object(module.time, 'time', return_value=time.time() + module.BOUNDS['github_retry']['seconds'] + 1):
+            row = self.q.status()[0]
+        self.assertEqual((row['outcome'], row['merge_attempts'], row['github_attempts']), ('merged', 1, 4))
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_status_reconciles_stale_failures_without_github_mutations(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.tick()
+        for phase in ('blocked', 'exhausted'):
+            with self.subTest(phase=phase):
+                with self.q.db:
+                    self.q.db.execute('UPDATE entries SET phase=?,outcome=?,github_attempts=?',
+                                      (phase, 'github_exhausted', module.MAX_ATTEMPTS))
+                before = len(self.load()['calls'])
+                result = subprocess.run([sys.executable, str(ENTRY), '--state', str(self.state),
+                                         '--root', str(self.root), 'status'],
+                                        text=True, capture_output=True, check=True)
+                row = json.loads(result.stdout)[0]
+                self.assertEqual(row['outcome'], 'merged')
+                self.assertIn(row['phase'], ('refreshing', 'done'))
+                calls = self.load()['calls'][before:]
+                self.assertTrue(calls)
+                self.assertTrue(all(a[:2] == ['api', f'repos/{module.REPOS[0]}/pulls/1'] for a in calls))
+                self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_exhausted_reads_after_landed_merge_preserve_merged(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.tick()
+        with self.q.db:
+            self.q.db.execute('UPDATE entries SET github_attempts=?', (module.MAX_ATTEMPTS,))
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries').fetchone()
+        self.assertEqual((row['phase'], row['outcome']), ('done', 'merged'))
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_error_after_merge_lands_records_merged_without_remerging(self):
+        self.pr(head=self.updated)
+        self.data['merge_landed_error'] = True
+        self.save()
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries').fetchone()
+        self.assertEqual(row['outcome'], 'merged')
+        self.assertIn(row['phase'], ('refreshing', 'done'))
+        self.restart()
+        self.q.tick()
+        self.assertEqual(len(self.calls('merge')), 1)
+    def test_submitter_preserves_work_card_priority_without_authorizing_unbound_pr(self):
+        for number in (1, 2, 3):
+            self.pr(number, head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.enqueue(module.REPOS[0], 2, self.updated)
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+            work.prioritize(f'{module.REPOS[0]}#2@{self.updated}', actor='test', reason='reviewed priority')
+        self.q.enqueue = module.Queue.enqueue.__get__(self.q)
+        self.q.submit(module.REPOS[0], [1, 2, 3])
+        self.q.tick()
+        self.assertEqual([call[2] for call in self.calls('merge')], ['2'])
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual([pin['pr'] for pin in work.merge_order()['entries']], [2, 1])
+        self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE pr=3').fetchone()[0], 'pending')
+
+    def test_pending_checks_exit_eight_waits_without_spending_retries(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        gh = self.root / 'bin/gh'
+        gh.write_text(gh.read_text().replace("if a[:2]==['pr','checks']: emit(d.get('required',[{'bucket':'pass'}])); sys.exit()",
+            "if a[:2]==['pr','checks']: emit([{'bucket':'pending'}]); sys.exit(8)"))
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries').fetchone()
+        self.assertEqual((row['outcome'], row['github_attempts'], row['transient_attempts']), ('waiting_ci', 0, 0))
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_exhausted_listing_for_one_entry_does_not_poison_next_entry(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.tick()
+        self.data = self.load()
+        self.data['gh_failure'] = dict(prefix=['api', f'repos/{module.REPOS[0]}/pulls?state=open&per_page=100&page=1'], malformed=True)
+        self.save()
+        for _ in range(module.MAX_ATTEMPTS):
+            with self.q.db:
+                self.q.db.execute('UPDATE entries SET retry_at=0')
+            self.q.tick()
+        self.data = self.load()
+        self.data.pop('gh_failure')
+        self.save()
+        self.pr(2, head=self.updated)
+        self.q.enqueue(module.REPOS[0], 2, self.updated)
+        self.q.tick()
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE pr=2').fetchone()
+        self.assertEqual((row['phase'], row['outcome']), ('done', 'merged'))
+
+    def test_held_entry_can_resume_after_entry_window_without_rearming(self):
+        self.pr(head=self.updated, held=True)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        with patch.object(module.time, 'time', return_value=10000) as clock:
+            self.q.tick()
+            clock.return_value += module.BOUNDS['entry']['seconds'] + 1
+            self.pr(head=self.updated)
+            self.q.tick()
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_ci_observation_restarts_after_75_minute_hold(self):
+        self.assert_observation_restarts_after_park({'held': True}, 'ci')
+
+    def test_ci_observation_restarts_after_75_minute_draft(self):
+        self.assert_observation_restarts_after_park({'draft': True}, 'ci')
+
+    def test_ci_observation_restarts_after_75_minute_stack(self):
+        self.assert_observation_restarts_after_park({'base': 'parent'}, 'ci')
+
+    def test_mergeability_observation_restarts_after_75_minute_hold(self):
+        self.assert_observation_restarts_after_park({'held': True}, 'mergeability')
+
+    def test_mergeability_observation_restarts_after_75_minute_draft(self):
+        self.assert_observation_restarts_after_park({'draft': True}, 'mergeability')
+
+    def test_mergeability_observation_restarts_after_75_minute_stack(self):
+        self.assert_observation_restarts_after_park({'base': 'parent'}, 'mergeability')
+
+    def assert_observation_restarts_after_park(self, parked, observation):
+        state = 'unknown' if observation == 'mergeability' else 'clean'
+        waiting = 'waiting_mergeability' if observation == 'mergeability' else 'waiting_ci'
+        self.pr(head=self.updated, state=state)
+        self.data['required'] = [{'bucket': 'pending'}]
+        self.save()
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        with patch.object(module.time, 'time', return_value=10000) as clock:
+            self.q.tick()
+            self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], waiting)
+            clock.return_value += 1
+            self.pr(head=self.updated, state=state, **parked)
+            self.q.tick()
+            clock.return_value += 75 * 60
+            self.restart()
+            self.pr(head=self.updated, state=state)
+            self.q.tick()
+            row = self.q.db.execute('SELECT * FROM entries').fetchone()
+            self.assertEqual((row['phase'], row['outcome']), ('pending', waiting))
+            clock.return_value += module.BOUNDS[observation]['seconds']
+            self.q.tick()
+            row = self.q.db.execute('SELECT * FROM entries').fetchone()
+            expected = ('exhausted', 'ci_timeout') if observation == 'ci' else ('blocked', 'waiting_mergeability_timeout')
+            self.assertEqual((row['phase'], row['outcome']), expected)
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_stale_dirty_current_head_waits_for_ci_without_transport_retries(self):
+        self.pr(head=self.updated, state='dirty')
+        self.data['required'] = [{'bucket': 'pending'}]
+        self.save()
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries').fetchone()
+        self.assertEqual((row['outcome'], row['transient_attempts']), ('waiting_ci', 0))
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_mergeability_observation_restarts_after_waiting_its_turn(self):
+        self.assert_observation_restarts_after_waiting_its_turn('mergeability')
+
+    def test_ci_observation_restarts_after_waiting_its_turn(self):
+        self.assert_observation_restarts_after_waiting_its_turn('ci')
+
+    def assert_observation_restarts_after_waiting_its_turn(self, observation):
+        state = 'unknown' if observation == 'mergeability' else 'clean'
+        waiting = 'waiting_mergeability' if observation == 'mergeability' else 'waiting_ci'
+        self.pr(held=True, head=self.updated)
+        self.pr(2, head=self.updated, state=state)
+        self.data['required'] = [{'bucket': 'pending'}]
+        self.save()
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.enqueue(module.REPOS[0], 2, self.updated)
+        with patch.object(module.time, 'time', return_value=10000) as clock:
+            self.q.tick()
+            self.assertEqual(self.q.db.execute('SELECT outcome FROM entries WHERE pr=2').fetchone()[0], waiting)
+            clock.return_value += 1
+            self.pr(head=self.updated)
+            self.q.tick()
+            clock.return_value += 75 * 60
+            self.restart()
+            self.pr(head=self.updated, held=True)
+            self.q.tick()
+            row = self.q.db.execute('SELECT * FROM entries WHERE pr=2').fetchone()
+            self.assertEqual((row['phase'], row['outcome']), ('pending', waiting))
+            clock.return_value += module.BOUNDS[observation]['seconds']
+            self.q.tick()
+            row = self.q.db.execute('SELECT * FROM entries WHERE pr=2').fetchone()
+            expected = ('exhausted', 'ci_timeout') if observation == 'ci' else ('blocked', 'waiting_mergeability_timeout')
+            self.assertEqual((row['phase'], row['outcome']), expected)
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_post_merge_provider_computation_waits_without_retry_exhaustion(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.tick()
+        self.load()
+        self.pr(2, head=self.updated, base='branch-1', state='unknown')
+        self.data['retarget_state'] = 'unknown'
+        self.save()
+        for _ in range(module.MAX_ATTEMPTS + 1):
+            self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE pr=1').fetchone()
+        self.assertEqual((row['phase'], row['outcome'], row['transient_attempts']), ('refreshing', 'merged', 0))
+        self.load()
+        self.data['prs'][module.REPOS[0]+'#2']['mergeable_state'] = 'clean'
+        self.save()
+        self.q.tick()
+        self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE pr=1').fetchone()[0], 'done')
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_discovery_read_budget_recovers_after_cooldown_without_replaying_actions(self):
+        self.pr(head=self.updated)
+        self.data['gh_failure'] = dict(prefix=['api'], malformed=True)
+        self.save()
+        with patch.object(module.time, 'time', return_value=10000) as clock:
+            for _ in range(module.MAX_ATTEMPTS):
+                self.q.discover()
+            failed_calls = len(self.load()['calls'])
+            self.q.discover()
+            self.assertEqual(len(self.load()['calls']), failed_calls)
+            self.data.pop('gh_failure')
+            self.save()
+            clock.return_value += module.BOUNDS['github_retry']['seconds'] + 1
+            self.restart()
+            self.q.discover()
+        self.assertEqual(self.q.db.execute('SELECT approved FROM entries WHERE pr=1').fetchone()[0], self.updated)
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_timed_out_discovery_read_recovers_after_cooldown_across_restart(self):
+        errors = (module.GitHubBudgetLockTimeout('budget lock deadline'),
+                  subprocess.TimeoutExpired('gh', 120), module.WaitExpired('read deadline'))
+        command = module.command
+        listing = ['gh', 'api', f'repos/{module.REPOS[0]}/pulls?state=open&per_page=100&page=1']
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                self.pr(head=self.updated)
+                with self.q.db:
+                    self.q.db.execute('DELETE FROM entries')
+                    self.q.db.execute('DELETE FROM github_failures')
+                calls = []
+                def request(argv, **kwargs):
+                    if argv[:3] == listing:
+                        calls.append(clock.return_value)
+                        if len(calls) == 1:
+                            raise error
+                    return command(argv, **kwargs)
+                with patch.object(module.time, 'time', return_value=10000) as clock, \
+                        patch.object(module, 'command', side_effect=request):
+                    self.q.discover()
+                    self.restart()
+                    clock.return_value += module.BOUNDS['github_retry']['seconds'] - 1
+                    self.q.discover()
+                    self.assertEqual(len(calls), 1, 'Discovery retried before its cooldown')
+                    clock.return_value += 1
+                    self.q.discover()
+                row = self.q.db.execute('SELECT approved FROM entries WHERE pr=1').fetchone()
+                self.assertIsNotNone(row, 'Discovery remained stopped after its cooldown')
+                self.assertEqual(row['approved'], self.updated)
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(self.calls('merge'), [])
+
+    def test_timeout_stops_writes_and_entry_owned_reads_after_cooldown(self):
+        self.pr()
+        entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
+        cases = ((False, 'automatic', None), (True, 'automatic', entry),
+                 (True, f'post-merge:{entry}', None))
+        for read, scope, owner in cases:
+            with self.subTest(read=read, scope=scope, entry=owner), \
+                    self.q.github_scope(scope), \
+                    patch.object(module.time, 'time', return_value=10000) as clock, \
+                    patch.object(module, 'command', side_effect=module.WaitExpired('deadline')) as command:
+                self.q._github_entry = owner
+                args = ('api', f'repos/{module.REPOS[0]}/pulls/1') + (() if read else ('-X', 'PATCH'))
+                with self.assertRaises(module.WaitExpired):
+                    self.q.gh(*args)
+                clock.return_value += module.BOUNDS['github_retry']['seconds'] + 1
+                with self.assertRaisesRegex(module.WaitExpired, 'stopped; reconcile'):
+                    self.q.gh(*args)
+                self.assertEqual(command.call_count, 1, 'Stopped operation was replayed')
+
+    def test_daemon_updated_head_is_discovered_and_waits_for_its_checks(self):
+        self.pr(state='behind')
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
+        self.q.tick()
+        self.q.tick()
+        self.q.discover()
+        self.load()
+        self.data['required'] = [{'bucket':'pending'}]
+        self.save()
+        self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
+        row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.updated,)).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row['outcome'], 'waiting_ci')
+        self.load()
+        self.data['required'] = [{'bucket':'pass'}]
+        self.save()
+        self.q.tick()
+        self.assertEqual(self.calls('merge')[0][-1], self.updated)
+
+    def test_blocked_outdated_head_is_updated_before_red_checks(self):
+        self.pr(state='blocked')
+        self.data['required'] = [{'bucket':'fail'}]
+        self.save()
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
+        self.q.tick()
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], 'updating')
+        self.assertEqual(len([call for call in self.load()['calls'] if 'update-branch' in str(call)]), 1)
+        self.assertEqual(self.calls('checks'), [])
+        self.assertEqual(self.calls('merge'), [])
+
     def test_required_checks_must_pass_without_skips(self):
         queue = object.__new__(module.Queue)
         for buckets, expected in ((['pass'], True), (['pass', 'skipping'], False),
@@ -147,6 +773,8 @@ class QueueTests(unittest.TestCase):
         ps.write_text('#!/bin/sh\nexit 0\n')
         ps.chmod(0o755)
         self.env = os.environ.copy()
+        self.env['CARR_WORK_QUEUE_DB'] = str(self.root / 'work.sqlite3')
+        self.env['PROGRESS_BOARD_LOCAL_ONLY'] = '1'
         self.env['FAKE_GH_STATE'] = str(self.fake_state)
         self.env['PATH'] = str(bin_dir) + os.pathsep + self.env['PATH']
         self.env['CARR_GITHUB_READ_BUDGET'] = str(self.root / 'github-budget.json')
@@ -155,6 +783,7 @@ class QueueTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.q = module.Queue(self.state, self.root, gap=0)
+        self.bind_work_queue()
         self.addCleanup(self.q.db.close)
         self.addCleanup(lambda: [child.wait(timeout=5) for child in self.q.children.values()])
         for repo in module.REPOS:
@@ -172,14 +801,162 @@ class QueueTests(unittest.TestCase):
         (self.root / 'tools/prepare_pr.py').write_text(
             'import json,sys\nprint(json.dumps({"head":sys.argv[sys.argv.index("--head")+1],"changed":False}))\n')
 
-    def test_preparation_push_waits_for_checks_on_the_new_head(self):
+    def bind_work_queue(self):
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])):
+            pass
+        enqueue = self.q.enqueue
+        def projected_enqueue(repo, n, head, note='', *, rearm=True):
+            entry = enqueue(repo, n, head, note, rearm=rearm)
+            if note == 'work queue projection':
+                return entry
+            card_id = f'{repo}#{n}@{head}'
+            with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+                if not any(c['card_id'] == card_id for c in work.export()['items']):
+                    work.enqueue(card_id, desk=card_id, task='synthetic merge', actor='test')
+                    claim = work.claim(eligible_desks={card_id}, card_id=card_id, actor='test', owner={})
+                    work.finish(card_id, claim['claim'], {'status': 'completed'}, actor='test')
+                    work.update(card_id, actor='test', reason='fixture pin', prs=[
+                        {'repo': repo, 'number': n, 'head': head}])
+                    work.transition(card_id, 'merging', actor='test', reason='fixture reviewed')
+            return entry
+        self.q.enqueue = projected_enqueue
+
+    def prepare_pinned_head(self):
         self.pr()
+        self.data['required'] = [{'bucket': 'pending'}]
+        self.save()
         (self.root / 'tools/prepare_pr.py').write_text(
-            'import json\nprint(json.dumps({"head":"' + self.changed + '","changed":True}))\n')
+            'import json,os,sys\nfrom pathlib import Path\n'
+            'args = dict(zip(sys.argv[1::2], sys.argv[2::2]))\n'
+            'prepared = ' + repr(self.updated) + '\n'
+            'if prepared == args["--head"]:\n print(json.dumps(dict(head=prepared, changed=False))); sys.exit()\n'
+            'receipt = Path(args["--receipt"])\nreceipt.parent.mkdir(parents=True, exist_ok=True)\n'
+            'receipt.write_text(json.dumps(dict(head=args["--head"], main=args["--main"], '
+            'prepared=prepared, branch=args["--branch"])))\n'
+            'state = Path(os.environ["FAKE_GH_STATE"])\ndata = json.loads(state.read_text())\n'
+            'data["prs"]["jbookout/carr-system#1"]["head"]["sha"] = prepared\n'
+            'state.write_text(json.dumps(data))\n'
+            'print(json.dumps(dict(head=prepared, changed=True)))\n')
         self.q.enqueue(module.REPOS[0], 1, self.approved)
+        return f'{module.REPOS[0]}#1@{self.approved}'
+
+    def test_preparation_push_waits_for_checks_on_the_new_head(self):
+        card_id = self.prepare_pinned_head()
         self.q.tick()
         self.assertEqual(self.calls('merge'), [])
-        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], 'regenerated')
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'], [dict(repo=module.REPOS[0], number=1, head=self.updated)])
+            event = work.get(card_id)['last_event']
+            self.assertEqual(event['kind'], 'pin_regenerated')
+            self.assertEqual(event['actor'], 'merge-daemon')
+            self.assertEqual(event['from']['head'], self.approved)
+            self.assertEqual(event['to']['head'], self.updated)
+            self.assertEqual(event['to']['main'], self.main)
+        self.restart()
+        self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries WHERE approved=?',
+                                         (self.updated,)).fetchone()[0], 'waiting_ci')
+        self.load()['required'] = [{'bucket': 'pass'}]
+        self.save()
+        self.q.tick()
+        self.assertEqual(len(self.calls('merge')), 1)
+        self.assertEqual(self.calls('merge')[0][-1], self.updated)
+
+    def test_completed_regeneration_recovers_pin_after_restart_once(self):
+        card_id = self.prepare_pinned_head()
+        self.q.prepare(module.REPOS[0], self.data['prs'][f'{module.REPOS[0]}#1'])
+        self.restart()
+        self.q.tick()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.updated)
+            self.assertEqual(len([e for e in work.export()['history'] if e['kind'] == 'pin_regenerated']), 1)
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_lost_regeneration_response_stays_recoverable_until_reconciled(self):
+        card_id = self.prepare_pinned_head()
+        script = self.root / 'tools/prepare_pr.py'
+        script.write_text(script.read_text() + 'raise SystemExit("response lost after push")\n')
+        self.q.tick()
+        self.restart()
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.approved,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome']), ('pending', 'action_uncertain'))
+        for _ in range(module.MAX_ATTEMPTS):
+            self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.approved,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome']), ('blocked', 'action_uncertain_exhausted'))
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.approved)
+        key = self.q.db.execute("SELECT key FROM actions WHERE kind='regen'").fetchone()[0]
+        self.q.reconcile_action(key, retry=True)
+        self.restart()
+        self.q.tick()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.updated)
+            self.assertEqual(len([e for e in work.export()['history'] if e['kind'] == 'pin_regenerated']), 1)
+        self.assertEqual(self.q.db.execute("SELECT attempts FROM actions WHERE kind='regen'").fetchone()[0], 1)
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries WHERE approved=?',
+                                         (self.updated,)).fetchone()[0], 'waiting_ci')
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_hold_after_lost_regeneration_response_requires_manual_repin(self):
+        card_id = self.prepare_pinned_head()
+        script = self.root / 'tools/prepare_pr.py'
+        script.write_text(script.read_text() + 'raise SystemExit("response lost after push")\n')
+        self.q.tick()
+        action = dict(self.q.db.execute("SELECT * FROM actions WHERE kind='regen'").fetchone())
+        receipt = Path(action['receipt']).read_text()
+        self.load()
+        self.pr(head=self.updated, held=True)
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.approved,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome']), ('blocked', 'needs_repin'))
+        event = self.q.db.execute('SELECT * FROM events WHERE entry_id=? ORDER BY id DESC',
+                                  (row['id'],)).fetchone()
+        self.assertIn('held_during_regeneration', event['detail'])
+        self.load()
+        self.pr(head=self.updated)
+        self.q.reconcile_action(action['key'], retry=True)
+        self.restart()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.approved)
+            self.assertFalse(any(e['kind'] == 'pin_regenerated' for e in work.export()['history']))
+            work.update(card_id, actor='human', reason='verified prepared head; manual re-pin', prs=[
+                dict(repo=module.REPOS[0], number=1, head=self.updated)])
+        self.q.tick()
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries WHERE approved=?',
+                                         (self.updated,)).fetchone()[0], 'waiting_ci')
+        retained = dict(self.q.db.execute("SELECT * FROM actions WHERE kind='regen'").fetchone())
+        self.assertEqual((retained['phase'], retained['attempts']), ('done', 1))
+        self.assertEqual(Path(retained['receipt']).read_text(), receipt)
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_foreign_push_after_regeneration_does_not_advance_pin(self):
+        card_id = self.prepare_pinned_head()
+        self.q.prepare(module.REPOS[0], self.data['prs'][f'{module.REPOS[0]}#1'])
+        self.load()
+        self.pr(head=self.changed)
+        self.restart()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.approved)
+            self.assertFalse(any(e['kind'] == 'pin_regenerated' for e in work.export()['history']))
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_regeneration_without_a_matching_receipt_does_not_advance_pin(self):
+        card_id = self.prepare_pinned_head()
+        self.q.prepare(module.REPOS[0], self.data['prs'][f'{module.REPOS[0]}#1'])
+        path = self.state / 'regen' / f'1-{self.approved}-{self.main}.json'
+        path.write_text(json.dumps(dict(head=self.changed, main=self.main, prepared=self.updated, branch='branch-1')))
+        self.restart()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.approved)
+        self.assertEqual(self.calls('merge'), [])
 
     def test_interrupted_preparation_is_not_replayed(self):
         self.pr()
@@ -224,6 +1001,7 @@ class QueueTests(unittest.TestCase):
     def restart(self):
         self.q.db.close()
         self.q = module.Queue(self.state, self.root, gap=0)
+        self.bind_work_queue()
         self.addCleanup(self.q.db.close)
 
 
@@ -237,6 +1015,10 @@ class QueueTests(unittest.TestCase):
         row = self.q.db.execute('SELECT * FROM entries').fetchone()
         self.assertEqual((row['approved'], row['tested'], row['outcome']),
                          (self.approved, None, 'head_moved'))
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            card = work.get(f'{module.REPOS[0]}#1@{self.approved}')
+            self.assertEqual(card['prs'], [dict(repo=module.REPOS[0], number=1, head=self.approved)])
+            self.assertFalse(any(e['kind'] == 'pin_regenerated' for e in work.export()['history']))
 
     def test_legacy_review_entry_preserves_approved_head_on_restart(self):
         self.pr(head=self.changed)
@@ -645,6 +1427,7 @@ class QueueTests(unittest.TestCase):
 
     def test_dispatch_cancelled_after_bridge_preflight_never_spawns(self):
         self.pr()
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
         brief = self.root / 'cancelled.txt'; brief.write_text('task')
         registry = self.root / 'desks.json'
         registry.write_text(json.dumps({'desks': {'sol': {
@@ -763,6 +1546,60 @@ class QueueTests(unittest.TestCase):
         self.assertNotIn(known, log)
         detail = json.loads(log.splitlines()[-1])['detail']
         self.assertLess(len(detail), 2300)
+
+    def test_enqueue_rearms_transient_github_block_before_merge_intent(self):
+        for n, outcome in enumerate(('github_exhausted', 'discovery_exhausted'), 1):
+            with self.subTest(outcome=outcome):
+                self.pr(n)
+                entry = self.q.enqueue(module.REPOS[0], n, self.approved)
+                with self.q.db:
+                    self.q.db.execute("UPDATE entries SET phase='blocked',outcome=?,"
+                                      "github_attempts=4,read_attempts=4,transient_attempts=4,retry_at=99999999999,"
+                                      "merge_attempts=4,ci_since=1,ci_head=? WHERE id=?",
+                                      (outcome, self.approved, entry))
+                result = self.cli('enqueue', module.REPOS[0], str(n), self.approved, 'try again')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(int(result.stdout), entry)
+                row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+                self.assertEqual((row['phase'], row['outcome'], row['github_attempts'],
+                                  row['read_attempts'], row['transient_attempts'], row['retry_at']),
+                                 ('pending', 'requeued', 0, 0, 0, 0))
+                self.assertEqual((row['tested'], row['merge_attempts'], row['ci_since'], row['ci_head']),
+                                 (None, 4, 1, self.approved))
+        self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_submit_retries_same_head_after_premerge_github_exhaustion(self):
+        self.pr()
+        entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
+        with self.q.db:
+            self.q.db.execute('UPDATE entries SET github_attempts=? WHERE id=?', (module.MAX_ATTEMPTS, entry))
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome'], row['tested']), ('blocked', 'github_exhausted', None))
+        result = self.cli('submit', '1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0], 'pending')
+        self.restart()
+        self.q.tick()
+        self.assertEqual(len(self.calls('merge')), 1)
+        self.assertEqual(self.calls('merge')[0][-1], self.approved)
+
+    def test_enqueue_never_rearms_held_or_head_moved_entries(self):
+        n = 0
+        for phase in ('blocked', 'exhausted'):
+            for outcome, held in (('head_moved', False), ('held', False), ('github_exhausted', True)):
+                n += 1
+                with self.subTest(phase=phase, outcome=outcome, held=held):
+                    self.pr(n, held=held)
+                    entry = self.q.enqueue(module.REPOS[0], n, self.approved)
+                    with self.q.db:
+                        self.q.db.execute('UPDATE entries SET phase=?,outcome=?,github_attempts=4 WHERE id=?',
+                                          (phase, outcome, entry))
+                    self.q.enqueue(module.REPOS[0], n, self.approved)
+                    row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+                    self.assertEqual((row['phase'], row['github_attempts']), (phase, 4))
+        self.assertEqual(self.calls('merge'), [])
 
     def test_enqueue_rearms_exhausted_entry_without_resetting_merge_or_ci_caps(self):
         self.pr()
@@ -1006,8 +1843,10 @@ class QueueTests(unittest.TestCase):
                 self.q.tick()
                 clock.return_value = max(clock.return_value, self.q.db.execute('SELECT retry_at FROM entries WHERE id=?', (entry,)).fetchone()[0])
                 self.restart()
-        self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0],
-                         phase)
+        self.assertIn(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0],
+                      ('blocked', 'exhausted'))
+        with self.q.db:
+            self.q.db.execute('UPDATE entries SET phase=? WHERE id=?', (phase, entry))
         self.load()
         del self.data['api_failure']
         self.save()
@@ -1018,7 +1857,7 @@ class QueueTests(unittest.TestCase):
         self.data['api_failure'] = {'path': 'repos/jbookout/carr-system/pulls/1', 'status': status}
         self.save()
         self.q.tick()
-        self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0], 'merging')
+        self.assertEqual(self.q.db.execute('SELECT phase,outcome FROM entries WHERE id=?', (entry,)).fetchone()[:], ('refreshing', 'merged'))
         self.load()
         del self.data['api_failure']
         self.save()
@@ -1055,7 +1894,7 @@ class QueueTests(unittest.TestCase):
         self.q.tick()
         self.assertEqual(len(self.calls('merge')), 1)
         self.assertEqual(self.q.db.execute('SELECT phase,outcome FROM entries WHERE id=?', (entry,)).fetchone()[:],
-                         ('merging', 'merge_uncertain'))
+                         ('refreshing', 'merged'))
 
     def test_issued_merge_observation_exhausts_without_losing_intent(self):
         self.pr(); self.q.enqueue(module.REPOS[0], 1, self.approved)
@@ -1072,7 +1911,7 @@ class QueueTests(unittest.TestCase):
             for _ in range(8):
                 self.q.tick()
                 clock.return_value = max(clock.return_value, self.q.db.execute('SELECT retry_at FROM entries').fetchone()[0])
-        self.assertEqual(reads, 4)
+        self.assertEqual(reads, 2 * module.MAX_ATTEMPTS)
         self.assertEqual(self.q.db.execute('SELECT phase,tested,outcome FROM entries').fetchone()[:],
                          ('exhausted', self.approved, 'retry_exhausted'))
         self.q.reconcile(1)
@@ -1091,6 +1930,112 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(len(self.calls('merge')), 1)
         self.assertEqual(self.calls('merge')[0][-1], self.updated)
         self.assertFalse(any('/comments' in str(a) for a in self.load()['calls']))
+
+    def conflicting_preparation(self, paths):
+        self.git('switch', '-q', '-c', 'branch-1', self.approved)
+        for path in paths:
+            target = self.remote / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text('PR bytes\n')
+        self.git('add', '--', *paths)
+        self.git('commit', '-qm', 'PR conflicts')
+        head = self.git('rev-parse', 'HEAD').strip()
+        self.git('switch', '-q', 'main')
+        for path in paths:
+            target = self.remote / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text('main bytes\n')
+        self.git('add', '--', *paths)
+        self.git('commit', '-qm', 'main conflicts')
+        self.main = self.git('rev-parse', 'HEAD').strip()
+        self.pr(state='dirty', head=head)
+        self.data['required'] = [{'bucket': 'pending'}]
+        self.save()
+        self.q.enqueue(module.REPOS[0], 1, head)
+        return head
+
+    def install_preparation_generator(self, paths):
+        (self.root / 'tools/prepare_pr.py').write_text(
+            'import json,os,sys\nfrom pathlib import Path\n'
+            'sys.path.insert(0, ' + repr(str(ROOT / 'tools')) + ')\n'
+            'from prepare_pr import prepare\n'
+            'args = dict(zip(sys.argv[1::2], sys.argv[2::2]))\n'
+            'def regenerate(repo):\n'
+            ' for path in ' + repr(paths) + ':\n'
+            '  target = repo / path\n'
+            '  assert target.read_text() == "main bytes\\n"\n'
+            '  target.write_text("regenerated bytes\\n")\n'
+            'sha = prepare(args["--remote"], args["--branch"], args["--head"], '
+            'args["--main"], Path(args["--receipt"]), regenerate)\n'
+            'state = Path(os.environ["FAKE_GH_STATE"])\ndata = json.loads(state.read_text())\n'
+            'data["prs"]["jbookout/carr-system#1"]["head"]["sha"] = sha\n'
+            'state.write_text(json.dumps(data))\n'
+            'print(json.dumps(dict(head=sha, changed=sha != args["--head"])))\n')
+
+    def test_conflicting_generated_outputs_prepare_and_regenerate_in_first_tick(self):
+        paths = ['ops/config/gate-baseline.json', 'db/schema.sql',
+                 'mcp-server/src/core-rule-ids.js',
+                 'mcp-server/test/f03-design-contract-corpus-plan-postgres.generated.sql',
+                 'mcp-server/test/f03-design-contract-corpus-slice-postgres.generated.sql']
+        head = self.conflicting_preparation(paths)
+        self.install_preparation_generator(paths)
+        self.q.tick()
+        prepared = self.git('rev-parse', 'branch-1').strip()
+        self.assertNotEqual(prepared, head)
+        for path in paths:
+            self.assertEqual(self.git('show', f'{prepared}:{path}').strip(), 'regenerated bytes')
+        self.git('merge-base', '--is-ancestor', head, prepared)
+        self.git('merge-base', '--is-ancestor', self.main, prepared)
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.merge_order()['entries'][0]['head'], prepared)
+        self.assertEqual(self.q.db.execute("SELECT COUNT(*) FROM waits WHERE kind='mergeability'").fetchone()[0], 0)
+        self.assertFalse(list((self.root / 'out/orch/queue/codex').glob('*.txt')))
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_stale_conflicting_result_prepares_without_mergeability_wait(self):
+        self.pr(state='dirty')
+        self.git('branch', 'branch-1', self.approved)
+        self.data['required'] = [{'bucket': 'pending'}]
+        self.save()
+        self.install_preparation_generator([])
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
+        self.q.tick()
+        self.assertNotEqual(self.git('rev-parse', 'branch-1').strip(), self.approved)
+        self.assertEqual(self.q.db.execute("SELECT COUNT(*) FROM waits WHERE kind='mergeability'").fetchone()[0], 0)
+        self.assertEqual(self.calls('merge'), [])
+
+    def assert_review_only_conflict(self, path):
+        head = self.conflicting_preparation([path])
+        self.q.tick()
+        entry = self.q.status()[0]
+        self.assertEqual((entry['phase'], entry['outcome']), ('conflict', 'conflict'))
+        detail = self.q.db.execute('SELECT detail FROM events WHERE entry_id=? ORDER BY id DESC LIMIT 1', (entry['id'],)).fetchone()[0]
+        self.assertIn(path, detail)
+        self.assertEqual(self.git('rev-parse', 'branch-1').strip(), head)
+        self.assertEqual(self.q.db.execute("SELECT COUNT(*) FROM waits WHERE kind='mergeability'").fetchone()[0], 0)
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_conflicting_registry_metadata_requires_review_without_waiting(self):
+        self.assert_review_only_conflict('mcp-server/src/scac-mutation-registry.current.generated.js')
+
+    def test_conflicting_dependency_lock_requires_review_without_waiting(self):
+        self.assert_review_only_conflict('requirements.lock')
+
+    def test_conflicting_source_paths_report_conflict_in_first_tick(self):
+        paths = ['source-one.py', 'source-two.py', 'mcp-server/src/core-rule-ids.js']
+        head = self.conflicting_preparation(paths)
+        self.data['prs'][module.REPOS[0]+'#1']['base']['sha'] = self.base
+        self.save()
+        self.q.tick()
+        entry = self.q.status()[0]
+        self.assertEqual((entry['phase'], entry['outcome']), ('conflict', 'conflict'))
+        detail = self.q.db.execute('SELECT detail FROM events WHERE entry_id=? ORDER BY id DESC LIMIT 1', (entry['id'],)).fetchone()[0]
+        for path in paths[:2]:
+            self.assertIn(path, detail)
+        self.assertEqual(self.git('rev-parse', 'branch-1').strip(), head)
+        self.assertEqual(self.q.db.execute("SELECT COUNT(*) FROM waits WHERE kind='mergeability'").fetchone()[0], 0)
+        self.assertEqual(self.q.db.execute("SELECT COUNT(*) FROM actions WHERE kind='regen'").fetchone()[0], 0)
+        self.assertEqual(self.calls('merge'), [])
 
     def test_conflicting_writes_brief_without_resolving(self):
         (self.remote/'file.txt').write_text('main conflict\n')
@@ -1280,6 +2225,7 @@ class QueueTests(unittest.TestCase):
 
     def test_partial_dispatch_receipt_does_not_block_other_briefs(self):
         self.pr(1);self.pr(2)
+        self.q.enqueue(module.REPOS[0], 2, self.approved)
         registry=self.root/'desks.json';registry.write_text(json.dumps({'desks':{}}));os.environ['CARR_HERMES_DESKS']=str(registry)
         for n,phase in ((1,'issued'),(2,'planned')):
             brief=self.root/f'conflict{n}.txt';brief.write_text('task')
@@ -1301,6 +2247,7 @@ class QueueTests(unittest.TestCase):
 
     def test_dispatch_waits_for_free_sol_desk_then_records_result(self):
         self.pr()
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
         brief=self.root/'conflict.txt';brief.write_text('bounded task')
         with self.q.db:
             self.q.db.execute('INSERT INTO actions(key,kind,repo,pr,head,payload) VALUES(?,?,?,?,?,?)',('test','dispatch',module.REPOS[0],1,self.approved,str(brief)))
@@ -1311,6 +2258,14 @@ class QueueTests(unittest.TestCase):
         (bridge/'dispatch.py').write_text("import json,sys\nfrom pathlib import Path\n"
             "a=sys.argv[1:]\nif '--help' in a: print('send --fresh');sys.exit()\n"
             "assert '--family' not in a\n"
+            "import os\n"
+            + "sys.path.insert(0, " + repr(str(ROOT/'tools/room-bridge')) + ")\n"
+            "from work_queue import WorkQueue\n"
+            "with WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as q:\n"
+            " card=a[a.index('--card-id')+1]\n"
+            " q.requeue(card, stage='fixing', desk='free-sol', actor='test', reason='authorized revision')\n"
+            " claim=q.claim(eligible_desks={'free-sol'}, actor='test', owner={})\n"
+            " q.finish(card, claim['claim'], {'status':'completed','msg_id':'verified'}, actor='test')\n"
             "Path(a[a.index('--results')+1]).write_text(json.dumps({'desk':'free-sol','kind':'codex-session','status':'completed','thread_id':'new-thread','result':'fixed'})+'\\n')\n")
         self.q.dispatch_conflicts()
         self.assertEqual(self.q.db.execute('SELECT phase FROM actions').fetchone()[0],'planned')
@@ -1372,6 +2327,8 @@ class QueueTests(unittest.TestCase):
         self.data['prs'][module.REPOS[0]+'#1'].update(merged=True,state='closed',merge_commit_sha=self.merge_sha);self.save()
         self.git('update-ref','refs/heads/main',self.merge_sha)
         self.q.enqueue(module.REPOS[0],1,self.approved);self.q.enqueue(module.REPOS[0],2,self.approved)
+        self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
         self.q.tick()
         self.assertEqual(self.calls('merge')[0][2],'2')
         self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=1').fetchone()[0],'done')

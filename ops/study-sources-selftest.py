@@ -24,13 +24,25 @@ class StudySourcesTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="study-sources-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
-        for name in ("bin", "ops/prompts", "tools/room-bridge", "fake-bin"):
+        for name in ("bin", "ops/prompts", "tools/room-bridge", "fake-bin", "lib"):
             (self.root / name).mkdir(parents=True)
         for name in ("bin/study-sources.sh", "bin/study_sources.py", "bin/with-timeout.py",
-                     "ops/prompts/source-study-brief.md", "tools/progress_board.py", "tools/room-bridge/grok_wire.py"):
+                     "ops/prompts/source-study-brief.md", "tools/progress_board.py",
+                     "tools/progress_board_test_support.py", "lib/progress_hierarchy.py", "tools/room-bridge/grok_wire.py"):
             source = ROOT / name
             if source.exists():
                 shutil.copyfile(source, self.root / name)
+        (self.root / 'tools/progress_board.py').rename(self.root / 'tools/progress_board_real.py')
+        self.executable('tools/progress_board.py', """
+            import os, runpy, sys
+            from pathlib import Path
+            from progress_board_test_support import seed_captured_task
+            if len(sys.argv) > 3 and sys.argv[1] == 'task':
+                seed_captured_task(Path(os.environ['PROGRESS_BOARD_ROOT']), sys.argv[2], sys.argv[3],
+                                   'Model Room source-study')
+            board = runpy.run_path(str(Path(__file__).with_name('progress_board_real.py')))
+            raise SystemExit(board['main']())
+        """)
         self.env = dict(os.environ, PATH=str(self.root / "fake-bin") + os.pathsep + os.environ["PATH"],
                         FAKE_EVENTS=str(self.root / "events.jsonl"), PROGRESS_BOARD_ROOT=str(self.root / "out"),
                         PROGRESS_BOARD_LOCAL_ONLY="1")

@@ -26,7 +26,6 @@ import { scheduleFailureRecord, rpcInternalErrorFailureClass, actorUnresolvedFai
 import { providerFor as judgeProviderFor } from "./judge-provider.js";
 import { countPaidJevAttemptsToday, jevAskBinding, prefetchJevAnswer, reserveJevCallAttempt,
   validateAskJevArgs } from "./jev-call-receipt.js";
-import { stampedGitSha } from "./build-stamp.js";
 import { parksADecision, classifyLoopText, needsDecider, loopRowText,
          ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.js";
 import { controllerOperationInput, controllerToolList, isEngineeringControllerActor,
@@ -169,8 +168,6 @@ export async function dispatchEngineeringController(request, env, ctx, actor) {
   }
 }
 
-export const FOUNDATION_ASSURANCE_RUNTIME_BINDING_SCHEMA =
-  "doctorcre-v5-foundation-assurance-runtime-binding.v1";
 const CANONICAL_OWNERSHIP_HOST_VERSION = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,95}$/;
 
 // This is deployment metadata the Worker received from Cloudflare, not a
@@ -182,23 +179,6 @@ export function canonicalOwnershipExecutionHost(env) {
     ? env.CF_VERSION_METADATA.id.trim() : "";
   return CANONICAL_OWNERSHIP_HOST_VERSION.test(version)
     ? `cloudflare-workers:${version}` : null;
-}
-
-// The foundation oracle must prove which deployed Worker is answering before
-// the record layer exposes any material. These values are runtime/provider
-// facts, not caller input: the source comes from the same deploy stamp used by
-// /release and the provider id comes from Cloudflare's immutable metadata
-// binding. Missing values remain null so the SQL boundary can refuse by name.
-export function foundationAssuranceRuntimeBinding(env) {
-  const providerId = typeof env?.CF_VERSION_METADATA?.id === "string"
-    ? env.CF_VERSION_METADATA.id.trim() : "";
-  return Object.freeze({
-    schema_version: FOUNDATION_ASSURANCE_RUNTIME_BINDING_SCHEMA,
-    environment: typeof env?.CARR_ENV === "string" ? env.CARR_ENV : null,
-    source_sha: stampedGitSha(env),
-    provider: "cloudflare-workers",
-    provider_version: providerId || null,
-  });
 }
 
 // Transaction-local actor context for SECURITY DEFINER functions that must
@@ -1153,8 +1133,7 @@ export async function dispatch(request, env, ctx, actor) {
             "WRITE LAW (rule 14181e60): database " +
             "first — content goes through verbs, NEVER into a .md file. Writes need a fresh " +
             "idempotency_key (UUID) per intended action; mutations need base_version from a fresh read. " +
-            "version_conflict and needs_confirm are questions for the human, never auto-retried. There " +
-            "is no send tool: drafts are produced, Joe sends. If this server is unreachable mid-task, " +
+            "version_conflict and needs_confirm are questions for the human, never auto-retried. Claude sends email and other outbound messages on Joe's behalf whenever Joe asks (one message or a standing instruction); with no ask, the default is a draft (decision 41906a30). This server has no send verb; sends go through Joe's own accounts. If this server is unreachable mid-task, " +
             "STOP AND SAY SO — never improvise files. DELEGATION LATCH: when a partner says delegate, " +
             "subagent, or cheapest qualified model for an active task, that authority survives new logins " +
             "or data sources, phase changes, retries, continuation and compaction until the task ends " +

@@ -47,6 +47,9 @@ class CheckoutDispatchTests(unittest.TestCase):
         self.reg = desks.Registry(self.root / 'desks.json')
         self.reg.register('cx', 'codex-session', cwd=str(self.source), family='sol', effort='high')
         self.results = self.root / 'results.jsonl'
+        queue_env = patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': str(self.root / 'work-queue.sqlite3')})
+        queue_env.start()
+        self.addCleanup(queue_env.stop)
         self.codex_calls = []
         canonical = patch('codex_checkout.CANONICAL_REPO', self.source)
         canonical.start()
@@ -54,9 +57,6 @@ class CheckoutDispatchTests(unittest.TestCase):
         checkout_root = patch('codex_checkout.CHECKOUT_ROOT', self.root)
         checkout_root.start()
         self.addCleanup(checkout_root.stop)
-        slot_dir = patch.object(dispatch, 'CODEX_SLOT_DIR', self.root / 'slots')
-        slot_dir.start()
-        self.addCleanup(slot_dir.stop)
 
     def git(self, *args, cwd=None):
         return REAL_RUN(['git', '-C', str(cwd or self.source), *args], check=True,
@@ -102,11 +102,83 @@ class CheckoutDispatchTests(unittest.TestCase):
         self.assertEqual(self.git('config', '--local', 'user.email'),
                          '123+author@users.noreply.github.com')
 
+    def test_clone_is_seeded_from_canonical_objects_then_dissociated(self):
+        # Five parallel 226 MB network clones overran the clone deadline
+        # (2026-10-20). The job clone borrows the canonical object store and
+        # then copies it in, so it never keeps a link to the live checkout.
+        calls = []
+        def record(argv, **kwargs):
+            calls.append(argv)
+            return self.execute(argv, **kwargs)
+        with patch.object(dispatch.subprocess, 'run', side_effect=record), \
+             patch('codex_checkout.subprocess.run', side_effect=record):
+            row = dispatch.dispatch('cx', 'repair it', registry=self.reg,
+                                    results_path=self.results, env=self.env,
+                                    checkout='repair', fresh=True)
+        self.addCleanup(lambda: shutil.rmtree(row['checkout_workspace'], ignore_errors=True))
+        clone = next(argv for argv in calls if argv[:2] == ['git', 'clone'])
+        self.assertIn('--dissociate', clone)
+        self.assertEqual(clone[clone.index('--reference-if-able') + 1], str(self.source))
+        repo = Path(row['checkout_path'])
+        self.assertFalse((repo / '.git' / 'objects' / 'info' / 'alternates').exists())
+        self.assertEqual(self.git('remote', 'get-url', 'origin', cwd=repo), str(self.origin))
+
+    def test_unreadable_canonical_objects_fall_back_to_an_origin_clone(self):
+        # The fixture origin hardlinks canonical objects; give it its own copy.
+        shutil.rmtree(self.origin)
+        REAL_RUN(['git', 'clone', '--bare', '--no-local', str(self.source), str(self.origin)],
+                 check=True, capture_output=True, env=fixture_env())
+        objects = [f for f in (self.source / '.git' / 'objects').rglob('*')
+                   if f.is_file() and len(f.parent.name) == 2]
+        for f in objects:
+            f.chmod(0)
+        self.addCleanup(lambda: [f.chmod(0o444) for f in objects])
+        row = self.send(checkout='repair', fresh=True)
+        repo = Path(row['checkout_path'])
+        self.assertEqual(self.git('branch', '--show-current', cwd=repo), 'repair')
+        self.assertFalse((repo / '.git' / 'objects' / 'info' / 'alternates').exists())
+
     def test_new_branch_uses_origin_default_head(self):
         row = self.send(checkout='new:job-repair')
         repo = Path(row['checkout_path'])
         self.assertEqual(self.git('branch', '--show-current', cwd=repo), 'job-repair')
         self.assertEqual(self.git('rev-parse', 'HEAD', cwd=repo), self.git('rev-parse', 'main'))
+
+    def test_grok_build_receives_standalone_checkout_and_can_commit(self):
+        self.reg.register('grok-builder', 'grok-cli', model='grok-9.2', cwd=str(self.source))
+        def provider(argv, **options):
+            repo = Path(options['cwd'])
+            (repo / 'fixed.py').write_text('fixed = True\n')
+            self.git('add', 'fixed.py', cwd=repo)
+            self.git('commit', '-m', 'fix', cwd=repo)
+            end = {'type': 'end', 'stopReason': 'end_turn', 'requestId': 'r', 'sessionId': 's',
+                   'modelUsage': {'grok-9.2-build': {'modelCalls': 1}}}
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'type': 'text', 'data': 'Fixed'})
+                + '\n' + json.dumps(end), '')
+        row = dispatch.dispatch('grok-builder', 'repair it', registry=self.reg,
+            results_path=self.results, env=self.env, checkout='new:grok-fix', provider_run=provider)
+        self.addCleanup(lambda: shutil.rmtree(row['checkout_workspace'], ignore_errors=True))
+        self.assertEqual(row['status'], 'completed')
+        self.assertEqual(self.git('log', '-1', '--format=%s', cwd=row['checkout_path']), 'fix')
+        self.assertFalse((self.source / 'fixed.py').exists())
+
+    def test_grok_checkout_job_gets_the_job_deadline_not_the_reply_deadline(self):
+        # 2026-10-20: Grok reviews dispatched with a checkout died at the
+        # 180-second room-reply limit (grok_cli_timeout).
+        self.reg.register('grok-reviewer', 'grok-cli', model='grok-9.2', cwd=str(self.source))
+        seen = {}
+        def provider(argv, **options):
+            seen.update(options)
+            end = {'type': 'end', 'stopReason': 'end_turn', 'requestId': 'r', 'sessionId': 's',
+                   'modelUsage': {'grok-9.2-build': {'modelCalls': 1}}}
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'type': 'text', 'data': 'Reviewed'})
+                + '\n' + json.dumps(end), '')
+        row = dispatch.dispatch('grok-reviewer', 'review it', registry=self.reg,
+            results_path=self.results, env=self.env, checkout='new:grok-review',
+            provider_run=provider, codex_timeout_s=7200)
+        self.addCleanup(lambda: shutil.rmtree(row['checkout_workspace'], ignore_errors=True))
+        self.assertEqual(row['status'], 'completed')
+        self.assertEqual(seen['timeout'], 7200)
 
     def test_resumed_thread_keeps_cwd_and_names_checkout(self):
         self.reg.remember_thread('cx', 'old-thread')
@@ -190,47 +262,22 @@ class CheckoutDispatchTests(unittest.TestCase):
                 self.assertEqual(self.git('branch', '--show-current', cwd=repo), 'repair')
                 self.assertEqual(self.git('remote', 'get-url', 'origin', cwd=repo), str(self.origin))
 
-    def test_codex_jobs_queue_for_a_free_slot(self):
-        # WR-000356: five concurrent Sol-high jobs drew 429s; a `send` past
-        # CARR_CODEX_MAX_CONCURRENT waits for a free slot instead of starting.
-        slots = {'CARR_CODEX_MAX_CONCURRENT': '1', 'CARR_CODEX_SLOT_DIR': str(self.root / 'slots'),
-                 'CODEX_HOME': str(self.root)}
-        argv = ['--registry', str(self.reg.path), '--results', str(self.results),
-                'send', 'cx', 'repair it', '--fresh']
-        held = dispatch._codex_slot(slots)
-        held.__enter__()
-        released = False
-        try:
-            with patch.dict(os.environ, slots), \
-                 patch.object(dispatch, 'CODEX_SLOT_POLL_S', 0.01), \
-                 patch.object(dispatch.seat_gate, 'check', return_value=None), \
-                 patch.object(dispatch.subprocess, 'run', side_effect=self.execute), \
-                 contextlib.redirect_stdout(io.StringIO()):
-                job = threading.Thread(target=dispatch.main, args=(argv,))
-                job.start()
-                time.sleep(0.3)
-                self.assertEqual(self.codex_calls, [])
-                held.__exit__(None, None, None)
-                released = True
-                job.join(10)
-            self.assertFalse(job.is_alive())
-            self.assertEqual(len(self.codex_calls), 1)
-        finally:
-            if not released:
-                held.__exit__(None, None, None)
-
-    def test_cli_documents_and_forwards_checkout(self):
+    def test_cli_documents_and_enqueues_checkout(self):
+        import work_runner
+        from work_queue import WorkQueue, default_path
         out = io.StringIO()
         with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
             dispatch.main(['send', '--help'])
         self.assertIn('--checkout', out.getvalue())
         self.assertIn('new:', out.getvalue())
-        with patch.object(dispatch, 'dispatch', return_value={'status': 'completed'}) as send, \
+        with patch.object(work_runner, 'kick'), \
              patch.object(dispatch.seat_gate, 'check', return_value=None), \
              contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(dispatch.main(['--registry', str(self.reg.path), 'send', 'cx',
-                                           'repair', '--checkout', 'repair']), 0)
-        self.assertEqual(send.call_args.kwargs['checkout'], 'repair')
+            self.assertEqual(dispatch.main(['--registry', str(self.reg.path), '--results', str(self.results),
+                                           'send', 'cx', 'repair', '--checkout', 'repair']), 0)
+        with WorkQueue(default_path()) as queue:
+            self.assertEqual(json.loads(queue.candidates()[0]['options'])['checkout'], 'repair')
+        self.assertEqual(self.codex_calls, [])
 
 
 if __name__ == '__main__':

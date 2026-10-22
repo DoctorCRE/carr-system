@@ -60,7 +60,7 @@ class HostIsolation(unittest.TestCase):
 
     def test_model_selection_proof_ignores_parent_capacity(self):
         self.run_capacity_proof('tools/room-bridge/test_codex_models_unit.py',
-                                'FamilyDispatchTests.test_send_cli_names_resolved_executor_before_launch')
+                                'FamilyDispatchTests.test_send_cli_defers_model_resolution_to_worker')
 
 
 if __name__ == '__main__':

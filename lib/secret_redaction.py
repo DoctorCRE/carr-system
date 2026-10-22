@@ -24,10 +24,16 @@ SOURCE_BYTES = Path(__file__).read_bytes()
 
 MASK = "[REDACTED]"
 
-# scheme://user:password@host... -- mask the WHOLE authority-bearing URI, not
+# scheme://userinfo@host... -- mask the WHOLE authority-bearing URI, not
 # just the password, since host/database name can be sensitive too.
 _URI_WITH_CREDENTIALS = re.compile(
-    r"\b[A-Za-z][A-Za-z0-9+.\-]*://[^\s'\"/@]+:[^\s'\"@]*@[^\s'\"]+")
+    r"\b[A-Za-z][A-Za-z0-9+.\-]*://[^\s'\"@]*@[^\s'\"]+")
+
+_URL_WITH_QUERY = re.compile(r"\bhttps?://[^\s'\"?#]+\?[^\s'\"#]+", re.IGNORECASE)
+_QUERY_SECRET = re.compile(
+    r"([?&](?:access[_-]?token|token|auth(?:orization)?|api[_-]?key)=)[^&#]*"
+    r"|(?<=[?=&])[A-Za-z0-9+/_%\-]{32,}={0,2}(?=[&#]|$)", re.IGNORECASE)
+
 
 # Recognisable API-key / access-token prefixes (OpenAI-shaped, GitHub, AWS,
 # Slack...).
@@ -48,9 +54,10 @@ _ASSIGNED_SECRET = re.compile(
 # public identifier. Shape alone is insufficient: a password may be a SHA or UUID.
 _PUBLIC_IDENTIFIER_LABEL = re.compile(
     r"(?:^|[\n;,])\s*(?:(?P<sha>(?:source[ _-])?sha(?: mismatch)?)"
-    r"|(?P<receipt>receipt[ _-]id))\s*[:=]$", re.IGNORECASE)
+    r"|(?P<uuid>receipt[ _-]id))\s*[:=]$"
+    r"|(?:^|\n)[ \t]*(?P<provider>provider version):$", re.IGNORECASE)
 _SHA_IDENTIFIER = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", re.IGNORECASE)
-_RECEIPT_IDENTIFIER = re.compile(
+_UUID_IDENTIFIER = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
     re.IGNORECASE)
 
@@ -58,8 +65,9 @@ _RECEIPT_IDENTIFIER = re.compile(
 def _redact_assigned_value(match: re.Match[str]) -> str:
     label = _PUBLIC_IDENTIFIER_LABEL.search(match.string[:match.start()])
     if label:
-        shape = _SHA_IDENTIFIER if label.group("sha") else _RECEIPT_IDENTIFIER
-        if shape.fullmatch(match.group().strip()):
+        shape = _SHA_IDENTIFIER if label.group("sha") else _UUID_IDENTIFIER
+        value = match.group().strip(" \t") if label.group("provider") else match.group().strip()
+        if shape.fullmatch(value):
             return match.group()
     return MASK
 
@@ -102,6 +110,8 @@ def redact_text(text: str, *, known_secrets: Iterable[str] = ()) -> str:
         if secret:
             out = out.replace(secret, MASK)
     out = _URI_WITH_CREDENTIALS.sub(MASK, out)
+    out = _URL_WITH_QUERY.sub(
+        lambda url: _QUERY_SECRET.sub(lambda value: (value.group(1) or "") + MASK, url.group()), out)
     out = _PREFIXED_TOKEN.sub(MASK, out)
     # Known secrets and credential shapes take precedence over public labels.
     out = _ASSIGNED_SECRET.sub(_redact_assigned_value, out)

@@ -84,7 +84,7 @@ class Controls(unittest.TestCase):
                     matrix = wf['jobs']['classes']['strategy']['matrix']
                     excluded = expression(matrix['exclude'], e)
                     groups = [g for g in matrix['classes'] if {'classes': g} not in excluded]
-                    self.assertEqual(groups, matrix['classes'][:1] if draft else matrix['classes'])
+                    self.assertEqual(excluded, [{'classes': 'gates'}, {'classes': 'migration'}] if draft else [])
                     self.assertTrue(expression(wf['jobs']['checks']['if'], e))
                     self.assertEqual(load('ci-evidence').class_groups(), matrix['classes'])
                 elif filename == 'db-acceptance.yml':
@@ -118,13 +118,20 @@ class Controls(unittest.TestCase):
         groups=mod.class_groups()
         jobs=[{'name':'ops/ci.sh --strict --only '+g,'status':'completed','conclusion':'success'} for g in groups]
         self.assertEqual(mod.verdict(jobs,groups)[0],0)
-        jobs[1]['conclusion']='failure';jobs[2]['conclusion']='cancelled'
+        gates_group = next(g for g in groups if 'gates' in g.split())
+        migration_group = next(g for g in groups if 'migration' in g.split())
+        by_group = {g: next(j for j in jobs if j['name'] == 'ops/ci.sh --strict --only '+g) for g in groups}
+        by_group[gates_group]['conclusion']='failure';by_group[migration_group]['conclusion']='cancelled'
         rc, lines=mod.verdict(jobs,groups)
         self.assertNotEqual(rc,0)
         self.assertIn('gates: FAILED',lines);self.assertIn('migration: CANCELLED',lines)
+        self.assertIn('hxprobe: PASSED',lines)
         for c in groups[0].split(): self.assertIn(c+': PASSED',lines)
-        self.assertNotEqual(mod.verdict(jobs[:-1],groups)[0],0)
-        self.assertIn('migration: MISSING',mod.verdict(jobs[:-1],groups)[1])
+        missing_migration = [j for j in jobs if j['name'] != 'ops/ci.sh --strict --only '+migration_group]
+        missing_rc, missing_lines = mod.verdict(missing_migration,groups)
+        self.assertNotEqual(missing_rc,0)
+        self.assertIn('migration: MISSING',missing_lines)
+        self.assertIn('hxprobe: PASSED',missing_lines)
         self.assertNotEqual(mod.verdict(jobs+[jobs[0]],groups)[0],0)
         for conclusion in ('skipped','timed_out','neutral',None):
             changed=[{**j,'conclusion':conclusion} for j in jobs]
@@ -159,6 +166,56 @@ class Controls(unittest.TestCase):
         policy['temporary_controls']['github_actions_pause']['repository_actions_enabled']=False
         with self.assertRaises(Exception): mod.rerun(remote,123,456,'a'*40,policy,checks,dispatch)
         dispatch.assert_not_called()
+
+    def test_rerun_ignores_repository_and_mergeability_cache_changes(self):
+        mod = load('ci-rerun')
+        head = 'a' * 40
+        run = {'id':123, 'name':'CI', 'path':'.github/workflows/ci.yml',
+               'event':'pull_request', 'status':'completed', 'conclusion':'failure',
+               'head_sha':head, 'run_attempt':1, 'repository':{'size':220185}}
+        job = {'id':456, 'run_id':123, 'name':'ops/ci.sh --strict --only gates',
+               'status':'completed', 'conclusion':'failure'}
+        pr = {'number':1927, 'state':'open', 'head':{'sha':head},
+              'base':{'sha':'b' * 40, 'repo':{'pushed_at':'before'}},
+              'mergeable':None, 'mergeable_state':'unknown', 'rebaseable':None}
+        current = ({**run, 'repository':{'size':232385}}, job,
+                   {**pr, 'base':{'sha':'b' * 40, 'repo':{'pushed_at':'after'}},
+                    'mergeable':True, 'mergeable_state':'blocked', 'rebaseable':False})
+        remote = Mock(repo=mod.REPO)
+        remote.snapshot.side_effect = [(run, job, pr), current]
+        policy = json.loads((ROOT/'ops/config/platform-metering.v1.json').read_text())
+        dispatch = Mock()
+        mod.rerun(remote, 123, 456, head, policy, Mock(), dispatch)
+        dispatch.assert_called_once_with(123, 456, 1, head)
+
+    def test_rerun_refuses_changed_admission_binding(self):
+        mod = load('ci-rerun')
+        head = 'a' * 40
+        run = {'id':123, 'name':'CI', 'path':'.github/workflows/ci.yml',
+               'event':'pull_request', 'status':'completed', 'conclusion':'failure',
+               'head_sha':head, 'run_attempt':1}
+        job = {'id':456, 'run_id':123, 'name':'ops/ci.sh --strict --only gates',
+               'status':'completed', 'conclusion':'failure'}
+        pr = {'number':1927, 'state':'open', 'draft':False,
+              'head':{'sha':head}, 'base':{'sha':'b' * 40}}
+        policy = json.loads((ROOT/'ops/config/platform-metering.v1.json').read_text())
+        for current in (
+                ({**run, 'run_attempt':2}, job, pr),
+                (run, {**job, 'id':457}, pr),
+                (run, {**job, 'name':'ops/ci.sh --strict --only unit'}, pr),
+                (run, {**job, 'conclusion':'cancelled'}, pr),
+                (run, job, {**pr, 'number':1928}),
+                (run, job, {**pr, 'base':{'sha':'c' * 40}}),
+                (run, job, {**pr, 'head':{'sha':'c' * 40}}),
+                (run, job, {**pr, 'state':'closed'}),
+                (run, job, {**pr, 'draft':True})):
+            with self.subTest(current=current):
+                remote = Mock(repo=mod.REPO)
+                remote.snapshot.side_effect = [(run, job, pr), current]
+                dispatch = Mock()
+                with self.assertRaises(mod.Refusal):
+                    mod.rerun(remote, 123, 456, head, policy, Mock(), dispatch)
+                dispatch.assert_not_called()
 
     def test_draft_reruns_keep_fast_feedback_and_refuse_expensive_jobs(self):
         mod = load('ci-rerun')
@@ -346,7 +403,7 @@ class Controls(unittest.TestCase):
         for shaped_run, shaped_job in (
                 (run, {**job, 'name':'other'}),
                 (run, {**job, 'name':'test'}),
-                ({**run, 'name':'CI', 'path':'.github/workflows/ci.yml'}, {**job, 'name':'test'}),
+                ({**run, 'name':'CI', 'path':'.github/workflows/ci.yml'}, {**job, 'name':'preview'}),
                 ({**run, 'name':'CI', 'path':'.github/workflows/ci.yml'}, {**job, 'name':'ops/ci.sh --strict --only gates'}),
                 ({**run, 'path':'.github/workflows/other.yml'}, job)):
             with self.subTest(run=shaped_run['path'], job=shaped_job['name']), self.assertRaises(mod.Refusal):
@@ -379,6 +436,22 @@ class Controls(unittest.TestCase):
         remote.snapshot.return_value = (run, job, pr)
         mod.rerun(remote, 123, 456, None, policy, lambda g: mod.hosted_checks(remote, g), dispatch)
         dispatch.assert_called_once_with(123, 456, 1, head)
+
+    def test_rerun_app_ci_test_job(self):
+        mod = load('ci-rerun')
+        repo, head = 'jbookout/doctorcre-app', 'b'*40
+        run = {'id':123, 'name':'CI', 'path':'.github/workflows/ci.yml', 'event':'pull_request',
+               'status':'completed', 'conclusion':'failure', 'head_sha':head, 'run_attempt':1}
+        job = {'id':456, 'run_id':123, 'name':'test', 'status':'completed', 'conclusion':'failure'}
+        pr = {'state':'open', 'head':{'sha':head}}
+        self.assertEqual(mod.admit(run, job, pr, head, repo), {'head':head, 'job':'test'})
+        for shaped_run, shaped_job, shaped_repo in (
+                (run, {**job, 'name':'preview'}, repo),
+                ({**run, 'path':'.github/workflows/other.yml'}, job, repo),
+                (run, job, 'jbookout/software-factory')):
+            with self.subTest(run=shaped_run['path'], job=shaped_job['name'], repo=shaped_repo), \
+                    self.assertRaises(mod.Refusal):
+                mod.admit(shaped_run, shaped_job, pr, head, shaped_repo)
 
     def test_rerun_unknown_repository_refused_before_validation(self):
         mod = load('ci-rerun')

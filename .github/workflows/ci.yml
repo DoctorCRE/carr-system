@@ -93,6 +93,8 @@ name: CI
 # ready_for_review runs every class; historical draft retries stay isolated.
 # After a base retarget, reopen the PR to test its new merge ref.
 on:
+  merge_group:
+    types: [checks_requested]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   schedule:
@@ -123,6 +125,7 @@ jobs:
           - "pushfloor unit types contract secret dependency binding artifact freshness"
           - "gates"
           - "migration"
+          - "hxprobe"
         # Keep fast feedback on draft pushes without starting expensive runners.
         exclude: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.draft && '[{"classes":"gates"},{"classes":"migration"}]' || '[]') }}
     # Both PR 1121 and PR 1406 exhausted a 20-minute migration job while

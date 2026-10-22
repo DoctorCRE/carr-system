@@ -15,7 +15,6 @@ mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
 with tempfile.TemporaryDirectory() as raw:
     root = Path(raw) / "source"
     (root / "mcp-server" / "src").mkdir(parents=True)
-    (root / "dealroom").mkdir()
     (root / "mcp-server" / "wrangler.toml").write_text("name = 'test'\n", encoding="utf-8")
     (root / "mcp-server" / "src" / "tools.js").write_text("export const TOOLS = {};\n", encoding="utf-8")
     # COMMITTED, and load-bearing for the last case below. validate() reports

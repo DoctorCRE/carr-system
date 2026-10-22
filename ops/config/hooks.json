@@ -144,7 +144,7 @@
       ]
     },
     {
-      "matcher": "Bash|mcp__.*__standing-context",
+      "matcher": "Bash|run_terminal_command|.*__standing[-_]context",
       "hooks": [
         {
           "type": "command",
@@ -166,7 +166,7 @@
       ]
     },
     {
-      "matcher": "Bash|mcp__.*__standing-context",
+      "matcher": "Bash|run_terminal_command|.*__standing[-_]context",
       "hooks": [
         {
           "type": "command",
@@ -192,6 +192,15 @@
         {
           "type": "command",
           "command": "if [ ! -f \"{{REPO}}/hooks/scheduled-run-record.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/scheduled-run-record.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/scheduled-run-record.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/scheduled-run-record.py",
+          "timeout": 20
+        }
+      ]
+    },
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "if [ ! -e \"{{REPO}}/hooks/rule-claim-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/rule-claim-gate.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-claim-gate.py",
           "timeout": 20
         }
       ]
