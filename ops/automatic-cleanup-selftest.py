@@ -95,6 +95,18 @@ class RetirementKeepTests(unittest.TestCase):
         self.assertTrue(any(row['repo'] == 'fixture/healthy' for row in report['kept']), report)
         self.assertEqual(json.loads((broken.repo / 'out/machine-cleanup-dry.json').read_text()), report)
 
+    def test_streamed_git_failure_keeps_command_and_bounded_stderr(self):
+        from branch_retirement import CommandError, git_records
+        fixture = fixtures.Fixture()
+        with self.assertRaises(CommandError) as raised:
+            list(git_records(fixture.repo, 'rev-parse', '--verify', 'refs/heads/missing'))
+        evidence = raised.exception.evidence
+        self.assertEqual(evidence['returncode'], 128)
+        self.assertEqual(evidence['command'], ['git', '-C', str(fixture.repo),
+            'rev-parse', '--verify', 'refs/heads/missing'])
+        self.assertIn('fatal:', evidence['stderr_tail'])
+        self.assertLessEqual(len(evidence['stderr_tail']), 4096)
+
     def test_slow_recovery_ledger_stops_without_effects(self):
         import branch_retirement as retirement
         fixture = fixtures.Fixture()
@@ -962,6 +974,33 @@ class ScheduledCleanupTests(unittest.TestCase):
                 self.assertEqual(json.loads((root / 'out/machine-cleanup-runs.jsonl').read_text().splitlines()[0])['status'],
                     'deferred')
 
+    def test_clone_git_failure_reaches_machine_receipt(self):
+        import machine_cleanup as cleanup
+        fixture = fixtures.Fixture()
+        clones = fixture.base / 'clones'
+        workspace = clones / 'room-codex-broken'
+        workspace.mkdir(parents=True)
+        clone = workspace / 'checkout'
+        fixture.git('clone', str(fixture.remote), str(clone))
+        fixture.git('remote', 'remove', 'origin', cwd=clone)
+        ledger = fixture.base / 'dispatch.jsonl'
+        ledger.write_text(json.dumps({'checkout_workspace': str(workspace),
+            'checkout_path': str(clone), 'status': 'completed',
+            'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n')
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        report = cleanup.run(fixture.repo, config, hook=fixtures.hook, tmp_root=clones,
+            dispatch_path=ledger, roots={}, provider=fixtures.FakeProvider(),
+            process_probe=lambda paths: set(), archive_thread=lambda *a, **k: None,
+            dry_run=True)
+        self.assertEqual(report['status'], 'failed', report)
+        error, = report['errors']
+        self.assertEqual(error['returncode'], 128)
+        self.assertEqual(error['command'][:3], ['git', '-C', str(clone)])
+        self.assertIn('fetch', error['command'])
+        self.assertIn("'origin' does not appear to be a git repository", error['stderr_tail'])
+        self.assertTrue(clone.is_dir())
+        self.assertEqual(json.loads((fixture.repo / 'out/machine-cleanup-dry.json').read_text()), report)
+
     def test_clone_budget_defers_remainder_and_resumes_from_saved_cursor(self):
         import machine_cleanup as cleanup
         from lib.cleanup_budget import BudgetExhausted
@@ -1159,6 +1198,35 @@ class ScheduledCleanupTests(unittest.TestCase):
                 self.assertEqual(report.get('pending'), pending)
                 self.assertEqual(candidate.exists(), not moved)
                 self.assertEqual((actual / 'payload').read_text(), 'keep complete staged bytes')
+
+    def test_recovery_git_failure_keeps_evidence_and_pending_receipt(self):
+        import machine_cleanup as cleanup
+        fixture = fixtures.Fixture()
+        workspace = fixture.base / 'room-codex-recovery'
+        (workspace / 'checkout').mkdir(parents=True)
+        target = fixture.base / '_to_delete' / (workspace.name + '-intent')
+        target.mkdir(parents=True)
+        manifest = {'path': str(workspace), 'staged_path': str(target / 'workspace'),
+            'status': 'intent', 'head': fixture.git('rev-parse', 'HEAD')}
+        (target / 'manifest.json').write_text(json.dumps(manifest))
+        pending = {'kind': 'job_clone', 'path': str(workspace)}
+        receipt = fixture.repo / 'out/machine-cleanup.json'
+        receipt.parent.mkdir()
+        receipt.write_text(json.dumps({'pending': pending, 'at': 0}))
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        report = cleanup.run(fixture.repo, config, hook=fixtures.hook,
+            tmp_root=fixture.base, dispatch_path=fixture.base / 'absent', roots={},
+            provider=fixtures.FakeProvider(), process_probe=lambda paths: set(),
+            archive_thread=lambda *a, **k: None)
+        self.assertEqual(report['status'], 'failed', report)
+        self.assertEqual(report['pending'], pending)
+        error, = report['errors']
+        self.assertEqual(error['returncode'], 128)
+        self.assertEqual(error['command'], ['git', '-C', str(workspace / 'checkout'),
+            'rev-parse', 'HEAD'])
+        self.assertIn('not a git repository', error['stderr_tail'])
+        self.assertEqual(json.loads((target / 'manifest.json').read_text()), manifest)
+        self.assertEqual(json.loads(receipt.read_text()), report)
 
     def test_slow_clone_recovery_preserves_pending_for_retry(self):
         import machine_cleanup as cleanup
