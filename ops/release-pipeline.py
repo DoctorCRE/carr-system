@@ -1517,8 +1517,8 @@ class Pipeline:
                         if row.get('lane') == 'worker' and row.get('status') == 'worker_promoted'
                         and row.get('run_id') == run_id]
             expected_identity = {'from_sha': previous, **promotion}
-            if (failure['promotion'] not in (None, promotion)
-                    or (failure['promotion'] is None and not recorded)
+            if (failure.get('promotion') not in (None, promotion)
+                    or (failure.get('promotion') is None and not recorded)
                     or any(row.get(key) != value for row in recorded for key, value in expected_identity.items())):
                 raise ValueError('run promotion identity differs or is missing')
             version = promotion['provider_version_id']
