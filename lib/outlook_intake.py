@@ -13,9 +13,10 @@ through the named record-layer verbs:
 - one isolated haiku call per new matched email proposes a next step, which
   becomes a ball when the record has none or only an older one.
 
-A run outside 07:00-19:30 local does nothing. Matching is deterministic: one
-record with that exact address, else one exact, unmerged record name; anything
-else is reported as unmatched. Records are never created, merged or renamed.
+A run outside 07:00-19:30 local does nothing. Matching requires one record with
+that exact address; names alone never establish identity. Wholly unmatched mail
+stays unresolved and is retried when the address mappings change, even outside
+the rolling lookback. Records are never created, merged or renamed.
 Every write carries uuid5(NAMESPACE_URL, "<verb>|<ref>|<source id>"), so an
 action stays pending in the state file until the verb acknowledges it and the
 retry replays the same key. A run with any write, model or cleanup failure
@@ -270,25 +271,18 @@ def _best_copies(mails: list[dict]) -> list[dict]:
 # ---- matching ----------------------------------------------------------------
 
 class Matcher:
-    def __init__(self, contacts: list, carr: Callable[[str, dict], dict]):
+    def __init__(self, contacts: list):
         self.by_email: dict[str, set] = {}
         for c in contacts:
             if '@' in c.email and not _internal(c.email) and RECORD_REF.match(c.ref):
                 self.by_email.setdefault(c.email.lower(), set()).add(c.ref)
-        self.carr = carr
-        self.names: dict[str, str | None] = {}
 
-    def ref(self, address: str, name: str | None) -> str | None:
-        refs = self.by_email.get(address, set())
-        if len(refs) == 1:
-            return next(iter(refs))
-        if refs or not name:
-            return None
-        if name not in self.names:
-            hits = [p for p in self.carr('find', {'query': name}).get('parties') or []
-                    if p.get('name') == name and not p.get('merged') and RECORD_REF.match(p.get('ref') or '')]
-            self.names[name] = hits[0]['ref'] if len({h['ref'] for h in hits}) == 1 else None
-        return self.names[name]
+    def fingerprint(self) -> str:
+        return _hash(json.dumps({a: sorted(refs) for a, refs in self.by_email.items()}, sort_keys=True))
+
+    def ref(self, address: str) -> str | None:
+        refs = self.by_email.get(address.lower(), set())
+        return next(iter(refs)) if len(refs) == 1 else None
 
 
 # ---- the model ---------------------------------------------------------------
@@ -418,10 +412,18 @@ class Run:
 
     def emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
         done = self.state.setdefault('mail_done', {})
+        unresolved = self.state.setdefault('mail_unresolved', {})
         pending = self.state.setdefault('pending_full', {})
         steps = self.state.setdefault('steps', {})
+        retries: dict[str, list] = {}
+        for ident, item in unresolved.items():
+            retries.setdefault(item['ck'], []).append((ident, item['sent']))
         for m in mails:
-            if m['sent_unix'] < since or m['sent_unix'] > self.now.timestamp() + 300:
+            prior = next(((ident, sent) for ident, sent in retries.get(m['ck'], [])
+                          if abs(sent - m['first_sent']) <= COPY_WINDOW), None)
+            if prior:
+                m['ident'], m['sent_unix'] = prior
+            if (m['sent_unix'] < since and m['ident'] not in unresolved) or m['sent_unix'] > self.now.timestamp() + 300:
                 continue
             if any(abs(t - m['sent_unix']) <= COPY_WINDOW for t in done.get(m['ck'], [])):
                 continue
@@ -434,14 +436,14 @@ class Run:
             self.counts['emails'] += 1
             refs = []
             for address, name in parties:
-                ref = matcher.ref(address, name)
+                ref = matcher.ref(address)
                 if ref is None:
                     self.unmatched.add((name or '(no name)', _domain(address)))
                 elif ref not in refs:
                     refs.append(ref)
             self.counts['unmatched'] += len(parties) - len(refs)
             if not refs:
-                done.setdefault(m['ck'], []).append(m['sent_unix'])
+                unresolved[m['ident']] = {'ck': m['ck'], 'sent': m['sent_unix']}
                 continue
             who = _clean_name(m['sender_name'], m['subject']) or m['sender'].lower()
             kind = 'email_out' if outbound else 'email_in'
@@ -460,6 +462,7 @@ class Run:
             if not ok:
                 continue
             self.counts['logged'] += 1
+            unresolved.pop(m['ident'], None)
             done.setdefault(m['ck'], []).append(m['sent_unix'])
             if not m['full']:
                 self.counts['preview_only'] += 1
@@ -539,7 +542,7 @@ class Run:
                 people.append((org, e['organizer_name']))
             refs: list[tuple[str, str]] = []
             for email, name in people:
-                ref = matcher.ref(email, _clean_name(name, e['subject']))
+                ref = matcher.ref(email)
                 if ref is None:
                     self.unmatched.add((name or '(no name)', _domain(email)))
                 elif ref not in [r for r, _ in refs]:
@@ -647,8 +650,15 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     info = store.stat()
     signature = [info.st_mtime_ns, info.st_size]
     now = ports.now()
+    matcher = None
+    if state.get('mail_unresolved'):
+        try:
+            matcher = Matcher(ports.contacts())
+        except CarrError:
+            return Outcome('failed', 'carr_unreachable')
+    contacts_changed = matcher is not None and state.get('contact_map') != matcher.fingerprint()
     pending_writes = any(not r['acknowledged'] for r in state.get('requests', {}).values())
-    if state.get('store') == signature and not state.get('steps') and not pending_writes and not _calendar_due(state, now):
+    if state.get('store') == signature and not contacts_changed and not state.get('steps') and not pending_writes and not _calendar_due(state, now):
         if state.get('pending_full'):
             Run(ports, state, now, out).full_text([])
             _refresh_list(out, state['pending_full'])
@@ -680,7 +690,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
                         del state['requests'][args['idempotency_key']]
                         continue
                 work.write(request['verb'], args, 'pending write')
-        matcher = Matcher(ports.contacts(), ports.carr)
+        matcher = matcher or Matcher(ports.contacts())
         work.emails(mails, matcher, since)
         work.full_text(mails)
         work.next_steps(mails)
@@ -696,7 +706,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     if failed:
         _save(out, state)
         return Outcome('failed', failed, counts)
-    state.update(store=signature, high_water=int(now.timestamp()))
+    state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint())
     _prune(state, now)
     _save(out, state)
     return Outcome('succeeded', 'processed' if work.written or any(work.counts.values()) else 'nothing_new', counts)
