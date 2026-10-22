@@ -974,6 +974,39 @@ class ScheduledCleanupTests(unittest.TestCase):
                 self.assertEqual(json.loads((root / 'out/machine-cleanup-runs.jsonl').read_text().splitlines()[0])['status'],
                     'deferred')
 
+    def test_failed_clone_evidence_does_not_block_later_clone(self):
+        import machine_cleanup as cleanup
+        fixture = fixtures.Fixture()
+        clones = fixture.base / 'clones'
+        clones.mkdir()
+        dispatches = []
+        for name in ('a-broken', 'b-healthy'):
+            workspace = clones / ('room-codex-' + name)
+            workspace.mkdir()
+            clone = workspace / 'checkout'
+            fixture.git('clone', str(fixture.remote), str(clone))
+            fixture.git('switch', 'main', cwd=clone)
+            dispatches.append({'checkout_workspace': str(workspace),
+                'checkout_path': str(clone), 'status': 'completed',
+                'dispatched_at': '2020-01-01T00:00:00Z'})
+        broken = clones / 'room-codex-a-broken'
+        healthy = clones / 'room-codex-b-healthy'
+        fixture.git('remote', 'remove', 'origin', cwd=broken / 'checkout')
+        ledger = fixture.base / 'dispatch.jsonl'
+        ledger.write_text(''.join(json.dumps(row) + '\n' for row in dispatches))
+        report = cleanup.run(fixture.repo,
+            watchdog.load_config(ROOT / 'ops/config/job-watchdog.json'),
+            hook=fixtures.hook, tmp_root=clones, dispatch_path=ledger, roots={},
+            provider=fixtures.FakeProvider(), process_probe=lambda paths: set(),
+            archive_thread=lambda *a, **k: None)
+        self.assertEqual(report['status'], 'failed', report)
+        self.assertEqual(len(report['errors']), 1, report)
+        self.assertTrue((broken / 'checkout/file').is_file())
+        self.assertFalse(healthy.exists(), report)
+        staged, = report['removed']
+        self.assertEqual((Path(staged['staged_path']) / 'checkout/file').read_text(), 'initial\n')
+        self.assertNotIn('pending', report)
+
     def test_clone_git_failure_reaches_machine_receipt(self):
         import machine_cleanup as cleanup
         fixture = fixtures.Fixture()
