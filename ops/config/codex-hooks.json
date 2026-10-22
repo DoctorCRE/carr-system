@@ -66,28 +66,9 @@
             "additionalContextLimit": 5000
           }
         ]
-      },
-      {
-        "matcher": "^(startup|resume)$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if [ ! -e \"{{REPO}}/hooks/session-presence-hook.py\" ] && [ ! -L \"{{REPO}}/hooks/session-presence-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/session-presence-hook.py; skipping\" >&2; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/session-presence-hook.py codex",
-            "timeout": 5
-          }
-        ]
       }
     ],
     "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if [ ! -e \"{{REPO}}/hooks/session-presence-hook.py\" ] && [ ! -L \"{{REPO}}/hooks/session-presence-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/session-presence-hook.py; skipping\" >&2; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/session-presence-hook.py codex",
-            "timeout": 5
-          }
-        ]
-      },
       {
         "hooks": [
           {

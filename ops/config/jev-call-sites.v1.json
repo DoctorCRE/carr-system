@@ -54,8 +54,8 @@
     },
     {
       "caller": "jev_model_route",
-      "trigger": "route a task to a model desk (room bridge target=auto, doc-convo, flash)",
-      "runs_in": "launchd com.carr.room-bridge; interactive doc-convo and flash",
+      "trigger": "route a task to a model desk (doc-convo, flash)",
+      "runs_in": "interactive doc-convo and flash",
       "attribution": "session_or_job",
       "unattended": "allowed",
       "hourly_budget": 10,

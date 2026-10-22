@@ -13,11 +13,9 @@ from typing import Any, cast
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-import bridge  # noqa: E402
 import claude_desktop_wire as wire  # noqa: E402
 import desks  # noqa: E402
 import dispatch  # noqa: E402
-import state as state_mod  # noqa: E402
 
 
 SID = "12345678-1234-4123-8123-123456789abc"
@@ -263,21 +261,12 @@ def test_status_reads_the_background_row_when_desktop_also_lists_it() -> None:
     assert wire.inspect_session(SID, run=run)["state"] == "done"
 
 
-def test_registry_dispatch_and_queue_only_fanout() -> None:
+def test_registry_dispatches_background_desk() -> None:
     with tempfile.TemporaryDirectory() as root:
         reg = desks.Registry(Path(root) / "desks.json")
         entry = reg.register("claude-desktop", "claude-desktop", model="opus",
                              effort="high", cwd=root)
         assert entry["permission_mode"] == "dontAsk"
-        raw = reg._load()
-        raw["desks"]["claude-desktop"]["room_seat"] = "claude"
-        raw["desks"]["ordinary"] = {
-            "kind": "claude-session", "room_seat": "reviewer", "socket": "/tmp/named.sock"
-        }
-        reg._save(raw)
-        seats = bridge.conversational_desk_seats(reg.entries())
-        assert seats == {"ordinary": "reviewer"}
-
         original = dispatch.claude_desktop_wire.launch_background
         setattr(dispatch.claude_desktop_wire, "launch_background", lambda _entry, _task: {
             "status": "delivered", "session_id": SID, "transport": "claude-desktop"
@@ -290,159 +279,11 @@ def test_registry_dispatch_and_queue_only_fanout() -> None:
         assert row["session_id"] == SID and row["status"] == "delivered"
 
 
-def test_done_pending_hands_off_then_finishes_queue() -> None:
-    state = state_mod.default_state()
-    state_mod.set_pending(
-        state, "claude-desktop", dispatch_msg_id="dispatch-1", log_offset=0,
-        injected_at="2026-08-31T12:00:00+00:00", source_msg_id="queue:t_queue0001",
-        source_seq=1, origin_kind="queue", kanban_task_id="t_queue0001",
-        target="claude-desktop", finish="review", cap="read",
-        transport="claude-desktop", session_id=SID,
-    )
-    handed: list[str] = []
-    finished: list[tuple[dict, str]] = []
-    posted: list[dict] = []
-
-    class Executor:
-        def finish_pending_posted(self, pending: dict, raw_result: str, *, post_completion, **_kwargs) -> dict:
-            finished.append((pending, raw_result))
-            terminal = {
-                "outcome": "review", "task_id": "t_queue0001",
-                "completion": {"queue_completion": {
-                    "v": 1, "task_id": "t_queue0001", "target": "claude-desktop",
-                    "outcome": "success", "summary": "Reviewed",
-                    "source_seq": 1, "source_msg_id": "queue:t_queue0001",
-                }},
-            }
-            post_completion(terminal["completion"])
-            return terminal
-
-    def post(**row) -> None:
-        posted.append(row)
-
-    def handoff(session_id: str) -> dict:
-        handed.append(session_id)
-        return {"status": "opened"}
-
-    executor = Executor()
-    result = 'Reviewed\nCARR_QUEUE_RESULT {"v":1}'
-    outcome = bridge.handle_pending(
-        "claude-desktop", "claude", state,
-        add_room_turn=post, log_path=Path("unused"),
-        pending_timeout_s=1800, queue_executor=cast(Any, executor),
-        inspect_background=lambda _sid: {"state": "done", "found": True},
-        read_background_result=lambda _sid: result,
-        handoff_background=handoff,
-    )
-    assert outcome is not None
-    assert outcome["outcome"] == "review"
-    assert handed == [SID] and finished[0][1] == result
-    assert json.loads(posted[0]["body"])["claude_desktop_handoff"]["status"] == "opened"
-    assert json.loads(posted[1]["body"])["queue_completion"]["task_id"] == "t_queue0001"
-    assert posted[1]["idempotency_key"] == "queue-completion:t_queue0001"
-    assert state_mod.get_pending(state, "claude-desktop") is None
-
-
-def test_handoff_timeout_after_completion_finishes_and_never_relaunches() -> None:
-    state = state_mod.default_state()
-    state_mod.set_pending(
-        state, "claude-desktop", dispatch_msg_id="dispatch-1", log_offset=0,
-        injected_at="2026-09-24T12:00:00+00:00", source_msg_id="queue:t_24f60cef",
-        source_seq=1, origin_kind="queue", kanban_task_id="t_24f60cef",
-        target="claude-desktop", finish="done", cap="read",
-        transport="claude-desktop", session_id=SID,
-    )
-    finished: list[tuple[dict, str]] = []
-    posted: list[dict] = []
-
-    class Executor:
-        def finish_pending_posted(self, pending: dict, raw_result: str, *, post_completion, **_kwargs) -> dict:
-            finished.append((pending, raw_result))
-            terminal = {
-                "outcome": "done", "task_id": "t_24f60cef",
-                "completion": {"queue_completion": {
-                    "v": 1, "task_id": "t_24f60cef", "target": "claude-desktop",
-                    "outcome": "success", "summary": "Answered",
-                    "source_seq": 1, "source_msg_id": "queue:t_24f60cef",
-                }},
-            }
-            post_completion(terminal["completion"])
-            return terminal
-
-        def fail_pending(self, pending: dict, reason: str, *, now=None) -> dict:
-            raise AssertionError(
-                f"fail_pending must not be called after completion (reason={reason!r})")
-
-    def post(**row) -> None:
-        posted.append(row)
-
-    def handoff(session_id: str) -> dict:
-        raise wire.ClaudeDesktopError("desktop_handoff_timeout", "Claude /desktop did not exit")
-
-    executor = Executor()
-    result = 'Here is the answer\nCARR_QUEUE_RESULT {"v":1}'
-    outcome = bridge.handle_pending(
-        "claude-desktop", "claude", state,
-        add_room_turn=post, log_path=Path("unused"),
-        pending_timeout_s=1800, queue_executor=cast(Any, executor),
-        inspect_background=lambda _sid: {"state": "done", "found": True},
-        read_background_result=lambda _sid: result,
-        handoff_background=handoff,
-    )
-    assert outcome is not None
-    assert outcome["outcome"] == "done"
-    assert finished == [({
-        "origin_kind": "queue", "kanban_task_id": "t_24f60cef", "target": "claude-desktop",
-        "finish": "done", "cap": "read", "source_seq": 1, "source_msg_id": "queue:t_24f60cef",
-        "dispatch_msg_id": "dispatch-1", "injected_at": "2026-09-24T12:00:00+00:00",
-        "transport": "claude-desktop", "session_id": SID, "log_offset": 0,
-    }, result)]
-    handoff_receipt = json.loads(posted[0]["body"])["claude_desktop_handoff"]
-    assert handoff_receipt["status"] == "failed"
-    assert handoff_receipt["code"] == "desktop_handoff_timeout"
-    assert json.loads(posted[1]["body"])["queue_completion"]["task_id"] == "t_24f60cef"
-    assert state_mod.get_pending(state, "claude-desktop") is None
-
-
-def test_already_open_handoff_receipt_is_honest() -> None:
-    state = state_mod.default_state()
-    state_mod.set_pending(
-        state, "claude-desktop", dispatch_msg_id="dispatch-1", log_offset=0,
-        injected_at="2026-09-24T12:00:00+00:00", source_msg_id="queue:t_24b0a0c6",
-        source_seq=1, origin_kind="queue", kanban_task_id="t_24b0a0c6",
-        target="claude-desktop", finish="done", cap="repo-write",
-        transport="claude-desktop", session_id=SID,
-    )
-    posted: list[dict] = []
-
-    class Executor:
-        def finish_pending_posted(self, pending: dict, raw_result: str, *, post_completion, **_kwargs) -> dict:
-            terminal = {"outcome": "done", "task_id": "t_24b0a0c6",
-                    "completion": {"queue_completion": {"v": 1, "task_id": "t_24b0a0c6"}}}
-            post_completion(terminal["completion"])
-            return terminal
-
-    outcome = bridge.handle_pending(
-        "claude-desktop", "claude", state,
-        add_room_turn=lambda **row: posted.append(row), log_path=Path("unused"),
-        pending_timeout_s=1800, queue_executor=cast(Any, Executor()),
-        inspect_background=lambda _sid: {"state": "done", "found": True},
-        read_background_result=lambda _sid: "done\nCARR_QUEUE_RESULT {}",
-        handoff_background=lambda sid: {"status": "already_open", "session_id": sid},
-    )
-    assert outcome is not None and outcome["outcome"] == "done"
-    assert json.loads(posted[0]["body"])["claude_desktop_handoff"]["status"] == "already_open"
-
-
 def main() -> int:
     check("launch is named, durable, and backgrounded", test_launch_is_named_durable_and_backgrounded)
     check("supervisor status is UUID-bound", test_supervisor_status_is_uuid_bound)
     check("typed result is read from persisted transcript", test_final_typed_result_comes_from_persisted_transcript)
     check("Desktop handoff uses attached PTY slash command", test_desktop_handoff_uses_attached_pty_slash_command)
-    check("desktop desk is queue-only and dispatchable", test_registry_dispatch_and_queue_only_fanout)
-    check("done background hands off before queue completion", test_done_pending_hands_off_then_finishes_queue)
-    check("handoff timeout after completion finishes and never relaunches",
-          test_handoff_timeout_after_completion_finishes_and_never_relaunches)
     check("real /desktop bytes defeat the old substring check",
           test_real_desktop_output_is_not_matched_by_the_old_substring_check)
     check("real /desktop output detected when status is unavailable",
@@ -454,8 +295,8 @@ def main() -> int:
     check("real attach refusal reads as already open", test_real_attach_refusal_reads_as_already_open)
     check("other early attach exit still fails", test_other_early_attach_exit_still_fails)
     check("status reads the background row", test_status_reads_the_background_row_when_desktop_also_lists_it)
-    check("already-open handoff receipt is honest", test_already_open_handoff_receipt_is_honest)
-    total = 17
+    check("registry dispatches the background desk", test_registry_dispatches_background_desk)
+    total = 14
     print(f"claude-desktop-wire unit: {total - len(FAILURES)}/{total} passed")
     return 1 if FAILURES else 0
 

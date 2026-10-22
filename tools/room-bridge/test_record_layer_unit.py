@@ -59,14 +59,12 @@ class WireTests(unittest.TestCase):
             events = [{'type': 'item.completed', 'item': {
                 'type': 'agent_message', 'text': 'Synthetic business reply.'}}, {'type': 'turn.completed'}]
             return subprocess.CompletedProcess(argv, 0, '\n'.join(map(json.dumps, events)), '')
-        with patch.object(dispatch.codex_ipc, 'thread_owner') as owner:
-            result = dispatch._to_codex({'posture': 'record-layer', 'thread_id': 'old',
-                'model': 'gpt-6.1-sol', 'effort': 'medium', 'cwd': '/ignored',
-                'sandbox': 'danger-full-access', 'add_dirs': ['/ignored']},
-                'Draft for someone@example.test.', env={'PATH': '/usr/bin',
-                    'CODEX_API_KEY': 'synthetic', 'CARR_MCP_TOKEN': 'synthetic',
-                    'UNRELATED_SECRET': 'must-not-inherit'}, live_desktop=True, provider_run=run)
-        owner.assert_not_called()
+        result = dispatch._to_codex({'posture': 'record-layer', 'thread_id': 'old',
+            'model': 'gpt-6.1-sol', 'effort': 'medium', 'cwd': '/ignored',
+            'sandbox': 'danger-full-access', 'add_dirs': ['/ignored']},
+            'Draft for someone@example.test.', env={'PATH': '/usr/bin',
+                'CODEX_API_KEY': 'synthetic', 'CARR_MCP_TOKEN': 'synthetic',
+                'UNRELATED_SECRET': 'must-not-inherit'}, provider_run=run)
         self.assertEqual(result['status'], 'completed')
         self.assertEqual(result['result'], 'Synthetic business reply.')
         self.assertEqual(result['canaries'], {'file_write': 'denied', 'network': 'denied'})

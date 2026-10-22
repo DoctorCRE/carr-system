@@ -333,12 +333,14 @@ class TranscriptHelperTests(unittest.TestCase):
 
 
 class BoundaryBatchTests(SemanticTestCase):
-    def test_main_desk_test_mapping_is_local_in_real_replay(self):
+    def test_desk_permission_tests_are_local_to_prompt_changes(self):
         repo = OPS.parent
-        case = {'id': 'f47899fdbe4b', 'tool_input': {'file_path': '{{REPO}}/tools/room-bridge/desk_cli.py', 'new_string': '    if args.seat:\n        entry = registry_ext.set_seat(args.name, args.seat, path=reg.path)\n    if getattr(args, "room_listen", None):\n        entry = registry_ext.set_room_listen(args.name, args.room_listen, path=reg.path)\n    if args.profile:\n        entry = registry_ext.set_profile(args.name, args.profile, path=reg.path)', 'old_string': '    if args.seat:\n        entry = registry_ext.set_seat(args.name, args.seat, path=reg.path)\n    if args.profile:\n        entry = registry_ext.set_profile(args.name, args.profile, path=reg.path)', 'replace_all': False}, 'tool_name': 'Edit'}
+        case = {"tool_input": {"file_path": "{{REPO}}/tools/room-bridge/desks.py",
+                               "new_string": "write questions to ~/carr-system/out/orchestrator-inbox.md",
+                               "old_string": "send them to the orchestrator session via send_message",
+                               "replace_all": False}, "tool_name": "Edit"}
         tool_input = {key: value.replace("{{REPO}}", str(repo)) if isinstance(value, str)
                       else value for key, value in case["tool_input"].items()}
-        # Main added a real desk-permissions test after the original snapshot.
         candidates = watch._shortlist_tests([tool_input["file_path"]], str(repo))
         self.assertIn("tools/room-bridge/test_desk_permissions_unit.py", candidates)
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(

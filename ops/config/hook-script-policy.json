@@ -22,7 +22,6 @@
       "hooks/builder-agent-gate.py",
       "hooks/job-watchdog-digest.py",
       "hooks/machine-converge.py",
-      "hooks/session-presence-hook.py",
       "hooks/worktree-self-plumb.py",
       "hooks/rule-claim-gate.py"
     ],

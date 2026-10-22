@@ -287,33 +287,6 @@
       }
     },
     {
-      "label": "com.carr.room-bridge",
-      "path": "~/Library/LaunchAgents/com.carr.room-bridge.plist",
-      "executables": [
-        "/bin/zsh"
-      ],
-      "dependencies": [
-        "~/carr-system/bin/run-scheduled.sh",
-        "~/carr-system/.venv/bin/python",
-        "~/carr-system/tools/room-bridge/bridge.py"
-      ],
-      "disabled": false,
-      "environment_names": [
-        "CARR_ENGINEERING_DISPATCH_ENABLED",
-        "CARR_ROOM_BRIDGE_ROOM",
-        "PATH"
-      ],
-      "schedule_source": "~/Library/LaunchAgents/com.carr.room-bridge.plist",
-      "classification": "leader-job",
-      "macbook_installed": false,
-      "macbook_missing": [],
-      "schedule_expectation": {
-        "scheduler": "launchd",
-        "expected_enabled": false,
-        "expected_installed": false
-      }
-    },
-    {
       "label": "com.carr.rules-refresh",
       "path": "~/Library/LaunchAgents/com.carr.rules-refresh.plist",
       "executables": [

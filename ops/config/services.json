@@ -328,26 +328,6 @@
       ]
     },
     {
-      "key": "room-bridge",
-      "name": "Partner room bridge",
-      "purpose": "Polls the shared partner room (add-room-turn/read-room, Idea 78) and routes new turns to local desks (claude-session, codex-session), captures each desk's reply and posts it back, and runs the assignment grammar. The explicit claude-desktop queue target starts a durable Claude background session only after a queue claim, then uses Claude Code's supported /desktop handoff after completion; it is excluded from ordinary conversational fan-out. On the same existing wake, the separate lease-bound Engineering Passport controller may drain one already-admitted engineering-slice job through the fixed fresh Codex desk; it never creates work or exposes its carr_jobs credential to that desk. Queue projection alone uses the locked, shape-checked project-room-queue door; ordinary room traffic remains on the local-machine identity. The live wire between the room and the desks registered in ~/.config/carr/hermes-desks.json.",
-      "family": "Local Mac edge",
-      "criticality": "medium",
-      "owner_actor": "joe",
-      "repo_path": "tools/room-bridge/bridge.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.room-bridge.plist",
-          "runs_on": "primary",
-          "expected_cadence_seconds": 1800,
-          "cadence_grace_seconds": 2700,
-          "notes": "Wakes every 60s, but bin/run-scheduled.sh's --heartbeat-interval throttles a SUCCEEDED row to at most one per 900s (15 min) \u2014 recording all ~1440 fires/day would be noise from a quiet room, the same reasoning capture-poll and partner-ping already state above. Every FAILURE (e.g. read-room unreachable) is still recorded immediately regardless of the throttle. Cadence/grace mirror capture-poll's own widened figures for the same tools/ops-spool.py flush-delay reason: a succeeded row can land up to ~1800s after the throttle emitted it."
-        }
-      ]
-    },
-    {
       "key": "calendar-eventkit",
       "name": "Calendar EventKit capture",
       "purpose": "Local, attendee-aware calendar read (EventKit) into stamp-touch, replacing the published feed the Cowork calendar-fetch-daily task read (which Microsoft strips attendees from). Weekdays 07:20. See ops/launchd/com.carr.calendar-eventkit.plist's own header for the PROP-010 ruling this job exists under.",
@@ -1082,11 +1062,6 @@
       "service": "fleet-sync",
       "depends_on": "neon-record-layer",
       "note": "The checkout sync is local and fail-closed; its generic ops.run receipt is projected through the record layer by the existing run-scheduled spool path."
-    },
-    {
-      "service": "room-bridge",
-      "depends_on": "neon-record-layer",
-      "note": "Every poll cycle reads/writes the partner room through the deployed Worker (tools/call-verb.py) \u2014 no direct database connection."
     },
     {
       "service": "control-plane-tick",
