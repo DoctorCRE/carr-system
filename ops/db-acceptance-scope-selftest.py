@@ -108,6 +108,12 @@ with tempfile.TemporaryDirectory() as tmp:
     os.environ['GITHUB_EVENT_NAME'] = 'pull_request'
     os.environ['GITHUB_EVENT_PATH'] = str(event_file)
     check('a real app-only PR diff skips database proof', not scope.decide())
+    Path(tmp, 'migrations/0002_caf\u00e9.sql').write_text('select 2;\n')
+    vcs('add', 'migrations/0002_caf\u00e9.sql')
+    vcs('commit', '-q', '-m', 'SQL filename requires quoting')
+    quoted_event = {'pull_request': {'base': {'ref': 'main', 'sha': base}, 'head': {'sha': vcs('rev-parse', 'HEAD')}}}
+    event_file.write_text(json.dumps(quoted_event))
+    check('a SQL filename that git quotes still runs database proof', scope.decide())
     vcs('mv', 'migrations/0001_a.sql', 'notes.txt')
     vcs('commit', '-q', '-m', 'b')
     setattr(scope, 'ROOT', Path(tmp))

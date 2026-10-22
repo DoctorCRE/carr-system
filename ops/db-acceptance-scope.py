@@ -41,9 +41,9 @@ def changed_paths(event: dict) -> list[str] | None:
     if not pr:
         return None
     base, head = pr['base'].get('sha', 'origin/' + pr['base']['ref']), pr['head']['sha']
-    out = subprocess.run(['git', 'diff', '--name-only', '--no-renames', f'{base}...{head}'], cwd=ROOT, env=scrubbed_env(),
+    out = subprocess.run(['git', 'diff', '--name-only', '--no-renames', '-z', f'{base}...{head}'], cwd=ROOT, env=scrubbed_env(),
                          capture_output=True, text=True, check=True, timeout=120).stdout
-    return [line for line in out.splitlines() if line]
+    return [path for path in out.split('\0') if path]
 
 
 def classify() -> tuple[bool, list[str] | None, str]:
