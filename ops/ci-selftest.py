@@ -324,17 +324,24 @@ def test_dep_check_detects_a_stale_lock():
     req = REPO / "requirements.txt"
     original = req.read_text()
     dep = [sys.executable, str(REPO / "ops" / "ci-dep-check.py")]
-    with seeded_paths("requirements.txt"):
-        p = subprocess.run(dep, cwd=REPO, capture_output=True, text=True)
+    # Lock freshness needs a fixed audit response, not repeated registry calls.
+    # The dependency CI class runs the real vulnerability audit separately.
+    with tempfile.TemporaryDirectory() as raw, seeded_paths("requirements.txt"):
+        npm = pathlib.Path(raw) / "npm"
+        npm.write_text("#!" + sys.executable + "\nimport json\nprint(json.dumps({"
+                       "'metadata': {'vulnerabilities': {'high': 0, 'critical': 0}}}))\n")
+        npm.chmod(0o700)
+        env = scrubbed_env({"PATH": raw + os.pathsep + os.environ.get("PATH", "")})
+        p = subprocess.run(dep, cwd=REPO, env=env, capture_output=True, text=True)
         check("dependency check passes on the committed tree", p.returncode == 0)
 
         req.write_text(original + "\nsome-package-that-is-not-locked>=1.0\n")
-        p = subprocess.run(dep, cwd=REPO, capture_output=True, text=True)
+        p = subprocess.run(dep, cwd=REPO, env=env, capture_output=True, text=True)
         check("a requirements.txt edit makes the lock STALE",
               p.returncode == 1 and "STALE" in (p.stdout + p.stderr))
 
         req.write_text(original + "\n# a comment-only edit\n")
-        p = subprocess.run(dep, cwd=REPO, capture_output=True, text=True)
+        p = subprocess.run(dep, cwd=REPO, env=env, capture_output=True, text=True)
         check("a comment-only edit does NOT invalidate the lock", p.returncode == 0)
 
 def test_types_class_catches_a_seeded_type_error():
