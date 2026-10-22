@@ -270,7 +270,7 @@ args = sys.argv[1:]
 cwd = args[args.index("--cwd") + 1]
 assert args[args.index("--escalate") + 1] == "suggest", args
 assert args[args.index("--test") + 1] == "python3 tests/check.py", args
-assert args[args.index("--sandbox") + 1] == "on" and "--no-learn" in args, args
+assert args[args.index("--sandbox") + 1] == "on" and "--no-learn" not in args, args
 mode = os.environ.get("FAKE_FLASH_MODE", "fix")
 if mode == "swapgit":
     # model code that escaped would swap the worktree's .git pointer for a directory whose config runs a hook

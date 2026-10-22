@@ -1,5 +1,4 @@
-"""Is a Flash answer backed by what its scripts printed? Code, not a model, decides; the router hands an "invented"
-answer to the Opus desk (ops/jev_model_route.handoff_reason). Measured on the 2026-09-24 Flash script tests.
+"""Check whether a Flash answer is backed by its scripts' printed output.
 
 'printed'  every answer number appears in script output, or is a printed number rounded to the answer's precision
            (revision 3 test, messy averages: the script printed avg 29.7393 and Flash answered 29.74, which the old
