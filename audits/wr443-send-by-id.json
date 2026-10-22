@@ -1,0 +1,1031 @@
+{
+  "schema": "wr443-outlook-static-send-audit/v1",
+  "work_request": "WR-000443",
+  "slice": "send-by-id",
+  "observed_at": "2026-10-20T22:45:21.213954-05:00",
+  "timezone": "America/Chicago",
+  "objective": "Find whether installed New Outlook can send an already-saved draft through an external entry point while the Mac screen is locked, using static analysis only.",
+  "verdict": {
+    "emails_send_by_id": "rejected_for_this_binary",
+    "summary": "/emails/send is a recognized but unimplemented case that returns false. immutableID and account resolution belong to /emails/open/message. AppleScript mailsend has a separate static send candidate. Locked-screen delivery is not established.",
+    "runtime_send_tested": false,
+    "locked_screen_tested": false
+  },
+  "scope": {
+    "app_root": "/Applications/Microsoft Outlook.app",
+    "read_only": true,
+    "outlook_launched": false,
+    "urls_opened": false,
+    "apple_events_sent": false,
+    "shortcuts_run": false,
+    "outlook_data_or_preferences_read": false,
+    "mailbox_content_read": false,
+    "credentials_read": false,
+    "decryptions": false,
+    "microsoft_network_calls": false,
+    "app_version": "16.114",
+    "app_build": "16.114.26101123",
+    "architecture": "arm64",
+    "arm64_slice_start": "0x68e4000",
+    "main_image_vm_base": "0x100000000",
+    "offset_convention": "VM addresses are unslid arm64 addresses. universal_file_offset counts from the beginning of the fat binary. arm64_slice_offset excludes the fat slice start. Framework addresses use that framework image base."
+  },
+  "sources": [
+    {
+      "path": "MacOS/Microsoft Outlook",
+      "sha256": "729e211992b71ed7979813269815d563473c4821674e7e0d89b356fc7125900c",
+      "size_bytes": 211731024
+    },
+    {
+      "path": "Info.plist",
+      "sha256": "1a3598bc65c6942e443a12eacfc36b4c60477d2781ca24efcbb87ef3dc8673aa",
+      "size_bytes": 37827
+    },
+    {
+      "path": "Frameworks/HxCore.framework/Versions/A/HxCore",
+      "sha256": "681f68b80339aad839d65f18c3e76caa2bb6ed03c9cd765abc6156487fbfbc91",
+      "size_bytes": 54938208
+    },
+    {
+      "path": "Frameworks/HxCore.framework/Versions/A/Headers/HxMessageHeader.g.h",
+      "sha256": "89cde23480a95cfe5b38ff82a63adcaad614e305fd3a1612617bc27ea6e307f0",
+      "size_bytes": 7033
+    },
+    {
+      "path": "Frameworks/HxCore.framework/Versions/A/Headers/HxAccount.g.h",
+      "sha256": "6536b727b6bcf0d4db4c7fa30410eb1ba81f6bdf0e9f66680b4c932068d1d4b0",
+      "size_bytes": 31470
+    },
+    {
+      "path": "Frameworks/HxCore.framework/Versions/A/Headers/HxObjectID.h",
+      "sha256": "58cde5848d0cf44567450745e8fa16b5852497443410dcd3d03b9a433f9c51fe",
+      "size_bytes": 715
+    },
+    {
+      "path": "Frameworks/HxCore.framework/Versions/A/Headers/ActorAPI.h",
+      "sha256": "a3fae53325117f4c858248bb93109ee852f49eda051ebf1357a778d3bdd66ffb",
+      "size_bytes": 2812781
+    },
+    {
+      "path": "Resources/Metadata.appintents/extract.actionsdata",
+      "sha256": "948232e54824c8f787a5246f6c96968dbd0bac3dad358150c95029b362e1f436",
+      "size_bytes": 3010
+    },
+    {
+      "path": "PlugIns/CalendarWidgetExtension.appex/Contents/Info.plist",
+      "sha256": "a28ea4ab42a525d449486edf3394691507d8bbf8cf3ed58bab24db27ad102219",
+      "size_bytes": 1132
+    },
+    {
+      "path": "PlugIns/CalendarWidgetExtension.appex/Contents/Resources/Metadata.appintents/extract.actionsdata",
+      "sha256": "75d4e3e3658c13d76c4b413a5e019d67637a04571c150970cbb32049645cf9b7",
+      "size_bytes": 1732
+    },
+    {
+      "path": "Resources/Outlook.sdef",
+      "sha256": "6aa5853ac9a1791a4ab4c770acb8e1706323fb2a86d2ae5c7074ed6a5368e44c",
+      "size_bytes": 172571
+    },
+    {
+      "path": "Frameworks/mso30.framework/Versions/A/mso30",
+      "sha256": "0aa8cd1ee12226a171d092a9a65835923f8b7cb31330c768969458535edd815c",
+      "size_bytes": 31659328
+    }
+  ],
+  "questions": {
+    "1_emails_send": {
+      "status": "statically_resolved",
+      "behavior": "handleEmailsURL lowercases the first path component, converts send to enum value 2, and returns Bool false through its async continuation. It does not look up a message, create compose UI, queue a send, or show confirmation on this branch.",
+      "query_keys_required": [],
+      "immutableID_required": false,
+      "accountID_required": false,
+      "any_query_keys_consumed": false,
+      "query_cannot_enable_send": "Adding immutableID, accountID, account, origin, recipients, subject, or body does not alter the case-2 return branch.",
+      "gates_in_branch": {
+        "foreground": false,
+        "origin": false,
+        "feature_flag": false,
+        "session_lock": false,
+        "confirmation": false
+      },
+      "gate_scope": "This describes the inspected handler branch, not LaunchServices, app startup, OS delivery, licensing, or other callers. No claim that URL delivery works while locked.",
+      "evidence": [
+        "E01",
+        "E02",
+        "E03",
+        "E04",
+        "E05"
+      ]
+    },
+    "2_immutableID": {
+      "status": "resolved_for_open_message_only",
+      "send_contract": null,
+      "applicable_path": "ms-outlook://emails/open/message",
+      "required_message_query_key": "immutableID",
+      "format": "Opaque Hx server-ID bytes encoded as standard base64, optionally using Exchange web-safe substitutions plus -> underscore and slash -> hyphen. Percent-encode any reserved URL query characters. This is not the standard base64url alphabet.",
+      "transform": "URL string -> replace _ with + and - with / -> NSData.init(base64Encoded:options:0) -> ActorAPI.fetchMessageByServerId(accountHxObjectID,messageServerId:NSData).",
+      "hx_property": "HxMessageHeader.serverId",
+      "hx_property_type": "NSData*",
+      "hx_result_type": "HxFetchMessageByServerIdResults.messageHeaderId is HxObjectID*; it is the result of resolution, not the URL identifier.",
+      "wrapper_properties": {
+        "OhxMessage.serverID": "Raw NSData from hxMessageHeader.serverId.",
+        "OhxMessage.serverId": "Base64 NSString from hxMessageHeader.serverId."
+      },
+      "not_interchangeable": [
+        "InternetMessageId from Exchange headers",
+        "HxObjectID.toString",
+        "HxObjectID.uint64Part",
+        "Mailbox or message GUID",
+        "HxAccount.stableAccountId"
+      ],
+      "rest_immutable_id_equivalence": "Unverified. The query name does not establish Exchange REST ImmutableId format. The direct deep-link path performs no REST-ID translation. The separate loadRecordWithItemId:orImmutableId: method can translate IDs, but openMessage calls retrieveMessageWithServerID directly.",
+      "padding": "No padding restoration observed in the web-safe reversal. Decoder options are zero. Retain the encoding returned by the wrapper rather than assume arbitrary unpadded input.",
+      "evidence": [
+        "E06",
+        "E07",
+        "E08",
+        "E09",
+        "E10",
+        "E11",
+        "E12",
+        "E13",
+        "E14"
+      ]
+    },
+    "3_accountID": {
+      "status": "resolved_for_open_message_only",
+      "actual_query_key": "account",
+      "fallback_query_key": "from",
+      "accountID_is_a_query_key_in_this_parser": false,
+      "format": "Decimal integer string parsed as Swift Int, boxed as NSNumber, read as unsignedIntegerValue, and matched against OlxAccount.hash. Valid match is normally the nonnegative 32-bit HxObjectID hash. Not an email or GUID.",
+      "lookup": "OlxAccountCollection.sharedCollectionWithoutLDAPWithoutOMC.accounts; first account whose hash matches. LDAP and OMC accounts are excluded.",
+      "hx_chain": "OlxRecord.hash -> account.recordUID -> OhxAccount.ohxRecordUID -> OhxRecordUID.hxID -> HxObjectID.hash.",
+      "where_it_lives": "The URL value is derived, not an HxAccount.accountID string property. The underlying account HxObjectID lives in HxMessageHeader.accountId, typed HxObjectID*. The account wrapper exposes it through recordUID/ohxRecordUID.hxID.",
+      "hash_algorithm": "For the exact installed HxCore arm64 representation: h=0; for each of 48 bytes of hxObjectId, h=(h*101+byte) modulo 2^32. a=(h*1103515245+12345) modulo 2^32; z=(h*69069+1) modulo 2^32; result=(z & 0xffff0000) | ((a >> 16) & 0xffff). This is build-specific native representation, not a general serialized-store recipe.",
+      "collision_behavior": "The loop takes the first matching account hash. No collision disambiguation is visible.",
+      "separate_handoff_id": "Handoff uses accountIdAfterSHA256 matched against accountIdSHA256Hash. It is a different identifier.",
+      "evidence": [
+        "E15",
+        "E16",
+        "E17",
+        "E18",
+        "E19",
+        "E20",
+        "E21",
+        "E22",
+        "E23",
+        "E27",
+        "E35"
+      ]
+    },
+    "4_external_entry_points": {
+      "classification_procedure": [
+        "Does an installed plist or action catalog declare the identifier? Record a declared entry point.",
+        "Does decoded control flow connect it to a send call? Record a static send candidate.",
+        "Has a permitted locked-screen delivery run proved success? No runtime runs were permitted, so none qualifies as proven."
+      ],
+      "url_schemes": [
+        {
+          "CFBundleURLName": "Email Address URL",
+          "CFBundleURLSchemes": [
+            "mailto"
+          ]
+        },
+        {
+          "CFBundleURLName": "MacOutlook",
+          "CFBundleURLSchemes": [
+            "com.microsoft.office.outlook",
+            "ms-outlook"
+          ]
+        },
+        {
+          "CFBundleURLName": "Google OAuth Redirect",
+          "CFBundleURLSchemes": [
+            "com.googleusercontent.apps.445112211283-8hj5uor2tp387i59rq1caep2rr5lnkcj"
+          ]
+        }
+      ],
+      "user_activities": {
+        "declared": [
+          "com.microsoft.Office.Outlook.compose.mail",
+          "com.microsoft.Office.Outlook.view.mail",
+          "INShareFocusStatusIntent",
+          "INSendMessageIntent"
+        ],
+        "compose_and_view": "ErageAppDelegate first handles universal links, then gated Handoff read or compose restoration. It retrieves a message and opens/restores UI. Telemetry objects also call send; these are not mail sends.",
+        "handoff_user_info_keys": [
+          "serverMessageID",
+          "accountIdAfterSHA256"
+        ],
+        "send_intent": "INSendMessageIntent is also listed as a user activity. No handling implementation or INSendMessageIntent class-name reference was found in the 211 scanned executable Mach-O files. Declaration alone is not a usable send path.",
+        "evidence": [
+          "E25",
+          "E26",
+          "E27",
+          "E28"
+        ]
+      },
+      "siri_intents": {
+        "declared": [
+          "INShareFocusStatusIntent",
+          "INSendMessageIntent"
+        ],
+        "implementation_status": "Unproven. No exact INSendMessageIntent, INSendMessageIntentHandling, or handleSendMessage:completion: reference found in the scanned executable binaries. application:handlerForIntent: occurs as protocol/selector metadata; no concrete implementation was recovered in the main binary method lists.",
+        "send_existing_draft_id_contract": null
+      },
+      "app_intents": [
+        {
+          "path": "Resources/Metadata.appintents/extract.actionsdata",
+          "actions": [
+            {
+              "authenticationPolicy": 0,
+              "fullyQualifiedTypeName": "Microsoft_Outlook.FocusFilterIntent",
+              "identifier": "FocusFilterIntent",
+              "openAppWhenRun": false,
+              "title": {
+                "alternatives": [],
+                "key": "Set Profile"
+              }
+            }
+          ]
+        },
+        {
+          "path": "PlugIns/CalendarWidgetExtension.appex/Contents/Resources/Metadata.appintents/extract.actionsdata",
+          "actions": [
+            {
+              "authenticationPolicy": 0,
+              "fullyQualifiedTypeName": "CalendarWidgetExtension.TimelineWidgetAppIntent",
+              "identifier": "TimelineWidgetAppIntent",
+              "openAppWhenRun": false,
+              "title": {
+                "alternatives": [],
+                "key": "Timeline Widget App Intent"
+              }
+            }
+          ]
+        }
+      ],
+      "nsservices": {
+        "declared": [],
+        "scope": "No NSServices entry in any of 215 discovered Info.plist files."
+      },
+      "xpc_services": {
+        "declared_xpc_bundles": [],
+        "declared_xpcservice_or_machservices_plists": [],
+        "scope": "No *.xpc bundle, XPCService entry, or MachServices entry in the inspected app bundle. NSXPCListener references exist in Office frameworks, so this is not a claim that all dynamic IPC is absent.",
+        "related_client_identifiers": [
+          "UBF8T346G9.com.microsoft.entrabroker.EntraIdentityBrokerXPC.Mach",
+          "UBF8T346G9.com.microsoft.entrabrokermacbroker.EntraIdentityBrokerXPC.Mach"
+        ],
+        "related_client_identifier_source": "mso30.framework arm64 bytes, evidence E36 and E37. These are Entra broker client references, not Outlook send-service declarations.",
+        "send_service_status": "No declared external XPC send service found. Dynamically created anonymous endpoints were not exhaustively reverse engineered."
+      },
+      "extensions": [
+        {
+          "bundle_identifier": "com.microsoft.Outlook.CalendarWidget",
+          "extension_point": "com.apple.widgetkit-extension",
+          "path": "PlugIns/CalendarWidgetExtension.appex",
+          "send_action": false
+        }
+      ],
+      "share_extension": {
+        "declared": [],
+        "scope": "Only the CalendarWidget appex is installed under this bundle. No share-service extension declaration was found."
+      },
+      "apple_events": {
+        "status": "static_send_candidate",
+        "bundle_identifier": "com.microsoft.Outlook",
+        "declaration": {
+          "NSAppleScriptEnabled": "Yes",
+          "OSAScriptingDefinition": "Outlook.sdef",
+          "suite": "Mail Suite",
+          "command": "send",
+          "code": "mailsend",
+          "event_class": "mail",
+          "event_id": "send",
+          "parameter": "direct parameter, type message"
+        },
+        "handler_chain": [
+          "ASMessage.handleSendCommand: at 0x100ab8da4",
+          "preview branch selects olxMessage, may switch draft store to targetAccount",
+          "OlxComposeActions.sendMessage: at 0x10037f120 dispatches by storeType",
+          "OhxComposeActions.sendMessage: at 0x10169e20c",
+          "OhxComposeActions.sendMessage:completion: at 0x10169e2cc checks draft and handles deferred send / DLP",
+          "ActorAPI send:sharedAttachmentsPermissions:completionType:completionBlock: at call 0x10169eb2c or 0x10169ebe4"
+        ],
+        "alternate_handler": "ASStagedOutgoingMessage.handleSendCommand: at 0x1008e3640 materializes a staged message and delegates to sendMessage:.",
+        "limits": "This is a concrete static candidate, not proof of AppleScript message enumeration/addressability in the active New Outlook mode, runtime handler registration, Automation authorization, DLP completion, absence of UI in all downstream paths, or locked-screen execution. No Apple event was sent.",
+        "evidence": [
+          "E29",
+          "E30",
+          "E31",
+          "E32",
+          "E33",
+          "E34"
+        ]
+      }
+    }
+  },
+  "evidence": [
+    {
+      "id": "E01",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x104bff538",
+      "arm64_slice_offset": "0x4bff538",
+      "universal_file_offset": "0xb4e3538",
+      "bytes_hex": "8fbf8e03000030000400000000000000020000000000000000909b03000030000300000000000000020000000000000004909b0300003000040000000000000002000000000000009cc997030000300007000000000000000200000000000000f29d8d03000030000c000000000000000200000000000000a82597030000800007000000000000000200000000000000",
+      "meaning": "StaticString switch entries, stride 24. open=0, new=1, send=2, message=3, conversation=4, unknown=5. Pointers use chained fixups.",
+      "symbol": "EmailsCanonicalOutlookURL.Paths.init(rawValue:) helper at 0x101fdf21c"
+    },
+    {
+      "id": "E02",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x103d1d1a0",
+      "arm64_slice_offset": "0x3d1d1a0",
+      "universal_file_offset": "0xa6011a0",
+      "bytes_hex": "5cadfffe40000000",
+      "meaning": "Async function pointer displacement 0xfeffad5c resolves to 0x102d17efc.",
+      "symbol": "OlkEmailsDeepLinkActionHandler.handleEmailsURL(_:) recovered name"
+    },
+    {
+      "id": "E03",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x102d17f30",
+      "arm64_slice_offset": "0x2d17f30",
+      "universal_file_offset": "0x95fbf30",
+      "bytes_hex": "d40a40f9000080d2d601cb97410600b4f40301aafe662094f30300aaf50301aae00314aafcb82094e00313aae10315aaaf1ccb97081c00121f090071600e0054",
+      "meaning": "Read pathAtIndex(0), lowercase, parse with switch helper at 0x101fdf21c, compare case 2 and branch to 0x102d18138."
+    },
+    {
+      "id": "E04",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x102d18138",
+      "arm64_slice_offset": "0x2d18138",
+      "universal_file_offset": "0x95fc138",
+      "bytes_hex": "00008052c10640f9fd7b43a9f5cf41a9f8df40a9f90744f8bdfb439220001fd6",
+      "meaning": "mov w0,#0; load continuation; restore frame; br x1. Complete false-return block with no send or query calls."
+    },
+    {
+      "id": "E05",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x101fded50",
+      "arm64_slice_offset": "0x1fded50",
+      "universal_file_offset": "0x88c2d50",
+      "bytes_hex": "081c00120980fcd2ea0d8e52aaccad720be0fcd2acad8cd26c6eaef22cecccf2ac0ce0f21f1100718d2e8dd2edcdadf20d80fdf26eec8dd2cecdaef2ae4ccef26e2eecf20fe0fcd2b0ce8dd270cdadf2f0edcef2d00de0f2ce01909aad018f9a1f0d00718c018e9a6b018d9a1f0500710d60fcd2cead8c52ee0ea0720f80fcd270ae8c52d08dac72ce01909aad018f9a1f0100714a018e9a29018d9a1f09007180c18a9a61c1899ac0035fd6",
+      "meaning": "Paths.rawValue getter independently maps enum 2 to little-endian ASCII send.",
+      "symbol": "_$s13OlkCocoaUtils25EmailsCanonicalOutlookURLC5PathsO8rawValueSSvg"
+    },
+    {
+      "id": "E06",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x102d17f7c",
+      "arm64_slice_offset": "0x2d17f7c",
+      "universal_file_offset": "0x95fbf7c",
+      "bytes_hex": "d40a40f920008052c301cb97810e00b4f40301aaeb662094f30300aaf50301aae00314aae9b82094e00313aae10315aa9c1ccb97081c00121f110071e00d00541f0d0071e10d0054288000d000bd41b907ba2094c00e00f9080000b008d10891162000a9c80a40f9f60300aae00308aafd7b43a9f5cf41a9f8df40a9f90744f8bdfb439279fcff17",
+      "meaning": "open path reads second component; message=3 branches to 0x102d171e4; conversation=4 returns true without opening here."
+    },
+    {
+      "id": "E07",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x102d17218",
+      "arm64_slice_offset": "0x2d17218",
+      "universal_file_offset": "0x95fb218",
+      "bytes_hex": "c05240f9a3feff97c05600f9200900b4f30300aad45240f920ad8dd2a0adaef2802eccf2408cedf2a12c89d28108a0f20160fdf202008052230080524805cb97c10d00b4d8420291f40301aa950ecb97",
+      "meaning": "openMessage first resolves account, then requires a nonempty immutableID, then reverses Exchange web-safe replacements."
+    },
+    {
+      "id": "E08",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x101fdacb8",
+      "arm64_slice_offset": "0x1fdacb8",
+      "universal_file_offset": "0x88becb8",
+      "bytes_hex": "e20b805263058052a4058052e505805201000014",
+      "meaning": "Exchange web-safe reversal maps underscore to plus and hyphen to slash. This differs from RFC4648 base64url.",
+      "symbol": "_$sSS13OlkCocoaUtilsE54reverseReplacingOccurrencesOfExchangeWebSafeCharactersSSyF"
+    },
+    {
+      "id": "E09",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x102d17310",
+      "arm64_slice_offset": "0x2d17310",
+      "universal_file_offset": "0x95fb310",
+      "bytes_hex": "e00313aad4ba2094e30300aae00314aae20315aae40318aadec22394",
+      "meaning": "Calls retrieveMessageWithServerID:forAccount:completionBlock: via objc stub 0x103607ea0.",
+      "symbol": "OlkEmailsDeepLinkActionHandler.openMessage(_:) recovered name"
+    },
+    {
+      "id": "E10",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x10164e294",
+      "arm64_slice_offset": "0x164e294",
+      "universal_file_offset": "0x7f32294",
+      "bytes_hex": "48a201d0142941f9e00316aaf1de7b94e00315aaefde7b94e00314aa93de7b94e20315aa030080d241857d94f40300aa",
+      "meaning": "OhxAccountActions base64-decodes the supplied NSString with NSData initWithBase64EncodedString:options: and options zero.",
+      "symbol": "+[OhxAccountActions retrieveMessageWithServerID:forAccount:completionBlock:]"
+    },
+    {
+      "id": "E11",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x10164e33c",
+      "arm64_slice_offset": "0x164e33c",
+      "universal_file_offset": "0x7f3233c",
+      "bytes_hex": "e00316aa48a97e94fd031daad0de7b94f80300aae00316aac1de7b94e00318aa4d34aa97",
+      "meaning": "Gets account.recordUID and unwraps it with OhxUnwrapHxObjectID."
+    },
+    {
+      "id": "E12",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x10164e3ac",
+      "arm64_slice_offset": "0x164e3ac",
+      "universal_file_offset": "0x7f323ac",
+      "bytes_hex": "e4c30091e00317aae20316aae30314aa21257d94",
+      "meaning": "Passes account HxObjectID as target and decoded NSData as messageServerId to ActorAPI fetchMessageByServerId:messageServerId:resultCompletionBlock:."
+    },
+    {
+      "id": "E13",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x1016d98ec",
+      "arm64_slice_offset": "0x16d98ec",
+      "universal_file_offset": "0x7fbd8ec",
+      "bytes_hex": "e5407b94fd031daa65b17994f30300aa71e97c94fd031daa61b17994f40300aa020080d23c167a94",
+      "meaning": "OhxMessage.serverId reads hxMessageHeader.serverId and encodes NSData as standard base64 with options zero.",
+      "symbol": "-[OhxMessage serverId]"
+    },
+    {
+      "id": "E14",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x1016dbd58",
+      "arm64_slice_offset": "0x16dbd58",
+      "universal_file_offset": "0x7fbfd58",
+      "bytes_hex": "ca377b94fd031daa4aa87994f30300aa56e07c94fd031daa",
+      "meaning": "OhxMessage.serverID exposes raw hxMessageHeader.serverId NSData.",
+      "symbol": "-[OhxMessage serverID]"
+    },
+    {
+      "id": "E15",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x101fde758",
+      "arm64_slice_offset": "0x1fde758",
+      "universal_file_offset": "0x88c2758",
+      "bytes_hex": "206c8cd260ecadf2a0cecdf2800ee0f201e0fcd2020080522300805200e8ff97811300b4",
+      "meaning": "queryAccountID reads account, not accountID. Parses signed decimal integer with overflow checks.",
+      "symbol": "_$s13OlkCocoaUtils25EmailsCanonicalOutlookURLC14queryAccountIDSo8NSNumberCSgyF"
+    },
+    {
+      "id": "E16",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x101fde9e8",
+      "arm64_slice_offset": "0x1fde9e8",
+      "universal_file_offset": "0x88c29e8",
+      "bytes_hex": "c04c8e52e0adad720180fcd202008052230080525ee7ff97",
+      "meaning": "If account is absent or cannot parse, queryAccountID tries from as a decimal integer alias."
+    },
+    {
+      "id": "E17",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x101fdec78",
+      "arm64_slice_offset": "0x1fdec78",
+      "universal_file_offset": "0x88c2c78",
+      "bytes_hex": "c85501b0007147f9229c5594e20313aad6505794",
+      "meaning": "Constructs NSNumber with initWithInteger: from parsed Swift Int."
+    },
+    {
+      "id": "E18",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x102d16cc4",
+      "arm64_slice_offset": "0x2d16cc4",
+      "universal_file_offset": "0x95facc4",
+      "bytes_hex": "f40300aa9f1ecb97400c00b4f30300aa08ec00b000f947f95cbc209458d82494fd031daa68bc2094c00700b4f40300aaa3d92094fd031daa63bc2094f50300aae00314aa54bc2094",
+      "meaning": "Resolve account through queryAccountID and OlxAccountCollection.sharedCollectionWithoutLDAPWithoutOMC.accounts."
+    },
+    {
+      "id": "E19",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x102d16d40",
+      "arm64_slice_offset": "0x2d16d40",
+      "universal_file_offset": "0x95fad40",
+      "bytes_hex": "e00313aa2f5c2594",
+      "meaning": "Read NSNumber.unsignedIntegerValue for account match."
+    },
+    {
+      "id": "E20",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x102d16dbc",
+      "arm64_slice_offset": "0x2d16dbc",
+      "universal_file_offset": "0x95fadbc",
+      "bytes_hex": "e00317aa283e229460fdffb71f0015eb21fdff54e00313aa",
+      "meaning": "Calls each account.hash, skips values with signed high bit set, and compares hash against parsed account value."
+    },
+    {
+      "id": "E21",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x1003a317c",
+      "arm64_slice_offset": "0x3a317c",
+      "universal_file_offset": "0x6c8717c",
+      "bytes_hex": "b955c994fd031daa418bc694f30300aa350dc894",
+      "meaning": "OlxRecord.hash delegates to recordUID.hash.",
+      "symbol": "-[OlxRecord hash]"
+    },
+    {
+      "id": "E22",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x1000bd7c4",
+      "arm64_slice_offset": "0xbd7c4",
+      "universal_file_offset": "0x69a17c4",
+      "bytes_hex": "8f96d414",
+      "meaning": "OhxAccount.recordUID delegates to ohxRecordUID.",
+      "symbol": "-[OhxAccount recordUID]"
+    },
+    {
+      "id": "E23",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x1000bd958",
+      "arm64_slice_offset": "0xbd958",
+      "universal_file_offset": "0x69a1958",
+      "bytes_hex": "82b0d394fd031daa4a21d294f30300aa3ea3d394f40300aa",
+      "meaning": "OhxRecordUID.hash delegates to hxID.hash.",
+      "symbol": "-[OhxRecordUID hash]"
+    },
+    {
+      "id": "E24",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x102d17784",
+      "arm64_slice_offset": "0x2d17784",
+      "universal_file_offset": "0x95fb784",
+      "bytes_hex": "e00314aae20313aa4d3c2394",
+      "meaning": "Successful openMessage calls openMessages: on messageUIActionHandler. It opens UI, not a send operation."
+    },
+    {
+      "id": "E25",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x102ca2bd4",
+      "arm64_slice_offset": "0x2ca2bd4",
+      "universal_file_offset": "0x9586bd4",
+      "bytes_hex": "886800f008c13491088100d1010141b2",
+      "meaning": "Handoff compose activity constant com.microsoft.Office.Outlook.compose.mail.",
+      "symbol": "+[OlkUIKit composeActivityType]"
+    },
+    {
+      "id": "E26",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x102ca2c28",
+      "arm64_slice_offset": "0x2ca2c28",
+      "universal_file_offset": "0x9586c28",
+      "bytes_hex": "886800f008813591088100d1010141b2",
+      "meaning": "Handoff view activity constant com.microsoft.Office.Outlook.view.mail.",
+      "symbol": "+[OlkUIKit readActivityType]"
+    },
+    {
+      "id": "E27",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x102ca2c7c",
+      "arm64_slice_offset": "0x2ca2c7c",
+      "universal_file_offset": "0x9586c7c",
+      "bytes_hex": "886800f008413691088100d1010141b2",
+      "meaning": "Handoff account key is accountIdAfterSHA256, distinct from the numeric URL account parameter.",
+      "symbol": "+[OlkUIKit accountIDKeyString]"
+    },
+    {
+      "id": "E28",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x100769508",
+      "arm64_slice_offset": "0x769508",
+      "universal_file_offset": "0x704d508",
+      "bytes_hex": "0eebb894",
+      "meaning": "ErageAppDelegate application:continueUserActivity:restorationHandler: first routes universal-link activity."
+    },
+    {
+      "id": "E29",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x100ab8dd4",
+      "arm64_slice_offset": "0xab8dd4",
+      "universal_file_offset": "0x739cdd4",
+      "bytes_hex": "e8fe01f000d947f901e7ac94f40300aae00313aa0e7aac9494030034ecadac94f30300aa08ff01f000d940f9a0aeae94",
+      "meaning": "ASMessage.handleSendCommand checks preview then obtains olxMessage for its new-store branch.",
+      "symbol": "-[ASMessage handleSendCommand:]"
+    },
+    {
+      "id": "E30",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x100ab8e44",
+      "arm64_slice_offset": "0xab8e44",
+      "universal_file_offset": "0x739ce44",
+      "bytes_hex": "a0e640f9e20313aafd7b42a9f44f41a9f657c3a80268ad14fd7b42a9f44f41a9f657c3a89665ad14",
+      "meaning": "ASMessage.handleSendCommand invokes OlxComposeActions.sendMessage: in preview branch, or legacy message.send in other branch."
+    },
+    {
+      "id": "E31",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x10037f14c",
+      "arm64_slice_offset": "0x37f14c",
+      "universal_file_offset": "0x6c6314c",
+      "bytes_hex": "e00313aa3475cb94e20300aae00315aaa988c994fd031daa491bc794f50300aae00314aae20315aa238dc994e20313aa394fca94",
+      "meaning": "OlxComposeActions.sendMessage selects registered action implementation by message.storeType then calls sendMessage:.",
+      "symbol": "+[OlxComposeActions sendMessage:]"
+    },
+    {
+      "id": "E32",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x10169e20c",
+      "arm64_slice_offset": "0x169e20c",
+      "universal_file_offset": "0x7f8220c",
+      "bytes_hex": "030080d21cd37d14",
+      "meaning": "OhxComposeActions.sendMessage: tail-calls sendMessage:completion: with nil completion.",
+      "symbol": "+[OhxComposeActions sendMessage:]"
+    },
+    {
+      "id": "E33",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x10169eb18",
+      "arm64_slice_offset": "0x169eb18",
+      "universal_file_offset": "0x7f82b18",
+      "bytes_hex": "e0031caafc0315aae2031baae30317aa440080526dce7d94",
+      "meaning": "Hx compose send implementation calls send:sharedAttachmentsPermissions:completionType:completionBlock: on ActorAPI after its draft and DLP handling.",
+      "symbol": "+[OhxComposeActions sendMessage:completion:]"
+    },
+    {
+      "id": "E34",
+      "binary": "MacOS/Microsoft Outlook",
+      "arm64_vm_address": "0x1008e3640",
+      "arm64_slice_offset": "0x8e3640",
+      "universal_file_offset": "0x71c7640",
+      "bytes_hex": "62e401f0422021919ec5b314a10000b4a80d02b000e540f9e20301aa01beb414",
+      "meaning": "ASStagedOutgoingMessage.handleSendCommand materializes a staged draft then calls sendMessage:.",
+      "symbol": "-[ASStagedOutgoingMessage handleSendCommand:]"
+    },
+    {
+      "id": "E35",
+      "binary": "Frameworks/HxCore.framework/Versions/A/HxCore",
+      "arm64_vm_address": "0x6ecfd4",
+      "arm64_slice_offset": "0x6ecfd4",
+      "universal_file_offset": "0x2198fd4",
+      "bytes_hex": "fd7bbfa9fd03009161782f94090080d208008052aa0c80520b686938082d0a1b290500913fc100f181ffff54a9cd8952c938a8722a0786520929091baab981522a00a0722b008052002d0a1b207d1033fd7bc1a8c0035fd6",
+      "symbol": "-[HxObjectID hash]",
+      "meaning": "Hashes 48 bytes of hxObjectId using a 32-bit multiply-by-101 accumulator and final arithmetic mixing. Not uint64Part or a mailbox GUID."
+    },
+    {
+      "id": "E36",
+      "binary": "Frameworks/mso30.framework/Versions/A/mso30",
+      "arm64_vm_address": "0xae3d3d",
+      "arm64_slice_offset": "0xae3d3d",
+      "universal_file_offset": "0x1a27d3d",
+      "bytes_hex": "554246385433343647392e636f6d2e6d6963726f736f66742e656e74726162726f6b65722e456e7472614964656e7469747942726f6b65725850432e4d616368",
+      "meaning": "Entra broker client service-name constant. Not an Outlook send-service declaration."
+    },
+    {
+      "id": "E37",
+      "binary": "Frameworks/mso30.framework/Versions/A/mso30",
+      "arm64_vm_address": "0xae3d7e",
+      "arm64_slice_offset": "0xae3d7e",
+      "universal_file_offset": "0x1a27d7e",
+      "bytes_hex": "554246385433343647392e636f6d2e6d6963726f736f66742e656e74726162726f6b65726d616362726f6b65722e456e7472614964656e7469747942726f6b65725850432e4d616368",
+      "meaning": "Entra broker client service-name constant. Not an Outlook send-service declaration."
+    }
+  ],
+  "tool_documentation": {
+    "otool": "Local man otool, object display and -arch/-l/-o/-s/-t/-v/-V/-p options read before use.",
+    "nm": "Local man nm, symbol format and -arch/-n options read before use.",
+    "strings": "Local man strings, -a/-t x and universal architecture behavior read before use.",
+    "swift_demangle": "xcrun swift-demangle --help read before use; selected symbols demangled with --compact.",
+    "llvm_objdump": "xcrun llvm-objdump --help read before use. This installed Mach-O path ignored start/stop bounds and generated whole-image temporary output. Final bounded traces use otool -p and a read-only stream filter.",
+    "rizin": "command -v rizin returned exit 1. Not used or installed.",
+    "llvm_mc": "xcrun llvm-mc --help attempted; utility unavailable. No analysis depended on it."
+  },
+  "inventory": {
+    "info_plist_count": 215,
+    "executable_macho_count": 211,
+    "scope_note": "Executable Mach-O files with executable permission, excluding symlink aliases. Plist and extension enumeration covers the entire bundle. Exact-name binary searches are supporting absence evidence, not proof against arbitrary dynamic name construction.",
+    "scanned_executables": [
+      "MacOS/Microsoft Outlook",
+      "SharedSupport/Microsoft Relauncher",
+      "Frameworks/libmbupdx2009.dylib",
+      "Frameworks/Oimg.framework/Versions/A/Oimg",
+      "Frameworks/OLEAutomation.framework/Versions/A/OLEAutomation",
+      "Frameworks/MicrosoftCredui.framework/Versions/A/MicrosoftCredui",
+      "Frameworks/OutlookUnifiedTelemetry.framework/Versions/A/OutlookUnifiedTelemetry",
+      "Frameworks/EditorKit.framework/Versions/A/EditorKit",
+      "Frameworks/Gfx.framework/Versions/A/Gfx",
+      "Frameworks/COMBase.framework/Versions/A/COMBase",
+      "Frameworks/MicrosoftWebServices.framework/Versions/A/MicrosoftWebServices",
+      "Frameworks/MicrosoftPTLS.framework/Versions/A/MicrosoftPTLS",
+      "Frameworks/MicrosoftProofing.framework/Versions/A/MicrosoftProofing",
+      "Frameworks/OdsSupportKit.framework/Versions/A/OdsSupportKit",
+      "Frameworks/osfstorage2.framework/Versions/A/osfstorage2",
+      "Frameworks/CalendarWidgetModelKit.framework/Versions/A/CalendarWidgetModelKit",
+      "Frameworks/OLE.framework/Versions/A/OLE",
+      "Frameworks/MetEx.framework/Versions/A/MetEx",
+      "Frameworks/OutlookRightsFramework.framework/Versions/A/OutlookRightsFramework",
+      "Frameworks/MicrosoftFontLibrary.framework/Versions/A/MicrosoftFontLibrary",
+      "Frameworks/WidgetFoundations.framework/Versions/A/WidgetFoundations",
+      "Frameworks/XPG.framework/Versions/A/XPG",
+      "Frameworks/osf.framework/Versions/A/osf",
+      "Frameworks/msospectre.framework/Versions/A/msospectre",
+      "Frameworks/WidgetModelKit.framework/Versions/A/WidgetModelKit",
+      "Frameworks/EmailRendererKit.framework/Versions/A/EmailRendererKit",
+      "Frameworks/Hlink.framework/Versions/A/Hlink",
+      "Frameworks/MicrosoftCloudServices.framework/Versions/A/MicrosoftCloudServices",
+      "Frameworks/MicrosoftCSI.framework/Versions/A/MicrosoftCSI",
+      "Frameworks/mso30.framework/Versions/A/mso30",
+      "Frameworks/MsgrLibClient.framework/Versions/A/MsgrLibClient",
+      "Frameworks/mbukernel.framework/Versions/A/mbukernel",
+      "Frameworks/SmartArt.framework/Versions/A/SmartArt",
+      "Frameworks/FluentUI.framework/Versions/A/FluentUI",
+      "Frameworks/Netlib.framework/Versions/A/Netlib",
+      "Frameworks/mso40ui.framework/Versions/A/mso40ui",
+      "Frameworks/CocoaUI.framework/Versions/A/CocoaUI",
+      "Frameworks/WinCrypto.framework/Versions/A/WinCrypto",
+      "Frameworks/OutlookCore.framework/Versions/A/OutlookCore",
+      "Frameworks/Chart.framework/Versions/A/Chart",
+      "Frameworks/Xmllite.framework/Versions/A/Xmllite",
+      "Frameworks/WordMail.framework/Versions/A/WordMail",
+      "Frameworks/OPF.framework/Versions/A/OPF",
+      "Frameworks/OPF.framework/Versions/A/Resources/OPF_Common.dylib",
+      "Frameworks/MicrosoftRichEdit.framework/Versions/A/MicrosoftRichEdit",
+      "Frameworks/ADAL4.framework/Versions/A/ADAL4",
+      "Frameworks/molc.framework/Versions/A/molc",
+      "Frameworks/dwrite10.framework/Versions/A/dwrite10",
+      "Frameworks/OcsClient.framework/Versions/A/OcsClient",
+      "Frameworks/mso99.framework/Versions/A/mso99",
+      "Frameworks/OfficeArt.framework/Versions/A/OfficeArt",
+      "Frameworks/HxCore.framework/Versions/A/HxCore",
+      "Frameworks/rpcrt4.framework/Versions/A/rpcrt4",
+      "Frameworks/mbuinstrument.framework/Versions/A/mbuinstrument",
+      "Frameworks/OutlookFoundation.framework/Versions/A/OutlookFoundation",
+      "Frameworks/MSXML.framework/Versions/A/MSXML",
+      "Frameworks/mso20.framework/Versions/A/mso20",
+      "Frameworks/ai.framework/Versions/A/ai",
+      "Frameworks/ai.framework/Versions/A/Libraries/liblmgpu2.dylib",
+      "Frameworks/ai.framework/Versions/A/Libraries/liblmgpu0.dylib",
+      "Frameworks/ai.framework/Versions/A/Libraries/liblmgpu1.dylib",
+      "Frameworks/ai.framework/Versions/A/Libraries/liblmcpu3.dylib",
+      "Frameworks/ai.framework/Versions/A/Libraries/liblm.dylib",
+      "Frameworks/ai.framework/Versions/A/Libraries/libllguidance.dylib",
+      "Frameworks/ai.framework/Versions/A/Libraries/liblmcpu1.dylib",
+      "Frameworks/ai.framework/Versions/A/Libraries/liblmcpu0.dylib",
+      "Frameworks/ai.framework/Versions/A/Libraries/liblmcpu2.dylib",
+      "Frameworks/ai.framework/Versions/A/Libraries/liblmcpu4.dylib",
+      "Frameworks/AppNexusNativeMacOSSDK.framework/Versions/A/AppNexusNativeMacOSSDK",
+      "Frameworks/WLMGraphicsDevice.framework/Versions/A/WLMGraphicsDevice",
+      "Frameworks/PowerLiftKit.framework/Versions/A/PowerLiftKit",
+      "Frameworks/MicrosoftIvy.framework/Versions/A/MicrosoftIvy",
+      "Frameworks/mbulocale.framework/Versions/A/mbulocale",
+      "Frameworks/OfficeAddressBook.framework/Versions/A/OfficeAddressBook",
+      "Frameworks/MsoCF.framework/Versions/A/MsoCF",
+      "Frameworks/WidgetUIKit.framework/Versions/A/WidgetUIKit",
+      "Frameworks/MicrosoftPTLS7.framework/Versions/A/MicrosoftPTLS7",
+      "Frameworks/merp.framework/Versions/A/merp",
+      "Frameworks/HxPlorer.framework/Versions/A/HxPlorer",
+      "Frameworks/MicrosoftFBA.framework/Versions/A/MicrosoftFBA",
+      "Frameworks/WLMKernel.framework/Versions/A/WLMKernel",
+      "Frameworks/Uniscribe.framework/Versions/A/Uniscribe",
+      "SharedSupport/Microsoft Error Reporting.app/Contents/MacOS/Microsoft Error Reporting",
+      "SharedSupport/Outlook Profile Manager.app/Contents/MacOS/Outlook Profile Manager",
+      "SharedSupport/Proofing Tools/IsiZuluSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/SlovakSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/PolishThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/KannadaSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/HebrewSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/CssSpanishSpeller.proofingtool/Contents/MacOS/Contextual Speller",
+      "SharedSupport/Proofing Tools/IberianPortugueseThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/TamilSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/DanishHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/BrazilianPortugueseHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/FrenchThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/RussianHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/KiswahiliSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/IndonesianSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/ItalianGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/EstonianSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/HebrewThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/HungarianSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/IsiXhosaSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/SetswanaSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/CzechGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/CssEnglishSpeller.proofingtool/Contents/MacOS/Contextual Speller",
+      "SharedSupport/Proofing Tools/DutchGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/CroatianSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/NorwegianNynorskSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/BosnianSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/GermanThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/ItalianSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/GenericCssSpeller.proofingtool/Contents/MacOS/Contextual Speller",
+      "SharedSupport/Proofing Tools/CzechSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/HungarianGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/MacedonianSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/DutchSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/GenericThesaurus8.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/PolishGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/MalaySpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/SesothoSaLeboaSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/NorwegianNynorskHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/EnglishGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/NorwegianBokmaalSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/CatalanThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/FarsiSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/GermanGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/BulgarianSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/KazakhSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/CzechThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/PolishSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/EnglishSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/NorwegianBokmaalGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/GermanSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/EnglishThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/GermanHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/RussianThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/NorwegianBokmaalThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/FrenchSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/SerbianLatinSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/SpanishGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/GenericGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/LanguageIdentification.proofingtool/Contents/MacOS/LAD",
+      "SharedSupport/Proofing Tools/FrenchGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/PolishHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/CatalanHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/GenericSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/SpanishSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/IberianPortugueseHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/JapaneseProofing.proofingtool/Contents/MacOS/JapaneseProofing",
+      "SharedSupport/Proofing Tools/ItalianThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/FinnishHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/DanishSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/NorwegianBokmaalHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/SwedishThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/SerbianCyrillicSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/CssFrenchSpeller.proofingtool/Contents/MacOS/Contextual Speller",
+      "SharedSupport/Proofing Tools/DanishGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/FrenchHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/BrazilianPortugueseSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/CzechHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/UkrainianSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/DanishThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/TurkishSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/LatvianSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/CssGermanSpeller.proofingtool/Contents/MacOS/Contextual Speller",
+      "SharedSupport/Proofing Tools/NorwegianNynorskThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/MarathiSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/BrazilianPortugueseThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/SwedishHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/BrazilianPortugueseGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/TurkishGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/EnglishHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/ItalianHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/FinnishThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/GreekSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/TurkishHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/ThaiSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/DutchThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/IberianPortugueseGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/GalicianSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/LithuanianSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/KoreanSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/CatalanSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/GujaratiSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/BasqueSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/IberianPortugueseSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/AfrikaansSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/TurkishThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/GenericThesaurus7.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/SpanishHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/DutchHyphenator.proofingtool/Contents/MacOS/GenericHyphenator",
+      "SharedSupport/Proofing Tools/FinnishGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/SpanishThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/ArabicSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/SwedishSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/RussianSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/ArabicThesaurus.proofingtool/Contents/MacOS/GenericThesaurus",
+      "SharedSupport/Proofing Tools/FinnishSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/RomanianSpeller.proofingtool/Contents/MacOS/Speller",
+      "SharedSupport/Proofing Tools/ArabicGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/SwedishGrammar.proofingtool/Contents/MacOS/Grammar",
+      "SharedSupport/Proofing Tools/RussianGrammar.proofingtool/Contents/MacOS/Grammar",
+      "Library/Spotlight/Microsoft Outlook Spotlight Importer.mdimporter/Contents/MacOS/Microsoft Outlook Spotlight Importer",
+      "PlugIns/CalendarWidgetExtension.appex/Contents/MacOS/CalendarWidgetExtension",
+      "PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/CalendarWidgetModelKit.framework/Versions/A/CalendarWidgetModelKit",
+      "PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetFoundations.framework/Versions/A/WidgetFoundations",
+      "PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetModelKit.framework/Versions/A/WidgetModelKit",
+      "PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/CalendarWidgetKit.framework/Versions/A/CalendarWidgetKit",
+      "PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/mbuinstrument.framework/Versions/A/mbuinstrument",
+      "PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetUIKit.framework/Versions/A/WidgetUIKit"
+    ],
+    "exact_name_matches": [
+      {
+        "path": "MacOS/Microsoft Outlook",
+        "hits": {
+          "application:handlerForIntent:": 2
+        }
+      },
+      {
+        "path": "Frameworks/osf.framework/Versions/A/osf",
+        "hits": {
+          "NSXPCListener": 16
+        }
+      },
+      {
+        "path": "Frameworks/mso30.framework/Versions/A/mso30",
+        "hits": {
+          "NSXPCListener": 12,
+          "initWithMachServiceName:": 2
+        }
+      },
+      {
+        "path": "Frameworks/mbukernel.framework/Versions/A/mbukernel",
+        "hits": {
+          "application:handlerForIntent:": 2
+        }
+      },
+      {
+        "path": "Frameworks/mso99.framework/Versions/A/mso99",
+        "hits": {
+          "application:handlerForIntent:": 2
+        }
+      },
+      {
+        "path": "SharedSupport/Outlook Profile Manager.app/Contents/MacOS/Outlook Profile Manager",
+        "hits": {
+          "application:handlerForIntent:": 2
+        }
+      }
+    ]
+  },
+  "reproduction": {
+    "entry_symbols": [
+      "_$s13OlkCocoaUtils25EmailsCanonicalOutlookURLC5PathsO8rawValueSSvg",
+      "_$s13OlkCocoaUtils25EmailsCanonicalOutlookURLC14queryAccountIDSo8NSNumberCSgyF",
+      "_$s8OlkUIKit0A21DeepLinkActionHandlerC24processURLAsCanonicalURLySb10Foundation0J0VYaFZ"
+    ],
+    "commands": [
+      "man otool; man nm; man strings; xcrun swift-demangle --help",
+      "nm -arch arm64 -n \"/Applications/Microsoft Outlook.app/Contents/MacOS/Microsoft Outlook\"",
+      "otool -arch arm64 -tvV -p '_$s8OlkUIKit0A21DeepLinkActionHandlerC24processURLAsCanonicalURLySb10Foundation0J0VYaFZ' \"/Applications/Microsoft Outlook.app/Contents/MacOS/Microsoft Outlook\"",
+      "otool -arch arm64 -ov \"/Applications/Microsoft Outlook.app/Contents/MacOS/Microsoft Outlook\"",
+      "otool -arch arm64 -s __TEXT __objc_stubs -V \"/Applications/Microsoft Outlook.app/Contents/MacOS/Microsoft Outlook\""
+    ],
+    "verification": "For every evidence record, read bytes_hex.length/2 bytes at universal_file_offset in the named binary and compare exactly. Verify whole-file SHA256 first. Decode chained fixup offsets relative to the image base when resolving selector and StaticString pointers."
+  },
+  "unverified": [
+    "Any send while the Mac screen is locked.",
+    "Any runtime URL delivery or app startup behavior.",
+    "Any live HxStore record or draft/account identifier.",
+    "Exchange REST ImmutableId equivalence.",
+    "Runtime AppleScript access and authorization in New Outlook.",
+    "Complete behavior of anonymous or dynamically registered XPC endpoints.",
+    "x86_64 executable control flow."
+  ],
+  "decisions": [
+    {
+      "question": "What is the scope and sizing?",
+      "decision": "Medium static investigation, one owner, one JSON audit and PR summary. No product code, runtime probe, ADR, or new repository glossary. These are reversible research choices.",
+      "tradeoff": "Keeps evidence together without adding a production interface or duplicate prose file."
+    },
+    {
+      "question": "Which architecture and offsets are authoritative?",
+      "decision": "Analyze installed arm64 instructions and metadata. Bind every binary evidence range to whole universal-file SHA256, arm64 VM address, slice offset, and universal-file offset.",
+      "tradeoff": "x86_64 control flow is unverified. Do not transfer addresses to another build."
+    },
+    {
+      "question": "What proves send behavior?",
+      "decision": "Require decoded enum mapping plus the executed handler branch. Reject the send-by-ID hypothesis because case 2 directly returns false.",
+      "tradeoff": "A send string or an intent declaration cannot establish sending."
+    },
+    {
+      "question": "How far may ID analysis go?",
+      "decision": "Resolve types and transformations from installed code and public bundle headers only. Name HxMessageHeader.serverId and HxObjectID hash without reading any store.",
+      "tradeoff": "No draft-specific value, mailbox sample, or REST ImmutableId equivalence can be validated."
+    },
+    {
+      "question": "How should alternative send entry points be graded?",
+      "decision": "Separate declared entry points, traced send candidates, and runtime proof. Include the AppleScript mailsend candidate despite the URL hypothesis failing.",
+      "tradeoff": "New Outlook scripting addressability, TCC, DLP, and locked-screen success remain unverified."
+    },
+    {
+      "question": "What is the delivery boundary?",
+      "decision": "Commit and push only this audit, open a ready PR against main, and stop before merge.",
+      "tradeoff": "Hosted CI may still be pending when the static investigation is delivered."
+    }
+  ],
+  "design_and_debt_pass": {
+    "codebase_design": "No executable interface changed. A single JSON audit keeps observations, evidence, decisions, and uncertainties together.",
+    "zero_tech_debt": "No runtime adapter, compatibility flag, speculative sender, or duplicated markdown report was added."
+  },
+  "skills_used": [
+    "poteto-mode",
+    "Prove It Works",
+    "grill-with-docs",
+    "grilling (autonomous frontier)",
+    "mattpocock-skills:domain-modeling",
+    "codebase-design",
+    "zero-tech-debt",
+    "mattpocock-skills:pr",
+    "technical-writing",
+    "unslop"
+  ],
+  "verification": {
+    "static_source_checks": 64,
+    "byte_ranges_compared": 37,
+    "hashed_sources_compared": 12,
+    "runtime_send_tests": 0,
+    "status": "pass",
+    "checks": "Compare all source SHA256 values and all evidence bytes against installed files; compare app build, declared activities, intents, action catalogs, service declarations, extension enumeration, and scripting command metadata."
+  }
+}

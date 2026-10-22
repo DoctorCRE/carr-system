@@ -378,6 +378,8 @@ def enqueue_due(manifest: dict[str, Any], instant: datetime,
     if mode not in {"shadow", "canary", "live", "replay"}:
         raise ValueError(f"invalid job mode: {mode}")
     due = due_workflows(manifest, instant)
+    if not due:
+        return []
     # Resolve every deterministic canary contract before opening a database
     # transaction.  A live-equivalent command must not even produce a queued
     # canary job that could later be mistaken for acceptance evidence.
@@ -428,6 +430,8 @@ def enqueue_due_auto(manifest: dict[str, Any], instant: datetime) -> list[dict[s
     one workflow, never an ungated one.
     """
     due = due_workflows(manifest, instant)
+    if not due:
+        return []
     rows: list[dict[str, str]] = []
     with connect() as conn, conn.cursor() as cur:
         resolved = _resolve_auto_modes(cur, due)
@@ -1615,6 +1619,38 @@ def inspect_job(job_id: str) -> dict[str, Any]:
     return {"job_id":job_id,"job":job,"attempts":attempts,"receipts":receipts}
 
 
+def preview_tick(manifest: dict[str, Any], max_jobs: int, mode: str) -> dict[str, Any]:
+    """Describe scheduling and pending work without collecting, enqueuing or claiming."""
+    instant = parse_instant(None)
+    due = due_workflows(manifest, instant)
+    with connect(read_only=True) as conn, conn.cursor() as cur:
+        modes = _resolve_auto_modes(cur, due) if mode == "auto" else {w["key"]: mode for w in due}
+        cur.execute("""select j.definition_key,j.definition_version,j.mode,j.state,d.enabled,
+                              count(*),min(j.scheduled_for)
+                         from ops.job j join ops.job_definition d
+                           on d.key=j.definition_key and d.version=j.definition_version
+                        where j.state in ('queued','retry_wait','running')
+                        group by j.definition_key,j.definition_version,j.mode,j.state,d.enabled
+                        order by min(j.scheduled_for),j.definition_key,j.definition_version,j.mode,j.state,d.enabled""")
+        backlog = [dict(zip(("workflow", "version", "mode", "state", "enabled", "count", "oldest_scheduled_for"), row))
+                   for row in cur.fetchall()]
+    definitions = {(w["key"], w["version"]): w for w in manifest["workflows"]}
+    for row in backlog:
+        workflow = definitions.get((row["workflow"], row["version"]), {})
+        row["execution"] = workflow.get("execution")
+        row["canonical_reads"] = workflow.get("inventory", {}).get("canonical_reads", [])
+    return {"dry_run": True, "at": instant, "max_jobs": max_jobs,
+            "replays_missed_cron_minutes": False,
+            "due": [{"workflow": w["key"], "version": w["version"], "mode": modes[w["key"]],
+                     "execution": w["execution"],
+                     "canonical_reads": w.get("inventory", {}).get("canonical_reads", [])} for w in due],
+            "backlog": backlog,
+            "backlog_note": "Pending counts are an inventory, not claim eligibility. Normal tick can reap expired leases. "
+                            "Unknown manifest versions have null execution. "
+                            "Admission, leases, deduplication and workflow guards still decide execution. "
+                            "At most max_jobs jobs run per tick; due-minute enqueues are not capped by max_jobs."}
+
+
 def tick(manifest: dict[str,Any],max_jobs: int=4,mode: str="shadow") -> dict[str,Any]:
     if mode=="auto":
         # Each due workflow already carries its own resolved tier on its job
@@ -1651,6 +1687,7 @@ def main() -> int:
     tick_parser=sub.add_parser("tick")
     tick_parser.add_argument("--max-jobs",type=int,default=4)
     tick_parser.add_argument("--mode",choices=("shadow","canary","live","auto"),default="shadow")
+    tick_parser.add_argument("--dry-run", action="store_true", help="Read-only due-work and pending-ledger preview")
     args = parser.parse_args()
     manifest = load_manifest()
     if args.command == "validate": result: Any = {"ok":True,"workflows":len(manifest["workflows"])}
@@ -1660,6 +1697,7 @@ def main() -> int:
     elif args.command=="metrics": result = metrics()
     elif args.command=="census": result = workflow_census()
     elif args.command=="inspect": result = inspect_job(args.job_id)
+    elif args.dry_run: result=preview_tick(manifest,args.max_jobs,args.mode)
     else: result=tick(manifest,args.max_jobs,args.mode)
     print(json.dumps(result,sort_keys=True,default=str))
     return 0

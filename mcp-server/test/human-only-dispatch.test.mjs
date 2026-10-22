@@ -108,6 +108,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "revoke-correspondence-adapter-consent",
     // V5-RW02: only a verified partner revokes Dell's Salesforce read consent.
     "revoke-salesforce-read-consent",
+    "set-prospect-engagement-status",
     "undo-invoice-close",
     "undo-lead-move",
   ]);

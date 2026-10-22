@@ -7,8 +7,11 @@ import json
 import os
 import subprocess
 import time
+from contextlib import nullcontext
+from types import SimpleNamespace
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location("control_plane_cli", REPO / "tools" / "control-plane.py")
@@ -27,6 +30,120 @@ def main() -> int:
         print(f"  {'ok  ' if condition else 'FAIL'} {name}")
         if not condition:
             failures.append(name)
+
+    instant = datetime.fromisoformat("2026-08-17T12:20:00+00:00")
+    not_due = {"key": "fixture", "version": 1, "enabled": True,
+               "recurrence": {"cron": "21 12 * * *", "timezone": "UTC"}}
+    for label, workflows in (("no definitions", []), ("not due", [not_due]),
+                             ("disabled", [{**not_due, "enabled": False}])):
+        for mode in ("shadow", "canary", "live", "replay", "auto"):
+            with patch.object(module, "connect") as connect:
+                manifest = {"workflows": workflows}
+                rows = (module.enqueue_due_auto(manifest, instant) if mode == "auto"
+                        else module.enqueue_due(manifest, instant, mode))
+            check(f"empty enqueue {mode} with {label} opens no connection",
+                  rows == [] and connect.call_count == 0)
+    with patch.object(module, "connect") as connect:
+        try:
+            module.enqueue_due({"workflows": []}, instant, "invalid")
+            invalid_refused = False
+        except ValueError:
+            invalid_refused = True
+    check("empty enqueue still rejects an invalid mode before connecting",
+          invalid_refused and connect.call_count == 0)
+
+    due = {**not_due, "recurrence": {"cron": "20 12 * * *", "timezone": "UTC"},
+           "execution": {"kind": "cognition"}}
+    for mode in ("shadow", "canary", "live", "replay", "auto"):
+        with patch.object(module, "connect") as connect:
+            conn = connect.return_value.__enter__.return_value
+            cur = conn.cursor.return_value.__enter__.return_value
+            cur.fetchone.return_value = ("queued-id",)
+            cur.fetchall.return_value = [("canary", "accepted")]
+            manifest = {"workflows": [due, not_due, {**due, "enabled": False}]}
+            rows = (module.enqueue_due_auto(manifest, instant) if mode == "auto"
+                    else module.enqueue_due(manifest, instant, mode))
+            selected_mode = "live" if mode == "auto" else mode
+            expected = {"workflow": "fixture", "job_id": "queued-id"}
+            if mode == "auto":
+                expected["mode"] = "live"
+            enqueue_calls = cur.execute.call_args_list
+            enqueue = enqueue_calls[-1]
+            check(f"due enqueue {mode} preserves ledger payload and idempotency",
+                  rows == [expected] and connect.call_count == 1
+                  and conn.commit.call_count == 1
+                  and enqueue.args == ("select (ops.enqueue_job(%s,%s,%s,%s,%s,%s)).id",
+                      ("fixture", 1, instant,
+                       '{"workflow_key": "fixture", "scheduled_for": "2026-08-17T12:20:00+00:00"}',
+                       f"schedule:{selected_mode}:fixture:v1:2026-08-17T12:20:00+00:00",
+                       selected_mode))
+                  and len(enqueue_calls) == (2 if mode == "auto" else 1))
+            if mode == "auto":
+                check("due auto enqueue reads acceptance for the exact definition",
+                      enqueue_calls[0].args == (
+                          "select mode,status from ops.workflow_acceptance "
+                          "where workflow_key=%s and workflow_version=%s", ("fixture", 1)))
+
+    for mode in ("shadow", "auto"):
+        claim = {"job_id": "queued-id", "lease_token": "fixture-lease",
+                 "definition_key": "fixture", "definition_version": 1,
+                 "payload": {}, "mode": "shadow", "execution_kind": "deterministic",
+                 "timeout_seconds": 30, "attempt": 1}
+        workflow = {**not_due, "execution": {"kind": "deterministic"}}
+        receipt = "job:queued-id:attempt:1"
+        evidence = {"exit_code": 0}
+        statements = []
+        events = []
+        pending = [tuple(claim.values()), (receipt, evidence), None]
+
+        class QueuedCursor:
+            description = [SimpleNamespace(name=key) for key in claim]
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def execute(self, sql, args): statements.append((sql, args))
+            def fetchone(self): return pending.pop(0)
+
+        class QueuedConnection:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def cursor(self): return QueuedCursor()
+            def commit(self): events.append("commit")
+            def rollback(self): raise AssertionError("queued job unexpectedly rolled back")
+
+        def execute_queued(*_args, **_kwargs):
+            events.append("execute")
+            return evidence
+
+        stages = []
+        def evaluate_queued(_workflow, stage, _facts):
+            stages.append(stage)
+            return True
+
+        with (patch.object(module, "connect", return_value=QueuedConnection()) as connect,
+              patch.object(module, "parse_instant", return_value=instant),
+              patch.object(module, "LeaseKeeper", return_value=nullcontext()) as keeper,
+              patch.object(module, "_execute_deterministic", side_effect=execute_queued),
+              patch.object(module, "_workflow_fact_collector", return_value={}),
+              patch.object(module, "evaluate_stage", side_effect=evaluate_queued)):
+            result = module.tick({"workflows": [workflow]}, max_jobs=4, mode=mode)
+        claim_sql = ("select * from ops.claim_job(%s,1,300)" if mode == "auto"
+                     else "select * from ops.claim_job_mode(%s,%s,1,300)")
+        check(f"empty schedule tick {mode} still dispatches an existing queued job",
+              result == {"scheduled": [], "runs": [
+                  {"claimed": 1, "job_id": "queued-id", "state": "succeeded"}], "run_count": 1}
+              and connect.call_count == 2
+              and statements[0][0] == statements[-1][0] == claim_sql
+              and statements[0][1] == ((f"tick:{os.getpid()}",) if mode == "auto"
+                                       else (f"tick:{os.getpid()}", "shadow"))
+              and not pending)
+        check(f"queued dispatch {mode} preserves committed claim, lease and completion audit",
+              events == ["commit", "execute", "commit", "commit"]
+              and keeper.call_args.args == ("queued-id", "fixture-lease")
+              and stages == ["routing", "filtering", "validation", "completion"]
+              and statements[1] == ("select ops.complete_job(%s,%s,%s,%s)",
+                  ("queued-id", "fixture-lease", '{"exit_code": 0}', receipt))
+              and "from ops.job_receipt" in statements[2][0]
+              and statements[2][1] == ("queued-id", 1))
 
     def canary_refuses(text: str) -> bool:
         try:
