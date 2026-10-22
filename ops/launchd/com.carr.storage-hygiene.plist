@@ -14,8 +14,7 @@
     <string>storage-hygiene</string>
     <string>launchd.run</string>
     <string>{{REPO}}/.venv/bin/python</string>
-    <string>{{REPO}}/tools/job-watchdog.py</string>
-    <string>run</string>
+    <string>{{REPO}}/tools/agent-run.py</string>
     <string>storage-hygiene</string>
     <string>machine cleanup</string>
     <string>5</string>

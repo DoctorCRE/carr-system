@@ -9,10 +9,15 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import types
+import unittest
 import uuid
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
+
+from git_env import fixture_env
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -31,6 +36,89 @@ fixture = load("staging_fixtures", ROOT / "tools/staging-fixtures.py")
 manifest = load("replacement_release_manifest", ROOT / "tools/release-manifest.py")
 sql_source = (ROOT / "migrations/0322_clean_staging_replacement_contract.sql").read_text()
 controller_source = (ROOT / "tools/staging-project-replacement.py").read_text()
+
+
+class SourceReachability(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.env = fixture_env()
+        self.origin = self.root / "origin.git"
+        self.writer = self.root / "writer"
+        self.repo = self.root / "release"
+        self.git(self.root, "init", "--bare", "-q", "-b", "main", str(self.origin))
+        self.git(self.root, "clone", "-q", str(self.origin), str(self.writer))
+        self.git(self.writer, "config", "user.name", "Fixture")
+        self.git(self.writer, "config", "user.email", "fixture@example.test")
+        self.base = self.commit("base")
+        self.git(self.root, "clone", "-q", str(self.origin), str(self.repo))
+        self.fetch_head = self.repo / ".git/FETCH_HEAD"
+        self.fetch_head.write_text("another session's fetch evidence\n")
+        self.enterContext(patch.object(ctl, "REPO", self.repo))
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", str(cwd), *args], env=self.env,
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    def commit(self, text, branch="main"):
+        (self.writer / "source.txt").write_text(text)
+        self.git(self.writer, "add", "source.txt")
+        self.git(self.writer, "commit", "-q", "-m", "fixture source")
+        self.git(self.writer, "push", "-q", "origin", "HEAD:" + branch)
+        return self.git(self.writer, "rev-parse", "HEAD")
+
+    def checkout(self, sha):
+        self.git(self.repo, "fetch", "--no-write-fetch-head", "--refmap=", "origin", sha)
+        self.git(self.repo, "checkout", "-q", "--detach", sha)
+
+    def validate(self, sha):
+        ledger = {ctl.CONTRACT_MIGRATION: "a" * 64}
+        material = f"{ctl.CONTRACT_MIGRATION}\0{'a' * 64}\n"
+        contract = {"git_sha": sha, "tree_mode": "full",
+                    "tree_tuple": ["mode", "type", "object", "path"],
+                    "source_tree_oid": "a" * 40, "source_tree_entry_count": 1,
+                    "migration_ledger": ledger, "migration_count": 1,
+                    "migration_highest": ctl.CONTRACT_MIGRATION,
+                    "migration_ledger_sha256": "sha256:" + hashlib.sha256(material.encode()).hexdigest()}
+        for index, key in enumerate(("source_tree_sha256", "artifact_sha256",
+                                     "config_sha256", "dependency_sha256"), 1):
+            contract[key] = "sha256:" + str(index) * 64
+
+        def run(args, **kwargs):
+            if args[0] == sys.executable:
+                return subprocess.CompletedProcess(args, 0, json.dumps(contract), "")
+            return subprocess.run(args, **dict(kwargs, env=self.env))
+
+        return ctl.validate_source(sha, run=run)
+
+    def test_merged_sha_passes_with_stale_tracking_ref_without_mutating_shared_git_state(self):
+        candidate = self.commit("reviewed source")
+        self.checkout(candidate)
+        self.assertEqual(self.git(self.repo, "rev-parse", "origin/main"), self.base)
+        self.assertEqual(self.validate(candidate).git_sha, candidate)
+        self.assertEqual(self.git(self.repo, "rev-parse", "origin/main"), self.base)
+        self.assertEqual(self.fetch_head.read_text(), "another session's fetch evidence\n")
+        self.assertEqual(self.git(self.repo, "rev-parse", "HEAD"), candidate)
+
+    def test_unmerged_branch_is_refused(self):
+        self.git(self.writer, "checkout", "-q", "-b", "unmerged")
+        candidate = self.commit("unmerged source", branch="unmerged")
+        self.checkout(candidate)
+        with self.assertRaisesRegex(ctl.ReplacementRefusal, "SHA is not reachable"):
+            self.validate(candidate)
+
+    def test_merged_sha_remains_valid_after_remote_main_advances(self):
+        candidate = self.commit("reviewed source")
+        self.checkout(candidate)
+        self.commit("later reviewed source")
+        self.assertEqual(self.validate(candidate).git_sha, candidate)
+        self.assertEqual(self.git(self.repo, "rev-parse", "origin/main"), self.base)
+        self.assertEqual(self.fetch_head.read_text(), "another session's fetch evidence\n")
+
+    def test_missing_remote_main_cannot_fall_back_to_cached_tracking_ref(self):
+        self.checkout(self.base)
+        self.git(self.origin, "update-ref", "-d", "refs/heads/main")
+        with self.assertRaisesRegex(ctl.ReplacementRefusal, "git source check failed"):
+            self.validate(self.base)
 
 
 def refuses(call, contains: str) -> None:
@@ -633,4 +721,5 @@ finally:
     for name, value in saved.items(): setattr(ctl, name, value)
     ctl.psycopg = saved_psycopg
 
-print("staging-project-replacement-selftest: PASS")
+if __name__ == "__main__":
+    unittest.main()

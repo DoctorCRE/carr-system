@@ -257,6 +257,42 @@ class IntakeTest(unittest.TestCase):
         self.assertIn('example.test', text)
         self.assertNotIn('stranger@example.test', text)
 
+    def test_unmatched_mail_retries_after_a_contact_is_added_without_a_store_change(self):
+        m = mail('new@example.test', -timedelta(hours=1), name='New Example')
+        self.assertEqual(self.run_intake([m]).state, 'succeeded')
+        self.assertEqual(self.fake.writes(), [])
+        decodes = self.fake.decodes
+        self.assertEqual(self.run_intake([m], touch=False).reason, 'store_unchanged')
+        self.assertEqual(self.fake.decodes, decodes)
+        self.fake.now += timedelta(days=14)
+        self.assertEqual(self.run_intake([m]).state, 'succeeded')
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertIn(ident(m), state['mail_unresolved'])
+        self.assertEqual(state['mail_done'], {})
+        self.fake.contacts_rows.append(intake.Contact('new@example.test', 'L-908', 'New Example'))
+        self.assertEqual(self.run_intake([m], touch=False).state, 'succeeded')
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual((args['ref'], args['detail']), ('L-908', m['body']))
+        self.assertEqual(args['idempotency_key'],
+                         str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|L-908|{ident(m)}')))
+        self.run_intake([m])
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_unresolved_mail_keeps_its_identity_when_a_later_copy_is_decoded(self):
+        m = mail('new@example.test', -timedelta(hours=1), copy_key='unresolved-copy')
+        self.run_intake([m])
+        self.fake.now += timedelta(days=14)
+        self.fake.contacts_rows.append(intake.Contact('new@example.test', 'L-908', 'New Example'))
+        later_copy = {**m, 'sent_unix': m['sent_unix'] + 20}
+        self.run_intake([later_copy])
+        activities = self.fake.writes('log-activity')
+        self.assertEqual(len(activities), 1)
+        args = activities[0][1]
+        self.assertEqual(args['idempotency_key'],
+                         str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|L-908|{ident(m)}')))
+        self.assertEqual(args['occurred_at'], (NOW - timedelta(hours=1)).isoformat())
+        self.assertEqual(json.loads((self.out() / intake.STATE).read_text())['mail_unresolved'], {})
+
     def test_report_and_state_are_private(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual(stat.S_IMODE(self.out().stat().st_mode), 0o700)
@@ -269,11 +305,14 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.out().iterdir() if p.is_dir()), [])
         self.assertEqual([p for p in self.out().rglob('*') if p.suffix in ('.hxd', '.db')], [])
 
-    def test_a_unique_exact_name_matches_when_no_address_does(self):
+    def test_a_unique_exact_name_cannot_attach_an_unknown_address(self):
         self.fake.parties['Rae Named'] = [{'name': 'Rae Named', 'ref': 'L-904', 'kind': 'lead', 'merged': False}]
-        self.run_intake([mail('rae@example.test', -timedelta(hours=1), name='Rae Named')])
-        [(_, args)] = self.fake.writes('log-activity')
-        self.assertEqual(args['ref'], 'L-904')
+        m = mail('rae@example.test', -timedelta(hours=1), name='Rae Named')
+        self.run_intake([m])
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(self.fake.model_calls, [])
+        self.assertIn(ident(m), json.loads((self.out() / intake.STATE).read_text())['mail_unresolved'])
+        self.assertIn('Rae Named', self.report_text())
 
     def test_an_ambiguous_name_is_unmatched(self):
         self.fake.parties['Rae Named'] = [
@@ -293,6 +332,74 @@ class IntakeTest(unittest.TestCase):
     def test_an_address_shared_by_two_records_is_ambiguous(self):
         self.fake.contacts_rows.append(intake.Contact('pat@example.test', 'L-907', 'Pat Example'))
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_ambiguous_address_retries_when_the_conflicting_mapping_is_removed(self):
+        conflicting = intake.Contact('pat@example.test', 'L-907', 'Pat Example')
+        self.fake.contacts_rows.append(conflicting)
+        self.fake.parties['Pat Example'] = [{'name': 'Pat Example', 'ref': 'C-901', 'merged': False}]
+        m = mail('pat@example.test', -timedelta(hours=1), name='Pat Example')
+        self.run_intake([m])
+        self.assertEqual(self.fake.writes(), [])
+        self.fake.contacts_rows.remove(conflicting)
+        self.run_intake([m], touch=False)
+        self.assertEqual([args['ref'] for _, args in self.fake.writes('log-activity')], ['C-901'])
+        self.assertEqual(json.loads((self.out() / intake.STATE).read_text())['mail_unresolved'], {})
+
+    def test_contact_order_names_and_duplicate_rows_do_not_retry_unresolved_mail(self):
+        m = mail('new@example.test', -timedelta(hours=1))
+        self.run_intake([m])
+        decodes = self.fake.decodes
+        self.fake.contacts_rows.reverse()
+        self.fake.contacts_rows.append(intake.Contact('PAT@example.test', 'C-901', 'Changed Name'))
+        result = self.run_intake([m], touch=False)
+        self.assertEqual(result.reason, 'store_unchanged')
+        self.assertEqual(self.fake.decodes, decodes)
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_missing_unresolved_source_is_retained_until_it_decodes_again(self):
+        m = mail('new@example.test', -timedelta(hours=1))
+        self.run_intake([m])
+        self.fake.now += timedelta(days=14)
+        self.fake.contacts_rows.append(intake.Contact('new@example.test', 'L-908', 'New Example'))
+        self.assertEqual(self.run_intake([], touch=False).state, 'succeeded')
+        self.assertIn(ident(m), json.loads((self.out() / intake.STATE).read_text())['mail_unresolved'])
+        self.run_intake([m])
+        self.assertEqual([args['ref'] for _, args in self.fake.writes('log-activity')], ['L-908'])
+
+    def test_unresolved_contact_read_failure_preserves_state_without_decoding(self):
+        m = mail('new@example.test', -timedelta(hours=1))
+        self.run_intake([m])
+        before = (self.out() / intake.STATE).read_bytes()
+        decodes = self.fake.decodes
+        def down():
+            raise intake.CarrError('contacts unavailable')
+        self.fake.contacts = down
+        result = self.run_intake([m], touch=False)
+        self.assertEqual((result.state, result.reason), ('failed', 'carr_unreachable'))
+        self.assertEqual(self.fake.decodes, decodes)
+        self.assertEqual((self.out() / intake.STATE).read_bytes(), before)
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_resolved_mail_write_failure_reuses_the_original_key_and_payload(self):
+        m = mail('new@example.test', -timedelta(hours=1))
+        self.run_intake([m])
+        self.fake.contacts_rows.append(intake.Contact('new@example.test', 'L-908', 'New Example'))
+        self.fake.fail_verbs.add('log-activity')
+        self.assertEqual(self.run_intake([m], touch=False).reason, 'writes_failed')
+        self.assertIn(ident(m), json.loads((self.out() / intake.STATE).read_text())['mail_unresolved'])
+        self.fake.fail_verbs.clear()
+        self.assertEqual(self.run_intake([m], touch=False).state, 'succeeded')
+        writes = self.fake.writes('log-activity')
+        self.assertEqual(len(writes), 2)
+        self.assertEqual(writes[0], writes[1])
+        self.assertEqual(json.loads((self.out() / intake.STATE).read_text())['mail_unresolved'], {})
+
+    def test_calendar_names_alone_cannot_log_an_activity_or_set_an_action(self):
+        self.fake.parties['Rae Named'] = [{'name': 'Rae Named', 'ref': 'L-904', 'merged': False}]
+        self.run_intake(events=[
+            event('name-past', -timedelta(hours=3), attendees=[('Rae Named', 'rae@example.test')]),
+            event('name-soon', timedelta(days=2), attendees=[('Rae Named', 'rae@example.test')])])
         self.assertEqual(self.fake.writes(), [])
 
     def test_duplicate_copies_collapse_and_the_full_body_wins(self):

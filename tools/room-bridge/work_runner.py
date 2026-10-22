@@ -28,7 +28,7 @@ class Resources:
     def __init__(self, locks, slots=None, limit=None):
         self.locks = Path(locks)
         self.slots = Path(slots or os.environ.get('CARR_CODEX_SLOT_DIR') or CODEX_SLOT_DIR)
-        self.limit = max(1, int(limit or os.environ.get('CARR_CODEX_MAX_CONCURRENT') or 4))
+        self.limit = max(1, int(limit or os.environ.get('CARR_CODEX_MAX_CONCURRENT') or 6))
 
     @staticmethod
     def _try(path):
@@ -69,7 +69,10 @@ class Runner:
 
     def _claim_pass(self):
         candidates = self.queue.candidates()
+        quota_stops = self.queue.quota_exhausted_desks()
         for candidate in candidates:
+            if candidate['desk'] in quota_stops:
+                continue
             active = self.queue.active()
             if candidate['desk'] in {r['desk'] for r in active}:
                 continue
@@ -80,6 +83,10 @@ class Runner:
             if handles is None:
                 continue
             try:
+                # A worker may finish with quota exhaustion after this claim pass
+                # read its initial stop set but before this desk lock was acquired.
+                if candidate['desk'] in self.queue.quota_exhausted_desks():
+                    continue
                 card = self.queue.claim(eligible_desks={candidate['desk']}, card_id=candidate['card_id'],
                                         actor='runner', owner=write_ownership.process_owner(),
                                         expected_candidates=candidates)

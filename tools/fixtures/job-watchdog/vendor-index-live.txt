@@ -1,4 +1,0 @@
-# API reference (synthetic saved fixture)
-- [Responses](https://developers.openai.com/api/reference/responses)
-- [Decisions](https://developers.openai.com/api/reference/decisions)
-- [Decisions](https://developers.openai.com/api/reference/decisions)
