@@ -141,7 +141,7 @@ async function health(env) {
 // already read this repo can already see all of that; the value here is
 // that a SESSION can ask the deployed Worker directly instead of trusting a
 // local marker file that can go stale silently (mcp-server/.last-deployed-
-// verb-count did exactly that on 2026-08-13 — see bin/deploy-worker.sh).
+// verb-count did exactly that on 2026-08-13 — see the GitHub production deployment workflow).
 // See release.js for why the payload-building logic lives in its own file
 // and how each field degrades honestly when it cannot be read.
 async function release(env) {

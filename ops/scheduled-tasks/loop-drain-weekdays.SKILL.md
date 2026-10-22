@@ -31,8 +31,8 @@ HARD RULES, each of which a previous session broke:
 
 MECHANICS:
 - Code lives in ~/carr-system and nowhere else.
-- Migrations: rehearse on a throwaway Neon branch first, ALWAYS, then `bin/migrate-prod.sh --apply`. Delete the branch after.
-- Worker: `bin/deploy-worker.sh`. It refuses a dirty mcp-server/ or a non-main HEAD, correctly.
+- Migrations: rehearse on a throwaway Neon branch first, ALWAYS, then `the GitHub production deployment workflow --apply`. Delete the branch after.
+- Worker: `the GitHub production deployment workflow`. It refuses a dirty mcp-server/ or a non-main HEAD, correctly.
 - NEON_API_KEY is in ~/.config/carr/db.env, so nothing waits on a browser login.
 - TWO-WRITER DISCIPLINE: this repo regularly holds another live session's uncommitted work. `git add` only the specific paths you wrote — never -A, never -a, never `.`. Check `git status --porcelain <path>` before editing a file to confirm nobody else holds it. A modified file you did not write belongs to someone else: report it, leave it.
 - TO CHANGE BRANCH, TAKE A WORKTREE — `run.sh worktree <name>` (add `--from origin/main` to start from the pushed tip). It hands you an isolated checkout with .venv and out/ already linked, so shared HEAD never moves under another writer, which is the whole of rule 308ef1de. Never `git checkout` in ~/carr-system while anyone else's files are loose; the git-writer-gate will refuse you anyway. Remove it with `run.sh worktree --remove <name>` when done — it refuses if the tree is dirty.

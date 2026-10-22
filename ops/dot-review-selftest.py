@@ -13,8 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
-from types import SimpleNamespace
+from unittest.mock import patch
 
 REPO = Path(os.environ.get("DOT_REVIEW_REPO", Path(__file__).resolve().parent.parent))
 sys.path[:0] = [str(REPO / "hooks"), str(REPO / "ops")]
@@ -27,6 +26,30 @@ def load(rel):
     sys.modules[name] = mod
     spec.loader.exec_module(mod)
     return mod
+
+
+class ReviewPolicy(unittest.TestCase):
+    def test_trusted_latest_review_and_strict_sha_header(self):
+        policy = load('lib/review_policy.py')
+        cfg = json.loads((REPO / 'ops/config/review-delivery.v1.json').read_text())['worker']
+        approve = 'APPROVE\nReviewed-SHA: ' + 'a' * 40
+        trusted = {'body': approve, 'author_association': 'OWNER', 'created_at': '2026-01-01', 'id': 1}
+        outsider = {'body': 'BLOCK', 'author_association': 'NONE', 'created_at': '2026-01-02', 'id': 2}
+        block = {**trusted, 'body': 'REVIEW: BLOCKED', 'id': 3}
+        self.assertIs(policy.deciding_verdict([trusted, outsider], cfg), trusted)
+        self.assertIs(policy.deciding_verdict([trusted, block], cfg), block)
+        self.assertEqual(policy.verdict(block['body'], cfg), 'block')
+        self.assertEqual(policy.reviewed_header_sha(approve), 'a' * 40)
+        for body in (approve + '\nReviewed-SHA: ' + 'a' * 40, approve.replace('APPROVE', 'approve'),
+                     'APPROVE\ntext\nReviewed-SHA: ' + 'a' * 40):
+            self.assertIsNone(policy.reviewed_header_sha(body))
+
+    def test_path_globs_keep_github_directory_boundaries(self):
+        policy = load('lib/review_policy.py')
+        self.assertTrue(policy._glob_hit('README.md', '**/*.md'))
+        self.assertTrue(policy._glob_hit('docs/README.md', 'docs/*.md'))
+        self.assertFalse(policy._glob_hit('docs/deep/README.md', 'docs/*.md'))
+        self.assertTrue(policy._glob_hit('docs/deep/README.md', 'docs/**/*.md'))
 
 
 class DotReview(unittest.TestCase):
@@ -113,74 +136,11 @@ class DotReview(unittest.TestCase):
         self.assertFalse(mod.in_safe_zone('rm -r /important/tmp/fixture'))
         self.assertFalse(mod.in_safe_zone('rm -r /important/scratchpad-copy'))
 
-    def test_control_health_known_findings(self):
-        mod = load('ops/release-pipeline.py')
-        with tempfile.TemporaryDirectory() as tmp:
-            pipe = mod.Pipeline(mod.load_config(), repo=Path(tmp), out=lambda *_: None)
-            pipe._release_worktree_ready = MagicMock(); pipe.remove_worktrees = MagicMock()
-            pipe.health_read = MagicMock(return_value=(mod.Result(1), [{'key':'fixture','hard_error':False}], True))
-            self.assertEqual(0, pipe.health_preflight('a'*40))
 
     def test_control_unique_triage_key_compatibility(self):
         mod = load('ops/jev_done_checks.py')
         answer = mod.triage_review(diff(['src/widgets.py']), '')
         self.assertIn('src/widgets.py', answer['detail']['files'])
-
-    def test_b11_newest_ci_outcome(self):
-        mod = load('ops/release-pipeline.py')
-        gh = MagicMock()
-        gh.runs_for.return_value = [{'id':1,'name':'CI','event':'pull_request','conclusion':'success'}, {'id':2,'name':'CI','event':'pull_request','conclusion':'failure'}]
-        gh.jobs.return_value = [{'name':'strict','conclusion':'success'},{'name':'secret','conclusion':'success'}]
-        with self.assertRaises(mod.Blocked):
-            mod.Pipeline.ci_run(None, gh, {'ci_workflow_name':'CI','ci_required_job':'strict'}, 1, 'a'*40)
-
-    def test_b12_lane_mutation_isolation(self):
-        mod = load('ops/release-pipeline.py')
-        cfg = mod.load_config()
-        with tempfile.TemporaryDirectory() as tmp:
-            pipe = mod.Pipeline(cfg, repo=Path(tmp), out=lambda *_: None)
-            pipe.store = MagicMock(); pipe.store.load.return_value = {}
-            pipe.git = MagicMock(return_value='a'*40)
-            pipe.last_released = MagicMock(return_value='b'*40)
-            pipe.changed_paths = MagicMock(return_value=['fixture'])
-            pipe.release_target = MagicMock(return_value='a'*40)
-            pipe.remove_worktrees = MagicMock()
-            pipe.fail = MagicMock(return_value=1)
-            def worker(*_):
-                pipe.mutated = True
-                return {}
-            pipe.release_worker = worker
-            pipe.release_app = MagicMock(side_effect=mod.Blocked('checks_pending','fixture'))
-            with patch.object(mod, 'kill_switch', return_value=None), patch.object(mod, 'classify', return_value=(True,['fixture'])):
-                pipe.run_lane('worker'); pipe.run_lane('app')
-            pipe.fail.assert_not_called()
-            self.assertEqual('blocked', pipe.store.record.call_args.args[0]['status'])
-
-    def test_b13_partial_migration_warning(self):
-        mod = load('ops/release-pipeline.py')
-        cfg = mod.load_config()
-        with tempfile.TemporaryDirectory() as tmp:
-            pipe = mod.Pipeline(cfg, repo=Path(tmp), out=lambda *_: None)
-            pipe.worker_evidence = MagicMock(return_value={'pr':1,'verifier':'fixture','verifier_evidence':'fixture','test_evidence':'fixture'})
-            pipe.unattended_preflight = MagicMock(); pipe.wrangler_auth = MagicMock()
-            pipe._release_worktree_ready = MagicMock()
-            pipe._health_baseline_or_block = MagicMock(return_value=([],True,0))
-            def step(name, *_):
-                if name=='migrate-apply':
-                    raise mod.StepFailed(name, 1, 'fixture', 'first batch committed; later batch failed')
-                return mod.Result(0, 'pending: 2' if name=='migrate-plan' else '{"receipt_id":"fixture"}')
-            pipe.step = step
-            with self.assertRaises(mod.StepFailed):
-                pipe.release_worker(cfg['worker'],'b'*40,'a'*40,{},'worker')
-            self.assertTrue(pipe.db_ahead_of_worker)
-
-    def test_b14_live_health_failure(self):
-        mod = load('ops/release-pipeline.py')
-        with tempfile.TemporaryDirectory() as tmp:
-            pipe = mod.Pipeline(mod.load_config(),repo=Path(tmp),out=lambda *_:None)
-            pipe._release_worktree_ready = MagicMock();pipe.remove_worktrees = MagicMock()
-            pipe.health_read = MagicMock(side_effect=[(mod.Result(0),[],True),(mod.Result(1),[{'key':'fixture','hard_error':True}],True)])
-            self.assertEqual(1,pipe.health_preflight('a'*40))
 
 
     def test_b18_triage_unique_paths(self):

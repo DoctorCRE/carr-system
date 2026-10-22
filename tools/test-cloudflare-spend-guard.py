@@ -321,7 +321,7 @@ class InventoryGate(GuardCase):
 
     def test_runaway_with_alarm_binding_reports_unknown_without_claiming_a_disable(self):
         cfg = config(staging_workers=['carr-mcp-staging'], staging_configs={
-            'carr-mcp-staging': str(Path(__file__).resolve().parents[1] / 'mcp-server/wrangler.toml')})
+            'carr-mcp-staging': str(Path(__file__).resolve().parents[1] / 'ops/config/staging-trigger-inventory.v1.json')})
         fake = FakeCloudflare()
         fake.gql = {'cur': [window('carr-mcp-staging', 600, errors=400)]}
         with redirect_stderr(io.StringIO()) as err:
@@ -334,7 +334,7 @@ class InventoryGate(GuardCase):
 
     def test_repository_staging_has_alarm_capable_binding(self):
         cfg = config(staging_workers=['carr-mcp-staging'], staging_configs={
-            'carr-mcp-staging': str(Path(__file__).resolve().parents[1] / 'mcp-server/wrangler.toml')})
+            'carr-mcp-staging': str(Path(__file__).resolve().parents[1] / 'ops/config/staging-trigger-inventory.v1.json')})
         result = self.run_guard(FakeCloudflare([row(cost=0.01)]), cfg)
         self.assertEqual(result['verdict'], 'UNKNOWN')
         self.assertIn('durable_objects', ' '.join(result['reasons']))

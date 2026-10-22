@@ -1,0 +1,62 @@
+{
+  "schema": "carr-review-delivery.v1",
+  "worker": {
+    "github_repo": "jbookout/carr-system",
+    "release_paths": [
+      "mcp-server/",
+      "migrations/",
+      "ops/config/doctorcre-artifact.v1.json"
+    ],
+    "non_release_globs": [
+      "mcp-server/test/**",
+      "mcp-server/**/*.md",
+      "migrations/README.md",
+      "**/*.test.mjs",
+      "**/*.test.js"
+    ],
+    "live_release_url": "https://api.doctorcre.com/release",
+    "review_markers": [
+      "independent review: pass",
+      "approve"
+    ],
+    "block_markers": [
+      "independent review: block",
+      "independent review: fail",
+      "review: blocked",
+      "block"
+    ],
+    "review_author_associations": [
+      "OWNER",
+      "MEMBER",
+      "COLLABORATOR"
+    ],
+    "review_logins": [],
+    "live_url": "https://api.doctorcre.com"
+  },
+  "app": {
+    "github_repo": "jbookout/doctorcre-app",
+    "non_release_globs": [
+      "**/*.md",
+      "test/**",
+      "reports/**"
+    ],
+    "live_release_url": "https://app.doctorcre.com/app-release",
+    "review_markers": [
+      "independent review: pass",
+      "approve"
+    ],
+    "block_markers": [
+      "independent review: block",
+      "independent review: fail",
+      "review: blocked",
+      "block"
+    ],
+    "review_author_associations": [
+      "OWNER",
+      "MEMBER",
+      "COLLABORATOR"
+    ],
+    "review_logins": [],
+    "live_url": "https://app.doctorcre.com"
+  }
+}

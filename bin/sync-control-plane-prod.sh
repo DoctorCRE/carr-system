@@ -69,7 +69,7 @@ if (( APPLY )); then
   fi
 fi
 
-# Same non-interactive auth and same project pin as bin/migrate-prod.sh, and for
+# Same non-interactive auth and same project pin as the GitHub production deployment workflow, and for
 # the same reasons stated there: a Neon API key needs no browser, and production
 # is pinned BY ID because a name lookup can drift to another project.
 if [ -z "${NEON_API_KEY:-}" ] && [ -f "$HOME/.config/carr/db.env" ]; then

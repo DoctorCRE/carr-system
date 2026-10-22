@@ -216,18 +216,6 @@
       "reason": "Exact rule-claim Git fixture revision. The email-shaped strings are GitHub SSH transport endpoints using the public git service account, not personal contact data."
     },
     {
-      "path": "ops/release-pipeline-selftest.py",
-      "sha256": "15a57161129168a52c1af01af1274e9f14d84f705a29c2e2406efa07d160a322",
-      "rule": "pii-email",
-      "reason": "Synthetic URL userinfo redaction regressions introduced in b027694e; opaque-fixture-access-token and fixture-password are test constants, not personal contact data or real credentials."
-    },
-    {
-      "path": "ops/release-pipeline-selftest.py",
-      "sha256": "b944ff4f74a8aa4083b64cb77b62346236eaa60dab8066a6390fac52c47d1347",
-      "rule": "pii-email",
-      "reason": "Synthetic URL userinfo redaction regressions introduced in 4abfa0b2; opaque-fixture-access-token and fixture-password are test constants, not personal contact data or real credentials."
-    },
-    {
       "path": "vendor/hxprobe/src/record.rs",
       "sha256": "7669221ae4871f570e53b9cdffab9ed878692658da93cca3af0e96f9b41af110",
       "rule": "pii-email",

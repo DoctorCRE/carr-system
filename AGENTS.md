@@ -339,3 +339,8 @@ For ordinary review, use direct image/JSON reads, inspect, zoom, or frames with
 explicit absolute bundle paths. Never use latest in concurrent desks. Sending,
 exporting, rerouting, or following paths outside the supplied capture requires
 an explicit task instruction.
+
+## Production deployment
+
+`.github/workflows/deploy.yml` deploys a successful main canary. It runs
+`tools/migrate.py` and verifies the production `/release` identity.

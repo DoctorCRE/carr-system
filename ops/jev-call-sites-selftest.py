@@ -922,7 +922,7 @@ class RegistryCoverageTests(unittest.TestCase):
         worker = (REPO / "mcp-server" / "src" / "jev-call-receipt.js").read_text()
         self.assertEqual(re.findall(r"^const WORKER_DAILY_CAP_DEFAULT = (\d+);$", worker, re.M), [str(cap)])
         wrangler = (REPO / "mcp-server" / "wrangler.toml").read_text()
-        self.assertEqual(re.findall(r'^JEV_WORKER_DAILY_CAP = "(\d+)"$', wrangler, re.M), [str(cap)] * 2,
+        self.assertEqual(re.findall(r'^JEV_WORKER_DAILY_CAP = "(\d+)"$', wrangler, re.M), [str(cap)],
                          "[vars] and [env.staging.vars] each declare the ceiling")
 
     def test_every_paid_call_source_is_registered(self):

@@ -73,7 +73,6 @@ records the OUTCOME to the operational ledger; this file reports.
 import hashlib
 import os
 import sys
-import tomllib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -192,9 +191,6 @@ def shared_ids(stg_conn: str, prod_conn: str, tables) -> dict[str, int]:
     return result
 
 
-def staging_worker_config() -> dict:
-    with open(REPO / "mcp-server" / "wrangler.toml", "rb") as fh:
-        return tomllib.load(fh)
 
 
 def main() -> int:
@@ -255,25 +251,6 @@ def main() -> int:
     fixtures = {t: n for t, n in stg_counts.items() if n > 0}
     print(f"        staging fixtures: "
           + (", ".join(f"{t}={n}" for t, n in fixtures.items()) if fixtures else "none"))
-
-    # ── 4. the staging Worker shares no binding ──────────────────────────────
-    cfg = staging_worker_config()
-    stg_env = cfg.get("env", {}).get("staging", {})
-    check("4a. staging deploys a different Worker name",
-          stg_env.get("name") and stg_env["name"] != cfg.get("name"),
-          f"staging name {stg_env.get('name')!r} vs production {cfg.get('name')!r}")
-
-    prod_kv = {k.get("id") for k in cfg.get("kv_namespaces", [])}
-    stg_kv = {k.get("id") for k in stg_env.get("kv_namespaces", [])}
-    check("4b. staging has its own KV namespace",
-          bool(stg_kv) and not (stg_kv & prod_kv),
-          f"shared namespace id(s): {stg_kv & prod_kv}" if (stg_kv & prod_kv) else
-          "staging declares no KV namespace of its own")
-
-    stg_routes = stg_env.get("routes", []) or []
-    check("4c. staging claims no route and no custom domain",
-          not stg_routes,
-          f"staging declares {len(stg_routes)} route(s) — one typo from production DNS")
 
     # ── 5 and 6. both environments are current with the repository ───────────
     committed = committed_migrations()

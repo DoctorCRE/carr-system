@@ -1145,7 +1145,7 @@ def _stuck_live_jobs(snap):
 # The completion marker _canonical_health() prints on EVERY path out of it,
 # clean or already-broken (see both call sites below). It must be printed
 # character-for-character identically from both places — a caller
-# (ops/release-pipeline.py's HEALTH_COMPLETE_MARKER) compares against this
+# (the retired local executor's HEALTH_COMPLETE_MARKER) compares against this
 # EXACT string as the last non-empty stdout line to decide whether a read
 # is trustworthy at all (point 3 of the third round of an independent
 # review of PR #1237: this string and that constant drifted apart for
@@ -1235,7 +1235,7 @@ def _canonical_finding(key, detail, *, subject="", count=1, hard_error=False, ti
 
 def _write_findings_json(path):
     """Machine-readable sibling of the CANONICAL_FINDING text lines — added so
-    ops/release-pipeline.py's health gate can diff by (key, subject) instead
+    the retired local executor's health gate can diff by (key, subject) instead
     of scraping exact finding strings (Jev-favored design over regex parsing;
     independent review of PR #1237)."""
     payload = {"findings": list(_FINDINGS),
@@ -1389,7 +1389,7 @@ def _canonical_health():
         # round of an independent review of PR #1237): this branch already
         # recorded a real, fully-explained hard_error finding — a read that
         # caught its own failure and named it is COMPLETE, not unavailable.
-        # Without the marker, ops/release-pipeline.py's read_health_findings
+        # Without the marker, the retired local executor's read_health_findings
         # would read this as an INCOMPLETE baseline (marker missing) and
         # hold forever waiting for a "clean" read that is never coming,
         # instead of treating the hard_error as the decisive answer it is.
@@ -2051,7 +2051,7 @@ def _breach_consumer():
     """Execute (with --act) and audit every red row's bound action.
 
     Runs before the completion marker, which must stay the last stdout line
-    (ops/release-pipeline.py reads it). Never touches `rc`: the audit is a
+    (the retired local executor reads it). Never touches `rc`: the audit is a
     report about loops, not a new health fault, so a release's health diff
     is unchanged by it. A fixture run stays hermetic and prints nothing."""
     global _ACT_ERRORS
@@ -2260,7 +2260,7 @@ def db_env_parse_failure():
     That is not hypothetical twice over. 2026-08-02 was CARR_DB_JOBS_URL. Then on
     2026-08-20 CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL — a key no watch here
     names, so nothing in this file could see it — landed unquoted and closed
-    bin/migrate-prod.sh, the one sanctioned door to production migrations, for
+    the GitHub deployment workflow, for
     six days, for every caller that did not already have NEON_API_KEY exported.
     This check is file-level and unconditional for exactly that reason: it does
     not need to know which keys matter.
@@ -2283,7 +2283,7 @@ print(f"Façade check (rule 28) — {time.strftime('%Y-%m-%d %H:%M')} — output
 _db_env_line = db_env_parse_failure()
 if _db_env_line is not None:
     print(f"  ⚠︎ {'db.env':<18} UNSOURCEABLE — {DB_ENV} does not parse as shell at line "
-          f"{_db_env_line}. Every job that does `set -a; . db.env` (bin/migrate-prod.sh, "
+          f"{_db_env_line}. Every job that does `set -a; . db.env` (the GitHub production deployment workflow, "
           f"bin/nightly.sh, bin/control-plane-tick.sh and the rest) "
           f"loses ALL of its keys, not just the bad one, and reports its credential missing. "
           f"Fix: single-quote that value  · one bad line disables every credential here")
@@ -3213,40 +3213,6 @@ except Exception as e:
     print(f"  ⚠︎ {'renders-verify':<18} check failed ({type(e).__name__}: {e})")
     rc = 1
 
-# ── ledger-vs-live ───────────────────────────────────────────────────────────
-# Does the deployment ledger still describe the Worker that is answering? The
-# two disagreed THREE times on 2026-08-19 and 2026-08-20 — a good deploy booked
-# failed on a stale identity read-back, another booked failed on a performance
-# budget that clocked the whole golden suite, and a third booked complete with
-# no verb count at all — and every one was found by a human curling /release,
-# never by a check. The ledger is not a diary: bin/deploy-worker.sh's verb-loss
-# guard reads it to decide whether a deploy is about to remove verbs, so a
-# baseline that has drifted below reality re-opens the 2026-08-09 hole where
-# production went from 75 verbs to 66 with nothing objecting. Bound action is
-# printed by the child per rule 590b11e1.
-try:
-    _dlv = os.path.join(REPO_ROOT, "ops", "deploy-ledger-vs-live.py")
-    if not os.path.exists(_dlv):
-        print(f"  -- {'ledger-vs-live':<18} ops/deploy-ledger-vs-live.py not present; skipped")
-    else:
-        _venv = os.path.join(REPO_ROOT, ".venv", "bin", "python")
-        _py = _venv if os.path.exists(_venv) else sys.executable
-        _p = subprocess.run([_py, _dlv], capture_output=True, text=True, timeout=120)
-        _lines = (_p.stdout or "").strip().splitlines()
-        _first = _lines[0] if _lines else (
-            f"(no output; stderr: {(_p.stderr or '').strip().splitlines()[-1]})"
-            if (_p.stderr or "").strip() else "(no output, no stderr)")
-        if _first.startswith("SKIP"):
-            print(f"  -- {'ledger-vs-live':<18} {_first.split(': ', 1)[-1]}")
-        elif _p.returncode == 0:
-            print(f"  OK {'ledger-vs-live':<18} {_first.split('— ', 1)[-1]}")
-        else:
-            print(f"  ⚠︎ {'ledger-vs-live':<18} {_first.split('— ', 1)[-1]}")
-            rc = 1
-except Exception as e:
-    print(f"  ⚠︎ {'ledger-vs-live':<18} check failed ({type(e).__name__}: {e})")
-    rc = 1
-
 # --- the doctrine store (P4/P5, 2026-08-08; decisions 82a2fb62 + import door) -
 # Every row prints its bound action inline (rule 590b11e1: no metric without a
 # bound action, visible in the render itself). A failed read is never all-clear.
@@ -3326,7 +3292,7 @@ except Exception as e:
 # than none.
 #
 # THIS ROW READS THE WORKER ITSELF, not the local marker — that is the whole
-# point (see bin/deploy-worker.sh's DEPLOY PROVENANCE note: the marker only
+# point (see the GitHub production deployment workflow's DEPLOY PROVENANCE note: the marker only
 # ever protects a deploy that goes through the script, and `wrangler deploy`
 # is also called directly elsewhere in this repo's own history). The Git SHA
 # is stamped into the Worker at deploy time (`wrangler deploy --var
@@ -3339,7 +3305,7 @@ except Exception as e:
 # no record of — this checkout is behind, or someone deployed from a branch
 # or a force-pushed-away commit. That is loop #276's failure mode (a verb
 # silently vanishing from production because the wrong tree shipped),
-# checked independently of whether bin/deploy-worker.sh's own preflight ran.
+# checked independently of whether the GitHub production deployment workflow's own preflight ran.
 print("\ndeploy provenance (/release)")
 RELEASE_URL = os.environ.get("CARR_RELEASE_URL", "https://api.doctorcre.com/release")
 try:
@@ -3367,7 +3333,7 @@ try:
             _reason = _sha_obj.get("reason") or "no reason given"
             print(f"  ⚠︎ release       git_sha NOT STAMPED — {_reason} · production's "
                   f"provenance cannot be checked against this checkout until the next "
-                  f"deploy goes through bin/deploy-worker.sh ({_rel_verbs} verbs reported)")
+                  f"GitHub deploy stamps the release ({_rel_verbs} verbs reported)")
             rc = 1
         else:
             # The commit may not exist in this checkout's object database yet (a

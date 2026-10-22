@@ -99,7 +99,7 @@ RECENT_MERGED = timedelta(days=14)
 # from. The launchd wrapper binds it explicitly, so a copy of the tool run from
 # anywhere else still reads the canonical checkout.
 REPO_ROOT = Path(os.environ.get("CARR_REPO_ROOT") or Path(__file__).resolve().parents[1]).expanduser().resolve()
-RELEASE_CONFIG = REPO_ROOT / "ops" / "config" / "release-pipeline.v1.json"
+RELEASE_CONFIG = REPO_ROOT / "ops" / "config" / "review-delivery.v1.json"
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 # Executor pools in ledger order: key, label, glyph. The app legend carries
@@ -856,7 +856,7 @@ def review_decision(reviews: list[dict[str, Any]], merge_state: Any, repo: str) 
     latest = {}
     for review in sorted(reviews, key=lambda r: (str(r.get("submittedAt") or ""), int(r.get("databaseId") or 0))):
         reviewer = author(review)
-        if not release_pipeline().trusted_commenter(
+        if not repo_lib("review_policy").trusted_commenter(
                 {"author_association": review.get("authorAssociation"), "user": reviewer}, rules):
             continue
         state = str(review.get("state") or "").upper()
@@ -1131,27 +1131,8 @@ def merge_sha(payload: dict[str, Any]) -> str | None:
 
 
 # ── review evidence ──────────────────────────────────────────────────────────
-# One interpretation, the release pipeline's own (ops/release-pipeline.py):
-# the LATEST verdict-carrying comment from a trusted author decides; BLOCK
-# markers block; an approval counts only as a literal APPROVE whose
-# Reviewed-SHA is the exact PR head. Every session posts through the owner
-# account, so authorship by the PR's own account is not disqualifying.
-
-_PIPELINE: ModuleType | None = None
-
-
-def release_pipeline() -> ModuleType:
-    global _PIPELINE
-    if _PIPELINE is None:
-        path = REPO_ROOT / "ops" / "release-pipeline.py"
-        spec = importlib.util.spec_from_file_location("carr_release_pipeline", path)
-        if spec is None or spec.loader is None:
-            raise RuntimeError(f"release pipeline unavailable at {path}")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-        _PIPELINE = module
-    return _PIPELINE
+# The latest verdict from a trusted author decides. An approval must bind
+# its Reviewed-SHA header to the exact PR head.
 
 
 _CONFIG: dict[str, Any] | None = None
@@ -1163,7 +1144,7 @@ def release_config() -> dict[str, Any]:
         try:
             loaded = json.loads(RELEASE_CONFIG.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            log(f"release pipeline config unreadable at {RELEASE_CONFIG} ({exc}); "
+            log(f"review and delivery config unreadable at {RELEASE_CONFIG} ({exc}); "
                 "review rules and auto-live are unavailable")
             loaded = {}
         _CONFIG = loaded if isinstance(loaded, dict) else {}
@@ -1180,31 +1161,31 @@ def lane_config(repo: str) -> tuple[str, dict[str, Any]] | None:
 
 def review_rules(repo: str) -> dict[str, Any]:
     """The repository's lane review rules; a repo with no lane uses the
-    worker's, the pipeline's reference contract."""
+    worker's reference review contract."""
     found = lane_config(repo)
     if found:
         return found[1]
     worker = release_config().get("worker")
     if not isinstance(worker, dict):
-        raise RuntimeError("release pipeline review rules unavailable")
+        raise RuntimeError("review rules unavailable")
     return worker
 
 
 def review_verdict(payload: dict[str, Any], repo: str = DEFAULT_PR_REPO) -> str:
     """BLOCK, APPROVE (exact head), or Not recorded."""
-    pipeline = release_pipeline()
+    policy = repo_lib("review_policy")
     rules = review_rules(repo)
     comments = [{"body": str(c.get("body") or ""), "author_association": c.get("authorAssociation"),
                  "user": {"login": (c.get("author") or {}).get("login")}, "created_at": c.get("createdAt"),
                  "id": index}
                 for index, c in enumerate(payload.get("comments") or []) if isinstance(c, dict)]
-    last = pipeline.deciding_verdict(comments, rules)
+    last = policy.deciding_verdict(comments, rules)
     if last is None:
         return "Not recorded"
-    if pipeline.verdict(last["body"], rules) == "block":
+    if policy.verdict(last["body"], rules) == "block":
         return "BLOCK"
     head = str(payload.get("headRefOid") or "").lower()
-    return "APPROVE" if SHA_RE.fullmatch(head) and pipeline.reviewed_header_sha(last["body"]) == head \
+    return "APPROVE" if SHA_RE.fullmatch(head) and policy.reviewed_header_sha(last["body"]) == head \
         else "Not recorded"
 
 
@@ -1262,10 +1243,8 @@ def derived_block(payload: dict[str, Any], phase: str) -> tuple[str, str] | None
 
 
 # ── verified releases ────────────────────────────────────────────────────────
-# A merged card is Live only when its merge commit is an ancestor of the latest
-# verified release for its repository: the newest `shipped` row the release
-# pipeline wrote for that repo's lane, or, when the pipeline has none yet, the
-# SHA the live release endpoint serves.
+# A merged card is Live only when its merge commit is an ancestor of the
+# release SHA the live endpoint serves.
 
 RELEASE_CACHE: dict[str, Any] = {}
 # Why the live release probe could not verify a repository's release.
@@ -1280,29 +1259,6 @@ def release_lanes() -> dict[str, dict[str, str]]:
         if isinstance(entry, dict) and isinstance(entry.get("github_repo"), str):
             lanes[lane] = {"repo": entry["github_repo"], "url": str(entry.get("live_release_url") or "")}
     return lanes
-
-
-def releases_path() -> Path:
-    configured = os.environ.get("PROGRESS_BOARD_RELEASES")
-    return Path(configured) if configured else REPO_ROOT / "out" / "release-pipeline" / "releases.jsonl"
-
-
-def release_rows(repo: str) -> list[dict[str, Any]]:
-    """The pipeline's rows for this repo's lanes, oldest first."""
-    lanes = {lane for lane, entry in release_lanes().items() if entry["repo"] == repo}
-    try:
-        lines = releases_path().read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
-    rows = []
-    for line in lines:
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(row, dict) and row.get("lane") in lanes:
-            rows.append(row)
-    return sorted(rows, key=lambda row: str(row.get("ts") or ""))
 
 
 def probe_sha(lane: str, payload: dict[str, Any]) -> str | None:
@@ -1334,13 +1290,7 @@ def latest_release(repo: str) -> dict[str, Any] | None:
     if repo in RELEASE_CACHE:
         return RELEASE_CACHE[repo]
     release = None
-    shipped = [row for row in release_rows(repo)
-               if row.get("status") == "shipped" and SHA_RE.fullmatch(str(row.get("sha") or "").lower())]
-    if shipped:
-        row = shipped[-1]
-        release = {"sha": str(row["sha"]).lower(), "lane": row.get("lane"), "ts": row.get("ts"),
-                   "source": "releases.jsonl"}
-    elif not os.environ.get("PROGRESS_BOARD_SKIP_PROBE"):
+    if not os.environ.get("PROGRESS_BOARD_SKIP_PROBE"):
         for lane, entry in release_lanes().items():
             if entry["repo"] != repo or not entry["url"].startswith("https://"):
                 continue
@@ -1362,22 +1312,7 @@ def latest_release(repo: str) -> dict[str, Any] | None:
 
 
 def release_wait_reason(repo: str) -> str:
-    """Why a merged commit is not live yet, in the pipeline's own words."""
-    rows = release_rows(repo)
-    shipped_ts = max((str(r.get("ts") or "") for r in rows if r.get("status") == "shipped"), default="")
-    later = [r for r in rows if str(r.get("ts") or "") > shipped_ts and r.get("status") != "shipped"]
-    if later:
-        row = later[-1]
-        status = str(row.get("status") or "unknown")
-        detail = str(row.get("detail") or "").strip()
-        tail = f": {detail[:200]}" if detail else ""
-        if status == "blocked":
-            return f"release pipeline blocked ({row.get('reason') or 'no reason'}){tail}"
-        if status == "failed":
-            return f"release pipeline failed at {row.get('step') or row.get('failed_step') or 'unknown step'}{tail}"
-        if status == "no_release_needed":
-            return "latest batch was doc/test-only; waiting for the next release"
-        return f"release pipeline {status}{tail}"
+    """Why the live release readback cannot certify a merged commit yet."""
     release = latest_release(repo)
     if release:
         return f"waiting for the next release after {release['sha'][:12]}"
@@ -1419,7 +1354,7 @@ def release_scope_gap(repo: str, paths: list[str] | None) -> str | None:
     lane, entry = found
     prefixes = entry.get("release_paths")
     ignore = entry.get("non_release_globs") or []
-    hit = release_pipeline()._glob_hit
+    hit = repo_lib("review_policy")._glob_hit
     outside = [path for path in paths
                if prefixes is not None and not any(path == x.rstrip("/") or path.startswith(x) for x in prefixes)
                and not any(hit(path, glob) for glob in ignore)]
@@ -1833,7 +1768,7 @@ def render(project: str, *, discover: bool = False) -> None:
             log(f"V1 discovery failed: {exc}")
     # Every network and git read happens here, before the lock: the release
     # readback for cards whose delivery target a release completes, and the
-    # pipeline's reason for the rest.
+    # live probe's reason for the rest.
     release_tasks = [*tasks, *[
         {"repo": key[0], "pr": key[1], "delivery_target": AUTOMATIC_DELIVERY_TARGETS[key[0]]}
         for key in discovered if key not in keys]]

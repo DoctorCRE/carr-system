@@ -184,7 +184,7 @@ check("asserts the guard still blocks the probe before spending a live run",
 
 # A codex-less machine (e.g. before Dell's own install) must SKIP (exit 78,
 # bin/nightly.sh's step() convention), never FAIL — same reasoning as every
-# other credential/tooling-gated nightly step (bin/smoke-and-record.sh).
+# other credential/tooling-gated nightly step (the manual release smoke checks).
 check("SKIPs with exit 78 when no codex CLI is on PATH, rather than failing",
       "exit 78" in smoke_src and "command -v codex" in smoke_src)
 

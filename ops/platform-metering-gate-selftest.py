@@ -199,19 +199,6 @@ def main() -> int:
             "active_nondefault_branches": 3,
         }, today=date(2026, 8, 17))))
 
-    check("Cloudflare deploy without local verification is refused", refuses(
-        lambda: _authorize_metered_execution(POLICY, "cloudflare-worker-release", {
-            "release_preflight_green": False,
-            "performance_budget_ref": "release:R-1",
-            "release_candidate_count": 1,
-        }, today=date(2026, 8, 17))))
-    allowed_deploy = _authorize_metered_execution(POLICY, "cloudflare-worker-release", {
-        "release_preflight_green": True,
-        "performance_budget_ref": "release:R-1",
-        "release_candidate_count": 1,
-    }, today=date(2026, 8, 17))
-    check("one verified Cloudflare release candidate is admitted", allowed_deploy["admitted"] is True)
-
     gates = POLICY.get("execution_gates", {})
     check("paid cognition delegates to the transactional database cost gate",
           gates.get("cognition-provider", {}).get("installed_enforcement_ref") ==
@@ -254,10 +241,6 @@ def main() -> int:
         authorize_at = source.find("neon-disposable-branch")
         check(f"{relative} admits metered branch work before create",
               authorize_at >= 0 and create_at >= 0 and authorize_at < create_at)
-
-    deploy = (REPO / "bin/deploy-worker.sh").read_text(encoding="utf-8")
-    check("Worker release passes the metering gate before Wrangler",
-          deploy.find("cloudflare-worker-release") < deploy.find('"$WRANGLER" versions upload'))
 
     control_plane = (REPO / "tools/control-plane.py").read_text(encoding="utf-8")
     check("provider call remains behind transactional cost admission",

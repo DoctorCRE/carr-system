@@ -147,7 +147,6 @@ class BoardCase(unittest.TestCase):
         self.env.update(TMPDIR=str(self.root), TMP=str(self.root), TEMP=str(self.root))
         self.env["PROGRESS_BOARD_SKIP_GH"] = "1"
         self.env["PROGRESS_BOARD_SKIP_PROBE"] = "1"
-        self.env["PROGRESS_BOARD_RELEASES"] = str(self.root / "releases.jsonl")
         # Mutations publish to the app board; unit tests stay local unless a
         # test spies on the publication itself.
         self.env["PROGRESS_BOARD_LOCAL_ONLY"] = "1"
@@ -225,10 +224,6 @@ class BoardCase(unittest.TestCase):
         if not self.gh_log.exists():
             return []
         return [json.loads(line) for line in self.gh_log.read_text().splitlines()]
-
-    def shipped(self, lane, sha, ts="2026-09-29T12:00:00+00:00"):
-        with open(self.root / "releases.jsonl", "a") as fh:
-            fh.write(json.dumps({"ts": ts, "lane": lane, "sha": sha, "status": "shipped"}) + "\n")
 
 
 class ProgressBoardCLI(BoardCase):
@@ -753,8 +748,7 @@ class PullRequestStatus(BoardCase):
             return {"author": {"login": login}, "authorAssociation": association, "body": body, "createdAt": created}
         approve = "APPROVE\nReviewed-SHA: " + SHA_A + "\n"
         cases = [
-            # Every session posts as the owner account (release-pipeline.v1.json
-            # _review_evidence), so the maker's own account carries a verdict.
+            # The configured owner association also applies to the maker's account.
             ([comment("builder", "OWNER", approve, "2026-09-28T10:00:00Z")], "Ready to merge"),
             ([comment("outsider", "NONE", approve, "2026-09-28T10:00:00Z")], "Awaiting review"),
             ([comment("reviewer", "COLLABORATOR", approve, "2026-09-28T10:00:00Z")], "Ready to merge"),
@@ -853,33 +847,34 @@ class PullRequestStatus(BoardCase):
         self.assertEqual(task["completed_at"], completed_at)
 
     def test_a_verified_release_alone_never_completes_a_project_card(self):
-        # #1439: a project card completes from a release only for a declared
-        # worker/app delivery target, from the production source readback.
+        # A project card requires a worker/app target or an operational receipt.
         self.start()
         merged = {**self.VALID, "state": "MERGED", "comments": [], "mergeCommit": {"oid": SHA_M}}
         self.fake_gh({"view": merged})
-        self.shipped("worker", SHA_M)
-        self.run_board("render", "demo")
+        release = {"sha": SHA_M, "lane": "worker", "ts": None, "source": "live probe"}
+        with patch.dict(os.environ, self.env), patch.object(BOARD, "latest_release", return_value=release):
+            BOARD.render("demo")
         task = self.read_state("demo")["tasks"]["a"]
         self.assertEqual((task["stage"], task["merge_sha"]), ("merged", SHA_M))
         self.assertNotIn("evidence", task)
         self.assertIn("no delivery target recorded", task["release_wait"])
         self.update_legacy_task("demo", "a", "--delivery-target", "workstation")
-        self.run_board("render", "demo")
+        with patch.dict(os.environ, self.env), patch.object(BOARD, "latest_release", return_value=release):
+            BOARD.render("demo")
         task = self.read_state("demo")["tasks"]["a"]
         self.assertEqual(task["stage"], "merged")
         self.assertIn("the workstation delivery target", task["release_wait"])
 
     def test_all_repos_card_in_an_exact_release_needs_no_ancestry_check(self):
         card = {**exercise_fields(SHA_M), "status": "review", "stage": "merged", "merge_sha": SHA_M, "pr": 7, "repo": "jbookout/carr-system"}
-        release = {"sha": SHA_M, "lane": "worker", "ts": "2026-09-29T12:00:00+00:00", "source": "releases.jsonl"}
+        release = {"sha": SHA_M, "lane": "worker", "ts": "2026-09-29T12:00:00+00:00", "source": "live probe"}
         with patch.object(BOARD, "latest_release", return_value=release), \
              patch.object(BOARD, "release_contains", side_effect=AssertionError("ancestry checked")):
             self.assertTrue(BOARD.auto_live(card, "jbookout/carr-system", iso(), ["mcp-server/src/a.js"]))
         self.assertEqual(card["stage"], "live")
         self.assertIn("verified worker release", card["evidence"])
 
-    def test_latest_verified_release_comes_from_shipped_rows_then_live_probe(self):
+    def test_latest_verified_release_uses_live_probe_even_with_stale_pipeline_rows(self):
         releases = self.root / "releases.jsonl"
         releases.write_text("\n".join([
             json.dumps({"ts": "2026-09-28T00:00:00+00:00", "lane": "worker", "sha": "0" * 40, "status": "shipped"}),
@@ -898,28 +893,25 @@ class PullRequestStatus(BoardCase):
                 app = BOARD.latest_release("jbookout/doctorcre-app")
                 wait = BOARD.release_wait_reason("jbookout/carr-system")
         BOARD.RELEASE_CACHE.clear()
-        self.assertEqual((carr["sha"], carr["lane"]), (SHA_R, "worker"))
+        self.assertEqual((carr["sha"], carr["lane"], carr["source"]), ("6" * 40, "worker", "live probe"))
         self.assertEqual((app["sha"], app["source"]), ("7" * 40, "live probe"))
-        self.assertEqual(wait, "release pipeline blocked (canary_pending): main canary has not finished on 333333333333")
+        self.assertEqual(wait, "waiting for the next release after 666666666666")
 
-    def test_merged_card_not_yet_released_shows_waiting_on_release_with_pipeline_reason(self):
+    def test_merged_card_not_yet_released_shows_live_probe_wait(self):
         self.start(extra=["--delivery-target", "worker"])
         merged = {**self.VALID, "state": "MERGED", "comments": [], "mergeCommit": {"oid": SHA_M}}
-        self.shipped("worker", SHA_R, ts="2026-09-29T08:00:00+00:00")
-        with open(self.root / "releases.jsonl", "a") as fh:
-            fh.write(json.dumps({"ts": "2026-09-29T09:00:00+00:00", "lane": "worker", "sha": "3" * 40,
-                                 "status": "failed", "step": "canary", "detail": "canary pending"}) + "\n")
         evidence = {"value": None}
         with patch.dict(os.environ, self.env), \
              patch.object(BOARD, "fetch_prs", every((merged, None))), \
              patch.object(BOARD, "deployed_release", return_value=None), \
+             patch.object(BOARD, "latest_release", return_value={"sha": SHA_R, "lane": "worker", "ts": None, "source": "live probe"}), \
              patch.object(BOARD, "deployment_evidence", lambda info, release: evidence["value"]):
             BOARD.RELEASE_CACHE.clear()
             BOARD.render("demo")
             task = self.read_state("demo")["tasks"]["a"]
             self.assertEqual(task["stage"], "merged")
             self.assertEqual(task["release_wait"],
-                             "production does not show this change yet; release pipeline failed at canary: canary pending")
+                             "production does not show this change yet; waiting for the next release after 222222222222")
             state = self.read_state("demo")
             fields = exercise_fields(SHA_M)
             fields["delivery_target"] = "worker"
@@ -1024,9 +1016,7 @@ class GitHubSync(BoardCase):
                 detail = BOARD.blocked_detail(task)
                 self.assertEqual(detail[0] if detail else None, reason)
                 self.assertEqual(task["stage_history"][-1]["stage"], stage)
-        # A verified release alone never completes a project card (#1439):
-        # the same sync names what it is waiting for.
-        self.shipped("worker", SHA_M)
+        # A project card without a delivery target remains merged.
         task, _ = self.sync({**self.OPEN, "state": "MERGED", "mergeCommit": {"oid": SHA_M}})
         self.assertEqual((task["status"], task["stage"]), ("review", "merged"))
         self.assertIn("no delivery target recorded", task["release_wait"])
@@ -1134,8 +1124,12 @@ class AllRepositoriesBoard(BoardCase):
 
     def test_builds_every_repository_from_gh_grouped_with_stages(self):
         self.fake_gh(self.fixture_all())
-        self.shipped("worker", SHA_M)
-        self.run_board("render", "all-repos")
+        with patch.dict(os.environ, self.env), patch.object(
+                BOARD, "probe_json", return_value={"git_sha": {"value": SHA_M}}):
+            os.environ.pop("PROGRESS_BOARD_SKIP_PROBE", None)
+            BOARD.RELEASE_CACHE.clear()
+            BOARD.build_all_repos()
+        BOARD.RELEASE_CACHE.clear()
         state = self.read_state("all-repos")
         self.assertEqual(state["kind"], "all-repos")
         self.assertEqual(state["project"], "all-repos")
@@ -1663,15 +1657,6 @@ class CardColumns(unittest.TestCase):
 
 
 
-def load_release_pipeline():
-    spec = importlib.util.spec_from_file_location("board_test_release_pipeline", REPO / "ops" / "release-pipeline.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 class ReviewRound1420(BoardCase):
     """jbookout/carr-system#1420 review findings 1-11, each reproduced."""
 
@@ -1694,9 +1679,8 @@ class ReviewRound1420(BoardCase):
         return calls, remote, caller
 
     def in_process(self, **extra):
-        env = {"PROGRESS_BOARD_ROOT": str(self.root), "PROGRESS_BOARD_SKIP_PROBE": "1",
-               "PROGRESS_BOARD_RELEASES": str(self.root / "releases.jsonl"), **extra}
-        return patch.dict(os.environ, env)
+        return patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root),
+                                       "PROGRESS_BOARD_SKIP_PROBE": "1", **extra})
 
     # 1 ── concurrent writers
     def test_1_superseded_project_render_cannot_replace_newer_review_evidence(self):
@@ -1841,7 +1825,7 @@ class ReviewRound1420(BoardCase):
                 BOARD.publish_board("demo")
         self.assertNotIn("publish-board-snapshot", calls)
 
-    # 4 ── one review interpretation, shared with the release pipeline
+    # 4 ── one shared review policy
     def test_4_same_account_and_review_blocked_verdicts_count_on_project_cards(self):
         self.run_board("init", "demo", "--title", "Demo")
         self.update_legacy_task("demo", "a", "--title", "A", "--status", "running", "--executor", "Codex", "--pr", "42")
@@ -1875,9 +1859,9 @@ class ReviewRound1420(BoardCase):
                          ("Ready to merge", "APPROVE"))
         self.assertEqual(len(self.gh_calls()), len(BOARD.CORE_REPOS), "comments come with the repository read")
 
-    def test_4_board_and_release_pipeline_agree_on_every_verdict_shape(self):
-        pipeline = load_release_pipeline()
-        cfg = json.loads((REPO / "ops" / "config" / "release-pipeline.v1.json").read_text())["worker"]
+    def test_4_board_and_shared_policy_agree_on_every_verdict_shape(self):
+        policy = BOARD.repo_lib("review_policy")
+        cfg = json.loads((REPO / "ops" / "config" / "review-delivery.v1.json").read_text())["worker"]
         bodies = ["APPROVE\nReviewed-SHA: " + SHA_A, "APPROVE\nReviewed-SHA: " + "b" * 40, "APPROVE",
                   "BLOCK\nNeeds work", "REVIEW: BLOCKED\nReviewed-SHA: " + SHA_A, "Independent review: pass",
                   "independent review: FAIL", "Looks fine to me", "APPROVE\nReviewed-SHA: " + SHA_A + "\nReviewed-SHA: " + SHA_A]
@@ -1888,16 +1872,16 @@ class ReviewRound1420(BoardCase):
                                  "createdAt": "2026-09-30T10:00:00Z"}]
                     rest = [{"user": {"login": "someone"}, "author_association": association, "body": body,
                              "created_at": "2026-09-30T10:00:00Z", "id": 1}]
-                    last = pipeline.deciding_verdict(rest, cfg)
+                    last = policy.deciding_verdict(rest, cfg)
                     if last is None:
                         expected = "Not recorded"
-                    elif pipeline.verdict(last["body"], cfg) == "block":
+                    elif policy.verdict(last["body"], cfg) == "block":
                         expected = "BLOCK"
                     else:
-                        expected = "APPROVE" if pipeline.reviewed_header_sha(last["body"]) == SHA_A else "Not recorded"
+                        expected = "APPROVE" if policy.reviewed_header_sha(last["body"]) == SHA_A else "Not recorded"
                     self.assertEqual(BOARD.review_verdict({"headRefOid": SHA_A, "comments": comments},
                                                           "jbookout/carr-system"), expected)
-        self.assertEqual(pipeline.verdict("REVIEW: BLOCKED", cfg), "block")
+        self.assertEqual(policy.verdict("REVIEW: BLOCKED", cfg), "block")
 
     # 5 ── the scheduled job runs from the repository
     def test_5_migration_reloads_and_verifies_the_existing_launchagent(self):
@@ -2013,7 +1997,7 @@ class ReviewRound1420(BoardCase):
         env = {k: v for k, v in self.env.items() if k != "CARR_REPO_ROOT"}
         unbound = subprocess.run([sys.executable, "-c", probe], env=env, capture_output=True, text=True, check=True)
         self.assertEqual(unbound.stdout.strip(), "[]")
-        self.assertIn("release pipeline config unreadable", unbound.stderr)
+        self.assertIn("review and delivery config unreadable", unbound.stderr)
 
     # 6 ── Live only for what the lane deploys
     def test_6_a_release_does_not_make_undeployed_local_changes_live(self):
@@ -2024,7 +2008,6 @@ class ReviewRound1420(BoardCase):
                        "--pr", "42", "--delivery-target", "workstation")
         merged = {**self.OPEN, "state": "MERGED", "mergeCommit": {"oid": SHA_M},
                   "files": [{"path": "tools/progress_board.py"}], "changedFiles": 1}
-        self.shipped("worker", SHA_M)
         self.fake_gh({"view": merged})
         self.run_board("render", "demo")
         task = self.read_state("demo")["tasks"]["a"]
@@ -2033,7 +2016,7 @@ class ReviewRound1420(BoardCase):
         self.assertNotIn("evidence", task)
         # All-repos cards carry no delivery target: the lane must deploy every
         # path the PR changed.
-        release = {"sha": SHA_M, "lane": "worker", "ts": "2026-09-29T12:00:00+00:00", "source": "releases.jsonl"}
+        release = {"sha": SHA_M, "lane": "worker", "ts": "2026-09-29T12:00:00+00:00", "source": "live probe"}
         for files, stage, wait in (
                 (["tools/progress_board.py", "ops/launchd/com.carr.x.plist"], "merged", "outside the worker release paths"),
                 (None, "merged", "changed-file list"),
@@ -2072,7 +2055,7 @@ class ReviewRound1420(BoardCase):
     def test_8_a_malformed_release_probe_leaves_the_release_unverified(self):
         probes = [{"git_sha": "a" * 40}, {"git_sha": {"value": 7}}, {"git_sha": {"value": "not-a-sha"}}, None]
         for payload in probes:
-            with self.subTest(payload=payload), patch.dict(os.environ, {"PROGRESS_BOARD_RELEASES": str(self.root / "none")}), \
+            with self.subTest(payload=payload), patch.dict(os.environ), \
                  patch.object(BOARD, "probe_json", lambda url: payload), patch("sys.stderr", new_callable=io.StringIO):
                 os.environ.pop("PROGRESS_BOARD_SKIP_PROBE", None)
                 BOARD.RELEASE_CACHE.clear()
@@ -2081,7 +2064,7 @@ class ReviewRound1420(BoardCase):
                 self.assertIn("release probe", BOARD.release_wait_reason("jbookout/carr-system"))
         BOARD.RELEASE_CACHE.clear()
         BOARD.RELEASE_ERRORS.clear()
-        with patch.dict(os.environ, {"PROGRESS_BOARD_RELEASES": str(self.root / "none")}), \
+        with patch.dict(os.environ), \
              patch.object(BOARD, "probe_json", lambda url: {"environment": "production", "source_commit": 5}):
             os.environ.pop("PROGRESS_BOARD_SKIP_PROBE", None)
             self.assertIsNone(BOARD.latest_release("jbookout/doctorcre-app"))

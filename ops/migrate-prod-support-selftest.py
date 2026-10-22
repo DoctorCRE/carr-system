@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Regression tests for migrate-prod refusal escalation readback."""
+"""Stubbed CLI checks for production proof connection resolution."""
 from __future__ import annotations
 
+from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
-import json
+import io
 import os
-import shutil
-import subprocess
-import tempfile
-import sys
-from urllib.parse import urlunsplit
 from pathlib import Path
-from typing import Any
+import subprocess
+import sys
+import unittest
+from unittest.mock import patch
+import uuid
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -19,82 +19,55 @@ SPEC = importlib.util.spec_from_file_location(
     "migrate_prod_support", REPO / "tools" / "migrate-prod-support.py"
 )
 assert SPEC and SPEC.loader
-support: Any = importlib.util.module_from_spec(SPEC)
+support = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(support)
 
 
-def main() -> int:
-    # Execute the production wrapper only in a disposable repository, with
-    # neonctl and the record door stubbed. No production database or write.
-    with tempfile.TemporaryDirectory(prefix="carr-neon-failure-") as temp:
-        root = Path(temp)
-        for directory in ('bin', 'tools', 'lib', 'out'):
-            (root / directory).mkdir()
-        (root / '.venv' / 'bin').mkdir(parents=True)
-        (root / '.venv' / 'bin' / 'python').symlink_to(sys.executable)
-        for relative in ('bin/migrate-prod.sh', 'tools/migrate-prod-support.py', 'lib/secret_redaction.py'):
-            shutil.copy2(REPO / relative, root / relative)
-        stub = root / 'bin' / 'neonctl'
-        stub.write_text('#!/bin/sh\nprintf "%s\\n" "fixture neon failure: $NEON_API_KEY $TEST_PROVIDER_DSN" >&2\nexit 7\n')
-        stub.chmod(0o700)
-        door = root / 'bin' / 'door'
-        door.write_text('#!/bin/sh\nexit 1\n')
-        door.chmod(0o700)
-        env = {name: value for name, value in os.environ.items()
-               if not any(word in name.upper() for word in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD', 'DATABASE_URL'))}
-        # A generated canary verifies known-secret masking without a credential
-        # literal in source or output.
-        canary = __import__('uuid').uuid4().hex
-        env.update(PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'],
-                   NEON_API_KEY=canary, CARR_MIGRATE_PROD_RUN_DOOR=str(door),
-                   TEST_PROVIDER_DSN=urlunsplit(('postgresql', f'fixture:{canary}@invalid', '/db', '', '')))
-        result = subprocess.run(['zsh', str(root / 'bin' / 'migrate-prod.sh')],
-                                env=env, capture_output=True, text=True, timeout=15)
-        assert result.returncode != 0
-        receipts = list((root / 'out').glob('migrate-prod-refusal-receipt.*.json'))
-        assert len(receipts) == 1
-        receipt = json.loads(receipts[0].read_text())
-        assert receipt['reason_class'] == 'dsn_unavailable', receipt['reason_class']
-        persisted = ''.join(path.read_text() for path in (root / 'out').iterdir() if path.is_file())
-        combined = result.stdout + result.stderr + persisted
-        assert 'fixture neon failure' in combined
-        assert 'neonctl rc=7' in combined
-        assert canary not in combined
-        assert 'postgresql://' not in combined
-        print('PASS neonctl failure named, rc preserved in reason, stderr redacted')
-    calls: list[tuple[str, dict]] = []
+class NeonDsnTests(unittest.TestCase):
+    def invoke(self, result):
+        output, error = io.StringIO(), io.StringIO()
+        with patch.object(sys, "argv", ["support", "neon-dsn", "--project-id", "fixture-project"]), \
+             patch.object(support.subprocess, "run", side_effect=result) as provider, \
+             redirect_stdout(output), redirect_stderr(error):
+            code = support.main()
+        return code, output.getvalue(), error.getvalue(), provider
 
-    def string_sequence(_door: str, verb: str, payload: dict) -> tuple[int, str, str]:
-        calls.append((verb, payload))
-        if verb == "add-room-turn":
-            return 0, json.dumps({"seq": "42"}), ""
-        if verb == "read-room":
-            return 0, json.dumps({"turns": [{"seq": "42", "body": "blocked"}]}), ""
-        raise AssertionError(verb)
+    def test_connection_string_is_returned_only_on_success(self):
+        with patch.dict(os.environ, {}, clear=True):
+            code, output, error, provider = self.invoke([
+                subprocess.CompletedProcess([], 0, "fixture-connection\n", "")])
+        self.assertEqual((code, output, error), (0, "fixture-connection\n", ""))
+        provider.assert_called_once_with(
+            ["neonctl", "connection-string", "production", "--project-id", "fixture-project",
+             "--role-name", "neondb_owner"], capture_output=True, text=True, timeout=90)
 
-    original = support._call_verb
-    try:
-        support._call_verb = string_sequence
-        assert support._add_room_turn_and_readback("run.sh", "blocked") is True
-        assert [verb for verb, _payload in calls] == ["add-room-turn", "read-room"]
-        assert calls[0][1]["body"] == "blocked"
-        assert calls[1][1] == {"room": support.ROOM, "after_seq": 41}
+    def test_provider_failure_preserves_exit_code_and_redacts_diagnostics(self):
+        canary = uuid.uuid4().hex
+        result = subprocess.CompletedProcess(
+            [], 7, "untrusted provider output", f"fixture failure {canary} postgres://fixture:{canary}@invalid/db")
+        with patch.dict(os.environ, {"NEON_API_KEY": canary}, clear=True):
+            code, output, error, _ = self.invoke([result])
+        self.assertEqual(code, 7)
+        self.assertEqual(output, "")
+        self.assertIn("fixture failure", error)
+        self.assertNotIn(canary, error)
+        self.assertLessEqual(len(error), support.DETAIL_MAX + 1)
 
-        calls.clear()
+    def test_unavailable_provider_returns_safe_error(self):
+        with patch.dict(os.environ, {}, clear=True):
+            code, output, error, _ = self.invoke(FileNotFoundError("fixture provider absent"))
+        self.assertEqual((code, output), (1, ""))
+        self.assertIn("neonctl unavailable (FileNotFoundError)", error)
 
-        def malformed(_door: str, verb: str, payload: dict) -> tuple[int, str, str]:
-            calls.append((verb, payload))
-            return 0, json.dumps({"seq": "not-a-sequence"}), ""
-
-        support._call_verb = malformed
-        assert support._add_room_turn_and_readback("run.sh", "blocked") is False
-        assert [verb for verb, _payload in calls] == ["add-room-turn"]
-    finally:
-        support._call_verb = original
-
-    print("migrate-prod support selftest: string sequence readback normalized; malformed refused")
-    return 0
+    def test_retired_wrapper_commands_are_rejected(self):
+        for command in ("write-receipt", "escalate"):
+            with self.subTest(command=command), \
+                 patch.object(sys, "argv", ["support", command, "--help"]), \
+                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), \
+                 self.assertRaises(SystemExit) as raised:
+                support.main()
+            self.assertEqual(raised.exception.code, 2)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    unittest.main()
