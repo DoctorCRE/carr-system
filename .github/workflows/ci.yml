@@ -41,7 +41,7 @@ jobs:
 
   classes:
     needs: scope
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     name: ${{ matrix.gate_shard == 2 && 'Gates selftests shard 2 of 2' || format('ops/ci.sh --strict --only {0}', matrix.classes) }}
     runs-on: ubuntu-24.04
     strategy:
@@ -179,7 +179,7 @@ jobs:
 
   migration-fixtures:
     needs: scope
-    if: ${{ always() && needs.scope.outputs.full != 'false' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    if: ${{ !cancelled() && needs.scope.outputs.full != 'false' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     name: Migration isolated fixtures
     runs-on: ubuntu-24.04
     timeout-minutes: 30
