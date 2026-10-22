@@ -1006,6 +1006,22 @@ class LegacyHealthPromotion(Base):
 
 
 class WorkerIdentityReconciliation(Base):
+    def test_repointing_live_to_older_source_reevaluates_unchanged_main(self):
+        released = self.fx.commit({"mcp-server/src/a.js": "release"})
+        head = self.fx.commit({"docs/source-only.md": "evaluated"})
+        live = {"sha": released}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": released}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        live["sha"] = self.fx.base
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertIn("promote", runner.names())
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], head)
+        reconciles = [row for row in self.fx.records() if row["status"] == "live_identity_reconciled"]
+        self.assertEqual([(row["from_sha"], row["sha"]) for row in reconciles], [(released, self.fx.base)])
+
     def failed_worker_readback(self):
         latest = self.fx.commit({'mcp-server/src/a.js': 'legacy promoted'})
         live = {'sha': latest, 'version': VERSION}
@@ -1816,6 +1832,17 @@ class CheckpointOwnership(unittest.TestCase):
 
 
 class ReleaseJournalRecovery(Base):
+    def test_source_evaluation_after_retirement_does_not_hide_a_later_live_rollback(self):
+        prior, promoted, head, live, runner, restart = self.rollback_revert_case()
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_evaluated_sha"], head)
+        self.assertEqual(self.fx.state()["worker"]["last_evaluated_from"], prior)
+        promotions = runner.names().count("promote")
+        live.update(sha=self.fx.base, version=PRIOR)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(runner.names().count("promote"), promotions + 1)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], head)
+
     def rollback_revert_case(self):
         prior = self.fx.commit({"mcp-server/src/a.js": "baseline"})
         live = {"sha": self.fx.base, "version": PRIOR}
@@ -2430,6 +2457,70 @@ class ReleaseJournalRecovery(Base):
 
 
 class Batching(Base):
+    def test_legacy_evaluated_head_without_a_base_is_reevaluated(self):
+        head = self.fx.commit({"mcp-server/src/a.js": "release"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base, "last_evaluated_sha": head}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertIn("promote", runner.names())
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], head)
+
+    def test_evaluated_head_still_reports_an_unchanged_rejection(self):
+        head = self.fx.commit({"docs/source-only.md": "evaluated"})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner)
+        state = {"worker": {"last_released_sha": self.fx.base,
+                            "last_evaluated_sha": head, "last_evaluated_from": self.fx.base}}
+        pipe.remember_rejection(state, "worker", self.fx.base, head, "canary_pending")
+        output = []
+        pipe.out = output.append
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertTrue(any("unchanged rejection" in line for line in output), output)
+        self.assertEqual(runner.calls, [])
+
+    def test_evaluated_head_with_repaired_prerequisite_retries(self):
+        head = self.fx.commit({"mcp-server/src/a.js": "release"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base,
+                                   "last_evaluated_sha": head, "last_evaluated_from": self.fx.base,
+                                   "failed_sha": head, "failed_step": "venv-source-missing"}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertIn("promote", runner.names())
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], head)
+
+    def test_clear_failed_retries_an_evaluated_head_without_a_new_merge(self):
+        head = self.fx.commit({"mcp-server/src/a.js": "release"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base,
+                                   "last_evaluated_sha": head,
+                                   "last_evaluated_from": self.fx.base,
+                                   "failed_sha": head, "failed_step": "upload"}})
+        rp.clear_failed(pipe.store, "worker", head, "repair verified", repo_dir=self.fx.repo)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertIn("promote", runner.names())
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], head)
+
+    def test_evaluated_head_still_reports_its_recorded_failure(self):
+        head = self.fx.commit({"mcp-server/src/a.js": "release"})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base,
+                                   "last_evaluated_sha": head,
+                                   "last_evaluated_from": self.fx.base,
+                                   "failed_sha": head, "failed_step": "upload"}})
+        output = []
+        pipe.out = output.append
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertTrue(any("failed at upload" in line for line in output), output)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], head)
+        self.assertEqual(runner.calls, [])
+
     def test_evaluated_head_releases_again_after_checkpoint_moves_backward(self):
         released = self.fx.commit({"mcp-server/src/a.js": "release"})
         head = self.fx.commit({"docs/source-only.md": "evaluated"})
@@ -4941,6 +5032,39 @@ class AppLane(Base):
         cfg = self.fx.config()
         cfg["app"]["enabled"] = True
         return cfg
+
+    def test_unevaluated_base_still_blocks_an_unreceipted_live_target(self):
+        head = self.fx.commit({"src/worker.js": "release"})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, cfg=self.cfg())
+        pipe.http = lambda _url: {"source_commit": head, "environment": "production"}
+        pipe.store.save({"app": {"last_released_sha": self.fx.base,
+                                "last_evaluated_sha": head, "last_evaluated_from": head}})
+        self.assertEqual(pipe.tick(["app"]), 0)
+        self.assertEqual([row.get("reason") for row in self.fx.records()], ["live_target_unreceipted"])
+        self.assertEqual(self.fx.state()["app"]["last_released_sha"], self.fx.base)
+        self.assertEqual(runner.calls, [])
+
+    def test_source_only_noop_ticks_do_not_poll_live_http(self):
+        head = self.fx.commit({"docs/app-source-only.md": "evaluated"})
+        runner = FakeRunner()
+        http = mock.Mock(return_value={"source_commit": self.fx.base, "environment": "production"})
+
+        def restart():
+            pipe = self.fx.pipeline(runner, cfg=self.cfg())
+            pipe.http = http
+            return pipe
+
+        restart().store.save({"app": {"last_released_sha": self.fx.base}})
+        self.assertEqual(restart().tick(["app"]), 0)
+        http.assert_called_once()
+        http.reset_mock()
+        for _ in range(10):
+            self.assertEqual(restart().tick(["app"]), 0)
+        http.assert_not_called()
+        self.assertEqual(self.fx.state()["app"]["last_evaluated_sha"], head)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(len([row for row in self.fx.records() if row["status"] == "no_release_needed"]), 1)
 
     def test_app_build_toolchain_tampering_refuses_production_publication(self):
         self.fx.commit({"src/worker.js": "new main"})

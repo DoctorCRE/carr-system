@@ -1459,6 +1459,7 @@ class Pipeline:
             self.store.resolve_promotion(state, lane, resolution)
         lane_state["last_released_sha"] = sha
         lane_state["last_evaluated_sha"] = sha
+        lane_state["last_evaluated_from"] = sha
         if not self.dry_run:
             self.store.save(state)
 
@@ -1467,6 +1468,7 @@ class Pipeline:
         if lane_state.get("pending_promotion"):
             raise Blocked("promotion_unresolved", "source checkpoint cannot advance while promotion intent is unresolved")
         lane_state["last_evaluated_sha"] = sha
+        lane_state["last_evaluated_from"] = lane_state.get("last_released_sha")
         if not self.dry_run:
             self.store.save(state)
 
@@ -1986,7 +1988,7 @@ class Pipeline:
                     if lane == "worker":
                         self.reconcile_worker_promotion(state, sha)
             live = (self.reconcile_worker_identity(state, lane_cfg, sha) if lane == "worker" else
-                    None if sha == lane_state.get("last_released_sha") else self.http(lane_cfg["live_release_url"]))
+                    None if lane_state.get("last_released_sha") else self.http(lane_cfg["live_release_url"]))
             base = self.last_released(state, lane, lane_cfg, live)
             if (not self.dry_run and not lane_state.get("last_released_sha")
                     and lane_state.get("failed_sha") == base):
@@ -1995,8 +1997,6 @@ class Pipeline:
                 if not lane_state.get("last_released_sha") and not self.dry_run:
                     raise Blocked("bootstrap_unreceipted", "live source identity has no durable shipped checkpoint")
                 self.out(f"release-pipeline[{lane}]: main {sha[:12]} is already released")
-                return 0
-            if sha == lane_state.get("last_evaluated_sha") and not lane_state.get("pending_promotion"):
                 return 0
             if not self.dry_run and live is not None:
                 live_sha = (live.get("git_sha") or {}).get("value") if lane == "worker" else live.get("source_commit")
@@ -2013,6 +2013,12 @@ class Pipeline:
                              f"{lane_state.get('failed_step')}; waiting for prerequisite repair or a fix-forward merge")
                     return 0
                 recovered_failure = sha
+            if (sha == lane_state.get("last_evaluated_sha")
+                    and base == lane_state.get("last_evaluated_from")
+                    and not lane_state.get("pending_promotion") and not recovered_failure):
+                return 0
+            if lane == "app" and live is None:
+                live = self.http(lane_cfg["live_release_url"])
             try:
                 self.git("merge-base", "--is-ancestor", base, sha, cwd=repo_dir)
             except StepFailed:
@@ -3589,7 +3595,8 @@ def _clear_failed_locked(store: Store, lane: str, sha: str, reason: str, *, repo
             "status": "promotion_retired", "reason": reason,
             "resolution_evidence": {"command": "clear-failed", "retirement_id": receipt_id, "cleared_sha": sha}})
     lane_state.update({"failed_sha": None, "failed_step": None, "failed_at": None})
-    for field in ("failed_worktree_retirement", "failed_worktree", "failed_run_id", "rejection"):
+    for field in ("failed_worktree_retirement", "failed_worktree", "failed_run_id", "rejection",
+                  "last_evaluated_sha", "last_evaluated_from"):
         lane_state.pop(field, None)
     store.save(state)
     retired = f"; kept worktree moved to {moved}" if moved else ""
