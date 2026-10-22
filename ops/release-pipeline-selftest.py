@@ -755,6 +755,19 @@ class LegacyHealthPromotion(Base):
         self.assertEqual(runner.calls, [])
         self.assertEqual(self.fx.slice_marks, [])
 
+    def test_recorded_run_recovers_when_failure_writer_omits_nested_promotion(self):
+        pipe, state, row, runner, _ = self.legacy(recorded=True)
+        main = self.fx.commit({'docs/after-health.md': 'source only'})
+        state['worker']['last_released_sha'] = main
+        pipe.store.save(state)
+        rows = pipe.store.records()
+        rows[-1].pop('promotion')
+        pipe.store.records_path.write_text(''.join(json.dumps(r) + '\n' for r in rows))
+        pipe.reconcile_worker_identity(state, pipe.cfg['worker'], main)
+        self.assertEqual(pipe.store.load()['worker']['last_released_sha'], row['sha'])
+        self.assertEqual(pipe.store.load()['worker']['failed_step'], 'health')
+        self.assertEqual(runner.calls, [])
+
     def test_source_only_checkpoint_can_advance_after_health_failure_then_main_releases_with_health(self):
         pipe, state, row, runner, _ = self.legacy(recorded=True)
         state['worker']['last_released_sha'] = row['sha']
@@ -793,7 +806,6 @@ class LegacyHealthPromotion(Base):
             'contradictory failure': lambda rows, state: rows[1].update(promotion={
                 'sha': rows[1]['sha'], 'provider_version_id': PRIOR,
                 'release_endpoint': rows[0]['release_endpoint']}),
-            'missing promotion field': lambda rows, state: rows[1].pop('promotion'),
             'unrelated checkpoint': lambda rows, state: state['worker'].update(last_released_sha='a' * 40),
         }
         for label, mutate in cases.items():
