@@ -2430,6 +2430,20 @@ class ReleaseJournalRecovery(Base):
 
 
 class Batching(Base):
+    def test_evaluated_head_releases_again_after_checkpoint_moves_backward(self):
+        released = self.fx.commit({"mcp-server/src/a.js": "release"})
+        head = self.fx.commit({"docs/source-only.md": "evaluated"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base,
+                                   "last_evaluated_sha": head,
+                                   "last_evaluated_from": released}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertIn("promote", runner.names())
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], head)
+        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
+
     def test_offline_live_poll_never_waits_on_the_wall_clock(self):
         with mock.patch.object(rp.time, "sleep", side_effect=AssertionError("real sleep in offline fixture")):
             pipe = self.fx.pipeline(FakeRunner())
