@@ -319,24 +319,6 @@ class WorkQueue:
                             {**self._state(row), 'started_at': at}, actor, reason, 'merge_started')
         return self.get(card)
 
-    def release_merge_batch(self, members, *, actor, reason):
-        """Release only a provider-rejected attempt in the same merge runs."""
-        with self.transaction():
-            for member in members:
-                card = member['pin']['card_id']
-                run = self.db.execute("SELECT MAX(id) FROM stage_runs WHERE card_id=? AND stage='merging'", (card,)).fetchone()[0]
-                if run != member['pin']['merge_run']:
-                    raise QueueChanged('merge run changed before rejected batch release')
-                data = json.loads(self._item(card)['data'])
-                if 'merge_inflight' not in data:
-                    raise QueueChanged('legacy_ownership')
-                before = data['merge_inflight']
-                pin = dict(repo=member['pin']['repo'], number=member['pr'], head=member['head'])
-                data['merge_inflight'] = [p for p in before if p != pin]
-                self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
-                if before != data['merge_inflight']:
-                    self._event(card, before, data['merge_inflight'], actor, reason, 'merge_pin_released')
-
     def advance_merge_pin(self, card, *, repo, pr, head, prepared, main, actor, reason, expected_order):
         if any(not re.fullmatch(r'[0-9a-f]{40}', sha or '') for sha in (head, prepared, main)) or head == prepared:
             raise ValueError('regeneration requires distinct pinned and prepared heads and a main SHA')

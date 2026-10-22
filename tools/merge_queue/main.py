@@ -152,11 +152,7 @@ def command(argv, *, cwd=None, data=None, timeout=None, observe=None, diagnostic
 
 
 class Queue:
-    def __init__(self, state: Path, root: Path = ROOT, gap: float = 2.0, batch_size: int = 1):
-        if not isinstance(batch_size, int) or not 1 <= batch_size <= 5:
-            raise ValueError("batch size must be between 1 and 5")
-        self.batch_size = batch_size
-        self.batch_children: dict[int, subprocess.Popen] = {}
+    def __init__(self, state: Path, root: Path = ROOT, gap: float = 2.0):
         self.state, self.root, self.gap = state, root, gap
         state.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(state / 'queue.sqlite3', timeout=BOUNDS['sqlite']['seconds'])
@@ -182,16 +178,13 @@ class Queue:
             CREATE TABLE IF NOT EXISTS waits (
                 owner TEXT NOT NULL, kind TEXT NOT NULL, deadline REAL NOT NULL,
                 PRIMARY KEY(owner,kind));
-            CREATE TABLE IF NOT EXISTS batches (
-                id INTEGER PRIMARY KEY, repo TEXT NOT NULL, members TEXT NOT NULL, phase TEXT NOT NULL,
-                base TEXT, branch TEXT, candidate TEXT, tree TEXT, pr INTEGER, started REAL, mutation TEXT, refreshed INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS service_stops (key TEXT PRIMARY KEY, reason TEXT NOT NULL);
         ''')
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
             additions = {
                 'entries': {'merge_attempts': 'INTEGER NOT NULL DEFAULT 0',
-                            'merged_commit': 'TEXT', 'batch_id': 'INTEGER',
+                            'merged_commit': 'TEXT',
                             'transient_attempts': 'INTEGER NOT NULL DEFAULT 0',
                             'read_attempts': 'INTEGER NOT NULL DEFAULT 0',
                             'github_attempts': 'INTEGER NOT NULL DEFAULT 0',
@@ -730,17 +723,14 @@ class Queue:
                     self.event(REPOS[0], 0, 'dispatch_transport_stopped', str(exc))
                     self.db.execute("UPDATE entries SET phase='blocked',outcome='dispatch_transport_stopped' WHERE phase='conflict'")
 
-    def process_identity(self, pid, *markers):
+    def dispatcher_identity(self, pid, receipt):
         if not pid:
             return None
         rows = command(['ps', '-axo', 'pid=,lstart=,command=']).splitlines()
         text = next((line.strip() for line in bounded_items('snapshot', rows) if line.split() and line.split()[0] == str(pid)), '')
-        if not text or any(str(marker) not in text for marker in markers):
+        if str(self.root / 'tools/room-bridge/dispatch.py') not in text or str(receipt) not in text:
             return None
         return hashlib.sha256(text.encode()).hexdigest()
-
-    def dispatcher_identity(self, pid, receipt):
-        return self.process_identity(pid, self.root / 'tools/room-bridge/dispatch.py', receipt)
 
     def observe_work_dispatch(self, a):
         if not a['work_card']:
@@ -988,7 +978,7 @@ class Queue:
                     self.event(repo, 0, 'discovery_unreadable', str(exc))
                 continue
             for p in bounded_items('snapshot', prs):
-                if self.held(p) or p['head']['ref'].startswith('merge-queue/batch-'):
+                if self.held(p):
                     continue
                 if self.db.execute('SELECT 1 FROM entries WHERE repo=? AND pr=? AND phase IN (\'pending\',\'merging\',\'refreshing\')',
                                    (repo, p['number'])).fetchone():
@@ -1022,17 +1012,6 @@ class Queue:
             with WorkQueue(default_path(), read_only=True) as work:
                 order = work.merge_order()['entries']
             self._observing_entries = set()
-            for key, child in bounded_items('snapshot', list(self.batch_children.items())):
-                if child.poll() is not None:
-                    child.wait(timeout=BOUNDS['child_reap']['seconds'])
-                    self.batch_children.pop(key)
-            if self.batch_size == 1:
-                for batch in self.db.execute("SELECT * FROM batches WHERE mutation IS NULL AND phase IN ('planned','preparing','publishing','ci','blocked','failed')").fetchall():
-                    self.invalidate_batch(batch, 'Batch flag disabled; cancel unissued composition')
-                    self.serial_batch(batch, 'Batch flag disabled; resume serial behavior')
-            if self.batch_size > 1 or self.db.execute("SELECT 1 FROM batches WHERE mutation IS NOT NULL AND phase IN ('landing','confirming','refreshing','rejected')").fetchone():
-                self.tick_batches(order)
-                return
             try:
                 waiting = set()
                 for pin in bounded_items('snapshot', order):
@@ -1062,414 +1041,6 @@ class Queue:
         if current['phase'] == 'done' and current['merged_commit']:
             self.complete_work_merge(current, card_id, merged=True)
         return wait
-
-    def batch_report(self, b, phase, detail):
-        with self.db:
-            self.db.execute('UPDATE batches SET phase=? WHERE id=?', (phase, b['id']))
-            for member in json.loads(b['members']):
-                if phase == 'blocked':
-                    self.db.execute("UPDATE entries SET phase='blocked' WHERE id=? AND phase!='done'", (member['entry'],))
-                self.event(b['repo'], member['pr'], 'batch_' + phase,
-                           f'Batch {b["id"]}: {detail}', member['entry'])
-
-    def new_batch(self, repo, members):
-        with self.db:
-            return self._new_batch(repo, members)
-
-    def _new_batch(self, repo, members):
-        cur = self.db.execute('INSERT INTO batches(repo,members,phase) VALUES(?,?,?)',
-                              (repo, json.dumps(members), 'planned'))
-        self.db.executemany("UPDATE entries SET phase='batch',batch_id=? WHERE id=?",
-                            [(cur.lastrowid, m['entry']) for m in members])
-        b = self.db.execute('SELECT * FROM batches WHERE id=?', (cur.lastrowid,)).fetchone()
-        for member in bounded_items('snapshot', members):
-            self.event(repo, member['pr'], 'batch_planned', f'Batch {b["id"]}: pinned group in work queue order', member['entry'])
-        return b
-
-    def serial_batch(self, b, detail):
-        if b['mutation']:
-            raise ActionUncertain('Issued batch landing must be reconciled before serial fallback')
-        with self.db:
-            self.db.executemany("UPDATE entries SET phase='pending',tested=NULL WHERE id=?",
-                                [(m['entry'],) for m in json.loads(b['members'])])
-            self.batch_report(b, 'serial', detail)
-
-    def split_batch(self, b, detail, conflict=None):
-        members = json.loads(b['members'])
-        if conflict is not None and conflict not in [m['pr'] for m in members]:
-            raise ValueError('Conflict receipt names a PR outside the batch')
-        with self.db:
-            if len(members) == 1:
-                self.serial_batch(b, detail + '; singleton resumes bounded serial retry rules')
-            elif conflict is not None:
-                culprit = [m for m in members if m['pr'] == conflict]
-                self._new_batch(b['repo'], [m for m in members if m['pr'] != conflict])
-                self.serial_batch(self._new_batch(b['repo'], culprit), detail + '; named conflict excluded from composition')
-                entry = self.db.execute('SELECT * FROM entries WHERE id=?', (culprit[0]['entry'],)).fetchone()
-                self.report(entry, 'conflict', detail + '; revise this pin or reconcile --retry for serial resolution', 'conflict')
-                self.batch_report(b, 'split', detail + '; excluded only the named conflicting PR')
-            else:
-                middle = len(members) // 2
-                self._new_batch(b['repo'], members[:middle])
-                self._new_batch(b['repo'], members[middle:])
-                self.batch_report(b, 'split', detail + '; retry halves against current main')
-
-    def invalidate_batch(self, b, detail):
-        child = self.batch_children.get(b['id'])
-        if child is not None and child.poll() is None:
-            try:
-                os.killpg(child.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-        with self.db:
-            self.db.executemany("UPDATE entries SET phase='pending',batch_id=NULL WHERE id=? AND tested IS NULL",
-                                [(m['entry'],) for m in json.loads(b['members'])])
-            self.batch_report(b, 'stale', detail)
-
-    def batch_members_current(self, b, order):
-        members = json.loads(b['members'])
-        identity = lambda pin: {k: v for k, v in pin.items() if k != 'position'}
-        selected = [identity(m['pin']) for m in members]
-        current = [identity(pin) for pin in order if pin['repo'] == b['repo'] and identity(pin) in selected]
-        if current != selected:
-            return False
-        seen = []
-        for pin in bounded_items('snapshot', (p for p in order if p['repo'] == b['repo'])):
-            if identity(pin) in selected:
-                seen.append(identity(pin))
-                if seen == selected:
-                    break
-                continue
-            e = self.db.execute('SELECT phase FROM entries WHERE repo=? AND pr=? AND approved=?',
-                                (b['repo'], pin['pr'], pin['head'])).fetchone()
-            if e and e['phase'] not in ('pending', 'batch', 'merging', 'merge_rejected', 'refreshing'):
-                continue
-            p = self.pr(b['repo'], pin['pr'])
-            if (p['state'] == 'open' and p['head']['sha'] == pin['head']
-                    and not p.get('draft') and not self.held(p) and p['base']['ref'] == 'main'):
-                return False
-        for member in members:
-            p = self.pr(b['repo'], member['pr'])
-            if (p['head']['sha'] != member['head'] or p['head']['ref'] != member['branch']
-                    or p['state'] != 'open' or p.get('draft') or self.held(p) or p['base']['ref'] != 'main'):
-                return False
-        return True
-
-    def tick_batches(self, order):
-        repos = dict.fromkeys([pin['repo'] for pin in order] + [r[0] for r in self.db.execute(
-            "SELECT DISTINCT repo FROM batches WHERE phase IN ('planned','preparing','publishing','ci','landing','confirming','refreshing','rejected')")])
-        for repo in bounded_items('snapshot', repos):
-            self.check_cancelled()
-            e = None
-            b = self.db.execute("SELECT * FROM batches WHERE repo=? AND phase IN "
-                                "('planned','preparing','publishing','ci','landing','confirming','refreshing','rejected') ORDER BY id LIMIT 1", (repo,)).fetchone()
-            try:
-                with self.github_scope(f'batch:{b["id"]}' if b else 'automatic'):
-                    if b:
-                        e = self.db.execute('SELECT * FROM entries WHERE id=?', (json.loads(b['members'])[0]['entry'],)).fetchone()
-                        if time.time() < e['retry_at']:
-                            continue
-                        self.advance_batch(b, order)
-                        with self.db:
-                            self.db.execute('UPDATE entries SET retry_at=0 WHERE id=?', (e['id'],))
-                            self.db.execute("DELETE FROM waits WHERE kind='github_retry' AND owner=?", (f'entry:{e["id"]}',))
-                        continue
-                    members = []
-                    for pin in bounded_items('snapshot', (p for p in order if p['repo'] == repo)):
-                        entry = self.enqueue(repo, pin['pr'], pin['head'], 'work queue projection', rearm=False)
-                        e = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
-                        self._github_entry = e['id']
-                        if time.time() < e['retry_at']:
-                            break
-                        previous = self.db.execute('SELECT phase FROM batches WHERE id=?', (e['batch_id'],)).fetchone()
-                        if previous and previous['phase'] == 'serial':
-                            if self.tick_entry(e, pin['card_id'], order):
-                                break
-                            continue
-                        if e['batch_id'] is not None or e['phase'] not in ('pending', 'merging', 'merge_rejected', 'refreshing'):
-                            continue
-                        if e['merge_attempts'] >= MAX_ATTEMPTS:
-                            self.report(e, 'merge_exhausted', 'Batch landing attempt cap reached', 'exhausted')
-                            continue
-                        if e['tested'] is not None:
-                            self.tick_entry(e, pin['card_id'], order)
-                            break
-                        p = self.pr(repo, pin['pr'])
-                        if p.get('merged') or p['state'] != 'open':
-                            self.tick_entry(e, pin['card_id'], order)
-                            continue
-                        if p['head']['sha'] != pin['head']:
-                            self.report(e, 'head_moved', 'Live head differs from the approved SHA', 'superseded')
-                            continue
-                        if p.get('draft') or self.held(p) or p['base']['ref'] != 'main':
-                            continue
-                        if 'repo' in p['head'] and (not isinstance(p['head']['repo'], dict) or p['head']['repo'].get('full_name') != repo):
-                            self.report(e, 'batch_fork', 'Atomic head guard requires a branch in the same repository', 'blocked')
-                            continue
-                        if self.db.execute("SELECT 1 FROM actions WHERE repo=? AND pr=? AND phase!='done'", (repo, pin['pr'])).fetchone():
-                            self.report(e, 'batch_action_pending', 'Reconcile existing provider action before batching', 'blocked')
-                            continue
-                        if not self.green(repo, pin['pr'], pin['head']):
-                            self.wait(e, 'ci', 'waiting_ci', 'Pinned head must pass hosted CI before batch selection')
-                            break
-                        members.append(dict(pin=pin, entry=entry, pr=pin['pr'], head=pin['head'], branch=p['head']['ref']))
-                        if len(members) >= self.batch_size:
-                            break
-                    if members:
-                        self.new_batch(repo, members)
-            except GitHubReadPaused as exc:
-                if b:
-                    self.batch_report(b, b['phase'], str(exc))
-                elif e:
-                    self.entry_failed(e, exc)
-            except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
-                if b:
-                    current = self.db.execute('SELECT * FROM batches WHERE id=?', (b['id'],)).fetchone()
-                    if current['mutation']:
-                        self.batch_report(b, current['phase'], str(exc) + '; observe existing landing intent')
-                    elif not isinstance(exc, ValueError) and not self.entry_failed(e, exc):
-                        self.batch_report(b, current['phase'], str(exc) + '; bounded retry with backoff')
-                    else:
-                        self.batch_report(b, 'blocked', str(exc) + '; only these members require reconciliation')
-                elif e:
-                    self.entry_failed(e, exc)
-                else:
-                    with self.db:
-                        self.event(repo, 0, 'batch_selection_failed', str(exc))
-
-    def advance_batch(self, b, order):
-        repo, phase = b['repo'], b['phase']
-        members = json.loads(b['members'])
-        directory = self.state / 'batches' / str(b['id'])
-        receipt = directory / 'receipt.json'
-        if phase == 'refreshing':
-            self.refresh_batch(b)
-            return
-        if phase == 'rejected':
-            if self.confirm_batch(b):
-                return
-            with WorkQueue(default_path()) as work:
-                work.release_merge_batch(members, actor='merge-daemon', reason=f'Batch {b["id"]}: atomic provider rejection proved no ref update')
-                changed = [m for m in members if self.pr(repo, m['pr'])['head']['sha'] != m['head']]
-                for member in changed:
-                    work.finish_merge(member['pin']['card_id'], repo=repo, pr=member['pr'], head=member['head'],
-                                      merged=False, actor='merge-daemon',
-                                      reason=f'Batch {b["id"]}: provider rejected the atomic attempt; moved pin stopped without merge')
-            with self.db:
-                self.db.executemany('UPDATE entries SET tested=NULL WHERE id=?', [(m['entry'],) for m in members])
-                self.invalidate_batch(b, 'Atomic provider rejection confirmed; reselect current pins')
-                for member in changed:
-                    e = self.db.execute('SELECT * FROM entries WHERE id=?', (member['entry'],)).fetchone()
-                    self.report(e, 'head_moved', 'Atomic rejection stopped the moved pin; a new reviewed pin is required', 'superseded')
-            return
-        if phase in ('landing', 'confirming'):
-            self.confirm_batch(b)
-            return
-        if not self.batch_members_current(b, order):
-            self.invalidate_batch(b, 'Head, base, hold, or work queue selection changed')
-            return
-        if phase == 'planned':
-            self.fetch(repo, *(m['head'] for m in members))
-            base = self.git(repo, 'rev-parse', 'origin/main').strip()
-            branch = f'merge-queue/batch-{b["id"]}-{base[:12]}'
-            source = self.state / 'repos' / (repo.split('/')[-1] + '.git')
-            request = dict(repo=repo, base=base, branch=branch, members=members,
-                           source=str(source.resolve()), runtime=str(self.root.resolve()))
-            directory.mkdir(parents=True, exist_ok=True)
-            receipt.unlink(missing_ok=True)
-            (directory / 'request.json').write_text(json.dumps(request))
-            with self.db:
-                self.db.execute('UPDATE batches SET base=?,branch=?,started=? WHERE id=?', (base, branch, time.time(), b['id']))
-                self.batch_report(b, 'preparing', 'Compose pinned heads and regenerate once')
-            with (directory / 'compose.log').open('a') as log:
-                process = subprocess.Popen([sys.executable, str(ROOT / 'tools/merge_queue/compose.py'),
-                                            str(directory / 'request.json'), str(receipt)],
-                                           env=scrubbed_env(), stdin=subprocess.DEVNULL,
-                                           stdout=log, stderr=log, start_new_session=True)
-            self.batch_children[b['id']] = process
-            (directory / 'process.json').write_text(json.dumps(dict(pid=process.pid,
-                identity=self.process_identity(process.pid, ROOT / 'tools/merge_queue/compose.py', directory / 'request.json'))))
-            return
-        if phase == 'preparing':
-            child = self.batch_children.get(b['id'])
-            if child is not None and child.poll() is not None:
-                child.wait(timeout=BOUNDS['child_reap']['seconds'])
-                self.batch_children.pop(b['id'])
-            if not receipt.exists():
-                if child is None:
-                    process_path = directory / 'process.json'
-                    process = json.loads(process_path.read_text()) if process_path.exists() else {}
-                    identity = self.process_identity(process.get('pid'), ROOT / 'tools/merge_queue/compose.py', directory / 'request.json')
-                    if not identity or identity != process.get('identity'):
-                        self.batch_report(b, 'planned', 'Restart resumes missing local composition with bounded retry')
-                        raise CommandFailed('Local composer disappeared without a receipt; recompose with backoff')
-                if time.time() >= b['started'] + BOUNDS['regeneration']['seconds']:
-                    if child is not None and child.poll() is None:
-                        os.killpg(child.pid, signal.SIGTERM)
-                    self.batch_report(b, 'blocked', 'Composition deadline expired; inspect local process and receipt')
-                return
-            output = json.loads(receipt.read_text())
-            if output['request'] != json.loads((directory / 'request.json').read_text()):
-                raise ValueError('Composition receipt does not match the pinned request')
-            if output.get('conflict'):
-                self.split_batch(b, output['detail'], conflict=output['conflict'])
-                return
-            if output.get('error'):
-                raise ValueError('Composition failed: ' + output['error'])
-            candidate, tree = output['candidate'], output['tree']
-            if not SHA.fullmatch(candidate) or not SHA.fullmatch(tree):
-                raise ValueError('Invalid composition receipt')
-            if self.git(repo, 'rev-parse', candidate+'^{tree}').strip() != tree:
-                raise ValueError('Candidate tree differs from composition receipt')
-            composed = output.get('members')
-            if not isinstance(composed, list) or len(composed) != len(members):
-                raise ValueError('Composition receipt is missing member squash trees')
-            previous = b['base']
-            for member, item in zip(members, composed):
-                if (item['pr'] != member['pr'] or item['head'] != member['head']
-                        or not SHA.fullmatch(item['commit']) or not SHA.fullmatch(item['tree'])):
-                    raise ValueError('Composition receipt changed member order or pins')
-                if (self.git(repo, 'rev-list', '--parents', '-n', '1', item['commit']).split()
-                        != [item['commit'], previous]
-                        or self.git(repo, 'rev-parse', item['commit']+'^{tree}').strip() != item['tree']):
-                    raise ValueError('Composition receipt changed the linear squash history')
-                previous = item['commit']
-            if previous != candidate or composed[-1]['tree'] != tree:
-                raise ValueError('Final squash differs from the CI candidate')
-            with self.db:
-                self.db.execute('UPDATE batches SET candidate=?,tree=? WHERE id=?', (candidate, tree, b['id']))
-                self.batch_report(b, 'publishing', f'Composed {candidate}, tree {tree}; receipt {receipt}')
-            return
-        if phase == 'publishing':
-            # Both operations reconcile by unique branch before any repeat.
-            remote_head = self.git(repo, 'ls-remote', 'origin', 'refs/heads/'+b['branch']).strip()
-            if not remote_head:
-                self.git(repo, 'push', 'origin', f'{b["candidate"]}:refs/heads/{b["branch"]}')
-            elif remote_head.split()[0] != b['candidate']:
-                raise ValueError('Published candidate branch moved')
-            prs = [p for p in self.pages(f'repos/{repo}/pulls?state=open&per_page=100') if p['head']['ref'] == b['branch']]
-            if len(prs) > 1:
-                raise ValueError('Multiple candidate PRs; reconcile before retry')
-            p = prs[0] if prs else self.api(f'repos/{repo}/pulls', '-X', 'POST', '-f', 'base=main',
-                                          '-f', 'head='+b['branch'], '-f', f'title=Merge queue batch {b["id"]}',
-                                          '-f', 'body=CI candidate for pinned work queue heads. Actual landing uses guarded serial squashes and their own CI.')
-            with self.db:
-                self.db.execute('UPDATE batches SET pr=?,started=? WHERE id=?', (p['number'], time.time(), b['id']))
-                self.batch_report(b, 'ci', f'Hosted CI candidate PR #{p["number"]} at {b["candidate"]}')
-            return
-        self.fetch(repo, b['candidate'])
-        if self.git(repo, 'rev-parse', 'origin/main').strip() != b['base']:
-            with self.db:
-                self.db.execute('UPDATE batches SET candidate=NULL,tree=NULL,pr=NULL WHERE id=?', (b['id'],))
-                self.batch_report(b, 'planned', 'Main advanced; recompose the same ordered pins on current main')
-            return
-        candidate_pr = self.pr(repo, b['pr'])
-        if (candidate_pr['head']['sha'] != b['candidate'] or candidate_pr['base']['ref'] != 'main'
-                or candidate_pr['state'] != 'open' or candidate_pr.get('draft') or self.held(candidate_pr)):
-            raise ValueError('Candidate PR changed; no landing authorized')
-        ci = self.batch_ci(b)
-        if ci == 'red':
-            self.split_batch(b, f'Hosted CI failed at {b["candidate"]}')
-            return
-        if ci != 'green':
-            if time.time() >= b['started'] + CI_WAIT_SECONDS:
-                self.batch_report(b, 'blocked', 'Hosted CI deadline expired; reconcile before retry')
-            return
-        self.check_cancelled()
-        if not self.batch_members_current(b, order):
-            self.invalidate_batch(b, 'Head, base, hold, or queue selection changed during CI readback')
-            return
-        self.serial_batch(b, 'Candidate CI passed; serial guarded squash landing is required: '
-                          'protected ref enforcement, member attribution and prefix CI are unproven')
-
-    def batch_ci(self, b):
-        def validate(rules):
-            if not isinstance(rules, list) or any(not isinstance(r, dict) or not isinstance(r.get('type'), str) for r in rules):
-                raise ValueError('Invalid branch rules readback')
-            for rule in rules:
-                if rule['type'] == 'required_status_checks':
-                    checks = rule['parameters']['required_status_checks']
-                    if not isinstance(checks, list) or any(not isinstance(c['context'], str) or not c['context'] for c in checks):
-                        raise ValueError('Invalid required status checks')
-        rules = self.api(f'repos/{b["repo"]}/rules/branches/main', validate=validate)
-        required = [check for rule in rules if rule['type'] == 'required_status_checks'
-                    for check in rule['parameters']['required_status_checks']]
-        if not required:
-            raise ValueError('No required CI checks configured; refuse unverified landing')
-        runs = self.api_pages(f'repos/{b["repo"]}/commits/{b["candidate"]}/check-runs?per_page=100', 'check_runs')
-        statuses = self.pages(f'repos/{b["repo"]}/commits/{b["candidate"]}/statuses?per_page=100')
-        pending = False
-        for check in required:
-            matching = [r for r in runs if r['name'] == check['context'] and r.get('head_sha') == b['candidate']
-                        and (not check.get('integration_id') or r['app']['id'] == check['integration_id'])]
-            if matching:
-                run = max(matching, key=lambda r: r['id'])
-                if run['status'] != 'completed':
-                    pending = True
-                elif run['conclusion'] != 'success':
-                    return 'red'
-            else:
-                matching_status = [s for s in statuses if s['context'] == check['context'] and s.get('sha') == b['candidate']
-                                   and not check.get('integration_id')]
-                if not matching_status or matching_status[0]['state'] == 'pending':
-                    pending = True
-                elif matching_status[0]['state'] != 'success':
-                    return 'red'
-        return 'pending' if pending else 'green'
-
-    def confirm_batch(self, b):
-        if not b['mutation']:
-            return
-        self.fetch(b['repo'], b['candidate'])
-        d = self.state / 'repos' / (b['repo'].split('/')[-1] + '.git')
-        ancestor = subprocess.run(['git', '-C', str(d), 'merge-base', '--is-ancestor', b['candidate'], 'origin/main'],
-                                  capture_output=True, env=scrubbed_env(), timeout=BOUNDS['command']['seconds'])
-        if ancestor.returncode == 1:
-            if time.time() >= b['started'] + BOUNDS['provider_merge']['seconds']:
-                self.batch_report(b, 'blocked', 'Landing uncertain; intent retained; explicit reconciliation required')
-            return
-        if ancestor.returncode != 0 or self.git(b['repo'], 'rev-parse', b['candidate']+'^{tree}').strip() != b['tree']:
-            raise ValueError('Landed batch tree verification failed')
-        for member in json.loads(b['members']):
-            p = self.pr(b['repo'], member['pr'])
-            if (p.get('merged') is not True or p['state'] != 'closed' or p['head']['sha'] != member['head']
-                    or p['base']['ref'] != 'main'):
-                phase = 'blocked' if time.time() >= b['started'] + BOUNDS['provider_merge']['seconds'] else 'confirming'
-                self.batch_report(b, phase, f'Waiting for exact-head provider merge receipt for PR #{member["pr"]}; landing intent retained')
-                return
-            self.git(b['repo'], 'merge-base', '--is-ancestor', member['head'], b['candidate'])
-            with self.db:
-                self.db.execute("UPDATE entries SET phase='done',outcome='merged',merged_commit=? WHERE id=?", (b['candidate'], member['entry']))
-            e = self.db.execute('SELECT * FROM entries WHERE id=?', (member['entry'],)).fetchone()
-            self.complete_work_merge(e, member['pin']['card_id'], merged=True)
-        with self.db:
-            if b['phase'] != 'refreshing':
-                self.db.execute('UPDATE batches SET started=? WHERE id=?', (time.time(), b['id']))
-            self.batch_report(b, 'refreshing', f'Exact tested commit {b["candidate"]}, tree {b["tree"]}, confirmed on main; all PR merge receipts consumed')
-        return True
-
-    def refresh_batch(self, b):
-        members = json.loads(b['members'])
-        if b['refreshed'] == len(members):
-            self.batch_report(b, 'done', 'All member merges verified; post-merge observations finished')
-            return
-        member = members[b['refreshed']]
-        try:
-            complete = self.refresh(b['repo'], member['branch'])
-            if not complete:
-                if time.time() < b['started'] + BOUNDS['refresh']['seconds']:
-                    return
-                with self.db:
-                    self.event(b['repo'], member['pr'], 'refresh_exhausted', 'Post-merge refresh deadline expired', member['entry'])
-        except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
-            terminal = isinstance(exc, (GitHubExhausted, WaitExpired, ActionExhausted)) or getattr(exc, 'github_attempts', 0) >= MAX_ATTEMPTS
-            if not terminal and time.time() < b['started'] + BOUNDS['refresh']['seconds']:
-                self.batch_report(b, 'refreshing', str(exc))
-                return
-            with self.db:
-                self.event(b['repo'], member['pr'], 'refresh_exhausted', str(exc), member['entry'])
-        with self.db:
-            self.db.execute('UPDATE batches SET refreshed=refreshed+1 WHERE id=?', (b['id'],))
 
     def complete_work_merge(self, e, card_id, *, merged):
         with WorkQueue(default_path()) as work:
@@ -1805,13 +1376,9 @@ class Queue:
 
     def status(self):
         for e in bounded_items('snapshot', self.db.execute(
-                "SELECT * FROM entries WHERE batch_id IS NULL AND phase IN ('blocked','exhausted') ORDER BY id").fetchall()):
+                "SELECT * FROM entries WHERE phase IN ('blocked','exhausted') ORDER BY id").fetchall()):
             self.reconcile_merged(e)
-        rows = [dict(r) for r in bounded_items('snapshot', self.db.execute('SELECT * FROM entries ORDER BY id'))]
-        for row in bounded_items('snapshot', rows):
-            if row['batch_id'] is not None:
-                row['batch'] = dict(self.db.execute('SELECT id,phase,candidate,tree,pr FROM batches WHERE id=?', (row['batch_id'],)).fetchone())
-        return rows
+        return [dict(r) for r in bounded_items('snapshot', self.db.execute('SELECT * FROM entries ORDER BY id'))]
 
     def recover_work_card(self, card_id, *, expected_revision, actor, reason):
         """End stale card ownership, retaining all journal and per-pin facts."""
@@ -1896,59 +1463,6 @@ class Queue:
 
     def _reconcile(self, entry, retry=False):
         e = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
-        b = self.db.execute('SELECT * FROM batches WHERE id=?', (e['batch_id'],)).fetchone() if e else None
-        if b and b['phase'] == 'serial' and not e['tested']:
-            p = self.pr(e['repo'], e['pr'])
-            if (p['state'] != 'open' or p['head']['sha'] != e['approved']
-                    or self.held(p) or p['base']['ref'] != 'main'):
-                raise RuntimeError('Serial retry requires the same open approved head, main base and no hold')
-            if retry:
-                self.rearm_reads(entry)
-                self.report(e, 'reconciled', 'Explicit retry resumes bounded serial rules for this member', 'pending')
-            return
-        if b and b['phase'] != 'serial':
-            if b['phase'] == 'failed' and not b['mutation'] and len(json.loads(b['members'])) == 1:
-                if retry:
-                    self.serial_batch(b, 'Explicit retry releases the failed singleton to serial rules')
-                    self._reconcile(entry, retry)
-                return
-            if b['mutation'] and self.confirm_batch(b):
-                return
-            if not retry:
-                self.batch_report(b, b['phase'], 'Explicit reconcile --retry can rearm after provider and receipt checks')
-                return
-            if b['phase'] != 'blocked':
-                raise RuntimeError('Only a blocked batch may be explicitly rearmed')
-            members = json.loads(b['members'])
-            if any(self.db.execute('SELECT merge_attempts FROM entries WHERE id=?', (m['entry'],)).fetchone()[0] >= MAX_ATTEMPTS for m in members):
-                raise RuntimeError('Batch landing attempt cap reached')
-            if b['mutation']:
-                with WorkQueue(default_path(), read_only=True) as work:
-                    order = work.merge_order()['entries']
-                if not self.batch_members_current(b, order):
-                    raise RuntimeError('Uncertain batch pins changed; retain intent for provider reconciliation')
-                self.fetch(b['repo'], b['candidate'])
-                if self.git(b['repo'], 'rev-parse', 'origin/main').strip() != b['base']:
-                    raise RuntimeError('Uncertain batch base changed; retain intent for provider reconciliation')
-                for m in members:
-                    if self.merge_pending(b['repo'], m['pr'], m['head']):
-                        raise RuntimeError('Provider owns a pending merge; retain batch intent')
-                self.batch_report(b, 'confirming', 'Legacy issued intent retained for observation only; never reissue an atomic ref write')
-            elif b['pr']:
-                self.batch_report(b, 'ci', 'Explicit retry of CI observation; original deadline retained')
-            elif b['candidate']:
-                self.batch_report(b, 'publishing', 'Explicit retry will reconcile branch and PR before any publication')
-            elif (self.state / 'batches' / str(b['id']) / 'receipt.json').exists():
-                self.batch_report(b, 'preparing', 'Explicit retry consumes existing composition receipt')
-            else:
-                raise RuntimeError('Missing composition receipt; inspect process before recovery')
-            with self.db:
-                scope = f'batch:{b["id"]}'
-                for member in members:
-                    self._clear_reads(member['entry'])
-                self.db.execute('DELETE FROM github_failures WHERE scope=? AND is_read=1', (scope,))
-                self.db.execute('UPDATE github_failures SET stopped=0 WHERE scope=? AND is_read=0', (scope,))
-            return
         if not e or e['phase'] not in ('merging', 'merge_rejected', 'exhausted', 'blocked') or not e['tested']:
             raise RuntimeError('reconciliation requires a persisted merge intent')
         p = self.pr(e['repo'], e['pr'])
@@ -2144,10 +1658,8 @@ class Queue:
             self.stopped = False
             def stop(*_):
                 self.stopped = True
-                processes = [*self.batch_children.values(), getattr(self, 'preparation_process', None)]
-                for process in processes:
-                    if process is None or process.poll() is not None:
-                        continue
+                process = getattr(self, 'preparation_process', None)
+                if process is not None:
                     try:
                         os.killpg(process.pid, signal.SIGTERM)
                     except ProcessLookupError:
@@ -2176,10 +1688,9 @@ class Queue:
                                 f.write(json.dumps({'outcome': 'discovery_failed', 'detail': str(exc)}) + '\n')
                     self.tick()
                     self.dispatch_conflicts()
-                    if not discover and legacy is None and not self.children and not self.batch_children and not self.db.execute(
+                    if not discover and legacy is None and not self.children and not self.db.execute(
                             "SELECT 1 FROM entries WHERE phase IN ('pending','merging','merge_rejected','refreshing') "
-                            "UNION ALL SELECT 1 FROM actions WHERE kind='dispatch' AND phase IN ('planned','issued') "
-                            "UNION ALL SELECT 1 FROM batches WHERE phase IN ('planned','preparing','publishing','ci','landing','confirming','refreshing','rejected') LIMIT 1").fetchone():
+                            "UNION ALL SELECT 1 FROM actions WHERE kind='dispatch' AND phase IN ('planned','issued') LIMIT 1").fetchone():
                         with (self.state / 'queue.log').open('a') as f:
                             f.write(json.dumps({'outcome': 'idle',
                                                 'detail': 'No runnable entries or active conflict dispatches; discovery disabled'}) + '\n')
@@ -2205,7 +1716,6 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--state', type=Path, default=Path(canonical_checkout()) / 'out/merge-queue')
     p.add_argument('--root', type=Path, default=ROOT)
-    p.add_argument('--batch-size', type=int, choices=range(1, 6), default=1)
     sub = p.add_subparsers(dest='cmd', required=True)
     run = sub.add_parser('run')
     run.add_argument('--poll', type=float, default=BOUNDS['poll']['seconds'])
@@ -2240,7 +1750,7 @@ def main():
         if name == 'migrate-holds':
             migration.add_argument('--apply', action='store_true')
     a = p.parse_args()
-    q = Queue(a.state, a.root, batch_size=a.batch_size)
+    q = Queue(a.state, a.root)
     if a.cmd == 'run':
         q.run(a.poll, not a.no_discover, a.legacy)
     elif a.cmd == 'submit':
