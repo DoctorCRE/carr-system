@@ -215,14 +215,16 @@ def test_queue_task_to_a_desktop_held_thread_is_never_left_pending_for_a_retry()
         started.append(thread)
         return {"status": "delivered", "thread_id": thread, "mode": "start"}
 
-    with tempfile.TemporaryDirectory() as td, \
+    with tempfile.TemporaryDirectory() as td, catalog_fixture(), \
          mock.patch.object(dispatch.codex_ipc, "thread_owner", return_value="owner-1"), \
          mock.patch.object(dispatch.codex_ipc, "start_turn", side_effect=router_start_turn), \
-         mock.patch.object(dispatch.subprocess, "run", return_value=Proc()):
+         mock.patch.object(dispatch, "_run_headless_process", side_effect=AssertionError("fixture must use provider_run")), \
+         mock.patch.object(dispatch.subprocess, "run", return_value=Proc()) as provider:
         def dispatch_queue(prompt):  # the shape of bridge.run_once's closure
             return dispatch.dispatch("codex-desk", prompt, registry=cast(Any, Reg()),
                                      results_path=Path(td) / "r.jsonl")
         out = executor.start("sol", dispatch_call=dispatch_queue, now="2026-09-27T00:00:00+00:00")
+    provider.assert_called_once()
     assert started == [], "queue work must never start a Desktop turn"
     assert out.get("outcome") != "pending", out  # nothing waits on a log that never fills
 
