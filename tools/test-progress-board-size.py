@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Regression for the live board's duplicated watchdog command diagnostics."""
 import copy
+import hashlib
 import importlib.util
 import os
 import unittest
@@ -253,6 +254,149 @@ class SnapshotSizeTests(unittest.TestCase):
         self.assertTrue(diagnostic["blocked_reason"].endswith("diagnostic line\n"))
         self.assertNotIn("note", snapshot["tasks"]["task-0"])
         self.assertEqual(state, before, "publishing must preserve full local diagnostics")
+
+
+class PagedPublicationTests(unittest.TestCase):
+    def setUp(self):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(patch.object(tempfile, "tempdir", str(root)))
+        self.enterContext(patch.dict(board.os.environ, {"PROGRESS_BOARD_ROOT": str(root)}))
+        self.enterContext(patch.object(board.repo_lib("machine_role"), "read_marker", return_value="primary"))
+        self.enterContext(patch.object(board, "now_utc", return_value=datetime(2026, 10, 21, 12, tzinfo=timezone.utc)))
+        (root / "boards").mkdir()
+        self.path = root / "boards/carr-v5.json"
+        self.store = {}
+        self.writes = []
+        self.enterContext(patch.object(board, "call_verb", side_effect=self.call))
+
+    def call(self, verb, args):
+        key = args["board_id"]
+        if verb == "read-progress-board":
+            return {"ok": True, "snapshot": copy.deepcopy(self.store.get(key)), "questions": []}
+        self.assertEqual(verb, "publish-board-snapshot")
+        self.assertLessEqual(board.snapshot_size(args["snapshot"]), board.SNAPSHOT_BUDGET)
+        self.assertEqual(args["base_version"], self.store.get(key, {}).get("version", 0))
+        self.store[key] = {"version": args["base_version"] + 1, "snapshot_json": copy.deepcopy(args["snapshot"])}
+        self.writes.append(key)
+        return {"ok": True, "snapshot": copy.deepcopy(self.store[key])}
+
+    def test_queue_growth_publishes_complete_snapshot_in_verified_bounded_pages(self):
+        state = {"project": "carr-v5", "tasks": {"open": {"title": "Open work", "status": "running"}},
+                 "notes": [{"text": "Keep this note."}]}
+        queue = {"schema": "room-work-queue/v1", "revision": 42,
+                 "items": [{"card_id": f"queue-{i}", "title": f"Queued work {i}", "stage": "review",
+                            "stages": [{"stage": "review", "elapsed": 12, "detail": "Synthetic stage evidence " * 40}],
+                            "last_event": {"at": "2026-10-21T12:00:00Z", "reason": "Review the work"}}
+                           for i in range(450)], "history": [], "omitted": {"finished": 0, "events": 0}}
+        self.path.write_text(json.dumps(state))
+        original = copy.deepcopy(queue)
+        with patch.object(board.work_queue_module(), "board_projection", return_value=queue):
+            result = board.publish_board("carr-v5", costs={"state": "unavailable", "providers": []}, refresh_inventory=False)
+        manifest = self.store["carr-v5"]["snapshot_json"]
+        pages = manifest["pagination"]["pages"]
+        content = []
+        for page in pages:
+            saved = self.call("read-progress-board", {"board_id": page["board_id"]})["snapshot"]
+            self.assertEqual(saved["version"], page["version"])
+            content.append(saved["snapshot_json"]["content"])
+        restored = json.loads("".join(content))
+        self.assertEqual(hashlib.sha256("".join(content).encode()).hexdigest(), manifest["pagination"]["digest"])
+        for page, text in zip(pages, content):
+            self.assertEqual(hashlib.sha256(text.encode()).hexdigest(), page["digest"])
+        self.assertEqual(restored["work_queue"], original)
+        self.assertEqual(restored["notes"], state["notes"])
+        self.assertEqual(restored["tasks"]["open"]["title"], "Open work")
+        self.assertEqual(queue, original)
+        omitted = manifest["pagination"]["omitted"]
+        self.assertEqual(omitted["work_queue.items"], 450 - len(manifest["work_queue"]["items"]))
+        self.assertTrue(any("read-progress-board" in note["text"] for note in manifest["notes"]))
+        self.assertEqual(result["snapshot_version"], 1)
+        self.assertEqual(self.writes[-1], "carr-v5")
+
+    def test_huge_unicode_note_is_lossless_and_repeat_tick_reuses_pages(self):
+        text = 'Unicode evidence 😀 "quoted"\\\n' * 30000
+        state = {"project": "carr-v5", "tasks": {}, "notes": [{"text": text}]}
+        self.path.write_text(json.dumps(state))
+        with patch.object(board.work_queue_module(), "board_projection", return_value=None):
+            board.publish_board("carr-v5", costs={}, refresh_inventory=False)
+            first = copy.deepcopy(self.store["carr-v5"])
+            writes = len(self.writes)
+            board.publish_board("carr-v5", costs={}, refresh_inventory=False)
+        self.assertEqual(self.store["carr-v5"], first)
+        self.assertEqual(self.writes[writes:], ["orchestrator"])
+        manifest = first["snapshot_json"]
+        restored = json.loads("".join(self.store[p["board_id"]]["snapshot_json"]["content"]
+                                     for p in manifest["pagination"]["pages"]))
+        self.assertEqual(restored["notes"], [{"text": text}])
+        self.assertEqual(manifest["pagination"]["omitted"]["notes"], 1)
+        self.assertIn('"notes": 1', manifest["notes"][0]["text"])
+
+    def test_page_outage_never_replaces_previous_manifest_or_its_pages(self):
+        state = {"project": "carr-v5", "tasks": {}, "notes": [{"text": "Original evidence " * 30000}]}
+        self.path.write_text(json.dumps(state))
+        with patch.object(board.work_queue_module(), "board_projection", return_value=None):
+            board.publish_board("carr-v5", costs={}, refresh_inventory=False)
+            previous = copy.deepcopy(self.store)
+            state["notes"][0]["text"] = "Replacement evidence " * 30000
+            self.path.write_text(json.dumps(state))
+            calls = 0
+            def outage(verb, args):
+                nonlocal calls
+                if verb == "publish-board-snapshot" and "-snapshot-" in args["board_id"]:
+                    calls += 1
+                    if calls == 2:
+                        raise RuntimeError("page outage")
+                return self.call(verb, args)
+            with patch.object(board, "call_verb", side_effect=outage):
+                with self.assertRaisesRegex(RuntimeError, "page outage"):
+                    board.publish_board("carr-v5", costs={}, refresh_inventory=False)
+            self.assertEqual(self.store["carr-v5"], previous["carr-v5"])
+            for page in previous["carr-v5"]["snapshot_json"]["pagination"]["pages"]:
+                self.assertEqual(self.store[page["board_id"]], previous[page["board_id"]])
+            board.publish_board("carr-v5", costs={}, refresh_inventory=False)
+        current = self.store["carr-v5"]["snapshot_json"]
+        restored = json.loads("".join(self.store[p["board_id"]]["snapshot_json"]["content"]
+                                     for p in current["pagination"]["pages"]))
+        self.assertEqual(restored["notes"], state["notes"])
+
+    def test_unverified_page_cannot_publish_a_manifest(self):
+        self.path.write_text(json.dumps({"project": "carr-v5", "tasks": {},
+                                         "notes": [{"text": "Evidence " * 40000}]}))
+        def no_readback(verb, args):
+            result = self.call(verb, args)
+            if verb == "read-progress-board" and "-snapshot-" in args["board_id"]:
+                result["snapshot"] = None
+            return result
+        with patch.object(board.work_queue_module(), "board_projection", return_value=None), \
+             patch.object(board, "call_verb", side_effect=no_readback):
+            with self.assertRaisesRegex(RuntimeError, "page did not read back"):
+                board.publish_board("carr-v5", costs={}, refresh_inventory=False)
+        self.assertNotIn("carr-v5", self.store)
+
+    def test_small_board_keeps_its_existing_reader_contract(self):
+        state = {"project": "carr-v5", "tasks": {"open": {"title": "Open work", "status": "running"}}}
+        self.path.write_text(json.dumps(state))
+        with patch.object(board.work_queue_module(), "board_projection", return_value=None):
+            expected = board.board_snapshot(state, costs={})
+            board.publish_board("carr-v5", costs={}, refresh_inventory=False)
+        self.assertEqual(self.store["carr-v5"]["snapshot_json"], expected)
+        self.assertNotIn("pagination", expected)
+
+    def test_growing_open_tasks_keep_true_totals_and_complete_page_access(self):
+        state = {"project": "carr-v5", "tasks": {
+            f"task-{i}": {"title": f"Open task {i} " + "details " * 150, "status": "running"}
+            for i in range(700)}}
+        self.path.write_text(json.dumps(state))
+        with patch.object(board.work_queue_module(), "board_projection", return_value=None):
+            board.publish_board("carr-v5", costs={}, refresh_inventory=False)
+        manifest = self.store["carr-v5"]["snapshot_json"]
+        restored = json.loads("".join(self.store[p["board_id"]]["snapshot_json"]["content"]
+                                     for p in manifest["pagination"]["pages"]))
+        self.assertEqual(set(restored["tasks"]), set(state["tasks"]))
+        self.assertEqual(manifest["task_counts"]["running"], 700)
+        self.assertEqual(manifest["pagination"]["omitted"]["tasks"], 700 - len(manifest["tasks"]))
+        self.assertIn('"tasks":', manifest["notes"][-1]["text"])
+        self.assertEqual(json.loads(self.path.read_text()), state)
 
 
 if __name__ == "__main__":

@@ -173,7 +173,7 @@ test("strict aggregate runs after failed classes and requires complete successfu
           cwd: new URL("../../", import.meta.url),
           env: { PATH: fixture + ":" + process.env.PATH, CLASSES_RESULT: result,
             DB_FULL: "true", FIXTURES_RESULT: "success",
-            GITHUB_REPOSITORY: "jbookout/carr-system", GITHUB_RUN_ID: "1",
+            GITHUB_REPOSITORY: "DoctorCRE/carr-system", GITHUB_RUN_ID: "1",
             GITHUB_RUN_ATTEMPT: "1", GITHUB_STEP_SUMMARY: join(fixture,"summary") },
           encoding: "utf8", timeout: 5000 });
         assert.ifError(output.error);
