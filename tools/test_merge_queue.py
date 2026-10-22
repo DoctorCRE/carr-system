@@ -44,7 +44,18 @@ if a[:2]==['api','graphql']:
  emit({'data':{'repository':{'pullRequest':{'headRefOid':p['head']['sha'],'state':'OPEN','mergeQueueEntry':{'id':'queued'} if d.get('server_queued') else None,'autoMergeRequest':None}}}});sys.exit()
 if a[0]=='api':
  path=a[1]; bits=path.split('/'); repo='/'.join(bits[1:3]); n=bits[4].split('?')[0] if len(bits)>4 else ''
- if bits[3]=='actions': emit(dict(workflow_runs=[dict(id=1,run_attempt=1,head_sha=d['merge_sha'],event='push',status='completed',conclusion=d.get('canary','success'))]));sys.exit()
+ if bits[3]=='actions':
+  commits=subprocess.check_output(['git','-C',d['remote'],'rev-list','--all'],text=True).split()
+  runs=[]
+  for sha in commits:
+   profile=d.get('canary_by_sha',{}).get(sha,{})
+   if isinstance(profile,str): profile=dict(conclusion=profile)
+   if profile.get('status')=='missing': continue
+   parallel='parallel-canary.yml' in path
+   runs.append(dict(id=int(sha[:8],16),run_attempt=profile.get('attempt',d.get('canary_attempt',2)),head_sha=sha,
+    head_branch=profile.get('branch','main'),event='workflow_dispatch' if parallel else 'push',display_title='parallel canary '+sha,
+    status=profile.get('status','completed'),conclusion=profile.get('conclusion',d.get('canary','success') if sha==d['merge_sha'] else 'success')))
+  emit(dict(workflow_runs=runs));sys.exit()
  if bits[3]=='rules': emit([dict(type='required_status_checks',parameters=dict(strict_required_status_checks_policy=False,required_status_checks=[dict(context='ops/ci.sh --strict' if repo=='jbookout/carr-system' else 'test')]))]);sys.exit()
  if bits[3].startswith('pulls?'): emit([[p for p in d['prs'].values() if p['repo']==repo and ('state=all' in path or p['state']=='open')]]); sys.exit()
  if bits[3]=='labels': emit({'name':'do_not_merge'});sys.exit()
@@ -71,6 +82,16 @@ if a[0]=='api':
   elif bits[-1].startswith('statuses'): emit([d.get('statuses',[])])
   else: raise AssertionError(a)
   sys.exit()
+if a[:2]==['workflow','run']:
+ sha=next(x.split('=',1)[1] for x in a if x.startswith('commit='))
+ d.setdefault('canary_by_sha',{})[sha]=dict(status='queued',attempt=1,conclusion=None)
+ save();sys.exit()
+if a[:2]==['run','rerun']:
+ commits=subprocess.check_output(['git','-C',d['remote'],'rev-list','--all'],text=True).split()
+ sha=next(sha for sha in commits if int(sha[:8],16)==int(a[2]))
+ profile=d.setdefault('canary_by_sha',{}).setdefault(sha,{})
+ profile['attempt']=2;profile['conclusion']=profile.get('rerun_conclusion','failure');profile['status']='completed'
+ save();sys.exit()
 if a[:2]==['pr','create']:
  repo=a[a.index('-R')+1];branch=a[a.index('--head')+1];n=max([p['number'] for p in d['prs'].values()])+1
  head=subprocess.check_output(['git','-C',d['remote'],'rev-parse',branch],text=True).strip()

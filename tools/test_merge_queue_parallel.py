@@ -400,12 +400,202 @@ class ParallelTests(unittest.TestCase):
         now = time.time()+module.CI_WAIT_SECONDS+1
         with patch.object(recovery, 'time', types.SimpleNamespace(time=lambda:now)):
             self.q.tick()
+        self.assertEqual(self.q.status()[0]['canary_phase'], 'canary')
+        now = time.time()+4*module.CI_WAIT_SECONDS+1
+        with patch.object(recovery, 'time', types.SimpleNamespace(time=lambda:now)):
+            self.q.tick()
         self.assertEqual(self.q.status()[0]['canary_phase'], 'blocked')
         self.q.reconcile(entry, retry=True)
         self.load()['canary'] = 'success'
         self.save()
         self.q.tick()
         self.assertEqual(self.q.status()[0]['canary_phase'], 'done')
+
+    def land_wave(self, count=4):
+        self.q.parallel_size = 4
+        self.data['dynamic_merge'] = True
+        for n in range(1, count+1):
+            self.git('switch', '-q', '-C', 'source-'+str(n), self.main)
+            (self.remote / ('source-'+str(n)+'.txt')).write_text(str(n)+'\n')
+            self.git('add', 'source-'+str(n)+'.txt')
+            self.git('commit', '-qm', 'source '+str(n))
+            head = self.git('rev-parse', 'HEAD').strip()
+            self.pr(n, head=head)
+            self.q.enqueue(module.REPOS[0], n, head)
+        self.git('switch', '-q', 'main')
+        self.q.tick()
+        for child in self.q.compositions.children.values():
+            child.wait(timeout=10)
+        self.q.tick()
+        self.q.tick()
+        return [self.load()['prs'][module.REPOS[0]+'#'+str(n)]['merge_commit_sha'] for n in range(1,count+1)]
+
+    def test_one_bad_landing_does_not_revert_its_three_innocent_descendants(self):
+        commits = self.land_wave()
+        self.load()['canary_by_sha'] = {sha:dict(conclusion='failure',attempt=2) for sha in commits}
+        self.save()
+        self.q.tick()
+        creates = [a for a in self.load()['calls'] if a[:2]==['pr','create']]
+        self.assertEqual(len(creates), 1, creates)
+        self.assertEqual(creates[0][creates[0].index('--head')+1], 'merge-queue/revert-'+commits[0])
+
+    def test_flaky_canary_reruns_once_and_green_retry_never_reverts(self):
+        commit = self.land_wave(1)[0]
+        self.load()['canary_by_sha'] = {commit:dict(conclusion='failure',attempt=1,rerun_conclusion='success')}
+        self.save()
+        self.q.tick()
+        calls = self.load()['calls']
+        self.assertFalse([a for a in calls if a[:2]==['pr','create']])
+        self.assertEqual(len([a for a in calls if a[:2]==['run','rerun']]),1)
+        self.q.tick()
+        self.assertEqual(self.q.status()[0]['canary_phase'], 'done')
+        self.assertFalse([a for a in self.load()['calls'] if a[:2]==['pr','create']])
+
+    def test_missing_exact_commit_canary_dispatches_once_across_restart(self):
+        commit = self.land_wave(1)[0]
+        self.load()['canary_by_sha'] = {commit:dict(status='missing')}
+        self.save()
+        self.q.tick()
+        calls = [a for a in self.load()['calls'] if a[:2]==['workflow','run']]
+        self.assertEqual(len(calls),1)
+        self.assertIn('commit='+commit,calls[0])
+        self.restart()
+        self.q.tick()
+        self.assertEqual(len([a for a in self.load()['calls'] if a[:2]==['workflow','run']]),1)
+
+    def test_ruleset_is_read_once_per_repository_per_tick(self):
+        self.q.parallel_size = 4
+        for n in range(1,5):
+            self.pr(n,head=self.updated)
+            self.q.enqueue(module.REPOS[0],n,self.updated)
+        self.q.tick()
+        reads = [a for a in self.load()['calls'] if a[0]=='api' and '/rules/branches/main' in a[1]]
+        self.assertEqual(len(reads),1)
+        for child in self.q.compositions.children.values():
+            child.wait(timeout=10)
+        self.q.tick()
+        reads = [a for a in self.load()['calls'] if a[0]=='api' and '/rules/branches/main' in a[1]]
+        self.assertEqual(len(reads),2)
+
+    def assert_cross_file_recomposition(self, source, landed):
+        self.q.parallel_size = 4
+        self.git('switch','-q','-C','cross-file-source',self.main)
+        path = self.remote / source
+        path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text('approved source\n')
+        self.git('add',source)
+        self.git('commit','-qm','source change')
+        head = self.git('rev-parse','HEAD').strip()
+        self.git('switch','-q','main')
+        self.pr(head=head)
+        self.q.enqueue(module.REPOS[0],1,head)
+        self.data['required'] = [dict(bucket='pending')]
+        self.save()
+        self.settle()
+        path = self.remote / landed
+        path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text('intervening landing\n')
+        self.git('add',landed)
+        self.git('commit','-qm','landed change')
+        self.load()['required'] = [dict(bucket='pass')]
+        self.save()
+        self.q.tick()
+        self.assertEqual(self.calls('merge'),[])
+        self.assertEqual(self.q.status()[0]['outcome'],'composing')
+
+    def test_different_migration_names_in_the_same_slot_recompose(self):
+        self.assert_cross_file_recomposition('migrations/1234_new_feature.sql','migrations/1234a_other_feature.sql')
+
+
+    def test_registry_source_and_generated_digest_recompose(self):
+        self.assert_cross_file_recomposition('mcp-server/src/doctrine.js',
+                                             'mcp-server/src/scac-mutation-registry.current.generated.js')
+
+    def test_two_different_inputs_of_one_generated_digest_overlap(self):
+        from tools.merge_queue.overlap import overlaps
+        pairs = [
+            ('ops/config/rule-triage.v1.json', 'ops/sync-core-rule-ids.py'),
+            ('mcp-server/test/fixtures/f03-design-contract-parity.v1.json',
+             'mcp-server/test/f03-sql-corpus-generator.mjs'),
+            ('hooks/guard-unattended.py', 'lib/hook_runtime.py'),
+            ('requirements.txt', 'requirements.lock'),
+        ]
+        for left, right in pairs:
+            with self.subTest(left=left, right=right):
+                self.assertTrue(overlaps({left}, {right}))
+                self.assertTrue(overlaps({right}, {left}))
+        self.assertFalse(overlaps({'tools/test_a.py'}, {'mcp-server/test/b.test.mjs'}))
+        self.assertFalse(overlaps({'tools/prepare_pr.py'}, {'ops/ci-liveness.py'}))
+        self.assertFalse(overlaps({'tools/prepare_pr.py'}, {'mcp-server/src/scac-mutation-registry.current.generated.js'}))
+        self.assertTrue(overlaps({'mcp-server/src/doctrine.js'}, {'mcp-server/src/scac-mutation-registry.current.generated.js'}))
+
+    def test_preexisting_red_main_is_never_reverted(self):
+        commit = self.land_wave(1)[0]
+        self.load()['canary_by_sha'] = {sha:dict(conclusion='failure',attempt=2) for sha in (self.main,commit)}
+        self.save()
+        self.q.tick()
+        self.assertFalse([a for a in self.load()['calls'] if a[:2]==['pr','create']])
+        self.assertEqual(self.q.status()[0]['canary_phase'], 'baseline_red')
+        entry = self.q.status()[0]['id']
+        self.q.reconcile(entry, retry=True)
+        self.load()['canary_by_sha'][commit] = dict(conclusion='success')
+        self.save()
+        self.q.tick()
+        self.assertEqual(self.q.status()[0]['canary_phase'], 'done')
+
+    def test_second_landing_is_only_culprit_after_first_is_green(self):
+        commits = self.land_wave()
+        self.load()['canary_by_sha'] = {sha:dict(conclusion='failure',attempt=2) for sha in commits[1:]}
+        self.save()
+        self.q.tick()
+        creates = [a for a in self.load()['calls'] if a[:2]==['pr','create']]
+        self.assertEqual(len(creates),1)
+        self.assertIn('merge-queue/revert-'+commits[1], creates[0])
+
+    def test_red_landing_waits_for_parent_canary(self):
+        commit = self.land_wave(1)[0]
+        self.load()['canary_by_sha'] = {commit:dict(conclusion='failure',attempt=2),self.main:dict(status='in_progress')}
+        self.save()
+        self.q.tick()
+        self.assertFalse([a for a in self.load()['calls'] if a[:2]==['pr','create']])
+        self.load()['canary_by_sha'][self.main] = dict(conclusion='success')
+        self.save()
+        self.q.tick()
+        self.assertEqual(len([a for a in self.load()['calls'] if a[:2]==['pr','create']]),1)
+
+    def test_confirmed_failure_reruns_once_across_lost_response(self):
+        commit = self.land_wave(1)[0]
+        self.load()['canary_by_sha'] = {commit:dict(conclusion='failure',attempt=1)}
+        self.save()
+        command = module.command
+        def lost(argv, **kwargs):
+            result = command(argv, **kwargs)
+            if argv[:3] == ['gh','run','rerun']:
+                raise module.CommandFailed('lost rerun response')
+            return result
+        with patch.object(module,'command',side_effect=lost):
+            self.q.tick()
+        self.restart()
+        self.q.tick()
+        self.assertEqual(len([a for a in self.load()['calls'] if a[:2]==['run','rerun']]),1)
+        self.assertEqual(len([a for a in self.load()['calls'] if a[:2]==['pr','create']]),1)
+
+    def test_revert_also_requires_the_expected_ruleset(self):
+        self.red_canary()
+        original = self.q.parallel_rules
+        with patch.object(self.q,'parallel_rules',return_value=False) as rules:
+            self.q.tick()
+        self.assertEqual(len(self.calls('merge')),1)
+        rules.assert_called_once_with(module.REPOS[0])
+        self.assertTrue(original(module.REPOS[0]))
+
+    def test_canary_from_another_branch_cannot_authorize_a_revert(self):
+        commit = self.land_wave(1)[0]
+        self.load()['canary_by_sha'] = {commit:dict(conclusion='failure',attempt=2,branch='untrusted')}
+        self.save()
+        self.q.tick()
+        self.assertFalse([a for a in self.load()['calls'] if a[:2]==['pr','create']])
+        self.assertEqual(len([a for a in self.load()['calls'] if a[:2]==['workflow','run']]),1)
 
 
 if __name__ == '__main__':

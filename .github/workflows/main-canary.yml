@@ -1,12 +1,23 @@
 # doctrine: engineering-workflow-sop
-# Every landing retains its own verdict for exact culprit recovery.
+# Serial pushes coalesce; parallel calls retain an exact-commit verdict.
 name: main canary
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "corpus/**"
+      - "audits/**"
+      - "video/**"
+      - "out/**"
+      - "**/*.md"
+  workflow_call:
+    inputs:
+      commit:
+        type: string
+        required: true
   workflow_dispatch:
 concurrency:
-  group: main-canary-${{ github.sha }}
+  group: ${{ inputs.commit && format('parallel-canary-{0}', inputs.commit) || 'main-canary' }}
   cancel-in-progress: false
 permissions:
   contents: read
@@ -22,6 +33,8 @@ jobs:
       reused: ${{ steps.resolve.outputs.reused }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit || github.sha }}
       - name: Resolve successful identical-tree class evidence
         id: resolve
         env:
@@ -65,6 +78,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.commit || github.sha }}
           # FULL HISTORY, for the freshness class only. actions/checkout defaults
           # to a depth of 1, which is why nothing here could ever have caught a
           # lost update: with no history there is no merge-base, so "has this

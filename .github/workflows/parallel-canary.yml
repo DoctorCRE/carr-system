@@ -1,0 +1,17 @@
+name: parallel canary
+run-name: parallel canary ${{ inputs.commit }}
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact landed commit or its first parent
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  canary:
+    uses: ./.github/workflows/main-canary.yml
+    with:
+      commit: ${{ inputs.commit }}

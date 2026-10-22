@@ -33,16 +33,19 @@ def test_the_canary_is_event_driven_and_never_always_on():
           "workflow_dispatch:" in y)
 
 
-def test_every_landing_gets_its_own_uncancelled_canary():
+def test_serial_canary_keeps_its_existing_filters_and_group():
     y = CANARY.read_text(encoding="utf-8")
     concurrency = re.search(r"^concurrency:\s*\n((?:[ \t]+[^\n]*\n)+)", y, re.M)
     check("the workflow declares concurrency", concurrency is not None)
     if concurrency is None:
         return
     settings = concurrency.group(1)
-    check("each landing has an independent canary group",
-          "group: main-canary-${{ github.sha }}" in settings)
-    check("no path filter can leave a landing without a verdict", "paths-ignore:" not in y)
+    check("serial canaries still coalesce in the original group",
+          "|| 'main-canary'" in settings)
+    check("serial canaries retain every original ignored path",
+          all(path in y for path in ('paths-ignore:', 'corpus/**', 'audits/**', 'video/**', 'out/**', '**/*.md')))
+    parallel = (REPO / '.github/workflows/parallel-canary.yml')
+    check("parallel mode has a separate exact-commit dispatcher", parallel.exists())
     check("a new merge cannot cancel the running canary and starve releases",
           re.search(r"^  cancel-in-progress: false\s*$", settings, re.M) is not None)
 
@@ -64,8 +67,18 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
           classes.get('if') == "${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}")
     main_steps = classes['steps']
     pr_steps = pr['jobs']['classes']['steps']
-    check('class execution and environment match PR CI',
-          main_steps == [st for st in pr_steps if st.get('name') != 'Require a written pull request description'])
+    expected = [st for st in pr_steps if st.get('name') != 'Require a written pull request description']
+    for step in expected:
+        if step.get('uses', '').startswith('actions/checkout@'):
+            step.setdefault('with', {})['ref'] = '${{ inputs.commit || github.sha }}'
+    check('class execution and environment match PR CI except the exact checkout', main_steps == expected)
+    parallel = workflow(REPO / '.github/workflows/parallel-canary.yml')
+    check('parallel wrapper only dispatches and reuses the same canary jobs',
+          set(parallel['on']) == {'workflow_dispatch'}
+          and parallel['jobs']['canary']['uses'] == './.github/workflows/main-canary.yml'
+          and parallel['jobs']['canary']['with']['commit'] == '${{ inputs.commit }}')
+    check('parallel results identify their target commit rather than dispatcher HEAD',
+          parallel['run-name'] == 'parallel canary ${{ inputs.commit }}')
     check('service containers match PR CI', classes['services'] == pr['jobs']['classes']['services'])
     aggregate = main['jobs']['canary']
     check('one aggregate main canary always reports',
@@ -157,7 +170,7 @@ def test_a_red_canary_stays_red_and_names_main():
 
 def main():
     for fn in (test_the_canary_is_event_driven_and_never_always_on,
-               test_every_landing_gets_its_own_uncancelled_canary,
+               test_serial_canary_keeps_its_existing_filters_and_group,
                test_parallel_classes_match_pr_ci_and_reuse_is_explicit,
                test_evidence_failure_runs_checks_and_uses_their_verdict,
                test_main_retains_migration_shadow_coverage,

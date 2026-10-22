@@ -1,0 +1,594 @@
+{
+  "source": {
+    "repo": "jbookout/carr-system",
+    "query": "gh pr list --repo jbookout/carr-system --state merged --base main --limit 50 --json number,mergedAt,files",
+    "raw_sha256": "a7da25bd67fb8215ba77ffa3a7a70cb1808bb39d68275bd72f952a48696d683f",
+    "window": [
+      "2026-10-19T22:00:13Z",
+      "2026-10-22T07:13:30Z"
+    ],
+    "file_limit_check": "Largest file list: 34 (below the 100-file page limit)"
+  },
+  "prs": [
+    {
+      "number": 1987,
+      "merged_at": "2026-10-19T22:00:13Z",
+      "files": [
+        "ops/ci-migration-gates-selftest.py",
+        "ops/staging-app-writer-recovery-selftest.py",
+        "ops/staging-authority-rollback-local-pg-gate.py",
+        "ops/staging-rollback-grants-selftest.py",
+        "tools/provision-staging-app-writer.py",
+        "tools/schema_snapshot_grants.py"
+      ]
+    },
+    {
+      "number": 1994,
+      "merged_at": "2026-10-20T01:52:49Z",
+      "files": [
+        "tools/room-bridge/dispatch.py",
+        "tools/room-bridge/test_hermes_desk_unit.py"
+      ]
+    },
+    {
+      "number": 1996,
+      "merged_at": "2026-10-20T04:01:27Z",
+      "files": [
+        "db/schema.sql",
+        "migrations/0913_grant_v_client_account.sql",
+        "ops/schema-reconstruction-selftest.py"
+      ]
+    },
+    {
+      "number": 1993,
+      "merged_at": "2026-10-20T05:51:15Z",
+      "files": [
+        "ops/release-pipeline-selftest.py",
+        "ops/release-pipeline.py"
+      ]
+    },
+    {
+      "number": 1995,
+      "merged_at": "2026-10-20T06:30:41Z",
+      "files": [
+        "lib/branch_retirement.py",
+        "lib/machine_cleanup.py",
+        "ops/automatic-cleanup-selftest.py",
+        "ops/branch-janitor-selftest.py"
+      ]
+    },
+    {
+      "number": 1989,
+      "merged_at": "2026-10-20T06:57:00Z",
+      "files": [
+        "tools/room-bridge/briefs/builder.md"
+      ]
+    },
+    {
+      "number": 1999,
+      "merged_at": "2026-10-20T11:27:56Z",
+      "files": [
+        "lib/branch_retirement.py",
+        "ops/automatic-cleanup-selftest.py"
+      ]
+    },
+    {
+      "number": 1998,
+      "merged_at": "2026-10-20T12:06:23Z",
+      "files": [
+        "lib/secret_redaction.py",
+        "ops/release-pipeline-selftest.py"
+      ]
+    },
+    {
+      "number": 2000,
+      "merged_at": "2026-10-20T13:56:58Z",
+      "files": [
+        "lib/job_watchdog.py",
+        "lib/salesforce_browser_refresh.py",
+        "lib/salesforce_deal_sync.py",
+        "mcp-server/test/salesforce-list-capture-browser.test.mjs",
+        "ops/config/job-watchdog.json",
+        "ops/templates/com.carr.salesforce-refresh.plist.in",
+        "pipelines/capture-salesforce-list.js",
+        "pipelines/read-salesforce-list.applescript",
+        "tools/install-salesforce-browser-refresh.py",
+        "tools/salesforce-browser-refresh.py",
+        "tools/test-salesforce-browser-refresh.py",
+        "tools/test-salesforce-deal-sync.py",
+        "tools/test_job_watchdog.py"
+      ]
+    },
+    {
+      "number": 2001,
+      "merged_at": "2026-10-20T13:58:43Z",
+      "files": [
+        "lib/cloudflare_tokens.py",
+        "ops/cloudflare-tokens-selftest.py",
+        "ops/release-pipeline-selftest.py",
+        "ops/release-pipeline.py",
+        "tools/health-check.py"
+      ]
+    },
+    {
+      "number": 1991,
+      "merged_at": "2026-10-20T14:00:11Z",
+      "files": [
+        "hooks/worktree-self-plumb.py",
+        "lib/branch_retirement.py",
+        "lib/cleanup_budget.py",
+        "lib/machine_cleanup.py",
+        "ops/automatic-cleanup-selftest.py",
+        "ops/branch-janitor-selftest.py",
+        "ops/cleanup-throughput-selftest.py",
+        "ops/config/gate-baseline.json",
+        "ops/config/job-watchdog.json",
+        "ops/fixtures/cleanup-throughput.py",
+        "tools/storage_hygiene.py"
+      ]
+    },
+    {
+      "number": 2004,
+      "merged_at": "2026-10-20T15:25:43Z",
+      "files": [
+        "tools/merge_queue/main.py",
+        "tools/room-bridge/test_work_queue_review_unit.py",
+        "tools/test_merge_queue.py",
+        "tools/test_merge_queue_liveness.py"
+      ]
+    },
+    {
+      "number": 2003,
+      "merged_at": "2026-10-20T17:07:51Z",
+      "files": [
+        "tools/room-bridge/codex_checkout.py",
+        "tools/room-bridge/dispatch.py",
+        "tools/room-bridge/grok_wire.py",
+        "tools/room-bridge/test_codex_checkout_unit.py"
+      ]
+    },
+    {
+      "number": 2020,
+      "merged_at": "2026-10-20T18:27:25Z",
+      "files": [
+        "tools/prepare_pr.py",
+        "tools/test_prepare_pr.py"
+      ]
+    },
+    {
+      "number": 2024,
+      "merged_at": "2026-10-20T18:57:36Z",
+      "files": [
+        "tools/prepare_pr.py",
+        "tools/test_prepare_pr.py"
+      ]
+    },
+    {
+      "number": 2010,
+      "merged_at": "2026-10-20T19:32:26Z",
+      "files": [
+        "ops/headless-task-selftest.py"
+      ]
+    },
+    {
+      "number": 2026,
+      "merged_at": "2026-10-20T20:32:32Z",
+      "files": [
+        "tools/merge_queue/main.py",
+        "tools/room-bridge/test_work_queue_unit.py",
+        "tools/room-bridge/work_queue.py",
+        "tools/test_merge_queue.py"
+      ]
+    },
+    {
+      "number": 2030,
+      "merged_at": "2026-10-20T21:48:58Z",
+      "files": [
+        "practice-plugin/package-lock.json",
+        "practice-plugin/package.json"
+      ]
+    },
+    {
+      "number": 2032,
+      "merged_at": "2026-10-20T22:18:45Z",
+      "files": [
+        "tools/merge_queue/main.py",
+        "tools/test_merge_queue.py"
+      ]
+    },
+    {
+      "number": 2025,
+      "merged_at": "2026-10-20T23:58:10Z",
+      "files": [
+        "lib/business_dispatch.py",
+        "tools/room-bridge/business-brief-footer.md",
+        "tools/room-bridge/business_routing.py",
+        "tools/room-bridge/claude_desktop_wire.py",
+        "tools/room-bridge/desks.py",
+        "tools/room-bridge/dispatch.py",
+        "tools/room-bridge/flash_wire.py",
+        "tools/room-bridge/grok_wire.py",
+        "tools/room-bridge/hermes_native.py",
+        "tools/room-bridge/hermes_wire.py",
+        "tools/room-bridge/record_layer.py",
+        "tools/room-bridge/test_business_dispatch_unit.py",
+        "tools/room-bridge/test_hermes_native_unit.py",
+        "tools/room-bridge/test_record_layer_unit.py",
+        "tools/room-bridge/work_cli.py",
+        "tools/room-bridge/work_runner.py"
+      ]
+    },
+    {
+      "number": 2034,
+      "merged_at": "2026-10-21T00:44:17Z",
+      "files": [
+        "lib/machine_cleanup.py",
+        "ops/automatic-cleanup-selftest.py",
+        "tools/room-bridge/codex_wire.py",
+        "tools/storage_hygiene.py"
+      ]
+    },
+    {
+      "number": 2035,
+      "merged_at": "2026-10-21T01:17:53Z",
+      "files": [
+        "tools/room-bridge/dispatch.py",
+        "tools/room-bridge/record_layer.py",
+        "tools/room-bridge/test_business_dispatch_unit.py",
+        "tools/room-bridge/test_codex_record_layer_unit.py",
+        "tools/room-bridge/test_record_layer_unit.py"
+      ]
+    },
+    {
+      "number": 2037,
+      "merged_at": "2026-10-21T02:09:08Z",
+      "files": [
+        "bin/schema-snapshot.sh",
+        "ops/schema-snapshot-rebuild-test.py"
+      ]
+    },
+    {
+      "number": 2012,
+      "merged_at": "2026-10-21T02:36:03Z",
+      "files": [
+        "db/schema.sql",
+        "mcp-server/src/scac-mutation-registry.current.generated.js",
+        "mcp-server/src/tools.js",
+        "mcp-server/test/local-deals-store.test.mjs",
+        "migrations/0916_deal_phase_start_dates.sql"
+      ]
+    },
+    {
+      "number": 2022,
+      "merged_at": "2026-10-21T03:20:21Z",
+      "files": [
+        "README.md",
+        "bin/gmail-handover.py",
+        "bin/outlook-draft.py",
+        "bin/pull-gmail-calendar.py",
+        "claude-tree/agents/README.md",
+        "claude-tree/agents/_ROSTER-ADDITIONS-sop-specialists.md",
+        "claude-tree/agents/benefit-summary.md",
+        "claude-tree/agents/client-intake.md",
+        "claude-tree/agents/costar-operator.md",
+        "claude-tree/agents/it-support.md",
+        "claude-tree/agents/marketing-coo.md",
+        "claude-tree/agents/salesforce-reader.md",
+        "control-room/contracts/authority-risk-matrix.v1.json",
+        "corpus/DNA/Deal Management/pipeline-coo-doctrine.md",
+        "corpus/DNA/templates.md",
+        "fill-engine/audit_template_colors.py",
+        "fill-engine/field-maps/loi-grid.json",
+        "fill-engine/field-maps/loi-lease.json",
+        "fill-engine/field-maps/loi-purchase.json",
+        "generators/build-deal-room.py",
+        "generators/lead-board-template.html",
+        "mcp-server/src/governed-correspondence-store.v5.js",
+        "mcp-server/src/governed-correspondence.v5.js",
+        "mcp-server/src/mcp.js",
+        "mcp-server/src/scac-mutation-registry.current.generated.js",
+        "mcp-server/src/tools.js",
+        "mcp-server/test/hermes-r0-lock.test.mjs",
+        "ops/audit-template-colors-selftest.py",
+        "pipelines/availability_matcher.py",
+        "pipelines/build-front-door.py",
+        "pipelines/front-door.html",
+        "pipelines/prepare_document.py",
+        "secrets-inventory.md",
+        "specs/agent-write-attribution.md"
+      ]
+    },
+    {
+      "number": 2023,
+      "merged_at": "2026-10-21T04:10:19Z",
+      "files": [
+        "bin/install-outlook-intake.sh",
+        "lib/launchd_calendar.py",
+        "lib/outlook_intake.py",
+        "mcp-server/src/scac-mutation-registry.current.generated.js",
+        "mcp-server/src/tools.js",
+        "mcp-server/test/morning-brief.test.mjs",
+        "ops/config/door-inventory.v1.json",
+        "ops/config/services.json",
+        "ops/launchd/com.carr.outlook-intake.plist",
+        "ops/outlook-intake-selftest.py",
+        "vendor-patches/README.md",
+        "vendor-patches/hxprobe-calendar-and-bodies.patch"
+      ]
+    },
+    {
+      "number": 2040,
+      "merged_at": "2026-10-21T04:38:52Z",
+      "files": [
+        "audits/wr443-outlook-route-evidence.json",
+        "audits/wr443-outlook-route-survey.json"
+      ]
+    },
+    {
+      "number": 2046,
+      "merged_at": "2026-10-21T05:35:46Z",
+      "files": [
+        "bin/install-outlook-intake.sh",
+        "lib/outlook_intake.py",
+        "ops/config/services.json",
+        "ops/outlook-intake-copy-selftest.py",
+        "ops/outlook-intake-selftest.py",
+        "tools/outlook-intake-copy.c"
+      ]
+    },
+    {
+      "number": 2027,
+      "merged_at": "2026-10-21T06:12:15Z",
+      "files": [
+        "mcp-server/src/identity.js",
+        "mcp-server/src/scac-mutation-registry.current.generated.js",
+        "mcp-server/src/tools.js",
+        "mcp-server/test/hermes-cos-grant.test.mjs",
+        "mcp-server/test/loop-due-date-persistence.test.mjs",
+        "mcp-server/test/morning-brief.test.mjs"
+      ]
+    },
+    {
+      "number": 2038,
+      "merged_at": "2026-10-21T06:48:46Z",
+      "files": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/main-canary.yml",
+        "ops/ci-control-selftest.py",
+        "ops/ci-evidence-selftest.py",
+        "ops/ci-preflight-selftest.py",
+        "ops/ci-selftest.py",
+        "ops/ci.sh",
+        "security/allowlist.json",
+        "vendor/hxprobe/.gitignore",
+        "vendor/hxprobe/BUILD-SHA256",
+        "vendor/hxprobe/Cargo.lock",
+        "vendor/hxprobe/Cargo.toml",
+        "vendor/hxprobe/LICENSE",
+        "vendor/hxprobe/UPSTREAM.md",
+        "vendor/hxprobe/rust-toolchain.toml",
+        "vendor/hxprobe/src/block.rs",
+        "vendor/hxprobe/src/body.rs",
+        "vendor/hxprobe/src/calendar.rs",
+        "vendor/hxprobe/src/folder.rs",
+        "vendor/hxprobe/src/header.rs",
+        "vendor/hxprobe/src/lz.rs",
+        "vendor/hxprobe/src/main.rs",
+        "vendor/hxprobe/src/record.rs",
+        "vendor/hxprobe/src/schema.rs"
+      ]
+    },
+    {
+      "number": 2039,
+      "merged_at": "2026-10-21T11:58:31Z",
+      "files": [
+        "tools/merge_queue/main.py",
+        "tools/prepare_pr.py",
+        "tools/regen.py",
+        "tools/test_merge_queue.py",
+        "tools/test_prepare_pr.py"
+      ]
+    },
+    {
+      "number": 2041,
+      "merged_at": "2026-10-21T12:35:03Z",
+      "files": [
+        "audits/wr443-deeplink-grammar.json"
+      ]
+    },
+    {
+      "number": 2042,
+      "merged_at": "2026-10-21T13:11:35Z",
+      "files": [
+        "audits/wr443-send-by-id.json"
+      ]
+    },
+    {
+      "number": 2044,
+      "merged_at": "2026-10-21T13:47:18Z",
+      "files": [
+        "ops/outlook-atlas-selftest.py",
+        "ops/outlook-atlas.py",
+        "spec/outlook/GLOSSARY.md",
+        "spec/outlook/README.md",
+        "spec/outlook/surface-atlas.json",
+        "spec/outlook/surface-atlas.md",
+        "spec/outlook/work-request-criteria.json"
+      ]
+    },
+    {
+      "number": 2011,
+      "merged_at": "2026-10-21T14:20:08Z",
+      "files": [
+        "db/schema.sql",
+        "mcp-server/src/lead-workspace.js",
+        "mcp-server/src/scac-mutation-registry.current.generated.js",
+        "mcp-server/src/tools.js",
+        "mcp-server/test/human-only-dispatch.test.mjs",
+        "mcp-server/test/local-deals-store.test.mjs",
+        "migrations/0920_prospect_engagement_status.sql",
+        "ops/sql/reverse-0915-prospect-engagement.sql"
+      ]
+    },
+    {
+      "number": 2051,
+      "merged_at": "2026-10-21T14:33:20Z",
+      "files": [
+        "ops/control-plane-runtime-selftest.py",
+        "tools/control-plane.py"
+      ]
+    },
+    {
+      "number": 2054,
+      "merged_at": "2026-10-21T16:05:01Z",
+      "files": [
+        "ops/ci-control-selftest.py",
+        "ops/ci-rerun.py"
+      ]
+    },
+    {
+      "number": 2013,
+      "merged_at": "2026-10-21T18:38:03Z",
+      "files": [
+        "db/schema.sql",
+        "mcp-server/src/deal-checklist.js",
+        "mcp-server/src/scac-mutation-registry.current.generated.js",
+        "mcp-server/src/tools.js",
+        "mcp-server/test/amend-closed-loop-mutants.test.mjs",
+        "mcp-server/test/deal-checklist.test.mjs",
+        "mcp-server/test/dealroom.test.js",
+        "mcp-server/test/local-deals-store.test.mjs",
+        "migrations/0922_deal_checklist_commissions.sql"
+      ]
+    },
+    {
+      "number": 2055,
+      "merged_at": "2026-10-21T19:37:56Z",
+      "files": [
+        "ops/ci-selftest.py"
+      ]
+    },
+    {
+      "number": 2015,
+      "merged_at": "2026-10-21T20:34:09Z",
+      "files": [
+        "db/schema.sql",
+        "mcp-server/src/scac-mutation-registry.current.generated.js",
+        "mcp-server/src/tools.js",
+        "mcp-server/test/capture.test.js",
+        "mcp-server/test/dealroom.test.js",
+        "mcp-server/test/hermes-cos-grant.test.mjs",
+        "mcp-server/test/local-deals-store.test.mjs",
+        "migrations/0923_deal_status_next_step.sql",
+        "ops/migration-safety-gate-selftest.py"
+      ]
+    },
+    {
+      "number": 2053,
+      "merged_at": "2026-10-21T21:26:46Z",
+      "files": [
+        "db/schema.sql",
+        "migrations/0924_jev_attempt_settlement_lookup.sql",
+        "ops/jev-attempt-aging-selftest.py"
+      ]
+    },
+    {
+      "number": 2056,
+      "merged_at": "2026-10-21T23:13:18Z",
+      "files": [
+        "mcp-server/test/progress-board-cli.test.mjs",
+        "ops/launchd/local.carr-progress-board.plist",
+        "tools/progress_board.py",
+        "tools/progress_orchestrator.py",
+        "tools/room-bridge/test_work_runner_unit.py",
+        "tools/room-bridge/work_queue.py",
+        "tools/room-bridge/work_runner.py",
+        "tools/test-orchestrator-publication-size.py",
+        "tools/test-progress-board-refresh.py",
+        "tools/test-progress-board.py",
+        "tools/test-progress-orchestrator.py"
+      ]
+    },
+    {
+      "number": 2057,
+      "merged_at": "2026-10-21T23:36:59Z",
+      "files": [
+        "tools/merge_queue/main.py",
+        "tools/room-bridge/work_queue.py",
+        "tools/test_merge_queue_recovery.py"
+      ]
+    },
+    {
+      "number": 2058,
+      "merged_at": "2026-10-22T00:52:01Z",
+      "files": [
+        "db/schema.sql",
+        "migrations/0926_jev_receipt_audit_lookup.sql",
+        "ops/jev-attempt-aging-selftest.py"
+      ]
+    },
+    {
+      "number": 2067,
+      "merged_at": "2026-10-22T01:42:45Z",
+      "files": [
+        "ops/release-pipeline-selftest.py",
+        "ops/release-pipeline.py"
+      ]
+    },
+    {
+      "number": 2021,
+      "merged_at": "2026-10-22T02:15:10Z",
+      "files": [
+        "bin/install-outlook-triage.sh",
+        "lib/outlook_triage.py",
+        "lib/outlook_ui.py",
+        "ops/config/door-inventory.v1.json",
+        "ops/config/services.json",
+        "ops/credential-mint-selftest.py",
+        "ops/launchd/com.carr.outlook-triage.plist",
+        "ops/outlook-triage-selftest.py",
+        "tools/test-progress-board-size.py",
+        "tools/test-progress-board.py"
+      ]
+    },
+    {
+      "number": 2016,
+      "merged_at": "2026-10-22T05:06:28Z",
+      "files": [
+        "tools/merge_queue/main.py",
+        "tools/test_merge_queue.py",
+        "tools/test_merge_queue_liveness.py"
+      ]
+    },
+    {
+      "number": 2009,
+      "merged_at": "2026-10-22T05:44:02Z",
+      "files": [
+        "tools/merge_queue/main.py",
+        "tools/test_merge_queue.py"
+      ]
+    },
+    {
+      "number": 2088,
+      "merged_at": "2026-10-22T06:37:04Z",
+      "files": [
+        "ops/ci-preflight-selftest.py",
+        "ops/ci-selftest.py",
+        "ops/ci.sh",
+        "ops/githooks/pre-push",
+        "ops/prepush-floor-selftest.py"
+      ]
+    },
+    {
+      "number": 2005,
+      "merged_at": "2026-10-22T07:13:30Z",
+      "files": [
+        ".agents/skills/scrawl/LICENSE",
+        ".agents/skills/scrawl/SKILL.md",
+        ".claude/skills/scrawl/SKILL.md",
+        "AGENTS.md",
+        "audits/scrawl-security-read.v1.json"
+      ]
+    }
+  ]
+}

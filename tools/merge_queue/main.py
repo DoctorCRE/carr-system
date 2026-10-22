@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
 sys.path.insert(0, str(ROOT))
 from tools.merge_queue.compose import Compositions
 from tools.merge_queue.recovery import Recovery
+from tools.merge_queue.overlap import overlaps
 from work_queue import WorkQueue, QueueChanged, default_path
 from git_env import scrubbed_env
 from regen import REGENERATED_OUTPUTS
@@ -158,6 +159,7 @@ class Queue:
         if type(parallel_size) is not int or not 1 <= parallel_size <= 16:
             raise ValueError("parallel size must be between 1 and 16")
         self.parallel_size = parallel_size
+        self.rule_checks: dict[str, object] = {}
         self.state, self.root, self.gap = state, root, gap
         state.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(state / 'queue.sqlite3', timeout=BOUNDS['sqlite']['seconds'])
@@ -1016,6 +1018,7 @@ class Queue:
 
     def tick(self):
         with self.runner_lock():
+            self.rule_checks.clear()
             self._observing_entries = set()
             self.compositions.poll()
             recovering = self.recovery.tick()
@@ -1064,7 +1067,14 @@ class Queue:
         return wait
 
     def parallel_rules(self, repo):
-        rules = self.api(f'repos/{repo}/rules/branches/main')
+        if repo not in self.rule_checks:
+            try:
+                self.rule_checks[repo] = self.api(f'repos/{repo}/rules/branches/main')
+            except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as exc:
+                self.rule_checks[repo] = exc
+        rules = self.rule_checks[repo]
+        if isinstance(rules, Exception):
+            raise rules
         checks = [r['parameters'] for r in rules if r['type'] == 'required_status_checks']
         required = {c['context'] for p in checks for c in p['required_status_checks']}
         expected = 'ops/ci.sh --strict' if repo == REPOS[0] else 'test'
@@ -1083,7 +1093,7 @@ class Queue:
         commits = self.git(repo, 'rev-list', base+'..'+main)
         landed = set(filter(None, self.git(repo, 'diff-tree', '--stdin', '--no-commit-id',
                                             '-r', '-m', '--no-renames', '--name-only', '-z', data=commits).split('\0')))
-        if changed & landed:
+        if overlaps(changed, landed):
             self.report(e, 'composing', 'Main touched composition files; recompose before landing')
             return False
         return True
@@ -1526,7 +1536,7 @@ class Queue:
     def _reconcile(self, entry, retry=False):
         e = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
         if e and e['merged_commit']:
-            canary = self.db.execute("SELECT * FROM canaries WHERE repo=? AND commit_sha=? AND phase='blocked'",
+            canary = self.db.execute("SELECT * FROM canaries WHERE repo=? AND commit_sha=? AND phase IN ('blocked','baseline_red')",
                                      (e['repo'], e['merged_commit'])).fetchone()
             if canary:
                 p = self.pr(e['repo'], e['pr'])
