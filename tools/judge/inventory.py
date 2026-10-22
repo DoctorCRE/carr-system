@@ -22,7 +22,6 @@ INDIRECT = {
     "hooks/lint-gate.py": {"module.review_for_edit"},
     "hooks/completion-evidence-gate.py": {"module.check"},
     "hooks/blocker-decider-gate.py": {"module.advise"},
-    "hooks/executor-tier-gate.py": {"module.recommend"},
     "hooks/rule-pack-preuse-reselection.py": {"module.advise"},
     "hooks/conduct-stop-gate.py": {"jev"},
     "hooks/escalation-gate.py": {"jev"},

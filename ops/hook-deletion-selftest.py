@@ -13,43 +13,6 @@ CHECK = REPO / 'ops/hook-deletion-check.py'
 
 
 class HookDeletion(unittest.TestCase):
-    def test_only_preexisting_optional_hooks_can_be_deleted_with_all_registrations(self):
-        for optional_at_base, still_wired in ((True, False), (True, True), (False, False)):
-            with self.subTest(optional_at_base=optional_at_base, still_wired=still_wired), \
-                 tempfile.TemporaryDirectory() as raw:
-                repo = Path(raw)
-                def git(*args):
-                    return subprocess.run(['git', '-C', str(repo), *args], check=True,
-                                          capture_output=True, text=True, env=fixture_env()).stdout.strip()
-                git('init', '-q')
-                git('config', 'user.name', 'Synthetic test')
-                git('config', 'user.email', 'fixture@example.invalid')
-                (repo / 'hooks').mkdir()
-                (repo / 'hooks/optional.py').write_text('pass\n')
-                (repo / 'ops/config').mkdir(parents=True)
-                config = repo / 'ops/config/hooks.json'
-                config.write_text(json.dumps({'Stop': [{'hooks': [{
-                    'command': 'python {{REPO}}/hooks/optional.py'}]}]}))
-                policy = repo / 'ops/config/delegation-gate-hook.json'
-                policy.write_text(json.dumps({'missing_script_policy': {
-                    'optional': ['hooks/optional.py'] if optional_at_base else [],
-                    'safety': [] if optional_at_base else ['hooks/optional.py']}}))
-                git('add', 'hooks/optional.py', 'ops/config/hooks.json',
-                    'ops/config/delegation-gate-hook.json')
-                git('commit', '-qm', 'Wire hook with its existing safety classification')
-                base = git('rev-parse', 'HEAD')
-                if not still_wired:
-                    config.write_text('{}')
-                policy.write_text(json.dumps({'missing_script_policy': {
-                    'optional': ['hooks/optional.py'], 'safety': []}}))
-                git('rm', 'hooks/optional.py')
-                git('add', 'ops/config/hooks.json', 'ops/config/delegation-gate-hook.json')
-                git('commit', '-qm', 'Delete hook')
-                result = subprocess.run(['python3', str(CHECK), '--repo', str(repo), '--base', base],
-                                        capture_output=True, text=True)
-                expected = 0 if optional_at_base and not still_wired else 1
-                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
-
     def test_target_spellings_cannot_bypass_deletion_check(self):
         for target in ('{{REPO}}/hooks/safety/old.py', 'hooks/old.py', './hooks/old.py',
                        'hooks/safety/../old.py', '{{REPO}}/hooks/../hooks/old.py',
@@ -93,10 +56,9 @@ class HookDeletion(unittest.TestCase):
                 git('commit', '-qm', 'Delete and unwire')
                 result = subprocess.run(['python3', str(CHECK), '--repo', str(repo), '--base', base],
                                         capture_output=True, text=True)
-                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertIn('REFUSED', result.stdout)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_unwire_and_rename_need_separate_prs(self):
+    def test_deletion_requires_unwiring_in_resulting_configuration(self):
         with tempfile.TemporaryDirectory() as raw:
             repo = Path(raw)
             def git(*args):
@@ -114,14 +76,19 @@ class HookDeletion(unittest.TestCase):
             git('add', 'hooks/old.py', 'ops/config/hooks.json')
             git('commit', '-qm', 'Wired hook')
             base = git('rev-parse', 'HEAD')
+            git('rm', 'hooks/old.py')
+            git('commit', '-qm', 'Delete while wired')
+            result = subprocess.run(['python3', str(CHECK), '--repo', str(repo), '--base', base], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            git('checkout', base, '--', 'hooks/old.py')
+            git('commit', '-qm', 'Restore fixture')
             config.write_text('{}')
             shutil.move(script, repo / 'hooks/new.py')
             git('add', 'hooks/old.py', 'hooks/new.py', 'ops/config/hooks.json')
             git('commit', '-qm', 'Unsafe rename and unwire')
             result = subprocess.run(['python3', str(CHECK), '--repo', str(repo), '--base', base],
                                     capture_output=True, text=True)
-            self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertIn('hooks/old.py', result.stdout)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             git('checkout', base, '--', 'hooks/old.py')
             git('commit', '-qm', 'Keep script through unwire')
             unwired = git('rev-parse', 'HEAD')

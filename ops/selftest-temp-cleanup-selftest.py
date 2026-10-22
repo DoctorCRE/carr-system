@@ -10,7 +10,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 for name in ("built-unclosed-selftest.py", "session-brief-selftest.py",
-             "branch-janitor-selftest.py", "backup-workflow-selftest.py",
+             "job-cleanup-selftest.py", "backup-workflow-selftest.py",
              "hook-env-isolation-selftest.py",
              "../tools/room-bridge/test_flash_desk_unit.py", "../test/doc_drift/test_checker.py",
              "../test/doc_drift/test_ci.py"):

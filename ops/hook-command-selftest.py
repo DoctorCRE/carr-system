@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parent.parent
 SOURCES = ('ops/config/hooks.json', 'ops/config/codex-hooks.json',
-           'ops/config/claude-continuity-hooks.json', '.claude/settings.json')
+           '.claude/settings.json')
 
 
 def commands():
@@ -60,7 +60,7 @@ class HookCommands(unittest.TestCase):
                                      [str(command_target(template, target_root).resolve())])
 
     def test_all_configured_hooks_have_an_explicit_missing_script_policy(self):
-        policy = json.loads((REPO / 'ops/config/delegation-gate-hook.json').read_text())['missing_script_policy']
+        policy = json.loads((REPO / 'ops/config/hook-script-policy.json').read_text())['missing_script_policy']
         safety = set(policy['safety'])
         optional = set(policy['optional'])
         self.assertFalse(safety & optional)
@@ -145,8 +145,6 @@ class HookCommands(unittest.TestCase):
                 result = run()
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertIn('payload', result.stdout)
-                if 'continuity' in script.name:
-                    self.assertIn('continuity', result.stdout)
                 script.unlink()
                 script.mkdir()
                 result = run('')

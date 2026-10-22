@@ -113,8 +113,8 @@ def _reader_args(argv):
         # A parent shell may carry this old ambient variable.  Normal health must
         # not pass it to any child or let a child silently choose a Drive reader.
         os.environ.pop("CARR_VAULT", None)
-    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "uptime", "storage", "sends"):
-        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|uptime|storage|sends")
+    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "uptime", "sends"):
+        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|uptime|sends")
     if fixture and recovery:
         raise SystemExit("health-check: --fixture is for hermetic canonical tests only")
     # --act executes every red row's bound action (tools/health_breach.py). It
@@ -1285,8 +1285,6 @@ def _host_liveness_rows():
     return module.rows(live, config)
 
 
-
-
 def _cloudflare_spend_row():
     """(line, failed, not_run) from the Cloudflare spend guard's local receipt; no network.
 
@@ -1329,24 +1327,6 @@ def _system_cost_row():
     import system_costs
     snapshot = system_costs.load_snapshot(os.path.join(REPO_ROOT, 'out/system-costs.json'))
     return snapshot, system_costs.health_row(snapshot, 'nightly collector owns reconciliation')
-
-
-def _branch_janitor_row():
-    sys.path.insert(0, os.path.join(REPO_ROOT, "lib"))
-    from branch_retirement import health
-    return health(REPO_ROOT)
-
-
-def _storage_hygiene_row():
-    if sys.platform != "darwin":
-        return ("SKIP storage hygiene — Studio Data volume check not applicable "
-                "outside macOS", False)
-    import storage_hygiene
-    _tmp, clone_root, _replay = storage_hygiene.storage_roots()
-    used, clones = storage_hygiene.storage_snapshot(
-        Path("/System/Volumes/Data"), clone_root)
-    return (storage_hygiene.health_row(used_bytes=used, clone_count=clones),
-            used > storage_hygiene.DATA_THRESHOLD_BYTES)
 
 
 def _system_sends_row():
@@ -1401,7 +1381,7 @@ def _canonical_health():
         if " over budget: " in _site_line or _site_line.startswith("UNKNOWN"):
             rc = _red("jev_site_budget", _site_line, hard_error=_site_line.startswith("UNKNOWN"))
     try:
-        snap = {} if CANONICAL_SECTION in ("jev-cap", "grok-session", "storage", "uptime", "sends") else _canonical_snapshot()
+        snap = {} if CANONICAL_SECTION in ("jev-cap", "grok-session", "uptime", "sends") else _canonical_snapshot()
     except Exception as exc:
         print(f"canonical health: REFUSED ({type(exc).__name__}: {exc})")
         _red("canonical_health_refused", f"{type(exc).__name__}: {exc}", hard_error=True)
@@ -1417,20 +1397,7 @@ def _canonical_health():
         return 1
 
     print(f"Façade check (rule 28) — {time.strftime('%Y-%m-%d %H:%M')} — canonical receipts, not Drive renders")
-    if CANONICAL_SECTION in ("all", "storage") and not CANONICAL_FIXTURE:
-        try:
-            storage_line, storage_failed = _storage_hygiene_row()
-            print("  " + storage_line)
-            if storage_failed:
-                rc = _red("storage_capacity", storage_line, subject="studio-data-volume",
-                          time_rolling=True)
-        except (OSError, ValueError) as exc:
-            storage_line = (f"storage hygiene unavailable ({type(exc).__name__}) · on breach: "
-                            "owner orchestrator · restore tools/storage_hygiene.py · "
-                            "verify: run.sh health --section storage · auto-clear after readback")
-            print("  WARN " + storage_line)
-            rc = _red("storage_health_unavailable", storage_line,
-                      subject="studio-data-volume", hard_error=True)
+
     if CANONICAL_SECTION in ("all", "jobs") and not CANONICAL_FIXTURE:
         flash_line = flashlib.health_row()
         print("  " + flash_line)
@@ -1987,19 +1954,6 @@ def _canonical_health():
             _detail = f"check failed ({type(e).__name__}: {e})"
             print(f"  ⚠︎ {'jev receipts':<18} {_detail}")
             rc = _red("jev_call_receipt_integrity", _detail, hard_error=True)
-
-    if CANONICAL_SECTION in ("all", "jobs") and not CANONICAL_FIXTURE:
-        print("Branch retirement — local scheduled receipts")
-        try:
-            line, failed = _branch_janitor_row()
-            print("  " + line)
-            if failed:
-                rc = _red("branch_janitor", line, subject="three-repo-retirement")
-        except Exception as exc:
-            line = (f"branch janitor unavailable ({type(exc).__name__}) · on breach: owner orchestrator "
-                    "· restore lib/branch_retirement.py · verify health · auto-clear after successful readback")
-            print("  WARN " + line)
-            rc = _red("branch_janitor", line, subject="three-repo-retirement")
 
     if CANONICAL_SECTION in ("all", "uptime") and not CANONICAL_FIXTURE:
         line, failed = _uptime.row()

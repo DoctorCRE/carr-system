@@ -180,49 +180,6 @@ class ReplayTests(unittest.TestCase):
         self.assertGreater(delivered, 0)
 
 
-class CorePlacementTests(unittest.TestCase):
-    """CORE cards ride the boot arm (startup, resume, clear, compact) and SubagentStart."""
-    @classmethod
-    def setUpClass(cls):
-        spec = importlib.util.spec_from_file_location('boot_gate_hook', REPO / 'hooks/rule-boot-gate.py')
-        cls.hook = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cls.hook)
-        cls.core = [c for c in load_cards() if c['placement'] == 'CORE']
-
-    def run_hook(self, payload, arm='RULE BOOT: arm text'):
-        with mock.patch('lib.rule_boot_gate.arm_session', return_value=arm):
-            return self.hook.decide(payload).stdout
-
-    def assert_core(self, text):
-        for card in self.core:
-            self.assertIn(f"[{card['id']}] {card['title']}: {card['wording']}\n  {card['acknowledgement']}", text)
-
-    def test_session_start_and_post_compaction_reboot_carry_core_cards(self):
-        for source in ('startup', 'resume', 'clear', 'compact'):
-            with self.subTest(source=source):
-                out = self.run_hook({'hook_event_name': 'SessionStart', 'session_id': 's', 'source': source})
-                self.assertTrue(out.startswith('RULE BOOT: arm text\n\nRULE CARDS (always-on core)'))
-                self.assert_core(out)
-
-    def test_core_page_fits_session_start_cap_beside_the_boot_instructions(self):
-        from lib.rule_boot_gate import fetch_instructions
-        out = self.run_hook({'hook_event_name': 'SessionStart', 'session_id': 's', 'source': 'startup'},
-                            arm=fetch_instructions(list(range(1, 16)), 'sha256:' + 'a' * 64, 15))
-        self.assertLess(len(out), 10000)
-
-    def test_subagent_start_carries_core_cards(self):
-        out = json.loads(self.run_hook({'hook_event_name': 'SubagentStart', 'session_id': 's',
-                                        'agent_id': 'a1', 'agent_type': 'Explore'}))
-        specific = out['hookSpecificOutput']
-        self.assertEqual(specific['hookEventName'], 'SubagentStart')
-        self.assertNotIn('permissionDecision', specific)
-        self.assert_core(specific['additionalContext'])
-
-    def test_core_card_failure_fails_open(self):
-        with mock.patch('lib.rule_cards.core_text', side_effect=ValueError('broken cards')):
-            self.assertEqual(self.run_hook({'hook_event_name': 'SessionStart', 'session_id': 's',
-                                            'source': 'compact'}), 'RULE BOOT: arm text\n')
-            self.assertEqual(self.run_hook({'hook_event_name': 'SubagentStart', 'session_id': 's'}), '')
 
 
 

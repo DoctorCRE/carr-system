@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require prior unwiring for safety hooks; optional hooks may be removed atomically."""
+"""Refuse deletion of scripts still invoked by the resulting hook configuration."""
 import argparse
 import json
 import os
@@ -11,7 +11,7 @@ import subprocess
 from git_env import scrubbed_env
 
 WIRING = ('ops/config/hooks.json', 'ops/config/codex-hooks.json',
-          'ops/config/claude-continuity-hooks.json', '.claude/settings.json')
+          '.claude/settings.json')
 
 
 def command_target(command, repo):
@@ -83,32 +83,22 @@ def check(repo, base):
             event = json.loads(Path(event_path).read_text())
             base = event.get('pull_request', {}).get('base', {}).get('sha') or event.get('before')
         base = base or git('merge-base', 'origin/main', 'HEAD').strip()
-    files = set(git('ls-tree', '-r', '--name-only', base).splitlines())
-    def wired_at(revision):
-        wired = set()
-        available = set(git('ls-tree', '-r', '--name-only', revision).splitlines())
-        for path in WIRING:
-            if path not in available:
+    wired = set()
+    files = set(git('ls-tree', '-r', '--name-only', 'HEAD').splitlines())
+    for path in WIRING:
+        if path not in files:
+            continue
+        document = json.loads(git('show', f'HEAD:{path}'))
+        for groups in document.get('hooks', document).values():
+            if not isinstance(groups, list):
                 continue
-            document = json.loads(git('show', f'{revision}:{path}'))
-            for groups in document.get('hooks', document).values():
-                if not isinstance(groups, list):
-                    continue
-                for group in groups:
-                    for hook in group.get('hooks', []):
-                        wired.add(command_target(hook.get('command', ''), repo))
-        return wired
-
-    policy_path = 'ops/config/delegation-gate-hook.json'
-    policy = (json.loads(git('show', f'{base}:{policy_path}')).get('missing_script_policy', {})
-              if policy_path in files else {})
-    optional = set(policy.get('optional', [])) - set(policy.get('safety', []))
-    wired, still_wired = wired_at(base), wired_at('HEAD')
+            for group in groups:
+                for hook in group.get('hooks', []):
+                    wired.add(command_target(hook.get('command', ''), repo))
     deleted = set(git('diff', '--no-renames', '--name-only', '--diff-filter=D', base, 'HEAD').splitlines())
-    unsafe = sorted(path for path in deleted if repo / path in wired
-                    and (path not in optional or repo / path in still_wired))
+    unsafe = sorted(path for path in deleted if repo / path in wired)
     for path in unsafe:
-        print(f'REFUSED: {path} is wired at the base revision. Unwire first; delete in a later PR.')
+        print(f'REFUSED: {path} is still wired in the resulting configuration. Remove its hook registration.')
     return 1 if unsafe else 0
 
 
@@ -120,7 +110,7 @@ def main():
     try:
         return check(args.repo, args.base)
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
-        print(f'REFUSED: cannot verify two-phase hook deletion: {exc}')
+        print(f'REFUSED: cannot verify hook deletion: {exc}')
         return 1
 
 

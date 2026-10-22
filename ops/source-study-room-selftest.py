@@ -121,7 +121,7 @@ class ResearchDeskTests(unittest.TestCase):
                 " except OSError: pass\n"
                 " else: raise SystemExit('authority escaped')\n")
         result = subprocess.run(self.room.confine([sys.executable, '-c', code], job),
-                                capture_output=True, text=True)
+                                cwd=job, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(outside.read_text(), 'synthetic-secret')
         self.assertEqual((job / 'allowed').read_text(), 'report')
