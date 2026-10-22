@@ -2106,8 +2106,8 @@ def check(cmd, cwd=None):
         return None
 
     executable = strip_inert_text(cmd)
-    # Filesystem permissions protect all native file tools. This narrow shell
-    # check also covers older clients while the managed policy rolls out.
+    # Claude native Read rules cover direct file tools. Command-sensitive reads
+    # stay here for Codex and shell wrappers without blocking reviewed readers.
     invocations = list(executed_invocations(executable))
     for program, arguments in invocations:
         if program in {'cat', 'head', 'tail', 'less', 'more', 'sed', 'awk', 'grep', 'rg', 'cp', 'source', '.'}:

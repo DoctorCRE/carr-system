@@ -20,7 +20,7 @@ assert spec is not None and spec.loader is not None
 cac = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cac)
 # LaunchAgent cases do not deploy administrator-owned client policy.
-cac.managed_safety_plan = lambda: []
+setattr(cac, "managed_safety_plan", lambda: [])
 
 
 class HoldTests(unittest.TestCase):

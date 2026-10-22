@@ -203,4 +203,3 @@ def reason(command):
     scan = mask_quoted_data(command)
     why = background_reason(scan) or loop_reason(scan)
     return ('GitHub calls need sleep 2 between items: ' + why) if why else None
-
