@@ -959,6 +959,18 @@ class QueueTests(unittest.TestCase):
             self.assertFalse(any(e['kind'] == 'pin_regenerated' for e in work.export()['history']))
         self.assertEqual(self.calls('merge'), [])
 
+    def test_regeneration_receipt_cannot_advance_a_non_merge_commit(self):
+        card_id = self.prepare_pinned_head()
+        script = self.root / 'tools/prepare_pr.py'
+        script.write_text(script.read_text().replace(repr(self.updated), repr(self.changed)))
+        self.q.tick()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.approved)
+        row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.approved,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome']), ('superseded', 'head_moved'))
+        self.assertEqual(self.calls('merge'), [])
+
     def test_regeneration_without_a_matching_receipt_does_not_advance_pin(self):
         card_id = self.prepare_pinned_head()
         self.q.prepare(module.REPOS[0], self.data['prs'][f'{module.REPOS[0]}#1'])
