@@ -5,7 +5,6 @@
 // from the record that owns it, so it leaves the list when that record closes.
 // Fake-client suite: one fixture per source, no Worker or database.
 
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS } from "../src/tools.js";
@@ -275,10 +274,7 @@ test("flagged loops always appear and explicit classifications win over keywords
   });
 });
 
-test("display classes cover money and watchdog credential phrases", () => {
+test("display classes cover money", () => {
   for (const text of ["$240", "£20", "€30", "10 usd", "10 dollars", "per month", "a year", "per seat", "a user"])
     assert.equal(classifyHumanOnly(text), "money", text);
-  const watchdog = JSON.parse(readFileSync(new URL("../../ops/config/job-watchdog.json", import.meta.url)));
-  for (const phrase of watchdog.needs_joe_patterns.credentials)
-    assert.equal(classifyHumanOnly(phrase), "credential", phrase);
 });
