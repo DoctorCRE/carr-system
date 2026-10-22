@@ -78,7 +78,8 @@ class PhrasingTests(unittest.TestCase):
         stdout, stderr = io.StringIO(), io.StringIO()
         db = self.root / 'queue.sqlite3'
         with patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': str(db)}), \
-                patch.object(dispatch.subprocess, 'run', self.runner), \
+                patch.object(dispatch, '_run_headless_process',
+                             side_effect=lambda argv, *args, **kwargs: self.runner(argv)), \
                 patch.object(work_runner, 'kick') as kick, \
                 patch.object(dispatch.seat_gate, 'check', return_value=None), \
                 contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
