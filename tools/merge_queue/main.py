@@ -633,8 +633,6 @@ class Queue:
             return head != action['head']
         if self.held(p) or p['state'] != 'open' or p['base']['ref'] != 'main':
             raise ActionUncertain('Regeneration PR is held or changed; no retry')
-        if action['attempts'] >= MAX_ATTEMPTS:
-            raise ActionExhausted(f'Regeneration push did not land after {MAX_ATTEMPTS} attempts; provider remains at {head}')
         with self.db:
             self.db.execute("UPDATE actions SET phase='planned' WHERE key=?", (action['key'],))
             self.event(action['repo'], action['pr'], 'regeneration_reconciled',
