@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -12,8 +12,10 @@ test("current contract generation is reproducible from the assembled tools", () 
   assert.equal(renderCurrentContracts(TOOLS, current), current);
 });
 
-test("editing a module without changing any verb contract leaves the registry unchanged", () => {
-  const module = join(mkdtempSync(join(tmpdir(), "registry-")), "verbs.js");
+test("editing a module without changing any verb contract leaves the registry unchanged", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "registry-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const module = join(dir, "verbs.js");
   const tools = { example: { registrySource: module, inputSchema: { type: "object" }, write: true } };
   writeFileSync(module, "export const before = 1;\n");
   const before = renderCurrentContracts(tools, current);
