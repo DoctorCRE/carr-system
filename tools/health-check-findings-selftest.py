@@ -775,19 +775,6 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         self.assertEqual(ns["_canonical_health"](), 1)
         self.assertEqual([row["key"] for row in ns["_FINDINGS"]], ["grok_session"])
 
-    def test_storage_section_does_not_read_unrelated_canonical_snapshot(self):
-        import contextlib, io
-        ns = self.namespace()
-
-        def unrelated_snapshot():
-            raise AssertionError("storage-only health read the canonical snapshot")
-
-        ns.update(CANONICAL_SECTION="storage", _canonical_snapshot=unrelated_snapshot,
-                  _storage_hygiene_row=lambda: ("OK storage hygiene fixture", False))
-        with contextlib.redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(ns["_canonical_health"](), 0)
-        self.assertIn("OK storage hygiene fixture", out.getvalue())
-        self.assertEqual(ns["_FINDINGS"], [])
 
     def test_sends_section_reports_its_own_row_and_breach(self):
         import contextlib, io
