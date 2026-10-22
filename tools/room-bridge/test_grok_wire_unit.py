@@ -33,6 +33,37 @@ class GrokTests(unittest.TestCase):
         catalog.start()
         self.addCleanup(catalog.stop)
 
+    def test_402_balance_error_is_quota_exhausted_and_kept_in_receipt(self):
+        message = "API error (status 402 Payment Required): Grok Build usage balance exhausted"
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            binary = root / "grok"
+            binary.write_text("#!" + os.environ.get("PYTHON", "/usr/bin/env python3") + "\n"
+                + "import sys\n"
+                + f"sys.stderr.write({message!r} + '\\n')\n"
+                + "raise SystemExit(1)\n")
+            binary.chmod(0o755)
+            receipt = root / "receipt.json"
+            env = {**os.environ, "PATH": f"{root}:{os.environ['PATH']}"}
+            result = grok_wire.run_request(
+                "Review this change", receipt_path=receipt,
+                invoke=lambda prompt, **options: grok_wire.invoke_cli(
+                    prompt, run=subprocess.run, env=env, **options),
+            )
+            saved = json.loads(receipt.read_text())
+        self.assertEqual(result["status"], "quota_exhausted")
+        self.assertEqual(result["detail"], "quota_exhausted")
+        self.assertEqual(saved["provider_message"], message)
+
+    def test_non_quota_error_event_keeps_current_error_classification(self):
+        result = grok_wire.parse_result(json.dumps({"type": "error", "message": "request rejected"}), 1)
+        self.assertEqual((result["status"], result["detail"]), ("failed", "grok_error_event"))
+
+    def test_successful_text_that_mentions_402_does_not_mark_quota_exhausted(self):
+        result = grok_wire.parse_result(output(text=
+            "The example error is API error (status 402 Payment Required)."), 0)
+        self.assertEqual(result["status"], "completed")
+
     def test_default_desk_refuses_unsafe_urls_without_provider_invocation(self):
         for url in ("https://fixture-user:fixture-secret@example.com/post",
                     "https://example.com/post?access_token=fixture-secret",
