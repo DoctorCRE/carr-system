@@ -85,11 +85,8 @@ class Controls(unittest.TestCase):
 
     def test_draft_cost_split_and_lifecycle(self):
         events = {'opened', 'synchronize', 'reopened', 'ready_for_review', 'converted_to_draft'}
-        for filename in ('ci.yml', 'db-acceptance.yml', 'doc-drift.yml'):
+        for filename in ('ci.yml', 'doc-drift.yml'):
             wf = workflow(filename)
-            if filename == 'db-acceptance.yml':
-                self.assertEqual(set(wf['on']), {'workflow_dispatch'})
-                continue
             self.assertEqual(set(wf['on']['pull_request']['types']), events)
             previous = None
             for action in events:
@@ -114,8 +111,6 @@ class Controls(unittest.TestCase):
                     self.assertEqual(actual, expected)
                     self.assertTrue(expression(wf['jobs']['checks']['if'], e))
                     self.assertEqual(load('ci-evidence').class_groups(), matrix['classes'])
-                elif filename == 'db-acceptance.yml':
-                    self.assertEqual(bool(expression(wf['jobs']['acceptance']['if'], e)), not draft)
                 else:
                     self.assertNotIn('if', wf['jobs']['check'])
             for name in ('schedule', 'workflow_dispatch'):
@@ -127,8 +122,6 @@ class Controls(unittest.TestCase):
                     exclusions = expression(wf['jobs']['classes']['strategy']['matrix']['exclude'], e)
                     self.assertTrue(all(row.get('gate_shard') == 2 and row['classes'] != 'gates' for row in exclusions))
                     self.assertTrue(expression(wf['jobs']['checks']['if'], e))
-                elif filename == 'db-acceptance.yml':
-                    self.assertTrue(expression(wf['jobs']['acceptance']['if'], e))
 
     def test_superseded_expensive_jobs_can_cancel(self):
         wf = workflow()

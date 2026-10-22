@@ -83,7 +83,7 @@ with patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}, clear=True):
     else:
         check("hosted runner refuses", False)
 
-# The declared hosted lane (.github/workflows/db-acceptance.yml) is the one
+# The declared hosted lane (.github/workflows/ci.yml) is the one
 # caller allowed through, and every clause is load-bearing. Dropping any one of
 # them would re-open the blanket hole the refusal exists to keep shut, so each
 # is tested by removing exactly that clause and requiring a refusal.

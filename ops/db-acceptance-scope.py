@@ -32,7 +32,7 @@ FULL_PATTERNS = (
     'mcp-server/src/*', 'mcp-server/test/*',
     'mcp-server/package.json', 'mcp-server/package-lock.json',
     'run.sh', 'requirements*', '.python-version', '.nvmrc',
-    '.github/workflows/ci.yml', '.github/workflows/db-acceptance.yml',
+    '.github/workflows/ci.yml',
 )
 
 

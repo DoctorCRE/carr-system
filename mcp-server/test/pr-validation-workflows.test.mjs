@@ -8,7 +8,7 @@ import { runInNewContext } from "node:vm";
 import test from "node:test";
 
 const yaml = createRequire(import.meta.url)("js-yaml");
-const files = ["ci.yml", "db-acceptance.yml", "doc-drift.yml"];
+const files = ["ci.yml", "doc-drift.yml"];
 const read = name => yaml.load(readFileSync(new URL("../../.github/workflows/" + name, import.meta.url), "utf8"));
 // Evaluate the workflows' scalar policy expressions, not a synthetic scheduler.
 // Unknown expressions fail closed; these tests make no claims about runner time.
@@ -51,18 +51,18 @@ for (const file of files) {
     assert.deepEqual(closed.runnable, []);
     for (const action of ["opened", "synchronize", "reopened"]) {
       const current = policy(workflow, context("pull_request", action));
-      assert.equal(current.triggers, file !== "db-acceptance.yml");
-      assert.deepEqual(current.runnable, current.triggers ? current.jobs.filter(name => name !== "shadow-aggregate") : []);
+      assert.equal(current.triggers, true);
+      assert.deepEqual(current.runnable, current.triggers ? current.jobs : []);
     }
   });
   test(`${file}: review transitions start validation and drafts retain cheap jobs`, () => {
     const ready = policy(workflow, context("pull_request", "ready_for_review"));
-    assert.equal(ready.triggers, file !== "db-acceptance.yml");
-    assert.deepEqual(ready.runnable, ready.triggers ? ready.jobs.filter(name => name !== "shadow-aggregate") : []);
+    assert.equal(ready.triggers, true);
+    assert.deepEqual(ready.runnable, ready.triggers ? ready.jobs : []);
     const event = context("pull_request", "converted_to_draft");
     event.event.pull_request.draft = true;
     const draft = policy(workflow, event);
-    assert.equal(draft.triggers, file !== "db-acceptance.yml");
+    assert.equal(draft.triggers, true);
     assert.deepEqual(draft.runnable, file === "ci.yml" ? ["scope", "classes", "checks"] : file === "doc-drift.yml" ? ["check"] : []);
   });
   test(`${file}: cancellation is scoped to the workflow and PR`, () => {
@@ -78,11 +78,11 @@ for (const file of files) {
     assert.notEqual(policy({ ...workflow, name: "Another workflow" }, context()).group, current.group);
     for (const event of ["schedule", "workflow_dispatch"]) {
       const one = policy(workflow, context(event, "", 9, 1)), two = policy(workflow, context(event, "", 9, 2));
-      assert.equal(one.triggers, file !== "db-acceptance.yml" || event === "workflow_dispatch");
+      assert.equal(one.triggers, true);
       assert.equal(one.cancel, false);
       assert.notEqual(one.group, current.group);
       assert.notEqual(one.group, two.group, "pending non-PR verdicts must not replace each other");
-      assert.deepEqual(one.runnable, one.triggers ? one.jobs.filter(name => name !== "shadow-aggregate") : []);
+      assert.deepEqual(one.runnable, one.triggers ? one.jobs : []);
     }
   });
   test(`${file}: unsubscribed push events never count as validation`, () => {
@@ -91,18 +91,6 @@ for (const file of files) {
     assert.deepEqual(push.runnable, []);
   });
 }
-
-test("DB shard aggregate is default-off, collects failed-trial diagnostics, and cannot run on PRs", () => {
-  const db = read("db-acceptance.yml");
-  assert.equal(db.on.workflow_dispatch.inputs.shard_trial.default, false);
-  assert.deepEqual(policy(db, context("workflow_dispatch"), true).runnable, ["acceptance"]);
-  const enabled = { shard_trial: true };
-  assert.deepEqual(policy(db, context("workflow_dispatch"), true, enabled).runnable, ["acceptance", "shadow-aggregate"]);
-  assert.deepEqual(policy(db, context("workflow_dispatch"), false, enabled).runnable, ["shadow-aggregate"]);
-  assert.deepEqual(policy(db, context(), true, enabled).runnable, []);
-  assert.deepEqual(Object.keys(db.on), ["workflow_dispatch"]);
-  assert.throws(() => expression("inputs.unknown", context()), /unsupported expression/);
-});
 
 test("expensive proof jobs survive scope failure but stop when superseded", () => {
   const ci = read("ci.yml");

@@ -307,9 +307,6 @@ def test_database_scope_receipts():
 
 def test_hosted_migration_ownership():
     wf = _hosted_workflow()
-    db = _hosted_workflow("db-acceptance.yml")
-    check("only required CI runs PR database proof", "pull_request" not in db["on"]
-          and "schedule" not in db["on"])
     runner = next(st for st in wf["jobs"]["classes"]["steps"] if st.get("name") == "Run this group's check classes")
     check("PR slot claims run before entering the credential-scrubbed database lane",
           runner["run"].index("python3 ops/migration-open-pr-gate.py") < runner["run"].index("python ops/local-pg-ci.py")
