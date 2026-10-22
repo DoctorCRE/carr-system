@@ -586,12 +586,7 @@ UNCOLLECTED_BY_DECISION = {
         "unittest package under tools/dictation-rig/tests/ that this lane did "
         "not run or vouch for. Named here so it is a known gap with an owner "
         "rather than an invisible one; collecting it is a follow-up that must "
-        "run it first. Same status as tools/partner-line/tests/test_watch.py.",
-    "tools/partner-line/tests/test_watch.py":
-        "Offline and correct, but not evaluated by this unit — see the "
-        "tools/dictation-rig entry. Its docstring claims no live socket and no "
-        "network, so it is a good candidate to collect; this lane owned "
-        "ops/ci.sh and ops/ci-selftest.py only and did not run it.",
+        "run it first.",
     "tools/doc-convo/bin/test-brain-stream.sh":
         "Not evaluated by this unit. It lives in a bin/ directory beside the "
         "convo server rather than in a tests/ directory, and the three "

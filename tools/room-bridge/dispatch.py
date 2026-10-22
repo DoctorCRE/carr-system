@@ -983,6 +983,9 @@ def desk_start(
         f"-p --input-format stream-json --output-format stream-json --verbose "
         f"<&3 >>{shlex.quote(str(log))} 2>&1"
     )
+    child_env, warning = credential_env.claude_child_env(env or None, path=token_path)
+    if warning:
+        print(f"desk_start {name}: {warning}", flush=True)
     proc = subprocess.Popen(
         ["/bin/sh", "-c", shell],
         env=child_env,
