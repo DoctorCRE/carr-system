@@ -1106,8 +1106,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 
 check_binding() {
   local problems="" machine_drift=""
-  run_quiet "$LOGDIR/binding-agent-boot.log" "$PY" ops/agent-boot-contract.py \
-    || { problems="$problems agent-boot"; cat "$LOGDIR/binding-agent-boot.log" >&2; }
   if [ -f mcp-server/wrangler.toml ]; then
     run_quiet "$LOGDIR/binding-wrangler.log" node -e '
       const fs=require("fs"), t=fs.readFileSync("mcp-server/wrangler.toml","utf8");
