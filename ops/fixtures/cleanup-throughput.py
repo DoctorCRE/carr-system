@@ -11,7 +11,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / 'lib'), str(ROOT / 'ops')]
 import branch_retirement
-import job_watchdog
+import local_jobs
 import machine_cleanup
 
 spec = importlib.util.spec_from_file_location('cleanup_fixtures', ROOT / 'ops/branch-janitor-selftest.py')
@@ -79,7 +79,7 @@ class CleanupThroughputTests(unittest.TestCase):
                                'dispatched_at': '2020-01-01T00:00:00Z'})
         dispatch_path = fixture.base / 'dispatch.jsonl'
         dispatch_path.write_text(''.join(json.dumps(row) + '\n' for row in dispatches))
-        config = job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
         config['machine_cleanup']['max_items'] //= self.budget_scale
         totals = {'job_clone': 0, 'worktree': 0}
         for run in range(1, 4):

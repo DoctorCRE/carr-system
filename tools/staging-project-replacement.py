@@ -213,8 +213,15 @@ def validate_source(sha: str, *, run: Run = subprocess.run) -> SourceContract:
         raise ReplacementRefusal("source checkout must be detached")
     if _success(git("status", "--porcelain=v1", "--untracked-files=all"), "cleanliness").strip():
         raise ReplacementRefusal("source checkout is not clean")
-    if git("merge-base", "--is-ancestor", sha, "origin/main", accept=(0, 1)).returncode:
-        raise ReplacementRefusal("SHA is not reachable from origin/main")
+    main = _success(git("ls-remote", "--exit-code", "origin", "refs/heads/main"),
+                    "remote main read").split()
+    if len(main) != 2 or not re.fullmatch(r"[0-9a-f]{40}", main[0]) \
+            or main[1] != "refs/heads/main":
+        raise ReplacementRefusal("remote main has no exact SHA acknowledgement")
+    # The pipeline's immutable fetch deliberately leaves shared tracking refs stale.
+    git("fetch", "--no-write-fetch-head", "--refmap=", "origin", main[0])
+    if git("merge-base", "--is-ancestor", sha, main[0], accept=(0, 1)).returncode:
+        raise ReplacementRefusal("SHA is not reachable from remote main")
     manifest = _json(_run([sys.executable, str(RELEASE_MANIFEST), "source-contract", "--sha", sha],
                           run=run), "source contract")
     exact = {"git_sha": sha, "tree_mode": "full", "tree_tuple": ["mode", "type", "object", "path"]}

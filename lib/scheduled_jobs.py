@@ -209,7 +209,7 @@ def is_checkout(path, required, roots):
 
 def render(rows):
     return [f"WARN scheduled jobs {r['label']} {r['code']}: {r['detail']} · on breach: "
-            f"tools/job-watchdog.py scan files/updates loop {r['key']} · owner {r['owner']} · "
+            f"loop {r['key']} · owner {r['owner']} · "
             f"fix: {r['fix']} · verify: python3 ops/scheduled-jobs-check.py · "
             f"auto-clear: next complete scan without {r['code']} for {r['label']}" for r in rows]
 
