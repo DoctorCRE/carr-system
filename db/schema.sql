@@ -123028,7 +123028,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0927_deal_action_hold_date.sql	ce7522c72d7ab978aeaf70a78362144c65cdde0c310dc3681f596c3f2cab4848	1970-01-01 00:00:00+00
 0932_retire_dead_background_jobs.sql	2920a630039f908deba5fa0d04ec959f180f7fd069b0a908a6d160279d24a2dd	1970-01-01 00:00:00+00
 0933_source_merge_projection_control_refs.sql	8e7a69d8ca622e59de97b8cdee76186694bbe88b99c4c26195c21340e7d14f85	1970-01-01 00:00:00+00
-0934_deal_alert_items.sql	469f722bb5005547378d43bed510fb1b4edc98c1fc146ea8d50ae423b0275bb3	1970-01-01 00:00:00+00
+0935_deal_alert_items.sql	469f722bb5005547378d43bed510fb1b4edc98c1fc146ea8d50ae423b0275bb3	1970-01-01 00:00:00+00
 \.
 
 
