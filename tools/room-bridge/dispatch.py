@@ -17,7 +17,7 @@ to route costs the tokens the routing was supposed to save.
 `send` saves a card in the durable work queue and returns its queued receipt.
 The detached runner claims cards in the current global order when their desk
 and a Codex slot are free. `prioritize`, `requeue`, `show`, `history`, `export`
-and `merge-order` all use that same store.
+and `queue` all use that same store.
 
 The worker resolves the current Codex family at execution time and records the
 executor model and effort on the card. The `dispatch()` function is the
@@ -858,43 +858,49 @@ def dispatch(
                'provider_run': provider_run,
                'claim_id': msg_id if declared_writes else None}
     workspace = base.get('checkout_path') or cwd or entry.get('cwd') or str(Path.cwd())
-    with (_hermes_slot(env or os.environ) if entry['kind'] == 'hermes-nous' else nullcontext()), \
-         (write_ownership.checkout_writer(workspace) if declared_writes or entry['kind'] == 'claude-api' else nullcontext()) as bind:
-        for attempt in range(CODEX_CAPACITY_ATTEMPTS):
-            if entry.get('posture') == 'record-layer':
-                try:
-                    reason = business_routing.unavailable(
-                        entry, results_path, business_routing.limit_states(results_path))
-                except (DeskError, OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
-                    reason = f'execution unavailable: {type(exc).__name__}'
-                if reason:
-                    raise DeskError('business_desk_unavailable', reason)
-            outcome = _execute(request, on_executor=bind)
-            if (entry['kind'] not in codex_models.CODEX_KINDS
-                    or outcome['status'] not in ('failed', 'capacity')
-                    or 'selected model is at capacity' not in outcome.get('detail', '').lower()):
-                break
-            outcome['status'] = 'capacity'
-            if outcome.get('termination_confirmed') is False or attempt + 1 == CODEX_CAPACITY_ATTEMPTS:
-                break
-            print(f"capacity: retrying {name} in {CODEX_CAPACITY_BACKOFF_S}s "
-                  f"(attempt {attempt + 2}/{CODEX_CAPACITY_ATTEMPTS})", file=sys.stderr, flush=True)
-            time.sleep(CODEX_CAPACITY_BACKOFF_S)
-    if outcome.get('thread_id') and not network_access and (entry['kind'] == 'codex-live'
-            or entry['kind'] in codex_models.CODEX_KINDS and not cwd):
-        registry.remember_thread(name, outcome['thread_id'])
+    try:
+        with (_hermes_slot(env or os.environ) if entry['kind'] == 'hermes-nous' else nullcontext()), \
+             (write_ownership.checkout_writer(workspace) if checkout is not None or declared_writes or entry['kind'] == 'claude-api' else nullcontext()) as bind:
+            for attempt in range(CODEX_CAPACITY_ATTEMPTS):
+                if entry.get('posture') == 'record-layer':
+                    try:
+                        reason = business_routing.unavailable(
+                            entry, results_path, business_routing.limit_states(results_path))
+                    except (DeskError, OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+                        reason = f'execution unavailable: {type(exc).__name__}'
+                    if reason:
+                        raise DeskError('business_desk_unavailable', reason)
+                outcome = _execute(request, on_executor=bind)
+                if (entry['kind'] not in codex_models.CODEX_KINDS
+                        or outcome['status'] not in ('failed', 'capacity')
+                        or 'selected model is at capacity' not in outcome.get('detail', '').lower()):
+                    break
+                outcome['status'] = 'capacity'
+                if outcome.get('termination_confirmed') is False or attempt + 1 == CODEX_CAPACITY_ATTEMPTS:
+                    break
+                print(f"capacity: retrying {name} in {CODEX_CAPACITY_BACKOFF_S}s "
+                      f"(attempt {attempt + 2}/{CODEX_CAPACITY_ATTEMPTS})", file=sys.stderr, flush=True)
+                time.sleep(CODEX_CAPACITY_BACKOFF_S)
+        if outcome.get('thread_id') and not network_access and (entry['kind'] == 'codex-live'
+                or entry['kind'] in codex_models.CODEX_KINDS and not cwd):
+            registry.remember_thread(name, outcome['thread_id'])
 
-    row = {
-        **base,
-        **outcome,
-        'status': outcome['status'],
-        **({'ephemeral_thread': True, 'thread_resumable': False} if network_access else {}),
-    }
-    if row['status'] == 'failed' and SAFETY_REFUSAL.search(row.get('detail', '')):
-        print('Provider safety refusal. ' + _phrasing_hint(original_task, examples_on_miss=True),
-              file=sys.stderr, flush=True)
-    _record(results_path, row)
-    return row
+        row = {
+            **base,
+            **outcome,
+            'status': outcome['status'],
+            **({'ephemeral_thread': True, 'thread_resumable': False} if network_access else {}),
+        }
+        if row['status'] == 'failed' and SAFETY_REFUSAL.search(row.get('detail', '')):
+            print('Provider safety refusal. ' + _phrasing_hint(original_task, examples_on_miss=True),
+                  file=sys.stderr, flush=True)
+        _record(results_path, row)
+        return row
+    finally:
+        if checkout is not None:
+            from ops.job_cleanup import clean
+            cleanup = clean(Path(base['checkout_path']), staging=Path.home() / '_to_delete', immediate=True)
+            print('Job checkout cleanup: ' + json.dumps(cleanup), file=sys.stderr, flush=True)
 
 
 # WR-000119 — THE DESK'S OWN ACKNOWLEDGEMENT, AND ONLY ITS OWN.
@@ -1237,7 +1243,7 @@ def main(argv: list[str]) -> int:
     s.add_argument("--effort", choices=desks.EFFORT_CHOICES)
     s.add_argument("--writes", action="append", help="repository-relative write glob (repeatable)")
     s.add_argument('--checkout', metavar='BRANCH|new:NAME',
-                   help='clone the canonical carr-system origin before launch into a retained /private/tmp job folder; '
+                   help='clone the canonical carr-system origin before launch into a /private/tmp job folder; safely pushed checkouts retire at job end; '
                         'BRANCH uses that branch, new:NAME branches from origin default HEAD. '
                         'Fresh jobs start in its parent workspace with the nested checkout named '
                         'in the task; resumed desks keep cwd and receive the checkout path. '

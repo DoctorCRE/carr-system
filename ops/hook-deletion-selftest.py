@@ -56,10 +56,9 @@ class HookDeletion(unittest.TestCase):
                 git('commit', '-qm', 'Delete and unwire')
                 result = subprocess.run(['python3', str(CHECK), '--repo', str(repo), '--base', base],
                                         capture_output=True, text=True)
-                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertIn('REFUSED', result.stdout)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_unwire_and_rename_need_separate_prs(self):
+    def test_deletion_requires_unwiring_in_resulting_configuration(self):
         with tempfile.TemporaryDirectory() as raw:
             repo = Path(raw)
             def git(*args):
@@ -77,14 +76,19 @@ class HookDeletion(unittest.TestCase):
             git('add', 'hooks/old.py', 'ops/config/hooks.json')
             git('commit', '-qm', 'Wired hook')
             base = git('rev-parse', 'HEAD')
+            git('rm', 'hooks/old.py')
+            git('commit', '-qm', 'Delete while wired')
+            result = subprocess.run(['python3', str(CHECK), '--repo', str(repo), '--base', base], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            git('checkout', base, '--', 'hooks/old.py')
+            git('commit', '-qm', 'Restore fixture')
             config.write_text('{}')
             shutil.move(script, repo / 'hooks/new.py')
             git('add', 'hooks/old.py', 'hooks/new.py', 'ops/config/hooks.json')
             git('commit', '-qm', 'Unsafe rename and unwire')
             result = subprocess.run(['python3', str(CHECK), '--repo', str(repo), '--base', base],
                                     capture_output=True, text=True)
-            self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertIn('hooks/old.py', result.stdout)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             git('checkout', base, '--', 'hooks/old.py')
             git('commit', '-qm', 'Keep script through unwire')
             unwired = git('rev-parse', 'HEAD')

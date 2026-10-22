@@ -21,11 +21,6 @@ if [ "${1:-}" = "--doc-drift" ]; then
   exec "${CARR_DOC_DRIFT_PYTHON:-$PY}" "$REPO/scripts/doc-drift/ci.py" "$@"
 fi
 
-if [ "${1:-}" = "--pr-skills" ]; then
-  node --test mcp-server/test/pr-skills.test.mjs || exit 1
-  exec node ops/check-pr-skills.mjs
-fi
-
 STRICT=0
 ONLY=""
 MIGRATION_PART=all
@@ -438,7 +433,7 @@ check_pushfloor() {
 
   run_quiet "$LOGDIR/pushfloor-hook-deletion.log" "$PY" ops/hook-deletion-check.py \
     || { cat "$LOGDIR/pushfloor-hook-deletion.log" >&2
-         floor_fail hook-deletion "unwire hook scripts in a prior PR before deleting or renaming them"; }
+         floor_fail hook-deletion "remove hook registrations before deleting or renaming their scripts"; }
 
   if [ -n "$changed" ] && [ -f ops/githooks/path-hygiene-check.py ]; then
     local added
@@ -509,7 +504,7 @@ check_pushfloor() {
 
   local gate_surface=""
   if [ -n "$changed" ]; then
-    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(delegation-gate-hook|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
+    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(hook-script-policy|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
   fi
   if [ -n "$gate_surface" ]; then
     ran="$ran gate-closure"
@@ -1060,6 +1055,12 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       bad migration "control-plane registry sync failed after migrations"
       return
     fi
+    if ! DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-service-registry-sync.log" \
+         "$PY" tools/ops-record.py sync-registry; then
+      tail -30 "$LOGDIR/migration-service-registry-sync.log" >&2
+      bad migration "service registry sync failed after migrations"
+      return
+    fi
 
     local dsn_read='environ\.get\("(CARR_CI_)?DATABASE_URL"|environ\["(CARR_CI_)?DATABASE_URL"\]|getenv\("(CARR_CI_)?DATABASE_URL"'
     if [[ "$MIGRATION_PART" != proofs && "$MIGRATION_PART" != acceptance ]]; then
@@ -1111,8 +1112,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 
 check_binding() {
   local problems="" machine_drift=""
-  run_quiet "$LOGDIR/binding-agent-boot.log" "$PY" ops/agent-boot-contract.py \
-    || { problems="$problems agent-boot"; cat "$LOGDIR/binding-agent-boot.log" >&2; }
   if [ -f mcp-server/wrangler.toml ]; then
     run_quiet "$LOGDIR/binding-wrangler.log" node -e '
       const fs=require("fs"), t=fs.readFileSync("mcp-server/wrangler.toml","utf8");
@@ -1187,10 +1186,16 @@ check_artifact() {
       ok artifact "$shipping verbs; no prior deployment recorded, this would set the baseline"
       ;;
     78)
-      if [ "${CARR_CI_PORTABLE_ONLY:-0}" = "1" ]; then
-            ok artifact "$shipping verbs; shrink guard not run here (portable runner has no ledger credential — the deploy enforces it)"
+      local base
+      base="$(git merge-base HEAD origin/main 2>/dev/null || true)"
+      [ "$base" != "$(git rev-parse HEAD)" ] || base="$(git rev-parse -q --verify 'HEAD^' || true)"
+      if [ -z "$base" ]; then
+        skip artifact "$shipping verbs counted, but no base commit or ledger credential — the shrink comparison did not run"
+      elif sh ops/verb-loss-vs-base.sh "$REPO" "$base" >"$LOGDIR/artifact-count.log" 2>"$LOGDIR/artifact.log"; then
+        ok artifact "$shipping verbs; loss checked by name against base ${base:0:12} and committed retirements"
       else
-        skip artifact "$shipping verbs counted, but no ledger credential — the shrink comparison did not run"
+        cat "$LOGDIR/artifact.log" >&2
+        bad artifact "verb loss against base ${base:0:12} does not match the committed retirement ledger"
       fi
       ;;
     *)

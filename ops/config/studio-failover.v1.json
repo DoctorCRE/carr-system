@@ -49,13 +49,6 @@
       "enabled": true
     },
     {
-      "label": "com.carr.fix-train",
-      "source": "ops/launchd/com.carr.fix-train.plist",
-      "credentials": [],
-      "state": [],
-      "enabled": true
-    },
-    {
       "label": "com.carr.job-watchdog",
       "source": "ops/launchd/com.carr.job-watchdog.plist",
       "credentials": [
@@ -167,10 +160,6 @@
     {
       "name": "guarded host startup",
       "prerequisite": "verify guarded or safely disabled startup on both hosts; bootstrap Studio with failback-to-studio.sh while MacBook is fenced; keep an unprepared returning host off until its old startup jobs are disabled"
-    },
-    {
-      "name": "generated fix-train executable",
-      "prerequisite": "provision and verify out/orch/fix-train.sh from its owning orchestrator"
     },
     {
       "name": "local model runtimes",

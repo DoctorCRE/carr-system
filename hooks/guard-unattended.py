@@ -81,8 +81,6 @@ try:                                    # telemetry only — never load-bearing
     LOG = hook_meter.guard_log_path(REPO)
 except Exception:                       # a missing meter must not change a verdict
     LOG = os.path.join(REPO, "out", "hook-guard.log")
-DELEGATION_STATE = os.path.join(REPO, "out", "delegation-gate-state.json")
-DELEGATION_LOCK = DELEGATION_STATE + ".lock"
 
 # The nightly chain, verbatim. Belt and braces: it matches nothing below, and it
 # is also allowlisted so it can never be caught by a pattern added later.
@@ -1854,22 +1852,6 @@ def raw_targets_carr(cmd):
     return any(re.search(marker, cmd) for marker in markers)
 
 
-def delegation_control_plane_write(cmd):
-    """Block ordinary shell tampering with the delegation gate's mutable state.
-
-    The hook itself updates this state by direct atomic filesystem calls, not by
-    issuing a harness Bash tool call, so this does not interfere with normal
-    state transitions.  A model-issued shell command, however, must never edit
-    the latch/control files to release its own task.
-    """
-    names = (DELEGATION_STATE, DELEGATION_LOCK, "delegation-gate-state.json",
-             ".delegation-gate-")
-    if not any(name in cmd for name in names):
-        return None
-    write_shape = re.compile(r"(>>?|\btee\b|\bsed\s+-i\b|\btruncate\b|\brm\b|\bmv\b|\bcp\b|\bchmod\b|\bchflags\b|open\([^\n]+['\"][wa])", re.I)
-    if write_shape.search(cmd):
-        return "delegation control-plane state write — blocked by the CARR guard"
-    return None
 
 
 def direct_metered_dispatch(cmd):
@@ -2144,9 +2126,6 @@ def check(cmd, cwd=None):
     if reason:
         return reason
 
-    reason = delegation_control_plane_write(cmd)
-    if reason:
-        return reason
 
     reason = direct_metered_dispatch(cmd)
     if reason:

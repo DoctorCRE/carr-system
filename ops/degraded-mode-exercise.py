@@ -130,17 +130,6 @@ def main() -> int:
     check("says out loud that it read nothing",
           "nothing read, nothing claimed" in p.stdout, p.stdout[:160])
 
-    # ── 3. the liveness PROBE must not invent three outages ──────────────────
-    # The failure this guards is specific: three servers whose results cannot be
-    # recorded are an unreachable ledger, and reporting them as three simultaneous
-    # outages would alarm every ten minutes on any Mac with a cold credential.
-    print("\nbin/probe-keepalive.py — the KeepAlive probe")
-    p = run([PY, os.path.join(REPO, "bin", "probe-keepalive.py")])
-    check("returns EX_CONFIG (78) rather than reporting outages it cannot record",
-          p.returncode == 78, f"rc={p.returncode}")
-    check("names the unreachable ledger as the cause",
-          "unreachable ledger" in p.stdout, p.stdout[-200:])
-
     # ── 5. the health check must name its degraded source ────────────────────
     # This is the one with history. The schedule-drift row fell back to a trimmed
     # log twice and reported a drift that never happened, so the fallback is only

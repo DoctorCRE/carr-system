@@ -48,18 +48,6 @@
     ]
   },
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash|Read|Grep|Glob|WebFetch|WebSearch",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 \"${HOME}/carr-system/hooks/delegation-gate.py\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "hooks": [

@@ -51,6 +51,9 @@ class CheckoutDispatchTests(unittest.TestCase):
         queue_env.start()
         self.addCleanup(queue_env.stop)
         self.codex_calls = []
+        staging = patch('dispatch.Path.home', return_value=self.root)
+        staging.start()
+        self.addCleanup(staging.stop)
         canonical = patch('codex_checkout.CANONICAL_REPO', self.source)
         canonical.start()
         self.addCleanup(canonical.stop)
@@ -75,7 +78,23 @@ class CheckoutDispatchTests(unittest.TestCase):
                                 provider_run=self.execute, **kwargs)
         workspace = Path(row['checkout_workspace'])
         self.addCleanup(lambda: shutil.rmtree(workspace, ignore_errors=True))
+        repo = Path(row['checkout_path'])
+        if not repo.exists():
+            staged = next((self.root / '_to_delete').glob('*/*/checkout'))
+            shutil.move(str(staged), str(repo))
         return row
+
+    def test_finished_pushed_job_retires_its_own_clone(self):
+        row = dispatch.dispatch('cx', 'repair it', registry=self.reg,
+            results_path=self.results, env=self.env, provider_run=self.execute,
+            checkout='repair', fresh=True)
+        self.assertEqual(row['status'], 'completed')
+        self.assertFalse(Path(row['checkout_path']).exists())
+        staged = list((self.root / '_to_delete').glob('*/*/checkout'))
+        self.assertEqual(len(staged), 1)
+        self.assertEqual(self.git('rev-parse', 'HEAD', cwd=staged[0]),
+                         self.git('rev-parse', 'repair'))
+        self.assertTrue(self.source.exists())
 
     def test_clone_cwd_and_noreply_author_before_fresh_turn(self):
         before = self.git('status', '--porcelain')
@@ -114,8 +133,11 @@ class CheckoutDispatchTests(unittest.TestCase):
              patch('codex_checkout.subprocess.run', side_effect=record):
             row = dispatch.dispatch('cx', 'repair it', registry=self.reg,
                                     results_path=self.results, env=self.env,
-                                    checkout='repair', fresh=True)
+                                    checkout='repair', fresh=True, provider_run=self.execute)
         self.addCleanup(lambda: shutil.rmtree(row['checkout_workspace'], ignore_errors=True))
+        repo = Path(row['checkout_path'])
+        if not repo.exists():
+            shutil.move(str(next((self.root / '_to_delete').glob('*/*/checkout'))), str(repo))
         clone = next(argv for argv in calls if argv[:2] == ['git', 'clone'])
         self.assertIn('--dissociate', clone)
         self.assertEqual(clone[clone.index('--reference-if-able') + 1], str(self.source))
@@ -226,7 +248,7 @@ class CheckoutDispatchTests(unittest.TestCase):
         with patch.object(desks, 'is_live', return_value=True), \
              patch.object(dispatch.codex_wire, 'run_turn', return_value={'status': 'completed'}) as turn:
             row = dispatch.dispatch('live', 'repair', registry=self.reg, results_path=self.results,
-                                    env=self.env, checkout='repair', fresh=True)
+                                    env=self.env, checkout='repair', fresh=True, provider_run=self.execute)
         self.addCleanup(lambda: shutil.rmtree(row['checkout_workspace'], ignore_errors=True))
         self.assertEqual(turn.call_args.kwargs['cwd'], row['checkout_workspace'])
         self.assertIn(row['checkout_path'], turn.call_args.args[1])

@@ -171,9 +171,9 @@ check("builds the prompt into a file rather than inlining it on a command line",
 check("reads the probe host from the judge module rather than hardcoding it",
       "codex_hook_smoke_judge" in smoke_src and "PROBE_HOST" in smoke_src)
 
-check('probe instructions fetch every boot page before issuing probe',
-      '"detail":"boot","page":1' in smoke_src and 'pages_total' in smoke_src
-      and smoke_src.index('First satisfy the CARR rule-boot gate') < smoke_src.index('After boot is complete, run exactly'))
+check('probe instructions issue the probe without a boot handshake',
+      'Run exactly this command using your shell/exec tool' in smoke_src
+      and 'First satisfy the CARR rule-boot gate' not in smoke_src)
 check('shell reports boot_gate separately', 'boot_gate)' in smoke_src)
 
 # Before spending a live Codex run the smoke asks the guard whether it still
