@@ -61,6 +61,21 @@ jobs:
         exclude: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.draft && '[{"classes":"pushfloor unit types contract secret dependency binding artifact freshness","gate_shard":2},{"classes":"hxprobe","gate_shard":2},{"classes":"gates"},{"classes":"migration"}]' || '[{"classes":"pushfloor unit types contract secret dependency binding artifact freshness","gate_shard":2},{"classes":"migration","gate_shard":2},{"classes":"hxprobe","gate_shard":2}]') }}
     timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
 
+    services:
+      postgres:
+        image: ${{ contains(matrix.classes, 'unit') && 'mirror.gcr.io/library/postgres:17@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3' || '' }}
+        env:
+          POSTGRES_USER: carr_ci
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: carr_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U carr_ci -d carr_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -153,6 +168,7 @@ jobs:
           # Excludes the checks whose dependency cannot exist on a runner
           # (installed Claude Code settings, macOS launchd). Each one prints its
           # reason in the output; nothing is dropped silently.
+          CARR_CI_DATABASE_URL: ${{ contains(matrix.classes, 'unit') && 'postgres://carr_ci:postgres@localhost:5432/carr_ci' || '' }} # ci-secret-scan: allow - disposable loopback fixture
           GH_TOKEN: ${{ github.token }}
           CARR_CI_PORTABLE_ONLY: "1"
           CARR_LOCAL_PG_ALLOW_HOSTED: "1"
@@ -250,15 +266,15 @@ jobs:
           CLASSES_RESULT: ${{ needs.classes.result }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          if [ "$CLASSES_RESULT" != "success" ]; then
+            echo "aggregate matrix result: $CLASSES_RESULT"
+            exit 1
+          fi
           if [ "$FIXTURES_RESULT" != success ] && ! { [ "$DB_FULL" = false ] && [ "$FIXTURES_RESULT" = skipped ]; }; then
             echo "migration fixtures: $FIXTURES_RESULT (database scope=$DB_FULL)"
             exit 1
           fi
           python3 ops/ci-evidence.py verdict
-          if [ "$CLASSES_RESULT" != "success" ]; then
-            echo "aggregate matrix result: $CLASSES_RESULT"
-            exit 1
-          fi
       - name: Record the tested tree and class contract
         if: needs.scope.outputs.full != 'false'
         run: python3 ops/ci-evidence.py record --output ci-evidence.json

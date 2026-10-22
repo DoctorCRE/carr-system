@@ -110,6 +110,28 @@ test("expensive proof jobs survive scope failure but stop when superseded", () =
   assert.deepEqual(policy(ci, context(), true, { shard_trial: false }, true).runnable, ["checks"]);
 });
 
+test("only unit fixtures provision the shared PostgreSQL service", () => {
+  const ci = read("ci.yml"), job = ci.jobs.classes;
+  const run = job.steps.find(step => step.name === "Run this group's check classes");
+  const evaluate = (value, classes) => runInNewContext(value.slice(3, -2), {
+    matrix: { classes }, contains: (value, needle) => value.includes(needle),
+  });
+  for (const group of job.strategy.matrix.classes) {
+    const image = evaluate(job.services.postgres.image, group);
+    const dsn = evaluate(run.env.CARR_CI_DATABASE_URL, group);
+    if (group.split(" ").includes("unit")) {
+      assert.equal(image, read("main-canary.yml").jobs.classes.services.postgres.image);
+      assert.match(image, /@sha256:[0-9a-f]{64}$/);
+      assert.equal(new URL(dsn).hostname, "localhost");
+      assert.equal(new URL(dsn).username, "carr_ci");
+      assert.equal(new URL(dsn).password, job.services.postgres.env.POSTGRES_PASSWORD);
+    } else {
+      assert.equal(image, "");
+      assert.equal(dsn, "");
+    }
+  }
+});
+
 test("metadata edits start no validation workflow, so no skipped suite replaces the required verdict", () => {
   for (const file of files) {
     const edited = policy(read(file), context("pull_request", "edited"));
@@ -156,7 +178,7 @@ test("strict aggregate runs after failed classes and requires complete successfu
           encoding: "utf8", timeout: 5000 });
         assert.ifError(output.error);
         assert.equal(output.status === 0, result === "success" && evidence.length === jobs.length, output.stdout + output.stderr);
-        if (evidence.length !== jobs.length) assert.match(output.stdout, /MISSING/);
+        if (result === "success" && evidence.length !== jobs.length) assert.match(output.stdout, /MISSING/);
       }
     }
   } finally { rmSync(fixture, { recursive: true, force: true }); }

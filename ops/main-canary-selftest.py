@@ -71,8 +71,9 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
           and any('--migration-part core' in st.get('run', '') for st in pr_steps)
           and any('--migration-part fixtures' in st.get('run', '')
                   for st in pr['jobs']['migration-fixtures']['steps']))
-    check('main owns its disposable service while PR runner owns its cluster',
-          'postgres' in classes['services'] and 'services' not in pr['jobs']['classes'])
+    check('main retains its service and PR limits the shared fixture to unit checks',
+          classes['services']['postgres']['image'] in pr['jobs']['classes']['services']['postgres']['image']
+          and "contains(matrix.classes, 'unit')" in pr['jobs']['classes']['services']['postgres']['image'])
     aggregate = main['jobs']['canary']
     check('one aggregate main canary always reports',
           aggregate['name'] == 'main canary' and 'always()' in aggregate['if'])
