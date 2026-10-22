@@ -8,7 +8,7 @@ from pathlib import Path
 import time
 import uuid
 
-from branch_retirement import GitHub, git, command, process_paths, save, fetch_remote_refs, remote_preserves
+from branch_retirement import CommandError, GitHub, git, command, process_paths, save, fetch_remote_refs, remote_preserves
 from job_watchdog import epoch
 from lib.cleanup_budget import BudgetExhausted, bounded, check, entries
 
@@ -103,7 +103,8 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         return {**result, 'status': 'deferred' if receipt is not None and not isinstance(exc, BudgetExhausted) else 'kept',
                 'reason': 'cleanup evidence or move verification timed out', 'budget_exhausted': True}
     except Exception as exc:
-        return {**keep('evidence or staging failed'), 'error': type(exc).__name__}
+        return {**keep('evidence or staging failed'), 'error': type(exc).__name__,
+                **(exc.evidence if isinstance(exc, CommandError) else {})}
 
 
 def health_findings(root, config, *, tmp_root, roots, now, user_tmp_root=None):
@@ -278,7 +279,8 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                 report.update(budget_exhausted=True, pending=pending)
                 return finish()
             except Exception as exc:
-                error = {'kind': pending.get('kind'), 'error': type(exc).__name__, 'reason': str(exc)}
+                error = {'kind': pending.get('kind'), 'error': type(exc).__name__, 'reason': str(exc),
+                         **(exc.evidence if isinstance(exc, CommandError) else {})}
                 errors = previous.get('errors', [])
                 failed = {**previous, 'status': 'failed', 'errors': errors if error in errors else errors + [error]}
                 save(receipt_path, failed)
@@ -293,7 +295,8 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                           'removed' if row.get('status') in {'staged', 'archived', 'removed'} else 'kept')
             report[collection].append(row)
             if row.get('error'):
-                report['errors'].append({'kind': row['kind'], 'error': row['error']})
+                report['errors'].append({k: row[k] for k in
+                    ('kind', 'path', 'error', 'command', 'returncode', 'stderr_tail') if k in row})
             if not row.get('error') and row.get('status') != 'deferred':
                 report.pop('pending', None)
             save(receipt_path, report)

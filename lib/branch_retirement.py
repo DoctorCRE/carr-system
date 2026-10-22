@@ -23,6 +23,13 @@ from job_watchdog import protected_branch, repository_roots
 CLASSES = ("merged", "superseded", "abandoned", "live")
 
 
+class CommandError(RuntimeError):
+    def __init__(self, argv, returncode, stderr):
+        super().__init__(f"{Path(argv[0]).name} failed (exit {returncode})")
+        self.evidence = {"command": list(argv), "returncode": returncode,
+                         "stderr_tail": stderr[-4096:]}
+
+
 def command(argv, cwd=None, *, input=None, allowed=(0,), timeout=120, environment=None):
     env = scrubbed_env()
     env.update(environment or {})
@@ -32,7 +39,7 @@ def command(argv, cwd=None, *, input=None, allowed=(0,), timeout=120, environmen
     result = subprocess.run(argv, cwd=cwd, env=env, input=input, capture_output=True,
                             text=True, timeout=timeout)
     if result.returncode not in allowed:
-        raise RuntimeError(f"{Path(argv[0]).name} failed (exit {result.returncode})")
+        raise CommandError(argv, result.returncode, result.stderr)
     return result
 
 
@@ -68,8 +75,12 @@ def git_records(root, *args, separator=b"\0"):
                     yield record.decode("utf-8", "surrogateescape")
             if pending:
                 yield pending.decode("utf-8", "surrogateescape")
-            if proc.wait(timeout=30):
-                raise RuntimeError("git evidence collection failed")
+            returncode = proc.wait(timeout=30)
+            if returncode:
+                errors.seek(0, os.SEEK_END)
+                errors.seek(max(0, errors.tell() - 4096))
+                raise CommandError(["git", "-C", str(root), *args], returncode,
+                                   errors.read().decode("utf-8", "replace"))
         finally:
             proc.stdout.close()
             if proc.poll() is None:
@@ -807,7 +818,8 @@ class FleetReaper:
                     except MaintenanceDeferred as exc:
                         report["deferred"].append({"repo": repo, "reason": str(exc)})
                     except Exception as exc:
-                        report["errors"].append({"repo": repo, "error": str(exc)})
+                        report["errors"].append({"repo": repo, "error": str(exc),
+                            **(exc.evidence if isinstance(exc, CommandError) else {})})
                 save(self.root / "out/orch/branch-janitor-report.json", report)
                 append(self.root / "out/orch/branch-janitor-runs.jsonl",
                        {k: v for k, v in report.items() if k != "rows"})
