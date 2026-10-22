@@ -1530,8 +1530,8 @@ class Pipeline:
                 "resolution_evidence": {"replacement_sha": target, "sha": sha,
                                         "provider_version_id": version, "receipt_digest": evidence_digest(receipt)}}
 
-    def legacy_health_promotion(self, failure: dict, lane_cfg: dict, main: str) -> dict:
-        """Bind a pre-intent promotion to its immutable source and successful provider steps."""
+    def legacy_health_promotion(self, failure: dict, lane_cfg: dict, main: str, promotion: dict) -> dict:
+        """Bind a health failure to its run identity and successful provider steps."""
         try:
             run_id = failure['run_id']
             if (not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}", run_id)
@@ -1556,7 +1556,15 @@ class Pipeline:
                     or not any(route.get('pattern') == host and route.get('custom_domain') is True
                                for route in identities[0]['routes'])):
                 raise ValueError('Worker account or route changed')
-            version = failure['promotion']['provider_version_id']
+            recorded = [row for row in self.store.records()
+                        if row.get('lane') == 'worker' and row.get('status') == 'worker_promoted'
+                        and row.get('run_id') == run_id]
+            expected_identity = {'from_sha': previous, **promotion}
+            if (failure.get('promotion') not in (None, promotion)
+                    or (failure.get('promotion') is None and not recorded)
+                    or any(row.get(key) != value for row in recorded for key, value in expected_identity.items())):
+                raise ValueError('run promotion identity differs or is missing')
+            version = promotion['provider_version_id']
             receipts = {}
             for name, command in (('11-upload.log', f'bin/deploy-worker.sh --upload-version --release-sha {sha}'),
                                   ('13-promote.log', f'bin/deploy-worker.sh --promote-version {version}')):
@@ -1584,8 +1592,12 @@ class Pipeline:
                 if versions != [version] or len(sources) != 1 or sources[0] not in {sha, '[REDACTED]'}:
                     raise ValueError('provider receipt identity differs or is missing')
                 receipts[name] = hashlib.sha256(raw).hexdigest()
-            return {'failure_digest': evidence_digest(failure), 'provider_receipts': receipts,
-                    'worker_identity': identities[0], 'health_verified': False}
+            proof = {'failure_digest': evidence_digest(failure), 'provider_receipts': receipts,
+                     'worker_identity': identities[0], 'health_verified': False}
+            if recorded:
+                self.store.recover_durable(recorded[-1])
+                proof['promotion_receipt_digest'] = evidence_digest(recorded[-1])
+            return proof
         except (KeyError, IndexError, ValueError, TypeError, OSError, StepFailed) as exc:
             raise Blocked('live_target_unreceipted', 'legacy health failure lacks exact source and provider receipts') from exc
 
@@ -1634,8 +1646,8 @@ class Pipeline:
                     or failure.get("step") != lane_state.get("failed_step")
                     or not failure.get("run_id")
                     or failure["run_id"] != lane_state.get("failed_run_id")
-                    or failure.get("from_sha") != previous
-                    or failure.get("promotion") != promotion
+                    or (failure.get("step") != "health" and (failure.get("from_sha") != previous
+                                                             or failure.get("promotion") != promotion))
                     or not isinstance(failure.get("executed"), list)
                     or (failure["executed"][-1:] != ["promote"] and failure.get("step") != "health")):
                 raise Blocked("live_target_unreceipted", "failed release source identity has no matching promotion evidence")
@@ -1646,7 +1658,11 @@ class Pipeline:
                            {'failed', 'shipped', 'worker_promoted', 'promotion_retired'}), None)
             if latest != failure:
                 raise Blocked('live_target_unreceipted', 'legacy failed journal is no longer current')
-            legacy = self.legacy_health_promotion(failure, lane_cfg, main)
+            if (failure.get('from_sha') != previous
+                    and not (self._at_or_before(sha, previous, self.repo)
+                             and self._at_or_before(previous, main, self.repo))):
+                raise Blocked('live_target_unreceipted', 'health recovery checkpoint is outside its source history')
+            legacy = self.legacy_health_promotion(failure, lane_cfg, main, promotion)
         self.controller_current(state)
         if not self._at_or_before(sha, main, self.repo):
             raise Blocked("history_diverged", f"live Worker {sha[:12]} is not an ancestor of main {main[:12]}")
