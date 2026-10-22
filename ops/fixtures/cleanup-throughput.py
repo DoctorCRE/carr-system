@@ -90,7 +90,8 @@ class CleanupThroughputTests(unittest.TestCase):
                     roots={repo: fixture.repo}, provider=provider, process_probe=lambda paths: set(),
                     archive_thread=lambda *args, **kwargs: self.fail('no thread fixture'))
             self.assertFalse(report['errors'], report['errors'])
-            self.assertFalse(report['deferred'], report['deferred'])
+            self.assertTrue(all(row['kind'] == 'sweep' for row in report['deferred']), report['deferred'])
+            self.assertEqual(report['status'], 'deferred' if report['budget_exhausted'] else 'completed')
             for row in report['removed']:
                 staged = Path(row['staged_path'])
                 self.assertIn('_to_delete', staged.parts)

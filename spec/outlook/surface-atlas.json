@@ -1,0 +1,3516 @@
+{
+  "outlook": {
+    "CFBundleIdentifier": "com.microsoft.Outlook",
+    "CFBundleShortVersionString": "16.114",
+    "CFBundleVersion": "16.114.26101123"
+  },
+  "schema": "outlook-surface-atlas/v1",
+  "scope": "static declarations and binary URL literals; runtime behavior untested",
+  "skipped_symlinks": [
+    "Contents/Frameworks/ADAL4.framework/ADAL4",
+    "Contents/Frameworks/ADAL4.framework/Resources",
+    "Contents/Frameworks/ADAL4.framework/Versions/Current",
+    "Contents/Frameworks/AppNexusNativeMacOSSDK.framework/AppNexusNativeMacOSSDK",
+    "Contents/Frameworks/AppNexusNativeMacOSSDK.framework/PrivateHeaders",
+    "Contents/Frameworks/AppNexusNativeMacOSSDK.framework/Resources",
+    "Contents/Frameworks/AppNexusNativeMacOSSDK.framework/Versions/Current",
+    "Contents/Frameworks/COMBase.framework/COMBase",
+    "Contents/Frameworks/COMBase.framework/Resources",
+    "Contents/Frameworks/COMBase.framework/Versions/Current",
+    "Contents/Frameworks/CalendarWidgetModelKit.framework/CalendarWidgetModelKit",
+    "Contents/Frameworks/CalendarWidgetModelKit.framework/Modules",
+    "Contents/Frameworks/CalendarWidgetModelKit.framework/Resources",
+    "Contents/Frameworks/CalendarWidgetModelKit.framework/Versions/Current",
+    "Contents/Frameworks/Chart.framework/Chart",
+    "Contents/Frameworks/Chart.framework/Resources",
+    "Contents/Frameworks/Chart.framework/Versions/Current",
+    "Contents/Frameworks/CocoaUI.framework/CocoaUI",
+    "Contents/Frameworks/CocoaUI.framework/Modules",
+    "Contents/Frameworks/CocoaUI.framework/Resources",
+    "Contents/Frameworks/CocoaUI.framework/Versions/Current",
+    "Contents/Frameworks/EditorKit.framework/EditorKit",
+    "Contents/Frameworks/EditorKit.framework/Modules",
+    "Contents/Frameworks/EditorKit.framework/Resources",
+    "Contents/Frameworks/EditorKit.framework/Versions/Current",
+    "Contents/Frameworks/EmailRendererKit.framework/EmailRendererKit",
+    "Contents/Frameworks/EmailRendererKit.framework/Modules",
+    "Contents/Frameworks/EmailRendererKit.framework/Resources",
+    "Contents/Frameworks/EmailRendererKit.framework/Versions/Current",
+    "Contents/Frameworks/FluentUI.framework/FluentUI",
+    "Contents/Frameworks/FluentUI.framework/Modules",
+    "Contents/Frameworks/FluentUI.framework/Resources",
+    "Contents/Frameworks/FluentUI.framework/Versions/Current",
+    "Contents/Frameworks/Gfx.framework/Gfx",
+    "Contents/Frameworks/Gfx.framework/Resources",
+    "Contents/Frameworks/Gfx.framework/Versions/Current",
+    "Contents/Frameworks/Hlink.framework/Hlink",
+    "Contents/Frameworks/Hlink.framework/Resources",
+    "Contents/Frameworks/Hlink.framework/Versions/Current",
+    "Contents/Frameworks/HxCore.framework/Headers",
+    "Contents/Frameworks/HxCore.framework/HxCore",
+    "Contents/Frameworks/HxCore.framework/Modules",
+    "Contents/Frameworks/HxCore.framework/Resources",
+    "Contents/Frameworks/HxCore.framework/Versions/Current",
+    "Contents/Frameworks/HxPlorer.framework/HxPlorer",
+    "Contents/Frameworks/HxPlorer.framework/Modules",
+    "Contents/Frameworks/HxPlorer.framework/Resources",
+    "Contents/Frameworks/HxPlorer.framework/Versions/Current",
+    "Contents/Frameworks/MSXML.framework/MSXML",
+    "Contents/Frameworks/MSXML.framework/Resources",
+    "Contents/Frameworks/MSXML.framework/Versions/Current",
+    "Contents/Frameworks/MetEx.framework/MetEx",
+    "Contents/Frameworks/MetEx.framework/Resources",
+    "Contents/Frameworks/MetEx.framework/Versions/Current",
+    "Contents/Frameworks/MicrosoftCSI.framework/MicrosoftCSI",
+    "Contents/Frameworks/MicrosoftCSI.framework/Resources",
+    "Contents/Frameworks/MicrosoftCSI.framework/Versions/Current",
+    "Contents/Frameworks/MicrosoftCloudServices.framework/MicrosoftCloudServices",
+    "Contents/Frameworks/MicrosoftCloudServices.framework/Resources",
+    "Contents/Frameworks/MicrosoftCloudServices.framework/Versions/Current",
+    "Contents/Frameworks/MicrosoftCredui.framework/MicrosoftCredui",
+    "Contents/Frameworks/MicrosoftCredui.framework/Resources",
+    "Contents/Frameworks/MicrosoftCredui.framework/Versions/Current",
+    "Contents/Frameworks/MicrosoftFBA.framework/MicrosoftFBA",
+    "Contents/Frameworks/MicrosoftFBA.framework/Resources",
+    "Contents/Frameworks/MicrosoftFBA.framework/Versions/Current",
+    "Contents/Frameworks/MicrosoftFontLibrary.framework/MicrosoftFontLibrary",
+    "Contents/Frameworks/MicrosoftFontLibrary.framework/Resources",
+    "Contents/Frameworks/MicrosoftFontLibrary.framework/Versions/Current",
+    "Contents/Frameworks/MicrosoftIvy.framework/MicrosoftIvy",
+    "Contents/Frameworks/MicrosoftIvy.framework/Resources",
+    "Contents/Frameworks/MicrosoftIvy.framework/Versions/Current",
+    "Contents/Frameworks/MicrosoftPTLS.framework/MicrosoftPTLS",
+    "Contents/Frameworks/MicrosoftPTLS.framework/Resources",
+    "Contents/Frameworks/MicrosoftPTLS.framework/Versions/Current",
+    "Contents/Frameworks/MicrosoftPTLS7.framework/MicrosoftPTLS7",
+    "Contents/Frameworks/MicrosoftPTLS7.framework/Resources",
+    "Contents/Frameworks/MicrosoftPTLS7.framework/Versions/Current",
+    "Contents/Frameworks/MicrosoftProofing.framework/MicrosoftProofing",
+    "Contents/Frameworks/MicrosoftProofing.framework/Resources",
+    "Contents/Frameworks/MicrosoftProofing.framework/Versions/Current",
+    "Contents/Frameworks/MicrosoftRichEdit.framework/MicrosoftRichEdit",
+    "Contents/Frameworks/MicrosoftRichEdit.framework/Resources",
+    "Contents/Frameworks/MicrosoftRichEdit.framework/Versions/Current",
+    "Contents/Frameworks/MicrosoftWebServices.framework/MicrosoftWebServices",
+    "Contents/Frameworks/MicrosoftWebServices.framework/Resources",
+    "Contents/Frameworks/MicrosoftWebServices.framework/Versions/Current",
+    "Contents/Frameworks/MsgrLibClient.framework/MsgrLibClient",
+    "Contents/Frameworks/MsgrLibClient.framework/Resources",
+    "Contents/Frameworks/MsgrLibClient.framework/Versions/Current",
+    "Contents/Frameworks/MsoCF.framework/MsoCF",
+    "Contents/Frameworks/MsoCF.framework/Resources",
+    "Contents/Frameworks/MsoCF.framework/Versions/Current",
+    "Contents/Frameworks/Netlib.framework/Netlib",
+    "Contents/Frameworks/Netlib.framework/Resources",
+    "Contents/Frameworks/Netlib.framework/Versions/Current",
+    "Contents/Frameworks/OLE.framework/OLE",
+    "Contents/Frameworks/OLE.framework/Resources",
+    "Contents/Frameworks/OLE.framework/Versions/Current",
+    "Contents/Frameworks/OLEAutomation.framework/OLEAutomation",
+    "Contents/Frameworks/OLEAutomation.framework/Resources",
+    "Contents/Frameworks/OLEAutomation.framework/Versions/Current",
+    "Contents/Frameworks/OPF.framework/OPF",
+    "Contents/Frameworks/OPF.framework/Resources",
+    "Contents/Frameworks/OPF.framework/Versions/Current",
+    "Contents/Frameworks/OcsClient.framework/OcsClient",
+    "Contents/Frameworks/OcsClient.framework/Resources",
+    "Contents/Frameworks/OcsClient.framework/Versions/Current",
+    "Contents/Frameworks/OdsSupportKit.framework/Modules",
+    "Contents/Frameworks/OdsSupportKit.framework/OdsSupportKit",
+    "Contents/Frameworks/OdsSupportKit.framework/Resources",
+    "Contents/Frameworks/OdsSupportKit.framework/Versions/Current",
+    "Contents/Frameworks/OfficeAddressBook.framework/OfficeAddressBook",
+    "Contents/Frameworks/OfficeAddressBook.framework/Resources",
+    "Contents/Frameworks/OfficeAddressBook.framework/Versions/Current",
+    "Contents/Frameworks/OfficeArt.framework/Modules",
+    "Contents/Frameworks/OfficeArt.framework/OfficeArt",
+    "Contents/Frameworks/OfficeArt.framework/Resources",
+    "Contents/Frameworks/OfficeArt.framework/Versions/Current",
+    "Contents/Frameworks/Oimg.framework/Oimg",
+    "Contents/Frameworks/Oimg.framework/Resources",
+    "Contents/Frameworks/Oimg.framework/Versions/Current",
+    "Contents/Frameworks/OutlookCore.framework/OutlookCore",
+    "Contents/Frameworks/OutlookCore.framework/Resources",
+    "Contents/Frameworks/OutlookCore.framework/Versions/Current",
+    "Contents/Frameworks/OutlookFoundation.framework/OutlookFoundation",
+    "Contents/Frameworks/OutlookFoundation.framework/Resources",
+    "Contents/Frameworks/OutlookFoundation.framework/Versions/Current",
+    "Contents/Frameworks/OutlookRightsFramework.framework/OutlookRightsFramework",
+    "Contents/Frameworks/OutlookRightsFramework.framework/Resources",
+    "Contents/Frameworks/OutlookRightsFramework.framework/Versions/Current",
+    "Contents/Frameworks/OutlookUnifiedTelemetry.framework/Modules",
+    "Contents/Frameworks/OutlookUnifiedTelemetry.framework/OutlookUnifiedTelemetry",
+    "Contents/Frameworks/OutlookUnifiedTelemetry.framework/Resources",
+    "Contents/Frameworks/OutlookUnifiedTelemetry.framework/Versions/Current",
+    "Contents/Frameworks/PowerLiftKit.framework/Modules",
+    "Contents/Frameworks/PowerLiftKit.framework/PowerLiftKit",
+    "Contents/Frameworks/PowerLiftKit.framework/Resources",
+    "Contents/Frameworks/PowerLiftKit.framework/Versions/Current",
+    "Contents/Frameworks/SmartArt.framework/Resources",
+    "Contents/Frameworks/SmartArt.framework/SmartArt",
+    "Contents/Frameworks/SmartArt.framework/Versions/Current",
+    "Contents/Frameworks/Uniscribe.framework/Resources",
+    "Contents/Frameworks/Uniscribe.framework/Uniscribe",
+    "Contents/Frameworks/Uniscribe.framework/Versions/Current",
+    "Contents/Frameworks/WLMGraphicsDevice.framework/Resources",
+    "Contents/Frameworks/WLMGraphicsDevice.framework/Versions/Current",
+    "Contents/Frameworks/WLMGraphicsDevice.framework/WLMGraphicsDevice",
+    "Contents/Frameworks/WLMKernel.framework/Resources",
+    "Contents/Frameworks/WLMKernel.framework/Versions/Current",
+    "Contents/Frameworks/WLMKernel.framework/WLMKernel",
+    "Contents/Frameworks/WidgetFoundations.framework/Modules",
+    "Contents/Frameworks/WidgetFoundations.framework/Resources",
+    "Contents/Frameworks/WidgetFoundations.framework/Versions/Current",
+    "Contents/Frameworks/WidgetFoundations.framework/WidgetFoundations",
+    "Contents/Frameworks/WidgetModelKit.framework/Modules",
+    "Contents/Frameworks/WidgetModelKit.framework/Resources",
+    "Contents/Frameworks/WidgetModelKit.framework/Versions/Current",
+    "Contents/Frameworks/WidgetModelKit.framework/WidgetModelKit",
+    "Contents/Frameworks/WidgetUIKit.framework/Modules",
+    "Contents/Frameworks/WidgetUIKit.framework/Resources",
+    "Contents/Frameworks/WidgetUIKit.framework/Versions/Current",
+    "Contents/Frameworks/WidgetUIKit.framework/WidgetUIKit",
+    "Contents/Frameworks/WinCrypto.framework/Resources",
+    "Contents/Frameworks/WinCrypto.framework/Versions/Current",
+    "Contents/Frameworks/WinCrypto.framework/WinCrypto",
+    "Contents/Frameworks/WordMail.framework/Resources",
+    "Contents/Frameworks/WordMail.framework/Versions/Current",
+    "Contents/Frameworks/WordMail.framework/WordMail",
+    "Contents/Frameworks/XPG.framework/Resources",
+    "Contents/Frameworks/XPG.framework/Versions/Current",
+    "Contents/Frameworks/XPG.framework/XPG",
+    "Contents/Frameworks/Xmllite.framework/Resources",
+    "Contents/Frameworks/Xmllite.framework/Versions/Current",
+    "Contents/Frameworks/Xmllite.framework/Xmllite",
+    "Contents/Frameworks/ai.framework/Helpers",
+    "Contents/Frameworks/ai.framework/Libraries",
+    "Contents/Frameworks/ai.framework/Resources",
+    "Contents/Frameworks/ai.framework/Versions/Current",
+    "Contents/Frameworks/ai.framework/ai",
+    "Contents/Frameworks/dwrite10.framework/Resources",
+    "Contents/Frameworks/dwrite10.framework/Versions/Current",
+    "Contents/Frameworks/dwrite10.framework/dwrite10",
+    "Contents/Frameworks/mbuinstrument.framework/Modules",
+    "Contents/Frameworks/mbuinstrument.framework/Resources",
+    "Contents/Frameworks/mbuinstrument.framework/Versions/Current",
+    "Contents/Frameworks/mbuinstrument.framework/mbuinstrument",
+    "Contents/Frameworks/mbukernel.framework/Resources",
+    "Contents/Frameworks/mbukernel.framework/Versions/Current",
+    "Contents/Frameworks/mbukernel.framework/mbukernel",
+    "Contents/Frameworks/mbulocale.framework/Resources",
+    "Contents/Frameworks/mbulocale.framework/Versions/Current",
+    "Contents/Frameworks/mbulocale.framework/mbulocale",
+    "Contents/Frameworks/merp.framework/Resources",
+    "Contents/Frameworks/merp.framework/Versions/Current",
+    "Contents/Frameworks/merp.framework/merp",
+    "Contents/Frameworks/molc.framework/Resources",
+    "Contents/Frameworks/molc.framework/Versions/Current",
+    "Contents/Frameworks/molc.framework/molc",
+    "Contents/Frameworks/mso20.framework/Modules",
+    "Contents/Frameworks/mso20.framework/Resources",
+    "Contents/Frameworks/mso20.framework/Versions/Current",
+    "Contents/Frameworks/mso20.framework/mso20",
+    "Contents/Frameworks/mso30.framework/Modules",
+    "Contents/Frameworks/mso30.framework/Resources",
+    "Contents/Frameworks/mso30.framework/Versions/Current",
+    "Contents/Frameworks/mso30.framework/mso30",
+    "Contents/Frameworks/mso40ui.framework/Modules",
+    "Contents/Frameworks/mso40ui.framework/Resources",
+    "Contents/Frameworks/mso40ui.framework/Versions/Current",
+    "Contents/Frameworks/mso40ui.framework/mso40ui",
+    "Contents/Frameworks/mso99.framework/Modules",
+    "Contents/Frameworks/mso99.framework/Resources",
+    "Contents/Frameworks/mso99.framework/Versions/Current",
+    "Contents/Frameworks/mso99.framework/mso99",
+    "Contents/Frameworks/msospectre.framework/Resources",
+    "Contents/Frameworks/msospectre.framework/Versions/Current",
+    "Contents/Frameworks/msospectre.framework/msospectre",
+    "Contents/Frameworks/osf.framework/Resources",
+    "Contents/Frameworks/osf.framework/Versions/Current",
+    "Contents/Frameworks/osf.framework/osf",
+    "Contents/Frameworks/osfstorage2.framework/Resources",
+    "Contents/Frameworks/osfstorage2.framework/Versions/Current",
+    "Contents/Frameworks/osfstorage2.framework/osfstorage2",
+    "Contents/Frameworks/rpcrt4.framework/Resources",
+    "Contents/Frameworks/rpcrt4.framework/Versions/Current",
+    "Contents/Frameworks/rpcrt4.framework/rpcrt4",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/CalendarWidgetKit.framework/CalendarWidgetKit",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/CalendarWidgetKit.framework/Resources",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/CalendarWidgetKit.framework/Versions/Current",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/CalendarWidgetModelKit.framework/CalendarWidgetModelKit",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/CalendarWidgetModelKit.framework/Resources",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/CalendarWidgetModelKit.framework/Versions/Current",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetFoundations.framework/Resources",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetFoundations.framework/Versions/Current",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetFoundations.framework/WidgetFoundations",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetModelKit.framework/Resources",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetModelKit.framework/Versions/Current",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetModelKit.framework/WidgetModelKit",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetUIKit.framework/Resources",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetUIKit.framework/Versions/Current",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetUIKit.framework/WidgetUIKit",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/mbuinstrument.framework/Resources",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/mbuinstrument.framework/Versions/Current",
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/mbuinstrument.framework/mbuinstrument"
+  ],
+  "sources": {
+    "Contents/Frameworks/ADAL4.framework/Versions/A/ADAL4": {
+      "bytes": 1689280,
+      "sha256": "572a4344ca428725acc36a9be131657c3b860fad4255013cddcbebed1392dea4"
+    },
+    "Contents/Frameworks/ADAL4.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 812,
+      "sha256": "b251a08e3da5af51937414c3ad2534f618d6cb023f6695aed5dbbdb1c908ec99"
+    },
+    "Contents/Frameworks/AppNexusNativeMacOSSDK.framework/Versions/A/AppNexusNativeMacOSSDK": {
+      "bytes": 598688,
+      "sha256": "3e6618628cbd96a61fb67242d65afa6e401c0dfe7e942d68f753f8a97e3d4424"
+    },
+    "Contents/Frameworks/AppNexusNativeMacOSSDK.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 834,
+      "sha256": "284c32b41499b930192223cafb6a0f226a003a4fead99df1f7e33d6224163894"
+    },
+    "Contents/Frameworks/COMBase.framework/Versions/A/COMBase": {
+      "bytes": 2662320,
+      "sha256": "f1f73f99792b37688be9c6f470e35206734c43e37028c62ef4d11d1227927062"
+    },
+    "Contents/Frameworks/COMBase.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1030,
+      "sha256": "dbf5c7f52f96287f2f203188e0d0f1161f1a7ffa6adca6058e77f8be76fd2676"
+    },
+    "Contents/Frameworks/CalendarWidgetModelKit.framework/Versions/A/CalendarWidgetModelKit": {
+      "bytes": 472992,
+      "sha256": "cef20bf7d78c744cd59be8b0b0a5b92fa246385824c247eff8fd7906f192009a"
+    },
+    "Contents/Frameworks/CalendarWidgetModelKit.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 693,
+      "sha256": "f6fc905cbda52db27821e326013f27bd4bccd048c580da9c4bbbf547320016ba"
+    },
+    "Contents/Frameworks/Chart.framework/Versions/A/Chart": {
+      "bytes": 30622080,
+      "sha256": "38273eae7438a806cb002fada19f731afd038ef8f252e3e3c97c23fe0a6aed13"
+    },
+    "Contents/Frameworks/Chart.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1021,
+      "sha256": "868d09e99c38d03e7e16f8af12c4d60407d8604aa908190b9f42288ebbcd0f6e"
+    },
+    "Contents/Frameworks/CocoaUI.framework/Versions/A/CocoaUI": {
+      "bytes": 4618768,
+      "sha256": "eb8df3a8819593734665fbf3efa3d1f4942fbc10518f0da9d8515cb92626695e"
+    },
+    "Contents/Frameworks/CocoaUI.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1030,
+      "sha256": "3be4faa8033ca4e9f62e7a0aeeac86da8695b5f6e38edc476d936b685a7b19cb"
+    },
+    "Contents/Frameworks/EditorKit.framework/Versions/A/EditorKit": {
+      "bytes": 11395040,
+      "sha256": "7271587bda685889dc542c95ea97b13d24684c207fe2f581b8126b844cd05a08"
+    },
+    "Contents/Frameworks/EditorKit.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 714,
+      "sha256": "a212e885cb84b69d6ef8f85264f21f4980bffe393b07ab91f8121215da3ef116"
+    },
+    "Contents/Frameworks/EmailRendererKit.framework/Versions/A/EmailRendererKit": {
+      "bytes": 1202144,
+      "sha256": "879d102b5aefdd02ca098158985bf71cba2fc64e7363db70d342d6d0dc58058f"
+    },
+    "Contents/Frameworks/EmailRendererKit.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 735,
+      "sha256": "fee88eb84f1bbac617bf8aa4b748c0af6287683ab8a34c574a8b510d7fe7dfdb"
+    },
+    "Contents/Frameworks/FluentUI.framework/Versions/A/FluentUI": {
+      "bytes": 1537552,
+      "sha256": "0859f0633c3be7719954b0a13ba12bb63cb83d029b9842a064a6b3cb79caea2b"
+    },
+    "Contents/Frameworks/FluentUI.framework/Versions/A/Resources/FluentUIResources-macos.bundle/Contents/Info.plist": {
+      "bytes": 616,
+      "sha256": "ec93b82dd1c5b7c6ccb4daaa932b84a48e0822d1e66d4458a5bc216246094292"
+    },
+    "Contents/Frameworks/FluentUI.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 673,
+      "sha256": "c6383ee6d92d038cd6f0181bbd613fb1479f524e30abe15836aecc081ef2c985"
+    },
+    "Contents/Frameworks/Gfx.framework/Versions/A/Gfx": {
+      "bytes": 7502048,
+      "sha256": "6cb29082f1393f36603286d03d5559a651c75303e33e9f6e3e95ebec4f5e2411"
+    },
+    "Contents/Frameworks/Gfx.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1022,
+      "sha256": "bde84e59a7892caf444d5472afab9d685b332ee0de44ce7ccbbea685e7b655bf"
+    },
+    "Contents/Frameworks/Hlink.framework/Versions/A/Hlink": {
+      "bytes": 748752,
+      "sha256": "51e75f6549bae61ee98dea3276b353437bec34da0168ff352dd4837ae3ba06b5"
+    },
+    "Contents/Frameworks/Hlink.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1026,
+      "sha256": "cf850f50ab48c344a7b75030a52b9121dbb2661cfe20dab7dd3cae054e37edcb"
+    },
+    "Contents/Frameworks/HxCore.framework/Versions/A/HxCore": {
+      "bytes": 54938208,
+      "sha256": "681f68b80339aad839d65f18c3e76caa2bb6ed03c9cd765abc6156487fbfbc91"
+    },
+    "Contents/Frameworks/HxCore.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 629,
+      "sha256": "6a5374c28f10ff426013df224b432bc1f6217bcbc8d42dc2b1edec5c148165c5"
+    },
+    "Contents/Frameworks/HxPlorer.framework/Versions/A/HxPlorer": {
+      "bytes": 447040,
+      "sha256": "4a9f03ae860bd602cda812bac636690472b2f8c3fc049026af07489337951487"
+    },
+    "Contents/Frameworks/HxPlorer.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 684,
+      "sha256": "2f06e366f66e8cea5d230f95e5fd77a25ee562fa80d2e03a733b3144e83c0432"
+    },
+    "Contents/Frameworks/MSXML.framework/Versions/A/MSXML": {
+      "bytes": 3686432,
+      "sha256": "7dbb5a34abac41de78f73df7b9cb708567b5c7895dbe1f998773d9993a8e7fcf"
+    },
+    "Contents/Frameworks/MSXML.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1026,
+      "sha256": "f9a66fc2fdfbf1817a3548d7c6f62db94bc3082af604f41fb71c3a7cd038b9e9"
+    },
+    "Contents/Frameworks/MetEx.framework/Versions/A/MetEx": {
+      "bytes": 4281152,
+      "sha256": "82b0c5618537233dddfc80e9a7f929555f63812f307603d743160d674a24682f"
+    },
+    "Contents/Frameworks/MetEx.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1026,
+      "sha256": "2e2d23c2cdcdfa8a4bd3edf72c88db918cfdde3c7ca2dd6bf590abfd5eea7ea4"
+    },
+    "Contents/Frameworks/MicrosoftCSI.framework/Versions/A/MicrosoftCSI": {
+      "bytes": 29557872,
+      "sha256": "3791970ead0a20fefac5692fbf7979153244b2fd6b55813e63db743b81ddc2b8"
+    },
+    "Contents/Frameworks/MicrosoftCSI.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1057,
+      "sha256": "5004038a5a75fb94d60a95b10c268c528e8733f933db6130f97a482bf5661db8"
+    },
+    "Contents/Frameworks/MicrosoftCloudServices.framework/Versions/A/MicrosoftCloudServices": {
+      "bytes": 563792,
+      "sha256": "9b3645424b5d5e1c2a166132a2edaea81c216a1dd36ce321a3033681f32f4df4"
+    },
+    "Contents/Frameworks/MicrosoftCloudServices.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1065,
+      "sha256": "3c078f6e7ae3abb7b64529f7f0bad8de8efe409e5e0b35e1209dbcb113755745"
+    },
+    "Contents/Frameworks/MicrosoftCredui.framework/Versions/A/MicrosoftCredui": {
+      "bytes": 372656,
+      "sha256": "017e82c371d591654094b41590079836267f2d156d46f9dab4c1255b424d3086"
+    },
+    "Contents/Frameworks/MicrosoftCredui.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1048,
+      "sha256": "c3370aec17c5c0ac613ffdf277573d6879313de5a6637e2a8fe6cb862d9c26c3"
+    },
+    "Contents/Frameworks/MicrosoftFBA.framework/Versions/A/MicrosoftFBA": {
+      "bytes": 248592,
+      "sha256": "f95504246c35bf4d009c1b0305a63635592d6e8798b0652efd51960003f555ff"
+    },
+    "Contents/Frameworks/MicrosoftFBA.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 972,
+      "sha256": "e48faeba5a6a244a5242e645831b955a7c4438d12aa9f7ba55c3296504a545d9"
+    },
+    "Contents/Frameworks/MicrosoftFontLibrary.framework/Versions/A/MicrosoftFontLibrary": {
+      "bytes": 633024,
+      "sha256": "9d1766581035f91fb3dc646b4a895dba2111a461fd3f78c25e8753a574f2008a"
+    },
+    "Contents/Frameworks/MicrosoftFontLibrary.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1045,
+      "sha256": "48c04282d90568040d41150ef1e5248038663fda0cbf4671a55c5723191d8e59"
+    },
+    "Contents/Frameworks/MicrosoftIvy.framework/Versions/A/MicrosoftIvy": {
+      "bytes": 4511392,
+      "sha256": "9e5331bf8e6e9dafc98ddea614e0c1d47f8d7f58e7eaf8371800cecbe4d1a04f"
+    },
+    "Contents/Frameworks/MicrosoftIvy.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1026,
+      "sha256": "45ba80f6efb0b9405722c73279ff44f67add6a1f53903c83ce93b16e5a1cc364"
+    },
+    "Contents/Frameworks/MicrosoftPTLS.framework/Versions/A/MicrosoftPTLS": {
+      "bytes": 2895472,
+      "sha256": "3049698bd907012a7a90662d15d4cd90c6d96a47ad1bd7940a13a1aa9b36cd03"
+    },
+    "Contents/Frameworks/MicrosoftPTLS.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1034,
+      "sha256": "3591e5329d2efb08d5a2f15b37125f25fc077b6ba080cd9a669f8476c2101926"
+    },
+    "Contents/Frameworks/MicrosoftPTLS7.framework/Versions/A/MicrosoftPTLS7": {
+      "bytes": 5666128,
+      "sha256": "add13dd3dd1f8104affff5a4b3f0185daff636814f177b47577d6ad6b4df1660"
+    },
+    "Contents/Frameworks/MicrosoftPTLS7.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1035,
+      "sha256": "e505c4a846cd9713a4dd88e1a643d4c494ab8c327ac7da8c85f3f90d70e857bd"
+    },
+    "Contents/Frameworks/MicrosoftProofing.framework/Versions/A/MicrosoftProofing": {
+      "bytes": 4130160,
+      "sha256": "8bd30409f8a6a0e9b06fbab12ff8e62356a0efdf6f9335a117b7239a646e0d60"
+    },
+    "Contents/Frameworks/MicrosoftProofing.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1038,
+      "sha256": "d21ced951e4f2a45bed0df5cf68c2082bc79e0b7c00609f89fd0f99994b7bea3"
+    },
+    "Contents/Frameworks/MicrosoftRichEdit.framework/Versions/A/MicrosoftRichEdit": {
+      "bytes": 5932384,
+      "sha256": "0df7566fe909df1db210d0f273d4850fd298fbcae8ee6ad47e076bdfdd13db15"
+    },
+    "Contents/Frameworks/MicrosoftRichEdit.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1074,
+      "sha256": "c8d05aa49cac6dc9714d1a058fb3118202222ee9395894fb77c75da70f494579"
+    },
+    "Contents/Frameworks/MicrosoftWebServices.framework/Versions/A/MicrosoftWebServices": {
+      "bytes": 1351024,
+      "sha256": "4c0e337320dd531016478680808d1d8183eef72e111c085bb6725430d2b1ea84"
+    },
+    "Contents/Frameworks/MicrosoftWebServices.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1061,
+      "sha256": "e74de0a315d1b20ad52121514e53f8a2fcde49c30ad7cb3bb2f5f007cd39f65d"
+    },
+    "Contents/Frameworks/MsgrLibClient.framework/Versions/A/MsgrLibClient": {
+      "bytes": 674256,
+      "sha256": "f0ce7783894436080e0684e46ebd87b4e531f95fe6d0128e3a3755260c3b9d83"
+    },
+    "Contents/Frameworks/MsgrLibClient.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1020,
+      "sha256": "06c176f95e55f05fbe2a88a29a2a8c630b579593a0b578f993205b27184e08ee"
+    },
+    "Contents/Frameworks/MsoCF.framework/Versions/A/MsoCF": {
+      "bytes": 396816,
+      "sha256": "fb348be6dbc041c8b079aa0664b0ccd2b60ccddb947d85ac891bf6d1a2ccbf45"
+    },
+    "Contents/Frameworks/MsoCF.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1021,
+      "sha256": "bc5624179e9ddb85ae856d3dc82ce272ca1ed0c2549f9281cfe857668c657c18"
+    },
+    "Contents/Frameworks/Netlib.framework/Versions/A/Netlib": {
+      "bytes": 402560,
+      "sha256": "75b9fbc443f07b383f7bcb59ef68e85205e61b823e7a4df181e2ba730b69054c"
+    },
+    "Contents/Frameworks/Netlib.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1059,
+      "sha256": "11c20d0302e0f92dde93751462e71cfe0d630d18cec805d45f3f3fa4ce4517e2"
+    },
+    "Contents/Frameworks/OLE.framework/Versions/A/OLE": {
+      "bytes": 1524320,
+      "sha256": "cfc2a0b06bc2cb0d41df102be3a0f1893f2b30f99bd6d6ac8802975123abbf15"
+    },
+    "Contents/Frameworks/OLE.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1022,
+      "sha256": "0ffb011aaeb4bba87f4a30932469b161b9b53b484eb998d1cb14a7dfee76b6a3"
+    },
+    "Contents/Frameworks/OLEAutomation.framework/Versions/A/OLEAutomation": {
+      "bytes": 1440176,
+      "sha256": "394d538b8ce9bc8f91e935dae2a0cadefc33657f04c3eb991a526f99d58ff1b8"
+    },
+    "Contents/Frameworks/OLEAutomation.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1042,
+      "sha256": "b1186c861a9e2314161b857b3360a6c17f93b0e014977675299acb29d757a1dd"
+    },
+    "Contents/Frameworks/OPF.framework/Versions/A/OPF": {
+      "bytes": 2030800,
+      "sha256": "01e3eb6bd39af1b46a20bca3e7b88f882b8d9436f940ac2ad921de14282ac72a"
+    },
+    "Contents/Frameworks/OPF.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1001,
+      "sha256": "485b13857e2d0d2207bc7e177e07a8e22d8d3d31f30bed7c15d75df07d437e3f"
+    },
+    "Contents/Frameworks/OPF.framework/Versions/A/Resources/OPF_Common.dylib": {
+      "bytes": 1412336,
+      "sha256": "6e341f5ae52352030b1ddca4d23bd63445f737ad36224511bc7f2a3d72591f24"
+    },
+    "Contents/Frameworks/OcsClient.framework/Versions/A/OcsClient": {
+      "bytes": 1536304,
+      "sha256": "51a735890c9e9ec0acd8a0d8f968a8f4322dc2ce8a4fd6244684513e675a531a"
+    },
+    "Contents/Frameworks/OcsClient.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1065,
+      "sha256": "6308fba05417bb44da876be0dd09fb426428fc6fe3db2def85f242865ad3400f"
+    },
+    "Contents/Frameworks/OdsSupportKit.framework/Versions/A/OdsSupportKit": {
+      "bytes": 2430640,
+      "sha256": "d00d92e6c7cb6ce110e6ef814bc659cacbe84e59ca87d44caa588be5b5d645c7"
+    },
+    "Contents/Frameworks/OdsSupportKit.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 658,
+      "sha256": "42c3c5fcfc9d48e84aea5e5ec9b89d2c838e57e9fec347deffccd5974998c22f"
+    },
+    "Contents/Frameworks/OfficeAddressBook.framework/Versions/A/OfficeAddressBook": {
+      "bytes": 428432,
+      "sha256": "ee37be17c5101cab0fc8109a267a412506b0aed18840731f80dfcb93a538a622"
+    },
+    "Contents/Frameworks/OfficeAddressBook.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1023,
+      "sha256": "a807ef098c189d454fbc1abd0ffeec839f0cb5595b5a846adbb6e13fac7037c7"
+    },
+    "Contents/Frameworks/OfficeArt.framework/Versions/A/OfficeArt": {
+      "bytes": 42050848,
+      "sha256": "13a00b8dfda25a2ace869221de2afbc5aa533be704ebc9891831898fe5aae056"
+    },
+    "Contents/Frameworks/OfficeArt.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1034,
+      "sha256": "efb711b6e0941156d8cc1c2e21f8a9c188a8b2ea609d3ff74da6e73a72e25c3a"
+    },
+    "Contents/Frameworks/Oimg.framework/Versions/A/Oimg": {
+      "bytes": 1527760,
+      "sha256": "cb5e1d44b2ba8c6036ca52c4fe8e895596a535e6cba309313742945308ae9bf1"
+    },
+    "Contents/Frameworks/Oimg.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1017,
+      "sha256": "c5c57d13445ea27d7becbdc81e23c247c24eabcfdb7beedfdcb56e894ceb4811"
+    },
+    "Contents/Frameworks/OutlookCore.framework/Versions/A/OutlookCore": {
+      "bytes": 16695808,
+      "sha256": "9e9101dd890f9f6d5ea9a6f907744de8e201b80f4ae531950f309e7c3bac7ab0"
+    },
+    "Contents/Frameworks/OutlookCore.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1039,
+      "sha256": "60a447da69993c11b96361df5c42580628486721901435d94b6c926d931928bf"
+    },
+    "Contents/Frameworks/OutlookFoundation.framework/Versions/A/OutlookFoundation": {
+      "bytes": 774544,
+      "sha256": "2be64e8007ac2dcea0a9e340561ea424ba3c5436729855dc650036129316273a"
+    },
+    "Contents/Frameworks/OutlookFoundation.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1035,
+      "sha256": "2ccf189700a2339db3e899f60a138b48f37bf3227b2a88928c62cf01e917f84e"
+    },
+    "Contents/Frameworks/OutlookRightsFramework.framework/Versions/A/OutlookRightsFramework": {
+      "bytes": 194704,
+      "sha256": "c5b5e7b2b29477fc53bca83b0d42e657de1455bfa47af384ab7e58bdbc0c0949"
+    },
+    "Contents/Frameworks/OutlookRightsFramework.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1093,
+      "sha256": "ceffa615bd3411e7199688eee26ba58eb3ee8ed88b670ff443e3277e36320974"
+    },
+    "Contents/Frameworks/OutlookUnifiedTelemetry.framework/Versions/A/OutlookUnifiedTelemetry": {
+      "bytes": 760816,
+      "sha256": "e0f6bb3ca306d2bedf901ff7b304fec69f02be333dd5361ee923bb99af9fff5f"
+    },
+    "Contents/Frameworks/OutlookUnifiedTelemetry.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 762,
+      "sha256": "9137c54663e029d5bb1a7269d9b0e9d063f05f29829de83224e99e8cd636cc36"
+    },
+    "Contents/Frameworks/PowerLiftKit.framework/Versions/A/PowerLiftKit": {
+      "bytes": 2333680,
+      "sha256": "b937ac4c83b85d7d4d4824fdbbb21731d37c34b56d0b154341ae965bb005320d"
+    },
+    "Contents/Frameworks/PowerLiftKit.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 693,
+      "sha256": "2600874b70bffcf10ef6b7be4c03b6fdaa4ac7a1bbc8978fb937555f4a993bc9"
+    },
+    "Contents/Frameworks/SmartArt.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1027,
+      "sha256": "01896d0c3f209870510c0813e3209b834010c812abf3c8ab0eab2caffb880f4e"
+    },
+    "Contents/Frameworks/SmartArt.framework/Versions/A/SmartArt": {
+      "bytes": 8865872,
+      "sha256": "a0a531cc751fb3a1ed7d1b9777ef38451af4c3d612e879a7cfd7e92058822ed9"
+    },
+    "Contents/Frameworks/Uniscribe.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1034,
+      "sha256": "251e5808427eef4384e59e52af7b5f371f9a7af8d11dd6237200de5150c26149"
+    },
+    "Contents/Frameworks/Uniscribe.framework/Versions/A/Uniscribe": {
+      "bytes": 849872,
+      "sha256": "61ab694745f0544b860477ec0d17e438884345e0ee23d27d7691c81fc1471fd8"
+    },
+    "Contents/Frameworks/WLMGraphicsDevice.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1072,
+      "sha256": "6c2afbb565cc2913b6fa7edf136fd9d84af229e17d0bd9cb4052c09af25dc1fe"
+    },
+    "Contents/Frameworks/WLMGraphicsDevice.framework/Versions/A/WLMGraphicsDevice": {
+      "bytes": 520896,
+      "sha256": "2ef6fcc6ac017167d24bf85cdd888394ab9ec6a7063c89484d2f027fbf5da1e1"
+    },
+    "Contents/Frameworks/WLMKernel.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1065,
+      "sha256": "3721b18923b4c2fc042bd5c1a9b0e2bdcb068fcc90399a607045756083fd6b8b"
+    },
+    "Contents/Frameworks/WLMKernel.framework/Versions/A/WLMKernel": {
+      "bytes": 1457664,
+      "sha256": "d682cd250884b21c365255ed2541033c593f52e9f2d3d75801c94748902d6a01"
+    },
+    "Contents/Frameworks/WidgetFoundations.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 683,
+      "sha256": "c8ccf92dfdf6581e8be6077d6f3bcb27af91ce38a3c07dbde961342e69dd8aea"
+    },
+    "Contents/Frameworks/WidgetFoundations.framework/Versions/A/WidgetFoundations": {
+      "bytes": 202656,
+      "sha256": "04ef6ed712cad22e217cf4752ab3a6f2abfdffa5b12834f64ef5808b5b412bf5"
+    },
+    "Contents/Frameworks/WidgetModelKit.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 675,
+      "sha256": "1d83acdc62051bc03b0bdd2d1dae90cf98e81a111851d63d7e1d47552ceb314e"
+    },
+    "Contents/Frameworks/WidgetModelKit.framework/Versions/A/WidgetModelKit": {
+      "bytes": 178320,
+      "sha256": "a0487baf9c64d0bef6f6102d9b72933dbdc768f20c90eb3a4651128b896a5f3c"
+    },
+    "Contents/Frameworks/WidgetUIKit.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 669,
+      "sha256": "e5137ad23a473d8e7ca550f65fdc306f31062e877e9734feba20cf0705126bd0"
+    },
+    "Contents/Frameworks/WidgetUIKit.framework/Versions/A/WidgetUIKit": {
+      "bytes": 226768,
+      "sha256": "6d108a9564793e1f02f8d66a25c64507cc42290051a2747224975df3bd6a3faf"
+    },
+    "Contents/Frameworks/WinCrypto.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1028,
+      "sha256": "ea38d71e443a5a1f0cab60e508b8baa5ba3b58d6638262f29d8a260177ebae81"
+    },
+    "Contents/Frameworks/WinCrypto.framework/Versions/A/WinCrypto": {
+      "bytes": 506768,
+      "sha256": "8080dc5d551c63de63a32bd4c4d0d228a26af8d520ff8dec6a0eaefc3e3dc2cc"
+    },
+    "Contents/Frameworks/WordMail.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1032,
+      "sha256": "8710c987f9ae2fc6e505f986e12d7928b34b981d3eb771c67b31604b712db3c9"
+    },
+    "Contents/Frameworks/WordMail.framework/Versions/A/WordMail": {
+      "bytes": 175489568,
+      "sha256": "1ecf925dbac46510984dbc8b5939523316149a9de4d7e1126d3f5dd8290c250f"
+    },
+    "Contents/Frameworks/XPG.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1022,
+      "sha256": "800867bcd5f5b0a3f9f8866c4f47813bcf0080aa5df10acd6f1304d20e81355e"
+    },
+    "Contents/Frameworks/XPG.framework/Versions/A/XPG": {
+      "bytes": 4369488,
+      "sha256": "28c69903962e2c6227bc3aff681315f387165e22f6ae25e7e1127a7898c08c12"
+    },
+    "Contents/Frameworks/Xmllite.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1013,
+      "sha256": "3a0d5cd74a348dd82f25dad72b7e9d8a7bb995a5d8d9b9c65942a135afa0aba8"
+    },
+    "Contents/Frameworks/Xmllite.framework/Versions/A/Xmllite": {
+      "bytes": 464992,
+      "sha256": "9df4a5290a2f93311888e883f069140db984a161b886f75fb4194988c3d28f6a"
+    },
+    "Contents/Frameworks/ai.framework/Versions/A/Libraries/libllguidance.dylib": {
+      "bytes": 4819552,
+      "sha256": "e58fcc0242a75e5db57bf7ca9c7f6d0466e4cfc9add889b63a401f1d73484ab2"
+    },
+    "Contents/Frameworks/ai.framework/Versions/A/Libraries/liblm.dylib": {
+      "bytes": 1899152,
+      "sha256": "02894c407eae4424c9d7756da9fe0b844bb8038610d60a514b4237bd4a4cd5dc"
+    },
+    "Contents/Frameworks/ai.framework/Versions/A/Libraries/liblmcpu0.dylib": {
+      "bytes": 8959664,
+      "sha256": "7c99c314b39cfbd599816099262947034ed02972aba7d3981c26bec389aeff53"
+    },
+    "Contents/Frameworks/ai.framework/Versions/A/Libraries/liblmcpu1.dylib": {
+      "bytes": 9090720,
+      "sha256": "bea3ddfc2666db9355a238465a85c08dc9e1259f7a27c0157b534373e29162cf"
+    },
+    "Contents/Frameworks/ai.framework/Versions/A/Libraries/liblmcpu2.dylib": {
+      "bytes": 9188752,
+      "sha256": "c848528c6079853dc8b028bfdea644951eb840115f95b182f3b9b180bdc8a1e4"
+    },
+    "Contents/Frameworks/ai.framework/Versions/A/Libraries/liblmcpu3.dylib": {
+      "bytes": 9188752,
+      "sha256": "dc34108b64990bdd0fdea0500164c3993c1847c6b0b49e111ab3a972e7ad36ba"
+    },
+    "Contents/Frameworks/ai.framework/Versions/A/Libraries/liblmcpu4.dylib": {
+      "bytes": 9532816,
+      "sha256": "de2ac3d2d129eaced5b15e43a0137ac1cc7cbc0cb66ae92156e19c6b547cf5e9"
+    },
+    "Contents/Frameworks/ai.framework/Versions/A/Libraries/liblmgpu0.dylib": {
+      "bytes": 10439648,
+      "sha256": "0e0dec9ffc1e1b4f780de388cacb368ca1abe85d0be406779886aa3da57d2b50"
+    },
+    "Contents/Frameworks/ai.framework/Versions/A/Libraries/liblmgpu1.dylib": {
+      "bytes": 10570688,
+      "sha256": "475e4a943656193a6d404fae1ca54bed77f8e94ec23d203e4a659f455ad313e3"
+    },
+    "Contents/Frameworks/ai.framework/Versions/A/Libraries/liblmgpu2.dylib": {
+      "bytes": 10668720,
+      "sha256": "3f6529fbf7f8b0a75da5ac3eb3aa28078700c16709491569c6ea9de253501175"
+    },
+    "Contents/Frameworks/ai.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 798,
+      "sha256": "91491e79d93e9506bf05d4b8116053c1dc628034d1084cee08d1e05d95154380"
+    },
+    "Contents/Frameworks/ai.framework/Versions/A/ai": {
+      "bytes": 47864704,
+      "sha256": "beed11300c789dd0e47380e1cd200cfc0e6c59ca2234cf7e6f3a366ea5c2b70f"
+    },
+    "Contents/Frameworks/dwrite10.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1013,
+      "sha256": "5bfe4ef66ba6348315b3b197374f81c83ca1f083d4a4492951bff3d6595a8289"
+    },
+    "Contents/Frameworks/dwrite10.framework/Versions/A/dwrite10": {
+      "bytes": 6154624,
+      "sha256": "678a27e108cb07599a10fb173a82cfcedf74f2389e96375d29efbf08c01b206e"
+    },
+    "Contents/Frameworks/libmbupdx2009.dylib": {
+      "bytes": 1667840,
+      "sha256": "4db0338b1624a817f144d771e26ac51e30e9745b5dc504f129eaf2642dc932f3"
+    },
+    "Contents/Frameworks/mbuinstrument.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1037,
+      "sha256": "7f7b585745534f6096cf7c0c9540f9b5f0e007205adc2f1902e30e2a515f2ca7"
+    },
+    "Contents/Frameworks/mbuinstrument.framework/Versions/A/mbuinstrument": {
+      "bytes": 818224,
+      "sha256": "c60bcbd6c3d7a2411278e9627f6d5e26b3b7b5135705e0bc919905bcd31ec571"
+    },
+    "Contents/Frameworks/mbukernel.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1017,
+      "sha256": "05558d4b9f59bc785d1cc59a3f8ff69aa4f17845d17f5c85ae6e79ca64ffa874"
+    },
+    "Contents/Frameworks/mbukernel.framework/Versions/A/mbukernel": {
+      "bytes": 1505936,
+      "sha256": "e88775474e6f9b48b5054a75652ee2442f4dcdb928fa5cfad17c67dfe874eff5"
+    },
+    "Contents/Frameworks/mbulocale.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1029,
+      "sha256": "8a3b4ae787ce9fca32a1b8630afc90c42d465ab585abc21c6b35b64d0be5fad1"
+    },
+    "Contents/Frameworks/mbulocale.framework/Versions/A/mbulocale": {
+      "bytes": 283600,
+      "sha256": "0cecc8b58189ec9375cadfc465d6674c1e0b6063a0ce2845b9a7e3e4da1ceb2a"
+    },
+    "Contents/Frameworks/merp.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1019,
+      "sha256": "0909043f0d1091602091b2bed7c0513a3595bd9b6a9e4f27248600edd55b61dd"
+    },
+    "Contents/Frameworks/merp.framework/Versions/A/merp": {
+      "bytes": 325504,
+      "sha256": "995489ab90961201d717d56cef69967a4cd64f05112a4c6794504d41cfedb2a5"
+    },
+    "Contents/Frameworks/molc.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1012,
+      "sha256": "fa96b420fdd7fcdf3fc68969beb27a23f3a98646e2a8562553e317ac38313c6f"
+    },
+    "Contents/Frameworks/molc.framework/Versions/A/molc": {
+      "bytes": 1105072,
+      "sha256": "5a6712a43d5d53f9519e24dd609dc1bd3be745970d2c73ad24b28439807e086d"
+    },
+    "Contents/Frameworks/mso20.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1021,
+      "sha256": "7ea178c80694953ebf4af29d75ec0d8a5ee794e4a12205b96442010d904f317d"
+    },
+    "Contents/Frameworks/mso20.framework/Versions/A/mso20": {
+      "bytes": 15208992,
+      "sha256": "470a4808b2c0b7e4e82a2ee3b0583a80b865d86406b371f65db7e63170b8160f"
+    },
+    "Contents/Frameworks/mso30.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1021,
+      "sha256": "aa5a456ec8c336b8b8d0e2eea2e0f9716e9d70e261efeda8bb9561e43f4696a0"
+    },
+    "Contents/Frameworks/mso30.framework/Versions/A/Resources/OneAuth.storyboardc/Info.plist": {
+      "bytes": 636,
+      "sha256": "47b9d080bbe15c43193aeb619b69b39d4693d2f8d70404a964a02c5efc14ca5c"
+    },
+    "Contents/Frameworks/mso30.framework/Versions/A/mso30": {
+      "bytes": 31659328,
+      "sha256": "0aa8cd1ee12226a171d092a9a65835923f8b7cb31330c768969458535edd815c"
+    },
+    "Contents/Frameworks/mso40ui.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1025,
+      "sha256": "07f33a1dd3e61bbad157a7e598b979a72aa02c54ee1dbda0dffe12165a782177"
+    },
+    "Contents/Frameworks/mso40ui.framework/Versions/A/mso40ui": {
+      "bytes": 26711904,
+      "sha256": "2e1ed773a53ead5b117b1e824f6fca45ccadfa3f9a92b9c2dce733ca5556cd5f"
+    },
+    "Contents/Frameworks/mso99.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1021,
+      "sha256": "7b53ba9ec2e0ac468ac8db9c50b6098372065db71ce73a61cbaceca7804a52f3"
+    },
+    "Contents/Frameworks/mso99.framework/Versions/A/Resources/OUIOfficeSpaceBundle.bundle/Contents/Info.plist": {
+      "bytes": 618,
+      "sha256": "b7e0347a098c7635991687f3366263c6b542fd6c1a9b5185674ba91150f7f5eb"
+    },
+    "Contents/Frameworks/mso99.framework/Versions/A/Resources/mso_intl.bundle/Contents/Info.plist": {
+      "bytes": 748,
+      "sha256": "391411b348b97993e50540f5f53e2a62a54e4e60254d49c296ece242bdf6fbce"
+    },
+    "Contents/Frameworks/mso99.framework/Versions/A/mso99": {
+      "bytes": 100327888,
+      "sha256": "51676b8b052ef42727cbbfdb5ed3ac85c93ad657e78ace9c02e5911743c52049"
+    },
+    "Contents/Frameworks/msospectre.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1043,
+      "sha256": "231672814481b033eb69c78c588c35466d6ee2c4b7803e01df2fa1f525315d59"
+    },
+    "Contents/Frameworks/msospectre.framework/Versions/A/msospectre": {
+      "bytes": 15880208,
+      "sha256": "26b43159132c68c3de55f8137c4d539e88e685471761cc2a68e519c1831818a5"
+    },
+    "Contents/Frameworks/osf.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1017,
+      "sha256": "2fbf28d34c11987a3888faed2e76b9be6a2d3a19481f2207869a226c1010b212"
+    },
+    "Contents/Frameworks/osf.framework/Versions/A/Resources/OsfWebDialogViewController.storyboardc/Info.plist": {
+      "bytes": 248,
+      "sha256": "8cb0b15cf727e2ce4b9c9241bc034aa4edc79983e511eb91d3759cdccd560761"
+    },
+    "Contents/Frameworks/osf.framework/Versions/A/osf": {
+      "bytes": 12064352,
+      "sha256": "462b9ab3c5f7bd0e90a23178baf4a1a704d3be022ce137f0a07c8a58bde6085f"
+    },
+    "Contents/Frameworks/osfstorage2.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1033,
+      "sha256": "e25dcaf4f8aac9ca5d2cd4687c058c8ee44e7ef6c7ed052aaba56ae65d9d5fb2"
+    },
+    "Contents/Frameworks/osfstorage2.framework/Versions/A/osfstorage2": {
+      "bytes": 534704,
+      "sha256": "e6ad0e0c0023db8569dbcef72f2d9d52d562bae2761d49fe7d1f3bc966c1f0aa"
+    },
+    "Contents/Frameworks/rpcrt4.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1028,
+      "sha256": "3f6cc23738d278b76133f3b9958248b27322280a40b32dba9e0ceddbe32cb4e6"
+    },
+    "Contents/Frameworks/rpcrt4.framework/Versions/A/rpcrt4": {
+      "bytes": 1291760,
+      "sha256": "3245efd6ce57f4020e19f727c2e156351a84198f270169bb7ba08ad5cd02af9c"
+    },
+    "Contents/Info.plist": {
+      "bytes": 37827,
+      "sha256": "1a3598bc65c6942e443a12eacfc36b4c60477d2781ca24efcbb87ef3dc8673aa"
+    },
+    "Contents/Library/Spotlight/Microsoft Outlook Spotlight Importer.mdimporter/Contents/Info.plist": {
+      "bytes": 2290,
+      "sha256": "f903dc8c15487babe65586af3318544a7bfa25e74adc91537e11ce0f1ec330c9"
+    },
+    "Contents/Library/Spotlight/Microsoft Outlook Spotlight Importer.mdimporter/Contents/MacOS/Microsoft Outlook Spotlight Importer": {
+      "bytes": 3997168,
+      "sha256": "462ec8472a2cfece0899ad74186fa5480cda0f690557ab8a20c9a32f3619542b"
+    },
+    "Contents/MacOS/Microsoft Outlook": {
+      "bytes": 211731024,
+      "sha256": "729e211992b71ed7979813269815d563473c4821674e7e0d89b356fc7125900c"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/CalendarWidgetKit.framework/Versions/A/CalendarWidgetKit": {
+      "bytes": 3473392,
+      "sha256": "6530aee4eee8bf48243c6cf571d0c27c0339d1f00a7a75e2cac3515f4bd5abac"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/CalendarWidgetKit.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 683,
+      "sha256": "e83ad2e2c5d732c4840d639f4fbe497930c9764bbd49ffb29e1e473d6537b2c6"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/CalendarWidgetModelKit.framework/Versions/A/CalendarWidgetModelKit": {
+      "bytes": 472992,
+      "sha256": "74795e6658c25f0e3ed84f45ff9c1b214a5089f0b1683da0d8360c90ac3e9116"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/CalendarWidgetModelKit.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 693,
+      "sha256": "f6fc905cbda52db27821e326013f27bd4bccd048c580da9c4bbbf547320016ba"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetFoundations.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 683,
+      "sha256": "c8ccf92dfdf6581e8be6077d6f3bcb27af91ce38a3c07dbde961342e69dd8aea"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetFoundations.framework/Versions/A/WidgetFoundations": {
+      "bytes": 202656,
+      "sha256": "562aec060436645f4590c17212b10cbdbf3f4fec8f04f5b3458a12287690f3e6"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetModelKit.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 675,
+      "sha256": "1d83acdc62051bc03b0bdd2d1dae90cf98e81a111851d63d7e1d47552ceb314e"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetModelKit.framework/Versions/A/WidgetModelKit": {
+      "bytes": 178320,
+      "sha256": "3569dd57c69e592253d6ee2a4afa2fc2282ca5f085b65d16f7bdd7b5ff1ef367"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetUIKit.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 669,
+      "sha256": "e5137ad23a473d8e7ca550f65fdc306f31062e877e9734feba20cf0705126bd0"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/WidgetUIKit.framework/Versions/A/WidgetUIKit": {
+      "bytes": 226768,
+      "sha256": "d00df142f9ca85f3c496a4e1623d5f80805a7568fd294a44f2fb9749dba72a57"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/mbuinstrument.framework/Versions/A/Resources/Info.plist": {
+      "bytes": 1037,
+      "sha256": "7f7b585745534f6096cf7c0c9540f9b5f0e007205adc2f1902e30e2a515f2ca7"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Frameworks/mbuinstrument.framework/Versions/A/mbuinstrument": {
+      "bytes": 818224,
+      "sha256": "8ee9af2fb9ee62c53a515f6628983d35c0c6364a84b2b51da1ba4db5265dadc0"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Info.plist": {
+      "bytes": 1132,
+      "sha256": "a28ea4ab42a525d449486edf3394691507d8bbf8cf3ed58bab24db27ad102219"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/MacOS/CalendarWidgetExtension": {
+      "bytes": 11828000,
+      "sha256": "babcad348080ea9470899f58abfdc831ebda6999a6548e56864e83f70f341235"
+    },
+    "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Resources/Metadata.appintents/extract.actionsdata": {
+      "bytes": 1732,
+      "sha256": "75d4e3e3658c13d76c4b413a5e019d67637a04571c150970cbb32049645cf9b7"
+    },
+    "Contents/Resources/DocsUIBundle_Mac.bundle/Contents/Info.plist": {
+      "bytes": 597,
+      "sha256": "7d96d1838758a598a0272ce72c9ed9b785566f25f8237bc6f0804cf2bc3cbe1c"
+    },
+    "Contents/Resources/Metadata.appintents/extract.actionsdata": {
+      "bytes": 3010,
+      "sha256": "948232e54824c8f787a5246f6c96968dbd0bac3dad358150c95029b362e1f436"
+    },
+    "Contents/Resources/OUIWhatsNewBundle_mac.bundle/Contents/Info.plist": {
+      "bytes": 616,
+      "sha256": "108a7966d1a7c47addbcf8641084cf4fce0df249d8fda0753c62f1e7b23723d4"
+    },
+    "Contents/Resources/OfficePrefsUI.bundle/Contents/Info.plist": {
+      "bytes": 601,
+      "sha256": "4224aaa276fdef1cecbb597fab8389995c2563d12d3437f22ac9770325d49634"
+    },
+    "Contents/Resources/OlkAudioFeedbackResources.bundle/Contents/Info.plist": {
+      "bytes": 635,
+      "sha256": "138e3feb809be1ba4b06952583da94c1311276d00870436110132be2a4c7ff15"
+    },
+    "Contents/Resources/OlkUIKitResources.bundle/Contents/Info.plist": {
+      "bytes": 661,
+      "sha256": "acd9357d62e1c555287a7376a9071c38db280e1738054b4af9e63a1764bad6a3"
+    },
+    "Contents/Resources/OutlookModels.bundle/Contents/Info.plist": {
+      "bytes": 797,
+      "sha256": "4499a91fecced0cc22fd75c157e0d9c0c5a115f0a6fe0c1d6e6ecf276d352670"
+    },
+    "Contents/Resources/PaywallResources.bundle/Contents/Info.plist": {
+      "bytes": 617,
+      "sha256": "b7f7c4c56cfcf50045f9449678ea6f492d0cdfd309f8222b596a403fcde6137d"
+    },
+    "Contents/Resources/ProofingUI.bundle/Contents/Info.plist": {
+      "bytes": 588,
+      "sha256": "d07bcb3165482e83bd071e2cd70d68619d7cbee7f0bbd5b0ae581f77eed4b9ea"
+    },
+    "Contents/Resources/SAExt_mac.bundle/Contents/Info.plist": {
+      "bytes": 582,
+      "sha256": "4de7c15910bc4beb4785b9d0ecdfad0d162782f2681dcf937e8e2b16252e6ea1"
+    },
+    "Contents/Resources/hubsdkiOSResources.bundle/Contents/Info.plist": {
+      "bytes": 610,
+      "sha256": "9ab3b1f7ea00dce91116c97c071ff447cbe6b8fa30e429280e9400c2b7e62ed8"
+    },
+    "Contents/Resources/setupui_bundle.bundle/Contents/Info.plist": {
+      "bytes": 596,
+      "sha256": "f4f7040972e510e14a97dea90d90ba7280907ad36da91cb5c188cbf712417f7e"
+    },
+    "Contents/SharedSupport/Microsoft Error Reporting.app/Contents/Info.plist": {
+      "bytes": 1230,
+      "sha256": "785055033c5307d1bfa147df9bc2d56ade135ac27b7797f637d4f53f1372c617"
+    },
+    "Contents/SharedSupport/Microsoft Error Reporting.app/Contents/MacOS/Microsoft Error Reporting": {
+      "bytes": 2243184,
+      "sha256": "5e7484000728a3bce03edffdf42f245f33e42c1e6bce1702beabef7e06210911"
+    },
+    "Contents/SharedSupport/Outlook Profile Manager.app/Contents/Info.plist": {
+      "bytes": 1421,
+      "sha256": "102e91f2101cd83d225919327b58eba4db7968f1b2531b6c053b4a9fe317e605"
+    },
+    "Contents/SharedSupport/Outlook Profile Manager.app/Contents/MacOS/Outlook Profile Manager": {
+      "bytes": 193072,
+      "sha256": "c670c3efb3b99f2f7d83b93bf75634a0f25e885355af9b1cdfc957ae6c978ca7"
+    },
+    "Contents/SharedSupport/Proofing Tools/AfrikaansSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1269,
+      "sha256": "41b71748ddd482526e84f35cb697b955b43761265af3d9160d42be9938598492"
+    },
+    "Contents/SharedSupport/Proofing Tools/AfrikaansSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "998096c810237149f42e9aca8dc327ad295aeab8935d654b450bfc3e10eed781"
+    },
+    "Contents/SharedSupport/Proofing Tools/ArabicGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1253,
+      "sha256": "8b13ff1b6b90c986c9dbeb8b986303427c31a0279054cd07cf35ea75c85e190f"
+    },
+    "Contents/SharedSupport/Proofing Tools/ArabicGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126112,
+      "sha256": "103c7387eac4fa0c71292b7d7c753b2a075a610e27b9e1651083782d40e51858"
+    },
+    "Contents/SharedSupport/Proofing Tools/ArabicSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1253,
+      "sha256": "a4d2d213f38f9d4561440f77d2bf1dba3936839a83c15258513d21932cb05e43"
+    },
+    "Contents/SharedSupport/Proofing Tools/ArabicSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "ed1aaa126c1d704b8fdf45614015c7340c610e8abad05cc79b8bdc5f67837914"
+    },
+    "Contents/SharedSupport/Proofing Tools/ArabicThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1278,
+      "sha256": "c28ae0327bf8235e25e4c3c3db50062e7ef5b942d50979486dacb7fe8a2dfcd0"
+    },
+    "Contents/SharedSupport/Proofing Tools/ArabicThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "2d0e7c3f0c1156a27e1508f692ea891e34aca9125047bb363c1964803f92885c"
+    },
+    "Contents/SharedSupport/Proofing Tools/BasqueSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1253,
+      "sha256": "c727aab9356019cf5aee1b3aaf40335620448e108f3ddd3ddd18d5caf1c3bc38"
+    },
+    "Contents/SharedSupport/Proofing Tools/BasqueSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "5bb2723dba96e1a939f492f177ac0b81dfc7408d87086e780077cd2c1efbe589"
+    },
+    "Contents/SharedSupport/Proofing Tools/BosnianSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "1e92a0f5863aa5d6fcf4e9f39aad38d3cdc451f010384575a116ae9ff40ac672"
+    },
+    "Contents/SharedSupport/Proofing Tools/BosnianSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "66ed3b8367dfcfb295ab91f95328f9c8d03538cd407ba476e0118394943c992a"
+    },
+    "Contents/SharedSupport/Proofing Tools/BrazilianPortugueseGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1317,
+      "sha256": "6fd146a8153223e67da304aaf3043191acc88cda4f3e846b482515e16050be37"
+    },
+    "Contents/SharedSupport/Proofing Tools/BrazilianPortugueseGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126144,
+      "sha256": "38b355d9c3e35e12a3e30ea98e1fd807adb99bb154b69c50e9f200784aaa1bfe"
+    },
+    "Contents/SharedSupport/Proofing Tools/BrazilianPortugueseHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1333,
+      "sha256": "5e1fcc0a4c0846390d0833bddc1dfe0b5fc134645eefdf4c02b0af723d40c8d4"
+    },
+    "Contents/SharedSupport/Proofing Tools/BrazilianPortugueseHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102992,
+      "sha256": "1ddcf5d97adb4a6f9a063bdb1dcdd0d3608730bee7d0344f18fe933397920409"
+    },
+    "Contents/SharedSupport/Proofing Tools/BrazilianPortugueseSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1317,
+      "sha256": "096d18b2fca0876cc4f0bbd6faa8998a46e74b2c5ed53aa1ebb3265193334eab"
+    },
+    "Contents/SharedSupport/Proofing Tools/BrazilianPortugueseSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104720,
+      "sha256": "f4f4e56b664a6d8f7a68c144423bee52448c34dd6ad7b01b66518d08b2c6895f"
+    },
+    "Contents/SharedSupport/Proofing Tools/BrazilianPortugueseThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1326,
+      "sha256": "89bce5be43c47cf16542ff5bafab1fb2741456f337f36f5d7574bd1dab64f974"
+    },
+    "Contents/SharedSupport/Proofing Tools/BrazilianPortugueseThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119648,
+      "sha256": "c6a6286e65c8ba153ba1a6c1fa41549b8e0b6be3b55441696a2caaff8873f217"
+    },
+    "Contents/SharedSupport/Proofing Tools/BulgarianSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1269,
+      "sha256": "84dc01ac3be2cec64e0b67624b73763335a58cf7d6983ea740c173fe536579a8"
+    },
+    "Contents/SharedSupport/Proofing Tools/BulgarianSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "6f16006d1c2dfb93fcb518a69664012ec2066ece90d878abe1a7efccf86a021d"
+    },
+    "Contents/SharedSupport/Proofing Tools/CatalanHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1289,
+      "sha256": "57b7acd26248709da898193bb583844452340b9e81d44752cfab2f8e917a652f"
+    },
+    "Contents/SharedSupport/Proofing Tools/CatalanHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102976,
+      "sha256": "ca5a4f3bfd5e22d562b131211b85a73b852925e6f025a05029d77298e0850520"
+    },
+    "Contents/SharedSupport/Proofing Tools/CatalanSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "d14eaf95ee7326dba59bebb33cd1f9f57c6602529bede53b33713dd9ea6db3f6"
+    },
+    "Contents/SharedSupport/Proofing Tools/CatalanSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "f1341f6d7c742a0b2cb85f320e63fa6d9baad54373a61d4f42031057b6645d52"
+    },
+    "Contents/SharedSupport/Proofing Tools/CatalanThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1282,
+      "sha256": "d5a712f29765777fa85a0017fe0cbcbd208c0846aa8d8745e25c0a2ec9f63fcf"
+    },
+    "Contents/SharedSupport/Proofing Tools/CatalanThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "f211e8324f9eb34338849ed10824337328d9799e1b3d81c9bdfccb21a2323419"
+    },
+    "Contents/SharedSupport/Proofing Tools/CroatianSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1265,
+      "sha256": "9fac768733cf79ae802e779599e47e8d35086ff8419d550d22542e9082646c05"
+    },
+    "Contents/SharedSupport/Proofing Tools/CroatianSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "938a168a765558197eb20dd5deb06f178bfdcbe04a24dde3198390602adf94c8"
+    },
+    "Contents/SharedSupport/Proofing Tools/CssEnglishSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1360,
+      "sha256": "126690294a43528038e75a4fbbb963b4a58df6cfc6aa22d01270f3c2c58a64c4"
+    },
+    "Contents/SharedSupport/Proofing Tools/CssEnglishSpeller.proofingtool/Contents/MacOS/Contextual Speller": {
+      "bytes": 104688,
+      "sha256": "d185f3c1ca9edace4adc600b79f4c0b99753d277ae1f143be2af483f9aba157e"
+    },
+    "Contents/SharedSupport/Proofing Tools/CssFrenchSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1327,
+      "sha256": "2adb9818d138619d6c697f2bac66fe557638bd8700a9b88250a7ddd8187e95a6"
+    },
+    "Contents/SharedSupport/Proofing Tools/CssFrenchSpeller.proofingtool/Contents/MacOS/Contextual Speller": {
+      "bytes": 104688,
+      "sha256": "0bc19b213ecfb4a89fedcf586ebdca1d72558ea77f3223d324ab8d17d96c5414"
+    },
+    "Contents/SharedSupport/Proofing Tools/CssGermanSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1326,
+      "sha256": "eea2431d18854bb6a6ed548db8017256be0ac14bdc555ab0bdf37bcfd8bb5c27"
+    },
+    "Contents/SharedSupport/Proofing Tools/CssGermanSpeller.proofingtool/Contents/MacOS/Contextual Speller": {
+      "bytes": 104688,
+      "sha256": "ac31eecfe58709baf778025cb0266b6f3ee25a3848e3effbe0568ee5792df5d6"
+    },
+    "Contents/SharedSupport/Proofing Tools/CssSpanishSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1605,
+      "sha256": "6a75e792446e51c466658e438756f2efd902a1e63db25cc8c70fe3599f976180"
+    },
+    "Contents/SharedSupport/Proofing Tools/CssSpanishSpeller.proofingtool/Contents/MacOS/Contextual Speller": {
+      "bytes": 104688,
+      "sha256": "a17b2eeb0b452acb050dd0c311e6c3c7e131870b73b20de30ca89fbfb0e9ca87"
+    },
+    "Contents/SharedSupport/Proofing Tools/CzechGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1249,
+      "sha256": "1f57fa9567bb4d5f8fced8d02df3cf14fe6e9d9dce6ecfaf9bf4026aaba00e7b"
+    },
+    "Contents/SharedSupport/Proofing Tools/CzechGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126112,
+      "sha256": "9e6a92e5143c3ce941c05c27c4336ad30608b23cb00771b145b3bc692999885c"
+    },
+    "Contents/SharedSupport/Proofing Tools/CzechHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1281,
+      "sha256": "5a075432b26eb8086a5d2fc597aaa9cdc5ad8bc72c016e760b98ef2cd56c5548"
+    },
+    "Contents/SharedSupport/Proofing Tools/CzechHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102976,
+      "sha256": "b2547750e082cd99e32c70fdb5dbb15131ea72e1bbead3a46c22cf2056845802"
+    },
+    "Contents/SharedSupport/Proofing Tools/CzechSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1249,
+      "sha256": "48b5d17a274d88c12ec154fdb282bd2bf89d5408e775a7e900d2b25f0835c665"
+    },
+    "Contents/SharedSupport/Proofing Tools/CzechSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "e0dc35df3e27895af23f76f2b519da01b9bd0c4c9231a72ca694fae3a7259078"
+    },
+    "Contents/SharedSupport/Proofing Tools/CzechThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1272,
+      "sha256": "9de4ab4d71c26e6ec32f88650d5ba1e40c75089f74f1acd78589b6f696fb74f4"
+    },
+    "Contents/SharedSupport/Proofing Tools/CzechThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "504020afea10efc6ddb5bad5b390fcffc9941ea6dce943e5a151161dae0fb33d"
+    },
+    "Contents/SharedSupport/Proofing Tools/DanishGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1253,
+      "sha256": "00795ff323ed1d83be0709d00ab3428bee0b45120ad29ced0ae86636f85cbb45"
+    },
+    "Contents/SharedSupport/Proofing Tools/DanishGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126112,
+      "sha256": "f9165350b24c53d72cc719f6d399954edc0cb2e133068ead528f77678cf1302c"
+    },
+    "Contents/SharedSupport/Proofing Tools/DanishHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1285,
+      "sha256": "5956c11e58fa5e11ef13df45fe636a71008a14c7c57b935620b1b66e2d1d4a64"
+    },
+    "Contents/SharedSupport/Proofing Tools/DanishHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102976,
+      "sha256": "ee1e2fed4d60484147ae4ffdbf660c7ec526805cba435a389b5cbc154b6f687f"
+    },
+    "Contents/SharedSupport/Proofing Tools/DanishSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1253,
+      "sha256": "387184ef9b506277983f4f278b1427af06b5806ff95c74314f3d64a60ca03551"
+    },
+    "Contents/SharedSupport/Proofing Tools/DanishSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "1257a4b3472b1ccdc97fbb9fd4057efab9a0313f8512219707093e930a033a38"
+    },
+    "Contents/SharedSupport/Proofing Tools/DanishThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1278,
+      "sha256": "ad571e97c0cbbdd9e39cf3ddbafdffefe592297f94f372dd57b2aeb6a5cd96fd"
+    },
+    "Contents/SharedSupport/Proofing Tools/DanishThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "7a6d928c41adad9823044f3d91745b38da77028530cc87b2cbcb31ceb6028105"
+    },
+    "Contents/SharedSupport/Proofing Tools/DutchGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1249,
+      "sha256": "831bb0a3a95aa63533edfcb7b4b5bf5ac31aa3f70198e73a13db99c8eae7b45f"
+    },
+    "Contents/SharedSupport/Proofing Tools/DutchGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126112,
+      "sha256": "066fb7cc8175379b552e2db725442eafbcc79ce56ec7bfab9c6e76a89b7ab0c7"
+    },
+    "Contents/SharedSupport/Proofing Tools/DutchHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1281,
+      "sha256": "7017348cb0f7cba1fa8d09580fc0f199c91459dcb5b04c1006e6a34315a63d5f"
+    },
+    "Contents/SharedSupport/Proofing Tools/DutchHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102976,
+      "sha256": "28a4235d4068bb0a9667fc9d6565c9689b15ac57073ac79117b1e50ebb21020d"
+    },
+    "Contents/SharedSupport/Proofing Tools/DutchSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1249,
+      "sha256": "23ff3e373948bfe56f3c50f882e13192296d4b3f91983e20374ba753cd2203bb"
+    },
+    "Contents/SharedSupport/Proofing Tools/DutchSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "b525328799c5f4c16ded717f3b7197f5e1bf596a227227fa68ed55b7c26d5ea8"
+    },
+    "Contents/SharedSupport/Proofing Tools/DutchThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1272,
+      "sha256": "6ec1ba78c0c27bf7ff16a5766b5feec52fa746baa0bae312110da5d3b0d7e09e"
+    },
+    "Contents/SharedSupport/Proofing Tools/DutchThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "c6d27a040b2ce5efbfa24cc96b54ad89e1dadce5b4e9c62490732aa208543b34"
+    },
+    "Contents/SharedSupport/Proofing Tools/EnglishGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1304,
+      "sha256": "02433a50a98f7c562a613ce418c8d4a0f80489ef36018ffa37bfd37fafa592b7"
+    },
+    "Contents/SharedSupport/Proofing Tools/EnglishGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126128,
+      "sha256": "21363ef6d28030dc7b5132f2f29b38a4b93f45434bd73fb6942b0852d9caa4a0"
+    },
+    "Contents/SharedSupport/Proofing Tools/EnglishHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1334,
+      "sha256": "da42906a0a2c4df4fbd8f0892da46cb9d827dd7923da8ec3697c6f5fbb9b7430"
+    },
+    "Contents/SharedSupport/Proofing Tools/EnglishHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102976,
+      "sha256": "af8e312b6e42c255ff624e067b842083f2fdbf9c3b82eabca103f8c858526497"
+    },
+    "Contents/SharedSupport/Proofing Tools/EnglishSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1330,
+      "sha256": "85ed49de22ae123ea01c50f0478f1b9ad90ce741dea64a762c9e3749f5acafd0"
+    },
+    "Contents/SharedSupport/Proofing Tools/EnglishSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "0ee0f39d906c7503279db94c8932179411e209457bbbd842061fc2ae6b8d1856"
+    },
+    "Contents/SharedSupport/Proofing Tools/EnglishThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1327,
+      "sha256": "577fcf24abdaf1de787d1968a03cb3cee0a4e584086e644f2b082b6c80e889f3"
+    },
+    "Contents/SharedSupport/Proofing Tools/EnglishThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "02bb0fe689900baf11df53be953658acfab744a5ae8d6aa5bb57564ce36ec81b"
+    },
+    "Contents/SharedSupport/Proofing Tools/EnglishWordForms.lexicon/Contents/Info.plist": {
+      "bytes": 976,
+      "sha256": "da440f6e7d118740b122cc19a1c7c198b4f251c56868f9861e5bebfc5269bb29"
+    },
+    "Contents/SharedSupport/Proofing Tools/EstonianSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1265,
+      "sha256": "aee14ea5f98a6c2538a507950b2d8fb3cfbd658b4977d66fce63f2e1af5f5a28"
+    },
+    "Contents/SharedSupport/Proofing Tools/EstonianSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "54dbb530cbfce62069622fa6682a79084a4d15dc2d8e77f1aa4871254e749b5c"
+    },
+    "Contents/SharedSupport/Proofing Tools/FarsiSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1249,
+      "sha256": "b3a7c44566d017c464e54c83522b75a363e4ee5a12435f95b6504713d08cbb93"
+    },
+    "Contents/SharedSupport/Proofing Tools/FarsiSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "b66612ae015744ee1aa3911f6cd045d30fbad4cf5e90560108ee493e8ac7de63"
+    },
+    "Contents/SharedSupport/Proofing Tools/FinnishGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "f31c7c52c704cdb6900463c23d8738065ca3de470c5953f5100179819e1ddc24"
+    },
+    "Contents/SharedSupport/Proofing Tools/FinnishGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126128,
+      "sha256": "c5dceb4a2657019976818a29f2079d6f15cc80343a8dc8800023449b7da4aa9a"
+    },
+    "Contents/SharedSupport/Proofing Tools/FinnishHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1289,
+      "sha256": "8c5eff9f544e9df375ff4e9ab8e3111f41e8f28c5350d795d80ce0e243aaf621"
+    },
+    "Contents/SharedSupport/Proofing Tools/FinnishHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102976,
+      "sha256": "4bd71d3f888ff6d06964007ad1cba11ecc4a779b1870602bc1abeb8f77a86cac"
+    },
+    "Contents/SharedSupport/Proofing Tools/FinnishSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "147e46f85126a368cbeb0292de6295b2daa8d2cf48cd01a4b2ccc261d874ae2e"
+    },
+    "Contents/SharedSupport/Proofing Tools/FinnishSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "82ff8bfd92235b76a8d73b995823713bc33b4d4d42387c33292b3c25a2dd477a"
+    },
+    "Contents/SharedSupport/Proofing Tools/FinnishThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1282,
+      "sha256": "f1a7af2a74873ff253913ac593ac8aa6053facb5742278e4cd7f9e349c888546"
+    },
+    "Contents/SharedSupport/Proofing Tools/FinnishThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "35e13ce8aa456b6eb7f718c0e2dc1e8864875c5680e0eb75c716600ce7deebb2"
+    },
+    "Contents/SharedSupport/Proofing Tools/FrenchGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1283,
+      "sha256": "9bfa93237d58652e70eb9dc9cd377035c0ad51d7500f8db7c4cc2fccc598af7a"
+    },
+    "Contents/SharedSupport/Proofing Tools/FrenchGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126112,
+      "sha256": "09f27aeeac9d42d9a34d9e491fd5c481a02a91aafaa8b10dacc4d5c219cc0291"
+    },
+    "Contents/SharedSupport/Proofing Tools/FrenchHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1315,
+      "sha256": "a781a47e66794a0d5e953ddc6a71788737117c73c4e5e2fd5e2c08b5a61b5a95"
+    },
+    "Contents/SharedSupport/Proofing Tools/FrenchHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102976,
+      "sha256": "92b1541530efaff840617b48695c1b29e773d7cf23946d3a6dccf2ce8a1f0308"
+    },
+    "Contents/SharedSupport/Proofing Tools/FrenchSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1295,
+      "sha256": "e400344706fc6326bb16389f197236a8921542fb0c6d51b84434e18c6e9ce170"
+    },
+    "Contents/SharedSupport/Proofing Tools/FrenchSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "c96787e981bd5960bafec512371a41c66cf82096ad083dec5c5f8bb98612ec3a"
+    },
+    "Contents/SharedSupport/Proofing Tools/FrenchThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1308,
+      "sha256": "1a09b405b48da46aa70faded64f0f4edf1b7246d5d0bc402edc6585346bfb940"
+    },
+    "Contents/SharedSupport/Proofing Tools/FrenchThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "611dee4518d1244e6aacc0b17e0eb1e600851ca30f8d86036d5a6a37e0b6d2d8"
+    },
+    "Contents/SharedSupport/Proofing Tools/GalicianSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1265,
+      "sha256": "c3f0c4bbd73f28f0487bce31af0321d07b43ecc3335a0637346a09b4c55b857b"
+    },
+    "Contents/SharedSupport/Proofing Tools/GalicianSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "f356c6da504bec4f966d48a8beb06c7206ed539a3f1929abe09c8e58cb749b49"
+    },
+    "Contents/SharedSupport/Proofing Tools/GenericCssSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1266,
+      "sha256": "4fcd56d25e41f0a21e1230af58961468bb5c04cb12a14457951a4b959b392963"
+    },
+    "Contents/SharedSupport/Proofing Tools/GenericCssSpeller.proofingtool/Contents/MacOS/Contextual Speller": {
+      "bytes": 104688,
+      "sha256": "f5308aae39c65233943eced4d8c2bb6210bf41515679eae03a10bc260f686ee8"
+    },
+    "Contents/SharedSupport/Proofing Tools/GenericGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1248,
+      "sha256": "281a8397a7a114e215845efa8bcbd7f45a01cfed91034402b037bf99fed1e3f9"
+    },
+    "Contents/SharedSupport/Proofing Tools/GenericGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126144,
+      "sha256": "f20495613c3a4218e4a0b167252ebda8014961329a787faa0737e52f1976051a"
+    },
+    "Contents/SharedSupport/Proofing Tools/GenericSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1248,
+      "sha256": "02e443dc3c926ba6c5f7207f870a82a180a3c92fe2c97486170ebc81470fad95"
+    },
+    "Contents/SharedSupport/Proofing Tools/GenericSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104720,
+      "sha256": "456b20e7b099cb0c070744eef124f528d64751002081c74ecf09fadf37fce3c6"
+    },
+    "Contents/SharedSupport/Proofing Tools/GenericThesaurus7.proofingtool/Contents/Info.plist": {
+      "bytes": 1264,
+      "sha256": "11d25a8543534b28acf01b9bf8a15c8152b907be4d31abbd30201bbdd58e7427"
+    },
+    "Contents/SharedSupport/Proofing Tools/GenericThesaurus7.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119648,
+      "sha256": "9340a7feda8a2bd121c3c41448f4f7790f217f49bec6e1e6f32e627c158889d9"
+    },
+    "Contents/SharedSupport/Proofing Tools/GenericThesaurus8.proofingtool/Contents/Info.plist": {
+      "bytes": 1264,
+      "sha256": "e6f53695d9470f34e13eb3951f8e5f57f0eac90ac3995d54abe457836544783d"
+    },
+    "Contents/SharedSupport/Proofing Tools/GenericThesaurus8.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119648,
+      "sha256": "437da94f648f8c5675377f4ea3652aefe2ddc547421598dad397d595d5be9ac1"
+    },
+    "Contents/SharedSupport/Proofing Tools/GermanGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1283,
+      "sha256": "f8824cab1bf25b02fc5313ddcb1df137878e8e4c4227995ddfe8d460ee14bb95"
+    },
+    "Contents/SharedSupport/Proofing Tools/GermanGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126112,
+      "sha256": "08d3045d6d7f827412ced6b9a15f3cae217fc31e26a35ea75f47c21036a49a8e"
+    },
+    "Contents/SharedSupport/Proofing Tools/GermanHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1315,
+      "sha256": "05fd1be786225265b7b73ff728f5603ce805ca546327bfa44e47747728e8d299"
+    },
+    "Contents/SharedSupport/Proofing Tools/GermanHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102976,
+      "sha256": "cd2b7f7d139a71e52a80b0e4fe6d73cc1853bb1b7a06021b6b9d28e1e7fdc6fb"
+    },
+    "Contents/SharedSupport/Proofing Tools/GermanSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1294,
+      "sha256": "57543791124befd707b0afea80e9abded2966fb1777e88a018ffcbd931876c58"
+    },
+    "Contents/SharedSupport/Proofing Tools/GermanSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "f3183064ec93693149c5689d1c5652371e9763e9cd43ff1e670895185449fcc4"
+    },
+    "Contents/SharedSupport/Proofing Tools/GermanThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1308,
+      "sha256": "0a1dbf36c4e9dc68edf9d94510ebba1a98318df3e89b4045677e0ea6366c2e59"
+    },
+    "Contents/SharedSupport/Proofing Tools/GermanThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "195a19e223b3dd5d0205e1ad1fe7cbd973fdff60774faad01f337d89be75e2eb"
+    },
+    "Contents/SharedSupport/Proofing Tools/GreekSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1249,
+      "sha256": "64c911a65dbb8cbbffadb4503c8432d268b5017b4d8ab191cbe4a2604868fa79"
+    },
+    "Contents/SharedSupport/Proofing Tools/GreekSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "d6c87b8668b2bb8056c8bdd2a4a69eb6da6133c21f2ef1b5ca29d70f808af508"
+    },
+    "Contents/SharedSupport/Proofing Tools/GujaratiSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1265,
+      "sha256": "37d21bd87c85daee615abf9967b6f446af0eccf81f7b0c3fe237798fe894f888"
+    },
+    "Contents/SharedSupport/Proofing Tools/GujaratiSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "29a9d69f16a6945a629e59bba56924cff533c80b3f66255103edc008d5f07023"
+    },
+    "Contents/SharedSupport/Proofing Tools/HebrewSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1253,
+      "sha256": "40e935807e4a0605ff6729d900d8f4defb22f272be4fa7cd3875ecfefc357159"
+    },
+    "Contents/SharedSupport/Proofing Tools/HebrewSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "9f2f9463481bcfd7650a8455c9dc00d6438a7dde0a0c036cbeb04cc7f09c8f71"
+    },
+    "Contents/SharedSupport/Proofing Tools/HebrewThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1278,
+      "sha256": "6d3713f879f85b1a546a7d28d2a96f29edbb15543d4bdb37ffc5a65af617baac"
+    },
+    "Contents/SharedSupport/Proofing Tools/HebrewThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "1a093399b9070fccb520dd98d5efc953f691e6cc875c102886d5a3793a46cf79"
+    },
+    "Contents/SharedSupport/Proofing Tools/HungarianGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1269,
+      "sha256": "fb2c6a07e4b20d81f97aaba796b32053b1e357fbf9cdba77e94c481d224f0626"
+    },
+    "Contents/SharedSupport/Proofing Tools/HungarianGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126128,
+      "sha256": "b8fb88c4fd8a5b3ca41cb01f6a7187608528671927915be2f70f2fae079c2c46"
+    },
+    "Contents/SharedSupport/Proofing Tools/HungarianSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1269,
+      "sha256": "c11663c2f69ca1845706e7673bf4c5de4740edcf17e66db36c42c40415d74932"
+    },
+    "Contents/SharedSupport/Proofing Tools/HungarianSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "284ec5825931a7d0d5c4a9ab807dbd78fe552804025aef4c364926177adf3cbd"
+    },
+    "Contents/SharedSupport/Proofing Tools/IberianPortugueseGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1313,
+      "sha256": "6a096577420434fdccf23108ec73da9b65c3af731fe55d8d3a20a6d1a8edd2f1"
+    },
+    "Contents/SharedSupport/Proofing Tools/IberianPortugueseGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126144,
+      "sha256": "a71fff65d50d2ac4d9d36188d7adf0fa90a03a3fa7888471a3203a806903b7d7"
+    },
+    "Contents/SharedSupport/Proofing Tools/IberianPortugueseHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1341,
+      "sha256": "80c66b607d49e9333fec5581c0ab28481676d2637ed0bf89384c977e5bb8e859"
+    },
+    "Contents/SharedSupport/Proofing Tools/IberianPortugueseHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102992,
+      "sha256": "1f990a096792dc96fdeb1b38d949919a1d386e43ed2496299298f8373108c049"
+    },
+    "Contents/SharedSupport/Proofing Tools/IberianPortugueseSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1313,
+      "sha256": "6ab5113e46fd85264aad4499920c3cbc8fe6b4818933821595783cbf22f742a3"
+    },
+    "Contents/SharedSupport/Proofing Tools/IberianPortugueseSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104720,
+      "sha256": "4dadb6b52e66cf8d2feeb5ec6fce80c5d5f76bfa23070a49905316cf246a9d28"
+    },
+    "Contents/SharedSupport/Proofing Tools/IberianPortugueseThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1334,
+      "sha256": "ecb821b82373b2699f3ed4a2642ba2fca75d2367b6225b9ead2b55071f8d4cf3"
+    },
+    "Contents/SharedSupport/Proofing Tools/IberianPortugueseThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119648,
+      "sha256": "960ff711c61f238b9c4e21563fc7bd33548359041f410af4e3838e6c364e0e8f"
+    },
+    "Contents/SharedSupport/Proofing Tools/IndonesianSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1273,
+      "sha256": "cc19af59460de5240f4e0b9237c1c15a0a260cc64486972f5c838129ebb0655d"
+    },
+    "Contents/SharedSupport/Proofing Tools/IndonesianSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "24644b13248e4bd330337ce37fe21fd1583cf9768ef51bd0f0bdc44b04a86ea2"
+    },
+    "Contents/SharedSupport/Proofing Tools/IsiXhosaSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1265,
+      "sha256": "a6c88c6e8bddf7a414c5d71a93045491658f26a2a1175609ae35da8b6c4e5ed7"
+    },
+    "Contents/SharedSupport/Proofing Tools/IsiXhosaSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "2b941615a09b6a518dc35c5dab97f4f49debc76cc9dbf6e819429f7e5f4f8138"
+    },
+    "Contents/SharedSupport/Proofing Tools/IsiZuluSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "c1f816b5e0fef02f00d6e9dbfb2bdca3c5e242bd1fb3c30f43505bae70a5e56c"
+    },
+    "Contents/SharedSupport/Proofing Tools/IsiZuluSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "5e88a833dd50a5f34769f375149d795ce822a25e3d79882ae0d02d0ee52cde2f"
+    },
+    "Contents/SharedSupport/Proofing Tools/ItalianGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "07e36e95f233447c98e9ff40df2f3140c27b27fb9a02570ad8bb2a2c2ff102a6"
+    },
+    "Contents/SharedSupport/Proofing Tools/ItalianGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126128,
+      "sha256": "33a95ea73f47b026710468ac48c6dbb1703e43d360f6e277714162c6c310889a"
+    },
+    "Contents/SharedSupport/Proofing Tools/ItalianHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1289,
+      "sha256": "c355f71ff4d278bf6633ed59532d349a9c0afbed01eef7af09446e01f2fa977c"
+    },
+    "Contents/SharedSupport/Proofing Tools/ItalianHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102976,
+      "sha256": "1dae58214c564125863c2f876a69552c17501bcb1537b9668fcd1b59cead682d"
+    },
+    "Contents/SharedSupport/Proofing Tools/ItalianSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "c79712261cf889cd68fdcdfbed0df51f2f0a9c6475130ad18d8a018ffa46a5cf"
+    },
+    "Contents/SharedSupport/Proofing Tools/ItalianSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "aea686a63cc47653600db02afeec54316531fd4b039a9aa649a89682b7e8c624"
+    },
+    "Contents/SharedSupport/Proofing Tools/ItalianThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1282,
+      "sha256": "97c009ca34659daa9ce714ae3d3acc993f56a897c99af270122b0a532a1372e6"
+    },
+    "Contents/SharedSupport/Proofing Tools/ItalianThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "0ce3445373353953f9590dafdd3ef4ed2dbf238f100681e0b8d48070403a0de6"
+    },
+    "Contents/SharedSupport/Proofing Tools/JapaneseProofing.proofingtool/Contents/Info.plist": {
+      "bytes": 1213,
+      "sha256": "2e074cd1cd36ad46af1e83c17e47a4b95b49c9ba8213342e5a932290e81d4a04"
+    },
+    "Contents/SharedSupport/Proofing Tools/JapaneseProofing.proofingtool/Contents/MacOS/JapaneseProofing": {
+      "bytes": 1289280,
+      "sha256": "09f68db0e0abcef659a0be32d65d50dba199e61bda8b3e6bcb5995e0d35f50df"
+    },
+    "Contents/SharedSupport/Proofing Tools/KannadaSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "293d6e91f0a8589fe7fcc7d7abb520c09d69d0662ea0b7d0e6cdd4de82e72feb"
+    },
+    "Contents/SharedSupport/Proofing Tools/KannadaSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "b323d89f484aeb5ddf265807677ae9eb433cab098acd51b6a4cdb994f94ea495"
+    },
+    "Contents/SharedSupport/Proofing Tools/KazakhSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1253,
+      "sha256": "25760705106824b850d60c89d97dcca68d789703c46c0a53919647812463379c"
+    },
+    "Contents/SharedSupport/Proofing Tools/KazakhSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "f6a44285b5915bf1bd9b100ba739cd0420130fd69eb8f208262ad50d0bc93ae9"
+    },
+    "Contents/SharedSupport/Proofing Tools/KiswahiliSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1269,
+      "sha256": "d95cfc52a641973fd8b543d31ec5b78661804c1716747076e10b39a4ba7ece12"
+    },
+    "Contents/SharedSupport/Proofing Tools/KiswahiliSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "abe87ab3dc692d025f9edea22e1b3deef662cf98bb6867f999304597a0de614d"
+    },
+    "Contents/SharedSupport/Proofing Tools/KoreanSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1253,
+      "sha256": "89803611ab7fffd4d212b591e3d6ae560e588ac12224512a4ef0f53b8d73635d"
+    },
+    "Contents/SharedSupport/Proofing Tools/KoreanSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "b34838da9defbc61d12872655c57ec6a186f7d25c4d6efd6d25b7892f20ebb87"
+    },
+    "Contents/SharedSupport/Proofing Tools/LanguageIdentification.proofingtool/Contents/Info.plist": {
+      "bytes": 1265,
+      "sha256": "7e3aeb72b41485dc45859e859c718e3aad4179c0b5726f0b2d28b9ff38d5727b"
+    },
+    "Contents/SharedSupport/Proofing Tools/LanguageIdentification.proofingtool/Contents/MacOS/LAD": {
+      "bytes": 263360,
+      "sha256": "7695cf74800fe8ece703f7ecb707839d3d3fb8e2d85a2ca3038838fc8826ea48"
+    },
+    "Contents/SharedSupport/Proofing Tools/LatvianSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "34587db61d6c42e8a0f91681844faac32067328a02f91b74bc188b5c355187cb"
+    },
+    "Contents/SharedSupport/Proofing Tools/LatvianSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "8f920182a09e450e013ffe3dca3849329504011b0c42f83a9e679e05908fff67"
+    },
+    "Contents/SharedSupport/Proofing Tools/LithuanianSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1273,
+      "sha256": "cec4e5200dc9a9ae702e984527ea2ef77954e1114e9ffe06806adc79852b0677"
+    },
+    "Contents/SharedSupport/Proofing Tools/LithuanianSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "bf9f35bd283a1cb52595546b071bb82da91e4656a6e82a2b8a64db2f17fb0012"
+    },
+    "Contents/SharedSupport/Proofing Tools/MacedonianSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1273,
+      "sha256": "a2bf9c9c053d7a8ceaba88599014839452b4318aa4e9238df467a4a89af15ea6"
+    },
+    "Contents/SharedSupport/Proofing Tools/MacedonianSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "62a7d117a177f2b40a749b77500c490d7ef06a994efcf7253cdf11d2e987bed0"
+    },
+    "Contents/SharedSupport/Proofing Tools/MalaySpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1249,
+      "sha256": "92b3da3088438b34bdf086d137c0b6ddb1f91f5f88a51bfa9ce0694fd9315f6f"
+    },
+    "Contents/SharedSupport/Proofing Tools/MalaySpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "2adb3f6313ccfbe3b1a2cd9a80f3dd7d17deed6096cd22d975f137d7a69fb4f0"
+    },
+    "Contents/SharedSupport/Proofing Tools/MarathiSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "938fe12925cfa1ee307e317c87414a5f8d9e5d26304c96f28b0dcdaa73389019"
+    },
+    "Contents/SharedSupport/Proofing Tools/MarathiSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "2902f608d0915da42e1a18acbc9cb6dc674f6aeb3247d5b43d27730aa47e75d2"
+    },
+    "Contents/SharedSupport/Proofing Tools/NorwegianBokmaalGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1305,
+      "sha256": "19336cba6e8190a5d51347c1850bf70326083f1f419e867273c5bebf5c99b33a"
+    },
+    "Contents/SharedSupport/Proofing Tools/NorwegianBokmaalGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126144,
+      "sha256": "b7af0f9d926433c320c708d8b132e3f8ccd25484edebcadbba476c6bce55d9a6"
+    },
+    "Contents/SharedSupport/Proofing Tools/NorwegianBokmaalHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1333,
+      "sha256": "cf4b7d36d0400edde7bd493671e1de7cf9beb0064a9951feecc524b6b6c29065"
+    },
+    "Contents/SharedSupport/Proofing Tools/NorwegianBokmaalHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102992,
+      "sha256": "29828e0861e07890cb5efdd7fed1eded056d9a639b8b7e573929811334b3845a"
+    },
+    "Contents/SharedSupport/Proofing Tools/NorwegianBokmaalSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1305,
+      "sha256": "e80e36c0560b5813c569942302bbc94a33a12ab030bc939f214f5bf6f6dee879"
+    },
+    "Contents/SharedSupport/Proofing Tools/NorwegianBokmaalSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104720,
+      "sha256": "d9ea9d7430fe94351fcd8ed8d5a62d9b8540a1e2e7d9f30929c6b7e092f526d5"
+    },
+    "Contents/SharedSupport/Proofing Tools/NorwegianBokmaalThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1326,
+      "sha256": "949bb08724c54be90c04d40ed2ddb39a7597cc1e9e6d826bbb518336b145e077"
+    },
+    "Contents/SharedSupport/Proofing Tools/NorwegianBokmaalThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119648,
+      "sha256": "491332d504942da849674f20b250d6c04eb20567361eb074964dcae51298e6ee"
+    },
+    "Contents/SharedSupport/Proofing Tools/NorwegianNynorskHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1333,
+      "sha256": "ab846645904808e5e2cd0f9bb9ea71100ea56eded914361037a31a6950303d5b"
+    },
+    "Contents/SharedSupport/Proofing Tools/NorwegianNynorskHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102992,
+      "sha256": "df18e8c0559ee3414826f4c8aba1adbb127905c86d0cf5dceabbfacebb84909b"
+    },
+    "Contents/SharedSupport/Proofing Tools/NorwegianNynorskSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1305,
+      "sha256": "0108d15f28dae796bcbc06b1762a22ae39cd1eb81f633fe46fce9ab1496f47e5"
+    },
+    "Contents/SharedSupport/Proofing Tools/NorwegianNynorskSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104720,
+      "sha256": "625de1a4d0b574a7ed93659a195e0fa1133c29f69eb5f73c05671ed856225e57"
+    },
+    "Contents/SharedSupport/Proofing Tools/NorwegianNynorskThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1326,
+      "sha256": "25166132d7a604130e56d7868076936ddd50ed711acf43e7e51bde61831285aa"
+    },
+    "Contents/SharedSupport/Proofing Tools/NorwegianNynorskThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119648,
+      "sha256": "5d9925840cf155a0f544458f5ae797d7b1ea36398fb7790cded21e0fef4d7963"
+    },
+    "Contents/SharedSupport/Proofing Tools/PolishGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1253,
+      "sha256": "82ded24325693aa29c6a541504ce86245c7ada6fa3375b883be21ffa013f6c83"
+    },
+    "Contents/SharedSupport/Proofing Tools/PolishGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126112,
+      "sha256": "4649cccc439e9035d134839985dcb6fefd129f56b4f4fabfca7195f42b34e2ab"
+    },
+    "Contents/SharedSupport/Proofing Tools/PolishHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1285,
+      "sha256": "256f22614c824ec112a1daed59eeaf5e66a4dc95033cd2d39f3c9598c382bdb7"
+    },
+    "Contents/SharedSupport/Proofing Tools/PolishHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102976,
+      "sha256": "1bc65764c68ca44c6f9e4d0e157abfaec1e54388991f41ee1f7099982872b1dc"
+    },
+    "Contents/SharedSupport/Proofing Tools/PolishSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1253,
+      "sha256": "f3337372700642c23040f52f50cbf54115640a335808e23917bd6105df9a1fb3"
+    },
+    "Contents/SharedSupport/Proofing Tools/PolishSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "ab3bfeafea06648addd2e545c80de901c58eba0b2938c7242bafc1c916bce7b8"
+    },
+    "Contents/SharedSupport/Proofing Tools/PolishThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1278,
+      "sha256": "ae159790795c653ea8934885d69c5e0ab63adef06a35e97b57d6d28f7ecf8e97"
+    },
+    "Contents/SharedSupport/Proofing Tools/PolishThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "b2fc92a6a7991bbb24c73ff26461169c710a99356700b7bb6f99813f609fe2f2"
+    },
+    "Contents/SharedSupport/Proofing Tools/RomanianSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1265,
+      "sha256": "ac63887a715a491cdfcbfb9a917103a60f656e5debaab9c994d8063bc3600d0c"
+    },
+    "Contents/SharedSupport/Proofing Tools/RomanianSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "e7f5e05eb5b5485762dd9aa68e6966975692b38c04763cad332277d85632530f"
+    },
+    "Contents/SharedSupport/Proofing Tools/RussianGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "a3b3a25893301e3280943b96c790eb1d3c4a84b8cf2461715477130a5c75eced"
+    },
+    "Contents/SharedSupport/Proofing Tools/RussianGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126128,
+      "sha256": "b90326bc8a51fb35c3e10106f8b58080c56d7ccb2481f9599fe25679993d1764"
+    },
+    "Contents/SharedSupport/Proofing Tools/RussianHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1289,
+      "sha256": "b8a3e85160a4d26db56d72a63a1a11a18ab25dff76780da92847149b6571c2e8"
+    },
+    "Contents/SharedSupport/Proofing Tools/RussianHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102976,
+      "sha256": "c74f09a85015e6bbfba07b8b22e46ac3a87cbc62feeabcc82907639e1066f951"
+    },
+    "Contents/SharedSupport/Proofing Tools/RussianSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "a43c9e4823d3022ef9d3eacc6447ba38600286c20b690b51a66ef51bc814ad70"
+    },
+    "Contents/SharedSupport/Proofing Tools/RussianSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "fb06bca9b731406a192123b6b99f9516b9e81c8c0f9d01bdf3bc7d389c3e5f76"
+    },
+    "Contents/SharedSupport/Proofing Tools/RussianThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1282,
+      "sha256": "1e7e474819ef9c162b721b76f7ef63497405b6670f540e3d1c415c5de02dafe5"
+    },
+    "Contents/SharedSupport/Proofing Tools/RussianThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "6116a90138a664eda210a3d04725b04f8a68fbcfdbdc3638201fccb12b95e365"
+    },
+    "Contents/SharedSupport/Proofing Tools/SerbianCyrillicSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1302,
+      "sha256": "af6d20162eae9b0522f0e77c46053ce2942c142166e949507c69ff51c0d0e21f"
+    },
+    "Contents/SharedSupport/Proofing Tools/SerbianCyrillicSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104720,
+      "sha256": "226c5e058e387b1717369cd889855c671e05e9c4baf3d617b19c076058266672"
+    },
+    "Contents/SharedSupport/Proofing Tools/SerbianLatinSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1289,
+      "sha256": "8d13f7fd2daf9b73a108a26cf9746ea3e4768ad8613113de62dcb296313114fa"
+    },
+    "Contents/SharedSupport/Proofing Tools/SerbianLatinSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "0ca4b60c41f68cc4f185128ee1e31796795253c973e215487e183343b3b48275"
+    },
+    "Contents/SharedSupport/Proofing Tools/SesothoSaLeboaSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1289,
+      "sha256": "300f3c3bb190f6274297401c7f2cda0d948383b7c5a28108aa907d98e2f81456"
+    },
+    "Contents/SharedSupport/Proofing Tools/SesothoSaLeboaSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "3f9d382c9e065cc32c5a461a2ffb710b085e6ca415c34605d91d30660dfbfebb"
+    },
+    "Contents/SharedSupport/Proofing Tools/SetswanaSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1265,
+      "sha256": "b6d6268b9e3c687e8eff3f634c1b6fa65045e06f9d5e48b3b4f75b157dba2ea8"
+    },
+    "Contents/SharedSupport/Proofing Tools/SetswanaSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "b17a15a22182ae3062ae95ab27f6c93b7919a895222927c0727e121bf667233f"
+    },
+    "Contents/SharedSupport/Proofing Tools/SlovakSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1253,
+      "sha256": "d51a23def887d87035e2cddecf460f3ae83a7b51fb1caa035be6de86191b7dd6"
+    },
+    "Contents/SharedSupport/Proofing Tools/SlovakSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "af60b148ab9cbba934dcef14506d3d8006da5c5bc5f24b036271dd4318ef1728"
+    },
+    "Contents/SharedSupport/Proofing Tools/SpanishGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1575,
+      "sha256": "a88fe7fe6cca3aeac2106ec53253ec45c71854fdea864979b5af7a880ca048cf"
+    },
+    "Contents/SharedSupport/Proofing Tools/SpanishGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126128,
+      "sha256": "a4f3aa30a521da18b1c354d3108fd216f6ec29de087ee6e6042bff843ab50a42"
+    },
+    "Contents/SharedSupport/Proofing Tools/SpanishHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1605,
+      "sha256": "1d975865c97b1d392731b554a8ab0133ebd1b0d644d245a4c750f1d294f4044e"
+    },
+    "Contents/SharedSupport/Proofing Tools/SpanishHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102976,
+      "sha256": "802584cdccbf690e586d6f157d7766b6636d55db950888f695736cb82742a658"
+    },
+    "Contents/SharedSupport/Proofing Tools/SpanishSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1575,
+      "sha256": "04bbd6ff8bb47fb86355fa747f46c38bfea42a1cf41b44284e8410b10d6e2872"
+    },
+    "Contents/SharedSupport/Proofing Tools/SpanishSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "2b5226743a9b54a9016f23f30754c7147549d9ed6f223f66573ae7d13c59eb3e"
+    },
+    "Contents/SharedSupport/Proofing Tools/SpanishThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1598,
+      "sha256": "24229779f3faed18e7173635eb942f1a9a944441f6b678a9d8e9dd537f77a237"
+    },
+    "Contents/SharedSupport/Proofing Tools/SpanishThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "e3a6a2e0d4e80ae6bf7eec132d7d27b8d675f1be8a7fbd22b3ca02e26acb67ec"
+    },
+    "Contents/SharedSupport/Proofing Tools/SwedishGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "a43bdfac1ff8f32bf7120238992af1af7e52cf207626ec671f4b98e71549c43c"
+    },
+    "Contents/SharedSupport/Proofing Tools/SwedishGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126128,
+      "sha256": "ab10379e41bab560b2d431cb1160b46ff3608a127c682dddd4149544210b37dc"
+    },
+    "Contents/SharedSupport/Proofing Tools/SwedishHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1289,
+      "sha256": "9b6a2aaf2598448496d7e5b8a1bcf7fba7ffe54675077a3abcfdf150086aaaa8"
+    },
+    "Contents/SharedSupport/Proofing Tools/SwedishHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102976,
+      "sha256": "39ad8960d1e9d0692fb92b94b33ce0d5ca1830b7b9ac73906663492e0c224c7c"
+    },
+    "Contents/SharedSupport/Proofing Tools/SwedishSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "950bec026eeacb0c223a683765b6c49586068f9d96e95fa0d377abc72e616d42"
+    },
+    "Contents/SharedSupport/Proofing Tools/SwedishSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "c6f7c60df7a9d7ed1c5d7bfda3ce2acd5f37d6480e2b84b8513a302ca990491c"
+    },
+    "Contents/SharedSupport/Proofing Tools/SwedishThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1282,
+      "sha256": "78d104f960a5eecf2d39681a1dfdf095bb3e865b2a318ef6e6f8f437ede3d078"
+    },
+    "Contents/SharedSupport/Proofing Tools/SwedishThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "0f0c09b42db88998ce79bf4428a01db6a414ddb113ebbb0c51323bc10e4c1149"
+    },
+    "Contents/SharedSupport/Proofing Tools/TamilSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1249,
+      "sha256": "e8c62d3397c57c06a553fc7cf47997d09fcb7cb6d7554c19989e86876b97a2c7"
+    },
+    "Contents/SharedSupport/Proofing Tools/TamilSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "50d3ee63e8124cbcf87d7013a3d730847fa4cda7f2355c3c34bd65ddcd146eb8"
+    },
+    "Contents/SharedSupport/Proofing Tools/ThaiSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1245,
+      "sha256": "873eb35d8a9ac30d247cdc8383238b7c73fc4f4ea32284566dc821dd640479c0"
+    },
+    "Contents/SharedSupport/Proofing Tools/ThaiSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104688,
+      "sha256": "64c2e3cb9e654bc3e9ba11afd64ed8868ee2ab56a63a128627cc3f2c8a60a7ec"
+    },
+    "Contents/SharedSupport/Proofing Tools/TurkishGrammar.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "e590094ca2d79d9465d6f215c3fdc2d9cf94b019869b4251e09d00c42ea7f64e"
+    },
+    "Contents/SharedSupport/Proofing Tools/TurkishGrammar.proofingtool/Contents/MacOS/Grammar": {
+      "bytes": 126128,
+      "sha256": "4ad3b793941e862620c8f07f481796cccc0ca02d3787bd41afd9986876b94653"
+    },
+    "Contents/SharedSupport/Proofing Tools/TurkishHyphenator.proofingtool/Contents/Info.plist": {
+      "bytes": 1289,
+      "sha256": "7fee2c36b832303bbe5eed01b7dc252afb9a660541498f3ad35a94e1b16e827f"
+    },
+    "Contents/SharedSupport/Proofing Tools/TurkishHyphenator.proofingtool/Contents/MacOS/GenericHyphenator": {
+      "bytes": 102976,
+      "sha256": "3cb9c307420cc8a76d8acb9427b78ee88cdd3399c87c95537e915039498c60c6"
+    },
+    "Contents/SharedSupport/Proofing Tools/TurkishSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1259,
+      "sha256": "bce9ed56b2d06c99085a1288a97eff3e19d3bcb499a98d52d34a5a4dd98563f3"
+    },
+    "Contents/SharedSupport/Proofing Tools/TurkishSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "6f0faaf6c92d1e965dd6299a3e8284a6b60f6fadcb1841fd8d318b2b2c0ca1bb"
+    },
+    "Contents/SharedSupport/Proofing Tools/TurkishThesaurus.proofingtool/Contents/Info.plist": {
+      "bytes": 1282,
+      "sha256": "9174241a48a12530ac28281bef0a1c5a53a9c827443d367d3580f1450142bdab"
+    },
+    "Contents/SharedSupport/Proofing Tools/TurkishThesaurus.proofingtool/Contents/MacOS/GenericThesaurus": {
+      "bytes": 119632,
+      "sha256": "bbbbadbf35d389faf1b5a60eefa16a4ecf2198573aaac1a56356f82811fca38d"
+    },
+    "Contents/SharedSupport/Proofing Tools/UkrainianSpeller.proofingtool/Contents/Info.plist": {
+      "bytes": 1269,
+      "sha256": "49913f4028556bc26cc630fc1d37b02833865537e5fa72a419cbeb2a2dde66ed"
+    },
+    "Contents/SharedSupport/Proofing Tools/UkrainianSpeller.proofingtool/Contents/MacOS/Speller": {
+      "bytes": 104704,
+      "sha256": "991de6fa24f6c430c33fa35dd723b86417a48a121d55fd0253b4ddb3e65f6ee3"
+    }
+  },
+  "surfaces": {
+    "app_intent:Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Resources/Metadata.appintents/extract.actionsdata:\"TimelineWidgetAppIntent\"": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/actions/TimelineWidgetAppIntent",
+          "source": "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Resources/Metadata.appintents/extract.actionsdata"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "app_intent",
+      "owner": "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Resources/Metadata.appintents/extract.actionsdata",
+      "value": {
+        "assistantDefinedSchemaTraits": [],
+        "assistantDefinedSchemas": [],
+        "authenticationPolicy": 0,
+        "availabilityAnnotations": {
+          "LNPlatformNameWildcard": {
+            "introducedVersion": "*"
+          }
+        },
+        "effectiveBundleIdentifiers": [],
+        "fullyQualifiedTypeName": "CalendarWidgetExtension.TimelineWidgetAppIntent",
+        "identifier": "TimelineWidgetAppIntent",
+        "isAuthPolExplicit": false,
+        "isDiscoverable": true,
+        "mangledTypeName": "23CalendarWidgetExtension08TimelineB9AppIntentV",
+        "mangledTypeNameByBundleIdentifier": {},
+        "mangledTypeNameByBundleIdentifierV2": {},
+        "mangledTypeNameV2": "23CalendarWidgetExtension08TimelineB9AppIntentV",
+        "openAppWhenRun": false,
+        "outputFlags": 0,
+        "parameters": [
+          {
+            "capabilities": 0,
+            "dynamicOptionsSupport": 0,
+            "inputConnectionBehavior": 0,
+            "isInput": false,
+            "isOptional": false,
+            "name": "direction",
+            "resolvableInputTypes": [
+              {
+                "kindValue": 0,
+                "valueType": {
+                  "primitive": {
+                    "wrapper": {
+                      "typeIdentifier": 7
+                    }
+                  }
+                }
+              },
+              {
+                "kindValue": 0,
+                "valueType": {
+                  "primitive": {
+                    "wrapper": {
+                      "typeIdentifier": 2
+                    }
+                  }
+                }
+              },
+              {
+                "kindValue": 0,
+                "valueType": {
+                  "primitive": {
+                    "wrapper": {
+                      "typeIdentifier": 0
+                    }
+                  }
+                }
+              }
+            ],
+            "title": {
+              "alternatives": [],
+              "key": "direction"
+            },
+            "typeSpecificMetadata": [],
+            "valueType": {
+              "primitive": {
+                "wrapper": {
+                  "typeIdentifier": 2
+                }
+              }
+            }
+          }
+        ],
+        "presentationStyle": 0,
+        "requiredCapabilities": [],
+        "supportedModes": 1,
+        "systemProtocolMetadata": [],
+        "systemProtocolMetadataV2": [],
+        "systemProtocols": [],
+        "title": {
+          "alternatives": [],
+          "key": "Timeline Widget App Intent"
+        },
+        "typeSpecificMetadata": [],
+        "visibilityMetadata": {
+          "assistantOnly": false,
+          "isDiscoverable": true
+        }
+      }
+    },
+    "app_intent:Contents/Resources/Metadata.appintents/extract.actionsdata:\"FocusFilterIntent\"": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/actions/FocusFilterIntent",
+          "source": "Contents/Resources/Metadata.appintents/extract.actionsdata"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "app_intent",
+      "owner": "Contents/Resources/Metadata.appintents/extract.actionsdata",
+      "value": {
+        "assistantDefinedSchemaTraits": [],
+        "assistantDefinedSchemas": [],
+        "authenticationPolicy": 0,
+        "availabilityAnnotations": {
+          "LNPlatformNameWildcard": {
+            "introducedVersion": "*"
+          }
+        },
+        "effectiveBundleIdentifiers": [],
+        "fullyQualifiedTypeName": "Microsoft_Outlook.FocusFilterIntent",
+        "identifier": "FocusFilterIntent",
+        "isAuthPolExplicit": false,
+        "isDiscoverable": true,
+        "mangledTypeName": "17Microsoft_Outlook17FocusFilterIntentV",
+        "mangledTypeNameByBundleIdentifier": {},
+        "mangledTypeNameByBundleIdentifierV2": {},
+        "mangledTypeNameV2": "17Microsoft_Outlook17FocusFilterIntentV",
+        "openAppWhenRun": false,
+        "outputFlags": 0,
+        "parameters": [
+          {
+            "capabilities": 0,
+            "dynamicOptionsSupport": 2,
+            "inputConnectionBehavior": 0,
+            "isInput": false,
+            "isOptional": true,
+            "name": "profile",
+            "resolvableInputTypes": [],
+            "title": {
+              "alternatives": [],
+              "key": "Profile"
+            },
+            "typeSpecificMetadata": [],
+            "valueType": {
+              "entity": {
+                "wrapper": {
+                  "typeName": "FocusFilterProfile"
+                }
+              }
+            }
+          }
+        ],
+        "presentationStyle": 0,
+        "requiredCapabilities": [],
+        "supportedModes": 1,
+        "systemProtocolMetadata": [
+          "com.apple.link.systemProtocol.FocusConfiguration",
+          {
+            "empty": {}
+          }
+        ],
+        "systemProtocolMetadataV2": [
+          "com.apple.link.systemProtocol.FocusConfiguration",
+          {
+            "empty": {}
+          }
+        ],
+        "systemProtocols": [
+          "com.apple.link.systemProtocol.FocusConfiguration"
+        ],
+        "title": {
+          "alternatives": [],
+          "key": "Set Profile"
+        },
+        "typeSpecificMetadata": [],
+        "visibilityMetadata": {
+          "assistantOnly": false,
+          "isDiscoverable": true
+        }
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Any application\", null, null, [\"????\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/41",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeName": "Any application",
+        "CFBundleTypeOSTypes": [
+          "????"
+        ],
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Alternate"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Any file\", null, null, [\"****\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/43",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeName": "Any file",
+        "CFBundleTypeOSTypes": [
+          "****"
+        ],
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Alternate"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"CDFV2 Microsoft Outlook Message\", [\"msg\"], [\"com.microsoft.outlook.msg\", \"dyn.ah62d4rv4ge80465h\"], null]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/16",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "msg"
+        ],
+        "CFBundleTypeIconFile": "M822.icns",
+        "CFBundleTypeName": "CDFV2 Microsoft Outlook Message",
+        "CFBundleTypeRole": "Editor",
+        "DocumentTypeSection": "Disabled",
+        "LSHandlerRank": "Default",
+        "LSItemContentTypes": [
+          "com.microsoft.outlook.msg",
+          "dyn.ah62d4rv4ge80465h"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Folder\", null, null, [\"fold\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/42",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeName": "Folder",
+        "CFBundleTypeOSTypes": [
+          "fold"
+        ],
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Default"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Excel 3.0 worksheet stationery\", [\"xls\"], [\"com.microsoft.excel.xls.stationery.biff3\"], [\"sLS3\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/4",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "xls"
+        ],
+        "CFBundleTypeIconFile": "sLS3.icns",
+        "CFBundleTypeName": "Microsoft Excel 3.0 worksheet stationery",
+        "CFBundleTypeOSTypes": [
+          "sLS3"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None",
+        "LSItemContentTypes": [
+          "com.microsoft.excel.xls.stationery.biff3"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Excel 4.0 worksheet stationery\", [\"xls\"], [\"com.microsoft.excel.xls.stationery.biff4\"], [\"sLS4\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/5",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "xls"
+        ],
+        "CFBundleTypeIconFile": "sLS4.icns",
+        "CFBundleTypeName": "Microsoft Excel 4.0 worksheet stationery",
+        "CFBundleTypeOSTypes": [
+          "sLS4"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None",
+        "LSItemContentTypes": [
+          "com.microsoft.excel.xls.stationery.biff4"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Excel Binary Workbook (.xlsb)\", [\"xlsb\"], [\"com.microsoft.excel.sheet.binary.macroenabled\"], [\"XLSB\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/6",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "xlsb"
+        ],
+        "CFBundleTypeIconFile": "XLSB.icns",
+        "CFBundleTypeName": "Microsoft Excel Binary Workbook (.xlsb)",
+        "CFBundleTypeOSTypes": [
+          "XLSB"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "com.microsoft.excel.sheet.binary.macroenabled"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Excel Macro-Enabled Workbook (.xlsm)\", [\"xlsm\"], [\"org.openxmlformats.spreadsheetml.sheet.macroenabled\", \"com.microsoft.excel.openxmlformats.spreadsheetml.sheet.macroenabled\"], [\"XLSM\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/7",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "xlsm"
+        ],
+        "CFBundleTypeIconFile": "XLSM.icns",
+        "CFBundleTypeName": "Microsoft Excel Macro-Enabled Workbook (.xlsm)",
+        "CFBundleTypeOSTypes": [
+          "XLSM"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "org.openxmlformats.spreadsheetml.sheet.macroenabled",
+          "com.microsoft.excel.openxmlformats.spreadsheetml.sheet.macroenabled"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Excel Template (.xltx)\", [\"xltx\"], [\"org.openxmlformats.spreadsheetml.template\", \"com.microsoft.excel.openxmlformats.spreadsheetml.template\"], [\"XLTX\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/10",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "xltx"
+        ],
+        "CFBundleTypeIconFile": "XLTX.icns",
+        "CFBundleTypeName": "Microsoft Excel Template (.xltx)",
+        "CFBundleTypeOSTypes": [
+          "XLTX"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "org.openxmlformats.spreadsheetml.template",
+          "com.microsoft.excel.openxmlformats.spreadsheetml.template"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Excel Workbook (.xlsx)\", [\"xlsx\"], [\"org.openxmlformats.spreadsheetml.sheet\", \"com.microsoft.excel.openxmlformats.spreadsheetml.sheet\"], [\"XLSX\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/8",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "xlsx"
+        ],
+        "CFBundleTypeIconFile": "XLSX.icns",
+        "CFBundleTypeName": "Microsoft Excel Workbook (.xlsx)",
+        "CFBundleTypeOSTypes": [
+          "XLSX"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "org.openxmlformats.spreadsheetml.sheet",
+          "com.microsoft.excel.openxmlformats.spreadsheetml.sheet"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Excel Workbook Template (.xlt)\", [\"xlt\"], [\"com.microsoft.excel.xlt\"], [\"sLS8\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/9",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "xlt"
+        ],
+        "CFBundleTypeIconFile": "XLT.icns",
+        "CFBundleTypeName": "Microsoft Excel Workbook Template (.xlt)",
+        "CFBundleTypeOSTypes": [
+          "sLS8"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "com.microsoft.excel.xlt"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook News Cache\", null, null, [\"Ncch\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/40",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeIconFile": "NewsCache.icns",
+        "CFBundleTypeName": "Microsoft Outlook News Cache",
+        "CFBundleTypeOSTypes": [
+          "Ncch"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook Template\", [\"oft\"], [\"com.microsoft.outlook.oft\"], null]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/17",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "oft"
+        ],
+        "CFBundleTypeIconFile": "template.icns",
+        "CFBundleTypeName": "Microsoft Outlook Template",
+        "CFBundleTypeRole": "Editor",
+        "DocumentTypeSection": "Disabled",
+        "LSHandlerRank": "Default",
+        "LSItemContentTypes": [
+          "com.microsoft.outlook.oft"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook archive file\", [\"rge\"], null, [\"Aarc\", \"rge \"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/24",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "rge"
+        ],
+        "CFBundleTypeIconFile": "Aarc.icns",
+        "CFBundleTypeName": "Microsoft Outlook archive file",
+        "CFBundleTypeOSTypes": [
+          "Aarc",
+          "rge "
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None",
+        "LSTypeIsPackage": "Yes"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook calendar event\", [\"ics\"], [\"com.apple.ical.ics\", \"com.microsoft.outlook15.icalendar\"], [\"iCal \"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/28",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "ics"
+        ],
+        "CFBundleTypeIconFile": "lcs.icns",
+        "CFBundleTypeMIMETypes": [
+          "text/calendar"
+        ],
+        "CFBundleTypeName": "Microsoft Outlook calendar event",
+        "CFBundleTypeOSTypes": [
+          "iCal "
+        ],
+        "CFBundleTypeRole": "Editor",
+        "DocumentTypeSection": "Disabled",
+        "LSHandlerRank": "Default",
+        "LSItemContentTypes": [
+          "com.apple.ical.ics",
+          "com.microsoft.outlook15.icalendar"
+        ],
+        "LSTypeIsPackage": false
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook calendar event\", [\"vcs\"], [\"com.apple.ical.vcs\"], [\"vCal \"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/29",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "vcs"
+        ],
+        "CFBundleTypeIconFile": "lcs.icns",
+        "CFBundleTypeMIMETypes": [
+          "text/x-vCalendar"
+        ],
+        "CFBundleTypeName": "Microsoft Outlook calendar event",
+        "CFBundleTypeOSTypes": [
+          "vCal "
+        ],
+        "CFBundleTypeRole": "Viewer",
+        "DocumentTypeSection": "Disabled",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "com.apple.ical.vcs"
+        ],
+        "LSTypeIsPackage": false
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook contact\", [\"vcf\"], [\"public.vcard\"], [\"vCrd\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/25",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "vcf"
+        ],
+        "CFBundleTypeIconFile": "vCrd.icns",
+        "CFBundleTypeName": "Microsoft Outlook contact",
+        "CFBundleTypeOSTypes": [
+          "vCrd"
+        ],
+        "CFBundleTypeRole": "Editor",
+        "DocumentTypeSection": "Disabled",
+        "LSHandlerRank": "Default",
+        "LSItemContentTypes": [
+          "public.vcard"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook database index\", null, null, [\"Indx\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/12",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeIconFile": "Nwrc.icns",
+        "CFBundleTypeName": "Microsoft Outlook database index",
+        "CFBundleTypeOSTypes": [
+          "Indx"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook database\", null, null, [\"Nwrc\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/11",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeIconFile": "Nwrc.icns",
+        "CFBundleTypeName": "Microsoft Outlook database",
+        "CFBundleTypeOSTypes": [
+          "Nwrc"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook database\", null, null, [\"OEDB\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/32",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeIconFile": "Nwrc.icns",
+        "CFBundleTypeName": "Microsoft Outlook database",
+        "CFBundleTypeOSTypes": [
+          "OEDB"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook document\", [\"olk15CalAttach\", \"olk15CalAttach\", \"olk15Category\"], null, [\"Nwrc\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/26",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "olk15CalAttach",
+          "olk15CalAttach",
+          "olk15Category"
+        ],
+        "CFBundleTypeIconFile": "Nwrc.icns",
+        "CFBundleTypeName": "Microsoft Outlook document",
+        "CFBundleTypeOSTypes": [
+          "Nwrc"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook document\", null, null, [\"CMap\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/23",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeIconFile": "CMap.icns",
+        "CFBundleTypeName": "Microsoft Outlook document",
+        "CFBundleTypeOSTypes": [
+          "CMap"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook document\", null, null, [\"OECl\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/31",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeIconFile": "Mail.icns",
+        "CFBundleTypeName": "Microsoft Outlook document",
+        "CFBundleTypeOSTypes": [
+          "OECl"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook document\", null, null, [\"PFrm\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/20",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeIconFile": "PrintFromFile.icns",
+        "CFBundleTypeName": "Microsoft Outlook document",
+        "CFBundleTypeOSTypes": [
+          "PFrm"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook list\", null, null, [\"List\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/21",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeIconFile": "MailingLists.icns",
+        "CFBundleTypeName": "Microsoft Outlook list",
+        "CFBundleTypeOSTypes": [
+          "List"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook mail message\", [\"eml\"], [\"com.microsoft.outlook15.email-message\", \"com.apple.mail.email\"], [\"M822\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/15",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "eml"
+        ],
+        "CFBundleTypeIconFile": "M822.icns",
+        "CFBundleTypeName": "Microsoft Outlook mail message",
+        "CFBundleTypeOSTypes": [
+          "M822"
+        ],
+        "CFBundleTypeRole": "Editor",
+        "DocumentTypeSection": "Disabled",
+        "LSHandlerRank": "Default",
+        "LSItemContentTypes": [
+          "com.microsoft.outlook15.email-message",
+          "com.apple.mail.email"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook mailbox\", [\"mbox\"], null, [\"MBOX\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/27",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "mbox"
+        ],
+        "CFBundleTypeIconFile": "Mail.icns",
+        "CFBundleTypeName": "Microsoft Outlook mailbox",
+        "CFBundleTypeOSTypes": [
+          "MBOX"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook preferences\", [\"olk15Pref\"], null, [\"pref\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/13",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "olk15Pref"
+        ],
+        "CFBundleTypeIconFile": "pref.icns",
+        "CFBundleTypeName": "Microsoft Outlook preferences",
+        "CFBundleTypeOSTypes": [
+          "pref"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook rule file\", null, null, [\"RULE\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/14",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeIconFile": "RULE.icns",
+        "CFBundleTypeName": "Microsoft Outlook rule file",
+        "CFBundleTypeOSTypes": [
+          "RULE"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook signatures\", [\"olk15Signature\"], null, [\"Sigs\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/19",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "olk15Signature"
+        ],
+        "CFBundleTypeIconFile": "Sigs.icns",
+        "CFBundleTypeName": "Microsoft Outlook signatures",
+        "CFBundleTypeOSTypes": [
+          "Sigs"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook sounds\", [\"eragesoundset\"], null, null]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/22",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "eragesoundset"
+        ],
+        "CFBundleTypeIconFile": "SndS.icns",
+        "CFBundleTypeName": "Microsoft Outlook sounds",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Default"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Outlook text document\", null, null, [\"TEXT\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/30",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeIconFile": "Mail.icns",
+        "CFBundleTypeName": "Microsoft Outlook text document",
+        "CFBundleTypeOSTypes": [
+          "TEXT"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "None"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft PowerPoint 97-2003 Presentation\", [\"ppt\"], [\"com.microsoft.powerpoint.ppt\"], [\"SLD8\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/2",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "ppt"
+        ],
+        "CFBundleTypeIconFile": "SLD8.icns",
+        "CFBundleTypeName": "Microsoft PowerPoint 97-2003 Presentation",
+        "CFBundleTypeOSTypes": [
+          "SLD8"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "com.microsoft.powerpoint.ppt"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft PowerPoint Presentation\", [\"pptx\"], [\"org.openxmlformats.presentationml.presentation\", \"com.microsoft.powerpoint.openxmlformats.presentationml.presentation\"], [\"PPTX\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/3",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "pptx"
+        ],
+        "CFBundleTypeIconFile": "PPTX.icns",
+        "CFBundleTypeName": "Microsoft PowerPoint Presentation",
+        "CFBundleTypeOSTypes": [
+          "PPTX"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "org.openxmlformats.presentationml.presentation",
+          "com.microsoft.powerpoint.openxmlformats.presentationml.presentation"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Word 97 - 2004 document (.doc)\", [\"doc\"], [\"com.microsoft.word.doc\"], [\"W8BN\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/0",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "doc"
+        ],
+        "CFBundleTypeIconFile": "W8BN.icns",
+        "CFBundleTypeName": "Microsoft Word 97 - 2004 document (.doc)",
+        "CFBundleTypeOSTypes": [
+          "W8BN"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "com.microsoft.word.doc"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Microsoft Word document (.docx)\", [\"docx\"], [\"org.openxmlformats.wordprocessingml.document\", \"com.microsoft.word.openxmlformats.wordprocessingml.document\"], [\"WXBN\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/1",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "docx"
+        ],
+        "CFBundleTypeIconFile": "WXBN.icns",
+        "CFBundleTypeName": "Microsoft Word document (.docx)",
+        "CFBundleTypeOSTypes": [
+          "WXBN"
+        ],
+        "CFBundleTypeRole": "None",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": [
+          "org.openxmlformats.wordprocessingml.document",
+          "com.microsoft.word.openxmlformats.wordprocessingml.document"
+        ]
+      }
+    },
+    "document_type:Contents/Info.plist:[\"Multipurpose Internet Mail Extensions (MIME) file\", [\"mime\", \"mme\"], null, null]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/18",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "mime",
+          "mme"
+        ],
+        "CFBundleTypeIconFile": "M822.icns",
+        "CFBundleTypeName": "Multipurpose Internet Mail Extensions (MIME) file",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Default"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"emltpl\", [\"emltpl\"], null, [\"vTPL\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/39",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "emltpl"
+        ],
+        "CFBundleTypeIconFile": "template.icns",
+        "CFBundleTypeName": "emltpl",
+        "CFBundleTypeOSTypes": [
+          "vTPL"
+        ],
+        "CFBundleTypeRole": "Editor",
+        "DocumentTypeSection": "Disabled",
+        "LSHandlerRank": "Default"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"olk15_contact\", [\"olk15Contact\"], null, [\"vCTC\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/37",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "olk15Contact"
+        ],
+        "CFBundleTypeIconFile": "vCrd.icns",
+        "CFBundleTypeName": "olk15_contact",
+        "CFBundleTypeOSTypes": [
+          "vCTC"
+        ],
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Default"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"olk15_event\", [\"olk15Event\"], null, [\"vCAL\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/34",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "olk15Event"
+        ],
+        "CFBundleTypeIconFile": "lcs.icns",
+        "CFBundleTypeName": "olk15_event",
+        "CFBundleTypeOSTypes": [
+          "vCAL"
+        ],
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Default"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"olk15_group\", [\"olk15Group\"], null, [\"vGRP\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/38",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "olk15Group"
+        ],
+        "CFBundleTypeIconFile": "CMap.icns",
+        "CFBundleTypeName": "olk15_group",
+        "CFBundleTypeOSTypes": [
+          "vGRP"
+        ],
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Default"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"olk15_message\", [\"olk15Message\"], null, [\"vMSG\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/33",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "olk15Message"
+        ],
+        "CFBundleTypeIconFile": "Mail.icns",
+        "CFBundleTypeName": "olk15_message",
+        "CFBundleTypeOSTypes": [
+          "vMSG"
+        ],
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Default"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"olk15_note\", [\"olk15Note\"], null, [\"vNTE\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/36",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "olk15Note"
+        ],
+        "CFBundleTypeIconFile": "lcs.icns",
+        "CFBundleTypeName": "olk15_note",
+        "CFBundleTypeOSTypes": [
+          "vNTE"
+        ],
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Default"
+      }
+    },
+    "document_type:Contents/Info.plist:[\"olk15_task\", [\"olk15Task\"], null, [\"vTSK\"]]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/35",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleTypeExtensions": [
+          "olk15Task"
+        ],
+        "CFBundleTypeIconFile": "lcs.icns",
+        "CFBundleTypeName": "olk15_task",
+        "CFBundleTypeOSTypes": [
+          "vTSK"
+        ],
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Default"
+      }
+    },
+    "document_type:Contents/Library/Spotlight/Microsoft Outlook Spotlight Importer.mdimporter/Contents/Info.plist:[null, null, [\"com.microsoft.outlook15.event\", \"com.microsoft.outlook15.contact\", \"com.microsoft.outlook15.message\", \"com.microsoft.outlook15.note\", \"com.microsoft.outlook15.task\"], null]": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleDocumentTypes/0",
+          "source": "Contents/Library/Spotlight/Microsoft Outlook Spotlight Importer.mdimporter/Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "document_type",
+      "owner": "Contents/Library/Spotlight/Microsoft Outlook Spotlight Importer.mdimporter/Contents/Info.plist",
+      "value": {
+        "CFBundleTypeRole": "MDImporter",
+        "LSItemContentTypes": [
+          "com.microsoft.outlook15.event",
+          "com.microsoft.outlook15.contact",
+          "com.microsoft.outlook15.message",
+          "com.microsoft.outlook15.note",
+          "com.microsoft.outlook15.task"
+        ]
+      }
+    },
+    "plugin:Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Info.plist:\"com.microsoft.Outlook.CalendarWidget\"": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "",
+          "source": "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "plugin",
+      "owner": "Contents/PlugIns/CalendarWidgetExtension.appex/Contents/Info.plist",
+      "value": {
+        "CFBundleIdentifier": "com.microsoft.Outlook.CalendarWidget",
+        "CFBundleVersion": "16.114.26101123",
+        "NSExtension": {
+          "NSExtensionPointIdentifier": "com.apple.widgetkit-extension"
+        }
+      }
+    },
+    "supported_intent:Contents/Info.plist:\"INSendMessageIntent\"": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/INIntentsSupported/1",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "supported_intent",
+      "owner": "Contents/Info.plist",
+      "value": "INSendMessageIntent"
+    },
+    "supported_intent:Contents/Info.plist:\"INShareFocusStatusIntent\"": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/INIntentsSupported/0",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "supported_intent",
+      "owner": "Contents/Info.plist",
+      "value": "INShareFocusStatusIntent"
+    },
+    "url_literal:bundle:[\"emails\", \"/message/open\"]": {
+      "claim": "literal grammar only; runtime acceptance unknown",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "length": 45,
+          "offset": 69566144,
+          "source": "Contents/Frameworks/WordMail.framework/Versions/A/WordMail"
+        },
+        {
+          "length": 45,
+          "offset": 156191872,
+          "source": "Contents/Frameworks/WordMail.framework/Versions/A/WordMail"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "url_literal",
+      "owner": "bundle",
+      "value": {
+        "host": "emails",
+        "path": "/message/open",
+        "query_keys": [
+          "immutableID"
+        ],
+        "scheme": "ms-outlook"
+      }
+    },
+    "url_scheme:Contents/Info.plist:\"com.googleusercontent.apps.445112211283-8hj5uor2tp387i59rq1caep2rr5lnkcj\"": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleURLTypes/2",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "url_scheme",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleURLName": "Google OAuth Redirect",
+        "CFBundleURLSchemes": [
+          "com.googleusercontent.apps.445112211283-8hj5uor2tp387i59rq1caep2rr5lnkcj"
+        ],
+        "scheme": "com.googleusercontent.apps.445112211283-8hj5uor2tp387i59rq1caep2rr5lnkcj"
+      }
+    },
+    "url_scheme:Contents/Info.plist:\"com.microsoft.office.outlook\"": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleURLTypes/1",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "url_scheme",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleURLName": "MacOutlook",
+        "CFBundleURLSchemes": [
+          "com.microsoft.office.outlook",
+          "ms-outlook"
+        ],
+        "scheme": "com.microsoft.office.outlook"
+      }
+    },
+    "url_scheme:Contents/Info.plist:\"mailto\"": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleURLTypes/0",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "url_scheme",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleURLName": "Email Address URL",
+        "CFBundleURLSchemes": [
+          "mailto"
+        ],
+        "scheme": "mailto"
+      }
+    },
+    "url_scheme:Contents/Info.plist:\"ms-outlook\"": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/CFBundleURLTypes/1",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "url_scheme",
+      "owner": "Contents/Info.plist",
+      "value": {
+        "CFBundleURLName": "MacOutlook",
+        "CFBundleURLSchemes": [
+          "com.microsoft.office.outlook",
+          "ms-outlook"
+        ],
+        "scheme": "ms-outlook"
+      }
+    },
+    "user_activity:Contents/Info.plist:\"INSendMessageIntent\"": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/NSUserActivityTypes/3",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "user_activity",
+      "owner": "Contents/Info.plist",
+      "value": "INSendMessageIntent"
+    },
+    "user_activity:Contents/Info.plist:\"INShareFocusStatusIntent\"": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/NSUserActivityTypes/2",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "user_activity",
+      "owner": "Contents/Info.plist",
+      "value": "INShareFocusStatusIntent"
+    },
+    "user_activity:Contents/Info.plist:\"com.microsoft.Office.Outlook.compose.mail\"": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/NSUserActivityTypes/0",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "user_activity",
+      "owner": "Contents/Info.plist",
+      "value": "com.microsoft.Office.Outlook.compose.mail"
+    },
+    "user_activity:Contents/Info.plist:\"com.microsoft.Office.Outlook.view.mail\"": {
+      "claim": "static declaration only",
+      "confidence": "proven",
+      "evidence": [
+        {
+          "pointer": "/NSUserActivityTypes/1",
+          "source": "Contents/Info.plist"
+        }
+      ],
+      "first_seen_version": "16.114.26101123",
+      "kind": "user_activity",
+      "owner": "Contents/Info.plist",
+      "value": "com.microsoft.Office.Outlook.view.mail"
+    }
+  }
+}

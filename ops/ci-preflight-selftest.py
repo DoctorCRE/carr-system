@@ -29,17 +29,20 @@ class PreflightTests(unittest.TestCase):
 
     def test_missing_or_duplicated_hosted_class_is_red(self):
         original = (ROOT / '.github/workflows/ci.yml').read_text()
+        canary = (ROOT / '.github/workflows/main-canary.yml').read_text()
         for replacement in ('pushfloor types', 'pushfloor unit unit types'):
             with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
                 (root / '.github/workflows').mkdir(parents=True)
                 (root / '.github/workflows/ci.yml').write_text(
                     original.replace('pushfloor unit types', replacement))
+                (root / '.github/workflows/main-canary.yml').write_text(canary)
                 mod = load('ci_membership', 'ci-selftest.py')
                 with patch.object(mod, 'REPO', root), contextlib.redirect_stdout(io.StringIO()):
                     mod.test_each_class_runs_in_exactly_one_hosted_group()
-                self.assertEqual(len(mod.RESULTS), 1)
+                self.assertEqual(len(mod.RESULTS), 2)
                 self.assertFalse(mod.RESULTS[0][1], mod.RESULTS)
+                self.assertTrue(mod.RESULTS[1][1], mod.RESULTS)
 
 if __name__ == "__main__":
     unittest.main()

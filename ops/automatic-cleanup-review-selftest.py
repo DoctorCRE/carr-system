@@ -138,6 +138,38 @@ class ReviewProbes(unittest.TestCase):
         self.assertTrue(all(json.loads(p.read_text())['status'] == 'intent'
                             for p in outside.rglob('manifest.json')))
 
+    def test_clone_evidence_timeout_preserves_uncertain_move_for_readback(self):
+        import subprocess
+        from unittest.mock import patch
+        for after_move in (False, True):
+            for failure in (TimeoutError('fixture deadline'), subprocess.TimeoutExpired('git', 1)):
+                with self.subTest(after_move=after_move, failure=type(failure).__name__):
+                    fixture = fixtures.Fixture()
+                    workspace = fixture.base / 'room-codex-timeout'
+                    clone = workspace / 'checkout'
+                    fixture.git('clone', str(fixture.remote), str(clone))
+                    fixture.git('switch', 'main', cwd=clone)
+                    original = machine_cleanup.git
+
+                    def timeout(path, *args, **kwargs):
+                        if (Path(path) != clone) == after_move:
+                            raise failure
+                        return original(path, *args, **kwargs)
+
+                    with patch.object(machine_cleanup, 'git', side_effect=timeout):
+                        row = machine_cleanup.clean_clone(workspace, {'status': 'completed',
+                            'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+                            'dispatched_at': '2020-01-01T00:00:00Z'}, provider=fixtures.FakeProvider(),
+                            process_probe=lambda paths: set(), now=time.time(), older_than=0, dry_run=False)
+                    self.assertNotIn('error', row, row)
+                    self.assertTrue(row['budget_exhausted'], row)
+                    self.assertEqual(row['status'], 'deferred' if after_move else 'kept', row)
+                    self.assertEqual(workspace.exists(), not after_move)
+                    if after_move:
+                        recovered = machine_cleanup.recover_clone(workspace)
+                        self.assertEqual(recovered['status'], 'staged', recovered)
+                        self.assertEqual((Path(recovered['staged_path']) / 'checkout/file').read_text(), 'initial\n')
+
     def test_budget_expiry_after_staging_swap_writes_no_effect_to_held_directory(self):
         from unittest.mock import patch
         fixture = fixtures.Fixture()

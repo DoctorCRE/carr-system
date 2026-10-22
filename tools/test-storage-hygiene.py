@@ -521,7 +521,9 @@ class TestFixtureCleanup(unittest.TestCase):
             report = storage_hygiene.cleanup_test_temps(root, now=time.time(), min_age=21600,
                 max_items=100, cursor='', process_probe=probe, deadline=lambda: False, dry_run=False)
             self.assertFalse(report['errors'], report)
-            self.assertEqual(report['kept'][0]['status'], 'verified_no_effect')
+            self.assertEqual(report['removed'][0]['status'], 'removed')
+            self.assertEqual(report['removed'][0]['allocated_bytes'], 0)
+            self.assertFalse(report['kept'])
 
     def test_vanished_nested_temp_file_is_success_and_later_fixture_stages(self):
         with tempfile.TemporaryDirectory() as directory:
