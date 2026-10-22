@@ -2603,7 +2603,7 @@ def publish_paged_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         offset += high
 
     preview = copy.deepcopy(snapshot)
-    omitted = {}
+    omitted: dict[str, int] = {}
     preview["pagination"] = {"schema": "carr-progress-board-pages.v1", "encoding": "json",
                              "digest": hashlib.sha256(content.encode()).hexdigest(),
                              "pages": pages, "omitted": omitted}
