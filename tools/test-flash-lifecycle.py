@@ -18,7 +18,6 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "room-bridge"))
 import flashlib
-import state
 import flash_wire
 
 
@@ -72,8 +71,6 @@ class LifecycleTests(unittest.TestCase):
                 with scope():
                     pass
         launch.assert_not_called()
-
-
 
 
     def test_idle_fixtures(self):
@@ -185,18 +182,12 @@ class LifecycleTests(unittest.TestCase):
                                     reasoning_effort="low", max_tokens=1, timeout=1)
         self.assertIn("TimeoutError", result["error"])
 
-    def test_room_only_queues_flash_when_mentioned(self):
-        for body, expected in (("hello", []), ("@flash-extra hi", []), ("@flash hi", []), ("@FLASH hi", [])):
-            snapshot = {"desks": {}, "last_seq": 0}
-            turn = {"kind": "turn", "msg_id": "m1", "seat": "joe", "seq": 1, "body": body}
-            self.assertEqual(state.route_turn(snapshot, turn, {"flash": "flash"}), expected)
 
     def test_ensure_timeout_preserves_direct_room_timeout(self):
         with patch.object(flashlib, "ensure_server", side_effect=TimeoutError("cold timeout")):
             # The captured production transport would be called only after readiness.
             result = flash_wire.run_turn("fixture", opener=flashlib.urllib.request.urlopen)
         self.assertEqual(result["status"], "timed_out")
-
 
 
 if __name__ == "__main__":

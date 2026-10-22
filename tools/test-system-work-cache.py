@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 import threading
@@ -11,12 +12,15 @@ from unittest.mock import patch
 from datetime import timedelta
 from datetime import datetime, timezone
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'ops'))
+from git_env import fixture_env
 spec=importlib.util.spec_from_file_location('cache',Path(__file__).with_name('system_work_cache.py'))
 assert spec is not None and spec.loader is not None
 cache=importlib.util.module_from_spec(spec);spec.loader.exec_module(cache)
 NOW=datetime(2026,10,1,tzinfo=timezone.utc)
 class CacheTests(unittest.TestCase):
  def setUp(self):
+  self.enterContext(patch.dict(os.environ, fixture_env(), clear=True))
   home=self.enterContext(tempfile.TemporaryDirectory())
   self.enterContext(patch.object(Path,'home',return_value=Path(home)))
  def read(self,args):

@@ -4,9 +4,34 @@ Code lives here. The CARR Record Layer owns business, brand, persona, deal
 context and doctrine. Query its verbs or `./run.sh retrieve "<question>"`
 before declaring anything absent.
 
-The 2026-08-19 cutoff retired the generated Drive .md files; there is no
-compiled-rules file or vault CLAUDE.md to fall back on. A session that cannot
-reach the store must say so rather than work from memory.
+## Always-on rules
+
+These twelve core cards are loaded natively with this file. No boot fetch is required.
+Before acting when a card applies, answer one line with applies yes/no and the action or reason.
+
+[K01] Assess when asked; finish when authorized: When Joe asks what you think, assess and stop. Once work is authorized, finish it and its necessary follow-ups without re-asking; backlog out-of-scope work with the product task it blocks.
+
+[K04] Verify before claiming: When you say something is done, fixed, or true, check the real artifact with a tool this session and current sources. Name anything unverified, skipped, or failed.
+
+[K03] Run it yourself before handing over: When you'd hand Joe a command or call work blocked, try it first: check permissions and wrappers, retry a classifier block once, try another route. Hand over only human-only sign-in, hardware taps, or human denials; file what stays blocked.
+
+[K05] Bound negative and capability claims: When you say something is missing or impossible, search every relevant collection (the full deployed verb list, not a cached one) or test it live there. Otherwise call it partial or unproven.
+
+[K02] Raise concerns and corrections plainly: When a partner's request, term, or model looks wrong or risky, or code disagrees with the agreed model, say what's off, why, the consequence, and a safer option. Don't soften; if reaffirmed, proceed. Save "I have a concern" for must-stop issues.
+
+[K06] Resolve source conflicts openly: When sources disagree, follow Joe's live direction, then the current store record, then the newer dated ruling, and say there was a conflict. Archives and backups are evidence, not authority.
+
+[K12] Capture durable corrections now: When a partner corrects or overrules you, or states a preference that would recur, propose it through teach this turn with the trade-off; proposals bind nobody yet. A how-to the same partner explains twice: quote both, offer a skill.
+
+[K08] End with one action or one decision: When ending a reply, do the doable steps yourself and leave at most one human action or decision, asked directly (approve or decline) in the question box. No closing menus or scripted replies.
+
+[K07] Make every item stand alone: When showing Joe a question, finding, draft, or review request, name the subject plainly, put IDs after the description, link files he should open, and explain automated findings from scratch.
+
+[K10] Write to the question: When writing to Joe, lead with the outcome in short plain prose sized to the question; tables or diagrams only for order, comparison, or flow. Keep evidence words exact; contrast only raised alternatives.
+
+[K09] Give runnable numbered steps: When giving a partner steps to run, number each, say all are required, one active-voice action per line under twenty words, ending with the check that proves it worked.
+
+[K11] Use observed clocks: When stating a date, time, age, or "today", take it from an observed timestamp or clock read and give it in Joe's timezone.
 
 Naming trap that cost a real search (2026-08-08): the app persona is
 **Dr. CRE** — "Doc" is only the spoken nickname. Search "Dr. CRE" or the
@@ -45,19 +70,12 @@ no credential (the receipted break-glass close stays a human's call) and it is
 not `call-verb` — never reach for that generic passthrough to get at a verb
 the classifier declined; that is working around a denial rather than filing it.
 
-## Build sessions: the four things that stalled the 2026-10-10 orchestrator
+## Build sessions: lessons from the 2026-10-10 orchestrator
 
 Measured from the Orchestrator.macbook transcript (37 hours, 11 compactions,
 224 Stop turns). Each item is the fix, not the story.
 
-1. **After a compaction, re-boot with the digest-only form.** The gate accepts it
-   on purpose and it costs ~200 characters a page instead of ~12,000:
-   `./run.sh call standing-context '{"detail":"boot","page":N}' | jq -c '{ok: .ok, rule_boot: {digest: .rule_boot.digest}}'`
-   (exactly those two fields; an extra field is not accepted). Reading all 15
-   pages in full after every compaction was 23% of that session's context and
-   the main reason it compacted every one to three hours. Rules still reach the
-   action point through the per-call route hook.
-2. **Dispatch (`tools/room-bridge/dispatch.py send`)**: launch with the Bash tool's
+1. **Dispatch (`tools/room-bridge/dispatch.py send`)**: launch with the Bash tool's
    `run_in_background`, never `nohup … &!`, `( … &)` or `perl -e 'alarm'` (exit
    142). There are no shared-file claims and no `reconcile` subcommand (#1811):
    a writing job holds only its checkout's `room-writer.lock`, which the next
@@ -66,9 +84,9 @@ Measured from the Orchestrator.macbook transcript (37 hours, 11 compactions,
    its process group (pgid in `<gitdir>/room-writer.lock`) is still alive: kill
    that group if it is. `--checkout` jobs each get a fresh clone, so they never
    block one another.
-3. **The progress board is one per checkout**, resolved from the main working
+2. **The progress board is one per checkout**, resolved from the main working
    tree; a worktree no longer needs its own `init`.
-4. **A Stop gate that holds the turn open is answered with the delta only**, and
+3. **A Stop gate that holds the turn open is answered with the delta only**, and
    if the gate misread a compaction summary or a request for instructions as an
    order, that is the gate's defect: fix the gate, do not reword the reply.
 
@@ -106,7 +124,7 @@ Read and follow [the required PR policy](AGENTS.md#before-every-pr-design-and-de
 
 ## Agent skills
 
-Use `tools/mq.sh` for serial merges, `tools/open-prs.sh` for open PRs across jbookout repos, and `tools/room-bridge/briefs/{builder,staging-score}.md` for dispatch briefs.
+Use `tools/approve-merge.sh <owner/repo> <pr> <approved_sha>` for GitHub native auto-merge, `tools/open-prs.sh` for open PRs across jbookout repos, and `tools/room-bridge/briefs/{builder,staging-score}.md` for dispatch briefs.
 
 ### Issue tracker
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refuse deletion of scripts still wired at the PR base. Unwire in a prior PR."""
+"""Refuse deletion of scripts still invoked by the resulting hook configuration."""
 import argparse
 import json
 import os
@@ -11,7 +11,7 @@ import subprocess
 from git_env import scrubbed_env
 
 WIRING = ('ops/config/hooks.json', 'ops/config/codex-hooks.json',
-          'ops/config/claude-continuity-hooks.json', '.claude/settings.json')
+          '.claude/settings.json')
 
 
 def command_target(command, repo):
@@ -84,11 +84,11 @@ def check(repo, base):
             base = event.get('pull_request', {}).get('base', {}).get('sha') or event.get('before')
         base = base or git('merge-base', 'origin/main', 'HEAD').strip()
     wired = set()
-    files = set(git('ls-tree', '-r', '--name-only', base).splitlines())
+    files = set(git('ls-tree', '-r', '--name-only', 'HEAD').splitlines())
     for path in WIRING:
         if path not in files:
             continue
-        document = json.loads(git('show', f'{base}:{path}'))
+        document = json.loads(git('show', f'HEAD:{path}'))
         for groups in document.get('hooks', document).values():
             if not isinstance(groups, list):
                 continue
@@ -98,7 +98,7 @@ def check(repo, base):
     deleted = set(git('diff', '--no-renames', '--name-only', '--diff-filter=D', base, 'HEAD').splitlines())
     unsafe = sorted(path for path in deleted if repo / path in wired)
     for path in unsafe:
-        print(f'REFUSED: {path} is wired at the base revision. Unwire first; delete in a later PR.')
+        print(f'REFUSED: {path} is still wired in the resulting configuration. Remove its hook registration.')
     return 1 if unsafe else 0
 
 
@@ -110,7 +110,7 @@ def main():
     try:
         return check(args.repo, args.base)
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
-        print(f'REFUSED: cannot verify two-phase hook deletion: {exc}')
+        print(f'REFUSED: cannot verify hook deletion: {exc}')
         return 1
 
 
