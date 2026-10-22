@@ -116,23 +116,6 @@ class FlashPolicyTests(unittest.TestCase):
             dispatch.desk_start('flash', registry=registry, state_dir=self.directory, sock_dir=self.directory)
         self.process.assert_not_called()
 
-    def test_room_probe_and_turns_never_auto_assign_flash(self):
-        import bridge
-        import state
-        self.assertFalse(bridge.probe_live({'kind': 'flash-local'}))
-        self.assertFalse(bridge.probe_live({'kind': 'claude-session', 'room_seat': 'flash'}))
-        turn = {'kind': 'turn', 'msg_id': 'm1', 'seat': 'joe', 'seq': 1, 'body': '@flash hi'}
-        self.assertEqual(state.route_turn({'desks': {}, 'last_seq': 0}, turn, {'flash': 'flash'}), [])
-
-    def test_auto_routes_and_kanban_targets_exclude_flash(self):
-        import kanban_adapter
-        policy = json.loads((ROOT / 'ops/config/model-routes.v1.json').read_text())
-        for route in ('code', 'script', 'direct'):
-            self.assertNotEqual(policy['routes'][route]['model'], 'flash')
-            self.assertNotIn(policy['queue_targets'][route], ('flash', 'flash-model'))
-        catalog = kanban_adapter.load_catalog()
-        self.assertFalse(catalog['targets']['flash']['enabled'])
-        self.assertFalse(kanban_adapter._flash_is_up())
 
     def test_install_converges_drifted_plists_and_stops_both_labels(self):
         import plistlib

@@ -60,8 +60,8 @@ POSTURES = ("record-layer",)
 RECORD_LAYER_KINDS = ("hermes-nous", "grok-cli", "flash-local", "codex-session", "claude-desktop")
 
 DESK_INSTRUCTION = (
-    "Model Room desk instruction: If you need approvals, permissions, or decisions, "
-    "send them to the orchestrator session via send_message in one message, then "
+    "Desk instruction: If you need approvals, permissions, or decisions, "
+    "write questions to ~/carr-system/out/orchestrator-inbox.md, then "
     "end the turn. Never ask Joe."
 )
 

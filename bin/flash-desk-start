@@ -13,5 +13,3 @@ cd "$HOME/flash-desk"
 PYTHON="$REPO/.venv/bin/python"
 [[ -x "$PYTHON" ]] || PYTHON=python3
 "$PYTHON" "$REPO/tools/room-bridge/dispatch.py" start flash
-exec "$PYTHON" "$REPO/tools/room-bridge/desk_cli.py" register flash \
-  --kind claude-session --socket /tmp/cc-socks/flash.sock --seat flash --room-listen mention

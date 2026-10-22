@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Backend-only Claude background-session and Desktop handoff wire.
 
-The Model Room bridge does not drive the Claude Desktop UI.  It starts a
+The desk starts a
 durable Claude Code background session with a caller-supplied UUID, observes
 that session through ``claude agents --json --all``, reads the completed
 assistant result from Claude Code's own persisted transcript, and finally
@@ -9,9 +9,8 @@ uses Claude Code's supported ``/desktop`` command from an attached PTY.  The
 PTY is load-bearing: slash commands are interactive client commands, not
 prompts that should be sent to a model with ``-p``.
 
-No poll creates a session.  ``launch_background`` is called only after Hermes
-has atomically claimed an explicitly addressed queue card; later poll cycles
-only inspect the UUID already persisted in room-bridge state.
+Dispatch launches the background session after the work queue claims a job.
+The queue retains the reservation until a completion receipt is recorded.
 """
 
 from __future__ import annotations

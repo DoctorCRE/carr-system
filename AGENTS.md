@@ -95,18 +95,18 @@ behavior, and CARR records. Do not ask for a separate Jev-specific approval or
 exclude a review merely because its category is not prelisted. Preserve source
 evidence, required checks, and any distinct reviewer-of-record requirement.
 
-## Model Room before another model
+## Dispatch before another model
 
 <!-- carr-model-room-route:start -->
-Decision `284028a5-8295-498a-af1e-6cae5c6034e7` records Joe's route:
-call Claude, Grok, and other external models through the Model Room. Before
-attempting a direct model CLI or API call, pull this rule into the preflight
-judgment with Jev and route the work to the named Model Room desk. Verify the
-desk's actual model and result. Choose every subagent by the cheapest tier
-still qualified to do the task correctly, name it on the call, and never
-silently delegate a portion to another model (Joe, 2026-09-23: the earlier
-Opus-always line was a temporary usage-window instruction, now retired). A model
-CLI used solely for authentication or health readback is not a model-work call.
+Decision `284028a5-8295-498a-af1e-6cae5c6034e7` records the external-model
+routing policy. Launch Claude, Grok, and other external model work through
+`tools/room-bridge/dispatch.py send`. The former Model Room conversation
+transport is removed. Desk jobs and their results use the dispatch queue.
+Choose the cheapest tier still qualified to do the task correctly, name it
+on the call, and verify the desk's actual model and result. Never silently
+delegate to another model. The Opus-always line was a temporary usage-window
+instruction, now retired. A model CLI used solely for authentication or health
+readback is not a model-work call.
 Set `model:` in each agent definition and name the executor in every task brief.
 <!-- carr-model-room-route:end -->
 
