@@ -137,6 +137,13 @@ class FakeDB {
   }
   async query(text, params = []) {
     const sql = text.replace(/\s+/g, " ").trim();
+    if (sql.includes("dealroom:field-lock")) return { rows: [] };
+    if (sql === "select next_date::text as next_date from deal where id=$1")
+      return { rows: [{ next_date: this.nextDate ?? null }] };
+    if (sql.includes("dealroom:set-next-date")) {
+      this.nextDate = params[1];
+      return { rows: [] };
+    }
     if (sql.includes("from v_today_triage")) return { rows: this.inserted ? [{
       item_kind: "next_action", owner: this.inserted.owner_id === IDS.joe ? "joe" : "dell",
       what: this.inserted.description, created_by: this.inserted.created_by,

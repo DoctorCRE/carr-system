@@ -73,6 +73,26 @@
   ],
   "services": [
     {
+      "key": "outlook-triage",
+      "name": "Evening Outlook Inbox triage",
+      "purpose": "Each evening between 19:15 and 21:00, once Joe has been away from the Mac for 10 minutes, restarts the Outlook desktop app into an ordinary window and files already-read Inbox email into Outlook folders by deterministic rules (CARR deal match, A.List vendor, private sender table). Code only: no agent and no model. Unread email is never selected and must still be unread at the end.",
+      "family": "Local Mac edge",
+      "criticality": "medium",
+      "owner_actor": "joe",
+      "repo_path": "lib/outlook_triage.py",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.outlook-triage.plist",
+          "runs_on": "secondary",
+          "expected_cadence_seconds": 86400,
+          "cadence_grace_seconds": 14400,
+          "notes": "Runs on the Mac that holds Joe's Outlook session, today the MacBook (role secondary). Fires every 15 minutes from 19:15 to 21:00 and runs at most once a day: a fire while Joe is active or a draft is open records skipped, and the 21:00 fire settles the day even when skipped, so every day leaves a row by about 21:00 (a success at 19:15 followed by one at 21:00 plus run time the next day is the widest gap, about 27.5 hours). Run rows come from bin/run-scheduled.sh with no names; the moves report stays private in out/outlook-triage/. Installed by bin/install-outlook-triage.sh."
+        }
+      ]
+    },
+    {
       "key": "disk-reaper",
       "name": "Retained disk cleanup",
       "purpose": "Every two hours, remove eligible retained worktrees, released dispatch checkouts, scratch and artifacts after location, Git, PR, ownership and native process safety checks.",

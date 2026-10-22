@@ -25,23 +25,42 @@ def workflow(filename="ci.yml"):
         str(ROOT / '.github/workflows' / filename)], cwd=ROOT / 'mcp-server', text=True))
 
 
-def expression(value, github):
+def expression(value, github, cancelled=False):
     # Evaluate the workflow's actual expression with GitHub's missing-property
     # semantics; no reimplementation of the intended event predicate.
     source = '''const get=(o,p)=>p.split('.').reduce((v,k)=>v&&v[k],o)||'';
-    const github=JSON.parse(process.argv[1]);const always=()=>true;const fromJSON=JSON.parse;
+    const github=JSON.parse(process.argv[1]);const always=()=>true;const cancelled=()=>JSON.parse(process.argv[3]);const fromJSON=JSON.parse;
+    const needs={scope:{outputs:{full:'true'}}};
     const e=process.argv[2].replace(/github(?:\\.[a-zA-Z_]+)+/g,p=>JSON.stringify(get({github},p)));
     console.log(JSON.stringify(eval(e)));'''
     import re
     def evaluate(match):
         return json.loads(subprocess.check_output(['node', '-e', source,
-            json.dumps(github), match.group(1)], text=True))
+            json.dumps(github), match.group(1), json.dumps(cancelled)], text=True))
     if value.startswith('${{') and value.endswith('}}') and value.count('${{') == 1:
         return evaluate(re.fullmatch(r'\$\{\{(.*?)\}\}', value))
     return re.sub(r'\$\{\{(.*?)\}\}', lambda m: str(evaluate(m)), value)
 
 
 class Controls(unittest.TestCase):
+    def test_node_install_reuses_downloads_without_duplicating_dependency_audit(self):
+        wf = workflow()
+        setup = next(step for step in wf['jobs']['classes']['steps']
+                     if 'actions/setup-node@' in step.get('uses', ''))
+        self.assertEqual(setup['with'].get('cache'), 'npm')
+        self.assertEqual(setup['with'].get('cache-dependency-path', '').split(),
+                         ['mcp-server/package-lock.json', 'practice-plugin/package-lock.json'])
+        install = next(step for step in wf['jobs']['classes']['steps']
+                       if step.get('name') == 'Install Node dependencies')
+        commands = install['run'].splitlines()
+        self.assertEqual(commands, ['npm --prefix mcp-server ci --no-audit',
+                                    'npm --prefix practice-plugin ci --no-audit'])
+        self.assertIn('dependency', wf['jobs']['classes']['strategy']['matrix']['classes'])
+        # The strict class, rather than install's informational audit, retains
+        # the existing vulnerability policy and fails on unavailable reports.
+        self.assertIn('["npm", "audit", "--omit=dev", "--audit-level=high", "--json"]',
+                      (ROOT / 'ops/ci-dep-check.py').read_text())
+
     def test_events(self):
         wf = workflow()
         def event(action, sha='a', base='main', run=1):
@@ -68,6 +87,9 @@ class Controls(unittest.TestCase):
         events = {'opened', 'synchronize', 'reopened', 'ready_for_review', 'converted_to_draft'}
         for filename in ('ci.yml', 'db-acceptance.yml', 'doc-drift.yml'):
             wf = workflow(filename)
+            if filename == 'db-acceptance.yml':
+                self.assertEqual(set(wf['on']), {'workflow_dispatch'})
+                continue
             self.assertEqual(set(wf['on']['pull_request']['types']), events)
             previous = None
             for action in events:
@@ -83,8 +105,13 @@ class Controls(unittest.TestCase):
                 if filename == 'ci.yml':
                     matrix = wf['jobs']['classes']['strategy']['matrix']
                     excluded = expression(matrix['exclude'], e)
-                    groups = [g for g in matrix['classes'] if {'classes': g} not in excluded]
-                    self.assertEqual(excluded, [{'classes': 'gates'}, {'classes': 'migration'}] if draft else [])
+                    actual = [(group, shard) for group in matrix['classes'] for shard in matrix['gate_shard']
+                              if not any(all({'classes': group, 'gate_shard': shard}.get(k) == v
+                                             for k, v in row.items()) for row in excluded)]
+                    expected = [(group, shard) for group in matrix['classes']
+                                if not draft or group not in ('gates', 'migration')
+                                for shard in ([1, 2] if group == 'gates' else [1])]
+                    self.assertEqual(actual, expected)
                     self.assertTrue(expression(wf['jobs']['checks']['if'], e))
                     self.assertEqual(load('ci-evidence').class_groups(), matrix['classes'])
                 elif filename == 'db-acceptance.yml':
@@ -97,17 +124,28 @@ class Controls(unittest.TestCase):
                 self.assertNotEqual(group, expression(wf['concurrency']['group'], {**e, 'run_id': 11}))
                 self.assertFalse(expression(wf['concurrency']['cancel-in-progress'], e))
                 if filename == 'ci.yml':
-                    self.assertEqual(expression(wf['jobs']['classes']['strategy']['matrix']['exclude'], e), [])
+                    exclusions = expression(wf['jobs']['classes']['strategy']['matrix']['exclude'], e)
+                    self.assertTrue(all(row.get('gate_shard') == 2 and row['classes'] != 'gates' for row in exclusions))
                     self.assertTrue(expression(wf['jobs']['checks']['if'], e))
                 elif filename == 'db-acceptance.yml':
                     self.assertTrue(expression(wf['jobs']['acceptance']['if'], e))
+
+    def test_superseded_expensive_jobs_can_cancel(self):
+        wf = workflow()
+        event = {'event_name': 'pull_request', 'event': {'pull_request': {'draft': False}}}
+        for job in ('classes', 'migration-fixtures'):
+            with self.subTest(job=job):
+                condition = wf['jobs'][job]['if']
+                self.assertTrue(expression(condition, event, cancelled=False))
+                self.assertFalse(expression(condition, event, cancelled=True))
+        self.assertTrue(expression(wf['jobs']['checks']['if'], event, cancelled=True))
 
     def test_required_context_reports_even_after_a_failed_class(self):
         wf = workflow()
         self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
         self.assertIn('always()', wf['jobs']['checks']['if'])
-        self.assertNotIn('if', wf['jobs']['classes'])
-        self.assertEqual(wf['jobs']['checks']['needs'], 'classes')
+        self.assertEqual(wf['jobs']['classes']['if'], '${{ !cancelled() }}')
+        self.assertEqual(set(wf['jobs']['checks']['needs']), {'scope', 'classes', 'migration-fixtures'})
         steps = wf['jobs']['checks']['steps']
         verdict = next(step for step in steps if step.get('name') == 'Fail unless every class group succeeded')
         self.assertIn('python3 ops/ci-evidence.py verdict', verdict['run'])
@@ -403,7 +441,7 @@ class Controls(unittest.TestCase):
         for shaped_run, shaped_job in (
                 (run, {**job, 'name':'other'}),
                 (run, {**job, 'name':'test'}),
-                ({**run, 'name':'CI', 'path':'.github/workflows/ci.yml'}, {**job, 'name':'test'}),
+                ({**run, 'name':'CI', 'path':'.github/workflows/ci.yml'}, {**job, 'name':'preview'}),
                 ({**run, 'name':'CI', 'path':'.github/workflows/ci.yml'}, {**job, 'name':'ops/ci.sh --strict --only gates'}),
                 ({**run, 'path':'.github/workflows/other.yml'}, job)):
             with self.subTest(run=shaped_run['path'], job=shaped_job['name']), self.assertRaises(mod.Refusal):
@@ -436,6 +474,22 @@ class Controls(unittest.TestCase):
         remote.snapshot.return_value = (run, job, pr)
         mod.rerun(remote, 123, 456, None, policy, lambda g: mod.hosted_checks(remote, g), dispatch)
         dispatch.assert_called_once_with(123, 456, 1, head)
+
+    def test_rerun_app_ci_test_job(self):
+        mod = load('ci-rerun')
+        repo, head = 'jbookout/doctorcre-app', 'b'*40
+        run = {'id':123, 'name':'CI', 'path':'.github/workflows/ci.yml', 'event':'pull_request',
+               'status':'completed', 'conclusion':'failure', 'head_sha':head, 'run_attempt':1}
+        job = {'id':456, 'run_id':123, 'name':'test', 'status':'completed', 'conclusion':'failure'}
+        pr = {'state':'open', 'head':{'sha':head}}
+        self.assertEqual(mod.admit(run, job, pr, head, repo), {'head':head, 'job':'test'})
+        for shaped_run, shaped_job, shaped_repo in (
+                (run, {**job, 'name':'preview'}, repo),
+                ({**run, 'path':'.github/workflows/other.yml'}, job, repo),
+                (run, job, 'jbookout/software-factory')):
+            with self.subTest(run=shaped_run['path'], job=shaped_job['name'], repo=shaped_repo), \
+                    self.assertRaises(mod.Refusal):
+                mod.admit(shaped_run, shaped_job, pr, head, shaped_repo)
 
     def test_rerun_unknown_repository_refused_before_validation(self):
         mod = load('ci-rerun')
