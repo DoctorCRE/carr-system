@@ -1232,7 +1232,7 @@ class ScheduledCleanupTests(unittest.TestCase):
                 self.assertEqual(candidate.exists(), not moved)
                 self.assertEqual((actual / 'payload').read_text(), 'keep complete staged bytes')
 
-    def test_recovery_git_failure_keeps_evidence_and_pending_receipt(self):
+    def test_unmoved_broken_clone_recovery_clears_pending_and_continues(self):
         import machine_cleanup as cleanup
         fixture = fixtures.Fixture()
         workspace = fixture.base / 'room-codex-recovery'
@@ -1251,14 +1251,10 @@ class ScheduledCleanupTests(unittest.TestCase):
             tmp_root=fixture.base, dispatch_path=fixture.base / 'absent', roots={},
             provider=fixtures.FakeProvider(), process_probe=lambda paths: set(),
             archive_thread=lambda *a, **k: None)
-        self.assertEqual(report['status'], 'failed', report)
-        self.assertEqual(report['pending'], pending)
-        error, = report['errors']
-        self.assertEqual(error['returncode'], 128)
-        self.assertEqual(error['command'], ['git', '-C', str(workspace / 'checkout'),
-            'rev-parse', 'HEAD'])
-        self.assertIn('not a git repository', error['stderr_tail'])
-        self.assertEqual(json.loads((target / 'manifest.json').read_text()), manifest)
+        self.assertEqual(report['status'], 'completed', report)
+        self.assertNotIn('pending', report)
+        self.assertFalse(report['errors'], report)
+        self.assertEqual(json.loads((target / 'manifest.json').read_text())['status'], 'verified_no_effect')
         self.assertEqual(json.loads(receipt.read_text()), report)
 
     def test_slow_clone_recovery_preserves_pending_for_retry(self):

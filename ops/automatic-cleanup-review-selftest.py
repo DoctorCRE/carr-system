@@ -20,6 +20,40 @@ spec.loader.exec_module(fixtures)
 
 
 class ReviewProbes(unittest.TestCase):
+    def test_manifest_only_recent_fixture_intent_recovers_without_git(self):
+        from unittest.mock import patch
+        import job_watchdog
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            candidate = root / 'branch-janitor-fixture-5oo1tss1'
+            candidate.mkdir()
+            (candidate / '.git').write_text('gitdir: missing-repository')
+            target = root / '_to_delete' / (candidate.name + '-a560f0b3')
+            target.mkdir(parents=True)
+            info = candidate.stat()
+            pending = dict(kind='test_temp', status='intent', reason='recent fixture',
+                path=str(candidate), staged_path=str(target / 'fixture'),
+                manifest_path=str(target / 'manifest.json'), identity=[info.st_dev, info.st_ino],
+                activity='unused-before-move', allocated_bytes=0)
+            (target / 'manifest.json').write_text(json.dumps(pending))
+            receipt = root / 'out/machine-cleanup.json'
+            receipt.parent.mkdir()
+            receipt.write_text(json.dumps(dict(at=0, pending=pending)))
+            later = root / 'carr-ci-test-later'
+            later.mkdir()
+            os.utime(later, (0, 0))
+            with patch('subprocess.run', side_effect=AssertionError('fixture recovery must not use git')):
+                report = machine_cleanup.run(root, job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json'),
+                    hook=None, tmp_root=root, user_tmp_root=root, roots={},
+                    dispatch_path=root / 'absent', provider=object(), process_probe=lambda paths: set(),
+                    archive_thread=lambda *a, **k: None)
+            self.assertNotIn('pending', report)
+            self.assertEqual(report['status'], 'completed', report)
+            self.assertTrue(candidate.exists())
+            self.assertFalse((target / 'fixture').exists())
+            self.assertEqual(json.loads((target / 'manifest.json').read_text())['status'], 'verified_no_effect')
+            self.assertTrue(any(row['path'] == str(later) for row in report['removed']))
+
     def test_interrupted_temp_effect_is_reconciled_in_next_receipt(self):
         from unittest.mock import patch
         import job_watchdog
