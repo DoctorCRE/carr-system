@@ -83,7 +83,7 @@ class StagingSessionTests(unittest.TestCase):
                 with self.assertRaises(MODULE.StagingRefusal):
                     MODULE.main(arguments)
 
-    def test_app_candidate_uses_standard_publisher_after_credential_free_artifact_build(self):
+    def test_app_candidate_builds_and_publishes_without_reading_a_session_secret(self):
         app_sha = "b" * 40
         app_repo = Path("/synthetic/doctorcre-app")
         calls = []
@@ -94,9 +94,9 @@ class StagingSessionTests(unittest.TestCase):
 
         with patch.object(MODULE, "source_identity", side_effect=[SHA, app_sha]), \
                 patch.object(MODULE, "checked_run", side_effect=run), \
-                patch.object(MODULE, "load_secret", return_value=SECRET), \
+                patch.object(Path, "lstat", side_effect=AssertionError("deploy must not inspect a session secret file")), \
                 patch.object(MODULE, "load_carr_tokens", return_value={"CLOUDFLARE_API_TOKEN": TOKEN}), \
-                patch.object(MODULE, "provision_and_deploy"), patch.object(MODULE, "smoke"), \
+                patch.object(MODULE, "deploy_candidate"), patch.object(MODULE, "smoke"), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(MODULE.main(["--apply", "--source-sha", SHA,
                                          "--app-repo", str(app_repo), "--app-sha", app_sha]), 0)
@@ -131,80 +131,32 @@ class StagingSessionTests(unittest.TestCase):
         self.assertNotIn("DATABASE_URL_WRITER", child_env)
         output = io.StringIO()
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(output):
-            MODULE.provision_and_deploy(fake_checkout(Path(directory) / "repo"), SHA, SECRET, child_env, run=run)
+            MODULE.deploy_candidate(fake_checkout(Path(directory) / "repo"), SHA, child_env, run=run)
         self.assertNotIn(TOKEN, output.getvalue())
         self.assertNotIn(SECRET, output.getvalue())
         wrangler = [call for call in calls if "wrangler" in Path(call[0][0]).name]
-        self.assertEqual(len(wrangler), 2)
-        self.assertEqual(wrangler[0][0][1:], ["secret", "put", "E2E_SESSION_SECRET", "--env", "staging"])
-        self.assertEqual(wrangler[0][1]["input"], SECRET + "\n")
-        self.assertIn("GIT_SHA:" + SHA, wrangler[1][0])
+        self.assertEqual(len(wrangler), 1)
+        self.assertEqual(wrangler[0][0][1:], ["deploy", "--env", "staging", "--var", "GIT_SHA:" + SHA])
         github = [call for call in calls if call[0][0] == "gh"]
-        self.assertEqual([call[0] for call in github], [
-            ["gh", "auth", "status", "--hostname", "github.com"],
-            ["gh", "secret", "set", "E2E_SESSION_SECRET", "--repo", "jbookout/doctorcre-app", "--env", "staging"],
-        ])
-        self.assertEqual(github[1][1]["input"], wrangler[0][1]["input"])
-        self.assertLess(calls.index(github[1]), calls.index(wrangler[0]))
-        for args, kwargs in github:
-            self.assertNotIn(SECRET, " ".join(args))
-            self.assertTrue(kwargs["capture_output"])
-            self.assertNotIn("CLOUDFLARE_API_TOKEN", kwargs.get("env", {}))
+        self.assertEqual(github, [])
+        for args, kwargs in calls:
+            self.assertNotIn("secret", args)
+            self.assertNotIn("input", kwargs)
         for args, kwargs in wrangler:
             self.assertEqual(args[args.index("--env") + 1], "staging")
             self.assertNotIn(SECRET, " ".join(args))
             self.assertTrue(kwargs["capture_output"])
             self.assertEqual(kwargs["env"]["CI"], "true")
 
-    def test_missing_or_unauthenticated_github_refuses_before_provider_operations(self):
-        for missing in (True, False):
-            with self.subTest(missing=missing):
-                calls = []
-                def run(args, **kwargs):
-                    command = list(map(str, args[3:]))
-                    calls.append(command)
-                    if command[0] == "gh":
-                        if missing:
-                            raise FileNotFoundError(SECRET)
-                        return subprocess.CompletedProcess(args, 1, SECRET, TOKEN)
-                    return subprocess.CompletedProcess(args, 0, "", "")
-                output = io.StringIO()
-                with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(output):
-                    with self.assertRaisesRegex(MODULE.StagingRefusal, "GitHub CLI is missing or unauthenticated") as caught:
-                        MODULE.provision_and_deploy(fake_checkout(Path(directory) / "repo"), SHA, SECRET,
-                                                    MODULE.provider_environment({}, TOKEN), run=run)
-                self.assertEqual(calls, [["gh", "auth", "status", "--hostname", "github.com"]])
-                self.assertNotIn(SECRET, str(caught.exception) + output.getvalue())
-                self.assertNotIn(TOKEN, str(caught.exception) + output.getvalue())
-
-    def test_github_secret_failure_refuses_before_provider_write_and_suppresses_output(self):
-        calls = []
-        def run(args, **kwargs):
-            command = list(map(str, args[3:]))
-            calls.append(command)
-            failed = command[:3] == ["gh", "secret", "set"]
-            return subprocess.CompletedProcess(args, int(failed), SECRET, TOKEN)
-        output = io.StringIO()
-        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(output), \
-                patch.object(MODULE.time, "sleep"):
-            with self.assertRaisesRegex(MODULE.StagingRefusal, "GitHub staging secret update failed") as caught:
-                MODULE.provision_and_deploy(fake_checkout(Path(directory) / "repo"), SHA, SECRET,
-                                            MODULE.provider_environment({}, TOKEN), run=run)
-        self.assertTrue(any(command[:3] == ["gh", "secret", "set"] for command in calls))
-        self.assertFalse(any("wrangler" in Path(command[0]).name for command in calls))
-        self.assertNotIn(SECRET, str(caught.exception) + output.getvalue())
-        self.assertNotIn(TOKEN, str(caught.exception) + output.getvalue())
-        self.assertNotIn("synchronized", output.getvalue())
-
     def test_failed_provider_output_is_suppressed(self):
         def run(args, **kwargs):
             command = list(map(str, args[3:]))
             failed = "wrangler" in Path(command[0]).name
             return subprocess.CompletedProcess(args, int(failed), SECRET, TOKEN)
-        with tempfile.TemporaryDirectory() as directory, patch.object(MODULE.time, "sleep"), \
+        with tempfile.TemporaryDirectory() as directory, \
                 self.assertRaises(MODULE.StagingRefusal) as caught:
-            MODULE.provision_and_deploy(fake_checkout(Path(directory) / "repo"), SHA, SECRET,
-                                        MODULE.provider_environment({}, TOKEN), run=run)
+            MODULE.deploy_candidate(fake_checkout(Path(directory) / "repo"), SHA,
+                                    MODULE.provider_environment({}, TOKEN), run=run)
         self.assertNotIn(TOKEN, str(caught.exception))
         self.assertNotIn(SECRET, str(caught.exception))
 
@@ -216,7 +168,7 @@ class StagingSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repo = fake_checkout(Path(directory) / "repo", wrangler=False)
             with self.assertRaises(MODULE.StagingRefusal) as caught:
-                MODULE.provision_and_deploy(repo, SHA, SECRET, MODULE.provider_environment({}, TOKEN), run=run)
+                MODULE.deploy_candidate(repo, SHA, MODULE.provider_environment({}, TOKEN), run=run)
             message = str(caught.exception)
             self.assertIn(str(repo / "mcp-server/node_modules/.bin/wrangler"), message)
             self.assertIn("run `npm ci` in " + str(repo / "mcp-server"), message)
@@ -231,21 +183,19 @@ class StagingSessionTests(unittest.TestCase):
         with self.assertRaises(MODULE.StagingRefusal):
             MODULE.source_identity(REPO, run=run)
 
-    def test_smoke_accepts_only_the_dedicated_normal_cookie_and_exact_source(self):
+    def test_smoke_reads_only_the_release_and_requires_the_exact_staging_source(self):
         calls = []
         def fetch(path, **kwargs):
             calls.append((path, kwargs))
-            if path == "/release":
-                return 200, {}, {"env": {"value": "staging"}, "git_sha": {"value": SHA}}
-            if path == "/auth/e2e-session":
-                return 200, {"set-cookie": "__Host-dealroom_session=synthetic-cookie; Path=/; Secure; HttpOnly; SameSite=Lax"}, {"ok": True}
-            return 200, {}, {"actor": {"slug": "joe", "display": "E2E Joe"}, "e2e_principal": "e2e-joe", "csrf_token": "synthetic-csrf"}
-        MODULE.smoke(SHA, SECRET, fetch=fetch)
-        self.assertEqual([call[0] for call in calls], ["/release", "/auth/e2e-session", "/auth/session"])
-        self.assertEqual(calls[1][1]["headers"]["authorization"], "Bearer " + SECRET)
-        self.assertEqual(calls[2][1]["headers"]["cookie"], "__Host-dealroom_session=synthetic-cookie")
-        with self.assertRaises(MODULE.StagingRefusal):
-            MODULE.smoke("b" * 40, SECRET, fetch=fetch)
+            return 200, {}, {"env": {"value": "staging"}, "git_sha": {"value": SHA}}
+        MODULE.smoke(SHA, fetch=fetch)
+        self.assertEqual(calls, [("/release", {})])
+        for status, environment, sha in [(401, "staging", SHA), (200, "production", SHA),
+                                       (200, "staging", "b" * 40)]:
+            with self.subTest(status=status, environment=environment, sha=sha):
+                with self.assertRaises(MODULE.StagingRefusal):
+                    MODULE.smoke(SHA, fetch=lambda path: (
+                        status, {}, {"env": {"value": environment}, "git_sha": {"value": sha}}))
 
     def test_staging_fetch_identifies_the_browser_compatible_qa_client(self):
         calls = []
@@ -259,11 +209,11 @@ class StagingSessionTests(unittest.TestCase):
                     raise MODULE.urllib.error.HTTPError(request.full_url, 403, "edge browser integrity", {}, None)
                 return Response(b'{"ok":true}')
         with patch.object(MODULE.urllib.request, "build_opener", return_value=Opener()):
-            status, _, body = MODULE.staging_fetch("/auth/e2e-session", method="POST", headers={"authorization": "Bearer " + SECRET})
+            status, _, body = MODULE.staging_fetch("/release")
         self.assertEqual((status, body), (200, {"ok": True}))
-        self.assertEqual(calls[0].full_url, "https://" + MODULE.CARR_HOST + "/auth/e2e-session")
+        self.assertEqual(calls[0].full_url, "https://" + MODULE.CARR_HOST + "/release")
         self.assertIn("DoctorCRE-Staging-E2E", calls[0].get_header("User-agent"))
-        self.assertEqual(calls[0].get_header("Authorization"), "Bearer " + SECRET)
+        self.assertIsNone(calls[0].get_header("Authorization"))
 
 
 if __name__ == "__main__":
