@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""One task, one desk, no model in the middle.
+"""One task, one desk, send-time skill selection.
 
-Hermes runs this. It reasons about WHICH seat a task belongs in; this file
-does not reason at all, which is the point — a router that needs its own model
-to route costs the tokens the routing was supposed to save.
+Hermes chooses the desk. At send time the official TypeSafe SDK scores the
+loadable skills against the brief; selected instruction bodies join the task
+before it enters the durable queue. Desk routing stays deterministic.
 
     dispatch.py send claude-desk "reconcile the loop board"
     dispatch.py send codex-desk "rename this variable across the package" --family luna --effort low
@@ -127,6 +127,7 @@ import hermes_wire
 import nous_budget
 import record_layer
 import business_routing
+import skill_picker
 import flash_wire  # noqa: E402  — the local Flash model as a desk, see the module
 
 TOOLS_ROOT = HERE.parent
@@ -180,8 +181,6 @@ BRIEF_FOOTERS = {'engineering': 'brief-footer.md', 'business': 'business-brief-f
 
 def _with_footer(task: str, brief: str) -> str:
     for block in (HERE / BRIEF_FOOTERS[brief]).read_text(encoding='utf-8').strip().split('\n\n'):
-        if block.startswith('Skills:') and re.search(r'^Skills:', task, re.M | re.I):
-            continue
         if block not in task:
             task += '\n\n' + block
     return task
@@ -1243,8 +1242,10 @@ def main(argv: list[str]) -> int:
             return 0
 
         task = sys.stdin.read() if a.task == "-" else a.task
+        task = task.split('\n\n## Required skills', 1)[0]
         if not task.strip():
             raise DeskError("empty_task", "dispatch requires a non-empty task")
+        brief_text = task
         task = _with_footer(task, a.brief)
         _lint_phrasing(task, a.allow_phrasing)
         # An offline host or a seat whose last probe failed is refused here,
@@ -1253,12 +1254,16 @@ def main(argv: list[str]) -> int:
         if a.brief != 'business' or a.name != 'business':
             _check_brief_desk(a.brief, desk_entry)
         if a.brief == 'business':
+            task, a.required_skills = skill_picker.prepare(brief_text, HERE.parents[1])
+            task = _with_footer(task, a.brief)
             row = work_cli.send_business(a, task, reg, results)
         else:
             if isinstance(desk_entry, dict):
                 blocked = seat_gate.check({**desk_entry, "name": a.name})
                 if blocked:
                     raise DeskError(*blocked)
+            task, a.required_skills = skill_picker.prepare(brief_text, HERE.parents[1])
+            task = _with_footer(task, a.brief)
             row = work_cli.send(a, task, reg, results)
         print(json.dumps(row, indent=2))
         return 0
