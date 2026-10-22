@@ -281,7 +281,7 @@ class HoldTests(unittest.TestCase):
 
     def test_detached_guard_reads_the_same_definition_registry(self):
         patch.stopall()
-        label = "com.carr.repo-hygiene-janitor"
+        label = "com.carr.resource-collector"
         fake = self.home / "launchctl-fixture"
         fake.write_text("#!/bin/sh\ncase \"$1\" in\n"
                         "print) echo 'Could not find service \"" + label + "\"'; exit 113;;\n"

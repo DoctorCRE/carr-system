@@ -232,11 +232,36 @@ class BoardCase(unittest.TestCase):
 
 
 class ProgressBoardCLI(BoardCase):
+    def test_publication_refreshes_expired_inventory_and_reuses_fresh_cache(self):
+        import system_work_cache as cache
+        self.run_board('init', 'carr-v5', '--title', 'Synthetic board')
+        path = self.root / 'boards/system-work-github-cache.json'
+        stale = {'schema': 'system-work-external.v1', 'items': [], 'complete': True,
+                 'observed_at': iso(timedelta(hours=1)), 'coverage': [], 'completed_pr_history': True}
+        path.write_text(json.dumps(stale))
+        refreshed = {**stale, 'observed_at': iso()}
+        remote = {}
+        def call(verb, args):
+            name = args['board_id']
+            if verb == 'publish-board-snapshot':
+                remote[name] = {'version': 1, 'snapshot_json': copy.deepcopy(args['snapshot'])}
+            return {'ok': True, 'snapshot': copy.deepcopy(remote.get(name)), 'questions': []}
+        with patch.dict(os.environ, self.env), patch.object(BOARD, 'call_verb', call), \
+             patch.object(Path, 'home', return_value=self.root), \
+             patch.object(cache, 'collect_github', return_value={**refreshed, 'pr_heads': []}) as collect, \
+             patch.object(cache, 'unfinished_briefs', return_value=[]):
+            BOARD.publish_board('carr-v5', costs={})
+            self.assertEqual(remote['carr-v5']['snapshot_json']['external_inventory']['observed_at'],
+                             refreshed['observed_at'])
+            self.assertEqual(json.loads(path.read_text()), refreshed)
+            BOARD.publish_board('carr-v5', costs={})
+        collect.assert_called_once()
+
     def test_publication_reuses_inventory_without_calling_github(self):
         self.run_board('init', 'carr-v5', '--title', 'Synthetic board')
         self.fake_gh({})
         external = {'schema': 'system-work-external.v1', 'items': [], 'complete': True,
-                    'observed_at': '2026-10-01T00:00:00Z', 'coverage': [], 'completed_pr_history': True}
+                    'observed_at': iso(), 'coverage': [], 'completed_pr_history': True}
         (self.root / 'boards/system-work-github-cache.json').write_text(json.dumps(external))
         remote = {}
         def call(verb, args):
@@ -260,7 +285,7 @@ class ProgressBoardCLI(BoardCase):
                 'completed':True,'opened_at':'2026-09-01T00:00:00Z',
                 'last_activity_at':'2026-09-02T00:00:00Z','identity':{}} for i in range(1448)]
         external={'schema':'system-work-external.v1','items':items,'complete':True,
-                  'observed_at':'2026-10-01T00:00:00Z','coverage':[],'completed_pr_history':True,'pr_work_refs':[]}
+                  'observed_at':iso(),'coverage':[],'completed_pr_history':True,'pr_work_refs':[]}
         remote={}
         def call(verb,args):
             board=args['board_id']

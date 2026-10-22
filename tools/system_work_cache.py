@@ -4,16 +4,30 @@ Read-only GitHub operations. The cache is projection data in board_snapshot;
 source identity and suggestions do not grant branch or pull-request authority.
 """
 import json
+import copy
+import time
 import fcntl
 import os
 import tempfile
 import re
 import subprocess
+import shutil
+import sys
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from pathlib import Path
 
-REPOSITORIES = ("DoctorCRE/carr-system", "jbookout/doctorcre-app")
+# Published identities stay stable across repository transfers.
+REPOSITORIES = {"jbookout/carr-system": "DoctorCRE/carr-system",
+                "jbookout/doctorcre-app": "jbookout/doctorcre-app"}
+GIT_MIN_FREE_BYTES = 512 * 1024 * 1024
+GIT_PACK_LIMIT_BYTES = 128 * 1024 * 1024
+LIMITED_GIT = """import os, resource, sys
+limit = int(sys.argv[1])
+resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+os.execvp(sys.argv[2], sys.argv[2:])
+"""
 
 
 def github_json(args):
@@ -39,13 +53,120 @@ def dot_suggestions(report):
     return result
 
 
-def pages_of_rows(value):
-    if not isinstance(value, list) or not value or any(not isinstance(page, list) for page in value):
-        raise ValueError('GitHub pagination envelope invalid')
-    rows = [row for page in value for row in page]
-    if any(not isinstance(row, dict) for row in rows):
-        raise ValueError('GitHub row invalid')
-    return rows
+PR_FIELDS = "number title url headRefName createdAt updatedAt mergedAt state body"
+PR_QUERY = """query($owner: String!, $name: String!, $history: String, $updates: String) {
+  repository(owner: $owner, name: $name) {
+    history: pullRequests(first: 100, after: $history,
+      orderBy: {field: CREATED_AT, direction: ASC}) {
+      nodes { %s } pageInfo { hasNextPage endCursor }
+    }
+    updates: pullRequests(first: 100, after: $updates,
+      orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes { %s } pageInfo { hasNextPage endCursor }
+    }
+  }
+}""" % (PR_FIELDS, PR_FIELDS)
+
+
+def pull_requests(repo, now, previous, read):
+    state = copy.deepcopy(previous or {})
+    owner, name = REPOSITORIES[repo].split('/')
+    result = read(['api', 'graphql', '-f', 'query=' + PR_QUERY,
+                   '-f', 'owner=' + owner, '-f', 'name=' + name,
+                   '-F', 'history=' + (state.get('history') or 'null'),
+                   '-F', 'updates=' + (state.get('updates') or 'null')])
+    if result.get('errors'): raise ValueError('GraphQL errors')
+    data = result['data']['repository']
+    rows = state.setdefault('prs', {})
+    # GitHub updates have second resolution; overlap the previous scan so
+    # changes during its first second cannot fall behind a fractional cursor.
+    watermark = date_value(state.setdefault('watermark', now.isoformat(timespec='seconds')))
+    watermark = watermark.replace(microsecond=0) - timedelta(seconds=1)
+    state.setdefault('scan_started', now.isoformat(timespec='seconds'))
+    for stream in ('history', 'updates'):
+        connection = data[stream]
+        page = connection['pageInfo']
+        nodes = connection['nodes']
+        if not isinstance(nodes, list) or type(page['hasNextPage']) is not bool:
+            raise ValueError('GraphQL page invalid')
+        if page['hasNextPage'] and not nodes:
+            raise ValueError('GraphQL nonterminal page is empty')
+        cursor = page['endCursor']
+        if nodes or page['hasNextPage']: required_text(cursor)
+        if page['hasNextPage'] and cursor == state.get(stream):
+            raise ValueError('GraphQL cursor did not advance')
+        for pr in nodes:
+            if type(pr['number']) is not int or pr['number'] < 1: raise ValueError('PR number invalid')
+            for key in ('title', 'url', 'headRefName'): required_text(pr[key])
+            date_value(pr['createdAt']); date_value(pr['updatedAt'])
+            if pr['mergedAt'] is not None: date_value(pr['mergedAt'])
+            if pr['state'] not in ('OPEN', 'CLOSED', 'MERGED'): raise ValueError('PR state invalid')
+            # Retain only the fields needed by the public inventory, never PR prose.
+            row = {key: pr[key] for key in ('number', 'title', 'url', 'headRefName',
+                                          'createdAt', 'updatedAt', 'mergedAt', 'state')}
+            row['work_refs'] = sorted(set(re.findall(r'WR-\d+', pr.get('body') or '')))
+            old = rows.get(str(pr['number']))
+            if old is None or date_value(old['updatedAt']) <= date_value(row['updatedAt']):
+                rows[str(pr['number'])] = row
+        if stream == 'history':
+            state['history'] = cursor or state.get('history')
+            state['history_complete'] = not page['hasNextPage']
+        else:
+            caught_up = not page['hasNextPage'] or any(
+                date_value(pr['updatedAt']) < watermark for pr in nodes)
+            state['updates_complete'] = caught_up
+            state['updates'] = None if caught_up else cursor
+            if caught_up:
+                state['watermark'] = state.pop('scan_started')
+    return sorted(rows.values(), key=lambda pr: (pr['createdAt'], pr['number']), reverse=True), state
+
+
+def local_branches(repo, root, now):
+    """Compare commits in a disposable bare repository, never a fleet checkout."""
+    if any(os.environ.get(key) for key in ('GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE',
+                                         'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_SHALLOW_FILE')):
+        raise ValueError('inherited git repository routing is unsafe for the inventory fetch')
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    name = repo.split('/')[1]
+    with (root / (name + '.lock')).open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        scratch = root / (name + '.scratch')
+        marker = scratch / '.inventory-owner'
+        if scratch.exists() or scratch.is_symlink():
+            if scratch.is_symlink() or marker.is_symlink() or not marker.is_file() or marker.read_text() != 'system-work-cache.v1\n':
+                raise ValueError('inventory scratch directory is not owned by this collector')
+            shutil.rmtree(scratch)
+        if shutil.disk_usage(root).free < GIT_MIN_FREE_BYTES:
+            raise OSError('insufficient space for the inventory git fetch')
+        scratch.mkdir()
+        marker.write_text('system-work-cache.v1\n')
+        try:
+            mirror = scratch / 'repo.git'
+            def git(*args):
+                command = ['git', '--git-dir=' + str(mirror), *args]
+                if args[0] == 'fetch':
+                    command = [sys.executable, '-c', LIMITED_GIT, str(GIT_PACK_LIMIT_BYTES), *command]
+                return subprocess.run(command,
+                    capture_output=True, text=True, timeout=120, check=True).stdout.strip()
+            subprocess.run(['git', 'init', '--bare', str(mirror)], capture_output=True,
+                           text=True, timeout=30, check=True)
+            git('fetch', '--no-tags', '--no-auto-maintenance', '--filter=tree:0',
+                'https://github.com/' + REPOSITORIES[repo] + '.git', '+refs/heads/*:refs/heads/*')
+            main = git('rev-parse', 'refs/heads/main')
+            rows = []
+            refs = git('for-each-ref', '--sort=refname', '--format=%(refname:strip=2)\t%(objectname)\t%(committerdate:iso-strict)', 'refs/heads/')
+            for line in refs.splitlines():
+                name, sha, date = line.split('\t')
+                if name == 'main' or now - date_value(date) <= timedelta(days=7): continue
+                base = git('merge-base', main, sha)
+                if int(git('rev-list', '--count', base + '..' + sha)) == 0: continue
+                # REST uses UTC Z dates; preserve the published bytes.
+                date = date_value(date).astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                rows.append({'name': name, 'sha': sha, 'date': date})
+            return rows
+        finally:
+            shutil.rmtree(scratch)
 
 
 def date_value(value):
@@ -69,44 +190,33 @@ def valid_cache(value):
             and isinstance(value.get('coverage'), list) and isinstance(value.get('complete'), bool))
 
 
-def collect_github(now, read=github_json, suggestions=None):
+def collect_github(now, read=github_json, suggestions=None, *, state=None, git_root=None, branches=local_branches):
     items, coverage, pr_heads, pr_work_refs = [], [], [], set()
-    for repo in REPOSITORIES:
+    state = state if state is not None else {}
+    git_root = git_root or Path(__file__).resolve().parents[1] / 'out/boards/system-work-git'
+    for index, repo in enumerate(REPOSITORIES):
         try:
-            pr_pages = read(['api',f'repos/{repo}/pulls?state=all&per_page=100','--paginate','--slurp'])
-            prs = pages_of_rows(pr_pages)
+            if index and read is github_json: time.sleep(2)
+            prs, next_state = pull_requests(repo, now, state.get(repo), read)
             for pr in prs:
-                if type(pr['number']) is not int or pr['number'] < 1:
-                    raise ValueError('PR number invalid')
-                required_text(pr['title']); required_text(pr['html_url']); required_text(pr['head']['ref'])
-                date_value(pr['created_at']); date_value(pr['updated_at'])
-                if pr.get('merged_at') is not None: date_value(pr['merged_at'])
-                if pr.get('state', 'open') not in ('open', 'closed'): raise ValueError('PR state invalid')
-                pr_heads.append({'repository':repo,'branch':pr['head']['ref']})
-                pr_work_refs.update(re.findall(r'WR-\d+',pr.get('body') or ''))
-                completed = bool(pr.get('merged_at'))
-                if pr.get('state','open') != 'open' and not completed: continue
+                pr_heads.append({'repository':repo,'branch':pr['headRefName']})
+                pr_work_refs.update(pr['work_refs'])
+                completed = bool(pr['mergedAt'])
+                if pr['state'] != 'OPEN' and not completed: continue
                 items.append({'id': f"{repo}:pr:{pr['number']}", 'kind':'pull_request','title':pr['title'],
-                    'state':'merged' if completed else 'open', 'opened_at':pr['created_at'],
-                    'last_activity_at':pr.get('merged_at') or pr['updated_at'], 'owner':None,'version':None,
-                    'completed':completed,'cancelled':False,'link':pr['html_url'],
-                    'branch':pr['head']['ref'],'work_refs':sorted(set(re.findall(r'WR-\d+',pr.get('body') or ''))),'identity':{}})
-            pages = read(['api',f'repos/{repo}/branches?per_page=100','--paginate','--slurp'])
-            for branch in pages_of_rows(pages):
-                name=required_text(branch['name'])
-                if name=='main': continue
-                commit = read(['api',f"repos/{repo}/commits/{branch['commit']['sha']}"])
-                date=commit['commit']['committer']['date']
-                date_value(date)
-                if now-datetime.fromisoformat(date.replace('Z','+00:00')) <= timedelta(days=7): continue
-                compare=read(['api',f'repos/{repo}/compare/main...{quote(name,safe="")}'])
-                if not isinstance(compare,dict) or type(compare.get('ahead_by')) is not int or compare['ahead_by'] < 0: raise ValueError('compare invalid')
-                if compare['ahead_by']==0: continue
+                    'state':'merged' if completed else 'open', 'opened_at':pr['createdAt'],
+                    'last_activity_at':pr['mergedAt'] or pr['updatedAt'], 'owner':None,'version':None,
+                    'completed':completed,'cancelled':False,'link':pr['url'],
+                    'branch':pr['headRefName'],'work_refs':pr['work_refs'],'identity':{}})
+            for branch in branches(repo, git_root, now):
+                name, date, sha = branch['name'], branch['date'], branch['sha']
                 items.append({'id':f'{repo}:branch:{name}','kind':'remote_branch','title':name,'state':'unmerged',
-                    'opened_at':date,'last_activity_at':date,'owner':None,'version':branch['commit']['sha'],
-                    'completed':False,'cancelled':False,'link':f'https://github.com/{repo}/tree/{quote(name,safe="")}',
+                    'opened_at':date,'last_activity_at':date,'owner':None,'version':sha,
+                    'completed':False,'cancelled':False,'link':f'https://github.com/{REPOSITORIES[repo]}/tree/{quote(name,safe="")}',
                     'identity':{},'suggested_triage':(suggestions or {}).get(name) if repo.endswith('/carr-system') else None})
-            coverage.append({'repository':repo,'complete':True,'reason':None})
+            state[repo] = next_state
+            complete = next_state['history_complete'] and next_state['updates_complete']
+            coverage.append({'repository':repo,'complete':complete,'reason':None if complete else 'github_history_pending'})
         except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
             coverage.append({'repository':repo,'complete':False,'reason':'github_read_failed'})
     return {'schema':'system-work-external.v1','observed_at':now.isoformat(),
@@ -138,9 +248,10 @@ def unfinished_briefs(root, pr_heads):
     return rows
 
 
-def cached_github(path, report_path=None, now=None, read=github_json):
+def cached_github(path, report_path=None, now=None, read=github_json, *, branches=local_branches):
     now = now or datetime.now(timezone.utc)
     path = Path(path)
+    cache = None
     try:
         cache=json.loads(path.read_text())
         if not valid_cache(cache): raise ValueError('invalid cache')
@@ -151,7 +262,14 @@ def cached_github(path, report_path=None, now=None, read=github_json):
     try:
         if report_path and Path(report_path).is_file(): suggestions=dot_suggestions(Path(report_path).read_text())
     except (OSError, UnicodeError): pass
-    cache=collect_github(now,read,suggestions)
+    state_path = path.with_suffix(path.suffix + '.prs')
+    try:
+        saved = json.loads(state_path.read_text())
+        state = saved['repositories'] if cache is not None and saved['observed_at'] == cache['observed_at'] else {}
+        if not isinstance(state, dict): state = {}
+    except (OSError, ValueError, KeyError, TypeError): state = {}
+    cache=collect_github(now,read,suggestions,state=state,
+                         git_root=path.parent / 'system-work-git', branches=branches)
     try:
         cache["items"].extend(unfinished_briefs(Path.home() / "carr-system/out/orch", cache["pr_heads"]))
         cache.pop("pr_heads", None)
@@ -166,14 +284,19 @@ def cached_github(path, report_path=None, now=None, read=github_json):
             if valid_cache(current) and date_value(current['observed_at']) > date_value(cache['observed_at']):
                 return current
         except (OSError, ValueError, KeyError, TypeError): pass
-        temporary = None
-        try:
-            with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, prefix=path.name+'.', suffix='.tmp', delete=False) as stream:
-                temporary = stream.name
-                json.dump(cache, stream, sort_keys=True)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, path)
-        finally:
-            if temporary and os.path.exists(temporary): os.unlink(temporary)
+        atomic_json(path, cache)
+        atomic_json(state_path, {'observed_at': cache['observed_at'], 'repositories': state})
     return cache
+
+
+def atomic_json(path, value):
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, prefix=path.name+'.', suffix='.tmp', delete=False) as stream:
+            temporary = stream.name
+            json.dump(value, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary): os.unlink(temporary)

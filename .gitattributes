@@ -1,0 +1,2 @@
+db/schema.sql merge=carr-generated
+mcp-server/src/scac-mutation-registry.current.generated.js merge=carr-generated
