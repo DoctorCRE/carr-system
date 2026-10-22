@@ -5,8 +5,9 @@ from pathlib import Path
 import plistlib
 import runpy
 import subprocess
+import tempfile
 
-from lib.outlook_intake import _snapshot
+from lib.outlook_intake import OUT, WORK_PREFIX, _snapshot
 from lib.outlook_version_tripwire import IntakeBlocked, _digest, _version
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,8 +57,12 @@ class OperationalPorts:
 
     def snapshot(self, work):
         self._unchanged()
-        _snapshot(self.home, work)
-        self._unchanged()
+        out = ROOT / OUT
+        out.mkdir(parents=True, mode=0o700, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=WORK_PREFIX, dir=out) as staged:
+            _snapshot(self.home, Path(staged))
+            self._unchanged()
+            (Path(staged) / 'store.hxd').replace(work / 'store.hxd')
 
     def observe(self, copy):
         self._unchanged()

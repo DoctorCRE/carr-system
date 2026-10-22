@@ -215,6 +215,44 @@ class TripwireTest(unittest.TestCase):
         with self.assertRaises(tripwire.IntakeBlocked):
             ports.observe(store)
 
+    def test_operational_snapshot_honors_the_fixed_helper_directory_and_cleans_sidecars(self):
+        import lib.outlook_version_ports as ports
+        from lib.outlook_intake import COPY_HELPER, OUT
+        root = Path(self.temp.name).resolve()
+        app = root / 'Synthetic.app'
+        (app / 'Contents').mkdir(parents=True)
+        (app / 'Contents/Info.plist').write_bytes(plistlib.dumps({
+            'CFBundleShortVersionString': VERSION['version'], 'CFBundleVersion': VERSION['build']}))
+        observer = root / 'observer'
+        observer.write_bytes(b'synthetic observer')
+        digest = hashlib.sha256(observer.read_bytes()).hexdigest()
+        _, manifest = ports.source_binding(observer, digest)
+        repo = root / 'repo'
+        for name in manifest['sources']:
+            target = repo / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ports.ROOT / name).read_bytes())
+        helper = root / COPY_HELPER
+        helper.parent.mkdir(parents=True)
+        helper.write_text('#!' + sys.executable + '\n' +
+                          'from pathlib import Path\nimport stat\n' +
+                          'work = Path.cwd()\n' +
+                          'assert work.parent == Path(' + repr(str(repo / OUT)) + ')\n' +
+                          'assert work.name.startswith("work-")\n' +
+                          'assert stat.S_IMODE(work.stat().st_mode) == 0o700\n' +
+                          'Path("store.hxd").write_bytes(b"synthetic store")\n' +
+                          'Path("Files").mkdir()\n' +
+                          'Path("Files/sidecar").write_bytes(b"synthetic sidecar")\n')
+        helper.chmod(0o700)
+        destination = root / 'receipt'
+        destination.mkdir(mode=0o700)
+        with patch.object(ports, 'ROOT', repo):
+            adapter = ports.OperationalPorts(root, app, observer, digest)
+            adapter.snapshot(destination)
+        self.assertEqual((destination / 'store.hxd').read_bytes(), b'synthetic store')
+        self.assertFalse((destination / 'Files').exists())
+        self.assertEqual(list((repo / OUT).iterdir()), [])
+
     def test_cli_errors_do_not_echo_private_arguments(self):
         cli = Path(__file__).with_name('outlook-version-tripwire.py')
         result = subprocess.run([sys.executable, str(cli), 'SyntheticNeverEmit/private'], capture_output=True)
