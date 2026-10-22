@@ -428,26 +428,6 @@
       ]
     },
     {
-      "key": "calendar-prebrief-joe",
-      "name": "Joe calendar prebrief projection",
-      "purpose": "Runs the sponsor-bound local EventKit prebrief adapter. Its launchd tick may schedule and claim only the existing Joe live jobs lease; activation remains receipt-backed and explicit.",
-      "family": "Local Mac edge",
-      "criticality": "medium",
-      "owner_actor": "joe",
-      "repo_path": "tools/calendar-prebrief-joe-runtime.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.calendar-prebrief-joe.plist",
-          "runs_on": "every",
-          "expected_cadence_seconds": 86400,
-          "cadence_grace_seconds": 172800,
-          "notes": "The local LaunchAgent wakes every minute, but the receipt-gated runtime schedules weekday work at 06:30 America/Chicago for a 06:45 prebrief target. The daily cadence and weekend-spanning grace make the Mac edge lifecycle visible without treating an installed plist as activation authority. Durable work evidence remains the exact ops.job lease and calendar-prebrief receipts; Joe live activation and the isolated canary retain their existing typed gates."
-        }
-      ]
-    },
-    {
       "key": "fleet-sync",
       "name": "Canonical checkout and configuration fleet sync",
       "purpose": "Fast-forwards each Mac's canonical main checkout only when the fail-closed local-state proof accepts it, then re-renders repository-owned configuration.",
@@ -482,26 +462,6 @@
           "deploy_mechanism": "ops/launchd/com.carr.control-plane-tick.plist",
           "runs_on": "primary",
           "notes": "Definition only: this repository change neither installs nor enables the agent. The tick has no ops.run heartbeat because it is itself a jobs-role ledger client; its durable effect is the idempotent ledger enqueue, and legacy schedules remain independently active until accepted cutover evidence and approval."
-        }
-      ]
-    },
-    {
-      "key": "cc-version-sentinel",
-      "name": "Claude Code version sentinel",
-      "purpose": "Watches for a Claude Code release that changes hook or settings behaviour.",
-      "family": "Local Mac edge",
-      "criticality": "low",
-      "owner_actor": "joe",
-      "repo_path": "bin/cc-version-sentinel.sh",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.cc-version-sentinel.plist",
-          "runs_on": "every",
-          "expected_cadence_seconds": 3600,
-          "cadence_grace_seconds": 3600,
-          "notes": "Grace widened 1800\u21923600 on 2026-08-18: run rows now ride the local spool (tools/ops-spool.py) and land at the next run-spool-flush, so a row can be inserted up to 1800s after its fire; the old grace put the worst honest gap exactly at the window edge."
         }
       ]
     },
@@ -560,24 +520,6 @@
           "expected_cadence_seconds": 3600,
           "cadence_grace_seconds": 5400,
           "notes": "Wakes every 60s; bin/run-scheduled.sh --heartbeat-interval 3600 throttles SUCCEEDED rows to one an hour, and every failure (a stopped release, or exit 3 for a missing unattended credential) is recorded immediately. Grace covers the ops-spool flush delay, as for room-bridge. What shipped, failed or blocked is in out/release-pipeline/releases.jsonl; `ops/release-pipeline.py report --date D` prints it for a daily note."
-        }
-      ]
-    },
-    {
-      "key": "merge-queue",
-      "name": "Serial reviewed-head merge queue",
-      "purpose": "Durable per-repository FIFO merging of independently reviewed heads with green hosted checks. Persists mutation intent and wait deadlines, stops failed entries with reasons, and resumes the next PR. Activation requires current canonical main and completed hold migration.",
-      "family": "Local Mac edge",
-      "criticality": "high",
-      "owner_actor": "joe",
-      "repo_path": "tools/merge_queue/main.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.merge-queue.plist",
-          "runs_on": "primary",
-          "notes": "Continuous service with bounded per-entry waits; queue.sqlite3 and queue.log carry progress and stopped-state reasons. No periodic scheduled-run heartbeat is claimed."
         }
       ]
     },
@@ -895,9 +837,7 @@
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.call-mode.plist",
           "runs_on": "every",
-          "expected_cadence_seconds": 1800,
-          "cadence_grace_seconds": 2700,
-          "notes": "KeepAlive server, so the health question is 'is it up' and never 'did it fire recently'. bin/probe-keepalive.py answers it every 10 min by opening a TCP connection to 127.0.0.1:4682 \u2014 a connect proves it is ACCEPTING, which is a real answer rather than a PID sighting. Still exempt from bin/run-scheduled.sh: the wrapper records on child exit, and a KeepAlive child exiting means launchd restarted it. Grace widened 900\u21922700 on 2026-08-18: an UP row rides the local spool (tools/ops-spool.py) and is inserted at the next run-spool-flush, up to 1800s after the probe saw it; a DOWN row still goes to the ledger direct and becomes an incident on the spot."
+          "notes": "launchd KeepAlive restarts the server. Scheduled-job health reads launchd registration and last exit status."
         }
       ]
     },
@@ -915,9 +855,7 @@
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.doc-engine.plist",
           "runs_on": "every",
-          "expected_cadence_seconds": 1800,
-          "cadence_grace_seconds": 2700,
-          "notes": "KeepAlive server. Probed every 10 min by a TCP connect to 127.0.0.1:4680, which proves it is ACCEPTING rather than merely running. Same wrapper exemption and the same reason as call-mode; same 2026-08-18 grace widening (900\u21922700) for the spool delay \u2014 an UP row lands at the next run-spool-flush, a DOWN row still lands direct. Proven end to end on 2026-08-14: stopping the agent produced SEV-3 INC-20260814-08 within one probe pass, and restarting it moved the incident to monitoring."
+          "notes": "launchd KeepAlive restarts the server. Scheduled-job health reads launchd registration and last exit status."
         }
       ]
     },
@@ -935,9 +873,7 @@
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.quill-dictate.plist",
           "runs_on": "every",
-          "expected_cadence_seconds": 1800,
-          "cadence_grace_seconds": 2700,
-          "notes": "KeepAlive server with NO PORT TO KNOCK ON, so its probe is process liveness only \u2014 a weaker claim than the other two, and the run detail says which signal was used so the row is never read as more than it is. A wedged process and a healthy one both have a PID. Same wrapper exemption and reason as call-mode; same 2026-08-18 grace widening (900\u21922700) for the spool delay."
+          "notes": "launchd KeepAlive restarts the server. Scheduled-job health reads launchd registration and last exit status."
         }
       ]
     },
@@ -974,26 +910,6 @@
           "deploy_mechanism": "ops/launchd/com.carr.dictation-consent.plist",
           "runs_on": "every",
           "notes": "WatchPaths-triggered; silence is normal, so no cadence. Criticality is HIGH despite being a small watcher: it is what makes the rig announce recording aloud, and Florida is an all-party-consent state. A failure here is a legal exposure rather than an inconvenience, which is why it is registered even though nothing can currently observe it firing."
-        }
-      ]
-    },
-    {
-      "key": "keepalive-probe",
-      "name": "KeepAlive server liveness probe",
-      "purpose": "Asks the three long-running servers whether they are up, and writes the answer to the ledger.",
-      "family": "Local Mac edge",
-      "criticality": "medium",
-      "owner_actor": "joe",
-      "repo_path": "bin/probe-keepalive.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.keepalive-probe.plist",
-          "runs_on": "every",
-          "expected_cadence_seconds": 1800,
-          "cadence_grace_seconds": 2700,
-          "notes": "Wakes every 10 min; cadence declared at 30 min so one missed pass is not an alarm. It is itself wrapped by bin/run-scheduled.sh, because a watcher whose own failure is invisible is the one thing nothing watches. Grace widened 900\u21922700 on 2026-08-18 for the spool delay (tools/ops-spool.py). It returns EX_CONFIG (78) rather than a failure when NOTHING could be recorded at all \u2014 since the spool, that means the local recording path itself is broken (not even the SQLite queue writable), not merely an unreachable database \u2014 and a probe that alarmed every 10 minutes on a Mac in that state would be the smoke-suite mistake again."
         }
       ]
     },
@@ -1113,24 +1029,6 @@
       ]
     },
     {
-      "key": "fix-train",
-      "name": "Generated fix-train orchestration",
-      "purpose": "Requires its owning orchestrator to provision and verify the generated executable.",
-      "family": "Local Mac edge",
-      "criticality": "high",
-      "owner_actor": "joe",
-      "repo_path": "out/orch/fix-train.sh",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.fix-train.plist",
-          "runs_on": "primary",
-          "notes": "Requires its owning orchestrator to provision and verify the generated executable. Source declaration only; no service import or activation performed."
-        }
-      ]
-    },
-    {
       "key": "studio-failover-rehearsal",
       "name": "Monthly MacBook failover readiness",
       "purpose": "MacBook-only day 5 at 10:15 local. Dry-run receipt and bound orchestrator health loop; never triggers real failover.",
@@ -1201,11 +1099,6 @@
       "depends_on": "neon-record-layer"
     },
     {
-      "service": "calendar-prebrief-joe",
-      "depends_on": "neon-record-layer",
-      "note": "The local adapter schedules, claims, and completes only the receipt-gated prebrief jobs lease."
-    },
-    {
       "service": "fleet-sync",
       "depends_on": "neon-record-layer",
       "note": "The checkout sync is local and fail-closed; its generic ops.run receipt is projected through the record layer by the existing run-scheduled spool path."
@@ -1214,10 +1107,6 @@
       "service": "control-plane-tick",
       "depends_on": "neon-record-layer",
       "note": "The ledger is the tick's sole authority and state owner."
-    },
-    {
-      "service": "keepalive-probe",
-      "depends_on": "neon-record-layer"
     },
     {
       "service": "npi-sweep-weekly",

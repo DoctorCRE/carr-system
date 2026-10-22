@@ -473,8 +473,8 @@
             "tool_input": {
               "todos": [
                 {
-                  "content": "Implement the merge-queue backoff fix",
-                  "activeForm": "Implement the merge-queue backoff fix",
+                  "content": "Implement the release backoff fix",
+                  "activeForm": "Implement the release backoff fix",
                   "status": "pending"
                 }
               ]
@@ -1763,7 +1763,7 @@
             "cwd": "/Users/booko/carr-system",
             "tool_name": "Bash",
             "tool_input": {
-              "command": "./run.sh test test/merge_queue"
+              "command": "./run.sh test test/release"
             },
             "tool_response": {
               "exit_code": 1

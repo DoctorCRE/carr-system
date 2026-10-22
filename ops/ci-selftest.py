@@ -351,7 +351,9 @@ def test_migration_partitions_execute_complete_inventory():
         root = pathlib.Path(directory)
         shim = root / "program"
         shim.write_text('#!/bin/bash\necho "$*" >> "$CALLS"\n'
-                        '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && exit 9\nexit 0\n')
+                        '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && exit 9\n'
+                        'if [[ "$*" == *"ci-migration-gates.py"* && "$*" != *"--sql-proof"* '
+                        '&& ! -f "$SERVICE_CATALOG" ]]; then exit 9; fi\nexit 0\n')
         shim.chmod(0o755)
         (root / "psql").symlink_to(shim)
         body = _ci_function_body("check_migration_fixtures", "check_binding")
@@ -360,15 +362,18 @@ def test_migration_partitions_execute_complete_inventory():
             "bad() { FAILED=1; }", "ok() { :; }", "skip() { FAILED=1; }",
             'run_quiet() { local log="$1"; shift; echo "$*" >> "$CALLS"; '
             '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && return 9; '
+            '[[ "$*" == *"tools/ops-record.py sync-registry"* ]] && touch "$SERVICE_CATALOG"; '
             'printf "r03_recovered_health\\njoe,3,3,3,0,0,0,0,1,0,0,0,0,0,No open\\n'
             'r03_actor_mismatch_health\\njoe,4,3,3,0,1,1,1,1,0,0,0,0,0,On missing\\n" > "$log"; }'))
         def run(part, fail=""):
             calls = root / "calls"
             calls.write_text("")
+            (root / "service-catalog").unlink(missing_ok=True)
             result = subprocess.run(["bash", "-c", prefix + f"\nMIGRATION_PART={part}\n" + body +
                                      '\ncheck_migration; exit "$FAILED"'], cwd=REPO,
                 env={**scrubbed_env(), "PATH": directory + os.pathsep + os.environ["PATH"],
                      "CALLS": str(calls), "CARR_CI_DATABASE_URL": "postgres://ci@127.0.0.1:55432/ci",
+                     "SERVICE_CATALOG": str(root / "service-catalog"),
                      "FAIL_PROGRAM": fail}, capture_output=True, text=True)
             return result.returncode, set(calls.read_text().splitlines())
         fixtures = {}
@@ -391,6 +396,9 @@ def test_migration_partitions_execute_complete_inventory():
               "node --test" in call or "ci-migration-gates.py --logdir" in call
               for call in fixtures["acceptance"]))
         check("a failing partition fails the migration verdict", run("reconstruction", "schema-reconstruction-selftest.py")[0] == 1)
+        rc, calls = run("gates-serial", "tools/ops-record.py sync-registry")
+        check("service-catalog bootstrap failure stops database gates", rc == 1 and not any(
+              "ci-migration-gates.py --logdir" in call for call in calls))
 
 
 def test_gate_shards_execute_a_disjoint_complete_inventory():
