@@ -142,6 +142,11 @@ class FakeAdapter:
 
 
 class QueueDispatchTests(unittest.TestCase):
+    def test_auto_uses_enabled_luna_subscription_desk_without_classifier(self):
+        service = kanban_adapter.QueueService(catalog=kanban_adapter.load_catalog())
+        result = service.route_auto({"title": "Count synthetic records", "body": "", "cap": "code"})
+        self.assertEqual(result["target"], "luna")
+
     def test_nous_spend_stop_is_terminal_and_never_schedules_a_retry(self):
         adapter = FakeAdapter([task()])
         controller = queue_dispatch.QueueDeskExecutor(catalog=CATALOG, adapter=adapter)
@@ -834,21 +839,13 @@ class FinalCapabilityRecheckTests(unittest.TestCase):
             },
         }
 
-        class FakeRouter:
-            def load_policy(self):
-                return {"queue_targets": {"direct": "flash", "fallback": "claude-desktop"}}
-
-            def decide(self, title, body, *, flash_free=True, policy=None):
-                return {"route": "direct", "model": "flash", "effort": "x", "scores": {},
-                        "overflow": False, "jev_error": None}
 
         class FakeAdapterRefusesCreate:
             def create(self, *_args, **_kwargs):
                 raise AssertionError("a rejected auto route must never create a Hermes task")
 
         service = kanban_adapter.QueueService(
-            catalog=catalog, adapter=FakeAdapterRefusesCreate(), router=FakeRouter(),
-            flash_up=lambda: True,
+            catalog=catalog, adapter=FakeAdapterRefusesCreate(),
         )
         turn = {"body": "@queue enqueue target=auto cap=read :: Shorten this", "msg_id": "m1",
                 "seat": "claude", "sponsor": "joe", "seq": 1, "origin_channel": "mcp", "origin_actor": "claude"}

@@ -1,84 +1,20 @@
 # -*- coding: utf-8 -*-
-"""jev_deal_read.py -- read what the record actually says about a live deal.
+"""Read recorded deal movement, the next actor, and the meaning of silence.
 
-WHAT THIS ANSWERS, AND WHAT IT REFUSES TO ANSWER. Joe asked for deal close
-likelihood. Before writing a line of it this module's author measured what the
-record layer holds per live deal, and the measurement changed the build:
-
-    live deals ................................................. 74
-    free-text evidence under 200 characters .................... 67
-    free-text evidence over 200 characters ...................... 7
-    deals carrying a document set ............................... 1
-    deals carrying key dates .................................... 1
-    closed deals over the same floor ............................ 2 of 99
-
-A likelihood for the 67 would be the model reading a client's name and a phase
-label and inventing the rest, and it would look exactly as confident as the
-seven real ones. So this module GATES ON EVIDENCE: a deal under the floor is
-reported as unanswerable and no question is asked about it. The thin book is
-the finding, not a thing to paper over.
-
-AND IT CANNOT BE VALIDATED AGAINST OUTCOMES. There are 99 closed deals carrying
-a real won or lost result, which is exactly the held-out slice this work owes.
-Two of them clear the same floor, and BOTH WERE WON -- there is not one losing
-deal on record with enough written down to learn a loss from. Six carry any free
-text at all. The rest hold a name, a type and a lane, so the only honest thing
-derivable from them is a base rate per deal type, which is arithmetic and
-belongs in SQL. No number this module returns has been checked against a known
-outcome, and none may be described as predictive until it has.
-
-A COUNT THAT LOOKED LIKE EVIDENCE AND WAS NOT: the first pass here said six
-closed deals carried evidence, because the length of an EMPTY legacy activity
-array -- the two characters of "[]" -- was being summed into every row. Six was
-the count of rows with any free text; the count that matters is two.
-
-IT IS A LIBRARY AND MUST STAY ONE. No shebang, no main guard -- either makes a
-.py file a registered script entrypoint in the sealed source inventory, moves
-the frontier and owes a forward-only registry successor. The detector is a
-regex over the whole file and does not know what a docstring is, so the
-construct is described and never spelled. Callers are entrypoints that already
-exist; generators/build-deal-room.py is the one this ships wired to.
-
-THE THREE QUESTIONS, one of each shape, asked in ONE request because they are
-independent judgments over the same state:
-
-  movement       Score  -- how far the recorded evidence shows the transaction
-                          has moved toward a signature, on five rungs that each
-                          describe a concrete recorded situation.
-  waiting_on     Choice -- who or what the next step is waiting on, with an
-                          explicit option for "the record does not say".
-  silence_is_bad Noul   -- whether the measured days of silence are a sign of
-                          trouble GIVEN what the deal was waiting on.
-
-The Noul is deliberately not "has this deal been quiet". Quiet is a date
-subtraction and code does it below, exactly and for free; asking a model to
-detect a condition code already knows duplicates the deterministic pass and
-teaches nothing. What code cannot do is rule on whether a particular silence
-MATTERS, and that is the question asked.
-
-DEGRADING IS PART OF THE CONTRACT. No credential, no network, a refused
-request: read_deals returns bundles with `judged=False` and a reason, and the
-Deal Room renders exactly as it did before this module existed.
+The generated Deal Room calls this library. Thin evidence produces no model
+request. Each eligible deal sends its three independent questions in one SDK
+call, and SDK failures leave the deal visible without advice.
 """
 import datetime
 import json
-import os
-import sys
+from contextlib import nullcontext
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if REPO not in sys.path:
-    sys.path.insert(0, REPO)
+from typesafe_sdk import Choice, Noul, Score, TypeSafeClient, TypeSafeError
 
-from ops import typesafe_client as ts  # noqa: E402
-
-# MEASURED, not chosen: 67 of 74 live deals sit under this, and the probe in
-# ops/judgment-operational-selftest.py shows what the answers look like below
-# it. Raising it narrows the book further; lowering it starts inventing.
+# Thin records remain visible without model advice.
 EVIDENCE_FLOOR_CHARS = 200
 
-# The state guard in typesafe_client is per request. One deal's bundle is well
-# under it, but a pathological carr_status could approach it, so each free-text
-# part is clipped here rather than discovered at the boundary.
+# Keep the deal evidence focused and bounded.
 CLIP = 3000
 
 # The exporter role reads VIEWS, not tables -- `permission denied for table
@@ -345,38 +281,38 @@ WAITING_OPTIONS = {
 }
 
 
-def questions(bundle):
+def questions():
     """The three judgments, one of each shape, over one deal's state."""
     return {
-        "movement": ts.score(
-            "Read only what `deal` records. How far has this commercial real "
+        "movement": Score(
+            instructions="Read only what `deal` records. How far has this commercial real "
             "estate transaction actually moved toward a signed lease or "
             "purchase agreement? Judge from what the record shows has "
             "happened, not from the `deal.recorded_phase` label, which is "
             "maintained by hand and can lag.",
-            MOVEMENT_LEVELS,
+            criteria=MOVEMENT_LEVELS,
         ),
-        "waiting_on": ts.choice(
-            "Read only what `deal` records. Who or what is this transaction "
+        "waiting_on": Choice(
+            instructions="Read only what `deal` records. Who or what is this transaction "
             "waiting on for its very next step? Choose who owes the next move, "
             "not who owes the most work overall.",
-            WAITING_OPTIONS,
+            criteria=WAITING_OPTIONS,
         ),
-        "silence_is_bad": ts.noul(
-            "`deal.days_since_the_record_was_touched` days have passed with "
+        "silence_is_bad": Noul(
+            instructions="`deal.days_since_the_record_was_touched` days have passed with "
             "nothing new recorded on this transaction. Given what `deal` says "
             "it was last waiting on, is that silence a sign this transaction "
             "is in trouble?",
-            true="The wait is longer than the step described in the record "
+            criteria={"true": "The wait is longer than the step described in the record "
                  "normally takes, and nothing in the record explains the gap.",
-            false="The silence fits what the record says is being waited on: a "
+            "false": "The silence fits what the record says is being waited on: a "
                   "normal turnaround, a date still in the future, or a client "
-                  "timeline that has not arrived.",
+                  "timeline that has not arrived."},
         ),
     }
 
 
-def read_deal(bundle, *, api_key=None, timeout=20.0, opener=None):
+def read_deal(bundle, *, client=None):
     """Judge one deal, or say why it was not judged. Never raises."""
     if not bundle["has_evidence"]:
         return dict(bundle, judged=False, reason=(
@@ -387,24 +323,20 @@ def read_deal(bundle, *, api_key=None, timeout=20.0, opener=None):
     # fault in this file, and the first version caught it alongside the network
     # and reported "the judgment did not run: 'client'" -- a programming error
     # wearing a service outage's clothes, in the one place nobody would look.
-    state, asked = state_for(bundle), questions(bundle)
+    state, asked = state_for(bundle), questions()
     try:
-        answer = _semantic().ask(state, asked, caller="jev_deal_read", version="vendor-v1", client=ts, timeout=timeout, api_key=api_key,
-                        opener=opener, work_class="app_runtime")
-    except Exception as exc:  # the room must build whatever the service does
+        with nullcontext(client) if client is not None else TypeSafeClient(model="jev-latest") as sdk:
+            response = sdk.system_one(state=state, questions=asked)
+    except TypeSafeError as exc:
         return dict(bundle, judged=False, reason=f"the judgment did not run: {exc}")
-    answers = answer.get("answers") or {}
-    try:
-        movement = answers["movement"]["score"]
-        waiting = answers["waiting_on"]["choice"]
-        silence = answers["silence_is_bad"]["noul"]
-    except (KeyError, TypeError) as exc:
-        return dict(bundle, judged=False,
-                    reason=f"the answer did not carry the expected keys: {exc}")
+    answers = response.answers
+    movement = answers["movement"].score
+    waiting = answers["waiting_on"].choice
+    silence = answers["silence_is_bad"].noul
     return dict(
         bundle, judged=True, reason=None,
         movement=movement,
-        movement_confidence=answers["movement"].get("confidence"),
+        movement_confidence=answers["movement"].confidence,
         # THE LEVELS ARE NUMBERED FROM ZERO, verified against a live legend on
         # 2026-09-18, not assumed: a five-rung score returns 0.0 through 4.0
         # and its probabilities are keyed "0".."4". Subtracting one here -- the
@@ -415,12 +347,12 @@ def read_deal(bundle, *, api_key=None, timeout=20.0, opener=None):
         movement_rung=int(round(movement)) + 1,
         movement_rungs=len(MOVEMENT_LEVELS),
         waiting_on=waiting,
-        waiting_on_confidence=answers["waiting_on"].get("confidence"),
+        waiting_on_confidence=answers["waiting_on"].confidence,
         silence_is_bad=silence,
     )
 
 
-def read_deals(*, conn=None, api_key=None, timeout=20.0, limit=None):
+def read_deals(*, conn=None, limit=None):
     """Every live deal, judged where there is evidence and marked where not.
 
     The caller gets one list and can render it without knowing whether the
@@ -430,10 +362,10 @@ def read_deals(*, conn=None, api_key=None, timeout=20.0, limit=None):
     try:
         found = bundles(conn=conn)
     except Exception as exc:
-        raise ts.TypeSafeError(f"could not read the deal record: {exc}") from None
+        raise RuntimeError(f"could not read the deal record: {exc}") from None
     if limit:
         found = found[:limit]
-    return [read_deal(b, api_key=api_key, timeout=timeout) for b in found]
+    return [read_deal(b) for b in found]
 
 
 def summarise(results):
@@ -458,11 +390,3 @@ def _tally(rows, field):
 
 def as_json(results):
     return json.dumps(results, indent=2, sort_keys=True, default=str)
-
-
-def _semantic():
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("jev_semantic", os.path.join(REPO, "ops", "jev_semantic.py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module

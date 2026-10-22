@@ -2,7 +2,7 @@
 # doctrine: rule-delivery-load-layers
 """rule-boot-gate.py — no tool runs until this context has read the rules.
 
-Joe asked for 100% recall on relevant rules; Jev chose this design (p=1.00).
+Require the current standing-rule digest before ordinary tool actions.
 Every session and every subagent must fetch every page of the gated rule boot
 (standing-context `detail: "boot"`, served live from the store) before any
 other tool call. hooks/gate-integrity.py arms the gate at SessionStart

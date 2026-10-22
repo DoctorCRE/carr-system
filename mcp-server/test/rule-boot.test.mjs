@@ -13,6 +13,9 @@ const rows = [
 test("digest is deterministic and changes for every visible rule amendment", async () => {
   const boot = await ruleBootPage(rows, "joe");
   assert.deepEqual(await ruleBootPage([...rows].reverse(), "joe"), boot);
+  assert.equal((await ruleBootPage([rows[0]], "joe")).digest,
+    "sha256:e773f997df1e228b99e779d8554de745d23003f85bfb2e2066d270c4e17e8b1c",
+    "the existing boot digest stays stable when its hashing utility moves");
   for (const index of [0, 1]) {
     const amended = rows.map((r, i) => i === index ? { ...r, statement: r.statement + " Amendment." } : r);
     assert.notEqual((await ruleBootPage(amended, "joe")).digest, boot.digest);

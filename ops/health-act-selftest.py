@@ -72,9 +72,6 @@ UPTIME = ("WARN production uptime · monitor unreachable or response invalid · 
           "owner orchestrator; fix: restore failed routes or configure/restart carr-uptime and its secrets; "
           "verify: three JSON probes, Healthchecks down/up delivery, and incident loop reconciliation; "
           "auto-clear: fresh passing monitor, no pending alerts or incident loops")
-JEV = ("no usable call recorded; recent attempt failed (state_unreadable); loop error · on breach: open/update "
-       "one deduplicated loop (owner Joe; repair the Jev outage state file); verify a usable Jev judgment; "
-       "auto-clear on that judgment")
 TAILSCALE = ("FAIL tailscale stopped · on breach: open/update one dedup loop 'Tailscale down on this Mac' · "
              "owner orchestrator · fix: launchctl kickstart gui/$(id -u)/com.carr.tailscale-up · verify: "
              "Tailscale status --json reports Running · auto-clear: the next health run reads a running node")
@@ -172,13 +169,13 @@ def world(lib):
     """Prior state: a reader-filed seat loop (twice: a real duplicate), loop
     #665, and two loops this consumer filed for rows that are now green."""
     green_claude = lib.breach_from_finding(finding("tailscale", TAILSCALE, "local-node"))
-    green_joe = lib.breach_from_finding(finding("jev_live_outage", JEV))
+    green_joe = lib.breach_from_finding(finding("ai_seat_health", SEAT, "grok-retired-seat"))
     return FakeDoor([
         {"number": 713, "body": SEAT.split(" · ", 1)[1]},
         {"number": 738, "body": SEAT.split(" · ", 1)[1]},
         {"number": 665, "body": "2026-09-27: helper INSTALLED on the Studio", "owner": "joe"},
         {"number": 790, "body": f"{green_claude.tag}{green_claude.digest}] FAIL tailscale stopped\nrest"},
-        {"number": 791, "body": f"{green_joe.tag}{green_joe.digest}] WARN jev\nrest", "owner": "joe"},
+        {"number": 791, "body": f"{green_joe.tag}{green_joe.digest}] FAIL grok retired seat\nrest", "owner": "joe"},
     ])
 
 
@@ -360,8 +357,6 @@ class HealthActTests(unittest.TestCase):
              "restore failed routes or configure/restart carr-uptime and its secrets",
              "three JSON probes, Healthchecks down/up delivery, and incident loop reconciliation",
              "fresh passing monitor, no pending alerts or incident loops", "health-breach:production_uptime"),
-            ("jev_live_outage", JEV, "Joe", "repair the Jev outage state file", "a usable Jev judgment",
-             "on that judgment", "health-breach:jev_live_outage"),
             ("branch_janitor", JANITOR, "orchestrator", "run hooks/worktree-self-plumb.py --reap --fleet",
              "out/orch/branch-janitor-report.json", "after a complete scheduled run",
              "health-breach:branch_janitor"),
@@ -384,7 +379,7 @@ class HealthActTests(unittest.TestCase):
         """A phrase that drifted from its reader's add-loop body would make the
         consumer file a duplicate beside the reader's loop."""
         lib = load()
-        sources = {"production_uptime": "tools/uptime_health.py", "jev_live_outage": "tools/jev_outage_health.py",
+        sources = {"production_uptime": "tools/uptime_health.py",
                    "grok_session": "ops/grok_session.py"}
         self.assertEqual(set(sources), set(lib.READER_LOOP_PHRASES))
         for key, phrases in lib.READER_LOOP_PHRASES.items():

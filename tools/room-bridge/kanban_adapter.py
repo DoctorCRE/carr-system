@@ -389,55 +389,23 @@ def bounded_status(payload: object, *, limit: int = 50) -> dict:
 REPO = Path(__file__).resolve().parents[2]
 
 
-def _model_router():
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("jev_model_route", REPO / "ops" / "jev_model_route.py")
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
-def _flash_is_up() -> bool:
-    import flash_wire
-    if flash_wire.flashlib.is_switched_off():
-        return False
-    return flash_wire.is_up()
 
 
 class QueueService:
     def __init__(self, *, catalog: dict | None = None, adapter: KanbanAdapter | None = None,
-                 router=None, flash_up=None):
+                 ):
         self.catalog = catalog or load_catalog()
         self.adapter = adapter or KanbanAdapter()
-        self._router = router
-        self._flash_up = flash_up
 
     def route_auto(self, command: dict) -> dict:
-        """Pick the target for a target=auto task. Jev routes it through the Model Room policy
-        (ops/config/model-routes.v1.json); code then checks that the picked target is enabled and accepts the
-        capability, and that Flash is up for a Flash route. Any miss goes to the policy's fallback target, with
-        the reason recorded."""
-        router = self._router or _model_router()
-        policy = router.load_policy()
-        up = (self._flash_up or _flash_is_up)()
-        row = router.decide(command["title"], command.get("body") or "", flash_free=up, policy=policy)
-        targets = policy.get("queue_targets", {})
-        alias = targets.get(row["route"])
-        entry = self.catalog["targets"].get(alias) if alias else None
-        reason = None
-        if not isinstance(entry, dict) or not entry.get("enabled"):
-            reason = "target_unavailable"
-        elif command["cap"] not in entry.get("capabilities", []):
-            reason = "capability_target_refused"
-        elif row.get("overflow"):
-            reason = "flash_busy_or_down"
-        elif alias in {"flash", "flash-model"}:
-            reason = "flash_explicit_only"
-        if reason:
-            alias = targets.get("fallback")
-        return {"target": alias, "route": row["route"], "model": row.get("model"), "effort": row.get("effort"),
-                "scores": row.get("scores"), "fallback_reason": reason, "jev_error": row.get("jev_error")}
+        """Automatic work uses the configured subscription desk."""
+        policy = json.loads((REPO / "ops/config/model-routes.v1.json").read_text())
+        alias = policy["queue_targets"]["fallback"]
+        entry = self.catalog["targets"].get(alias) or {}
+        return {"target": alias, "route": "direct", "model": entry.get("effective_model"),
+                "effort": None, "fallback_reason": None}
 
     def handle(self, turn: dict, *, room: str) -> dict:
         parsed = queue_grammar.parse({**turn, "room": room}, self.catalog)

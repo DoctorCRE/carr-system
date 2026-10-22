@@ -85,22 +85,12 @@ host, provider, sandbox, or law are outside CARR's control and must be reported
 accurately.
 <!-- carr-product-first-policy:end -->
 
-## Jev in reviews
-
-Decision `d57501f6-00e7-4ff5-a886-c28a5d5501d6` records Joe's direction:
-Jev is authorized to participate in every kind of review. Use it for bounded
-review judgments wherever it helps, including code, CI, pull requests, product
-behavior, and CARR records. Do not ask for a separate Jev-specific approval or
-exclude a review merely because its category is not prelisted. Preserve source
-evidence, required checks, and any distinct reviewer-of-record requirement.
-
 ## Model Room before another model
 
 <!-- carr-model-room-route:start -->
 Decision `284028a5-8295-498a-af1e-6cae5c6034e7` records Joe's route:
 call Claude, Grok, and other external models through the Model Room. Before
-attempting a direct model CLI or API call, pull this rule into the preflight
-judgment with Jev and route the work to the named Model Room desk. Verify the
+attempting a direct model CLI or API call, route the work to the named Model Room desk. Verify the
 desk's actual model and result. Choose every subagent by the cheapest tier
 still qualified to do the task correctly, name it on the call, and never
 silently delegate a portion to another model (Joe, 2026-09-23: the earlier

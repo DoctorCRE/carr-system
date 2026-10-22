@@ -1020,8 +1020,6 @@ def _execute_deterministic(workflow: dict[str, Any], payload: dict[str, Any],
     env = {key: os.environ[key] for key in ("HOME", "PATH", "TMPDIR", "LANG", "LC_ALL")
            if os.environ.get(key)}
     env.update({"CARR_JOB_PAYLOAD": json.dumps(payload, sort_keys=True), "CARR_CONTROL_PLANE_MODE": mode})
-    if workflow.get("key"):
-        env["CARR_JEV_JOB"] = workflow["key"]
     if workflow.get("key") == "calendar-fetch-daily":
         env["CARR_REPO"] = str(REPO)
         env["CARR_CALENDAR_OUTPUT_ROOT"] = str(

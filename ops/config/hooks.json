@@ -77,16 +77,6 @@
       ]
     },
     {
-      "matcher": "Agent",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/executor-tier-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/executor-tier-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/executor-tier-gate.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/executor-tier-gate.py",
-          "timeout": 10
-        }
-      ]
-    },
-    {
       "matcher": "Bash|mcp__claude-in-chrome__.*",
       "hooks": [
         {

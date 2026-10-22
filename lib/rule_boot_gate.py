@@ -154,7 +154,7 @@ TOOLLESS_AGENT_TYPES = frozenset({"statusline-setup"})
 # has done the read; demanding the whole JSON made sessions fetch every page
 # twice. The cost, accepted on purpose: a filtered page has no length evidence,
 # and a filter that keeps the digest and drops the text still counts.
-# KNOWN RESIDUALS (Jev, 2026-09-27, kind rule-boot-gate-fetch-recognition-
+# KNOWN RESIDUALS (2026-09-27, kind rule-boot-gate-fetch-recognition-
 # loopholes; top gap edited_worktree_run_sh 0.95), kept on purpose: the gate
 # trusts the run.sh it recognises, and a session can edit a worktree's run.sh
 # (or what it calls: tools/call-verb.py, tools/db-tap.py, mcp-server/local-verb.mjs)

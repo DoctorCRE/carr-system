@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The flash-local desk and target=auto routing (2026-09-24). No Flash server, no Jev, no Hermes: the wire gets a
-fake opener, the service a fake router and a fake adapter, the registry a temporary file."""
+"""The flash-local desk and target=auto routing (2026-09-24). No Flash server, no model classifier, no Hermes: the wire gets a
+fake opener, the service a fake adapter, the registry a temporary file."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def check(label, fn):
         print(f"  ok    {label}")
 
 
-CATALOG = {
+CATALOG: dict = {
     "v": 1,
     "targets": {
         "flash": {"enabled": True, "adapter": "desk", "assignee": "desk:flash-model", "desk": "flash-model",
@@ -55,6 +55,12 @@ CATALOG = {
 }
 POLICY = {"queue_targets": {"direct": "flash", "escalate": "sol-fixer", "code": "sol-fixer",
                             "script": "sol-fixer", "fallback": "sol-fixer"}}
+
+
+AUTO_TARGET = json.loads((HERE.parents[1] / "ops/config/model-routes.v1.json").read_text())["queue_targets"]["fallback"]
+CATALOG["targets"][AUTO_TARGET] = {
+    **CATALOG["targets"]["sol-fixer"], "desk": "luna-desk", "assignee": "desk:luna-desk",
+    "effective_model": "luna"}
 
 
 def turn(body, *, msg_id="22222222-2222-4222-8222-222222222222"):
@@ -132,19 +138,6 @@ def test_grammar_accepts_auto_and_keeps_human_only_on_joes_lane():
     assert refused.kind == "rejected" and refused.code == "capability_human_lane_required", refused
 
 
-class FakeRouter:
-    def __init__(self, route, *, overflow=False):
-        self.route, self.overflow, self.calls = route, overflow, []
-
-    def load_policy(self):
-        return POLICY
-
-    def decide(self, task, context="", *, flash_free=True, policy=None):
-        self.calls.append((task, context, flash_free))
-        return {"route": self.route, "model": "flash" if self.route == "direct" else "sol", "effort": "x",
-                "scores": {"direct": 0.9}, "overflow": self.overflow and not flash_free, "jev_error": None}
-
-
 class FakeAdapter:
     def __init__(self):
         self.creates = []
@@ -154,34 +147,23 @@ class FakeAdapter:
         return {"task_id": "t_flash0001", "created": True}
 
 
-def service(route, *, flash_up=True, overflow=False):
+def service():
     adapter = FakeAdapter()
-    router = FakeRouter(route, overflow=overflow)
-    svc = kanban_adapter.QueueService(catalog=CATALOG, adapter=adapter, router=router, flash_up=lambda: flash_up)
-    return svc, adapter, router
+    return kanban_adapter.QueueService(catalog=CATALOG, adapter=adapter), adapter
 
 
 def test_auto_direct_task_goes_to_flash_with_the_route_on_the_receipt():
-    svc, adapter, router = service("direct")
+    svc, adapter = service()
     out = svc.handle(turn("@queue enqueue target=auto cap=read :: Shorten this\nWe are reaching out."), room="p")
     accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "sol-fixer" and accepted["route"]["route"] == "direct", accepted
-    assert adapter.creates[0][0]["target"] == "sol-fixer"
-    assert router.calls[0][0] == "Shorten this" and "reaching out" in router.calls[0][1]
+    assert accepted["target"] == AUTO_TARGET and accepted["route"]["route"] == "direct", accepted
+    assert adapter.creates[0][0]["target"] == AUTO_TARGET
 
 
 def test_auto_judgment_task_goes_to_sol():
-    svc, adapter, _ = service("escalate")
+    svc, adapter = service()
     out = svc.handle(turn("@queue enqueue target=auto cap=read :: Can the tenant sublet?"), room="p")
-    assert out["receipt"]["queue_accepted"]["target"] == "sol-fixer"
-
-
-def test_auto_flash_route_falls_back_when_flash_is_down():
-    svc, adapter, _ = service("direct", flash_up=False, overflow=True)
-    out = svc.handle(turn("@queue enqueue target=auto cap=read :: Shorten this"), room="p")
-    accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "sol-fixer", accepted
-    assert accepted["route"]["fallback_reason"] == "flash_busy_or_down", accepted
+    assert out["receipt"]["queue_accepted"]["target"] == AUTO_TARGET
 
 
 def test_flash_desk_off_switch_overrides_a_live_server_and_installed_plist():
@@ -193,32 +175,23 @@ def test_flash_desk_off_switch_overrides_a_live_server_and_installed_plist():
         plist.parent.mkdir(parents=True)
         plist.touch()
         (state / "flash.off").touch()
-        router = FakeRouter("direct", overflow=True)
         adapter = FakeAdapter()
-        service = kanban_adapter.QueueService(catalog=CATALOG, adapter=adapter, router=router)
+        service = kanban_adapter.QueueService(catalog=CATALOG, adapter=adapter)
         with patch.dict(os.environ, {"CARR_FLASH_STATE_DIR": str(state)}), \
              patch.object(kanban_adapter.Path, "home", return_value=home), \
              patch.object(flash_wire, "is_up", return_value=True):
             out = service.handle(turn("@queue enqueue target=auto cap=read :: Shorten this"), room="p")
     accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "sol-fixer", accepted
-    assert accepted["route"]["fallback_reason"] == "flash_busy_or_down", accepted
-
-
-def test_auto_flash_route_falls_back_when_flash_refuses_the_capability():
-    svc, adapter, _ = service("direct")
-    out = svc.handle(turn("@queue enqueue target=auto cap=repo-write :: Tidy the README"), room="p")
-    accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "sol-fixer"
-    assert accepted["route"]["fallback_reason"] == "capability_target_refused", accepted
+    assert accepted["target"] == AUTO_TARGET, accepted
+    assert accepted["route"]["fallback_reason"] is None, accepted
 
 
 def test_explicit_target_never_consults_the_router():
-    svc, adapter, router = service("direct")
+    svc, adapter = service()
     incoming = {**turn("@queue enqueue target=flash cap=read :: Shorten this"),
                 "origin_channel": "browser-human", "origin_actor": "joe"}
     svc.handle(incoming, room="p")
-    assert router.calls == [] and adapter.creates[0][0]["target"] == "flash"
+    assert adapter.creates[0][0]["target"] == "flash"
 
 
 class FakeAdapterDuplicate:
@@ -242,34 +215,13 @@ class FakeAdapterDuplicate:
         return {"task": {"id": task_id, "body": body, "status": "todo"}}
 
 
-class FlippingRouter:
-    """First call: direct (flash). Second call: escalate (sol-fixer) — Flash's own
-    liveness or Jev's decision can differ between an original target=auto send and a
-    retry that reuses the SAME idempotency key, per PR #1249's review finding 4."""
-
-    def __init__(self):
-        self.calls = 0
-
-    def load_policy(self):
-        return POLICY
-
-    def decide(self, task, context="", *, flash_free=True, policy=None):
-        self.calls += 1
-        route = "direct" if self.calls == 1 else "escalate"
-        model = "flash" if route == "direct" else "sol"
-        return {"route": route, "model": model, "effort": "x", "scores": {},
-                "overflow": False, "jev_error": None}
-
-
 def test_retried_auto_command_reports_the_existing_tasks_actual_target():
     adapter = FakeAdapterDuplicate()
-    router = FlippingRouter()
-    svc = kanban_adapter.QueueService(catalog=CATALOG, adapter=adapter, router=router,
-                                      flash_up=lambda: True)
+    svc = kanban_adapter.QueueService(catalog=CATALOG, adapter=adapter)
     incoming = turn("@queue enqueue target=auto cap=read key=retry-target :: Shorten this.")
     first = svc.handle(incoming, room="p")
     replay = svc.handle(incoming, room="p")
-    assert first["receipt"]["queue_accepted"]["target"] == "sol-fixer", first
+    assert first["receipt"]["queue_accepted"]["target"] == AUTO_TARGET, first
     assert replay["receipt"]["queue_accepted"]["status"] == "duplicate", replay
     # The retry's own route_auto call picked escalate -> sol-fixer, but the task
     # ALREADY EXISTS, on flash: the receipt must report where that existing task really
@@ -279,7 +231,7 @@ def test_retried_auto_command_reports_the_existing_tasks_actual_target():
 
 def test_real_catalog_and_policy_agree():
     catalog = kanban_adapter.load_catalog()
-    policy = kanban_adapter._model_router().load_policy()
+    policy = json.loads((HERE.parents[1] / "ops/config/model-routes.v1.json").read_text())
     for route, alias in policy["queue_targets"].items():
         if route.startswith("_"):
             continue
@@ -331,12 +283,8 @@ def test_script_inputs_with_no_data_lines_is_not_a_script_task():
     assert flash_wire.script_inputs("just a question", roots=["/nowhere"]) == (None, "just a question", None)
 
 
-def script_service(body_root, *, flash_up=True):
-    adapter = FakeAdapter()
-    router = FakeRouter("script")
-    router.load_policy = lambda: {**SCRIPT_POLICY, "script_data_roots": [body_root]}
-    svc = kanban_adapter.QueueService(catalog=CATALOG, adapter=adapter, router=router, flash_up=lambda: flash_up)
-    return svc, adapter
+def script_service(body_root):
+    return service()
 
 
 def test_auto_script_task_with_allowed_data_goes_to_flash():
@@ -345,7 +293,7 @@ def test_auto_script_task_with_allowed_data_goes_to_flash():
     out = svc.handle(turn(f"@queue enqueue target=auto cap=read :: Total column b\ndata: {root}/sales.csv"),
                      room="p")
     accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "sol-fixer" and accepted["route"]["fallback_reason"] == "flash_explicit_only", accepted
+    assert accepted["target"] == AUTO_TARGET and accepted["route"]["fallback_reason"] is None, accepted
 
 
 def test_auto_script_task_without_usable_data_goes_to_the_fallback():
@@ -353,32 +301,10 @@ def test_auto_script_task_without_usable_data_goes_to_the_fallback():
     svc, _ = script_service(root)
     out = svc.handle(turn("@queue enqueue target=auto cap=read :: Total column b"), room="p")
     accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "sol-fixer" and accepted["route"]["fallback_reason"] == "flash_explicit_only"
+    assert accepted["target"] == AUTO_TARGET and accepted["route"]["fallback_reason"] is None
     out = svc.handle(turn("@queue enqueue target=auto cap=read key=k2 :: Total b\ndata: /etc/hosts"), room="p")
     accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "sol-fixer" and accepted["route"]["fallback_reason"] == "flash_explicit_only"
-
-
-def test_auto_script_task_falls_back_when_jev_abstained():
-    root = data_root()
-    svc, _ = script_service(root)
-    decide = svc._router.decide
-    svc._router.decide = lambda *a, **k: {**decide(*a, **k), "jev_error": "JudgeUnavailable: down"}
-    out = svc.handle(turn(f"@queue enqueue target=auto cap=read :: Total column b\ndata: {root}/sales.csv"),
-                     room="p")
-    accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "sol-fixer" and accepted["route"]["fallback_reason"] == "flash_explicit_only"
-
-
-def test_auto_script_task_falls_back_when_no_score_cleared_its_cutoff():
-    # Review of #1319: Jev can abstain by answering with nothing over its cutoff, not only by being unreachable.
-    root = data_root()
-    svc, _ = script_service(root)
-    decide = svc._router.decide
-    svc._router.decide = lambda *a, **k: {**decide(*a, **k), "fallback": True}
-    out = svc.handle(turn(f"@queue enqueue target=auto cap=read :: Look at this\ndata: {root}/sales.csv"),
-                     room="p")
-    assert out["receipt"]["queue_accepted"]["route"]["fallback_reason"] == "flash_explicit_only"
+    assert accepted["target"] == AUTO_TARGET and accepted["route"]["fallback_reason"] is None
 
 
 def test_a_data_line_in_the_title_counts_on_neither_side():
@@ -386,7 +312,7 @@ def test_a_data_line_in_the_title_counts_on_neither_side():
     svc, _ = script_service(root)
     out = svc.handle(turn(f"@queue enqueue target=auto cap=read :: data: {root}/sales.csv\nTotal column b"),
                      room="p")
-    assert out["receipt"]["queue_accepted"]["route"]["fallback_reason"] == "flash_explicit_only"
+    assert out["receipt"]["queue_accepted"]["route"]["fallback_reason"] is None
     prompt = queue_dispatch.QueueDeskExecutor._prompt({
         "task_id": "t_script001", "title": f"data: {root}/sales.csv", "instructions": "Total column b",
         "meta": {"source_seq": 5, "source_msg_id": "m", "cap": "read"}})
@@ -578,11 +504,9 @@ def test_a_task_naming_both_data_and_a_project_is_refused_on_both_sides():
 
 def code_service(root, route="code"):
     adapter = FakeAdapter()
-    router = FakeRouter(route)
-    router.load_policy = lambda: {**CODE_POLICY, "code_project_roots": [root]}
     catalog = {**CATALOG, "targets": {**CATALOG["targets"], "flash": {
         **CATALOG["targets"]["flash"], "capabilities": ["read", "repo-write"]}}}
-    svc = kanban_adapter.QueueService(catalog=catalog, adapter=adapter, router=router, flash_up=lambda: True)
+    svc = kanban_adapter.QueueService(catalog=catalog, adapter=adapter)
     return svc, adapter
 
 
@@ -594,14 +518,14 @@ def test_auto_code_task_with_an_allowed_project_goes_to_flash():
     root = code_root()
     svc, adapter = code_service(root)
     accepted = svc.handle(enqueue(code_body(root)), room="p")["receipt"]["queue_accepted"]
-    assert accepted["target"] == "sol-fixer" and accepted["route"]["fallback_reason"] == "flash_explicit_only", accepted
+    assert accepted["target"] == AUTO_TARGET and accepted["route"]["fallback_reason"] is None, accepted
 
 
 def test_auto_code_task_without_a_project_falls_back():
     root = code_root()
     svc, _ = code_service(root)
     accepted = svc.handle(enqueue("Fix add."), room="p")["receipt"]["queue_accepted"]
-    assert accepted["target"] == "sol-fixer" and accepted["route"]["fallback_reason"] == "flash_explicit_only"
+    assert accepted["target"] == AUTO_TARGET and accepted["route"]["fallback_reason"] is None
 
 
 def test_auto_code_task_with_a_refused_project_or_test_falls_back():
@@ -611,8 +535,8 @@ def test_auto_code_task_with_a_refused_project_or_test_falls_back():
                               code_body(code_root()), code_body(root, test="pytest; rm -rf ~"),
                               code_body(root, test=None))):
         accepted = svc.handle(enqueue(body, key=f"r{n}"), room="p")["receipt"]["queue_accepted"]
-        assert accepted["target"] == "sol-fixer", (body, accepted)
-        assert accepted["route"]["fallback_reason"] == "flash_explicit_only", (body, accepted)
+        assert accepted["target"] == AUTO_TARGET, (body, accepted)
+        assert accepted["route"]["fallback_reason"] is None, (body, accepted)
 
 
 def test_auto_code_task_from_an_untrusted_origin_falls_back():
@@ -620,20 +544,10 @@ def test_auto_code_task_from_an_untrusted_origin_falls_back():
     root = code_root()
     svc, _ = code_service(root)
     acc = svc.handle(enqueue(code_body(root), channel="mcp", actor="claude"), room="p")["receipt"]["queue_accepted"]
-    assert acc["target"] == "sol-fixer" and acc["route"]["fallback_reason"] == "flash_explicit_only", acc
+    assert acc["target"] == AUTO_TARGET and acc["route"]["fallback_reason"] is None, acc
     # an unknown browser actor is refused even earlier, by the grammar's origin check
     rej = svc.handle(enqueue(code_body(root), channel="browser-human", actor="mallory"), room="p")["receipt"]
     assert "queue_rejected" in rej and rej["queue_rejected"]["code"] == "origin_untrusted", rej
-
-
-def test_auto_code_task_falls_back_when_jev_abstained():
-    root = code_root()
-    for flag in ({"jev_error": "JudgeUnavailable: down"}, {"fallback": True}):
-        svc, _ = code_service(root)
-        decide = svc._router.decide
-        svc._router.decide = lambda *a, _d=decide, _f=flag, **k: {**_d(*a, **k), **_f}
-        accepted = svc.handle(enqueue(code_body(root)), room="p")["receipt"]["queue_accepted"]
-        assert accepted["target"] == "sol-fixer" and accepted["route"]["fallback_reason"] == "flash_explicit_only"
 
 
 def code_prompt(body, title="Fix add", *, origin="browser-human:joe", cap="repo-write"):
@@ -649,7 +563,7 @@ def test_a_project_line_in_the_title_counts_on_neither_side():
     svc, _ = code_service(root)
     out = svc.handle(code_turn(f"@queue enqueue target=auto cap=repo-write :: project: {root}/app\n"
                                "test: python3 tests/check.py\nFix add"), room="p")
-    assert out["receipt"]["queue_accepted"]["route"]["fallback_reason"] == "flash_explicit_only", out
+    assert out["receipt"]["queue_accepted"]["route"]["fallback_reason"] is None, out
     prompt = code_prompt("test: python3 tests/check.py\nFix add", title=f"project: {root}/app")
     body = flash_wire.task_parts(prompt)[2]
     assert body == "test: python3 tests/check.py\nFix add", body
@@ -696,7 +610,7 @@ args = sys.argv[1:]
 cwd = args[args.index("--cwd") + 1]
 assert args[args.index("--escalate") + 1] == "suggest", args
 assert args[args.index("--test") + 1] == "python3 tests/check.py", args
-assert args[args.index("--sandbox") + 1] == "on" and "--no-learn" in args, args
+assert args[args.index("--sandbox") + 1] == "on", args
 mode = os.environ.get("FAKE_FLASH_MODE", "fix")
 if mode == "swapgit":
     # model code that escaped would swap the worktree's .git pointer for a directory whose config runs a hook
@@ -837,7 +751,7 @@ def test_a_code_run_timeout_kills_the_whole_process_group():
 
 
 def test_the_real_policy_names_code_project_roots_and_routes_code_to_luna():
-    policy = kanban_adapter._model_router().load_policy()
+    policy = json.loads((HERE.parents[1] / "ops/config/model-routes.v1.json").read_text())
     assert policy["queue_targets"]["code"] == "luna", policy["queue_targets"]
     assert isinstance(policy.get("code_project_roots"), list) and policy["code_project_roots"]
     assert "repo-write" in kanban_adapter.load_catalog()["targets"]["flash"]["capabilities"]
@@ -949,8 +863,6 @@ def main() -> int:
     check("grammar accepts auto, keeps human-only on Joe's lane", test_grammar_accepts_auto_and_keeps_human_only_on_joes_lane)
     check("auto direct task goes to flash", test_auto_direct_task_goes_to_flash_with_the_route_on_the_receipt)
     check("auto judgment task goes to sol", test_auto_judgment_task_goes_to_sol)
-    check("auto flash route falls back when flash is down", test_auto_flash_route_falls_back_when_flash_is_down)
-    check("auto flash route falls back on capability", test_auto_flash_route_falls_back_when_flash_refuses_the_capability)
     check("explicit target never consults the router", test_explicit_target_never_consults_the_router)
     check("retried auto command reports the existing task's actual target",
           test_retried_auto_command_reports_the_existing_tasks_actual_target)

@@ -2,7 +2,7 @@
 """Answer a large-data question through Flash's supervised script protocol.
 
 The command copies allowed inputs into a temporary directory, lets Flash write
-bounded Python scripts, and uses Jev to inspect the results. Deterministic code
+bounded Python scripts. Deterministic code
 decides whether to return an answer or hand the task to the configured next
 desk. When Flash is switched off, the command reads no input and returns that
 handoff immediately.
@@ -15,6 +15,7 @@ Completed and switched-off attempts append a row to out/flash-script-runs.jsonl.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import importlib.util
 import json
 import os
@@ -45,7 +46,6 @@ MAX_TURNS = MAX_RUNS + 2
 # Revision 3 capped only compute turns; the uncapped turns that remained ran to 24,576 tokens (428 s once). Every
 # script-writing turn is capped here.
 COMPUTE_TOKENS = 12288
-JEV_TIMEOUT = 60
 
 
 def append_run(row):
@@ -306,78 +306,17 @@ def count_gap(answer, outs):
     return (total, got) if total else None
 
 
-# ---------- Jev (fails open: no judgment means no steer, never a crash) ----------
 
-class Jev:
-    def __init__(self, judge=None, client=None):
-        self.judge, self.client, self.errors = judge, client, 0
-
-    def _ask(self, subject, questions):
-        try:
-            if self.judge is None:
-                self.judge = _lib("jev_judge")
-            client = self.client or self.judge._client()
-            qs = {k: client.noul(text, true=t, false=f) for k, (text, t, f) in questions.items()}
-            a = _lib("jev_semantic").ask(subject, qs, caller="flash-script", version="step-v1", transport=self.judge.judge, timeout=JEV_TIMEOUT, client=client)["answers"]
-            return {k: round(float(a[k]["noul"]), 2) for k in questions}
-        except Exception:
-            self.errors += 1
-            return {}
-
-    def pre(self, q, prev):
-        return self._ask({"question": q[:6000], "file_preview": prev[:4000]}, {
-            "multi_doc": ("Answering needs facts combined across many separate documents or files, so a plan of "
-                          "several steps is needed before any counting can happen.",
-                          "It needs facts combined across many documents in several steps.",
-                          "A single pass over one table or file answers it."),
-            "semantic": ("The question asks to sort records into categories that are NOT written anywhere in the "
-                         "data as a field value or fixed word; each record's category must be inferred from "
-                         "descriptive prose using world knowledge (for example knowing that an endodontist is a "
-                         "dentist). Messy formatting, varied number formats or fields in different orders do NOT "
-                         "count: those are pattern matching.",
-                         "Categories must be inferred from prose with world knowledge.",
-                         "The needed values are written in the data, even if formatted inconsistently.")})
-
-    def flags(self, q, out, prev):
-        return self._ask({"question": q[:6000], "data_files": prev[:3000], "script_output": out[-4000:]}, {
-            "misparsed": ("The output shows records whose printed text plainly contains a value that the script "
-                          "reports as missing, unparsed or wrong, i.e. the parsing rule misses a format.",
-                          "Printed records contradict what the script says it parsed.",
-                          "Nothing printed contradicts the parsing."),
-            "exploring": ("The output is an exploration step (sample lines, a table of formats or value "
-                          "frequencies, file sizes) rather than a computed answer to the question.",
-                          "This output explores the data rather than answering the question.",
-                          "This output reports a computed answer to the question."),
-            "answer_ready": ("The output prints a final result in the form the question asks for (the number, the "
-                             "set of counts, or the list), not only samples, formats or intermediate figures.",
-                             "A final result in the asked-for form is printed.",
-                             "Only samples, formats or intermediate figures are printed.")})
-
-    def covers_all(self, q, answer, total):
-        # Code computes the count gap. Only category exhaustiveness is semantic.
-        try:
-            categories = list(json.loads(answer))[:40]
-        except (ValueError, TypeError):
-            return 0.0
-        return self._ask({"question": q[:6000], "category_names": categories}, {
-            "covers_all": ("Does every record described by the question belong to exactly one of these named categories?",
-                           "The categories cover every record exactly once.",
-                           "Some records fall outside these categories or can belong to several.")
-        }).get("covers_all", 0.0)
 
 
 # ---------- the loop ----------
 
-def solve(question, work, names, *, chat_fn=chat, jev=None, runner=run_code, say=lambda m: None):
+def solve(question, work, names, *, chat_fn=chat, runner=run_code, say=lambda m: None):
     """Answer `question` over the staged files in `work`. Returns (answer or None, turn log)."""
     checks = _lib("flash_answer_checks")
-    jev = jev or Jev()
     prev = preview(work, names)
     first = f"Question: {question}\n\nFiles:\n{prev}"
     log = []
-    pre = jev.pre(question, prev)
-    on = []  # unvalidated semantic hints are logged for review only
-    log.append({"jev_pre": pre, "hints": on})
     coverage = COVERAGE
     msgs = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": first}]
     seen, outs, scripts = set(), [], []
@@ -436,8 +375,6 @@ def solve(question, work, names, *, chat_fn=chat, jev=None, runner=run_code, say
             log.append({"turn": n, "think_s": think, "tokens": used, "run_s": secs, "out": out[:600]})
             outs.append(out)
             runs += 1
-            flags = jev.flags(question, out, prev)
-            log[-1]["jev_flags"] = flags  # review advice, no calibrated automatic control
             note = ""
             left = MAX_RUNS - runs
             nxt = ("That was your last script. Reply now with FINAL: <answer>." if left <= 0 else
@@ -477,8 +414,7 @@ def solve(question, work, names, *, chat_fn=chat, jev=None, runner=run_code, say
             gap = count_gap(answer, outs) if not gap_checked else None
             if gap:
                 gap_checked = True
-                cov = jev.covers_all(question, answer, gap[0])
-                log.append({"turn": n, "count_gap": gap, "covers_all": cov, "candidate": answer[:500]})
+                log.append({"turn": n, "count_gap": gap, "candidate": answer[:500]})
                 log[-1]["review_required"] = True
             support = checks.answer_support(answer, outs)
             log.append({"turn": n, "think_s": think, "tokens": used, "final": answer[:3000], "support": support})
@@ -496,12 +432,11 @@ def main(argv):
     ap.add_argument("--json", action="store_true", help="print the result row as JSON")
     a = ap.parse_args(argv)
     if flashlib.is_switched_off():
-        route = _lib("jev_model_route")
-        policy = route.load_policy()
+        policy = json.loads(Path(REPO, "ops/config/model-routes.v1.json").read_text())
         row = {"at": datetime.now(timezone.utc).isoformat(), "question": a.question[:500],
                "paths": [os.path.abspath(p) for p in a.paths], "answer": "", "support": None,
                "handoff": flashlib.OFF_REASON, "handoff_desk": policy["routes"]["script"]["then"]["desk"],
-               "turns": 0, "jev_errors": 0, "secs": 0, "log": [], "detail": flashlib.OFF_REASON}
+               "turns": 0, "secs": 0, "log": [], "detail": flashlib.OFF_REASON}
         append_run(row)
         if a.json:
             print(json.dumps({k: v for k, v in row.items() if k != "log"}))
@@ -519,7 +454,7 @@ def main(argv):
     if flash_port() is None:
         print(f"flash-script: CARR_FLASH_URL must be a loopback address, not {FLASH_URL}", file=sys.stderr)
         return 2
-    route = _lib("jev_model_route")
+    policy = json.loads(Path(REPO, "ops/config/model-routes.v1.json").read_text())
     t = time.monotonic()
     work = tempfile.mkdtemp(prefix="flash-script-")
     try:
@@ -528,18 +463,28 @@ def main(argv):
         except ValueError as exc:
             print(f"flash-script: {exc}", file=sys.stderr)
             return 2
-        jev = Jev()
-        answer, log = solve(a.question, work, names, jev=jev,
+        answer, log = solve(a.question, work, names,
                             say=(lambda m: None) if a.json else (lambda m: print(m, file=sys.stderr, flush=True)))
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    reason = route.handoff_reason(answer, log)
-    policy = route.load_policy()
+    reason = None
+    if not answer:
+        reason = "no_answer"
+    elif any(e.get("support") == "invented" for e in log):
+        reason = "invented"
+    else:
+        empty_run = 0
+        for entry in log:
+            empty_run = empty_run + 1 if entry.get("empty") and entry.get("finish") == "length" else 0
+            if empty_run >= 2:
+                reason = "runaway"
+                break
+
     row = {"at": datetime.now(timezone.utc).isoformat(), "question": a.question[:500],
            "paths": [os.path.abspath(p) for p in a.paths], "answer": (answer or "")[:3000],
            "support": next((e["support"] for e in reversed(log) if "support" in e), None),
            "handoff": reason, "handoff_desk": policy["routes"]["script"]["then"]["desk"] if reason else None,
-           "turns": sum(1 for e in log if "turn" in e), "jev_errors": jev.errors,
+           "turns": sum(1 for e in log if "turn" in e),
            "secs": round(time.monotonic() - t, 1), "log": log}
     append_run(row)
     if a.json:  # the full answer: a long list is the answer, and the log row keeps only its first 3,000 characters

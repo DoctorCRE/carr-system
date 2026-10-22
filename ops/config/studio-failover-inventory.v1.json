@@ -674,10 +674,6 @@
       "macbook_present": true
     },
     {
-      "path": "~/.config/carr/typesafe.env",
-      "macbook_present": true
-    },
-    {
       "path": "~/.config/carr/wr95-review-tokens.env",
       "macbook_present": true
     },
@@ -1420,24 +1416,8 @@
       "macbook_present": true
     },
     {
-      "path": "~/carr-system/out/jev-calls.jsonl.daily-cap.sqlite3",
-      "macbook_present": true
-    },
-    {
-      "path": "~/carr-system/out/jev-judge-cache.sqlite3",
-      "macbook_present": true
-    },
-    {
       "path": "~/carr-system/out/run-spool.sqlite3",
       "macbook_present": true
-    },
-    {
-      "path": "~/carr-system/out/wt-dot-job3/.git-recovery.qiybFN/repo/out/jev-judge-cache.sqlite3",
-      "macbook_present": false
-    },
-    {
-      "path": "~/carr-system/out/wt-dot-job3/out/jev-judge-cache.sqlite3",
-      "macbook_present": false
     }
   ],
   "state_search_roots": [

@@ -34,11 +34,7 @@
 //     The FIFTH branch, HUMAN_WANTS_CHOICE against the partner's own last
 //     transcript turn ("what are my options", "ask me", …), is NOT ported:
 //     the server never receives the session transcript, so there is no data
-//     to check it against. This is a real, reported behavior change — see
-//     the PR description's Jev architecture_or_design receipt for the
-//     alternatives considered and why fail-closed (a few more calls refused
-//     with a clear message, rather than silently admitting one a transcript
-//     might have exempted) was the one Jev picked.
+//     to check it against. Calls without that transcript evidence are refused.
 //   - drift-claim-gate.py and rule-shape-gate.py are NOT ported: neither one
 //     ever denies (drift-claim-gate only injects additionalContext; rule-shape-gate
 //     is warn-only by design, per the bypass audit's C32 finding). There is
