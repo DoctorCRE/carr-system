@@ -268,6 +268,9 @@ class PagedPublicationTests(unittest.TestCase):
         self.store = {}
         self.writes = []
         self.enterContext(patch.object(board, "call_verb", side_effect=self.call))
+        self.inventory = {'schema': 'system-work-external.v1', 'items': [], 'complete': True,
+                          'observed_at': '2026-10-21T12:00:00Z', 'coverage': [], 'completed_pr_history': True}
+        self.enterContext(patch('system_work_cache.cached_github', return_value=self.inventory))
 
     def call(self, verb, args):
         key = args["board_id"]
@@ -378,6 +381,7 @@ class PagedPublicationTests(unittest.TestCase):
         self.path.write_text(json.dumps(state))
         with patch.object(board.work_queue_module(), "board_projection", return_value=None):
             expected = board.board_snapshot(state, costs={})
+            expected['external_inventory'] = board.publish_external_inventory(self.inventory)
             board.publish_board("carr-v5", costs={})
         self.assertEqual(self.store["carr-v5"]["snapshot_json"], expected)
         self.assertNotIn("pagination", expected)

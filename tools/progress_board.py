@@ -2558,14 +2558,10 @@ def publish_board(project: str, *, costs=None) -> dict[str, int]:
     remote_snapshot = before.get("snapshot")
     snapshot = project_board_snapshot(state, costs=costs)
     if board == "carr-v5":
-        from system_work_cache import valid_cache
-        inventory = read_json_file(board_dir() / "system-work-github-cache.json")
-        if valid_cache(inventory):
-            snapshot["external_inventory"] = publish_external_inventory(inventory)
-        elif remote_snapshot:
-            inventory = remote_snapshot.get("snapshot_json", {}).get("external_inventory")
-            if inventory is not None:
-                snapshot["external_inventory"] = inventory
+        from system_work_cache import cached_github
+        snapshot["external_inventory"] = publish_external_inventory(cached_github(
+            board_dir() / "system-work-github-cache.json",
+            Path.home() / "carr-system/out/orch/dot/job13/report-G.md"))
     try:
         fitted = fit_snapshot(copy.deepcopy(snapshot))
     except SnapshotTooLarge:
