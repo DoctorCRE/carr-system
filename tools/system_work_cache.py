@@ -212,7 +212,7 @@ def collect_github(now, read=github_json, suggestions=None, *, state=None, git_r
                 name, date, sha = branch['name'], branch['date'], branch['sha']
                 items.append({'id':f'{repo}:branch:{name}','kind':'remote_branch','title':name,'state':'unmerged',
                     'opened_at':date,'last_activity_at':date,'owner':None,'version':sha,
-                    'completed':False,'cancelled':False,'link':f'https://github.com/{repo}/tree/{quote(name,safe="")}',
+                    'completed':False,'cancelled':False,'link':f'https://github.com/{REPOSITORIES[repo]}/tree/{quote(name,safe="")}',
                     'identity':{},'suggested_triage':(suggestions or {}).get(name) if repo.endswith('/carr-system') else None})
             state[repo] = next_state
             complete = next_state['history_complete'] and next_state['updates_complete']

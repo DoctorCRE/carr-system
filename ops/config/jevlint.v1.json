@@ -7,7 +7,7 @@
   "license_file": "ops/jevlint.LICENSE",
   "requirements": ["Go >= 1.26", "CGO enabled", "C compiler"],
   "install": ["python3", "ops/jevlint_review.py", "--install"],
-  "review": ["python3", "ops/jevlint_review.py", "--repo", "<PR-worktree>", "--base", "<PR-base-SHA>", "--head", "<PR-head-SHA>", "--pr", "jbookout/carr-system/<number>", "--session", "<native-session-id>"],
+  "review": ["python3", "ops/jevlint_review.py", "--repo", "<PR-worktree>", "--base", "<PR-base-SHA>", "--head", "<PR-head-SHA>", "--pr", "DoctorCRE/carr-system/<number>", "--session", "<native-session-id>"],
   "eval": ["python3", "ops/jevlint_review.py", "--evals", "jevlint-evals.json", "--pr", "calibration", "--session", "<native-session-id>"],
   "interface": {
     "stdout": "carr-jevlint-review/v1 JSON: upstream findings, exact source bindings, cache counts and paid reservations",

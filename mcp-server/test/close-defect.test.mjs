@@ -51,7 +51,7 @@ test("each evidence kind has one shape, and anything else is refused by name", (
   assert.deepEqual(resolutionEvidence({ evidence_kind: "commit", evidence_ref: " ABC1234 " }),
     { evidence_kind: "commit", evidence_ref: "abc1234" });
   for (const ref of ["#1711", "PR-1711", "pr:1711", "1711",
-                     "https://github.com/jbookout/carr-system/pull/1711"])
+                     "https://github.com/DoctorCRE/carr-system/pull/1711"])
     assert.deepEqual(resolutionEvidence({ evidence_kind: "pull_request", evidence_ref: ref }),
       { evidence_kind: "pull_request", evidence_ref: "1711" }, ref);
   assert.deepEqual(resolutionEvidence({ evidence_kind: "receipt",

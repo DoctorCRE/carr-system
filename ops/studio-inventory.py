@@ -172,7 +172,7 @@ def compare(root):
     manifest_ref = 'origin/main' if subprocess.run(['git', 'cat-file', '-e',
         'origin/main:ops/config/scheduled-jobs.v1.json'], capture_output=True).returncode == 0 else 'origin/codex/job-manifest-drift'
     scheduled = json.loads(subprocess.check_output(['git', 'show', manifest_ref + ':ops/config/scheduled-jobs.v1.json'], text=True))
-    manifest = {'repository': 'jbookout/carr-system', 'ref': manifest_ref,
+    manifest = {'repository': 'DoctorCRE/carr-system', 'ref': manifest_ref,
                 'captured_machine_role': scheduled.get('captured_machine_role'),
                 'source_sha': subprocess.check_output(['git', 'rev-parse', manifest_ref], text=True).strip(),
                 'path': 'ops/config/scheduled-jobs.v1.json'}

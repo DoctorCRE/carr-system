@@ -537,7 +537,7 @@ class Controls(unittest.TestCase):
 
     def test_rerun_unknown_repository_refused_before_validation(self):
         mod = load('ci-rerun')
-        for repo in ('jbookout/other', 'someone/carr-system', 'jbookout/carr-system/extra'):
+        for repo in ('jbookout/other', 'someone/carr-system', 'DoctorCRE/carr-system/extra'):
             with self.subTest(repo=repo), \
                     patch.object(sys, 'argv', ['ci-rerun.py','123','--job','456','--repo',repo]), \
                     patch.object(mod.subprocess, 'check_output') as git, \

@@ -21,7 +21,7 @@ SPEC = importlib.util.spec_from_file_location("board", Path(__file__).with_name(
 assert SPEC is not None and SPEC.loader is not None
 B = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(B)
-REPO, APP = "jbookout/carr-system", "jbookout/doctorcre-app"
+REPO, APP = "DoctorCRE/carr-system", "jbookout/doctorcre-app"
 SHA = "a" * 40
 RECENT = (B.now_utc() - B.timedelta(days=3)).isoformat(timespec="seconds")
 EARLIER = (B.now_utc() - B.timedelta(days=4)).isoformat(timespec="seconds")
