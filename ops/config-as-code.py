@@ -1878,7 +1878,7 @@ def reconcile_retired_launchd(apply):
         print(f"  RETIRE FAILED  template directory is unavailable: {LAUNCHD_REPO}")
         return [LAUNCHD_REPO]
     for filename in carr_plists():
-        if os.path.isfile(launchd_repo_path(filename)):
+        if os.path.lexists(launchd_repo_path(filename)):
             continue
         label = filename.removesuffix(".plist")
         live = os.path.join(LAUNCHD_SRC, filename)

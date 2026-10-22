@@ -372,11 +372,12 @@ def retired_launchd_cases() -> list[bool]:
             mod.LAUNCHD_ALT_REPO = {"com.carr.alternate.plist": str(home / "alternate.plist")}
             mod.subprocess.run = fake_launchctl
             names = ("com.carr.retired", "com.carr.current", "com.carr.alternate",
-                     "com.vendor.personal", "local.carr-progress-board")
+                     "com.carr.declared-link", "com.vendor.personal", "local.carr-progress-board")
             for label in names:
                 (agents / f"{label}.plist").write_text(plist(label))
             (templates / "com.carr.current.plist").write_text(plist("com.carr.current"))
             (home / "alternate.plist").write_text(plist("com.carr.alternate"))
+            (templates / "com.carr.declared-link.plist").symlink_to(home / "missing-template.plist")
             retired = ("com.carr.retired", "com.carr.fix-train", "com.carr.cliproxyapi", "com.carr.held")
             for label in retired:
                 target = agents / f"{label}.plist"
