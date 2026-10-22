@@ -26,6 +26,16 @@ def pr(number, state="OPEN", title="Synthetic work", **extra):
             "updatedAt": AT.isoformat(), "createdAt": AT.isoformat(), **extra}
 
 
+def every(result):
+    """A fetch_prs stand-in answering every key with one result."""
+    return lambda keys: {key: result for key in keys}
+
+
+def by_pr(fetch):
+    """A fetch_prs stand-in over a per-PR reader (number, repo)."""
+    return lambda keys: {key: fetch(key[1], key[0]) for key in keys}
+
+
 class CleanupTests(unittest.TestCase):
 
     def test_preview_removes_watchdog_folds_duplicates_and_retires_terminal_prs(self):
@@ -244,7 +254,7 @@ class ReconcileApplyTests(BoardFileCase):
             "pr-1": {"status": "review", "pr": 1, "title": "Keep me", "executor": "codex"}}})
 
     def apply(self, fetch):
-        with patch.object(board, "discover_v1", return_value={}), patch.object(board, "fetch_pr", fetch), \
+        with patch.object(board, "discover_v1", return_value={}), patch.object(board, "fetch_prs", by_pr(fetch)), \
                 patch.object(board, "publish_board") as publish, contextlib.redirect_stdout(io.StringIO()):
             board.main(["reconcile", "test", "--apply"])
         return publish
