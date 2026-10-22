@@ -630,11 +630,13 @@ def _code_gate(prompt: str, task_id: str | None, origins: list[str]) -> str | No
 
 
 def run_task(prompt: str, *, roots: list[str] | None = None, runner=None, code_roots: list[str] | None = None,
-             code_runner=None, code_origins: list[str] | None = None, **turn_kwargs) -> dict:
+             code_runner=None, code_origins: list[str] | None = None, posture=None, **turn_kwargs) -> dict:
     """The flash-local desk's entry: a queued task whose BODY names a project runs flash-run on a new branch of it
     (code), one whose body names data runs the script protocol, anything else one direct reply (run_turn). Project
     and data lines count in the body only, as route_auto reads them, and are checked again here, whatever routed the
     task. A code task always ends in this desk's own result line: success only when the test passes on the patch."""
+    from record_layer import enforce
+    enforce({'posture': posture}, kind='flash-local')
     if flashlib.is_switched_off():
         return {"status": "failed", "detail": flashlib.OFF_REASON}
     task_id, title, body = task_parts(prompt)

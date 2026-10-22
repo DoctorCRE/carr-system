@@ -5,10 +5,9 @@ availability_matcher.py — ORDER 14(c), wave2-design §D4. Nightly join of
 
 WHAT A MATCH IS AND IS NOT
   A match is a DIGEST LINE. It is written to a report file and nothing else:
-  nothing is emailed, texted, pushed, or shown to a client. One human gate —
-  Joe reads the digest and decides. The order says NEVER auto-sent, and this
-  script holds no send path of any kind to make that structural rather than
-  remembered.
+  nothing is emailed, texted, pushed, or shown to a client. This script has
+  no send path. Follow-up messages use a separate sending tool when Joe asks
+  (decision 41906a30); without an ask, the default is a draft.
 
 THE HONEST-REPORT POSTURE (§C, and the reason this file exists before its data)
   Both tables are empty today. That is not a failure and it is not silence: the

@@ -39,10 +39,11 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-CLASS_ORDER="pushfloor unit types contract gates secret dependency migration binding artifact freshness"
+CLASS_ORDER="pushfloor unit types contract gates secret dependency migration binding artifact freshness hxprobe"
 
 class_desc() {
   case "$1" in
+    hxprobe) echo "vendored HxStore reader tests and release build with locked dependencies" ;;
     freshness) echo "source includes the current main revision" ;;
     pushfloor)  echo "seeded defect that must not leave the machine (local pre-push floor)" ;;
     unit)       echo "seeded failing unit test" ;;
@@ -105,6 +106,17 @@ fail_tail() {  # fail_tail <logfile>
     printf '        %s\n' "gate output WITHHELD: ops/ci-secret-scan.py --redact could not run, and unredacted child output is never printed. The captured log is at $log." >&2
   fi
   rm -f "$window" "$window.redacted"
+}
+
+check_hxprobe() {
+  if run_quiet "$LOGDIR/hxprobe.log" bash -c \
+      'cd "$1/vendor/hxprobe" && cargo test --locked && cargo build --release --locked' _ "$REPO"; then
+    cat "$LOGDIR/hxprobe.log"
+    ok hxprobe "locked Rust tests and release build passed"
+  else
+    fail_tail "$LOGDIR/hxprobe.log"
+    bad hxprobe "locked Rust tests or release build failed"
+  fi
 }
 
 check_unit() {

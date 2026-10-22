@@ -29,6 +29,8 @@ GENERATORS = (
      ('node', 'mcp-server/test/f03-sql-corpus-generator.mjs', '--write')),
 )
 OUTPUTS = {p for _, paths, _ in GENERATORS for p in paths} | {'ops/config/gate-baseline.json', 'db/schema.sql', 'requirements.lock'}
+# The registry preserves DB metadata and grants. The lock preserves resolved versions.
+REGENERATED_OUTPUTS = OUTPUTS - {'requirements.lock', 'mcp-server/src/scac-mutation-registry.current.generated.js'}
 
 
 def run(*argv: str) -> str:

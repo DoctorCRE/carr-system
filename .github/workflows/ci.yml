@@ -125,6 +125,7 @@ jobs:
           - "pushfloor unit types contract secret dependency binding artifact freshness"
           - "gates"
           - "migration"
+          - "hxprobe"
         # Keep fast feedback on draft pushes without starting expensive runners.
         exclude: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.draft && '[{"classes":"gates"},{"classes":"migration"}]' || '[]') }}
     # Both PR 1121 and PR 1406 exhausted a 20-minute migration job while

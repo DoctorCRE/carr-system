@@ -226,6 +226,12 @@
       "sha256": "b944ff4f74a8aa4083b64cb77b62346236eaa60dab8066a6390fac52c47d1347",
       "rule": "pii-email",
       "reason": "Synthetic URL userinfo redaction regressions introduced in 4abfa0b2; opaque-fixture-access-token and fixture-password are test constants, not personal contact data or real credentials."
+    },
+    {
+      "path": "vendor/hxprobe/src/record.rs",
+      "sha256": "7669221ae4871f570e53b9cdffab9ed878692658da93cca3af0e96f9b41af110",
+      "rule": "pii-email",
+      "reason": "Public example addresses in source comments from ukd1/hxstore-reverse-engineering commit 191b54e42757687806202f8f696e9066f0514e11, retained only for the byte-verbatim import commit. Final source comments use example.test. This qualification binds only this path and the exact upstream blob; no client data or private store was used."
     }
   ]
 }
