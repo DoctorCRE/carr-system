@@ -100,8 +100,11 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
     except (TimeoutError, subprocess.TimeoutExpired) as exc:
         if receipt is not None and isinstance(exc, BudgetExhausted):
             save(target / 'manifest.json', {**receipt, 'status': 'verified_no_effect'})
-        return {**result, 'status': 'deferred' if receipt is not None and not isinstance(exc, BudgetExhausted) else 'kept',
-                'reason': 'cleanup evidence or move verification timed out', 'budget_exhausted': True}
+        uncertain_move = receipt is not None and not isinstance(exc, BudgetExhausted)
+        exhausted = isinstance(exc, BudgetExhausted) or (deadline is not None and deadline())
+        return {**result, 'status': 'deferred' if uncertain_move or not exhausted else 'kept',
+                'reason': 'cleanup evidence or move verification timed out; retry within next time budget',
+                'budget_exhausted': exhausted or uncertain_move}
     except Exception as exc:
         return {**keep('evidence or staging failed'), 'error': type(exc).__name__}
 
@@ -229,7 +232,8 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
             if report['budget_exhausted']:
                 report['deferred'].append({'kind': 'sweep', 'reason': 'cleanup budget exhausted; resume from saved cursor',
                                            'cursor': dict(cursor)})
-            report['status'] = 'failed' if report['errors'] else 'deferred' if report['deferred'] else 'completed'
+            incomplete = report.get('pending') or any(row.get('kind') != 'job_clone' for row in report['deferred'])
+            report['status'] = 'failed' if report['errors'] else 'deferred' if incomplete else 'completed'
             if report['status'] == 'completed' and not dry_run:
                 report['last_success_at'] = now
             save(cursor_path, cursor)
@@ -294,7 +298,8 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
             report[collection].append(row)
             if row.get('error'):
                 report['errors'].append({'kind': row['kind'], 'error': row['error']})
-            if not row.get('error') and row.get('status') != 'deferred':
+            if not row.get('error') and (row.get('status') != 'deferred' or
+                    row.get('kind') == 'job_clone' and not row.get('budget_exhausted')):
                 report.pop('pending', None)
             save(receipt_path, report)
             save(cursor_path, cursor)
