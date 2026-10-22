@@ -19,7 +19,7 @@ import ai_eval
 REPO_ROOT = Path(__file__).resolve().parent.parent
 POLICY_PATH = REPO_ROOT / "evals" / "ai" / "function-router.v1.json"
 BOUND_SUITE_PATH = REPO_ROOT / "evals" / "ai" / "model-boundary.v1.json"
-POLICY_SHA256 = "45a6075598db613870130921522101eecbe4a43145d3bd37872dd9190f02c7ea"
+POLICY_SHA256 = "4e3c0678f1afa755f5ccb8eb10f9388f397fb5e0d5970ba06bb9e1d154f310fd"
 ACTION_RISK_REGISTRY_PATH = REPO_ROOT / "control-room" / "contracts" / "action-risk-registry.v1.json"
 SERVER_CONTEXT = {
     "organization_tenant_id": "carr-internal",
@@ -57,7 +57,7 @@ ROUTER_VIOLATION_CODES = {
 }
 SCHEMA_FIELDS = {
     "type", "properties", "required", "items", "enum", "description", "default",
-    "additionalProperties",
+    "additionalProperties", "minimum", "maximum", "minLength", "maxLength",
 }
 SUPPORTED_SCHEMA_TYPES = {"string", "integer", "number", "boolean", "object", "array"}
 
@@ -102,6 +102,20 @@ def _validate_schema(schema: Any) -> None:
         or len(schema["enum"]) != len(set(json.dumps(item, sort_keys=True) for item in schema["enum"]))
     ):
         raise RouterError("route input_schema enum is invalid")
+    for field in ("minimum", "maximum"):
+        if field in schema and (
+            schema_type not in {"integer", "number"}
+            or isinstance(schema[field], bool)
+            or not isinstance(schema[field], (int, float))
+            or not math.isfinite(schema[field])
+        ):
+            raise RouterError("route numeric schema bound is invalid")
+    for field in ("minLength", "maxLength"):
+        if field in schema and (
+            schema_type != "string" or isinstance(schema[field], bool)
+            or not isinstance(schema[field], int) or schema[field] < 0
+        ):
+            raise RouterError("route string schema bound is invalid")
     if schema_type == "object":
         properties = schema.get("properties")
         required = schema.get("required", [])
@@ -233,7 +247,15 @@ def _schema_matches(value: Any, schema: dict[str, Any]) -> bool:
         if any(key not in value for key in schema.get("required", [])):
             return False
         matches = all(_schema_matches(item, properties[key]) for key, item in value.items())
-    return matches and ("enum" not in schema or value in schema["enum"])
+    if not matches or ("enum" in schema and value not in schema["enum"]):
+        return False
+    if schema_type in {"integer", "number"}:
+        return (("minimum" not in schema or value >= schema["minimum"])
+                and ("maximum" not in schema or value <= schema["maximum"]))
+    if schema_type == "string":
+        return (("minLength" not in schema or len(value) >= schema["minLength"])
+                and ("maxLength" not in schema or len(value) <= schema["maxLength"]))
+    return True
 
 
 def _refuse(code: str) -> dict[str, Any]:

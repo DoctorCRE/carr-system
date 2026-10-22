@@ -179,7 +179,26 @@
       "protection": "read_only",
       "input_schema": {
         "type": "object",
-        "properties": {}
+        "additionalProperties": false,
+        "properties": {
+          "owners": {
+            "type": "string",
+            "enum": [
+              "all",
+              "partners"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        }
       }
     }
   ],

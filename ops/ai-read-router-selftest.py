@@ -174,6 +174,24 @@ class ReadRouterTests(unittest.TestCase):
                 self.assertEqual(result["state"], "accepted")
                 self.assertEqual(result["route"], {"tool_name": tool_name, "arguments": arguments})
 
+    def test_triage_accepts_bound_arguments_and_refuses_out_of_bounds_values(self):
+        for arguments in (
+            {"owners": "partners", "limit": 1, "cursor": "a"},
+            {"owners": "all", "limit": 50, "cursor": "a" * 1000},
+        ):
+            with self.subTest(arguments=arguments):
+                result = self.route({"schema_version": 1, "tool_name": "today-triage", "arguments": arguments})
+                self.assertEqual(result["state"], "accepted")
+                self.assertEqual(result["route"]["arguments"], arguments)
+        for arguments in (
+            {"owners": "other"}, {"limit": 0}, {"limit": 51},
+            {"limit": True}, {"cursor": ""}, {"cursor": "a" * 1001},
+        ):
+            with self.subTest(arguments=arguments):
+                self.assert_refused({
+                    "schema_version": 1, "tool_name": "today-triage", "arguments": arguments,
+                }, "router_arguments_type_invalid")
+
     def test_accepted_descriptor_is_detached_from_proposal_and_server_values(self):
         proposal = {
             "schema_version": 1, "tool_name": "find", "arguments": {"query": "synthetic"},
