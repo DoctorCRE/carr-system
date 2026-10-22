@@ -9794,7 +9794,7 @@ registerTools({
         hint: "this verb requires a partner or a server-verified Codex/Claude session sponsored by one" });
       if (typeof args.accept !== "boolean") throw new ToolError({ error: "accept_required" });
       const found = await c.query(
-        `select id,kind,deal_id,assignee_slug,action_description,due_on,recipient_party_id,
+        `select id,kind,deal_id,assignee_slug,action_description,to_jsonb(due_on)#>>'{}' as due_on,recipient_party_id,
                 recipient_ref,email_subject,body_sha256,status,resulting_ref,evidence_quote
            from capture_post_call_candidate where id=$1 for update
            /* capture:resolve-post-call-read */`, [args.candidate_id]);
