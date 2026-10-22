@@ -171,6 +171,52 @@ def test_strict_turns_skip_into_failure():
     check("--strict failure explains why a skip counts",
           "stopped running" in out_strict.lower() or "skipped" in out_strict.lower())
 
+def test_gates_build_hxprobe_before_parallel_selftests():
+    with tempfile.TemporaryDirectory(prefix="carr-hxprobe-gates-") as directory:
+        root = pathlib.Path(directory).resolve()
+        (root / "ops/config").mkdir(parents=True)
+        (root / "vendor/hxprobe").mkdir(parents=True)
+        (root / "bin").mkdir()
+        for name in ("ci.sh", "ci-quarantine.py", "node_test_summary.py", "git_env.py",
+                     "ci-secret-scan.py", "pii_guard.py"):
+            shutil.copy2(REPO / "ops" / name, root / "ops" / name)
+        shutil.copy2(REPO / "bin/with-timeout.py", root / "bin/with-timeout.py")
+        (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
+        (root / "ops/config/ci-check-scope.json").write_text('{}')
+        (root / "vendor/hxprobe/Cargo.toml").touch()
+        (root / "ops/probe-selftest.py").write_text(
+            "from pathlib import Path\n"
+            "assert Path('worker-built').exists(), 'worker not built before pool'\n"
+            "Path('gate-ran').touch()\n")
+        (root / "hooks").mkdir()
+        (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
+        (root / "ops/boot-budget-check.py").write_text("raise SystemExit(0)\n")
+        cargo = root / "bin/cargo"
+        cargo.write_text("#!/bin/sh\n"
+                         'test "$*" = "build --locked" || exit 9\n'
+                         'test "$PWD" = "$CARR_TEST_ROOT/vendor/hxprobe" || exit 10\n'
+                         'test "$CARR_BUILD_FAIL" = 0 || exit 1\n'
+                         'touch "$CARR_TEST_ROOT/worker-built"\n')
+        cargo.chmod(0o755)
+        env = fixture_env()
+        env.update(PATH=str(root / "bin") + os.pathsep + os.environ["PATH"],
+                   CARR_TEST_ROOT=str(root), CARR_CI_GATE_JOBS="2")
+        subprocess.run(["git", "init", "-q", str(root)], env=env, check=True)
+        subprocess.run(["git", "-C", str(root), "add", "ops/ci.sh"], env=env, check=True)
+        subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture", "-c",
+                        "user.email=fixture@example.invalid", "commit", "-qm", "fixture"], env=env, check=True)
+        for failure in ("0", "1"):
+            for name in ("worker-built", "gate-ran"):
+                (root / name).unlink(missing_ok=True)
+            env["CARR_BUILD_FAIL"] = failure
+            result = subprocess.run(["bash", str(root / "ops/ci.sh"), "--strict", "--only", "gates"],
+                                    cwd=root, env=env, capture_output=True, text=True, timeout=30)
+            check(f"gates prepare HxStore worker before pool (build failure={failure})",
+                  (root / "gate-ran").exists() == (failure == "0"), result.stdout + result.stderr)
+            check(f"gates propagate HxStore preparation result (build failure={failure})",
+                  result.returncode == int(failure), result.stdout + result.stderr)
+
+
 def test_hxprobe_runs_locked_checks_and_propagates_failures():
     with tempfile.TemporaryDirectory(prefix="carr-hxprobe-ci-") as directory:
         root = pathlib.Path(directory).resolve()
@@ -1180,6 +1226,7 @@ def main(argv=None):
                test_strict_turns_skip_into_failure,
                test_unknown_class_refuses,
                test_hxprobe_runs_locked_checks_and_propagates_failures,
+               test_gates_build_hxprobe_before_parallel_selftests,
                test_gate_shards_execute_a_disjoint_complete_inventory,
                test_migration_partitions_execute_complete_inventory,
                test_hosted_migration_ownership,

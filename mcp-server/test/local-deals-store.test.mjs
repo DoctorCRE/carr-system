@@ -165,6 +165,23 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       })).ref;
     };
 
+    await t.test('deal detail preserves held actions and exposes hold dates for both action sources', async () => transaction(async () => {
+      await fixture(false);
+      const task = await TOOLS['set-next-action'].handler(c, actor, {
+        idempotency_key: randomUUID(), ref: id(4), description: 'Review synthetic terms', due_on: '2026-01-01',
+      });
+      await c.query("update next_action set hold_until='2027-01-01' where id=$1", [task.next_action_id]);
+      const postCall = await accept(id(4), 'joe', '2026-01-02');
+      await c.query('set role carr_reader');
+      try {
+        const room = await TOOLS['get-deal-room'].handler(c, actor, { deal: id(4) });
+        const held = room.next_actions.find(row => row.id === task.next_action_id);
+        assert.equal(held.hold_until, '2027-01-01');
+        assert.equal(held.status, 'open', 'a hold must preserve the recorded lifecycle state');
+        assert.equal(room.next_actions.find(row => row.id === postCall).hold_until, null);
+      } finally { await c.query('reset role'); }
+    }));
+
     await t.test('partner status update supersedes an overdue step and flags the next-step gap', async () => transaction(async () => {
       await fixture(true);
       const yesterday = (await c.query("select (current_date-1)::text as day")).rows[0].day;
