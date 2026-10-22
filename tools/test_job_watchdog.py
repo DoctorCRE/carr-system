@@ -675,6 +675,124 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(w.detect({"prs": [p], "jobs": [job]}, c, 2000000000), [])
 
 
+class IncrementalCollectionTests(unittest.TestCase):
+    def test_scan_releases_lock_during_reads_and_effects_but_excludes_overlap(self):
+        from unittest.mock import Mock, patch
+        from contextlib import redirect_stdout
+        import io
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lock = root / c["paths"]["scan_lock"]
+            def check_lock(*args, **kwargs):
+                with w.locked(lock, blocking=False):
+                    pass
+                self.assertEqual(w.scan(root, c), 0)
+                return {"errors": []}
+            effects = Mock()
+            effects.report.side_effect = lambda row: check_lock()
+            f = w.finding("branch_idle", "synthetic/branch", "idle", c)
+            with patch.object(w, "collect", side_effect=check_lock), \
+                 patch.object(w, "Effects", return_value=effects), \
+                 patch.object(w, "detect", return_value=[f]), \
+                 redirect_stdout(io.StringIO()):
+                self.assertEqual(w.scan(root, c), 0)
+            self.assertEqual(effects.report.call_count, 1)
+            rows = w.read_latest(root / c["paths"]["scan_ledger"])
+            self.assertEqual(rows["scan"]["status"], "completed")
+            self.assertEqual(rows["scan_skipped"]["status"], "skipped")
+
+    def test_scan_prints_only_changed_digest_and_recovers_a_dead_owner(self):
+        from unittest.mock import Mock, patch
+        from contextlib import redirect_stdout
+        import io
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ledger = root / c["paths"]["scan_ledger"]
+            w.append(ledger, {"key": "scan", "status": "started", "owner_pid": 99999999,
+                              "owner_identity": "dead"})
+            effects = Mock()
+            effects.report.return_value = {}
+            f = w.finding("branch_idle", "synthetic/branch", "idle", c)
+            output = io.StringIO()
+            with patch.object(w, "collect", return_value={"errors": []}), \
+                 patch.object(w, "Effects", return_value=effects), \
+                 patch.object(w, "detect", return_value=[f]), redirect_stdout(output):
+                self.assertEqual(w.scan(root, c), 0)
+                self.assertIn("1 idle branches", output.getvalue())
+                output.seek(0)
+                output.truncate()
+                self.assertEqual(w.scan(root, c), 0)
+                self.assertEqual(output.getvalue(), "")
+                f["reason"] = "changed incident"
+                self.assertEqual(w.scan(root, c), 0)
+                self.assertIn("1 idle branches", output.getvalue())
+
+    def test_action_resolution_waits_for_live_scan_owner(self):
+        from unittest.mock import patch
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            w.append(root / c["paths"]["actions"], {"key": "synthetic", "status": "failed"})
+            def collect(*args):
+                with self.assertRaises(BlockingIOError):
+                    w.resolve_failed_action(root, c, "synthetic", "Inspected absent effect")
+                return {"errors": []}
+            with patch.object(w, "collect", side_effect=collect):
+                self.assertEqual(w.scan(root, c), 0)
+            self.assertEqual(w.resolve_failed_action(root, c, "synthetic", "Inspected absent effect")["status"],
+                             "resolved_no_effect")
+
+    def test_machine_inventory_reuse_does_not_freeze_receipt_age(self):
+        from unittest.mock import patch
+        import machine_cleanup
+        c = __import__("job_watchdog").load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "out").mkdir()
+            receipt = root / "out/machine-cleanup.json"
+            receipt.write_text(json.dumps({"status": "completed", "last_success_at": 100}))
+            args = dict(tmp_root=root, roots={}, inventory=[])
+            self.assertEqual(machine_cleanup.health_findings(root, c, now=100, **args), [])
+            rows = machine_cleanup.health_findings(root, c, now=86501, **args)
+            self.assertEqual([r["code"] for r in rows], ["cleanup_stale"])
+            receipt.write_text(json.dumps({"status": "completed", "last_success_at": 86501}))
+            self.assertEqual(machine_cleanup.health_findings(root, c, now=86502, **args), [])
+
+    def test_unchanged_registry_is_not_rebuilt_but_liveness_and_deadlines_are_fresh(self):
+        from unittest.mock import patch
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        c["repositories"] = []
+        c["paths"]["queue_logs"] = []
+        c["paths"]["merge_queue"] = "queue.txt"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry = root / c["paths"]["registry"]
+            log = root / "job.log"
+            log.write_text("working")
+            os.utime(log, (100, 100))
+            job = {"id": "synthetic", "pid": 22, "process_identity": "same", "start": 100,
+                   "limit": 99999, "log_path": str(log)}
+            w.append(registry, job)
+            original = w.read_latest
+            with patch.object(w.sys, "platform", "linux"), \
+                 patch.object(w, "process_identity", return_value="same") as identity, \
+                 patch.object(w, "read_latest", wraps=original) as reads:
+                self.assertEqual(w.detect(w.collect(root, c, 100), c, 100), [])
+                self.assertEqual(w.detect(w.collect(root, c, 101), c, 101), [])
+                self.assertEqual(sum(call.args[0] == registry for call in reads.call_args_list), 1)
+                self.assertEqual(w.detect(w.collect(root, c, 701), c, 701)[0]["kind"], "job_silent")
+                identity.return_value = None
+                self.assertEqual(w.detect(w.collect(root, c, 102), c, 102)[0]["kind"], "job_dead")
+                w.append(registry, {"id": "synthetic", "exit_code": 0})
+                self.assertEqual(w.detect(w.collect(root, c, 103), c, 103), [])
+
+
 class GithubBudgetTests(unittest.TestCase):
     """The scan spends GitHub GraphQL only on PRs whose REST listing changed."""
 
@@ -691,6 +809,7 @@ class GithubBudgetTests(unittest.TestCase):
         c["paths"]["merge_queue"] = "queue.txt"
         c["paths"]["queue_logs"] = []
         c["paths"]["release_log"] = "release.log"
+        c["thresholds"]["remote_collect_seconds"] = 1
         self.c = c
         self.listing = [{"number": 7, "head": {"sha": "a" * 40, "ref": "claude/x",
                          "repo": {"full_name": self.REPO}}, "updated_at": "2026-10-04T10:00:00Z"}]
@@ -792,6 +911,18 @@ class GithubBudgetTests(unittest.TestCase):
         facts = self.collect(2000000000)
         self.assertTrue(any("branch_idle" in error["blinds"] for error in facts["errors"]))
         self.assertFalse(any(branch["repo"] == other for branch in facts["branches"]))
+
+    def test_remote_lists_have_their_own_cadence_and_queue_revision_invalidates_them(self):
+        self.c["thresholds"]["remote_collect_seconds"] = 600
+        first = self.collect(1000)
+        self.assertEqual(self.collect(1120), first)
+        self.assertEqual(self.calls, [])
+        (self.root / "queue.txt").write_text("synthetic queue revision")
+        self.collect(1240)
+        self.assertTrue(any("pulls?state=open" in a[-1] for a in self.calls))
+        self.assertFalse(self.graphql_calls(), "unchanged head keeps the existing detail cache")
+        self.collect(1840)
+        self.assertTrue(any("branches?" in a[-1] for a in self.calls))
 
     def test_unchanged_pr_is_not_recollected_until_the_cache_expires(self):
         first = self.collect(1000)

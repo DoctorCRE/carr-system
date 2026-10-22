@@ -106,7 +106,7 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         return {**keep('evidence or staging failed'), 'error': type(exc).__name__}
 
 
-def health_findings(root, config, *, tmp_root, roots, now, user_tmp_root=None):
+def inventory_findings(config, *, tmp_root, roots, user_tmp_root=None):
     from branch_retirement import iter_worktrees
     policy = config['machine_cleanup']
     rows = []
@@ -143,6 +143,16 @@ def health_findings(root, config, *, tmp_root, roots, now, user_tmp_root=None):
             count = sum('_to_delete' not in Path(e['path']).parts for e in iter_worktrees(path))
             if count > policy['worktree_threshold']:
                 rows.append({'code': 'worktree_count:' + repo, 'detail': f'{repo} has {count} active worktrees, threshold {policy["worktree_threshold"]}'})
+    except Exception as exc:
+        rows.append({'code': 'cleanup_stale', 'detail': 'Machine cleanup evidence unavailable: ' + type(exc).__name__})
+    return rows
+
+
+def health_findings(root, config, *, tmp_root, roots, now, user_tmp_root=None, inventory=None):
+    policy = config['machine_cleanup']
+    rows = list(inventory) if inventory is not None else inventory_findings(
+        config, tmp_root=tmp_root, roots=roots, user_tmp_root=user_tmp_root)
+    try:
         receipt = json.loads((Path(root) / 'out/machine-cleanup.json').read_text())
         last = receipt.get('last_success_at')
         if last is None or now - last > policy['success_max_age_seconds']:

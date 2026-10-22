@@ -429,7 +429,7 @@ def collect(manifest):
     return snapshot
 
 
-def check(snapshot=None, now=None):
+def check(snapshot=None, now=None, *, observe=None):
     now = time.time() if now is None else now
     if snapshot is not None:
         return report(native_manifest(), snapshot, now)
@@ -439,7 +439,17 @@ def check(snapshot=None, now=None):
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
             manifest = native_manifest()
-            rows = report(manifest, collect(manifest), now)
+            snapshot = (observe or collect)(manifest)
+            if observe:
+                sys.path.insert(0, str(SOURCE / "tools"))
+                import flashlib
+                snapshot["flash_grant"] = flashlib.active_grant(now=now)
+                for log in snapshot["log_mtimes"]:
+                    try:
+                        snapshot["log_mtimes"][log] = Path(log).stat().st_mtime
+                    except FileNotFoundError:
+                        snapshot["log_mtimes"][log] = None
+            rows = report(manifest, snapshot, now)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             rows = unavailable(exc)
         with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as handle:

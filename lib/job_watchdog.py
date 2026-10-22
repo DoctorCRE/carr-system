@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import fcntl
 import hashlib
 import json
@@ -12,6 +13,7 @@ import signal
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
@@ -168,7 +170,7 @@ print(json.dumps(result))
             output, error = proc.communicate(timeout=max(0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             proc.kill()
-            proc.communicate()  # Reap the owned child before releasing the scan lock.
+            proc.communicate()
             raise TimeoutError("vendor document exceeded elapsed fetch deadline") from None
         finally:
             if proc.poll() is None:
@@ -221,7 +223,7 @@ def release_reference_urls(text, source, watch):
 
 
 def vendor_release_findings(root, config, now, *, fetch=None):
-    """Called under the scan lock. Cache hourly reads and retry unreported findings."""
+    """Cache hourly reads and retry unreported findings under the scan ownership claim."""
     watches = config.get("vendor_release_watches", [])
     if not watches:
         return []
@@ -672,6 +674,8 @@ def resolve_failed_action(root, config, key, evidence):
     if not evidence.strip():
         raise ValueError("resolution requires evidence from the inspected effect")
     with locked(path_at(root, config["paths"]["scan_lock"]), blocking=False):
+        if active_scan(read_latest(path_at(root, config["paths"]["scan_ledger"])), config):
+            raise BlockingIOError("another scan owns the scan")
         actions_path = path_at(root, config["paths"]["actions"])
         prior = read_latest(actions_path).get(key)
         if not prior:
@@ -689,7 +693,7 @@ def resolve_failed_action(root, config, key, evidence):
 
 
 def reconcile(root, config, found, effects, now, complete=True, *, clear_kinds=None):
-    """Called under the scan lock. Persist intent before each non-repeatable effect."""
+    """The scan owner persists intent before each non-repeatable effect."""
     findings_path = path_at(root, config["paths"]["findings"])
     actions_path = path_at(root, config["paths"]["actions"])
     previous = read_latest(findings_path)
@@ -926,9 +930,81 @@ def rate_limit_reason(config, original):
         return f"{original}; rate-limit diagnostic unreadable: {exc}"
 
 
+def file_revision(path):
+    try:
+        st = Path(path).stat()
+        return [st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns]
+    except FileNotFoundError:
+        return None
+
+
+class Observations:
+    """Disposable input snapshots, scoped to the collector code and configuration."""
+    def __init__(self, root, config, now):
+        self.path = root / "out/watchdog/observations.json"
+        self.now = now
+        sources = [Path(__file__), SOURCE / "lib/scheduled_jobs.py", SOURCE / "lib/machine_cleanup.py"]
+        self.version = hashlib.sha256((json.dumps(config, sort_keys=True) +
+            "".join(path.read_text() for path in sources)).encode()).hexdigest()
+        self.used = set()
+        self.dirty = False
+        try:
+            saved = json.loads(self.path.read_text())
+            self.entries = saved["entries"] if saved["version"] == self.version else {}
+            if not isinstance(self.entries, dict):
+                self.entries = {}
+        except (OSError, ValueError, KeyError, TypeError):
+            self.entries = {}
+
+    def get(self, key, revision, load, max_age=None):
+        self.used.add(key)
+        entry = self.entries.get(key)
+        try:
+            if (entry["revision"] == revision and 0 <= self.now - entry["at"]
+                    and (max_age is None or self.now - entry["at"] < max_age)
+                    and entry["digest"] == self.signature(entry["value"])):
+                return copy.deepcopy(entry["value"])
+        except (KeyError, TypeError, ValueError):
+            pass
+        self.entries.pop(key, None)
+        self.dirty = True
+        value = load()
+        self.entries[key] = {"revision": revision, "at": self.now,
+                             "value": copy.deepcopy(value), "digest": self.signature(value)}
+        return value
+
+    @staticmethod
+    def signature(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+    def file(self, path, load):
+        revision = file_revision(path)
+        value = self.get(str(path), revision, load)
+        if revision != file_revision(path):
+            self.entries.pop(str(path), None)
+            raise OSError("evidence changed while reading " + str(path))
+        return value
+
+    def save(self):
+        for key in self.entries.keys() - self.used:
+            del self.entries[key]
+            self.dirty = True
+        if not self.dirty:
+            return
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(mode="w", dir=self.path.parent, delete=False) as handle:
+                staged = Path(handle.name)
+                json.dump({"version": self.version, "entries": self.entries}, handle)
+            staged.replace(self.path)
+        except OSError:
+            pass
+
+
 def collect(root, config, now=None):
     now = time.time() if now is None else now
     facts = {"jobs": [], "prs": [], "logs": [], "branches": [], "errors": [], "queue": ""}
+    observations = Observations(root, config, now)
     missing, limited = {}, {}
     def error(subject, exc, evidence):
         blinds = EVIDENCE[evidence]
@@ -947,16 +1023,17 @@ def collect(root, config, now=None):
             facts["errors"].append({"kind": "collection_error", "source": subject, "reason": str(exc),
                                     "blinds": sorted(blinds)})
     try:
-        jobs = read_latest(path_at(root, config["paths"]["registry"]))
+        registry = path_at(root, config["paths"]["registry"])
+        jobs = observations.file(registry, lambda: read_latest(registry))
         for job in jobs.values():
             job = dict(job)
-            identity = process_identity(job.get("pid"), config)
+            identity = process_identity(job.get("pid"), config) if "exit_code" not in job else None
             job["alive"] = bool(identity and identity == job.get("process_identity"))
             if "exit_code" not in job:
                 log = Path(job["log_path"])
                 if log.exists():
                     job["log_mtime"] = log.stat().st_mtime
-                    job["log_tail"] = tail(log, config["thresholds"]["log_tail_bytes"])
+                    job["log_tail"] = observations.file(log, lambda: tail(log, config["thresholds"]["log_tail_bytes"]))
                 else:
                     job["log_mtime"] = job["start"]
             facts["jobs"].append(job)
@@ -977,24 +1054,43 @@ def collect(root, config, now=None):
     if sys.platform == "darwin":
         try:
             import scheduled_jobs
-            facts["scheduled_jobs"] = scheduled_jobs.check(now=now)
+            def observe_schedule(manifest):
+                directories = [Path.home() / "Library/LaunchAgents", Path("/Library/LaunchAgents"),
+                               Path("/Library/LaunchDaemons")]
+                revision = [manifest, [[str(p), file_revision(p)] for directory in directories
+                                      for p in sorted(directory.glob("*.plist"))]]
+                snapshot = observations.get("scheduled", revision, lambda: scheduled_jobs.collect(manifest),
+                                            config["thresholds"]["machine_collect_seconds"])
+                if snapshot.get("errors"):
+                    observations.entries.pop("scheduled", None)
+                return snapshot
+            facts["scheduled_jobs"] = scheduled_jobs.check(now=now, observe=observe_schedule)
             if any(row["code"] == "evidence_unavailable" for row in facts["scheduled_jobs"]):
                 error("scheduled job evidence", RuntimeError("incomplete scheduled-job observation"), "scheduled_jobs")
         except Exception as exc:
             error("scheduled jobs", exc, "scheduled_jobs")
     if sys.platform == "darwin" and Path(root).resolve() == repository_roots(config).get("jbookout/carr-system"):
         try:
-            from machine_cleanup import health_findings
+            from machine_cleanup import health_findings, inventory_findings
             sys.path.append(str(Path(__file__).resolve().parents[1] / "tools"))
             from storage_hygiene import storage_roots
+            user_tmp = storage_roots()[0]
+            roots = repository_roots(config)
+            revision = [file_revision(root / "out/machine-cleanup.json"), file_revision("/private/tmp"),
+                        file_revision(user_tmp)]
+            inventory = observations.get("cleanup_inventory", revision, lambda: inventory_findings(
+                config, tmp_root=Path("/private/tmp"), roots=roots, user_tmp_root=user_tmp),
+                config["thresholds"]["machine_collect_seconds"])
+            if any("unavailable" in row["detail"].lower() or row["code"].endswith("_partial") for row in inventory):
+                observations.entries.pop("cleanup_inventory", None)
             facts["machine_cleanup"] = health_findings(root, config, tmp_root=Path("/private/tmp"),
-                roots=repository_roots(config), now=now, user_tmp_root=storage_roots()[0])
+                roots=roots, now=now, user_tmp_root=user_tmp, inventory=inventory)
         except Exception as exc:
             error("machine cleanup", exc, "machine_cleanup")
     queue = path_at(root, config["paths"]["merge_queue"])
     if queue.exists():
         try:
-            facts["queue"] = queue.read_text()
+            facts["queue"] = observations.file(queue, queue.read_text)
         except OSError as exc:
             error("merge queue", exc, "merge_queue")
     # Each PR's GraphQL snapshot is reused while the REST listing shows the same
@@ -1015,7 +1111,9 @@ def collect(root, config, now=None):
             facts["prs"].extend(v["pr"] for k, v in cache.items() if k.startswith(repo + "#"))
             continue  # Stop provider reads; all skipped evidence is blinded.
         try:
-            pages = json.loads(command(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/pulls?state=open&per_page=100"], config))
+            pages = observations.get(repo + ":pulls", file_revision(queue), lambda: json.loads(command(
+                ["gh", "api", "--paginate", "--slurp", f"repos/{repo}/pulls?state=open&per_page=100"], config)),
+                t["remote_collect_seconds"])
             open_branches = {pr["head"]["ref"] for page in pages for pr in page
                              if (pr["head"].get("repo") or {}).get("full_name") == repo}
             # Closed PRs leave the cache; an unlisted repository keeps its entries.
@@ -1040,6 +1138,8 @@ def collect(root, config, now=None):
                         if limited and entry:
                             facts["prs"].append(entry["pr"])
         except Exception as exc:
+            observations.entries.pop(repo + ":pulls", None)
+            observations.dirty = True
             error(repo + " PRs", exc, "prs")
             if open_branches is None:
                 error(repo + " branches", exc, "branches")
@@ -1048,7 +1148,9 @@ def collect(root, config, now=None):
         if open_branches is None:
             continue
         try:
-            pages = json.loads(command(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/branches?per_page=100"], config))
+            pages = observations.get(repo + ":branches", file_revision(queue), lambda: json.loads(command(
+                ["gh", "api", "--paginate", "--slurp", f"repos/{repo}/branches?per_page=100"], config)),
+                t["remote_collect_seconds"])
             for page in pages:
                 for branch in page:
                     if not protected_branch(config, branch["name"]):
@@ -1062,7 +1164,7 @@ def collect(root, config, now=None):
                             date = None
                         if date is None:
                             # Commit dates are immutable. Prefer already fetched objects;
-                            # still list remote refs every scan so retirement clears facts.
+                            # refresh remote refs on their cadence so retirement clears facts.
                             try:
                                 checkout = Path(config["repository_roots"][repo]).expanduser()
                                 date = command(["git", "show", "-s", "--format=%cI", sha], config, checkout).strip()
@@ -1076,6 +1178,8 @@ def collect(root, config, now=None):
                                                   "updated": date,
                             "open_pr": branch["name"] in open_branches})
         except Exception as exc:
+            observations.entries.pop(repo + ":branches", None)
+            observations.dirty = True
             error(repo + " branches", exc, "branches")
     logs = [(p, "queue") for p in config["paths"]["queue_logs"]] + [(config["paths"]["release_log"], "release")]
     for configured, kind in logs:
@@ -1084,7 +1188,7 @@ def collect(root, config, now=None):
             continue  # Optional pipelines that have never run have no stale log.
         try:
             facts["logs"].append({"path": str(log), "type": kind, "mtime": log.stat().st_mtime,
-                                  "tail": tail(log, config["thresholds"]["log_tail_bytes"])})
+                                  "tail": observations.file(log, lambda: tail(log, config["thresholds"]["log_tail_bytes"]))})
         except OSError as exc:
             error(str(log), exc, kind + "_log")
     try:
@@ -1104,6 +1208,7 @@ def collect(root, config, now=None):
     for job in facts["jobs"]:
         if job["id"] in recovered:
             job["superseded"] = True
+    observations.save()
     return facts
 
 
@@ -1362,32 +1467,61 @@ def digest(root, config, *, session_id=None):
     return "\n".join(lines)
 
 
+def active_scan(prior_runs, config):
+    for key in ("scan", "vendor-watch"):
+        prior = prior_runs.get(key, {})
+        if prior.get("status") != "started" or not prior.get("owner_pid"):
+            continue
+        identity = process_identity(prior["owner_pid"], config)
+        if identity == prior.get("owner_identity"):
+            return True
+        if identity is None:
+            try:
+                os.kill(prior["owner_pid"], 0)
+            except ProcessLookupError:
+                pass
+            else:
+                raise RuntimeError("scan owner is live but its identity is unavailable")
+    return False
+
+
 def scan(root, config, config_path=None, *, vendor_only=False):
+    ledger = path_at(root, config["paths"]["scan_ledger"])
+    scan_key = "vendor-watch" if vendor_only else "scan"
+    def skipped(reason):
+        append(ledger, {"key": "scan_skipped", "status": "skipped", "at": stamp(), "reason": reason})
+        return 0
     try:
         with locked(path_at(root, config["paths"]["scan_lock"]), blocking=False):
-            now = time.time()
-            ledger = path_at(root, config["paths"]["scan_ledger"])
             prior_runs = read_latest(ledger)
-            scan_key = "vendor-watch" if vendor_only else "scan"
+            if active_scan(prior_runs, config):
+                return skipped("another scan owns the scan")
+            identity = process_identity(os.getpid(), config)
+            if not identity:
+                raise RuntimeError("cannot establish scan owner identity")
+            now = time.time()
             append(ledger, {"key": scan_key, "status": "started", "at": stamp(now),
+                            "owner_pid": os.getpid(), "owner_identity": identity,
                             "previous_status": prior_runs.get(scan_key, {}).get("status")})
-            effects = Effects(root, config)
-            effects.config_path = Path(config_path or SOURCE / "ops/config/job-watchdog.json").resolve()
-            facts = {"errors": []} if vendor_only else collect(root, config, now)
-            candidates = detect(facts, config, now) + vendor_release_findings(root, config, now)
-            found = reconcile(root, config, candidates, effects, now,
-                              clear_kinds={"vendor_release_fetch_error"} if vendor_only else None)
-            append(ledger, {"key": scan_key, "status": "completed", "at": stamp(),
-                            "findings": len(found), "collection_errors": len(facts["errors"])})
-            print(digest(root, config))
-            # The exit status says this scan could not do its job: evidence it could
-            # not read, or an effect or report it could not complete. A third-party
-            # source refusing a fetch is a reported finding about that source, so it
-            # fails only the vendor-only scan, whose whole job is that fetch.
-            failing = {"action_error", "record_error"} | ({"vendor_release_fetch_error"} if vendor_only else set())
-            return 1 if facts["errors"] or any(f["kind"] in failing for f in found) else 0
     except BlockingIOError:
-        # Another scan owns the entire interval's effects; say so instead of vanishing.
-        append(path_at(root, config["paths"]["scan_ledger"]),
-               {"key": "scan_skipped", "status": "skipped", "at": stamp(), "reason": "another scan holds the scan lock"})
-        return 0
+        return skipped("another scan holds the scan lock")
+    started = time.monotonic()
+    try:
+        effects = Effects(root, config)
+        effects.config_path = Path(config_path or SOURCE / "ops/config/job-watchdog.json").resolve()
+        facts = {"errors": []} if vendor_only else collect(root, config, now)
+        candidates = detect(facts, config, now) + vendor_release_findings(root, config, now)
+        found = reconcile(root, config, candidates, effects, now,
+                          clear_kinds={"vendor_release_fetch_error"} if vendor_only else None)
+        output = digest(root, config, session_id="scheduled-scan")
+        if output:
+            print(output)
+        append(ledger, {"key": scan_key, "status": "completed", "at": stamp(),
+                        "findings": len(found), "collection_errors": len(facts["errors"]),
+                        "duration_seconds": time.monotonic() - started})
+        failing = {"action_error", "record_error"} | ({"vendor_release_fetch_error"} if vendor_only else set())
+        return 1 if facts["errors"] or any(f["kind"] in failing for f in found) else 0
+    except BaseException:
+        append(ledger, {"key": scan_key, "status": "failed", "at": stamp(),
+                        "duration_seconds": time.monotonic() - started})
+        raise
