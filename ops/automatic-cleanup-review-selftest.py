@@ -20,6 +20,36 @@ spec.loader.exec_module(fixtures)
 
 
 class ReviewProbes(unittest.TestCase):
+    def test_clone_writer_lock_and_missing_termination_keep_checkout(self):
+        for condition in ('live-lock', 'late-lock', 'missing-termination'):
+            with self.subTest(condition=condition):
+                fixture = fixtures.Fixture()
+                workspace = fixture.base / 'room-codex-writer'
+                clone = workspace / 'checkout'
+                workspace.mkdir()
+                fixture.git('clone', str(fixture.remote), str(clone))
+                fixture.git('switch', 'main', cwd=clone)
+                lock = clone / '.git/room-writer.lock'
+                def bind():
+                    lock.write_text(json.dumps(dict(kind='process_group', pgid=os.getpgrp())))
+                provider = fixtures.FakeProvider()
+                if condition == 'live-lock':
+                    bind()
+                elif condition == 'late-lock':
+                    def open_pulls(*args):
+                        bind()
+                        return []
+                    provider.open_pulls = open_pulls
+                dispatch = dict(status='completed', checkout_path=str(clone),
+                    checkout_workspace=str(workspace), dispatched_at='2020-01-01T00:00:00Z')
+                if condition != 'missing-termination':
+                    dispatch['termination_confirmed'] = True
+                result = machine_cleanup.clean_clone(workspace, dispatch, provider=provider,
+                    process_probe=lambda paths: set(), now=time.time(), older_than=1, dry_run=False)
+                self.assertEqual(result['status'], 'kept', result)
+                self.assertIn('writer' if condition != 'missing-termination' else 'finished dispatch', result['reason'])
+                self.assertTrue(clone.exists())
+
     def test_manifest_only_recent_fixture_intent_recovers_without_git(self):
         from unittest.mock import patch
         import job_watchdog
