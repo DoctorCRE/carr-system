@@ -383,6 +383,35 @@ class SessionAuditTests(unittest.TestCase):
             audit.audit_events([self.event(command)], diff='', brief='Sizing: small')
         self.assertEqual(caught, [])
 
+    def test_native_truncation_warning_preserves_explicit_tool_status(self):
+        rows = self.codex('cat /pstack/poteto-mode/SKILL.md')
+        rows[1]['payload']['output'] = [
+            {'type':'input_text','text':'Script completed\nWall time 0.5 seconds\nOutput:\n'},
+            {'type':'input_text','text':'Warning: truncated output (original token count: 13653)\nTotal output lines: 1\n\n'+json.dumps(
+                dict(chunk_id='fixture',wall_time_seconds=0.5,exit_code=0,original_token_count=13653,output='skill text'))}]
+        self.write(rows)
+        events = audit.load_session(self.path)['events']
+        self.assertEqual(events[0]['exit_code'],0)
+        self.assertEqual(events[0]['output'],'skill text')
+        self.assertEqual(audit.audit_events(events,diff='',brief='Sizing: small')['checks']['poteto_mode']['verdict'],'VERIFIED')
+
+    def test_concatenated_results_require_count_safe_all_zero_statuses(self):
+        js = 'text(await tools.exec_command({cmd:"cat /pstack/poteto-mode/SKILL.md"})); text(await tools.exec_command({cmd:"git rev-parse HEAD"}));'
+        for codes, expected in (([0,0],[0,0]),([1,0],[None,None]),([0],[None,None])):
+            self.write([dict(type='response_item',timestamp='a',payload=dict(type='custom_tool_call',name='exec',call_id='c',input=js)),
+                dict(type='response_item',timestamp='b',payload=dict(type='custom_tool_call_output',call_id='c',output=[
+                    dict(type='input_text',text='Script completed\nWall time 0.5 seconds\nOutput:\n'),
+                    dict(type='input_text',text=''.join(json.dumps(dict(chunk_id=str(i),exit_code=code,output='a'*40)) for i,code in enumerate(codes)))]))])
+            events = audit.load_session(self.path)['events']
+            self.assertEqual([e['exit_code'] for e in events],expected)
+            self.assertTrue(all(not e['output'] for e in events))
+
+    def test_truncation_header_with_arbitrary_trailing_text_is_unknown(self):
+        rows=self.codex('cat /pstack/poteto-mode/SKILL.md')
+        rows[1]['payload']['output']='Warning: truncated output (original token count: 123)\nTotal output lines: 1\n\n'+json.dumps(dict(exit_code=0,output='skill'))+' unexplained trailing data'
+        self.write(rows)
+        self.assertIsNone(audit.load_session(self.path)['events'][0]['exit_code'])
+
     def test_skill_menu_is_not_a_tool_open(self):
         self.write([dict(timestamp='2026-10-22T12:00:00Z', type='response_item',
                          payload=dict(type='message', role='developer', content=[

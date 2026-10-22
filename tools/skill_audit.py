@@ -26,7 +26,46 @@ def _text(value):
     return ''
 
 
+def _result_objects(value):
+    value = _json(value)
+    if isinstance(value, list):
+        objects = []
+        for item in value:
+            if _text(item).startswith(('Script completed\n', 'Script running with cell ID')):
+                continue
+            result = _result_objects(item)
+            if not result:
+                return []
+            objects.extend(result)
+        return objects
+    if isinstance(value, dict):
+        if 'exit_code' in value or 'session_id' in value:
+            return [value]
+        if 'text' in value or 'content' in value:
+            return _result_objects(value.get('text', value.get('content')))
+    if isinstance(value, str):
+        text = re.sub(r'\AWarning: truncated output \(original token count: \d+\)\nTotal output lines: \d+\n\n', '', value)
+        objects = []
+        decoder = json.JSONDecoder()
+        while text.strip():
+            try:
+                obj, end = decoder.raw_decode(text.lstrip())
+            except ValueError:
+                return []
+            if not isinstance(obj, dict) or not ('exit_code' in obj or 'session_id' in obj):
+                return []
+            objects.append(obj)
+            text = text.lstrip()[end:]
+        return objects
+    return []
+
+
 def _result(value, claude=False, error=False):
+    objects = _result_objects(value)
+    if len(objects) == 1:
+        value = objects[0]
+    elif len(objects) > 1:
+        return None, '', None
     value = _json(value)
     if isinstance(value, list):
         items = [item for item in value if not _text(item).startswith(('Script completed\n', 'Script running with cell ID'))]
@@ -231,10 +270,12 @@ def _bounded_output(text, command):
 
 
 def _finish(events, output, timestamp, order, running, claude=False, error=False):
+    objects = _result_objects(output)
     for event in events:
         code, text, session_id = _result(output, claude, error)
         if len(events) != 1:
-            code, session_id = None, None
+            code = 0 if len(objects) == len(events) and all(type(item.get('exit_code')) is int and item['exit_code'] == 0 for item in objects) else None
+            text, session_id = '', None
         if event['tool'] == 'write_stdin':
             original = running.get(event['arguments'].get('session_id'))
             if original is not None:
