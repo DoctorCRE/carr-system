@@ -365,15 +365,15 @@ def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFOR
         try:
             prompt = prefix + "\n\n" + retrieval_prompt(urls) + task
             if fixture:
-                raw, returncode, cli_version = Path(fixture).read_text(encoding="utf-8"), 0, "fixture"
+                raw, returncode, stderr, cli_version = Path(fixture).read_text(encoding="utf-8"), 0, "", "fixture"
             else:
                 if preflight:
                     cli_version = preflight()
                 proc = invoke(prompt, cwd=cwd, effort=effort, max_turns=max_turns,
                               writable=writable, timeout_seconds=timeout_seconds)
-                raw, returncode = proc.stdout or "", proc.returncode
+                raw, returncode, stderr = proc.stdout or "", proc.returncode, proc.stderr or ""
             outcome = parse_result(
-                raw, returncode, stderr=proc.stderr or "", urls=urls, effort=effort,
+                raw, returncode, stderr=stderr, urls=urls, effort=effort,
                 cli_version=cli_version, require_identity=require_identity or retrieval,
                 model=model,
             )
