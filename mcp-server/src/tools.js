@@ -9251,6 +9251,60 @@ registerTools({
     },
   },
 
+  "read-home-agenda": {
+    description: "Read one bounded Home agenda snapshot across active team and national-account deals: scope, dates and open actions including holds. No deal detail or history. Refuses rather than truncates above 1000 deals, 10000 dates or 10000 open actions; owner and workspace filtering remain with the viewer.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    handler: async (c, actor) => {
+      const { rows: [snapshot] } = await c.query(`
+        with scoped as materialized (
+          select b.id, b.name, b.phase, b.owner, b.type, b.attention, b.next_step,
+                 ce.client_status, ce.prospect_engagement_status,
+                 to_jsonb(b.next_date)#>>'{}' as next_date,
+                 to_jsonb(b.last_touch)#>>'{}' as last_touch,
+                 to_jsonb(b.last_review_at)#>>'{}' as last_review_at,
+                 b.workspace_kind, b.account_client_id, b.operating_state, b.outcome,
+                 to_jsonb(b.closed_on)#>>'{}' as closed_on,
+                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on
+            from v_deal_room_board b
+            join v_client_engagement_status ce on ce.client_id = b.client_id
+           where b.operating_state = 'active' and b.phase <> 'closed'
+             and b.outcome is null and b.closed_on is null and b.invoiced_on is null
+           order by b.id limit 1001
+        ), dates as materialized (
+          select d.deal_id, d.id, d.kind, to_jsonb(d.due_on)#>>'{}' as due_on, d.note, d.status
+            from v_deal_room_critical_date d join scoped s on s.id = d.deal_id
+           order by d.deal_id, d.due_on nulls last, d.id limit 10001
+        ), actions as materialized (
+          select a.deal_id, a.id, a.owner, a.description, to_jsonb(a.due_on)#>>'{}' as due_on,
+                 a.status, to_jsonb(a.hold_until)#>>'{}' as hold_until
+            from v_deal_room_action a join scoped s on s.id = a.deal_id
+           where a.status = 'open'
+           order by a.deal_id, a.updated_at desc, a.id desc limit 10001
+        ), bounds as (
+          select (select count(*) from scoped) > 1000
+              or (select count(*) from dates) > 10000
+              or (select count(*) from actions) > 10000 as overflow
+        ), date_groups as (
+          select deal_id, jsonb_agg(to_jsonb(d) - 'deal_id' order by due_on nulls last, id) as entries
+            from dates d group by deal_id
+        ), action_groups as (
+          select deal_id, jsonb_agg(to_jsonb(a) - 'deal_id' order by id) as entries
+            from actions a group by deal_id
+        )
+        select bounds.overflow,
+               case when bounds.overflow then null else coalesce((
+                 select jsonb_agg(to_jsonb(s) || jsonb_build_object(
+                   'critical_dates', coalesce(d.entries, '[]'::jsonb),
+                   'next_actions', coalesce(a.entries, '[]'::jsonb)) order by s.id)
+                   from scoped s left join date_groups d on d.deal_id = s.id
+                                 left join action_groups a on a.deal_id = s.id
+               ), '[]'::jsonb) end as deals from bounds`);
+      if (snapshot.overflow) throw new ToolError({ error: "agenda_limit_exceeded",
+        limits: { deals: 1000, critical_dates: 10000, open_actions: 10000 } });
+      return { schema_version: "home-agenda.v1", actor: actor.slug, deals: snapshot.deals };
+    },
+  },
+
   "read-deal-reconciliation": {
     description: "Read one minimal deal reconciliation record, including closed deals. Pass all:true instead of deal for the Salesforce sync snapshot with client, owner, version and explicitly labeled sf_close_date_placeholder. The single-deal read excludes placeholders. Neither read returns source_row or commission.",
     inputSchema: { type: "object", additionalProperties: false,
