@@ -81,7 +81,7 @@ with postgres_fixture_group(), DisposablePostgres('lead-read-proof-', bins / 'pg
     assert not by_ref['L-9']['linked_client'], 'merged client linked'
     assert by_ref['L-10']['last_stage_move']['to'] == 'qualified', 'mutation order lost'
     assert by_ref['L-11']['contact_eligible'] is None, 'nullable contact policy changed'
-    plans = {'before': [], 'after': []}
+    plans: dict[str, list[dict]] = {'before': [], 'after': []}
     for _ in range(5):
         for side, name in [('before', 'before_workspace'), ('after', 'v_lead_workspace')]:
             plans[side].append(json.loads(sql(f'''explain(analyze,buffers,format json)
