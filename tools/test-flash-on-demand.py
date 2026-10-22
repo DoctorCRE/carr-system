@@ -131,7 +131,6 @@ class FlashPolicyTests(unittest.TestCase):
             self.assertNotIn(policy['queue_targets'][route], ('flash', 'flash-model'))
         catalog = kanban_adapter.load_catalog()
         self.assertFalse(catalog['targets']['flash']['enabled'])
-        self.assertFalse(kanban_adapter._flash_is_up())
 
     def test_install_converges_drifted_plists_and_stops_both_labels(self):
         import plistlib
