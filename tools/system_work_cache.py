@@ -68,7 +68,7 @@ def pull_requests(repo, now, previous, read):
     if result.get('errors'): raise ValueError('GraphQL errors')
     data = result['data']['repository']
     rows = state.setdefault('prs', {})
-    watermark = date_value(state['watermark']) if state.get('watermark') else None
+    watermark = date_value(state.setdefault('watermark', now.isoformat()))
     state.setdefault('scan_started', now.isoformat())
     for stream in ('history', 'updates'):
         connection = data[stream]
@@ -98,7 +98,7 @@ def pull_requests(repo, now, previous, read):
             state['history_complete'] = not page['hasNextPage']
         else:
             caught_up = not page['hasNextPage'] or any(
-                watermark is not None and date_value(pr['updatedAt']) < watermark for pr in nodes)
+                date_value(pr['updatedAt']) < watermark for pr in nodes)
             state['updates_complete'] = caught_up
             state['updates'] = None if caught_up else cursor
             if caught_up:
@@ -118,6 +118,11 @@ def local_branches(repo, root, now):
         if not mirror.exists():
             subprocess.run(['git', 'init', '--bare', str(mirror)], capture_output=True,
                            text=True, timeout=30, check=True)
+        source = (Path(os.environ.get('CARR_REPO_ROOT') or Path(__file__).resolve().parents[1])
+                  if repo.endswith('/carr-system') else Path.home() / 'doctorcre-app')
+        if not git('for-each-ref', '--count=1', '--format=%(refname)', 'refs/heads/') and (source / '.git').exists():
+            # Reuse fetched objects before asking GitHub for branch deltas.
+            git('fetch', '--no-tags', str(source), '+refs/heads/*:refs/heads/*')
         canonical = REPOSITORIES[repo]
         git('fetch', '--prune', '--no-tags', 'https://github.com/' + canonical + '.git',
             '+refs/heads/*:refs/heads/*')

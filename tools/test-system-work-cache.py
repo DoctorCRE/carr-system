@@ -67,6 +67,7 @@ class CacheTests(unittest.TestCase):
     response=self.response([first],cursor='page-1',more=True)
     if len(calls)>2:
      self.assertEqual(fields['history'],'page-1')
+     self.assertEqual(fields['updates'],'null')
      response=self.response([last],cursor='page-2')
      response['data']['repository']['updates']={'nodes':[merged,first],'pageInfo':{'endCursor':'updates-2','hasNextPage':False}}
     return response
@@ -101,8 +102,8 @@ class CacheTests(unittest.TestCase):
   self.assertEqual(len(live),2)
   self.assertTrue(all(item['state']=='merged' and item['last_activity_at']=='2026-09-02T00:00:00Z' for item in live))
   self.assertFalse(any(item['id'].endswith(':pr:3') for item in result['items']))
- def test_large_history_uses_one_page_per_stream_per_refresh(self):
-  prs=[{**self.read([])['data']['repository']['history']['nodes'][0], 'number':n} for n in range(1,251)]
+ def test_large_history_and_update_backlog_use_one_page_per_stream_per_refresh(self):
+  prs=[{**self.read([])['data']['repository']['history']['nodes'][0], 'number':n,'updatedAt':'2026-10-01T00:00:01Z'} for n in range(1,251)]
   with tempfile.TemporaryDirectory() as d:
    calls=[];path=Path(d)/'cache.json'
    def read(args):
@@ -131,11 +132,25 @@ class CacheTests(unittest.TestCase):
    sha=git('rev-parse','HEAD')
    git('checkout','-b','recent');git('commit','--allow-empty','-m','recent',date='2026-09-30T00:00:00Z')
    git('checkout','-b','exactly-seven-days');git('commit','--allow-empty','-m','boundary',date='2026-09-24T00:00:00Z')
-   env={'GIT_CONFIG_COUNT':'1','GIT_CONFIG_KEY_0':f'url.{source}.insteadOf','GIT_CONFIG_VALUE_0':'https://github.com/DoctorCRE/carr-system.git'}
+   env={'CARR_REPO_ROOT':str(source),'GIT_CONFIG_COUNT':'1','GIT_CONFIG_KEY_0':f'url.{source}.insteadOf','GIT_CONFIG_VALUE_0':'https://github.com/DoctorCRE/carr-system.git'}
    with patch.dict(os.environ,env):
     rows=cache.local_branches('jbookout/carr-system',root/'mirrors',NOW)
     self.assertEqual(rows,[{'name':'stale/feature','sha':sha,'date':'2026-09-02T00:00:00Z'}])
     git('branch','-D','stale/feature')
+    self.assertEqual(cache.local_branches('jbookout/carr-system',root/'mirrors',NOW),[])
+ def test_cold_mirror_reuses_fetched_checkout_objects(self):
+  with tempfile.TemporaryDirectory() as d:
+   root=Path(d);source=root/'checkout';source.mkdir()
+   subprocess.run(['git','init','-b','main',str(source)],capture_output=True,check=True)
+   subprocess.run(['git','-C',str(source),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-m','base'],capture_output=True,check=True)
+   real_run=subprocess.run
+   def transport(args,**kwargs):
+    if any(arg.startswith('https://') for arg in args):
+     probe=real_run([*args[:2],'cat-file','-e','refs/heads/main^{commit}'],capture_output=True)
+     self.assertEqual(probe.returncode,0,'cold fetch must reuse the already-fetched checkout')
+     return subprocess.CompletedProcess(args,0,stdout='',stderr='')
+    return real_run(args,**kwargs)
+   with patch.dict(os.environ,{'CARR_REPO_ROOT':str(source)}), patch.object(subprocess,'run',side_effect=transport):
     self.assertEqual(cache.local_branches('jbookout/carr-system',root/'mirrors',NOW),[])
  def test_builder_brief_with_pr_is_excluded_and_no_body_cached(self):
   with tempfile.TemporaryDirectory() as d:
