@@ -132,7 +132,7 @@ STRUCTURAL_KEYS = {
     "feature_switch_unreadable", "canonical_health_refused", "source_unreadable", "export_unreadable",
     "job_ledger", "control_state", "repo_status", "registry_integrity",
     "credential_health", "unrecorded_failure", "tailscale",
-    "storage_health_unavailable", "verb_usage",
+    "verb_usage",
 }
 ALWAYS_HARD_ERROR_KEYS = STRUCTURAL_KEYS | {"jev_call_receipt_integrity", "scheduled_jobs_evidence_unavailable", "studio_failover_evidence"}
 
@@ -815,8 +815,6 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                 "verb_usage": _verb_usage_value([], 411)}
         ns.update(CANONICAL_SECTION="all", _canonical_snapshot=lambda: snap,
                   _seat_health_rows=lambda: ["PASS seat fixture"],
-                  _branch_janitor_row=lambda: ("OK branch janitor fixture", False),
-                  _storage_hygiene_row=lambda: ("OK storage hygiene fixture", False),
                   _canonical_now=lambda snap: datetime.now(timezone.utc),
                   _canonical_contradiction_alarm=lambda: 0,
                   _canonical_workflow_truth=lambda: None, _canonical_assurance_health=lambda: None,

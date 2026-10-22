@@ -1430,8 +1430,6 @@ def _host_liveness_rows():
     return module.rows(live, config)
 
 
-
-
 def _cloudflare_spend_row():
     """(line, failed, not_run) from the Cloudflare spend guard's local receipt; no network.
 
@@ -1474,24 +1472,6 @@ def _system_cost_row():
     import system_costs
     snapshot = system_costs.load_snapshot(os.path.join(REPO_ROOT, 'out/system-costs.json'))
     return snapshot, system_costs.health_row(snapshot, 'nightly collector owns reconciliation')
-
-
-def _branch_janitor_row():
-    sys.path.insert(0, os.path.join(REPO_ROOT, "lib"))
-    from branch_retirement import health
-    return health(REPO_ROOT)
-
-
-def _storage_hygiene_row():
-    if sys.platform != "darwin":
-        return ("SKIP storage hygiene — Studio Data volume check not applicable "
-                "outside macOS", False)
-    import storage_hygiene
-    _tmp, clone_root, _replay = storage_hygiene.storage_roots()
-    used, clones = storage_hygiene.storage_snapshot(
-        Path("/System/Volumes/Data"), clone_root)
-    return (storage_hygiene.health_row(used_bytes=used, clone_count=clones),
-            used > storage_hygiene.DATA_THRESHOLD_BYTES)
 
 
 def _system_sends_row():
@@ -1562,20 +1542,7 @@ def _canonical_health():
         return 1
 
     print(f"Façade check (rule 28) — {time.strftime('%Y-%m-%d %H:%M')} — canonical receipts, not Drive renders")
-    if CANONICAL_SECTION in ("all", "storage") and not CANONICAL_FIXTURE:
-        try:
-            storage_line, storage_failed = _storage_hygiene_row()
-            print("  " + storage_line)
-            if storage_failed:
-                rc = _red("storage_capacity", storage_line, subject="studio-data-volume",
-                          time_rolling=True)
-        except (OSError, ValueError) as exc:
-            storage_line = (f"storage hygiene unavailable ({type(exc).__name__}) · on breach: "
-                            "owner orchestrator · restore tools/storage_hygiene.py · "
-                            "verify: run.sh health --section storage · auto-clear after readback")
-            print("  WARN " + storage_line)
-            rc = _red("storage_health_unavailable", storage_line,
-                      subject="studio-data-volume", hard_error=True)
+
     if CANONICAL_SECTION in ("all", "jobs") and not CANONICAL_FIXTURE:
         flash_line = flashlib.health_row()
         print("  " + flash_line)
@@ -2148,19 +2115,6 @@ def _canonical_health():
             _detail = f"check failed ({type(e).__name__}: {e})"
             print(f"  ⚠︎ {'jev receipts':<18} {_detail}")
             rc = _red("jev_call_receipt_integrity", _detail, hard_error=True)
-
-    if CANONICAL_SECTION in ("all", "jobs") and not CANONICAL_FIXTURE:
-        print("Branch retirement — local scheduled receipts")
-        try:
-            line, failed = _branch_janitor_row()
-            print("  " + line)
-            if failed:
-                rc = _red("branch_janitor", line, subject="three-repo-retirement")
-        except Exception as exc:
-            line = (f"branch janitor unavailable ({type(exc).__name__}) · on breach: owner orchestrator "
-                    "· restore lib/branch_retirement.py · verify health · auto-clear after successful readback")
-            print("  WARN " + line)
-            rc = _red("branch_janitor", line, subject="three-repo-retirement")
 
     if CANONICAL_SECTION in ("all", "uptime") and not CANONICAL_FIXTURE:
         line, failed = _uptime.row()

@@ -40,8 +40,6 @@ class HostIsolation(unittest.TestCase):
     def test_config_reconciliation_proof_is_independent_of_host(self):
         self.run_suite('config-as-code-selftest.py')
 
-    def test_orphan_reaper_proof_is_independent_of_host(self):
-        self.run_suite('orphan-reaper-selftest.py')
 
     def run_capacity_proof(self, script, case):
         with tempfile.TemporaryDirectory(prefix='carr-parent-slots-') as temp:

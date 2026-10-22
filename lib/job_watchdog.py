@@ -28,7 +28,6 @@ EVIDENCE = {
     "control_plane_tick": frozenset({"control_plane_tick_skipped"}),
     "scheduled_jobs": frozenset({"scheduled_job_drift"}),
     "salesforce_refresh": frozenset({"salesforce_refresh"}),
-    "machine_cleanup": frozenset({"machine_cleanup"}),
     "vendor_releases": frozenset({"vendor_release_fetch_error"}),
     "jobs": frozenset({"job_failed", "job_dead", "job_hang", "job_silent", "job_over_limit"}),
     "prs": frozenset({"pr_blocked_review", "pr_ci_red", "pr_conflict", "pr_draft_idle", "pr_ready"}),
@@ -340,24 +339,12 @@ def detect(facts, config, now):
         emit("scheduled_jobs", "scheduled_job_drift", row["label"], row["detail"],
              key=row["key"], next_action=row["fix"] +
              "; verify python3 ops/scheduled-jobs-check.py; auto-clear on next complete scan without this finding")
-    for row in facts.get("machine_cleanup", []):
-        emit("machine_cleanup", "machine_cleanup", row["code"], row["detail"])
     jobs = facts.get("jobs", [])
     def job_scope(job):
         return tuple(job.get(key) for key in ("card", "executor", "repo", "pr", "head"))
     successes = {}
     for job in jobs:
         if job.get("card") and "start" in job and job.get("ended_at") and job.get("exit_code") == 0:
-            if job["card"] == "branch-janitor":
-                try:
-                    report = json.loads(job.get("log_tail", ""))
-                except ValueError:
-                    continue
-                if (not isinstance(report, dict) or report.get("schema") != "branch-retirement/v1"
-                        or report.get("execute") is not True or report.get("deferred") != []
-                        or report.get("errors") != [] or not isinstance(report.get("counts"), dict)
-                        or set(report["counts"]) != set(config["repositories"])):
-                    continue
             scope = job_scope(job)
             successes[scope] = max(successes.get(scope, -math.inf), epoch(job["ended_at"]))
     failures = set()
@@ -1002,15 +989,6 @@ def collect(root, config, now=None):
                 error("scheduled job evidence", RuntimeError("incomplete scheduled-job observation"), "scheduled_jobs")
         except Exception as exc:
             error("scheduled jobs", exc, "scheduled_jobs")
-    if sys.platform == "darwin" and Path(root).resolve() == repository_roots(config).get("jbookout/carr-system"):
-        try:
-            from machine_cleanup import health_findings
-            sys.path.append(str(Path(__file__).resolve().parents[1] / "tools"))
-            from storage_hygiene import storage_roots
-            facts["machine_cleanup"] = health_findings(root, config, tmp_root=Path("/private/tmp"),
-                roots=repository_roots(config), now=now, user_tmp_root=storage_roots()[0])
-        except Exception as exc:
-            error("machine cleanup", exc, "machine_cleanup")
     queue = path_at(root, config["paths"]["merge_queue"])
     if queue.exists():
         try:

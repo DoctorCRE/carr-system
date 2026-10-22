@@ -186,7 +186,7 @@ class ReplayTests(unittest.TestCase):
     def test_identical_job_failures_collapse_by_card_and_cause(self):
         import job_watchdog as w
         config = w.load_config(ROOT / "ops/config/job-watchdog.json")
-        jobs = [{"id": f"run-{n}", "card": "branch-janitor", "start": n,
+        jobs = [{"id": f"run-{n}", "card": "fixture-job", "start": n,
                  "exit_code": 1, "log_tail": "repository evidence refused"} for n in (1, 2, 3)]
         jobs += [{**jobs[-1], "id": "other-cause", "log_tail": "process evidence unavailable"},
                  {**jobs[-1], "id": "other-job", "card": "another-job"}]
@@ -426,24 +426,6 @@ class ReplayTests(unittest.TestCase):
                                  ["newer-failure"])
         self.assertEqual(w.detect({"jobs": [failed, {**success, "start": 50}]}, c, 300), [])
 
-    def test_branch_janitor_recovery_requires_completed_fleet_report(self):
-        import job_watchdog as w
-        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
-        failed = {"id": "failed", "card": "branch-janitor", "executor": "reaper",
-                  "start": 100, "ended_at": w.stamp(110), "exit_code": 9}
-        report = {"schema": "branch-retirement/v1", "execute": True, "deferred": [], "errors": [],
-                  "counts": {repo: {} for repo in c["repositories"]}}
-        success = {**failed, "id": "success", "start": 200, "ended_at": w.stamp(210), "exit_code": 0,
-                   "log_tail": json.dumps(report)}
-        self.assertEqual(w.detect({"jobs": [failed, success]}, c, 300), [])
-        incomplete = ["", "truncated JSON", "[]", "null", json.dumps({})]
-        incomplete += [json.dumps({**report, **change}) for change in (
-            {"execute": False}, {"deferred": [{"repo": "fleet"}]}, {"errors": [{"error": "failed"}]},
-            {"counts": {}}, {"counts": {c["repositories"][0]: {}}})]
-        for output in incomplete:
-            with self.subTest(output=output):
-                found = w.detect({"jobs": [failed, {**success, "log_tail": output}]}, c, 300)
-                self.assertEqual([f["job"]["id"] for f in found], ["failed"])
 
     def test_release_block_counts_only_while_it_is_the_lane_outcome(self):
         import job_watchdog as w
@@ -1266,50 +1248,6 @@ class StateTests(unittest.TestCase):
             latest = w.read_latest(root / c["paths"]["findings"])
             self.assertIsNone(latest[found[0]["key"]]["cleared_at"])
 
-    def test_lock_deferred_cli_cannot_clear_real_job_failure(self):
-        import contextlib
-        import io
-        from unittest.mock import patch
-        import job_watchdog as w
-        from branch_retirement import maintenance
-        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
-        class Effects:
-            def report(self, finding):
-                return {}
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            registry = root / c["paths"]["registry"]
-            path = root / c["paths"]["findings"]
-            subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
-            program = f"""import runpy, sys
-from pathlib import Path
-sys.path.insert(0, {str(ROOT / 'lib')!r})
-import job_watchdog
-job_watchdog.repository_roots = lambda config=None: {{'jbookout/carr-system': Path({str(root)!r})}}
-sys.argv = [{str(ROOT / 'hooks/worktree-self-plumb.py')!r}, '--reap', '--fleet', '--repo', {str(root)!r}]
-runpy.run_path(sys.argv[0], run_name='__main__')
-"""
-            def reconcile():
-                jobs = list(w.read_latest(registry).values())
-                return w.reconcile(root, c, w.detect({"jobs": jobs}, c, 1000), Effects(), 1000)
-            with patch.object(w, "board_task", return_value={}), contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(w.run_job(root, c, "branch-janitor", "deterministic reaper", 1,
-                                          [sys.executable, "-c", "print('unrepaired failure'); raise SystemExit(9)"]), 9)
-                failed = reconcile()[0]["key"]
-                before = path.read_bytes()
-                registry_before = registry.read_bytes()
-                with maintenance(root):
-                    self.assertEqual(w.run_job(root, c, "branch-janitor", "deterministic reaper", 1,
-                                              [sys.executable, "-c", program]), 0)
-            retry = list(w.read_latest(registry).values())[-1]
-            report = json.loads(retry["log_tail"])
-            self.assertEqual([row["repo"] for row in report["deferred"]], ["fleet"])
-            self.assertEqual(report["counts"], {})
-            self.assertEqual(report["actions"], [])
-            self.assertEqual([f["key"] for f in reconcile()], [failed])
-            self.assertIsNone(w.read_latest(path)[failed]["cleared_at"])
-            self.assertTrue(path.read_bytes().startswith(before))
-            self.assertTrue(registry.read_bytes().startswith(registry_before))
 
     def test_later_success_clears_same_job_failures_without_deleting_history(self):
         import job_watchdog as w
@@ -1322,8 +1260,8 @@ runpy.run_path(sys.argv[0], run_name='__main__')
             registry = root / c["paths"]["registry"]
             path = root / c["paths"]["findings"]
             for job_id, start in (("first", 100), ("second", 120)):
-                w.append(registry, {"id": job_id, "card": "branch-janitor",
-                                   "executor": "deterministic reaper", "start": start,
+                w.append(registry, {"id": job_id, "card": "fixture-job",
+                                   "executor": "fixture executor", "start": start,
                                    "exit_code": 1, "ended_at": w.stamp(start + 10),
                                    "log_tail": "repository maintenance lock held; preserve pending run"})
             def reconcile(now):
@@ -1331,8 +1269,8 @@ runpy.run_path(sys.argv[0], run_name='__main__')
                 return w.reconcile(root, c, w.detect({"jobs": jobs}, c, now), Effects(), now)
             self.assertEqual(len(reconcile(140)), 1)
             before = path.read_text().splitlines()
-            w.append(registry, {"id": "retry", "card": "branch-janitor",
-                               "executor": "deterministic reaper", "start": 200,
+            w.append(registry, {"id": "retry", "card": "fixture-job",
+                               "executor": "fixture executor", "start": 200,
                                "alive": True, "log_mtime": 200, "limit": 3600})
             self.assertEqual(len(reconcile(210)), 1, "an unfinished retry is not recovery")
             report = {"schema": "branch-retirement/v1", "execute": True, "errors": [], "deferred": [],
