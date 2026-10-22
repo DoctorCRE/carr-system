@@ -6521,13 +6521,19 @@ class TokenCheckWrangler(Base):
         recorded = receipt.read_text()
         pipe = self.fx.pipeline(rp.Runner())
         wrangler = pipe.auth_wrangler()
+        settings = {"XDG_CONFIG_HOME": str(self.fx.tmp / "config"),
+                    "XDG_CACHE_HOME": str(self.fx.tmp / "cache"),
+                    "TMPDIR": str(self.fx.tmp / "tmp")}
+        pipe.env.update(settings)
         result = pipe.step("wrangler-auth", [str(wrangler), "whoami"], home)
         observed = json.loads(result.out)
         self.assertTrue(Path(observed["cache"]).is_relative_to(pipe.run_dir.resolve()))
         self.assertEqual(observed["env"]["HOME"], pipe.env["HOME"])
         for name in ("MINIFLARE_CACHE_DIR", "CLOUDFLARE_CF_FETCH_PATH", "WRANGLER_CACHE_DIR",
-                     "WRANGLER_LOG_PATH", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "TMPDIR"):
+                     "WRANGLER_LOG_PATH"):
             self.assertTrue(Path(observed["env"][name]).resolve().is_relative_to(pipe.run_dir.resolve()), name)
+        for name, value in settings.items():
+            self.assertEqual(observed["env"][name], value, name)
         self.assertFalse((home / "node_modules/.mf").exists())
         self.assertEqual(rp.toolchain_digest(home), recorded.strip())
         self.assertEqual(receipt.read_text(), recorded)
@@ -6580,7 +6586,8 @@ class TokenCheckWrangler(Base):
         for command in ("git", "gh"):
             pipe.step("schema-" + command, [command, "--version"], self.fx.repo)
             observed = runner.envs["schema-" + command]
-            self.assertEqual(observed, pipe.env)
+            for name in ("HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "TMPDIR", "GH_CONFIG_DIR"):
+                self.assertEqual(observed.get(name), pipe.env.get(name), name)
 
     def test_non_wrangler_steps_preserve_home_for_nested_git_and_github(self):
         runner = FakeRunner()
@@ -6595,7 +6602,22 @@ class TokenCheckWrangler(Base):
             pipe.step(name, argv, self.fx.repo)
             self.assertEqual(runner.envs[name]["HOME"], str(home), argv)
 
-    def test_non_wrangler_steps_preserve_github_config_when_xdg_is_redirected(self):
+    @unittest.skipUnless(sys.platform == "darwin", "macOS release host sandbox")
+    def test_wrapped_step_keeps_global_git_url_rewrite_for_nested_fetch(self):
+        home = self.fx.repo / "login-home"
+        config = home / ".config/git/config"
+        config.parent.mkdir(parents=True)
+        config.write_text(f'[url "{self.fx.origin.as_uri()}"]\n'
+                          '    insteadOf = fixture:origin\n')
+        env = fixture_env({"PATH": os.environ["PATH"], "HOME": str(home), "LANG": "C"})
+        del env["GIT_CONFIG_GLOBAL"]
+        pipe = self.fx.pipeline(rp.Runner())
+        pipe.auth_wrangler()
+        result = pipe.step("nested-git-fetch", ["/bin/sh", "-c",
+            "git fetch --no-write-fetch-head fixture:origin HEAD"], self.fx.repo, env=env)
+        self.assertEqual(result.rc, 0)
+
+    def test_non_wrangler_steps_preserve_github_config(self):
         runner = FakeRunner()
         pipe = self.fx.pipeline(runner)
         home = self.fx.repo / "login-home"
@@ -6610,7 +6632,8 @@ class TokenCheckWrangler(Base):
             name = f"github-config-check-{index}"
             pipe.step(name, ["./run.sh", "health"], self.fx.repo, env=env)
             observed = runner.envs[name]
-            config = observed.get("GH_CONFIG_DIR") or str(Path(observed["XDG_CONFIG_HOME"]) / "gh")
+            config = observed.get("GH_CONFIG_DIR") or str(
+                Path(observed.get("XDG_CONFIG_HOME") or Path(observed["HOME"]) / ".config") / "gh")
             self.assertEqual(config, str(expected))
 
     def test_command_before_toolchain_install_does_not_need_package_files(self):
