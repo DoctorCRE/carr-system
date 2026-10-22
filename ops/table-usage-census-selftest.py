@@ -64,6 +64,36 @@ class ReportTests(unittest.TestCase):
             self.assertIn('Joe', proposal['next_step'])
             self.assertEqual(report['provenance']['catalog_source'], 'migration_declarations_not_live_database')
 
+    def test_proposal_carries_reference_caveat_and_all_sensitive_exclusions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'migrations').mkdir()
+            (root/'lib').mkdir()
+            (root/'migrations/0001_fixture.sql').write_text('CREATE TABLE public.token_store_run(id int);')
+            sensitive = root/'lib/token_store.py'
+            sensitive.write_text('SECRET_SENTINEL = "must never be scanned"')
+            def git(command, **kwargs):
+                if command[1] == 'ls-files':
+                    return subprocess.CompletedProcess(command, 0,
+                        b'migrations/0001_fixture.sql\0lib/token_store.py\0')
+                return subprocess.CompletedProcess(command, 0, 'fixture-head\n')
+            original_read_text = Path.read_text
+            def guarded_read_text(path, *args, **kwargs):
+                if path == sensitive:
+                    raise AssertionError('sensitive path contents must not be read')
+                return original_read_text(path, *args, **kwargs)
+            with patch.object(census, 'ROOT', root), patch.object(census, 'source_inventory', return_value=[]), \
+                    patch.object(census.subprocess, 'run', side_effect=git), \
+                    patch.object(Path, 'read_text', guarded_read_text):
+                self.assertEqual(census.main(['--source-only']), 0)
+            report = json.loads((root/'out/table-usage-census.json').read_text())
+            proposal = json.loads((root/'out/table-proposed-deletions.json').read_text())
+            self.assertEqual(report['tables'][0]['classification'], 'unknown')
+            self.assertEqual(proposal['excluded_sensitive_path_count'], 1)
+            self.assertEqual(proposal['excluded_sensitive_paths'], ['lib/token_store.py'])
+            self.assertEqual(proposal['reference_caveat'], report['reference_caveat'])
+            self.assertNotIn('SECRET_SENTINEL', json.dumps(proposal))
+
     def test_real_source_only_with_fake_empty_statistics_has_review_candidates(self):
         run = subprocess.run([sys.executable, ROOT/'ops/table-usage-census.py', '--source-only'],
                              cwd=ROOT, capture_output=True, text=True, timeout=300)
@@ -77,7 +107,7 @@ class ReportTests(unittest.TestCase):
         rows = {row['table']: row for row in report['tables']}
         protected = {'ops.execution_environment_' + suffix: 'bin/schema-snapshot.sh'
                      for suffix in ('conformance', 'provider', 'provider_event')}
-        protected['public.' + 'retrieval_' + 'phrase'] = 'bin/schema-snapshot.sh'
+        protected['public.' + 'retrieval_' + 'phrase'] = 'migrations/0135_situation_retrieval.sql'
         protected['ops.' + 'scac_reference_monitor_' + 'mode_event'] = 'docs/frontier-finding/gen_breakglass_run.py'
         for name, source_path in protected.items():
             with self.subTest(table=name):
@@ -151,6 +181,57 @@ class ReportTests(unittest.TestCase):
 
 
 class ReferenceTests(unittest.TestCase):
+    def test_prose_and_comments_do_not_reference_bare_table_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'docs').mkdir()
+            (root/'ops').mkdir()
+            (root/'docs/reference.md').write_text('The word leaves appears here as prose.\n')
+            (root/'ops/read.py').write_text(
+                '# leaves is only a comment\n'
+                'query = "select * from leaves"\n')
+            refs, _ = census.scan_references(
+                root, [table('leaves')], ['docs/reference.md', 'ops/read.py'], [], [])
+            self.assertEqual(len(refs['public.leaves']), 1)
+            self.assertEqual(refs['public.leaves'][0]['line'], 2)
+
+    def test_source_catalog_ignores_comment_text_and_keeps_real_ddl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'migrations').mkdir()
+            source = 'migrations/0046_fixture.sql'
+            (root/source).write_text(
+                '-- create table if not exists public.if;\n'
+                '/* create table public.will(id int); */\n'
+                "select 'CREATE TABLE public.stringy(id int)';\n"
+                'DO $$ CREATE TABLE public.dollar_stringy(id int); $$;\n'
+                'CREATE TABLE IF NOT EXISTS public.actual(id int);\n')
+            with patch.object(census, 'ROOT', root):
+                snapshot = census.source_catalog([source])
+            self.assertEqual([(item['schema'], item['name']) for item in snapshot['tables']],
+                             [('public', 'actual')])
+
+    def test_sensitive_paths_taint_matching_tables_without_reading_contents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'lib').mkdir()
+            sensitive = root/'lib/token_store.py'
+            sensitive.write_text('SECRET_SENTINEL')
+            original_read_text = Path.read_text
+            def guarded_read_text(path, *args, **kwargs):
+                if path == sensitive:
+                    raise AssertionError('sensitive path contents must not be read')
+                return original_read_text(path, *args, **kwargs)
+            with patch.object(Path, 'read_text', guarded_read_text):
+                refs, unknown = census.scan_references(
+                    root, [table('token_store_run'), table('unrelated')], ['lib/token_store.py'], [], [])
+            report = census.build_report([table('token_store_run'), table('unrelated')],
+                                         references=refs, unresolved=unknown, backup_tables=set())
+            rows = {row['table']: row for row in report['tables']}
+            self.assertEqual(rows['public.token_store_run']['classification'], 'unknown')
+            self.assertEqual(rows['public.unrelated']['classification'], 'unreferenced-and-empty')
+            self.assertEqual(unknown[0]['possible_tables'], ['public.token_store_run'])
+
     def test_literal_placeholder_prefix_does_not_scope_uncertainty_to_every_table(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -167,17 +248,22 @@ class ReferenceTests(unittest.TestCase):
             (root/'migrations').mkdir()
             source = 'migrations/0001_fixture.sql'
             (root/source).write_text(
+                '-- SELECT * FROM public.commented;\n'
+                '/* SELECT * FROM public.block_commented; */\n'
                 'CREATE TABLE public.unused(id int);\n'
                 'CREATE TABLE public.child(id int REFERENCES public.parent(id));\n'
                 'CREATE VIEW v AS SELECT * FROM public.viewed;\n'
                 'CREATE TRIGGER t BEFORE UPDATE ON public.triggered FOR EACH ROW EXECUTE FUNCTION f();\n'
                 'CREATE POLICY p ON public.secured USING (true);\n')
-            tables = [table(name) for name in ('unused', 'child', 'parent', 'viewed', 'triggered', 'secured')]
+            tables = [table(name) for name in ('unused', 'child', 'parent', 'viewed', 'triggered', 'secured',
+                                                'commented', 'block_commented')]
             refs, unknown = census.scan_references(root, tables, [source], [], [])
             report = census.build_report(tables, references=refs, unresolved=unknown, backup_tables=set())
             self.assertEqual({name for name in refs},
                              {'public.parent', 'public.viewed', 'public.triggered', 'public.secured'})
-            self.assertEqual(report['counts']['unreferenced-and-empty'], 2)
+            self.assertNotIn('public.commented', refs)
+            self.assertNotIn('public.block_commented', refs)
+            self.assertEqual(report['counts']['unreferenced-and-empty'], 4)
 
     def test_opaque_calls_and_unread_sensitive_paths_are_notes_without_table_scope(self):
         fixtures = {

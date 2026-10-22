@@ -80,6 +80,77 @@ EXCLUDED_DIRECTORIES = {'.git', '.venv', 'node_modules', 'vendor', 'vendored', '
 EXCLUDED_FILES = {'db/schema.sql', 'db/migration-baseline.json'}
 SENSITIVE_PATH = re.compile(r"(?:^|[/_.-])(?:env|credentials?|tokens?|keys?|keychains?|dumps?|secrets?)(?:$|[/_.-])", re.I)
 SYMBOL = re.compile(r"(?:\b(?:async\s+)?def\s+|\bfunction\s+|\b(?:const|let)\s+)([A-Za-z_$][\w$]*)")
+SQLISH = re.compile(
+    r"\b(?:select\b.*\bfrom\b|insert\s+into\b|update\s+[\w\".]|delete\s+from\b|"
+    r"alter\s+table\b|create\s+(?:unlogged\s+)?table\b|truncate(?:\s+table)?\b|references\b|join\b)", re.I)
+
+
+def strip_sql_comments_and_literals(text, *, strip_literals=True):
+    output = []
+    index = 0
+    block_depth = 0
+    quote = None
+    dollar_quote = None
+    while index < len(text):
+        if dollar_quote:
+            if text.startswith(dollar_quote, index):
+                output.extend(' ' * len(dollar_quote) if strip_literals else dollar_quote)
+                index += len(dollar_quote)
+                dollar_quote = None
+            else:
+                output.append('\n' if text[index] == '\n' else (' ' if strip_literals else text[index]))
+                index += 1
+        elif block_depth:
+            if text.startswith('/*', index):
+                block_depth += 1
+                output.extend('  ')
+                index += 2
+            elif text.startswith('*/', index):
+                block_depth -= 1
+                output.extend('  ')
+                index += 2
+            else:
+                output.append('\n' if text[index] == '\n' else ' ')
+                index += 1
+        elif quote:
+            char = text[index]
+            output.append(char if quote == '"' or not strip_literals else ('\n' if char == '\n' else ' '))
+            index += 1
+            if char == quote:
+                if index < len(text) and text[index] == quote:
+                    output.append(text[index] if quote == '"' or not strip_literals else ' ')
+                    index += 1
+                else:
+                    quote = None
+            elif char == '\\' and quote == "'" and index < len(text):
+                output.append('\n' if text[index] == '\n' else (' ' if strip_literals else text[index]))
+                index += 1
+        elif text.startswith('--', index):
+            while index < len(text) and text[index] != '\n':
+                output.append(' ')
+                index += 1
+        elif text.startswith('/*', index):
+            block_depth = 1
+            output.extend('  ')
+            index += 2
+        elif match := re.match(r'\$[A-Za-z_0-9]*\$', text[index:]):
+            dollar_quote = match[0]
+            output.extend(' ' * len(dollar_quote) if strip_literals else dollar_quote)
+            index += len(dollar_quote)
+        elif text[index] in {"'", '"'}:
+            quote = text[index]
+            output.append(text[index] if quote == '"' or not strip_literals else ' ')
+            index += 1
+        else:
+            output.append(text[index])
+            index += 1
+    return ''.join(output)
+
+
+def sensitive_path_scope(source, tables):
+    path_tokens = set(re.findall(r'[a-z0-9]+', source.lower()))
+    return sorted(f"{table['schema']}.{table['name']}" for table in tables
+                  if re.split(r'[^a-z0-9]+', table['name'].lower(), maxsplit=1)[0] in path_tokens)
 
 
 def scan_references(root, tables, paths, inventory, functions):
@@ -110,18 +181,20 @@ def scan_references(root, tables, paths, inventory, functions):
 
     def scan(source, text, signature=None):
         suffix = Path(source).suffix
+        query_text = strip_sql_comments_and_literals(text, strip_literals=False) if suffix == '.sql' else text
         if suffix == '.py':
             queries = python_queries(text)
         elif signature or suffix in {'.js', '.mjs', '.ts', '.tsx', '.sql', '.sh', '.applescript'}:
-            queries = other_queries(text, '.sql' if signature else suffix)
+            queries = other_queries(query_text, '.sql' if signature else suffix)
         else:
             queries = []
         migration = source.startswith('migrations/') and source.endswith('.sql')
         if migration:
+            text = query_text
             dependency_sql = re.sub(
                 r'\b(?:create\s+(?:unlogged\s+)?|alter\s+|drop\s+)table\s+'
                 r'(?:(?:if\s+(?:not\s+)?exists|only)\s+)?[\w."]+',
-                lambda match: re.sub(r'[^\n]', ' ', match[0]), text, flags=re.I)
+                lambda match: re.sub(r'[^\n]', ' ', match[0]), query_text, flags=re.I)
             for match in re.finditer(r'\bcreate\s+(?:or\s+replace\s+)?(?:constraint\s+)?'
                                      r'(?:trigger|policy)\b[^;]*?\bon\s+([\w."]+)', text, re.I):
                 queries.append((text.count('\n', 0, match.start()) + 1, {'select * from ' + match[1]}))
@@ -150,7 +223,12 @@ def scan_references(root, tables, paths, inventory, functions):
         if migration:
             return
         symbol = None
+        suffix = Path(source).suffix.lower()
+        documentation = suffix in {'.md', '.rst', '.txt'} or 'license' in Path(source).name.lower()
         for number, line in enumerate(text.splitlines(), 1):
+            if line.lstrip().startswith(('#', '//', '--', '/*', '*', '*/')):
+                continue
+            line = re.split(r'\s+#|\s+//|\s+--', line, maxsplit=1)[0]
             declaration = SYMBOL.search(line)
             if declaration:
                 symbol = declaration[1]
@@ -158,7 +236,12 @@ def scan_references(root, tables, paths, inventory, functions):
             if signature:
                 location["function"] = signature
             lexical_line = re.sub(r"\$[A-Za-z_0-9]*\$", " ", line)
-            for token in sorted(set(re.findall(r"[A-Za-z_][A-Za-z_0-9$]*", lexical_line)) & names.keys()):
+            tokens = set(re.findall(r"[A-Za-z_][A-Za-z_0-9$]*", lexical_line)) & names.keys()
+            for token in sorted(tokens):
+                qualified = re.search(r'\b[A-Za-z_][A-Za-z_0-9$]*\s*\.\s*"?'
+                                      + re.escape(token) + r'"?\b', lexical_line)
+                if not qualified and (documentation or not SQLISH.search(lexical_line)):
+                    continue
                 for target in names[token]:
                     evidence = {"kind": "function_static" if signature else "source_static", **location}
                     if symbol and not signature:
@@ -173,7 +256,8 @@ def scan_references(root, tables, paths, inventory, functions):
     for source in sorted(paths):
         path = root / source
         if SENSITIVE_PATH.search(source):
-            unresolved.append({"kind": "excluded_sensitive_path", "source": source, "possible_tables": []})
+            unresolved.append({"kind": "excluded_sensitive_path", "source": source,
+                               "possible_tables": sensitive_path_scope(source, tables)})
         elif path.is_file():
             if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
                 unresolved.append({"kind": "excluded_symlink", "source": source, "possible_tables": []})
@@ -285,7 +369,7 @@ def source_catalog(paths):
         path = ROOT/source
         if path.is_symlink():
             continue
-        for match in declaration.finditer(path.read_text()):
+        for match in declaration.finditer(strip_sql_comments_and_literals(path.read_text(encoding='utf-8'))):
             schema, name = (match[1] or 'public').strip('"'), match[2].strip('"')
             if schema not in {'public', 'ops'}:
                 continue
@@ -336,13 +420,17 @@ def main(argv=None):
         "backup_census_sha256": snapshot["backup_census_sha256"],
     }
     report["reference_caveat"] = (
-        "Lexical matches can include comments, tests and ambiguous names. Symbols are nearest-declaration "
+        "Single-name lexical matches require SQL-like context; qualified names can still match in source or tests. "
+        "Symbols are nearest-declaration "
         "candidates; candidate_verbs share a module and do not prove a call graph. Unbounded SQL and "
-        "excluded sensitive paths are notes with no inferred table scope. Finite expressions reference only their resolved relations; "
+        "excluded sensitive paths are never read; tables sharing a filename prefix remain uncertain. Finite expressions reference only their resolved relations; "
         "unresolved relation slots require a known table-name prefix to infer a table scope. Schema-only and unbounded slots are notes, "
         "so this scan does not establish their dependencies. Migration declarations alone are not use. "
         "Static absence never proves runtime absence."
     )
+    report['excluded_sensitive_paths'] = sorted(
+        item['source'] for item in unresolved if item.get('kind') == 'excluded_sensitive_path')
+    report['excluded_sensitive_path_count'] = len(report['excluded_sensitive_paths'])
     report["backup_caveat"] = "Membership in the current backup census scope only; not proof of a successful backup."
     report["size_caveat"] = "Per-relation bytes include indexes and TOAST. Partition parents do not sum children. Foreign sizes are unknown."
     path = ROOT / "out/table-usage-census.json"
@@ -351,6 +439,9 @@ def main(argv=None):
     write_report({'schema': 'carr-table-proposed-deletions/v1',
                   'approval': 'required_from_joe', 'proposed_deletions': report['proposed_deletions'],
                   'next_step': report['next_step'], 'stats_reset_caveat': report['stats_reset_caveat'],
+                  'reference_caveat': report['reference_caveat'],
+                  'excluded_sensitive_path_count': report['excluded_sensitive_path_count'],
+                  'excluded_sensitive_paths': report['excluded_sensitive_paths'],
                   'provenance': report['provenance']}, proposal_path)
     print(render_summary(report))
     print(f"Artifact: {path}")
