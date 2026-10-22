@@ -76,3 +76,5 @@ Several sessions share this one checkout, so its state is shared state.
 - **Untracked is not saved.** Two files lived all day as untracked local
   copies with no commit on any ref, one `git clean -fd` from gone. If a file
   matters, commit it the day it is written.
+
+<!-- CI scope probe: documentation-only diff; close without merging. -->
