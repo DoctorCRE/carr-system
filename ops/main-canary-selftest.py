@@ -33,18 +33,16 @@ def test_the_canary_is_event_driven_and_never_always_on():
           "workflow_dispatch:" in y)
 
 
-def test_a_running_canary_finishes_before_the_newest_pending_run():
+def test_every_landing_gets_its_own_uncancelled_canary():
     y = CANARY.read_text(encoding="utf-8")
     concurrency = re.search(r"^concurrency:\s*\n((?:[ \t]+[^\n]*\n)+)", y, re.M)
     check("the workflow declares concurrency", concurrency is not None)
     if concurrency is None:
         return
     settings = concurrency.group(1)
-    check("canaries share the main-canary group",
-          re.search(r"^  group: main-canary\s*$", settings, re.M) is not None)
-    # Canaries take 20-30 minutes while merges can land every 20 minutes.
-    # Cancelling the running canary starves releases of a completed verdict;
-    # GitHub still replaces older pending runs with the newest in this group.
+    check("each landing has an independent canary group",
+          "group: main-canary-${{ github.sha }}" in settings)
+    check("no path filter can leave a landing without a verdict", "paths-ignore:" not in y)
     check("a new merge cannot cancel the running canary and starve releases",
           re.search(r"^  cancel-in-progress: false\s*$", settings, re.M) is not None)
 
@@ -159,7 +157,7 @@ def test_a_red_canary_stays_red_and_names_main():
 
 def main():
     for fn in (test_the_canary_is_event_driven_and_never_always_on,
-               test_a_running_canary_finishes_before_the_newest_pending_run,
+               test_every_landing_gets_its_own_uncancelled_canary,
                test_parallel_classes_match_pr_ci_and_reuse_is_explicit,
                test_evidence_failure_runs_checks_and_uses_their_verdict,
                test_main_retains_migration_shadow_coverage,

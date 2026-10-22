@@ -26,6 +26,8 @@ sys.path.insert(0, str(ROOT / 'ops'))
 sys.path.insert(0, str(ROOT / 'tools'))
 sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
 sys.path.insert(0, str(ROOT))
+from tools.merge_queue.compose import Compositions
+from tools.merge_queue.recovery import Recovery
 from work_queue import WorkQueue, QueueChanged, default_path
 from git_env import scrubbed_env
 from regen import REGENERATED_OUTPUTS
@@ -152,7 +154,10 @@ def command(argv, *, cwd=None, data=None, timeout=None, observe=None, diagnostic
 
 
 class Queue:
-    def __init__(self, state: Path, root: Path = ROOT, gap: float = 2.0):
+    def __init__(self, state: Path, root: Path = ROOT, gap: float = 2.0, parallel_size: int = 1):
+        if type(parallel_size) is not int or not 1 <= parallel_size <= 16:
+            raise ValueError("parallel size must be between 1 and 16")
+        self.parallel_size = parallel_size
         self.state, self.root, self.gap = state, root, gap
         state.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(state / 'queue.sqlite3', timeout=BOUNDS['sqlite']['seconds'])
@@ -188,7 +193,7 @@ class Queue:
                             'transient_attempts': 'INTEGER NOT NULL DEFAULT 0',
                             'read_attempts': 'INTEGER NOT NULL DEFAULT 0',
                             'github_attempts': 'INTEGER NOT NULL DEFAULT 0',
-                            'ci_since': 'REAL', 'ci_head': 'TEXT',
+                            'ci_since': 'REAL', 'ci_head': 'TEXT', 'composition_base': 'TEXT',
                             'retry_at': 'REAL NOT NULL DEFAULT 0'},
                 'actions': {'attempts': 'INTEGER NOT NULL DEFAULT 0', 'expected_base': 'TEXT',
                             'dispatcher_pid': 'INTEGER', 'dispatcher_identity': 'TEXT', 'receipt': 'TEXT', 'work_card': 'TEXT',
@@ -212,6 +217,8 @@ class Queue:
         self._github_scope = 'automatic'
         self._github_entry = None
         self.children: dict[str, subprocess.Popen] = {}
+        self.compositions = Compositions(self)
+        self.recovery = Recovery(self)
         self._repo_ready: set[str] = set()
 
     @contextmanager
@@ -1009,19 +1016,33 @@ class Queue:
 
     def tick(self):
         with self.runner_lock():
+            self._observing_entries = set()
+            self.compositions.poll()
+            recovering = self.recovery.tick()
             with WorkQueue(default_path(), read_only=True) as work:
                 order = work.merge_order()['entries']
             self._observing_entries = set()
             try:
                 waiting = set()
+                selected = {}
                 for pin in bounded_items('snapshot', order):
                     if self.stopped:
                         return
                     repo = pin['repo']
-                    if repo in waiting:
+                    if self.parallel_size == 1 and repo in waiting:
                         continue
                     entry = self.enqueue(repo, pin['pr'], pin['head'], 'work queue projection', rearm=False)
                     e = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+                    if e['phase'] == 'done' and e['merged_commit']:
+                        self.tick_entry(e, pin['card_id'], order)
+                        continue
+                    if e['phase'] not in ('pending', 'merging', 'merge_rejected', 'refreshing'):
+                        continue
+                    if repo in recovering and not e['tested']:
+                        continue
+                    selected[repo] = selected.get(repo, 0) + 1
+                    if selected[repo] > self.parallel_size:
+                        continue
                     wait = self.tick_entry(e, pin['card_id'], order)
                     if wait:
                         waiting.add(repo)
@@ -1041,6 +1062,32 @@ class Queue:
         if current['phase'] == 'done' and current['merged_commit']:
             self.complete_work_merge(current, card_id, merged=True)
         return wait
+
+    def parallel_rules(self, repo):
+        rules = self.api(f'repos/{repo}/rules/branches/main')
+        checks = [r['parameters'] for r in rules if r['type'] == 'required_status_checks']
+        required = {c['context'] for p in checks for c in p['required_status_checks']}
+        expected = 'ops/ci.sh --strict' if repo == REPOS[0] else 'test'
+        return bool(checks) and expected in required and all(
+            p['strict_required_status_checks_policy'] is False for p in checks)
+
+    def composition_current(self, e, p):
+        if not e['composition_base']:
+            return False
+        repo, head, base = e['repo'], e['approved'], e['composition_base']
+        self.fetch(repo, head, base)
+        main = self.git(repo, 'rev-parse', 'origin/main').strip()
+        self.git(repo, 'merge-base', '--is-ancestor', base, main)
+        ancestor = self.git(repo, 'merge-base', base, head).strip()
+        changed = set(filter(None, self.git(repo, 'diff', '--no-renames', '--name-only', '-z', ancestor, head).split('\0')))
+        commits = self.git(repo, 'rev-list', base+'..'+main)
+        landed = set(filter(None, self.git(repo, 'diff-tree', '--stdin', '--no-commit-id',
+                                            '-r', '-m', '--no-renames', '--name-only', '-z', data=commits).split('\0')))
+        if changed & landed:
+            self.report(e, 'composing', 'Main touched composition files; recompose before landing')
+            return False
+        return True
+
 
     def complete_work_merge(self, e, card_id, *, merged):
         with WorkQueue(default_path()) as work:
@@ -1131,6 +1178,9 @@ class Queue:
             if p['base']['ref'] != 'main':
                 self.report(e, 'stacked', f'Waiting for base {p["base"]["ref"]} to merge')
                 return False
+            if self.parallel_size > 1 and not self.parallel_rules(repo):
+                self.report(e, 'parallel_rules_changed', 'Speculation requires an active required check with strict=false', 'blocked')
+                return False
             self._observing_entries.add(e['id'])
             if time.time() >= self.deadline(f'entry:{e["id"]}', 'entry'):
                 if e['ci_since'] is not None and time.time() - e['ci_since'] >= CI_WAIT_SECONDS:
@@ -1161,7 +1211,8 @@ class Queue:
                 if files:
                     self.report(e, 'conflict', f'Conflicts require review: {", ".join(files)}', 'conflict')
                     return False
-            if self.behind(repo, p) and p.get('mergeable') is True:
+            composed = self.parallel_size > 1 and self.composition_current(e, p)
+            if not composed and self.parallel_size == 1 and self.behind(repo, p) and p.get('mergeable') is True:
                 self.action('update', repo, n, head, 'main')
                 self.report(e, 'updating', f'Waiting for clean update of {head}')
                 return True
@@ -1169,7 +1220,11 @@ class Queue:
                 if self.wait(e, 'mergeability', 'waiting_mergeability', 'GitHub mergeability is unknown'):
                     return True
                 return False
-            if self.prepare(repo, p):
+            preparing = (self.compositions.prepare(e, p) if self.parallel_size > 1
+                         else self.prepare(repo, p)) if not composed else False
+            if preparing:
+                if self.parallel_size > 1:
+                    return True
                 current = self.pr(repo, n)
                 if not self.advance_regenerated_pin(e, card_id, current, expected_order):
                     self.report(e, 'regenerated', f'Prepared from {head}; waiting for matching regeneration receipt and provider head')
@@ -1201,6 +1256,10 @@ class Queue:
             if e['merge_attempts'] >= MAX_ATTEMPTS:
                 self.report(e, 'merge_exhausted', f'Merge attempt cap reached at {head}', 'exhausted')
                 return True
+            if self.parallel_size > 1:
+                latest = self.db.execute('SELECT * FROM entries WHERE id=?', (e['id'],)).fetchone()
+                if not self.composition_current(latest, current):
+                    return True
             with WorkQueue(default_path()) as work:
                 work.begin_merge(card_id, actor='merge-daemon',
                                  reason=f'journal entry {e["id"]}: merge pinned at {head}',
@@ -1354,6 +1413,7 @@ class Queue:
         return p
 
     def finish_merge(self, e, p):
+        self.recovery.record(e, p)
         detail = f'Merge commit {p["merge_commit_sha"]} confirmed on origin/main'
         self.report(e, 'merged', detail, 'refreshing')
         deadline = self.deadline(f'entry:{e["id"]}', 'refresh')
@@ -1719,6 +1779,8 @@ def main():
     sub = p.add_subparsers(dest='cmd', required=True)
     run = sub.add_parser('run')
     run.add_argument('--poll', type=float, default=BOUNDS['poll']['seconds'])
+    run.add_argument('--parallel', action='store_true', help='validate independent pinned PRs concurrently')
+    run.add_argument('--parallel-size', type=int, default=4)
     run.add_argument('--no-discover', action='store_true')
     run.add_argument('--legacy', type=Path)
     submit = sub.add_parser('submit')
@@ -1750,7 +1812,7 @@ def main():
         if name == 'migrate-holds':
             migration.add_argument('--apply', action='store_true')
     a = p.parse_args()
-    q = Queue(a.state, a.root)
+    q = Queue(a.state, a.root, parallel_size=a.parallel_size if a.cmd == 'run' and a.parallel else 1)
     if a.cmd == 'run':
         q.run(a.poll, not a.no_discover, a.legacy)
     elif a.cmd == 'submit':

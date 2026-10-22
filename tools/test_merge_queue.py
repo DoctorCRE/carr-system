@@ -44,7 +44,9 @@ if a[:2]==['api','graphql']:
  emit({'data':{'repository':{'pullRequest':{'headRefOid':p['head']['sha'],'state':'OPEN','mergeQueueEntry':{'id':'queued'} if d.get('server_queued') else None,'autoMergeRequest':None}}}});sys.exit()
 if a[0]=='api':
  path=a[1]; bits=path.split('/'); repo='/'.join(bits[1:3]); n=bits[4].split('?')[0] if len(bits)>4 else ''
- if bits[3].startswith('pulls?'): emit([[p for p in d['prs'].values() if p['repo']==repo and p['state']=='open']]); sys.exit()
+ if bits[3]=='actions': emit(dict(workflow_runs=[dict(id=1,run_attempt=1,head_sha=d['merge_sha'],event='push',status='completed',conclusion=d.get('canary','success'))]));sys.exit()
+ if bits[3]=='rules': emit([dict(type='required_status_checks',parameters=dict(strict_required_status_checks_policy=False,required_status_checks=[dict(context='ops/ci.sh --strict' if repo=='jbookout/carr-system' else 'test')]))]);sys.exit()
+ if bits[3].startswith('pulls?'): emit([[p for p in d['prs'].values() if p['repo']==repo and ('state=all' in path or p['state']=='open')]]); sys.exit()
  if bits[3]=='labels': emit({'name':'do_not_merge'});sys.exit()
  if bits[3]=='pulls':
   p=d['prs'][repo+'#'+n]
@@ -69,6 +71,11 @@ if a[0]=='api':
   elif bits[-1].startswith('statuses'): emit([d.get('statuses',[])])
   else: raise AssertionError(a)
   sys.exit()
+if a[:2]==['pr','create']:
+ repo=a[a.index('-R')+1];branch=a[a.index('--head')+1];n=max([p['number'] for p in d['prs'].values()])+1
+ head=subprocess.check_output(['git','-C',d['remote'],'rev-parse',branch],text=True).strip()
+ d['prs'][repo+'#'+str(n)]=dict(number=n,repo=repo,head=dict(sha=head,ref=branch),base=dict(sha=d['merge_sha'],ref='main'),merged=False,state='open',draft=False,title=a[a.index('--title')+1],labels=[],mergeable=True,mergeable_state='clean')
+ save();print('https://github.com/'+repo+'/pull/'+str(n));sys.exit()
 if a[:2]==['pr','checks']: emit(d.get('required',[{'bucket':'pass'}])); sys.exit()
 if a[:2]==['pr','ready']:
  repo=a[a.index('-R')+1];d['prs'][repo+'#'+a[2]]['draft']=False; save();sys.exit()
@@ -78,6 +85,10 @@ if a[:2]==['pr','merge']:
  if d.get('merge_reject'): save();print('GraphQL: Pull request is not mergeable (mergePullRequest)',file=sys.stderr);sys.exit(1)
  repo=a[a.index('-R')+1];p=d['prs'][repo+'#'+a[2]]
  assert '--squash' in a and a[a.index('--match-head-commit')+1]==p['head']['sha']
+ if d.get('dynamic_merge'):
+  main=subprocess.check_output(['git','-C',d['remote'],'rev-parse','main'],text=True).strip()
+  tree=subprocess.check_output(['git','-C',d['remote'],'merge-tree','--write-tree',main,p['head']['sha']],text=True).strip()
+  d['merge_sha']=subprocess.check_output(['git','-C',d['remote'],'commit-tree',tree,'-p',main,'-m','squash'],text=True).strip()
  p['merged']=True;p['state']='closed';p['merge_commit_sha']=d['merge_sha']
  subprocess.run(['git','-C',d['remote'],'update-ref','refs/heads/main',d['merge_sha']],check=True)
  if d.get('merge_landed_error'): save();print('gh: response lost after merge (HTTP 502)',file=sys.stderr);sys.exit(1)

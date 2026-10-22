@@ -1,18 +1,12 @@
 # doctrine: engineering-workflow-sop
-# Running verdicts finish; GitHub replaces older pending runs with the newest.
+# Every landing retains its own verdict for exact culprit recovery.
 name: main canary
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "corpus/**"
-      - "audits/**"
-      - "video/**"
-      - "out/**"
-      - "**/*.md"
   workflow_dispatch:
 concurrency:
-  group: main-canary
+  group: main-canary-${{ github.sha }}
   cancel-in-progress: false
 permissions:
   contents: read

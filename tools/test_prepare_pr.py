@@ -44,6 +44,17 @@ class PrepareTests(unittest.TestCase):
         return subprocess.run(['git', *args], cwd=repo or self.repo, env=env,
                               check=True, capture_output=True, text=True).stdout.strip()
 
+    def test_non_carr_cli_composes_without_carr_generators(self):
+        args = ['prepare_pr.py', '--remote', str(self.remote), '--branch', 'feature',
+                '--head', self.head, '--main', self.main, '--pr', '7',
+                '--receipt', str(self.receipt), '--repo', 'jbookout/doctorcre-app']
+        pr = dict(head={'sha': self.head}, state='open', base={'ref': 'main'}, labels=[])
+        with patch.object(sys, 'argv', args), patch.object(prepare_pr, 'GitHubReader') as reader:
+            reader.return_value.api.return_value = pr
+            self.assertEqual(prepare_pr.main(), 0)
+        prepared = json.loads(self.receipt.read_text())['prepared']
+        self.git('merge-base', '--is-ancestor', self.main, prepared, repo=self.remote)
+
     def test_normal_push_contains_both_main_and_generated_commit(self):
         def regen(repo):
             (repo / 'generated.txt').write_text('fresh\n')

@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
-import subprocess
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from collections.abc import Callable
 from migration_number_contract import SLOT_RE
 
@@ -11,9 +12,8 @@ REPO = 'jbookout/carr-system'
 
 
 def github(path: str) -> list:
-    result = subprocess.run(['gh', 'api', '--paginate', '--slurp', path],
-                            capture_output=True, text=True, check=True, timeout=120)
-    return json.loads(result.stdout)
+    from lib.github_reader import GitHubReader
+    return GitHubReader().api(path, paginate=True, slurp=True)
 
 
 @dataclass

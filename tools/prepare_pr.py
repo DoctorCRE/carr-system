@@ -10,7 +10,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'ops'))
+from lib.github_reader import GitHubReader
 from git_env import scrubbed_env
 from regen import REGENERATED_OUTPUTS
 
@@ -94,9 +96,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('remote', 'branch', 'head', 'main', 'pr', 'receipt'):
         parser.add_argument(f'--{name}', required=True)
+    parser.add_argument('--repo', choices=('jbookout/carr-system', 'jbookout/doctorcre-app', 'jbookout/software-factory'), default='jbookout/carr-system')
     args = parser.parse_args()
     try:
         def regenerate(repo):
+            if args.repo != 'jbookout/carr-system':
+                return
             env = regen_env(os.environ)
             runtime = Path(__file__).resolve().parents[1] / 'mcp-server'
             if ((runtime / 'node_modules').is_dir() and (runtime / 'package-lock.json').read_bytes() == (repo / 'mcp-server/package-lock.json').read_bytes()):
@@ -109,9 +114,7 @@ def main() -> int:
             if result.returncode:
                 raise ValueError(result.stderr[-8000:])
         def verify_pr():
-            result = subprocess.run(['gh', 'api', f'repos/jbookout/carr-system/pulls/{int(args.pr)}'],
-                                    capture_output=True, text=True, check=True, timeout=120)
-            pr = json.loads(result.stdout)
+            pr = GitHubReader().api(f'repos/{args.repo}/pulls/{int(args.pr)}')
             if (pr['head']['sha'] != args.head or pr['state'] != 'open' or pr['base']['ref'] != 'main'
                     or any(label['name'] == 'do_not_merge' for label in pr['labels'])):
                 raise ValueError('PR changed or held during regeneration; no push')
