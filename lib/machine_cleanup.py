@@ -104,6 +104,7 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
                 'reason': 'cleanup evidence or move verification timed out', 'budget_exhausted': True}
     except Exception as exc:
         return {**keep('evidence or staging failed'), 'error': type(exc).__name__,
+                'status': 'verified_no_effect' if receipt is None else 'kept',
                 **(exc.evidence if isinstance(exc, CommandError) else {})}
 
 
@@ -297,7 +298,7 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
             if row.get('error'):
                 report['errors'].append({k: row[k] for k in
                     ('kind', 'path', 'error', 'command', 'returncode', 'stderr_tail') if k in row})
-            if not row.get('error') and row.get('status') != 'deferred':
+            if row.get('status') == 'verified_no_effect' or (not row.get('error') and row.get('status') != 'deferred'):
                 report.pop('pending', None)
             save(receipt_path, report)
             save(cursor_path, cursor)
@@ -374,10 +375,10 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                 provider=provider, process_probe=process_probe, now=now,
                 older_than=policy['checkout_age_seconds'], dry_run=dry_run,
                 deadline=lambda: time.monotonic() >= clone_deadline)
-            if not row.get('error') and not row.get('budget_exhausted'):
+            if row.get('status') == 'verified_no_effect' or (not row.get('error') and not row.get('budget_exhausted')):
                 cursor['clone'] = workspace.name
             record(row)
-            if row.get('error') or row.get('budget_exhausted'):
+            if row.get('budget_exhausted') or (row.get('error') and row.get('status') != 'verified_no_effect'):
                 break
         else:
             if len(candidates) < policy['max_items'] and not report['budget_exhausted']:
