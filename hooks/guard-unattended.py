@@ -109,7 +109,7 @@ KNOWN_HOSTS = (
     # custom domain: on 2026-08-13 a staging deploy without `routes = []`
     # inherited all three production custom domains and served api.doctorcre.com
     # from the empty staging database for about two minutes. Staging now attaches
-    # to workers.dev alone, which ops/deploy-attachment-check.py verifies before
+    # to workers.dev alone, which the deployment configuration declares before
     # any non-production deploy — so this hostname is exactly how a session
     # reaches staging WITHOUT touching production, and blocking it pushes anyone
     # verifying a staging deploy toward the production URL instead. That is the
@@ -1850,7 +1850,7 @@ def direct_metered_dispatch(cmd):
     executable = strip_inert_text(cmd)
     patterns = (
         (re.compile(r"\b(?:npx\s+)?wrangler\s+(?:deploy|versions\s+(?:upload|deploy))\b", re.I),
-         "direct Cloudflare release bypasses bin/deploy-worker.sh"),
+         "direct Cloudflare release bypasses the GitHub deployment workflow"),
         (re.compile(r"\bneonctl\b[^\n;&|]*\bbranches\s+create\b", re.I),
          "direct Neon branch create bypasses neon-disposable-branch admission"),
         (re.compile(r"\bgh\s+(?:workflow\s+run|run\s+rerun)\b", re.I),

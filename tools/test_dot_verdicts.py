@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -195,7 +196,7 @@ class EvidenceTests(unittest.TestCase):
                 if output is None:
                     return actual_run(argv, **kwargs)
                 return subprocess.CompletedProcess(argv, 0, output+'\n', '')
-            with patch.object(dot.sys, 'platform', 'darwin'), \
+            with patch.object(dot, 'sys', SimpleNamespace(platform='darwin')), \
                  patch.object(dot.shutil, 'which', return_value='/usr/bin/git' if shim else str(installed)), \
                  patch.object(dot.os.path, 'exists', return_value=True), \
                  patch.object(dot.subprocess, 'run', side_effect=metadata):

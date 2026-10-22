@@ -91,8 +91,8 @@ def main() -> int:
           envs["production"]["worker"].get("name") == wrangler.get("name"),
           f"matrix {envs['production']['worker'].get('name')!r} "
           f"vs wrangler {wrangler.get('name')!r}")
-    check("2b. staging's Worker name matches [env.staging]",
-          envs["staging"]["worker"].get("name") == stg_cfg.get("name"),
+    check("2b. database diagnostics declare no staging Worker",
+          not envs["staging"]["worker"].get("deployed") and not stg_cfg,
           f"matrix {envs['staging']['worker'].get('name')!r} "
           f"vs wrangler {stg_cfg.get('name')!r}")
     check("2c. local and rehearsal declare no Worker",

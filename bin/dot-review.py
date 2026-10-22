@@ -40,12 +40,12 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib.secret_redaction import redact_text, sensitive_env_values
-from lib import dot_relay, dot_review_receipts
+from lib import dot_relay, dot_review_receipts, review_policy
 from lib.dot_review_receipts import publication_body
 from lib.dot_processes import run_bounded
 
-REVIEW = runpy.run_path(str(ROOT / "ops/release-pipeline.py"))
-REVIEW_CONFIG = json.loads((ROOT / "ops/config/release-pipeline.v1.json").read_text())
+REVIEW = vars(review_policy)
+REVIEW_CONFIG = json.loads((ROOT / "ops/config/review-delivery.v1.json").read_text())
 
 REPOS = {'DoctorCRE/carr-system', 'jbookout/doctorcre-app', 'jbookout/software-factory'}
 DOT_MARKER = dot_review_receipts.DOT_MARKER

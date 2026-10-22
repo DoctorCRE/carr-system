@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """release-smoke.py — prove the live DoctorCRE system works, read-only.
 
-ops/release-pipeline.py runs this before a release (the baseline) and again
+Run this manually before a release (the baseline) and again
 after it (the proof). The pipeline compares the two runs: a journey that worked
 before the release and fails after it is the release's fault. That journey
 marks the release FAILED and rolls the lane back.
