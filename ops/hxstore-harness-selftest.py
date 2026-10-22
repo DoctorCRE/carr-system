@@ -29,7 +29,7 @@ class HarnessTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         subprocess.run(['cargo', 'build', '--locked'], cwd=ROOT / 'vendor/hxprobe',
-                       check=True, capture_output=True, timeout=180)
+                       check=True, timeout=180)
 
     def run_cli(self, *args):
         return subprocess.run([sys.executable, str(CLI), *map(str, args)],
