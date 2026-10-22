@@ -82,3 +82,33 @@ test('triage pages equal and null dates across kinds without dropping or repeati
   assert.equal(broad.total, 6);
   assert.equal(broad.items[0].owner, 'claude');
 });
+
+test('imminent critical dates survive more than one page of overdue critical dates', async () => {
+  const near = (await db.query("select (current_date + 1)::text as day")).rows[0].day;
+  await rows([
+    ...Array.from({ length: 55 }, (_, i) => [i + 1, 'critical_date', null, '2020-01-01']),
+    [61, 'critical_date', null, near],
+    [62, 'next_action', 'joe', '2019-01-01'],
+  ]);
+  const first = await call({ owners: 'partners' });
+  assert.equal(first.items.length, 50);
+  assert.equal(first.items[0].id, id(61));
+  assert.equal(first.items[1].id, id(62));
+  assert.equal(first.total, 57);
+  assert.equal(first.has_more, true);
+  const next = await call({ owners: 'partners', cursor: first.next_cursor });
+  assert.equal(next.items.length, 7);
+  assert.equal(new Set([...first.items, ...next.items].map(row => row.id)).size, 57);
+  assert.equal(next.total, 57);
+  assert.equal(next.has_more, false);
+});
+
+test('invalid paging inputs are refused before SQL and empty queues remain complete', async () => {
+  const noQuery = { query: () => assert.fail('invalid paging inputs must not reach SQL') };
+  for (const args of [
+    { limit: 0 }, { limit: 51 }, { limit: 1.5 }, { owners: 'someone' },
+    { cursor: '' }, { cursor: 'garbage' }, { cursor: btoa('{}') }, { cursor: 7 },
+  ]) await assert.rejects(executeRegisteredTool(noQuery, JOE, 'today-triage', args), ToolError);
+  await rows([]);
+  assert.deepEqual(await call({ owners: 'partners' }), { items: [], total: 0, has_more: false, next_cursor: null });
+});
