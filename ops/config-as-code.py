@@ -2148,7 +2148,7 @@ def install_launchd_plist(filename, dest, body, body_matches, *, timeout=15):
     # matching file and matching launchctl path cannot mask an old definition.
     with open(pending, "w", encoding="utf-8") as fh:
         fh.write(hashlib.sha256(body.encode("utf-8")).hexdigest() + "\n")
-    if not body_matches:
+    if installed_sha256(dest) != hashlib.sha256(body.encode("utf-8")).hexdigest():
         with open(dest, "w", encoding="utf-8") as fh:
             fh.write(body)
 
@@ -2370,16 +2370,6 @@ def cmd_install(apply):
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         print(f"  HOLD REFUSED: {exc}")
         return 1
-    if os.path.exists(os.path.join(LAUNCHD_REPO, "local.ds4-flash-next.plist")):
-        from tools import flash_install
-        if apply:
-            try:
-                flash_install.install(Path(REPO), Path(HOME))
-            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-                print(f"ERROR: Flash off-by-default convergence failed: {exc}")
-                return 1
-        else:
-            print("  Would converge Flash off-by-default and install the expiry watcher on this machine")
     settings_existed = os.path.exists(SETTINGS)
     raw = read(SETTINGS) if settings_existed else "{}"
     if not settings_existed:

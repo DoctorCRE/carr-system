@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import sys
@@ -154,6 +155,22 @@ class FlashPolicyTests(unittest.TestCase):
             self.assertNotIn('enable', commands)
             self.assertNotIn('bootstrap', commands)
 
+    def test_repeated_explicit_install_keeps_plist_bytes_and_mtimes(self):
+        import flash_install
+        home = self.directory / 'home'
+        flashlib.grant_path().write_text(json.dumps({'issued_at': 0, 'expires_at': 4e9}))
+        launch = Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))
+        flash_install.install(ROOT, home, launch=launch)
+        paths = list((home / 'Library/LaunchAgents').glob('*.plist'))
+        paths.append(home / '.local/bin/flash-desk-start')
+        before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths]
+        launch.reset_mock()
+        with patch.object(Path, 'write_bytes', side_effect=AssertionError('unchanged file rewritten')), \
+                patch.object(Path, 'write_text', side_effect=AssertionError('unchanged file rewritten')):
+            flash_install.install(ROOT, home, launch=launch)
+        self.assertEqual(before, [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths])
+        self.assertEqual([c.args[0][1] for c in launch.call_args_list], ['print'])
+
     def test_scheduled_jobs_rejects_enabled_and_drifted_flash_without_a_grant(self):
         import scheduled_jobs
         for label in (flashlib.SERVER_LABEL, flashlib.DESK_LABEL):
@@ -185,6 +202,27 @@ class FlashPolicyTests(unittest.TestCase):
                 'Label': label, 'RunAtLoad': True, 'KeepAlive': True}))
         launch = Mock(return_value=subprocess.CompletedProcess([], 0, '{}', ''))
         self.assertTrue(flash_install.check(home, launch=launch))
+
+    def test_unconfigured_flash_is_not_configuration_drift(self):
+        import flash_install
+        launch = Mock(side_effect=AssertionError('unconfigured Flash queried launchd'))
+        self.assertEqual(flash_install.check(self.directory / 'home', launch=launch), [])
+
+    def test_scheduled_jobs_accepts_uninstalled_flash_until_activation(self):
+        import scheduled_jobs
+        import flash_install
+        manifest = {'jobs': [{'label': label, 'scheduler': 'launchd',
+            'owner': 'orchestrator', 'required_checkout': '~/carr-system',
+            'expected_enabled': label == flash_install.WATCHER, 'expected_installed': True,
+            'program_arguments': ['/fixture'], 'interval': {'RunAtLoad': False}}
+            for label in (*flash_install.LABELS, flash_install.WATCHER)]}
+        snapshot = {'machine_role': 'primary', 'plists': {}, 'launchctl_list': '',
+                    'launchctl_print': {}, 'launchctl_disabled': '', 'cron': '',
+                    'git': {'branch': 'main'}}
+        self.assertEqual(scheduled_jobs.report(manifest, snapshot, 1000), [])
+        snapshot['flash_grant'] = {'issued_at': 900, 'expires_at': 1100}
+        self.assertEqual([r['code'] for r in scheduled_jobs.report(manifest, snapshot, 1000)],
+                         ['missing_job'] * 3)
 
     def test_granted_session_accepts_a_disabled_unused_desk(self):
         import scheduled_jobs
@@ -251,6 +289,19 @@ class FlashPolicyTests(unittest.TestCase):
 
 
 class FlashCommandTests(unittest.TestCase):
+    def test_explicit_activation_installs_before_starting_flash(self):
+        import flash_install
+        calls = Mock()
+        calls.attach_mock(Mock(return_value=0), 'configure')
+        calls.attach_mock(Mock(return_value=0), 'activate')
+        with patch.object(flash_install, 'configure', calls.configure), \
+                patch.object(flashlib, 'main', calls.activate), \
+                patch.object(sys, 'argv', ['flash-on']), self.assertRaises(SystemExit) as stopped:
+            runpy.run_path(str(ROOT / 'bin/flash-on'), run_name='__main__')
+        self.assertEqual(stopped.exception.code, 0)
+        self.assertEqual([c[0] for c in calls.mock_calls], ['configure', 'activate'])
+        calls.configure.assert_called_once_with(ROOT, apply=True)
+
     def test_off_cli_callers_never_reach_launchctl(self):
         with tempfile.TemporaryDirectory(dir=ROOT / 'out') as directory:
             env = {'HOME': directory, 'PATH': '/usr/bin:/bin:/opt/homebrew/bin',

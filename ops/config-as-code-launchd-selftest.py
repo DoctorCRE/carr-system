@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location(
@@ -305,6 +306,40 @@ def check_and_install_cases() -> list[bool]:
             out.append(check("install retires removed templates in its apply path",
                              not orphan.exists()
                              and len(list((home / "Library/LaunchAgents-quarantine").rglob(orphan.name))) == 1))
+            # A routine fleet refresh must not opt a machine into Flash.
+            from tools import flash_install
+            (launchd / "com.carr.planted.plist").unlink()
+            for label in (*flash_install.LABELS, flash_install.WATCHER):
+                filename = label + ".plist"
+                (launchd / filename).write_bytes((REPO / "ops/launchd" / filename).read_bytes())
+            with patch.object(flash_install, "install") as flash_setup, \
+                    patch.dict(os.environ, {mod.ACTIVE_LAUNCHD_LABEL_ENV: "com.carr.good"}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                first_rc = mod.cmd_install(True)
+                before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns)
+                          for p in agents.iterdir()}
+                launchctl_calls.clear()
+                def read_only(file, mode="r", *args, **kwargs):
+                    if any(flag in mode for flag in "wax+"):
+                        raise AssertionError(f"unchanged install opened {file} for writing")
+                    return real_open(file, mode, *args, **kwargs)
+                real_open = open
+                with patch("builtins.open", side_effect=read_only), \
+                        patch("io.open", side_effect=read_only):
+                    second_rc = mod.cmd_install(True)
+                after = {p.name: (p.read_bytes(), p.stat().st_mtime_ns)
+                         for p in agents.iterdir()}
+            out.append(check(
+                "two fleet installs at the same revision leave plists untouched and never install Flash",
+                first_rc == second_rc == 0 and not flash_setup.called
+                and before == after and launchctl_calls == []
+                and not any((agents / (label + ".plist")).exists()
+                            for label in (*flash_install.LABELS, flash_install.WATCHER)),
+                (first_rc, second_rc, flash_setup.call_count, launchctl_calls),
+            ))
+            for label in (*flash_install.LABELS, flash_install.WATCHER):
+                (launchd / (label + ".plist")).unlink()
+            (launchd / "com.carr.planted.plist").write_text(planted, encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()) as check_out:
                 check_rc = mod.cmd_check()
             text = check_out.getvalue()
@@ -749,6 +784,22 @@ def main() -> int:
                 ] and other_dest.read_text(encoding="utf-8") == desired_other
                 and "kept loaded" in kept_out.getvalue(),
                 (other, calls, kept_out.getvalue()),
+            ))
+
+            before = other_dest.stat().st_mtime_ns
+            calls.clear()
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    patch("builtins.open", wraps=open) as writes:
+                repaired = mod.install_launchd_plist(
+                    other_dest.name, str(other_dest), desired_other, False
+                )
+            cases.append(check(
+                "repairing stale loaded arguments never rewrites identical plist bytes",
+                repaired == "loaded" and other_dest.stat().st_mtime_ns == before
+                and not any(call.args[0] == str(other_dest) and "w" in str(call.args[1:])
+                            for call in writes.call_args_list)
+                and ["launchctl", "load", "-w", str(other_dest)] in calls,
+                (repaired, calls),
             ))
 
             loaded_paths[other_label] = str(root / "foreign.plist")

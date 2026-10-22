@@ -421,28 +421,30 @@ def case_marker_primary_noop(tmp):
     }
 
 
-def case_flash_converges(tmp):
+def case_flash_is_explicit(tmp):
     repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell")
     agents = Path(home) / "Library/LaunchAgents"
     labels = ("local.ds4-flash-next", "local.flash-desk")
     for label in labels:
         (agents / (label + ".plist")).write_bytes(plistlib.dumps({
             "Label": label, "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False}}))
+    before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in
+              (agents / (label + ".plist") for label in labels)]
     r = run_hook(repo, home, stubs, tmp)
     log = Path(tmp, "launchctl.log").read_text()
-    bodies = [plistlib.loads((agents / (label + ".plist")).read_bytes()) for label in labels]
+    after = [(p.read_bytes(), p.stat().st_mtime_ns) for p in
+             (agents / (label + ".plist") for label in labels)]
     return {
         "hook finishes": r.returncode == 0 and "re-applied" in r.stdout,
-        "both templates off": all(not b.get("RunAtLoad") and not b.get("KeepAlive") for b in bodies),
-        "both labels disabled": all("disable gui/" in log and label in log for label in labels),
-        "watcher loaded": "bootstrap" in log and "com.carr.flash-idle-stop" in log,
-        "no model started": not any(x in log for x in ("kickstart", "enable gui/")),
+        "existing Flash definitions untouched": before == after,
+        "watcher not installed": not (agents / "com.carr.flash-idle-stop.plist").exists(),
+        "no Flash launchctl calls": not any(label in log for label in (*labels, "com.carr.flash-idle-stop")),
     }
 
 
 def main():
     cases = [
-        ("Flash drift converges to off", case_flash_converges),
+        ("Flash installation requires explicit activation", case_flash_is_explicit),
         ("secondary machine converges", case_secondary_converges),
         ("stale continuity receipt is re-stamped and the install completes",
          case_stale_continuity_receipt_self_heals),
