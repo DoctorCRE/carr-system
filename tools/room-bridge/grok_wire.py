@@ -27,36 +27,23 @@ QUOTA_ERROR = re.compile(r"(?:status\s*[:=]?\s*402\b|usage\s+balance\s+exhausted
 
 def quota_error_message(stdout: str, stderr: str = "", *, returncode=0) -> str | None:
     """Return the provider's quota message only for an explicit 402 signal."""
-    for line in stdout.splitlines():
-        try:
-            event = json.loads(line)
-        except ValueError:
-            event = None
-        if isinstance(event, dict):
-            if event.get("type") != "error":
-                continue
-            message = event.get("message")
-            error = event.get("error")
-            if not isinstance(message, str):
-                message = error.get("message") if isinstance(error, dict) else error
-            if isinstance(message, str) and QUOTA_ERROR.search(message):
-                return message.strip()[:1000]
-        elif returncode and QUOTA_ERROR.search(line):
-            return line.strip()[:1000]
-    for line in stderr.splitlines():
-        if QUOTA_ERROR.search(line):
+    for source, plain_text_allowed in ((stdout, bool(returncode)), (stderr, True)):
+        for line in source.splitlines():
             try:
                 event = json.loads(line)
             except ValueError:
-                return line.strip()[:1000]
+                event = None
             if isinstance(event, dict):
+                if event.get("type") not in (None, "error"):
+                    continue
                 message = event.get("message")
-                if isinstance(message, str) and message.strip():
-                    return message.strip()[:1000]
                 error = event.get("error")
-                if isinstance(error, dict) and isinstance(error.get("message"), str):
-                    return error["message"].strip()[:1000]
-            return line.strip()[:1000]
+                if not isinstance(message, str):
+                    message = error.get("message") if isinstance(error, dict) else error
+                if isinstance(message, str) and QUOTA_ERROR.search(message):
+                    return message.strip()[:1000]
+            elif plain_text_allowed and QUOTA_ERROR.search(line):
+                return line.strip()[:1000]
     return None
 
 
@@ -252,11 +239,7 @@ def parse_stream(lines, returncode: int = 0, *, model=MODEL) -> dict:
             detail = "grok_invalid_stream"
             break
         if event.get("type") == "error":
-            message = event.get("message")
-            if not isinstance(message, str):
-                error = event.get("error")
-                message = error.get("message") if isinstance(error, dict) else None
-            detail = "quota_exhausted" if isinstance(message, str) and QUOTA_ERROR.search(message) else "grok_error_event"
+            detail = "grok_error_event"
             break
         if event.get("type") == "text":
             if not isinstance(event.get("data"), str):
@@ -311,8 +294,7 @@ def parse_result(stdout: str, returncode: int, *, stderr: str = "", urls: list[s
         return {"status": "quota_exhausted", "detail": "quota_exhausted", "code": 4,
                 "result": "" if urls else parsed["text"], "receipt": receipt}
     if parsed["code"]:
-        return {"status": "quota_exhausted" if parsed["detail"] == "quota_exhausted" else "failed",
-                "detail": parsed["detail"], "code": parsed["code"],
+        return {"status": "failed", "detail": parsed["detail"], "code": parsed["code"],
                 "result": "" if urls else parsed["text"], "receipt": receipt}
     if require_identity and not all(isinstance(end.get(key), str) and end[key].strip()
                                     for key in ("requestId", "sessionId")):
