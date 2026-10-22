@@ -72,6 +72,29 @@ spec.loader.exec_module(fixtures)
 
 
 class RetirementKeepTests(unittest.TestCase):
+    def test_git_failure_records_evidence_and_continues_to_next_repository(self):
+        import machine_cleanup as cleanup
+        broken, healthy = fixtures.Fixture(), fixtures.Fixture()
+        broken.git('remote', 'remove', 'origin')
+        trees = broken.base / 'clones'
+        trees.mkdir()
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        report = cleanup.run(broken.repo, config, hook=fixtures.hook, tmp_root=trees,
+            dispatch_path=broken.base / 'absent',
+            roots={'fixture/broken': broken.repo, 'fixture/healthy': healthy.repo},
+            provider=fixtures.FakeProvider(), process_probe=lambda paths: set(),
+            archive_thread=lambda *a, **k: None, dry_run=True)
+        self.assertEqual(report['status'], 'failed', report)
+        self.assertEqual(len(report['errors']), 1, report)
+        error = report['errors'][0]
+        self.assertEqual(error['repo'], 'fixture/broken')
+        self.assertEqual(error['returncode'], 128)
+        self.assertEqual(error['command'][:3], ['git', '-C', str(broken.repo)])
+        self.assertIn('fetch', error['command'])
+        self.assertIn("'origin' does not appear to be a git repository", error['stderr_tail'])
+        self.assertTrue(any(row['repo'] == 'fixture/healthy' for row in report['kept']), report)
+        self.assertEqual(json.loads((broken.repo / 'out/machine-cleanup-dry.json').read_text()), report)
+
     def test_slow_recovery_ledger_stops_without_effects(self):
         import branch_retirement as retirement
         fixture = fixtures.Fixture()
