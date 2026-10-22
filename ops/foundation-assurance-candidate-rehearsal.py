@@ -214,7 +214,7 @@ def foundation_assurance_facts(snapshot_dsn: str, *, connect=psycopg.connect) ->
 
 def hosted_checks(sha: str) -> list[dict]:
     raw = subprocess.check_output(
-        ["gh", "api", "--paginate", f"repos/jbookout/carr-system/commits/{sha}/check-runs"],
+        ["gh", "api", "--paginate", f"repos/DoctorCRE/carr-system/commits/{sha}/check-runs"],
         cwd=ROOT, text=True
     )
     pages = [json.loads(line) for line in raw.splitlines() if line.strip()]

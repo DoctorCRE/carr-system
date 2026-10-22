@@ -293,7 +293,7 @@ def _tests_probe(pr, changed, intent):
         state = "fail" if removed or not any(TEST_FILE_RE.search(p) for p in changed) else "judge"
         return [(state, "no executable test file delivered in the diff")]
     evidence = [("pass", "tests in diff: " + ", ".join(_diff_link(pr, p) for p in tests))] if tests else []
-    known_repo = (pr.get("url") or "").startswith("https://github.com/jbookout/carr-system/pull/")
+    known_repo = (pr.get("url") or "").startswith("https://github.com/DoctorCRE/carr-system/pull/")
     execution = [c for c in pr.get("statusCheckRollup") or [] if known_repo and _execution_lanes(c)]
     state, failed, pending, green = _ci(execution)
     if not execution:

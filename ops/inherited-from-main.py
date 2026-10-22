@@ -6,7 +6,7 @@ import subprocess
 def main():
     try:
         result = subprocess.run(
-            ["gh", "run", "list", "--repo", "jbookout/carr-system", "--branch", "main",
+            ["gh", "run", "list", "--repo", "DoctorCRE/carr-system", "--branch", "main",
              "--workflow", "ci.yml", "--status", "failure", "--limit", "1", "--json", "url",
              "--jq", ".[0].url // empty"],
             capture_output=True, text=True, timeout=15)

@@ -43,15 +43,15 @@ class FlakeTests(unittest.TestCase):
             gh = root / 'gh'
             store = root / 'issues.json'
             store.write_text('[]')
-            gh.write_text("#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\np=Path(os.environ['ISSUE_STORE']); rows=json.loads(p.read_text()); a=sys.argv[1:]\nif a[0]=='api' and '-X' not in a: print(json.dumps(rows))\nelif a[0]=='api' and a[a.index('-X')+1]=='POST':\n payload=json.loads(sys.stdin.read()); rows.append(dict(payload,number=len(rows)+1,html_url='https://github.com/jbookout/carr-system/issues/'+str(len(rows)+1),state='open')); p.write_text(json.dumps(rows)); print(json.dumps(rows[-1]))\nelse: raise SystemExit('unexpected gh arguments')\n")
+            gh.write_text("#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\np=Path(os.environ['ISSUE_STORE']); rows=json.loads(p.read_text()); a=sys.argv[1:]\nif a[0]=='api' and '-X' not in a: print(json.dumps(rows))\nelif a[0]=='api' and a[a.index('-X')+1]=='POST':\n payload=json.loads(sys.stdin.read()); rows.append(dict(payload,number=len(rows)+1,html_url='https://github.com/DoctorCRE/carr-system/issues/'+str(len(rows)+1),state='open')); p.write_text(json.dumps(rows)); print(json.dumps(rows[-1]))\nelse: raise SystemExit('unexpected gh arguments')\n")
             gh.chmod(0o755)
             env = {**os.environ, 'PATH': str(root) + os.pathsep + os.environ['PATH'], 'ISSUE_STORE': str(store)}
             proposals = root / 'proposals.json'
             for tree in ('aaa', 'bbb'):
-                proposals.write_text(json.dumps([{'repo': 'jbookout/carr-system', 'test': 'ops/a-selftest.py',
-                    'tree': tree, 'workflow': 'CI', 'fail_url': 'https://github.com/jbookout/carr-system/actions/runs/1',
-                    'pass_url': 'https://github.com/jbookout/carr-system/actions/runs/2'}]))
-                result = subprocess.run([sys.executable, str(COLLECTOR), 'propose', '--repo', 'jbookout/carr-system',
+                proposals.write_text(json.dumps([{'repo': 'DoctorCRE/carr-system', 'test': 'ops/a-selftest.py',
+                    'tree': tree, 'workflow': 'CI', 'fail_url': 'https://github.com/DoctorCRE/carr-system/actions/runs/1',
+                    'pass_url': 'https://github.com/DoctorCRE/carr-system/actions/runs/2'}]))
+                result = subprocess.run([sys.executable, str(COLLECTOR), 'propose', '--repo', 'DoctorCRE/carr-system',
                     '--input', str(proposals)], env=env, capture_output=True, text=True, timeout=10)
                 self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(len(json.loads(store.read_text())), 1)
@@ -65,13 +65,13 @@ class FlakeTests(unittest.TestCase):
         sha = 'a' * 40
         checkout = f'2026-10-05T00:00:00Z [command]/usr/bin/git log -1 --format=%H\n2026-10-05T00:00:00Z {sha}\n'
         run = {'id': 1, 'name': 'CI', 'head_sha': 'b' * 40, 'created_at': '2026-10-05T00:00:00Z'}
-        rows = module.observations_from_logs('jbookout/carr-system', run, 1,
+        rows = module.observations_from_logs('DoctorCRE/carr-system', run, 1,
             {'gates.txt': checkout + 'FAIL gates selftest suites failed: a-selftest.py\n'}, ['ops/a-selftest.py'])
         self.assertEqual(rows[0]['source_sha'], sha)
         self.assertEqual(rows[0]['result'], 'fail')
-        self.assertEqual(module.observations_from_logs('jbookout/carr-system', run, 2,
+        self.assertEqual(module.observations_from_logs('DoctorCRE/carr-system', run, 2,
             {'gates.txt': checkout + 'FAIL gates dependency missing\n'}, ['ops/a-selftest.py']), [])
-        passed = module.observations_from_logs('jbookout/carr-system', run, 2,
+        passed = module.observations_from_logs('DoctorCRE/carr-system', run, 2,
             {'gates.txt': checkout + 'OK gates 500 selftest suites + baseline integrity\n'}, ['ops/a-selftest.py'])
         self.assertEqual(passed, [])
 
@@ -85,20 +85,20 @@ class FlakeTests(unittest.TestCase):
         receipt = {'version': 1, 'test': 'ops/a-selftest.py', 'candidate': True, 'sha': sha,
             'tree': 'b' * 40, 'first_exit': 1, 'rerun_exit': 0, 'status': 'flake-candidate',
             'fingerprint': module.hashlib.sha256(b'').hexdigest()}
-        event = {'id': 1, 'name': 'CI', 'head_repository': {'full_name': 'jbookout/carr-system'}}
+        event = {'id': 1, 'name': 'CI', 'head_repository': {'full_name': 'DoctorCRE/carr-system'}}
         line = '2026-10-05T00:00:00Z CARR_FLAKE_RESULT ' + json.dumps(receipt) + '\n'
         def source_api(endpoint, *args, **kwargs):
             if '/git/commits/' in endpoint:
                 return {'sha': sha, 'tree': {'sha': 'b' * 40}}
             return {'truncated': False, 'tree': [{'type': 'blob', 'path': 'ops/a-selftest.py'}]}
         with patch.object(module, 'gh_api', side_effect=source_api):
-            rows = module.candidate_rows('jbookout/carr-system', event, 1, {'job.txt': checkout + line + line})
+            rows = module.candidate_rows('DoctorCRE/carr-system', event, 1, {'job.txt': checkout + line + line})
         self.assertEqual(len(rows), 1)
         receipt['sha'] = 'c' * 40
         wrong = 'CARR_FLAKE_RESULT ' + json.dumps(receipt)
-        self.assertEqual(module.candidate_rows('jbookout/carr-system', event, 1, {'job.txt': checkout + wrong}), [])
+        self.assertEqual(module.candidate_rows('DoctorCRE/carr-system', event, 1, {'job.txt': checkout + wrong}), [])
         event['head_repository']['full_name'] = 'someone/fork'
-        self.assertEqual(module.candidate_rows('jbookout/carr-system', event, 1, {'job.txt': checkout + line}), [])
+        self.assertEqual(module.candidate_rows('DoctorCRE/carr-system', event, 1, {'job.txt': checkout + line}), [])
 
     def test_mixed_node_outcomes_belong_only_to_the_named_suite(self):
         import importlib.util
@@ -109,10 +109,10 @@ class FlakeTests(unittest.TestCase):
         text = f'git log -1 --format=%H\n{sha}\n2026-10-05T00:00:01Z ok 1 a.test.mjs\n2026-10-05T00:00:02Z not ok 2 b.test.mjs\n'
         tests = ['mcp-server/test/a.test.mjs', 'mcp-server/test/b.test.mjs']
         run = {'id': 1, 'name': 'CI', 'created_at': '2026-10-05T00:00:00Z'}
-        rows = module.observations_from_logs('jbookout/carr-system', run, 1, {'job.txt': text}, tests)
+        rows = module.observations_from_logs('DoctorCRE/carr-system', run, 1, {'job.txt': text}, tests)
         self.assertEqual({r['test']: r['result'] for r in rows}, dict(zip(tests, ['pass', 'fail'])))
         self.assertEqual(module.failed_tests({'job.txt': text}, tests), [tests[1]])
-        later = module.observations_from_logs('jbookout/carr-system', run, 2,
+        later = module.observations_from_logs('DoctorCRE/carr-system', run, 2,
             {'job.txt': f'git log -1 --format=%H\n{sha}\n2026-10-05T00:01:00Z ok 1 b.test.mjs\n'}, tests)
         self.assertEqual([r['test'] for r in module.analyze(rows + later)], [tests[1]])
 
@@ -122,7 +122,7 @@ class ReviewRegressions(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('flake_review', COLLECTOR)
         self.module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.module)
-        self.repo = 'jbookout/carr-system'
+        self.repo = 'DoctorCRE/carr-system'
         self.sha = 'a' * 40
         self.tree = 'b' * 40
         self.test = 'mcp-server/test/a.test.mjs'

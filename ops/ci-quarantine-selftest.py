@@ -19,7 +19,7 @@ class QuarantineTests(unittest.TestCase):
     def test_temp_leaks_fail_without_rerun_or_quarantine(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            entry = {'test': 'ops/example-selftest.py', 'loop': 'https://github.com/jbookout/carr-system/issues/123',
+            entry = {'test': 'ops/example-selftest.py', 'loop': 'https://github.com/DoctorCRE/carr-system/issues/123',
                 'owner': 'qa-engineer', 'expires': '2099-01-01', 'reason': 'Fixture'}
             result = self.invoke(root, "import tempfile; tempfile.mkdtemp(prefix='leaked-fixture-')", [entry])
             self.assertEqual(result.returncode, 125, result.stdout + result.stderr)
@@ -69,7 +69,7 @@ class QuarantineTests(unittest.TestCase):
             root = Path(directory)
             marker = root / 'executed'
             entry = {
-                'test': 'ops/example-selftest.py', 'loop': 'https://github.com/jbookout/carr-system/issues/123',
+                'test': 'ops/example-selftest.py', 'loop': 'https://github.com/DoctorCRE/carr-system/issues/123',
                 'owner': 'jbookout', 'expires': '2099-01-01', 'reason': 'Same-tree failure followed by pass.'}
             result = self.invoke(root,
                 f"from pathlib import Path; Path({str(marker)!r}).write_text('ran'); raise SystemExit(1)", [entry])
@@ -92,7 +92,7 @@ class QuarantineTests(unittest.TestCase):
 
     def test_expired_and_incomplete_quarantines_fail_even_if_test_passes(self):
         for entry in (
-            {'test': 'ops/example-selftest.py', 'loop': 'https://github.com/jbookout/carr-system/issues/123',
+            {'test': 'ops/example-selftest.py', 'loop': 'https://github.com/DoctorCRE/carr-system/issues/123',
              'owner': 'jbookout', 'expires': '2000-01-01', 'reason': 'Fixture'},
             {'test': 'ops/example-selftest.py', 'expires': '2099-01-01'},
         ):
@@ -144,7 +144,7 @@ class QuarantineTests(unittest.TestCase):
         for code in (78, 124):
             with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                entry = {'test': 'ops/example-selftest.py', 'loop': 'https://github.com/jbookout/carr-system/issues/123',
+                entry = {'test': 'ops/example-selftest.py', 'loop': 'https://github.com/DoctorCRE/carr-system/issues/123',
                     'owner': 'qa-engineer', 'expires': '2099-01-01', 'reason': 'Fixture'}
                 result = self.invoke(root, f'raise SystemExit({code})', [entry])
                 self.assertEqual(result.returncode, code)
@@ -155,7 +155,7 @@ class QuarantineTests(unittest.TestCase):
             with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 marker = root / 'attempt'
-                entry = {'test': 'ops/example-selftest.py', 'loop': 'https://github.com/jbookout/carr-system/issues/123',
+                entry = {'test': 'ops/example-selftest.py', 'loop': 'https://github.com/DoctorCRE/carr-system/issues/123',
                     'owner': 'qa-engineer', 'expires': '2099-01-01', 'reason': 'Fixture'}
                 result = self.invoke(root,
                     f"from pathlib import Path; p=Path({str(marker)!r}); seen=p.exists(); p.touch(); raise SystemExit({code} if seen else 1)", [entry])
@@ -166,7 +166,7 @@ class QuarantineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             marker = root / 'attempt'
-            entry = {'test': 'ops/example-selftest.py', 'loop': 'https://github.com/jbookout/carr-system/issues/123',
+            entry = {'test': 'ops/example-selftest.py', 'loop': 'https://github.com/DoctorCRE/carr-system/issues/123',
                 'owner': 'qa-engineer', 'expires': '2099-01-01', 'reason': 'Fixture'}
             result = self.invoke(root,
                 f"from pathlib import Path; p=Path({str(marker)!r}); seen=p.exists(); p.touch(); print('rerun diagnostic' if seen else 'first diagnostic'); raise SystemExit(1)", [entry])

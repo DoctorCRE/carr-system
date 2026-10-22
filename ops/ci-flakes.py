@@ -237,7 +237,7 @@ def history(repo, since, until, cache):
 
 
 def propose(repo, rows):
-    if repo not in ('jbookout/carr-system', 'jbookout/doctorcre-app'):
+    if repo not in ('DoctorCRE/carr-system', 'jbookout/doctorcre-app'):
         raise ValueError('unsupported repository')
     issues = paged(f'repos/{repo}/issues?state=all')
     loops = []

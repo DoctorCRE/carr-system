@@ -14,7 +14,7 @@ SPEC = importlib.util.spec_from_file_location("board", Path(__file__).with_name(
 assert SPEC is not None and SPEC.loader is not None
 B = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(B)
-REPO = "jbookout/carr-system"
+REPO = "DoctorCRE/carr-system"
 SHA = "a" * 40
 
 

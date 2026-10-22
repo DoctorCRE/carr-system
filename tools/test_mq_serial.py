@@ -55,7 +55,7 @@ class EnqueueTests(unittest.TestCase):
             fcntl.flock(writer, fcntl.LOCK_EX)
             writer.write('12')
             writer.flush()
-            proc = subprocess.Popen(self.command('--queue', 'jbookout/carr-system', str(queue), str(log)),
+            proc = subprocess.Popen(self.command('--queue', 'DoctorCRE/carr-system', str(queue), str(log)),
                                     env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.addCleanup(lambda: proc.poll() is None and proc.kill())
             time.sleep(.3)
@@ -74,7 +74,7 @@ class EnqueueTests(unittest.TestCase):
         queue = self.root / 'queue'
         for text in ('12', '12\ninvalid\n', '12\n0\n'):
             queue.write_text(text)
-            result = subprocess.run(self.command('--queue', 'jbookout/carr-system', str(queue), str(self.root / 'log')),
+            result = subprocess.run(self.command('--queue', 'DoctorCRE/carr-system', str(queue), str(self.root / 'log')),
                                     env=self.env, text=True, capture_output=True, timeout=5)
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse((self.root / 'calls').exists())

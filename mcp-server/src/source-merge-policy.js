@@ -352,7 +352,7 @@ export function evaluateSourceMerge({ authorization, passport, pull_request: pul
     eligible: reasonCodes.length === 0,
     reason_codes: reasonCodes,
     decision_ref: NO_CEREMONIAL_MERGE_DECISION,
-    repository: "jbookout/carr-system",
+    repository: "DoctorCRE/carr-system",
     pr_number: Number.isInteger(pullRequest?.number) ? pullRequest.number : null,
     head_sha: SHA.test(headSha) ? headSha : null,
     base_sha: SHA.test(pullRequest?.base?.sha || "") ? pullRequest.base.sha : null,

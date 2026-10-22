@@ -11,7 +11,7 @@
     }
   },
   "scheduled_manifest": {
-    "repository": "jbookout/carr-system",
+    "repository": "DoctorCRE/carr-system",
     "ref": "origin/codex/job-manifest-drift",
     "captured_machine_role": "secondary",
     "source_sha": "c5c4520b57302d0064560d0a1849813aa5443f06",

@@ -32,7 +32,7 @@ from regen import REGENERATED_OUTPUTS
 from lib.carr_paths import canonical_checkout
 from lib.secret_redaction import redacted_tail, sensitive_env_values
 from lib.github_rate_limit import GitHubReadBudget, GitHubReadPaused, GitHubBudgetLockTimeout, resource_for, split_response
-REPOS = ('jbookout/carr-system', 'jbookout/doctorcre-app', 'jbookout/software-factory')
+REPOS = ('DoctorCRE/carr-system', 'jbookout/doctorcre-app', 'jbookout/software-factory')
 HOLD = 'do_not_merge'
 SHA = re.compile(r'^[0-9a-f]{40}$')
 WAIT_REGISTRY = json.loads(Path(__file__).with_name('wait_registry.json').read_text())
@@ -561,7 +561,7 @@ class Queue:
 
 
     def prepare(self, repo, p):
-        if repo != 'jbookout/carr-system':
+        if repo != 'DoctorCRE/carr-system':
             return False
         if p['head'].get('repo', {}).get('full_name', repo) != repo:
             raise RuntimeError('regeneration refuses a fork branch')

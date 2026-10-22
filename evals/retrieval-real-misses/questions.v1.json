@@ -62,7 +62,7 @@
       "evidence": [
         "git:72bac3e9abc09a5a8e908cefeae0e692c9ec73a5:evals/retrieval/fixtures/bounded-record-questions.v1.json",
         "git:72bac3e9abc09a5a8e908cefeae0e692c9ec73a5:evals/retrieval/baselines/bounded-record-strict-fts.v1.json",
-        "https://github.com/jbookout/carr-system/pull/1546"
+        "https://github.com/DoctorCRE/carr-system/pull/1546"
       ],
       "derivation": "Historical strict-FTS synthetic reference was 12/23 positive questions. Rebind q07 application-placement theme to current production doctrine; no synthetic UUIDs are reused."
     },

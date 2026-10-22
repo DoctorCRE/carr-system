@@ -28,7 +28,7 @@ class CleanupThroughputTests(unittest.TestCase):
     def test_three_runs_drain_backlog_and_preserve_guards(self):
         fixture = fixtures.Fixture()
         self.addCleanup(shutil.rmtree, fixture.base)
-        repo = 'jbookout/carr-system'
+        repo = 'DoctorCRE/carr-system'
         head = fixture.git('rev-parse', 'HEAD')
         clones, scratch = fixture.base / 'clones', fixture.base / 'scratch'
         clones.mkdir()

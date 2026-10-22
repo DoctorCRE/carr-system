@@ -60,7 +60,7 @@ class GitHubAppTokenTests(unittest.TestCase):
 
     def write_config(self, **overrides):
         config = {"app_id": 5199739, "client_id": "Iv23liV6joa2rIh9RjPj",
-                  "repository": "jbookout/carr-system", "key_file": "github-app.pem",
+                  "repository": "DoctorCRE/carr-system", "key_file": "github-app.pem",
                   "reserve": 500}
         config.update(overrides)
         self.config.write_text(json.dumps(config))

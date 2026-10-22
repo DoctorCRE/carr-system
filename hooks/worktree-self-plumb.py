@@ -321,14 +321,14 @@ def reap_main(argv):
     from branch_retirement import health, repository_roots
     roots = repository_roots()
     canon = Path(canonical_root(value("--repo") or REPO))
-    if "--fleet" in argv and canon.resolve() != roots["jbookout/carr-system"].resolve():
+    if "--fleet" in argv and canon.resolve() != roots["DoctorCRE/carr-system"].resolve():
         print("fleet retirement requires the canonical CARR repository")
         return 1
     if "--health-row" in argv:
         line, failed = health(canon)
         print(line)
         return int(failed)
-    roots = roots if "--fleet" in argv else {"jbookout/carr-system": canon}
+    roots = roots if "--fleet" in argv else {"DoctorCRE/carr-system": canon}
     report = fleet_reaper(canon).run(roots, execute="--dry-run" not in argv,
                                     skip=[value("--skip")] if value("--skip") else [])
     print(json.dumps({k: v for k, v in report.items() if k != "rows"}, sort_keys=True))

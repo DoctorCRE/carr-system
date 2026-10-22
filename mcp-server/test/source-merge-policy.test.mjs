@@ -459,7 +459,7 @@ function locator() {
     decision_id: NO_CEREMONIAL_MERGE_DECISION.replace(/^decision:/, ""),
     work_request: "WR-900",
     head_sha: HEAD,
-    repository: "jbookout/carr-system",
+    repository: "DoctorCRE/carr-system",
     ruleset_id: SOURCE_MERGE_RULESET_ID,
     pr_number: 42,
   };

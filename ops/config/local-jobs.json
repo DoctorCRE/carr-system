@@ -6,12 +6,12 @@
     "develop"
   ],
   "repositories": [
-    "jbookout/carr-system",
+    "DoctorCRE/carr-system",
     "jbookout/doctorcre-app",
     "jbookout/software-factory"
   ],
   "repository_roots": {
-    "jbookout/carr-system": "~/carr-system",
+    "DoctorCRE/carr-system": "~/carr-system",
     "jbookout/doctorcre-app": "~/doctorcre-app",
     "jbookout/software-factory": "~/software-factory"
   },

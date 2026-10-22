@@ -461,7 +461,7 @@ runpy.run_path(sys.argv[0], run_name='__main__')
         from branch_retirement import maintenance
         fixture = Fixture()
         reaper = fixture.reaper()
-        roots = {"jbookout/carr-system": fixture.repo}
+        roots = {"DoctorCRE/carr-system": fixture.repo}
         reaper.run(roots, execute=True)
         paths = [fixture.repo / "out/orch" / name for name in
                  ("branch-janitor-report.json", "branch-janitor-runs.jsonl")]
@@ -519,7 +519,7 @@ runpy.run_path(sys.argv[0], run_name='__main__')
         closed["state"] = "closed"
         closed["head"]["ref"] = "claude/closed"
         for side in ("head", "base"):
-            closed[side]["repo"]["full_name"] = "jbookout/carr-system"
+            closed[side]["repo"]["full_name"] = "DoctorCRE/carr-system"
         (tree / "file").write_text("uncommitted orphan bytes\n")
         fixture.age(tree)
         config = local_jobs.load_config(ROOT / "ops/config/local-jobs.json")
@@ -537,7 +537,7 @@ reaper = hook.fleet_reaper(repo, provider=module['FakeProvider']([{closed!r}]),
     process_probe=lambda paths: set(), ownership_probe=lambda path: 'orphaned',
     clock=lambda: {now!r})
 with patch.object(hook, 'fleet_reaper', return_value=reaper), \
-        patch('branch_retirement.repository_roots', return_value={{'jbookout/carr-system': repo}}):
+        patch('branch_retirement.repository_roots', return_value={{'DoctorCRE/carr-system': repo}}):
     sys.argv = [hook.__file__, '--reap', '--fleet', '--repo', str(repo)]
     sys.exit(hook.main())
 """)
@@ -621,7 +621,7 @@ with patch.object(hook, 'fleet_reaper', return_value=reaper), \
         from branch_retirement import health
         fixture = Fixture()
         fixture.tree("old")
-        roots = {repo: fixture.repo for repo in ("jbookout/carr-system", "jbookout/doctorcre-app", "jbookout/software-factory")}
+        roots = {repo: fixture.repo for repo in ("DoctorCRE/carr-system", "jbookout/doctorcre-app", "jbookout/software-factory")}
         report = fixture.reaper(process_probe=lambda paths: None).run(roots, execute=True)
         self.assertTrue(report["errors"])
         self.assertTrue(health(fixture.repo)[1])

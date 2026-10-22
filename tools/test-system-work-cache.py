@@ -47,7 +47,7 @@ class CacheTests(unittest.TestCase):
  def test_builder_brief_with_pr_is_excluded_and_no_body_cached(self):
   with tempfile.TemporaryDirectory() as d:
    p=Path(d)/'brief-synthetic.txt';p.write_text('ROLE: builder\nREPOS: carr-system\nBRANCH: synthetic\n')
-   self.assertEqual(cache.unfinished_briefs(d,[{'repository':'jbookout/carr-system','branch':'synthetic'}]),[])
+   self.assertEqual(cache.unfinished_briefs(d,[{'repository':'DoctorCRE/carr-system','branch':'synthetic'}]),[])
    rows=cache.unfinished_briefs(d,[]);self.assertEqual(len(rows),1);self.assertNotIn('body',rows[0])
  def test_concurrent_refresh_never_overwrites_newer_evidence(self):
   with tempfile.TemporaryDirectory() as d:

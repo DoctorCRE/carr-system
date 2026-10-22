@@ -1,4 +1,4 @@
-ROLE: Reviewer tooling engineer. Model: Claude Opus 5.5, high effort. Repo jbookout/carr-system, branch claude/brief-check.
+ROLE: Reviewer tooling engineer. Model: Claude Opus 5.5, high effort. Repo DoctorCRE/carr-system, branch claude/brief-check.
 GOAL (Joe 2026-10-05, gap #17): before the orchestrator reviews a builder PR, a check confirms each numbered requirement of the builder's brief was met, with evidence, so review time goes to judgment.
 WHAT EXISTS: builder briefs live in out/orch/**/ *.md with "BUILD (all required):" numbered lists; out/orch/review-pr.sh and review-template.md; serial merges gated by GitHub required CI; Jev (ask-jev) for bounded review judgments.
 BUILD (all required):

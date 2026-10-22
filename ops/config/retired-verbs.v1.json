@@ -2,7 +2,7 @@
   "schema": "carr-retired-verbs/v1",
   "retirements": [
     {
-      "reference": "https://github.com/jbookout/carr-system/pull/1806",
+      "reference": "https://github.com/DoctorCRE/carr-system/pull/1806",
       "commit": "6015711f51b0501c3782e80c1287601ebac7fdc9",
       "verbs": [
         "accept-benchmark-manifest-draft",
@@ -44,7 +44,7 @@
       ]
     },
     {
-      "reference": "https://github.com/jbookout/carr-system/pull/1810",
+      "reference": "https://github.com/DoctorCRE/carr-system/pull/1810",
       "verbs": [
         "claude-record-event",
         "codex-record-event"

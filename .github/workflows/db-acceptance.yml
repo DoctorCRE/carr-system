@@ -166,7 +166,7 @@ jobs:
         env:
           # ops/local-pg-ci.py refuses hosted runners by DEFAULT and still does.
           # This is the declared opt-in — the module additionally requires the
-          # repository to be jbookout/carr-system and a real run id, so a fork
+          # repository to be DoctorCRE/carr-system and a real run id, so a fork
           # running this same file is still refused. See its
           # hosted_execution_is_declared() and the selftest cases that drop each
           # clause in turn.

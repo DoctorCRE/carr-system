@@ -89,7 +89,7 @@ def reader(fake=None):
 
 
 def board_from(module=pr_board, probe=PROBE):
-    base, nodes = module.fetch_open_prs(reader(), "jbookout/carr-system")
+    base, nodes = module.fetch_open_prs(reader(), "DoctorCRE/carr-system")
     return module.build_board(base, nodes, probe, now=NOW)
 
 
@@ -162,7 +162,7 @@ class Board(unittest.TestCase):
 class ReadsOnly(unittest.TestCase):
     def test_pagination_carries_the_cursor_and_every_call_is_a_graphql_read(self):
         fake = FakeGh()
-        base, nodes = pr_board.fetch_open_prs(reader(fake), "jbookout/carr-system")
+        base, nodes = pr_board.fetch_open_prs(reader(fake), "DoctorCRE/carr-system")
         self.assertEqual((base["oid"], len(nodes)), ("f" * 40, 14))
         self.assertEqual(len(fake.calls), 2)
         self.assertNotIn("cursor=CURSOR-1", fake.calls[0])

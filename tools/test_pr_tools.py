@@ -36,7 +36,7 @@ elif 'PUT' in args:
 elif args[0] == 'api' and '/compare/' in args[1]:
     print(os.environ['PR_TOOL_BEHIND'])
 else:
-    print('jbookout/carr-system\\t12\\tMERGEABLE\\tCLEAN')
+    print('DoctorCRE/carr-system\\t12\\tMERGEABLE\\tCLEAN')
 ''')
             gh.chmod(0o755)
             sleep = root / 'sleep'
@@ -48,7 +48,7 @@ with (pathlib.Path(os.environ['PR_TOOL_FIXTURE']) / 'calls.jsonl').open('a') as 
             sleep.chmod(0o755)
             env = {**os.environ, 'PATH': f'{root}:{os.environ["PATH"]}',
                    'PR_TOOL_FIXTURE': tmp, 'PR_TOOL_UPDATE': str(update),
-                   'PR_TOOL_MERGE': str(merge), 'PR_TOOL_BEHIND': str(behind), 'R': 'jbookout/carr-system'}
+                   'PR_TOOL_MERGE': str(merge), 'PR_TOOL_BEHIND': str(behind), 'R': 'DoctorCRE/carr-system'}
             result = subprocess.run(['bash', str(ROOT / 'tools' / tool), *args],
                                     env=env, capture_output=True, text=True, timeout=15)
             calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
@@ -62,7 +62,7 @@ with (pathlib.Path(os.environ['PR_TOOL_FIXTURE']) / 'calls.jsonl').open('a') as 
     def test_open_prs_uses_one_cross_repo_search_with_merge_state(self):
         result, calls = self.run_tool('open-prs.sh', args=())
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('jbookout/carr-system', result.stdout)
+        self.assertIn('DoctorCRE/carr-system', result.stdout)
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][:3], ['gh', 'api', 'graphql'])
         query = ' '.join(calls[0])

@@ -722,7 +722,7 @@ class QueueTests(unittest.TestCase):
                                   (['skipping'], False), ([], False), (['pending'], False)):
             with self.subTest(buckets=buckets), patch.object(queue, 'gh', return_value=[
                     {'bucket': b} for b in buckets]):
-                self.assertEqual(queue.green('jbookout/carr-system', 7, 'a' * 40), expected)
+                self.assertEqual(queue.green('DoctorCRE/carr-system', 7, 'a' * 40), expected)
 
     def setUp(self):
         patcher = patch.dict(os.environ, fixture_env(), clear=True)
@@ -834,7 +834,7 @@ class QueueTests(unittest.TestCase):
             'receipt.write_text(json.dumps(dict(head=args["--head"], main=args["--main"], '
             'prepared=prepared, branch=args["--branch"])))\n'
             'state = Path(os.environ["FAKE_GH_STATE"])\ndata = json.loads(state.read_text())\n'
-            'data["prs"]["jbookout/carr-system#1"]["head"]["sha"] = prepared\n'
+            'data["prs"]["DoctorCRE/carr-system#1"]["head"]["sha"] = prepared\n'
             'state.write_text(json.dumps(data))\n'
             'print(json.dumps(dict(head=prepared, changed=True)))\n')
         self.q.enqueue(module.REPOS[0], 1, self.approved)
@@ -1808,17 +1808,17 @@ class QueueTests(unittest.TestCase):
         self.assertIn('4', reason)
 
     def test_rejected_pr_read_is_bounded_and_next_pr_runs(self):
-        self.assert_rejected_read_is_bounded('repos/jbookout/carr-system/pulls/1', 404)
+        self.assert_rejected_read_is_bounded('repos/DoctorCRE/carr-system/pulls/1', 404)
 
 
 
     def test_rejected_api_reads_follow_effective_method_and_graphql_operation(self):
         self.pr()
         cases = (
-            ('repos/jbookout/carr-system/pulls/1', ('-X', 'GET', '-f', 'page=1'), module.ReadRejected),
-            ('repos/jbookout/carr-system/pulls/1', ('--method=HEAD',), module.ReadRejected),
-            ('repos/jbookout/carr-system/pulls/1', ('-f', 'body=comment'), module.ActionRejected),
-            ('repos/jbookout/carr-system/pulls/1', ('-X', 'PUT', '-f', 'expected_head_sha='+self.approved), module.ActionRejected),
+            ('repos/DoctorCRE/carr-system/pulls/1', ('-X', 'GET', '-f', 'page=1'), module.ReadRejected),
+            ('repos/DoctorCRE/carr-system/pulls/1', ('--method=HEAD',), module.ReadRejected),
+            ('repos/DoctorCRE/carr-system/pulls/1', ('-f', 'body=comment'), module.ActionRejected),
+            ('repos/DoctorCRE/carr-system/pulls/1', ('-X', 'PUT', '-f', 'expected_head_sha='+self.approved), module.ActionRejected),
             ('graphql', ('-f', 'query=query { viewer { login } }'), module.ReadRejected),
             ('graphql', ('-f', 'query=mutation { effect }'), module.ActionRejected),
         )
@@ -1836,7 +1836,7 @@ class QueueTests(unittest.TestCase):
         entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
         self.q.tick()
         self.assertEqual(len(self.calls('merge')), 1)
-        self.data['api_failure'] = {'path': 'repos/jbookout/carr-system/pulls/1', 'status': status}
+        self.data['api_failure'] = {'path': 'repos/DoctorCRE/carr-system/pulls/1', 'status': status}
         self.save()
         with patch.object(module.time, 'time', return_value=time.time()) as clock:
             for _ in range(4):
@@ -1854,7 +1854,7 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0], phase)
         self.q.reconcile(entry, retry=True)
         self.restart()
-        self.data['api_failure'] = {'path': 'repos/jbookout/carr-system/pulls/1', 'status': status}
+        self.data['api_failure'] = {'path': 'repos/DoctorCRE/carr-system/pulls/1', 'status': status}
         self.save()
         self.q.tick()
         self.assertEqual(self.q.db.execute('SELECT phase,outcome FROM entries WHERE id=?', (entry,)).fetchone()[:], ('refreshing', 'merged'))
@@ -1968,7 +1968,7 @@ class QueueTests(unittest.TestCase):
             'sha = prepare(args["--remote"], args["--branch"], args["--head"], '
             'args["--main"], Path(args["--receipt"]), regenerate)\n'
             'state = Path(os.environ["FAKE_GH_STATE"])\ndata = json.loads(state.read_text())\n'
-            'data["prs"]["jbookout/carr-system#1"]["head"]["sha"] = sha\n'
+            'data["prs"]["DoctorCRE/carr-system#1"]["head"]["sha"] = sha\n'
             'state.write_text(json.dumps(data))\n'
             'print(json.dumps(dict(head=sha, changed=sha != args["--head"])))\n')
 

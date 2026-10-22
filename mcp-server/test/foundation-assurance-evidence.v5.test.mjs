@@ -54,7 +54,7 @@ function fixture() {
     },
     github_checks: FOUNDATION_ASSURANCE_GITHUB_CHECKS.map((name, index) => ({
       name, conclusion: "success", head_sha: "a".repeat(40), run_id: index + 1,
-      url: `https://github.com/jbookout/carr-system/actions/runs/${index + 1}`,
+      url: `https://github.com/DoctorCRE/carr-system/actions/runs/${index + 1}`,
     })),
     benchmark_config_digest: digest(validateFoundationAssuranceBenchmarkConfig(config)),
     benchmark_payload: payload,

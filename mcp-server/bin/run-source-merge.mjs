@@ -21,7 +21,7 @@ function exactLocator(value) {
   return value && typeof value === "object" && !Array.isArray(value) &&
     Object.keys(value).sort().join(",") === keys.sort().join(",") &&
     value.decision_id === DECISION_ID &&
-    value.repository === "jbookout/carr-system" &&
+    value.repository === "DoctorCRE/carr-system" &&
     typeof value.work_request === "string" && value.work_request.length > 0 &&
     /^[0-9a-f]{40}$/.test(value.head_sha || "") &&
     Number.isInteger(value.pr_number) && value.pr_number > 0 &&
@@ -205,7 +205,7 @@ export async function planOrExecute({ command, locator, resolveAuthority, token,
 
 export async function autoMergeOnce({ resolveAuthority, token, fetchImpl = globalThis.fetch }) {
   if (typeof resolveAuthority !== "function") throw new Error("canonical source merge authority resolver is required");
-  const repository = "jbookout/carr-system";
+  const repository = "DoctorCRE/carr-system";
   const client = new GitHubSourceMergeClient(token, fetchImpl);
   const candidates = await client.openCandidates(repository);
   const refused = [];
@@ -294,7 +294,7 @@ async function main(argv = process.argv.slice(2)) {
     work_request: args.work_request,
     pr_number: Number(args.pr_number),
     head_sha: args.head_sha,
-    repository: "jbookout/carr-system",
+    repository: "DoctorCRE/carr-system",
     ruleset_id: SOURCE_MERGE_RULESET_ID,
   };
   const result = await planOrExecute({

@@ -51,7 +51,7 @@ class ScheduledRefreshTests(unittest.TestCase):
                     self.assertEqual(verb, 'publish-board-snapshot')
                     store[key] = {'version': args['base_version'] + 1, 'snapshot_json': copy.deepcopy(args['snapshot'])}
                     return {'ok': True}
-                with tempfile.TemporaryDirectory() as root, patch.object(tempfile, 'tempdir', root), patch.dict(board.os.environ, {'PROGRESS_BOARD_ROOT': root}), patch.object(board, 'render'), patch.object(board, 'list_repositories', return_value=['jbookout/carr-system', 'jbookout/doctorcre-app']), patch.object(board, 'read_repository', side_effect=reads), patch.object(board, 'latest_release') as release, patch.object(board, 'stamp', return_value=fresh), patch.object(board, 'call_verb', side_effect=call), patch.object(board.work_queue_module(), 'board_projection', return_value={'items': []}), patch.object(board, 'project_board_snapshot', side_effect=board.SnapshotTooLarge('legacy size')), patch.object(board, 'poll_board_answers') as poll, patch.object(board, 'publish_needs_joe_local'), patch('sys.stderr', new_callable=io.StringIO):
+                with tempfile.TemporaryDirectory() as root, patch.object(tempfile, 'tempdir', root), patch.dict(board.os.environ, {'PROGRESS_BOARD_ROOT': root}), patch.object(board, 'render'), patch.object(board, 'list_repositories', return_value=['DoctorCRE/carr-system', 'jbookout/doctorcre-app']), patch.object(board, 'read_repository', side_effect=reads), patch.object(board, 'latest_release') as release, patch.object(board, 'stamp', return_value=fresh), patch.object(board, 'call_verb', side_effect=call), patch.object(board.work_queue_module(), 'board_projection', return_value={'items': []}), patch.object(board, 'project_board_snapshot', side_effect=board.SnapshotTooLarge('legacy size')), patch.object(board, 'poll_board_answers') as poll, patch.object(board, 'publish_needs_joe_local'), patch('sys.stderr', new_callable=io.StringIO):
                     Path(root, 'boards').mkdir()
                     board.write_json(state)
                     board.write_json(prior)
@@ -64,7 +64,7 @@ class ScheduledRefreshTests(unittest.TestCase):
                 self.assertEqual(canonical['github_sync']['stale'], outage != 'none')
                 self.assertEqual(view['sources']['portfolio'], {'state': 'stale' if outage != 'none' else 'observed', 'checked_at': fresh, 'last_success_at': old if outage != 'none' else fresh})
                 self.assertEqual(view['cards'][0]['state'], 'review' if outage != 'none' else 'merged')
-                self.assertEqual([call.args[0] for call in release.call_args_list], [] if outage == 'full' else ['jbookout/carr-system'] if outage == 'partial' else ['jbookout/carr-system', 'jbookout/doctorcre-app'])
+                self.assertEqual([call.args[0] for call in release.call_args_list], [] if outage == 'full' else ['DoctorCRE/carr-system'] if outage == 'partial' else ['DoctorCRE/carr-system', 'jbookout/doctorcre-app'])
                 poll.assert_not_called()
 
 

@@ -14,7 +14,7 @@ spec.loader.exec_module(hint)
 
 class MainHintTests(unittest.TestCase):
     def test_links_the_failed_main_run(self):
-        url = "https://github.com/jbookout/carr-system/actions/runs/123"
+        url = "https://github.com/DoctorCRE/carr-system/actions/runs/123"
         with patch.object(hint.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, url + "\n")) as run, patch("builtins.print") as output:
             hint.main()
         output.assert_called_once_with("Latest failed main CI run: " + url)

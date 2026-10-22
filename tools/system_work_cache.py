@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from pathlib import Path
 
-REPOSITORIES = ("jbookout/carr-system", "jbookout/doctorcre-app")
+REPOSITORIES = ("DoctorCRE/carr-system", "jbookout/doctorcre-app")
 
 
 def github_json(args):

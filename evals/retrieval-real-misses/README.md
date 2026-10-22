@@ -54,7 +54,7 @@ Rule probes read the full-text boot and reuse the existing deterministic prompt 
 
 The uncaptured orb conversation has no production conversation ID to label. Those questions target the existing loop as a gap/work locator. Even a future locator hit would not prove recovery of the original conversation. Its absence is a capture limitation, and expanding the search cannot reconstruct missing source material.
 
-The old **12/23, 52.2%** result belongs to the synthetic strict-FTS reference committed in [72bac3e9](https://github.com/jbookout/carr-system/commit/72bac3e9abc09a5a8e908cefeae0e692c9ec73a5). Its own `basis` says it was not live recall. [PR 1546](https://github.com/jbookout/carr-system/pull/1546) removed that unused experiment. This fixture rebinds its application-placement question theme to an independently read production doctrine section. It copies no synthetic UUID into an expected label.
+The old **12/23, 52.2%** result belongs to the synthetic strict-FTS reference committed in [72bac3e9](https://github.com/DoctorCRE/carr-system/commit/72bac3e9abc09a5a8e908cefeae0e692c9ec73a5). Its own `basis` says it was not live recall. [PR 1546](https://github.com/DoctorCRE/carr-system/pull/1546) removed that unused experiment. This fixture rebinds its application-placement question theme to an independently read production doctrine section. It copies no synthetic UUID into an expected label.
 
 ## Verification and registration
 

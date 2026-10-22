@@ -7,7 +7,7 @@
   "state_dir": "out/release-pipeline",
   "worker": {
     "enabled": true,
-    "github_repo": "jbookout/carr-system",
+    "github_repo": "DoctorCRE/carr-system",
     "release_paths": [
       "mcp-server/",
       "migrations/",

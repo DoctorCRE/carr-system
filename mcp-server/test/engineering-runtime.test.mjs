@@ -161,7 +161,7 @@ prepared = {"checkout_path": "/private/tmp/room-codex-example/checkout",
     "checkout_branch": "fix/controller-completion", "checkout_revision": revision}
 evidence = {"ref": "evidence:adapter", "redaction_class": "metadata_only",
     "content_digest": "sha256:" + "a" * 64}
-job = {"repository": "jbookout/carr-system", "revision": revision,
+job = {"repository": "DoctorCRE/carr-system", "revision": revision,
     "permitted_work": {"objective": "Fix dispatch", "scope_boundary": "Dispatch only",
         "actions": [], "resource_refs": [], "component_refs": [], "paths": []},
     "checks": [{"check_ref": "check:slice:one"}]}

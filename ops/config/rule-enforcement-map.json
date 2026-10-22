@@ -575,7 +575,7 @@
     "pr_only_main_ruleset": {
       "failure_mode": "local pre-commit refusal on a direct commit to `main`, plus server-side rejection of a direct push to `main` (the PR-only ruleset with required CI)",
       "implementation": [
-        "external:GitHub branch ruleset 20824501 on jbookout/carr-system's main branch \u2014 PR-only, direct pushes rejected server-side with required status checks",
+        "external:GitHub branch ruleset 20824501 on DoctorCRE/carr-system's main branch \u2014 PR-only, direct pushes rejected server-side with required status checks",
         "ops/githooks/pre-commit"
       ],
       "note": "Added 2026-08-27 (WR-000019 slice S3) as the reassignment target for the two rules (308ef1de, 4a53ff82) whose own edit-time/git-action-time gates retired this slice. This control binds LATER than either retired gate did \u2014 at commit/push/merge rather than at the git command or the file edit itself \u2014 which is a real, stated reduction in how early a mistake is caught, not a claim of equivalent coverage.",

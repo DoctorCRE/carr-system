@@ -32,7 +32,7 @@ def load_manifest(path):
         name = entry['test']
         if name in entries or name.startswith('/') or '..' in Path(name).parts:
             raise ValueError(f'duplicate or unsafe test path: {name}')
-        if not re.fullmatch(r'https://github\.com/jbookout/(carr-system|doctorcre-app)/issues/[1-9][0-9]*', entry['loop']):
+        if not re.fullmatch(r'https://github\.com/(DoctorCRE/carr-system|jbookout/doctorcre-app)/issues/[1-9][0-9]*', entry['loop']):
             raise ValueError(f'{name}: loop must link to its GitHub fix issue')
         if date.fromisoformat(entry['expires']) <= datetime.now(timezone.utc).date():
             raise ValueError(f"{name}: expired {entry['expires']}; fix and remove or renew with loop evidence")

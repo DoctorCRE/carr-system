@@ -11,9 +11,9 @@ function check(body, overrides = {}) {
   const directory = mkdtempSync(join(tmpdir(), "pr-skills-"));
   try {
     const event = join(directory, "event.json");
-    writeFileSync(event, JSON.stringify({ repository: { full_name: "jbookout/carr-system" },
+    writeFileSync(event, JSON.stringify({ repository: { full_name: "DoctorCRE/carr-system" },
       pull_request: { body, user: { login: "jbookout" },
-        head: { ref: "feature/example", repo: { full_name: "jbookout/carr-system" } }, ...overrides } }));
+        head: { ref: "feature/example", repo: { full_name: "DoctorCRE/carr-system" } }, ...overrides } }));
     return spawnSync(process.execPath, [checker], {
       env: { PATH: process.env.PATH, GITHUB_EVENT_PATH: event }, encoding: "utf8",
     });
@@ -44,15 +44,15 @@ for (const login of ["dependabot[bot]", "renovate[bot]", "renovate"]) {
 }
 test("the release pipeline schema PR is exempt", () => {
   const result = check("Opened by ops/release-pipeline.py: the release applied production migrations", {
-    head: { ref: "release/schema-snapshot-1234abcd", repo: { full_name: "jbookout/carr-system" } },
+    head: { ref: "release/schema-snapshot-1234abcd", repo: { full_name: "DoctorCRE/carr-system" } },
   });
   assert.equal(result.status, 0, result.stderr);
 });
 
 for (const [name, overrides] of [
-  ["branch alone", { head: { ref: "release/schema-snapshot-1234abcd", repo: { full_name: "jbookout/carr-system" } } }],
+  ["branch alone", { head: { ref: "release/schema-snapshot-1234abcd", repo: { full_name: "DoctorCRE/carr-system" } } }],
   ["fork", { head: { ref: "release/schema-snapshot-1234abcd", repo: { full_name: "someone/fork" } } }],
-  ["untrusted author", { user: { login: "someone" }, head: { ref: "release/schema-snapshot-1234abcd", repo: { full_name: "jbookout/carr-system" } } }],
+  ["untrusted author", { user: { login: "someone" }, head: { ref: "release/schema-snapshot-1234abcd", repo: { full_name: "DoctorCRE/carr-system" } } }],
 ]) test(`release exemption rejects ${name}`, () => {
   const body = name === "branch alone" ? "A manual PR" : "Opened by ops/release-pipeline.py: synthetic";
   assert.equal(check(body, overrides).status, 1);

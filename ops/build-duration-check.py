@@ -24,7 +24,7 @@ def main():
     parser.add_argument("--repo", action="append")
     parser.add_argument("--minutes", type=float, default=15)
     args = parser.parse_args()
-    for repo in args.repo or ("jbookout/carr-system", "jbookout/doctorcre-app", "jbookout/software-factory"):
+    for repo in args.repo or ("DoctorCRE/carr-system", "jbookout/doctorcre-app", "jbookout/software-factory"):
         result = subprocess.run(["gh", "run", "list", "--repo", repo, "--status", "completed",
                                  "--limit", "50", "--json", "workflowName,startedAt,updatedAt,url,status"],
                                 check=True, capture_output=True, text=True, timeout=30)

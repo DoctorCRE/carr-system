@@ -52,7 +52,7 @@ class RuleClaimGateTest(unittest.TestCase):
     def turn(self, *records):
         return [message('user', 'Please apply the correction.', uuid='human1'), *records]
 
-    def checkout(self, name, origin='https://github.com/jbookout/carr-system.git'):
+    def checkout(self, name, origin='https://github.com/DoctorCRE/carr-system.git'):
         root = self.root / name
         root.mkdir(exist_ok=True)
         subprocess.run(['git', 'init', '-q', str(root)], check=True, capture_output=True, env=ENV)
@@ -68,7 +68,7 @@ class RuleClaimGateTest(unittest.TestCase):
         clone = self.root / 'scratchpad/clone'
         subprocess.run(['git', 'clone', '-q', str(source), str(clone)], check=True, env=ENV)
         subprocess.run(['git', '-C', str(clone), 'remote', 'set-url', 'origin',
-                        'git@github.com:jbookout/carr-system.git'], check=True, env=ENV)
+                        'git@github.com:DoctorCRE/carr-system.git'], check=True, env=ENV)
         worktree = self.root / 'scratchpad/worktree'
         subprocess.run(['git', '-C', str(source), 'worktree', 'add', '-q', '-b',
                         'fixture', str(worktree)], check=True, env=ENV)
@@ -109,8 +109,8 @@ class RuleClaimGateTest(unittest.TestCase):
     def test_foreign_checkout_and_origin_lookalikes_do_not_count(self):
         for index, origin in enumerate([
             'https://github.com/jbookout/other.git',
-            'https://example.com/jbookout/carr-system.git',
-            'https://github.com/jbookout/carr-system-fake.git',
+            'https://example.com/DoctorCRE/carr-system.git',
+            'https://github.com/DoctorCRE/carr-system-fake.git',
             'https://github.com/other/carr-system.git',
         ]):
             with self.subTest(origin=origin):
@@ -127,7 +127,7 @@ class RuleClaimGateTest(unittest.TestCase):
             assistant('I saved a rule.'))).get('decision'), 'block')
 
     def test_external_checkout_preserves_enforcement_path_restrictions(self):
-        root = self.checkout('external', 'ssh://git@github.com/jbookout/carr-system.git')
+        root = self.checkout('external', 'ssh://git@github.com/DoctorCRE/carr-system.git')
         for path in ['hooks/check.py', 'tools/check.py', 'tests/check.py',
                      '.github/workflows/check.yml', '.claude/settings.json',
                      'mcp-server/src/check.js', 'hooks/lesson.md', 'tools/memory/check.py',

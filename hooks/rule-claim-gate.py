@@ -89,7 +89,7 @@ def enforcement_path(path):
             ['git', '-C', str(root), 'config', '--get', 'remote.origin.url'],
             check=True, capture_output=True, text=True, timeout=5, env=env).stdout.strip()
         if re.fullmatch(r'(?:https?://github\.com/|git@github\.com:|ssh://git@github\.com/)'
-                        r'jbookout/carr-system(?:\.git)?/?', origin):
+                        r'DoctorCRE/carr-system(?:\.git)?/?', origin):
             return path.relative_to(root).as_posix()
     except (OSError, ValueError, subprocess.SubprocessError):
         pass
