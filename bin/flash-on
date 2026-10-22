@@ -6,9 +6,11 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import flashlib
+import flash_install
 parser = argparse.ArgumentParser(description="Explicitly start Flash with an expiring grant (default 2 hours).")
 parser.add_argument("--hours", type=float, default=2)
 args = parser.parse_args()
 if not math.isfinite(args.hours) or args.hours <= 0:
     parser.error("hours must be positive and finite")
+flash_install.configure(Path(__file__).resolve().parents[1], apply=True)
 raise SystemExit(flashlib.main("on", seconds=args.hours * 3600))
