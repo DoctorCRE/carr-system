@@ -305,7 +305,6 @@
       "id": "normal-client-artifacts",
       "class": "normal_runtime",
       "sources": [
-        "lib/control_plane_workflow_truth_reader.py",
         "pipelines/brief_pack.py",
         "pipelines/review_queue.py",
         "tools/health-check.py",
@@ -326,7 +325,7 @@
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
         "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
-        "verified": "All six sources fail closed on the normal path. tools/health-check.py (line 103), tools/registry-audit.py (line 67) and tools/report-card.py (line 510) each sit on the same `if recovery: resolve / else: pop the ambient vault root` branch, and health-check additionally strips the variable from every child environment it spawns (lines 571, 604, 676, 1005). lib/control_plane_workflow_truth_reader.py joined this entry when the V5-F09 reading moved out of health-check so the assurance-health adapter could perform it rather than be handed a census; its ONLY Drive reference is the same child-environment scrub (line 67), it resolves no vault root and has no recovery mode at all. pipelines/brief_pack.py resolves a recovery root only when --recovery is passed and errors if --vault arrives without it. tools/retrieve.py resolves Drive only inside recovery_vault(), whose own docstring states it resolves only after the caller has selected recovery mode. pipelines/review_queue.py has ZERO Drive references."
+        "verified": "The listed sources fail closed on the normal path. tools/health-check.py (line 103), tools/registry-audit.py (line 67) and tools/report-card.py (line 510) each sit on the same `if recovery: resolve / else: pop the ambient vault root` branch, and health-check additionally strips the variable from every child environment it spawns (lines 571, 604, 676, 1005). pipelines/brief_pack.py resolves a recovery root only when --recovery is passed and errors if --vault arrives without it. tools/retrieve.py resolves Drive only inside recovery_vault(), whose own docstring states it resolves only after the caller has selected recovery mode. pipelines/review_queue.py has ZERO Drive references."
       }
     },
     {
@@ -491,9 +490,9 @@
       "id": "recovery-tools",
       "class": "recovery",
       "sources": [
-        "tools/displacement-baselines.py",
         "tools/test-record-home-gate.py",
-        "tools/test-section-index-store-classification.py"
+        "tools/test-section-index-store-classification.py",
+        "tools/displacement-baselines.py"
       ],
       "path_pattern": "{{VAULT}}/**",
       "producer": "recovery/parity tools",
@@ -514,8 +513,7 @@
         "hooks/gate_paths.py",
         "hooks/guard-unattended.py",
         "hooks/lint-gate.py",
-        "hooks/record-home-gate.py",
-        "lib/carr_paths.py"
+        "hooks/record-home-gate.py"
       ],
       "path_pattern": "{{VAULT}}/**",
       "producer": "policy gates",

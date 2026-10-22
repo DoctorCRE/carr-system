@@ -94,11 +94,6 @@ Measured from the Orchestrator.macbook transcript (37 hours, 11 compactions,
 Read current canonical migration/release state before naming frontier/blocker.
 Dated incidents/WRs are history; source/CI grants no live authority.
 
-## Steering evals
-
-Surfaces in `evals/surfaces.json`: `/claude-api build-eval`, then
-`/claude-api hillclimb`; ship per `evals/README.md`.
-
 ## Map work has one mandatory front door
 
 For any request to recommend, design, build, revise, review, or publish a map,

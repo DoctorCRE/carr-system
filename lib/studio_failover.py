@@ -16,6 +16,14 @@ from urllib.parse import parse_qs, urlsplit
 TRANSFER_LOCK = 638148226000001
 
 
+def contract_hash(root):
+    config = json.loads((root / 'ops/config/studio-failover.v1.json').read_text())
+    paths = ['ops/config/studio-failover.v1.json', 'lib/studio_failover.py', 'ops/studio-failover.py',
+             'ops/studio-job-guard.py', *[j['source'] for j in config['jobs']]]
+    return hashlib.sha256(json.dumps([(p, hashlib.sha256((root / p).read_bytes()).hexdigest())
+                                     for p in sorted(paths)]).encode()).hexdigest()
+
+
 def write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     temp = path.with_name(path.name + '.tmp-' + uuid.uuid4().hex)

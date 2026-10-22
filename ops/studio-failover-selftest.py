@@ -53,7 +53,7 @@ class FailoverTests(unittest.TestCase):
         return module
 
     def test_current_manifest_contract_has_only_retained_job_templates(self):
-        from lib.studio_failover_health import contract_hash
+        from lib.studio_failover import contract_hash
         from lib.studio_failover import plan
         digest = contract_hash(ROOT)
         self.assertRegex(digest, r'^[a-f0-9]{64}$')
@@ -205,29 +205,7 @@ class FailoverTests(unittest.TestCase):
             self.assertIn('studio-job-guard.py', rendered)
             self.assertEqual(managed_body(rendered, root, root), rendered)
 
-    def test_health_missing_stale_and_failed_receipt_name_the_bound_action(self):
-        from lib.studio_failover_health import evaluate
-        from datetime import datetime, timezone, timedelta
-        now = datetime.now(timezone.utc)
-        for report in [None, {'mode': 'dry-run', 'target': 'macbook', 'ready': True,
-                             'verified_at': (now - timedelta(days=36)).isoformat()},
-                       {'mode': 'dry-run', 'target': 'macbook', 'ready': False, 'verified_at': now.isoformat()}]:
-            result = evaluate(report, now, 'head', [])
-            self.assertEqual(result['status'], 'warn')
-            self.assertIn('owner orchestrator', result['line'])
-            self.assertIn('auto-clear', result['line'])
 
-    def test_health_requires_every_planned_job_and_accepts_complete_current_receipt(self):
-        from lib.studio_failover_health import evaluate
-        from lib.studio_failover import plan
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc)
-        steps = plan({'jobs': [{'label': 'first', 'source': 'a'}, {'label': 'second', 'source': 'b'}]}, {}, 'macbook')['steps']
-        report = {'schema': 'carr-failover-rehearsal/v1', 'mode': 'dry-run', 'target': 'macbook',
-                  'ready': True, 'missing': [], 'contract_hash': 'head', 'verified_at': now.isoformat(), 'steps': steps}
-        self.assertEqual(evaluate(report, now, 'head', steps)['status'], 'ok')
-        report['steps'] = [s for s in steps if s.get('label') != 'second']
-        self.assertEqual(evaluate(report, now, 'head', steps)['status'], 'warn')
 
     def test_guard_stops_process_group_and_disarms_after_connection_loss(self):
         from lib.studio_failover import run_guarded
@@ -272,18 +250,6 @@ class FailoverTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'start_failed'): transfer(h, 'studio', 'macbook')
         h.abort.assert_called_once()
 
-    def test_health_loop_is_deduplicated_and_clears_after_verified_recovery(self):
-        from lib.studio_failover_health import reconcile
-        with tempfile.TemporaryDirectory() as raw:
-            path = Path(raw) / 'loop.json'
-            calls = []
-            def verb(name, payload):
-                calls.append(name)
-                return {'ok': True, 'loop_id': 'fixture-loop'}
-            self.assertEqual(reconcile({'status': 'warn', 'detail': 'missing dependency'}, path, verb), 'opened')
-            self.assertEqual(reconcile({'status': 'warn', 'detail': 'missing dependency'}, path, verb), 'open')
-            self.assertEqual(reconcile({'status': 'ok'}, path, verb), 'cleared')
-            self.assertEqual(calls, ['add-loop', 'close-loop'])
 
 
 if __name__ == '__main__':

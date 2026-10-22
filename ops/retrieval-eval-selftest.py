@@ -15,7 +15,6 @@ RUNNER = REPO / "ops" / "retrieval_eval.py"
 GOLDEN = REPO / "evals" / "retrieval" / "golden-queries.v1.json"
 BASELINE = REPO / "evals" / "retrieval" / "baselines" / "lexical.v1.json"
 BASELINE_INDEX = REPO / "evals" / "retrieval" / "fixtures" / "section-index.baseline.v1.tsv"
-DOCTRINE_BASELINE = REPO / "evals" / "retrieval" / "baselines" / "doctrine-fts.2026-08-15.v1.json"
 
 
 def check(label: str, condition: bool) -> None:
