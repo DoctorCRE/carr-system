@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -12,8 +11,8 @@ from git_env import scrubbed_env
 
 
 class Compositions:
-    def __init__(self, queue):
-        self.q = queue
+    def __init__(self, queue, bounds):
+        self.q, self.bounds = queue, bounds
         self.children = {}
 
     def live(self, action):
@@ -21,7 +20,7 @@ class Compositions:
         if child is not None:
             return child.poll() is None
         rows = subprocess.run(['ps', '-axo', 'command='], capture_output=True, text=True,
-                              check=True, timeout=15).stdout.splitlines()
+                              check=True, timeout=self.bounds['command']['seconds']).stdout.splitlines()
         return any(str(self.q.root / 'tools/prepare_pr.py') in row
                    and str(action['receipt']) in row for row in rows)
 
@@ -37,7 +36,7 @@ class Compositions:
                     continue
                 child = self.children.pop(action['key'], None)
                 if child is not None:
-                    child.wait(timeout=5)
+                    child.wait(timeout=self.bounds['child_reap']['seconds'])
                 p = q.pr(action['repo'], action['pr'])
                 path = Path(action['receipt'])
                 receipt = json.loads(path.read_text()) if path.exists() else None
@@ -69,7 +68,7 @@ class Compositions:
                 if conflicts:
                     q.report(e, 'conflict', 'Composition source conflict requires review', 'conflict')
                 with q.db:
-                    phase = 'exhausted' if action['attempts'] >= 4 or conflicts else 'planned'
+                    phase = 'exhausted' if action['attempts'] >= self.bounds['retry']['attempts'] or conflicts else 'planned'
                     q.db.execute('UPDATE actions SET phase=? WHERE key=?', (phase, action['key']))
                 if not conflicts:
                     q.retry(e, 'Composer stopped before confirmed push; provider head unchanged')

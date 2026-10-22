@@ -217,8 +217,8 @@ class Queue:
         self._github_scope = 'automatic'
         self._github_entry = None
         self.children: dict[str, subprocess.Popen] = {}
-        self.compositions = Compositions(self)
-        self.recovery = Recovery(self)
+        self.compositions = Compositions(self, BOUNDS)
+        self.recovery = Recovery(self, BOUNDS)
         self._repo_ready: set[str] = set()
 
     @contextmanager
@@ -1041,7 +1041,7 @@ class Queue:
                     if repo in recovering and not e['tested']:
                         continue
                     selected[repo] = selected.get(repo, 0) + 1
-                    if selected[repo] > self.parallel_size:
+                    if self.parallel_size > 1 and selected[repo] > self.parallel_size:
                         continue
                     wait = self.tick_entry(e, pin['card_id'], order)
                     if wait:
@@ -1438,7 +1438,9 @@ class Queue:
         for e in bounded_items('snapshot', self.db.execute(
                 "SELECT * FROM entries WHERE phase IN ('blocked','exhausted') ORDER BY id").fetchall()):
             self.reconcile_merged(e)
-        return [dict(r) for r in bounded_items('snapshot', self.db.execute('SELECT * FROM entries ORDER BY id'))]
+        return [dict(r) for r in bounded_items('snapshot', self.db.execute(
+            'SELECT entries.*,canaries.phase AS canary_phase FROM entries LEFT JOIN canaries '
+            'ON entries.repo=canaries.repo AND entries.merged_commit=canaries.commit_sha ORDER BY entries.id'))]
 
     def recover_work_card(self, card_id, *, expected_revision, actor, reason):
         """End stale card ownership, retaining all journal and per-pin facts."""
@@ -1523,6 +1525,16 @@ class Queue:
 
     def _reconcile(self, entry, retry=False):
         e = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+        if e and e['merged_commit']:
+            canary = self.db.execute("SELECT * FROM canaries WHERE repo=? AND commit_sha=? AND phase='blocked'",
+                                     (e['repo'], e['merged_commit'])).fetchone()
+            if canary:
+                p = self.pr(e['repo'], e['pr'])
+                self.confirmed_merge(e, p)
+                if retry:
+                    phase = 'revert' if canary['revert_head'] or canary['effect'] else 'canary'
+                    self.recovery.update(canary, phase=phase, started=time.time())
+                return
         if not e or e['phase'] not in ('merging', 'merge_rejected', 'exhausted', 'blocked') or not e['tested']:
             raise RuntimeError('reconciliation requires a persisted merge intent')
         p = self.pr(e['repo'], e['pr'])

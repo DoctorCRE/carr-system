@@ -11,8 +11,8 @@ from work_queue import WorkQueue, default_path
 
 
 class Recovery:
-    def __init__(self, queue):
-        self.q = queue
+    def __init__(self, queue, bounds):
+        self.q, self.bounds = queue, bounds
         queue.db.execute('''CREATE TABLE IF NOT EXISTS canaries (
             repo TEXT NOT NULL, culprit INTEGER NOT NULL, head TEXT NOT NULL, commit_sha TEXT NOT NULL,
             phase TEXT NOT NULL DEFAULT 'canary', branch TEXT, revert_head TEXT, revert_pr INTEGER,
@@ -30,6 +30,9 @@ class Recovery:
         with self.q.db:
             self.q.db.execute('UPDATE canaries SET '+','.join(k+'=?' for k in fields)+' WHERE repo=? AND commit_sha=?',
                               (*fields.values(), r['repo'], r['commit_sha']))
+            if fields.get('phase') == 'blocked':
+                self.q.event(r['repo'], r['culprit'], 'canary_blocked',
+                             'Recovery deadline expired; reconcile the culprit entry after provider and process readback')
 
     def tick(self):
         q = self.q
@@ -41,7 +44,7 @@ class Recovery:
             except (RuntimeError, OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
                 with q.db:
                     q.event(r['repo'], r['culprit'], 'recovery_waiting', str(exc))
-                if time.time()-r['started'] >= 4500:
+                if time.time()-r['started'] >= self.bounds['ci']['seconds']:
                     self.update(r, phase='blocked')
         return {r['repo'] for r in q.db.execute("SELECT repo FROM canaries WHERE phase IN ('revert','requeue','blocked')")}
 
@@ -58,7 +61,7 @@ class Recovery:
 
     def step(self, r):
         q = self.q
-        if time.time()-r['started'] >= 4500:
+        if time.time()-r['started'] >= self.bounds['ci']['seconds']:
             self.update(r, phase='blocked')
             return
         if r['phase'] == 'canary':
@@ -67,8 +70,6 @@ class Recovery:
                 self.update(r, phase='done')
                 return
             if verdict != 'red':
-                if time.time()-r['started'] >= 4500:
-                    self.update(r, phase='blocked')
                 return
             self.update(r, phase='revert', started=time.time())
             r.update(phase='revert', started=time.time())

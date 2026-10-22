@@ -387,6 +387,26 @@ class ParallelTests(unittest.TestCase):
             self.q.tick()
         self.assertEqual(self.q.status()[-1]['outcome'], 'composing')
 
+    def test_canary_timeout_is_visible_and_reconcile_can_resume_it(self):
+        import types
+        import tools.merge_queue.recovery as recovery
+        self.q.parallel_size = 4
+        self.pr(head=self.updated)
+        entry = self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.settle('merge_requested')
+        self.q.tick()
+        self.load()['canary'] = 'cancelled'
+        self.save()
+        now = time.time()+module.CI_WAIT_SECONDS+1
+        with patch.object(recovery, 'time', types.SimpleNamespace(time=lambda:now)):
+            self.q.tick()
+        self.assertEqual(self.q.status()[0]['canary_phase'], 'blocked')
+        self.q.reconcile(entry, retry=True)
+        self.load()['canary'] = 'success'
+        self.save()
+        self.q.tick()
+        self.assertEqual(self.q.status()[0]['canary_phase'], 'done')
+
 
 if __name__ == '__main__':
     unittest.main()
