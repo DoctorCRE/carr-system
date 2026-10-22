@@ -46,9 +46,7 @@ const iso = (value) => {
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 };
 const actions = () => ({ pause: false, run: false, stop: false });
-
 const validSeconds = (value) => Number.isInteger(Number(value)) && Number(value) > 0;
-
 
 function serviceJob(row, nowMs) {
   const owner = row.runtime === "claude-code-scheduled-task" ? "claude-code" : row.runtime;
@@ -89,7 +87,7 @@ export function scheduleBoardTools() {
   return {
     "schedule-board": {
       write: false,
-      description: "Read known scheduled jobs for the verified partner: scheduler evidence, last run receipt, next expected deadline or queued time, freshness, and supported actions. Missing provider evidence stays unknown.",
+      description: "Read known scheduled jobs for the verified partner: scheduler evidence, last run receipt, next expected deadline, freshness, and supported actions. Missing provider evidence stays unknown.",
       inputSchema: { type: "object", additionalProperties: false, properties: {} },
       handler: async (client, actor, _args, { now = () => new Date() } = {}) => {
         const scope = personalScopeForActor(actor);
@@ -98,9 +96,7 @@ export function scheduleBoardTools() {
         const observedAt = iso(now());
         const nowMs = Date.parse(observedAt);
         const serviceRows = (await client.query(SERVICE_SQL, [scope.sponsor])).rows;
-        const jobs = [
-          ...serviceRows.map((row) => serviceJob(row, nowMs)),
-        ];
+        const jobs = serviceRows.map((row) => serviceJob(row, nowMs));
         const sources = ["launchd", "claude-code", "cron"].map((owner) => {
           const count = jobs.filter((job) => job.owner === owner).length;
           return { owner, state: count ? "read" : "unknown", count: count || null };
