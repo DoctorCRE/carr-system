@@ -7,7 +7,7 @@ import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helper
 
 const bin = ['/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin']
   .find(candidate => existsSync(path.join(candidate, 'initdb')));
-const migration = new URL('../../migrations/0928_retire_jev_gateway.sql', import.meta.url);
+const migration = new URL('../../migrations/0935_retire_jev_gateway.sql', import.meta.url);
 
 test('retiring the classifier gateway removes its store and functions while preserving unrelated records and publication members',
   { skip: !bin && 'PostgreSQL unavailable' }, async () => {

@@ -57,7 +57,7 @@
       ]
     },
     {
-      "reference": "Joe 2026-10-22 direction: delete Jev gateway wrappers and ask-jev; migration 0928_retire_jev_gateway.sql",
+      "reference": "Joe 2026-10-22 direction: delete Jev gateway wrappers and ask-jev; migration 0935_retire_jev_gateway.sql",
       "verbs": [
         "ask-jev",
         "read-jev-call-receipt-integrity",
