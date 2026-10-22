@@ -23,7 +23,7 @@ def class_groups(root=ROOT):
     return re.findall(r'^          - "([^"]+)"', block, re.M)
 
 
-def verdict(jobs, groups):
+def verdict(jobs, groups, *, db_full=True, draft=False):
     """Report job conclusions for every class, failing closed on missing jobs."""
     lines, passed = [], True
     labels = {'success': 'PASSED', 'failure': 'FAILED', 'cancelled': 'CANCELLED',
@@ -36,7 +36,11 @@ def verdict(jobs, groups):
             label = 'INCOMPLETE'
         else:
             label = labels.get(matches[0].get('conclusion'), 'UNKNOWN')
-        passed = passed and label == 'PASSED'
+        if draft and group in ('gates', 'migration') and not matches:
+            label = 'DEFERRED (draft)'
+        elif group == 'migration' and not db_full and label == 'PASSED':
+            label = 'NOT APPLICABLE (receipt)'
+        passed = passed and label in ('PASSED', 'NOT APPLICABLE (receipt)', 'DEFERRED (draft)')
         lines.extend(c + ': ' + label for c in group.split())
     return (0 if passed else 1), lines
 
@@ -54,9 +58,10 @@ def hosted_verdict():
             capture_output=True, text=True,
             timeout=min(15, max(0.001, deadline - time.monotonic())), check=True)
         jobs = [job for page in json.loads(raw.stdout) for job in page['jobs']]
-        rc, lines = verdict(jobs, groups)
+        rc, lines = verdict(jobs, groups, db_full=os.environ.get('DB_FULL') != 'false',
+                            draft=os.environ.get('CI_DRAFT') == 'true')
         if (rc == 0 or deadline - time.monotonic() <= 5 or any(
-                not line.endswith((': PASSED', ': MISSING', ': INCOMPLETE')) for line in lines)):
+                not line.endswith((': PASSED', ': MISSING', ': INCOMPLETE', ': NOT APPLICABLE (receipt)', ': DEFERRED (draft)')) for line in lines)):
             break
         print('Class job conclusions still settling; retrying in 5 seconds')
         time.sleep(5)
