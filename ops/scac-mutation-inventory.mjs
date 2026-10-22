@@ -39,7 +39,7 @@ const sqlModels = new Map();
 const parents = new WeakMap();
 function walk(node, visit) {
   if (!node || typeof node.type !== "string") return;
-  visit(node);
+  if (visit(node) === false) return;
   for (const value of Object.values(node)) {
     for (const child of Array.isArray(value) ? value : [value]) {
       if (!child || typeof child.type !== "string") continue;
@@ -49,17 +49,44 @@ function walk(node, visit) {
   }
 }
 
+function walkFunction(node, visit) {
+  walk(node, child => {
+    if (child !== node && /^(?:Function|ArrowFunction)/.test(child.type) &&
+        parents.get(child)?.type !== "CallExpression") return false;
+    return visit(child);
+  });
+}
+
 function parseSource(source) {
-  return parsers.acorn.parse(source, {});
+  const ast = parsers.acorn.parse(source, {});
+  walk(ast, () => {});
+  return ast;
+}
+
+function lexicalBinding(node, name) {
+  for (let scope = parents.get(node); scope; scope = parents.get(scope)) {
+    for (const statement of Array.isArray(scope.body) ? scope.body : []) {
+      const declaration = statement.declaration || statement;
+      if (declaration.type === "FunctionDeclaration" && declaration.id?.name === name) return declaration;
+      for (const binding of declaration.declarations || [])
+        if (binding.id.name === name) return declaration.kind === "const" ? binding.init : binding;
+    }
+    const params = (scope.params || []).flatMap(param => param.type === "ObjectPattern"
+      ? param.properties.map(property => property.value) : [param]);
+    if (params.some(param => param?.name === name)) return params.find(param => param?.name === name);
+  }
+  return undefined;
 }
 
 function sqlModel(path) {
   if (sqlModels.has(path)) return sqlModels.get(path);
   const source = readFileSync(resolve(REPO_ROOT, path), "utf8");
   const ast = parseSource(source);
-  const model = { ast, source, functions: new Map(), imports: new Map() };
+  const model = { ast, source, functions: new Map(), imports: new Map(), factories: new Map() };
   sqlModels.set(path, model);
   walk(ast, node => {
+    if (node.type === "Property" && typeof node.key.value === "string" && node.value.type === "CallExpression")
+      model.factories.set(node.key.value, node.value);
     if (node.type === "FunctionDeclaration" && node.id) model.functions.set(node.id.name, node);
     if (node.type === "VariableDeclarator" && node.id.type === "Identifier" &&
         ["ArrowFunctionExpression", "FunctionExpression"].includes(node.init?.type))
@@ -73,19 +100,90 @@ function sqlModel(path) {
   return model;
 }
 
-function sqlText(node, source) {
-  if (!node) return "";
-  if (node.type === "Literal" && typeof node.value === "string") return node.value;
-  if (node.type === "TemplateLiteral") return node.quasis.map((part, i) =>
-    part.value.cooked + (node.expressions[i] ? "${" + source.slice(node.expressions[i].start, node.expressions[i].end) + "}" : "")).join("");
+function joinSql(left, right) {
+  if (left === null || right === null || left.length * right.length > 16384) return null;
+  return [...new Set(left.flatMap(a => right.map(b => a + b)))];
+}
+
+function sqlTexts(node, source, path, bindings = new Map(), seen = new Set()) {
+  if (!node || seen.has(node)) return null;
+  if (bindings.has(node)) return bindings.get(node);
+  seen = new Set([...seen, node]);
+  if (node.type === "Identifier") {
+    const local = lexicalBinding(node, node.name);
+    if (local !== undefined) return sqlTexts(local, source, path, bindings, seen);
+    if (!path) return null;
+    const context = sqlModel(path);
+    const imported = context.imports.get(node.name);
+    const targetPath = imported?.path || path;
+    const target = sqlModel(targetPath);
+    return sqlTexts(lexicalBinding(target.ast.body[0], imported?.name || node.name),
+      target.source, targetPath, bindings, seen);
+  }
+  if (node.type === "Literal" && typeof node.value === "string") return [node.value];
+  if (node.type === "TemplateLiteral") {
+    let texts = [""];
+    for (const [i, part] of node.quasis.entries()) {
+      texts = joinSql(texts, [part.value.cooked]);
+      const expression = node.expressions[i];
+      if (!expression) continue;
+      const values = sqlTexts(expression, source, path, bindings, seen);
+      if (values === null && i === 0 && !part.value.cooked.trim()) return null;
+      texts = joinSql(texts, values || ["${" + source.slice(expression.start, expression.end) + "}"]);
+    }
+    return texts;
+  }
   if (node.type === "BinaryExpression" && node.operator === "+")
-    return sqlText(node.left, source) + sqlText(node.right, source);
-  return "";
+    return joinSql(sqlTexts(node.left, source, path, bindings, seen), sqlTexts(node.right, source, path, bindings, seen));
+  if (node.type === "ConditionalExpression") {
+    const left = sqlTexts(node.consequent, source, path, bindings, seen);
+    const right = sqlTexts(node.alternate, source, path, bindings, seen);
+    return left === null || right === null ? null : [...new Set([...left, ...right])];
+  }
+  if (node.type === "VariableDeclarator") {
+    let texts = sqlTexts(node.init, source, path, bindings, seen);
+    const scope = parents.get(parents.get(node));
+    walk(scope, child => {
+      if (!["AssignmentExpression", "UpdateExpression"].includes(child.type)) return;
+      const target = child.left || child.argument;
+      if (target.type !== "Identifier" || lexicalBinding(target, target.name) !== node) return;
+      const value = sqlTexts(child.right, source, path, bindings, seen);
+      const changed = child.operator === "+=" ? joinSql(texts, value) : child.operator === "=" ? value : null;
+      texts = texts === null || changed === null ? null : [...new Set([...texts, ...changed])];
+    });
+    return texts;
+  }
+  if (node.type === "MemberExpression" && !node.computed && node.object.type === "Identifier") {
+    for (let loop = parents.get(node); loop; loop = parents.get(loop)) {
+      if (loop.type !== "ForOfStatement" || loop.left.declarations?.[0]?.id.name !== node.object.name) continue;
+      let values = loop.right;
+      while (values.type === "CallExpression" && values.callee.type === "MemberExpression" && values.callee.property.name === "filter")
+        values = values.callee.object;
+      if (values.type === "Identifier") values = lexicalBinding(values, values.name);
+      if (values?.type !== "ArrayExpression") return null;
+      const texts = values.elements.map(value => {
+        let object = value, argumentsByParam = bindings;
+        if (value?.type === "CallExpression" && value.callee.type === "Identifier") {
+          const helper = lexicalBinding(value, value.callee.name);
+          if (!helper?.params) return null;
+          object = helper.body.type === "BlockStatement" ? helper.body.body.find(statement => statement.type === "ReturnStatement")?.argument : helper.body;
+          argumentsByParam = new Map([...bindings, ...helper.params.map((param, i) =>
+            [param, sqlTexts(value.arguments[i], source, path, bindings, seen)])]);
+        }
+        const property = object?.properties?.find(property => (property.key.name || property.key.value) === node.property.name);
+        return sqlTexts(property?.value, source, path, argumentsByParam, seen);
+      });
+      return texts.some(text => text === null) ? null : texts.flat();
+    }
+  }
+  return null;
 }
 
 function writeTargets(sql, embedded = false) {
   let clean = sql.replace(/\/\*[\s\S]*?\*\/|--[^\n]*/g, comment => comment.replace(/[^\n]/g, " "));
   if (!embedded) clean = clean.replace(/'(?:''|[^'])*'/g, value => value.replace(/[^\n]/g, " "));
+  clean = clean.replace(/\bfor\s+(?:no\s+key\s+)?update\b|\bdo\s+update\s+set\b/gi,
+    clause => clause.replace(/[^\n]/g, " "));
   return [...clean.matchAll(/\b(?:insert\s+into|update|delete\s+from|merge\s+into)\s+(\$\{[^}]+\}|(?:"?[a-z_][a-z_0-9]*"?\.)?"?[a-z_][a-z_0-9]*"?)(?=\s|[;()'"]|$)/gi)]
     .map(match => ({ target: match[1].replaceAll('"', "").toLowerCase(), offset: match.index }));
 }
@@ -102,12 +200,19 @@ function literalLoopTables(node, variable, path) {
   throw new Error(`unresolved SQL table ${variable}: ${path}`);
 }
 
-function queryWrites(node, path, source) {
+function queryWrites(node, path, source, bindings = new Map()) {
   const writes = [];
-  walk(node, child => {
+  const traverse = node.type === "Program" ? walk : walkFunction;
+  traverse(node, child => {
     if (child.type === "CallExpression" && child.callee.type === "MemberExpression" &&
         child.callee.property.name === "query") {
-      for (const { target } of writeTargets(sqlText(child.arguments[0], source))) {
+      const sql = sqlTexts(child.arguments[0], source, path, bindings);
+      if (sql === null) {
+        writes.push({ table: "unresolved", source_locator: path,
+          line: source.slice(0, child.start).split("\n").length, caller: enclosingCaller(child) });
+        return;
+      }
+      for (const { target } of sql.flatMap(text => writeTargets(text))) {
         const tables = target.startsWith("${") ? literalLoopTables(child, target.slice(2, -1), path) : [target];
         for (const table of tables) writes.push({
           table: table.includes(".") ? table : `public.${table}`,
@@ -121,31 +226,65 @@ function queryWrites(node, path, source) {
   return writes;
 }
 
-function handlerWrites(tool) {
+function handlerWrites(tool, operation) {
   const path = tool.registrySource;
-  const source = `const handler = ${tool.handler.toString()};`;
-  const handler = parseSource(source);
+  let source = `const handler = ${tool.handler.toString()};`;
+  let handler = parseSource(source).body[0].declarations[0].init;
+  const initialBindings = new Map();
+  const model = sqlModel(path);
+  const call = model.factories.get(operation);
+  const factory = call?.callee.type === "Identifier" ? lexicalBinding(call, call.callee.name) : null;
+  const returned = factory?.body?.type === "ObjectExpression" ? factory.body : null;
+  const original = returned?.properties.find(property => property.key.name === "handler")?.value;
+  if (original && model.source.slice(original.start, original.end) === tool.handler.toString()) {
+    source = model.source;
+    handler = original;
+    for (const [i, param] of factory.params.entries()) {
+      if (param.type !== "ObjectPattern") continue;
+      for (const property of param.properties) {
+        const argument = call.arguments[i]?.properties?.find(value => value.key.name === property.key.name);
+        initialBindings.set(property.value, sqlTexts(argument?.value, source, path));
+      }
+    }
+  }
   const tables = new Set();
-  const visited = new Set();
-  const visitFunction = (node, sourcePath, sourceText) => {
-    if (visited.has(node)) return;
-    visited.add(node);
-    for (const write of queryWrites(node, sourcePath, sourceText)) tables.add(write.table);
-    walk(node, child => {
+  const visited = new Map();
+  const active = new Set();
+  const visitFunction = (node, sourcePath, sourceText, bindings = new Map()) => {
+    if (active.has(node)) {
+      if (queryWrites(node, sourcePath, sourceText, bindings).length) tables.add("unresolved");
+      return;
+    }
+    const signature = JSON.stringify([...bindings.values()]);
+    if (visited.get(node)?.has(signature)) return;
+    if (!visited.has(node)) visited.set(node, new Set());
+    visited.get(node).add(signature);
+    active.add(node);
+    for (const write of queryWrites(node, sourcePath, sourceText, bindings)) tables.add(write.table);
+    walkFunction(node, child => {
       if (child.type !== "CallExpression" || child.callee.type !== "Identifier") return;
       const name = child.callee.name;
       // Generic dispatch is represented by delegates_to, never by traversing
       // the registry implementation and assigning every writer to every verb.
       if (name === "executeRegisteredTool") return;
+      const local = lexicalBinding(child, name);
+      if (local !== undefined) {
+        if (local && /^(?:Function|ArrowFunction)/.test(local.type))
+          visitFunction(local, sourcePath, sourceText, new Map([...bindings, ...local.params.map((param, i) =>
+            [param, sqlTexts(child.arguments[i], sourceText, sourcePath, bindings)])]));
+        return;
+      }
       const context = sqlModel(sourcePath);
       const imported = context.imports.get(name);
       const helperPath = imported?.path || sourcePath;
       const helperModel = sqlModel(helperPath);
       const helper = helperModel.functions.get(imported?.name || name);
-      if (helper) visitFunction(helper, helperPath, helperModel.source);
+      if (helper) visitFunction(helper, helperPath, helperModel.source,
+        new Map(helper.params.map((param, i) => [param, sqlTexts(child.arguments[i], sourceText, sourcePath, bindings)])));
     });
+    active.delete(node);
   };
-  visitFunction(handler, path, source);
+  visitFunction(handler, path, source, initialBindings);
   return [...tables].sort();
 }
 
@@ -192,7 +331,7 @@ export function legacyLifecycleCensus(tools) {
   const pin = JSON.parse(readFileSync(resolve(REPO_ROOT, pinPath), "utf8"));
   if (pin.source_commit !== "35936628aba4c7189b17f5b195c41c8ba9b782be")
     throw new Error("DoctorCRE source pin changed; review its database writer and proxy evidence before regenerating");
-  const operations = mcpInventory(tools).filter(row => row.tables_written.some(table => LEGACY_TABLES.has(table)))
+  const operations = mcpInventory(tools).filter(row => row.tables_written.some(table => LEGACY_TABLES.has(table) || table === "unresolved"))
     .map(row => ({ operation: row.operation, source_locator: row.source_locator,
       source_digest: row.source_digest, handler_digest: sha256(tools[row.operation].handler.toString()),
       tables_written: row.tables_written, delegates_to: row.delegates_to }));
@@ -227,7 +366,10 @@ export function renderLegacyLifecycleCensus(tools) {
 
 export function assertLegacyLifecycleCensus(tools,
   committed = readFileSync(resolve(REPO_ROOT, LEGACY_CENSUS_PATH), "utf8")) {
-  if (committed !== renderLegacyLifecycleCensus(tools))
+  const rendered = renderLegacyLifecycleCensus(tools);
+  const unresolved = JSON.parse(rendered).operations.filter(row => row.tables_written.includes("unresolved"));
+  if (unresolved.length) throw new Error(`unresolved SQL coverage: ${unresolved.map(row => row.operation).join(", ")}`);
+  if (committed !== rendered)
     throw new Error("legacy lifecycle census is stale; run node ops/scac-mutation-inventory.mjs --write-legacy-lifecycle");
   return true;
 }
@@ -247,7 +389,7 @@ export function mcpInventory(tools = defaultTools) {
       source_locator: tool.registrySource,
       schema_digest: sha256(tool.inputSchema || {}),
       source_digest: sourceDigest(tool.registrySource),
-      tables_written: handlerWrites(tool),
+      tables_written: handlerWrites(tool, name),
       write,
       human_only: humanOnly,
       authority_only: authorityOnly,

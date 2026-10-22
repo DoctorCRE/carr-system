@@ -43,6 +43,115 @@ test("unresolved SQL table expressions refuse rather than silently claiming empt
   } }), /unresolved SQL table table/);
 });
 
+test("const-held SQL contributes its write target", () => {
+  const [row] = mcpInventory({ fixture: {
+    registrySource: "mcp-server/src/tools.js",
+    handler: async c => {
+      const sql = 'update deal set name=$1';
+      await c.query(sql);
+    },
+  } });
+  assert.deepEqual(row.tables_written, ["public.deal"]);
+});
+
+test("helper SQL arguments preserve each call's writes through nested helpers", () => {
+  const [row] = mcpInventory({ fixture: {
+    registrySource: "mcp-server/src/tools.js",
+    handler: async c => {
+      async function execute(sql) { await c.query(sql); }
+      const forward = async statement => execute(statement);
+      const sql = 'update deal set name=$1';
+      await forward(sql);
+      await forward('delete from client');
+    },
+  } });
+  assert.deepEqual(row.tables_written, ["public.client", "public.deal"]);
+});
+
+test("unresolved SQL is explicit and freshness refuses even freshly rendered evidence", () => {
+  const tools = { fixture: {
+    registrySource: "mcp-server/src/tools.js",
+    handler: async (c, sql) => c.query(sql),
+  } };
+  assert.deepEqual(mcpInventory(tools)[0].tables_written, ["unresolved"]);
+  const rendered = inventory.renderLegacyLifecycleCensus(tools);
+  assert.throws(() => inventory.assertLegacyLifecycleCensus(tools, rendered), /unresolved SQL.*fixture/);
+});
+
+test("registered SQL constants, finite branches, appended filters and bounded query records resolve", () => {
+  const unresolved = mcpInventory(TOOLS).filter(row => row.tables_written.includes("unresolved"));
+  assert.deepEqual(unresolved.map(row => row.operation), []);
+});
+
+test("helper closures retain SQL arguments", () => {
+  const tools = { fixture: {
+    registrySource: "mcp-server/src/tools.js",
+    handler: async c => {
+      async function execute(sql) {
+        const nested = async () => c.query(sql);
+        await nested();
+      }
+      await execute('update deal set name=$1');
+    },
+  } };
+  assert.deepEqual(mcpInventory(tools)[0].tables_written, ["public.deal"]);
+});
+
+test("inline transaction callbacks contribute writes while unused helpers do not", () => {
+  const [row] = mcpInventory({ fixture: {
+    registrySource: "mcp-server/src/tools.js",
+    handler: async c => {
+      async function within(work) { return work(); }
+      const unused = async () => c.query('delete from vendor');
+      await within(async () => {
+        const sql = 'update deal set name=$1';
+        await c.query(sql);
+      });
+    },
+  } });
+  assert.deepEqual(row.tables_written, ["public.deal"]);
+});
+
+test("recursive SQL helpers mark unbounded expansion unresolved", () => {
+  const [row] = mcpInventory({ fixture: {
+    registrySource: "mcp-server/src/tools.js",
+    handler: async c => {
+      async function execute(sql) {
+        await c.query(sql);
+        await execute(sql + ' ');
+      }
+      await execute('update deal set name=$1');
+    },
+  } });
+  assert.deepEqual(row.tables_written, ["public.deal", "unresolved"]);
+});
+
+test("unknown concatenation and mutable SQL never masquerade as complete write sets", () => {
+  for (const handler of [
+    async (c, extra) => c.query('update deal set name=$1' + extra),
+    async (c, extra) => { let sql = 'select 1'; sql = extra; await c.query(sql); },
+  ]) {
+    assert.deepEqual(mcpInventory({ fixture: { registrySource: "mcp-server/src/tools.js", handler } })[0].tables_written,
+      ["unresolved"]);
+  }
+});
+
+test("SQL interpolated as a whole resolves constants and refuses unknown expressions", () => {
+  const [known] = mcpInventory({ fixture: {
+    registrySource: "mcp-server/src/tools.js",
+    handler: async c => {
+      const sql = 'update deal set name=$1';
+      await c.query(`${sql}`);
+    },
+  } });
+  assert.deepEqual(known.tables_written, ["public.deal"]);
+  const [unknown] = mcpInventory({ fixture: {
+    registrySource: "mcp-server/src/tools.js",
+    handler: async (c, args) => c.query(`${args.sql}`),
+  } });
+  assert.deepEqual(unknown.tables_written, ["unresolved"]);
+});
+
 test("SQL examples, comments, and row locks do not become database writers", () => {
   const [row] = mcpInventory({ fixture: {
     registrySource: "mcp-server/src/tools.js",
@@ -53,6 +162,18 @@ test("SQL examples, comments, and row locks do not become database writers", () 
     },
   } });
   assert.deepEqual(row.tables_written, []);
+});
+
+test("FOR UPDATE OF locks are reads and an upsert writes only its INSERT target", () => {
+  const [row] = mcpInventory({ fixture: {
+    registrySource: "mcp-server/src/tools.js",
+    handler: async c => {
+      await c.query('select * from deal d for update of d');
+      await c.query('insert into client (id) values ($1) on conflict (id) do update set name=$2');
+      await c.query('with locked as (select * from deal d for no key update of d) update deal set name=$1');
+    },
+  } });
+  assert.deepEqual(row.tables_written, ["public.client", "public.deal"]);
 });
 
 test("the version-bound evidence names helper sites and all wave-one inserts without authorizing retirement", () => {

@@ -1,7 +1,7 @@
 {
   "schema": "legacy-lifecycle-callers.v1",
   "generator": "ops/scac-mutation-inventory.mjs",
-  "source_set_digest": "sha256:f2dbed9e2171f517a207eaed62567e16e2387a6873eb30eac889ca761441fa95",
+  "source_set_digest": "sha256:93ed1a7380fed7eb7b5e80506c567fe1754cc6c42d1b13793c78582c4719f83e",
   "source_count": 1421,
   "tables": [
     "public.client",
