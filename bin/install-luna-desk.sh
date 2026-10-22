@@ -3,7 +3,7 @@
 set -eu
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-exec /usr/bin/env python3 "$REPO/tools/room-bridge/desk_cli.py" register luna-desk \
+exec /usr/bin/env python3 "$REPO/tools/room-bridge/dispatch.py" register luna-desk \
   --kind codex-session \
   --family luna \
   --effort low \

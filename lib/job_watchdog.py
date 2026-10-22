@@ -80,9 +80,11 @@ def reconcile(root, config, found, observed_jobs, now=None):
         if prior.get("cleared_at") or any(prior.get(k) != v for k, v in finding.items()):
             append(path, {**finding, "first_seen": stamp(now) if prior.get("cleared_at") else prior.get("first_seen", stamp(now)),
                           "cleared_at": None})
+    # An unloaded job keeps its last failure; a job whose definition is gone is retired.
+    declared = {plistlib.loads(p.read_bytes()).get("Label") for p in (SOURCE / "ops/launchd").glob("*.plist")}
     for key, prior in previous.items():
         if (prior.get("kind") == "job_failed" and "exit_code" in prior
-                and prior["subject"] not in observed_jobs):
+                and prior["subject"] not in observed_jobs and prior["subject"] in declared):
             continue
         if key not in current and not prior.get("cleared_at"):
             append(path, {**prior, "cleared_at": stamp(now)})

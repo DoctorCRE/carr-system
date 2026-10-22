@@ -2,6 +2,7 @@
 """Exercise hosted event isolation, class conclusions and rerun admission."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -60,6 +61,54 @@ class Controls(unittest.TestCase):
         # the existing vulnerability policy and fails on unavailable reports.
         self.assertIn('["npm", "audit", "--omit=dev", "--audit-level=high", "--json"]',
                       (ROOT / 'ops/ci-dep-check.py').read_text())
+
+    def test_class_jobs_do_not_wait_for_a_scope_runner(self):
+        job = workflow()['jobs']['classes']
+        self.assertNotIn('scope', job.get('needs', []))
+        migration = next(step for step in job['steps'] if step.get('id') == 'scope')
+        self.assertIn('ops/db-acceptance-scope.py', migration['run'])
+        self.assertTrue(migration['continue-on-error'])
+        self.assertEqual(job['strategy']['matrix']['classes'][0], 'migration')
+        for step in job['steps']:
+            self.assertNotIn('needs.scope', json.dumps(step))
+
+    def test_postgres_install_is_bounded_and_retries_once(self):
+        installs = [step for job in workflow()['jobs'].values() for step in job.get('steps', [])
+                    if step.get('name') == 'Install PostgreSQL 17']
+        for step in installs:
+            self.assertEqual(step.get('timeout-minutes'), 5)
+            self.assertEqual(step['run'], 'bash ops/ci-postgres.sh')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            timeout = root / 'timeout'
+            timeout.write_text('#!' + sys.executable + "\n"
+                "import os,pathlib,sys\n"
+                "p=pathlib.Path(os.environ['ATTEMPTS'])\n"
+                "n=int(p.read_text())+1 if p.exists() else 1\n"
+                "p.write_text(str(n))\n"
+                "assert sys.argv[1:] == ['--kill-after=5s','110s','bash','-euo','pipefail','-c','install_postgres']\n"
+                "sys.exit(124 if os.environ['INSTALL_RESULT']=='timeout' or n==1 else 0)\n")
+            timeout.chmod(0o755)
+            for mode, expected in [('retry-success', 0), ('timeout', 1)]:
+                attempts = root / (mode + '-attempts')
+                result = subprocess.run(['bash', 'ops/ci-postgres.sh'], cwd=ROOT,
+                    env={**os.environ, 'PATH': directory + os.pathsep + os.environ['PATH'],
+                         'ATTEMPTS': str(attempts), 'INSTALL_RESULT': mode},
+                    capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                self.assertEqual(attempts.read_text(), '2')
+
+    def test_merge_group_keeps_the_full_required_workflow(self):
+        wf = workflow()
+        self.assertEqual(wf['on']['merge_group']['types'], ['checks_requested'])
+        event = {'workflow': 'CI', 'event_name': 'merge_group', 'event': {}, 'run_id': 42}
+        self.assertTrue(expression(wf['jobs']['classes']['if'], event))
+        self.assertTrue(expression(wf['jobs']['migration-fixtures']['if'], event))
+        self.assertTrue(expression(wf['jobs']['checks']['if'], event))
+        exclusions = expression(wf['jobs']['classes']['strategy']['matrix']['exclude'], event)
+        self.assertFalse(any(row == {'classes': 'migration'} for row in exclusions))
+        self.assertFalse(any(row == {'classes': 'gates'} for row in exclusions))
+        self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
 
     def test_events(self):
         wf = workflow()
@@ -142,7 +191,8 @@ class Controls(unittest.TestCase):
         steps = wf['jobs']['checks']['steps']
         verdict = next(step for step in steps if step.get('name') == 'Fail unless every class group succeeded')
         self.assertIn('python3 ops/ci-evidence.py verdict', verdict['run'])
-        self.assertIn('exit 1', verdict['run'])
+        self.assertEqual(verdict['env']['CI_NEEDS'], '${{ toJSON(needs) }}')
+        self.assertNotIn('GH_TOKEN', verdict['env'])
 
     def test_verdict(self):
         mod = load('ci-evidence')
@@ -157,7 +207,7 @@ class Controls(unittest.TestCase):
         self.assertNotEqual(rc,0)
         self.assertIn('gates: FAILED',lines);self.assertIn('migration: CANCELLED',lines)
         self.assertIn('hxprobe: PASSED',lines)
-        for c in groups[0].split(): self.assertIn(c+': PASSED',lines)
+        for c in next(g for g in groups if 'unit' in g.split()).split(): self.assertIn(c+': PASSED',lines)
         missing_migration = [j for j in jobs if j['name'] != 'ops/ci.sh --strict --only '+migration_group]
         missing_rc, missing_lines = mod.verdict(missing_migration,groups)
         self.assertNotEqual(missing_rc,0)
@@ -270,6 +320,7 @@ class Controls(unittest.TestCase):
         wf = workflow()
         head = 'a' * 40
         groups = mod.evidence.class_groups()
+        fast_group = next(g for g in groups if 'unit' in g.split())
         draft = {'workflow': 'CI', 'event_name': 'pull_request', 'run_id': 123,
                  'event': {'action': 'synchronize', 'pull_request': {
                      'number': 7, 'draft': True, 'head': {'sha': head}}}}
@@ -278,12 +329,12 @@ class Controls(unittest.TestCase):
         run = {'id': 123, 'name': 'CI', 'path': '.github/workflows/ci.yml',
                'event': 'pull_request', 'status': 'completed', 'conclusion': 'failure',
                'head_sha': head, 'run_attempt': 1}
-        job = {'id': 456, 'run_id': 123, 'name': 'ops/ci.sh --strict --only ' + groups[0],
+        job = {'id': 456, 'run_id': 123, 'name': 'ops/ci.sh --strict --only ' + fast_group,
                'status': 'completed', 'conclusion': 'failure'}
         pr = {'state': 'open', 'draft': True, 'head': {'sha': head}}
-        self.assertEqual(mod.admit(run, job, pr, head), groups[0])
+        self.assertEqual(mod.admit(run, job, pr, head), fast_group)
         pr['draft'] = False
-        self.assertEqual(mod.admit(run, job, pr, head), groups[0])
+        self.assertEqual(mod.admit(run, job, pr, head), fast_group)
         retry = {**draft, 'run_attempt': 2}
         ready_group = expression(wf['concurrency']['group'], ready)
         for phase, event in (('draft failure', draft), ('ready', ready), ('historical retry', retry)):
@@ -312,8 +363,8 @@ class Controls(unittest.TestCase):
         sibling = {'id':789, 'name':'test', 'status':'completed', 'conclusion':'success'}
         with tempfile.TemporaryDirectory() as temp:
             for repo, options in (
-                    ('jbookout/carr-system', []),
-                    ('jbookout/carr-system', ['--repo', 'jbookout/carr-system']),
+                    ('DoctorCRE/carr-system', []),
+                    ('DoctorCRE/carr-system', ['--repo', 'DoctorCRE/carr-system']),
                     ('jbookout/doctorcre-app', ['--repo', 'jbookout/doctorcre-app'])):
                 with self.subTest(repo=repo, options=options), tempfile.TemporaryDirectory(dir=temp) as attempt:
                     candidate = 'a'*40 if repo == mod.REPO else 'b'*40
@@ -359,7 +410,7 @@ class Controls(unittest.TestCase):
                     self.assertEqual(len(receipts), 1)
                     self.assertEqual(json.loads(receipts[0].read_text())['repo'], repo)
                     self.assertEqual(json.loads(receipts[0].read_text())['head_sha'], candidate)
-                    if repo == 'jbookout/carr-system':
+                    if repo == 'DoctorCRE/carr-system':
                         self.assertEqual(receipts[0].parent, Path(attempt) / 'carr-ci-rerun')
                     else:
                         self.assertEqual(receipts[0].parent.name, repo.replace('/', '--'))

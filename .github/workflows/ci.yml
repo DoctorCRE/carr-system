@@ -40,7 +40,7 @@ jobs:
           if-no-files-found: error
 
   classes:
-    needs: scope
+    # Dispatch immediately; migration classifies locally with the same scope owner.
     if: ${{ !cancelled() }}
     name: ${{ matrix.gate_shard == 2 && 'Gates selftests shard 2 of 2' || format('ops/ci.sh --strict --only {0}', matrix.classes) }}
     runs-on: ubuntu-24.04
@@ -53,9 +53,9 @@ jobs:
         # Keep gates and migration in separate jobs. Every class
         # must appear in exactly one group (ops/ci-selftest.py verifies this).
         classes:
+          - "migration"
           - "pushfloor unit types contract secret binding artifact freshness"
           - "gates"
-          - "migration"
           - "hxprobe"
           - "dependency"
         # The second dimension partitions only gates. Drafts keep their fast classes.
@@ -83,8 +83,14 @@ jobs:
           # Migration identity and historical snapshot proofs read pinned commits.
           fetch-depth: 0
 
+      - name: Decide database proof applicability
+        if: matrix.classes == 'migration'
+        id: scope
+        continue-on-error: true
+        run: python3 ops/db-acceptance-scope.py --receipt db-scope.json
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: matrix.classes != 'migration' || needs.scope.outputs.full != 'false'
+        if: matrix.classes != 'migration' || steps.scope.outputs.full != 'false'
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -93,12 +99,12 @@ jobs:
             practice-plugin/package-lock.json
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: matrix.classes != 'migration' || needs.scope.outputs.full != 'false'
+        if: matrix.classes != 'migration' || steps.scope.outputs.full != 'false'
         with:
           python-version-file: .python-version
 
       - name: Install Python dependencies from the lock
-        if: matrix.classes != 'migration' || needs.scope.outputs.full != 'false'
+        if: matrix.classes != 'migration' || steps.scope.outputs.full != 'false'
         # The LOCK, not requirements.txt. requirements.txt is the loose
         # human-facing declaration; the lock is its pinned resolution, and
         # installing the lock is what makes this run reproducible. ci.sh's
@@ -109,23 +115,23 @@ jobs:
 
       # ci verifies lock integrity; the strict dependency class owns npm audit.
       - name: Install Node dependencies
-        if: matrix.classes != 'migration' || needs.scope.outputs.full != 'false'
+        if: matrix.classes != 'migration' || steps.scope.outputs.full != 'false'
         run: |
           npm --prefix mcp-server ci --no-audit
           npm --prefix practice-plugin ci --no-audit
 
       - name: Identify the runner image for the zsh archive
-        if: matrix.classes != 'migration' || needs.scope.outputs.full != 'false'
+        if: matrix.classes != 'migration' || steps.scope.outputs.full != 'false'
         id: zsh-image
         run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
       - name: Restore zsh package archives
-        if: matrix.classes != 'migration' || needs.scope.outputs.full != 'false'
+        if: matrix.classes != 'migration' || steps.scope.outputs.full != 'false'
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: ${{ runner.temp }}/zsh-debs/*.deb
           key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh') }}
       - name: Install zsh
-        if: matrix.classes != 'migration' || needs.scope.outputs.full != 'false'
+        if: matrix.classes != 'migration' || steps.scope.outputs.full != 'false'
         # bin/review-council-runner.sh has a #!/bin/zsh shebang and its test
         # invokes it by that interpreter. Use the runner's installed shell
         # when available; otherwise try its indexes before refreshing them.
@@ -144,18 +150,9 @@ jobs:
         run: ops/ci-zsh.sh
 
       - name: Install PostgreSQL 17
-        if: contains(matrix.classes, 'gates') || (matrix.classes == 'migration' && needs.scope.outputs.full != 'false')
-        run: |
-          set -euo pipefail
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-17 postgresql-18 postgresql-client-18
-          /usr/lib/postgresql/17/bin/initdb --version
-          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+        if: contains(matrix.classes, 'gates') || (matrix.classes == 'migration' && steps.scope.outputs.full != 'false')
+        timeout-minutes: 5
+        run: bash ops/ci-postgres.sh
 
       - name: Verify edge incident delivery
         if: matrix.classes == 'gates'
@@ -174,7 +171,7 @@ jobs:
           LC_ALL: C
         run: |
           if [ "${{ matrix.classes }}" = migration ]; then
-            if [ "${{ needs.scope.outputs.full }}" = false ]; then
+            if [ "${{ steps.scope.outputs.full }}" = false ]; then
               echo "migration: not applicable; see db-scope receipt" | tee -a "$GITHUB_STEP_SUMMARY"
             else
               python3 ops/migration-open-pr-gate.py
@@ -218,17 +215,8 @@ jobs:
           python -m pip install -r requirements.lock
           npm --prefix mcp-server ci --no-audit
       - name: Install PostgreSQL 17
-        run: |
-          set -euo pipefail
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-17 postgresql-18 postgresql-client-18
-          /usr/lib/postgresql/17/bin/initdb --version
-          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+        timeout-minutes: 5
+        run: bash ops/ci-postgres.sh
 
       - name: Prove independent migration fixture
         if: matrix.part != 'acceptance' && !startsWith(matrix.part, 'gates-')
@@ -264,7 +252,6 @@ jobs:
     needs: [scope, classes, migration-fixtures]
     permissions:
       contents: read
-      actions: read
     if: ${{ always() }}
     timeout-minutes: 5
     steps:
@@ -274,20 +261,8 @@ jobs:
       - name: Fail unless every class group succeeded
         env:
           CI_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
-          DB_FULL: ${{ needs.scope.outputs.full }}
-          FIXTURES_RESULT: ${{ needs.migration-fixtures.result }}
-          CLASSES_RESULT: ${{ needs.classes.result }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ "$CLASSES_RESULT" != "success" ]; then
-            echo "aggregate matrix result: $CLASSES_RESULT"
-            exit 1
-          fi
-          if [ "$FIXTURES_RESULT" != success ] && ! { { [ "$DB_FULL" = false ] || [ "$CI_DRAFT" = true ]; } && [ "$FIXTURES_RESULT" = skipped ]; }; then
-            echo "migration fixtures: $FIXTURES_RESULT (database scope=$DB_FULL)"
-            exit 1
-          fi
-          python3 ops/ci-evidence.py verdict
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: python3 ops/ci-evidence.py verdict
       - name: Record the tested tree and class contract
         if: needs.scope.outputs.full != 'false' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
         run: python3 ops/ci-evidence.py record --output ci-evidence.json

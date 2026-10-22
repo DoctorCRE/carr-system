@@ -10,7 +10,6 @@ import os
 from pathlib import Path
 import re
 import subprocess
-import time
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,29 +45,21 @@ def verdict(jobs, groups, *, db_full=True, draft=False):
 
 
 def hosted_verdict():
-    repo, run_id = os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID']
-    run_attempt = int(os.environ['GITHUB_RUN_ATTEMPT'])
-    groups = class_groups()
-    # The jobs API can lag needs.classes. Leave a minute for checkout and
-    # evidence upload within the checks job's five-minute timeout.
-    deadline = time.monotonic() + 240
-    while True:
-        raw = subprocess.run(['gh', 'api', '--paginate', '--slurp',
-            f'repos/{repo}/actions/runs/{run_id}/attempts/{run_attempt}/jobs?per_page=100'],
-            capture_output=True, text=True,
-            timeout=min(15, max(0.001, deadline - time.monotonic())), check=True)
-        jobs = [job for page in json.loads(raw.stdout) for job in page['jobs']]
-        rc, lines = verdict(jobs, groups, db_full=os.environ.get('DB_FULL') != 'false',
-                            draft=os.environ.get('CI_DRAFT') == 'true')
-        if (rc == 0 or deadline - time.monotonic() <= 5 or any(
-                not line.endswith((': PASSED', ': MISSING', ': INCOMPLETE', ': NOT APPLICABLE (receipt)', ': DEFERRED (draft)')) for line in lines)):
-            break
-        print('Class job conclusions still settling; retrying in 5 seconds')
-        time.sleep(5)
+    """Use the scheduler's terminal results, never the eventually consistent jobs API."""
+    needs = json.loads(os.environ['CI_NEEDS'])
+    scope = needs['scope']
+    full = scope.get('outputs', {}).get('full') if scope['result'] == 'success' else None
+    draft = os.environ.get('CI_DRAFT') == 'true'
+    results = {name: needs[name]['result'] for name in ('classes', 'migration-fixtures')}
+    allowed = {'classes': {'success'}, 'migration-fixtures': {'success'}}
+    if full == 'false' or draft:
+        allowed['migration-fixtures'].add('skipped')
+    lines = [f"{name}: {'PASSED' if result == 'success' else str(result).upper()}"
+             for name, result in results.items()]
     print('\n'.join(lines))
     with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
-        summary.write('Class job conclusions:\n\n' + '\n'.join('- ' + line for line in lines) + '\n')
-    return rc
+        summary.write('Job dependency results:\n\n' + '\n'.join('- ' + line for line in lines) + '\n')
+    return 0 if all(result in allowed[name] for name, result in results.items()) else 1
 
 
 def contract_digest(root=ROOT):
@@ -155,8 +146,8 @@ def main():
     if args.action == 'verdict':
         try:
             return hosted_verdict()
-        except (OSError, ValueError, KeyError, subprocess.SubprocessError):
-            print('CI verdict: job conclusions unavailable; refusing success')
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
+            print('CI verdict: dependency results unavailable; refusing success')
             return 1
     if not args.output:
         parser.error('--output is required for record/resolve')

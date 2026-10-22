@@ -46,7 +46,6 @@ from lib import launchd_calendar, machine_role  # noqa: E402
 COPIES = [
     "hooks/machine-converge.py",
     "hooks/grok_invocation.py",
-    "lib/claude_continuity_config.py",
     "lib/machine_prerequisites.py",
     "lib/launchd_calendar.py",
     "lib/machine_role.py",
@@ -55,15 +54,12 @@ COPIES = [
     "ops/config/services.json",
     "lib/launchd_hold.py",
     "mcp-server/continuity-stdio-proxy.mjs",
-    "ops/claude-continuity-hook.py",
     "ops/config-as-code.py",
     "tools/flash_install.py",
     "tools/flashlib.py",
     "ops/launchd/local.ds4-flash-next.plist",
     "ops/launchd/local.flash-desk.plist",
     "ops/launchd/com.carr.flash-idle-stop.plist",
-    "ops/install-claude-continuity.py",
-    "ops/config/claude-continuity-hooks.json",
     "ops/git_env.py",
     "ops/githooks/pre-push",
     "ops/config/hooks.json",
@@ -302,37 +298,6 @@ def case_secondary_converges(tmp):
     return checks
 
 
-def case_stale_continuity_receipt_self_heals(tmp):
-    """A machine that opted into Claude continuity, then pulled a merge that
-    changed the continuity adapter: its mode receipt no longer matches the
-    contract digest, config-as-code refuses to install ANYTHING, and the whole
-    hook set drifts. 2026-10-10 to 10-12 on the MacBook that was 224 Stop
-    turns crashing on a deleted gate. The hook must re-stamp the receipt with
-    the sanctioned installer and finish the install."""
-    repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell")
-    receipt = os.path.join(home, ".config", "carr", "claude-continuity-mode.json")
-    os.makedirs(os.path.dirname(receipt), exist_ok=True)
-    with open(receipt, "w", encoding="utf-8") as fh:
-        json.dump({"schema_version": 1, "mode": "shadow",
-                   "config_digest": "sha256:" + "0" * 64}, fh)
-    r = run_hook(repo, home, stubs, tmp)
-    with open(receipt, encoding="utf-8") as fh:
-        after = json.load(fh)
-    settings = os.path.join(home, ".claude", "settings.json")
-    installed = json.load(open(settings, encoding="utf-8")) if os.path.isfile(settings) else {}
-    commands = " ".join(
-        hook.get("command", "")
-        for entries in (installed.get("hooks") or {}).values()
-        for entry in entries for hook in entry.get("hooks", []))
-    return {
-        "hook exits 0": r.returncode == 0,
-        "brief line names the re-stamp": "re-stamped mode 'shadow'" in r.stdout,
-        "install completed after the re-stamp": "re-applied" in r.stdout,
-        "receipt keeps the machine's mode": after.get("mode") == "shadow",
-        "receipt digest was refreshed": after.get("config_digest") not in (None, "sha256:" + "0" * 64),
-        "Claude settings rendered": os.path.isfile(settings),
-        "continuity overlay installed with the base hooks": "claude-continuity-hook.py" in commands,
-    }
 
 
 def case_primary_noop(tmp):
@@ -415,31 +380,31 @@ def case_marker_primary_noop(tmp):
     }
 
 
-def case_flash_converges(tmp):
+def case_flash_is_explicit(tmp):
     repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell")
     agents = Path(home) / "Library/LaunchAgents"
     labels = ("local.ds4-flash-next", "local.flash-desk")
     for label in labels:
         (agents / (label + ".plist")).write_bytes(plistlib.dumps({
             "Label": label, "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False}}))
+    before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in
+              (agents / (label + ".plist") for label in labels)]
     r = run_hook(repo, home, stubs, tmp)
     log = Path(tmp, "launchctl.log").read_text()
-    bodies = [plistlib.loads((agents / (label + ".plist")).read_bytes()) for label in labels]
+    after = [(p.read_bytes(), p.stat().st_mtime_ns) for p in
+             (agents / (label + ".plist") for label in labels)]
     return {
         "hook finishes": r.returncode == 0 and "re-applied" in r.stdout,
-        "both templates off": all(not b.get("RunAtLoad") and not b.get("KeepAlive") for b in bodies),
-        "both labels disabled": all("disable gui/" in log and label in log for label in labels),
-        "watcher loaded": "bootstrap" in log and "com.carr.flash-idle-stop" in log,
-        "no model started": not any(x in log for x in ("kickstart", "enable gui/")),
+        "existing Flash definitions untouched": before == after,
+        "watcher not installed": not (agents / "com.carr.flash-idle-stop.plist").exists(),
+        "no Flash launchctl calls": not any(label in log for label in (*labels, "com.carr.flash-idle-stop")),
     }
 
 
 def main():
     cases = [
-        ("Flash drift converges to off", case_flash_converges),
+        ("Flash installation requires explicit activation", case_flash_is_explicit),
         ("secondary machine converges", case_secondary_converges),
-        ("stale continuity receipt is re-stamped and the install completes",
-         case_stale_continuity_receipt_self_heals),
         ("primary machine (actor slug) is a no-op", case_primary_noop),
         ("primary machine (owner-email fallback) is a no-op", case_owner_fallback_noop),
         ("dirty tree refuses ff, keeps the edit, still applies", case_dirty_tree_refuses_ff_but_still_applies),

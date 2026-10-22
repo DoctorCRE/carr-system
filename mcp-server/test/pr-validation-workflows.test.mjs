@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
@@ -138,35 +138,18 @@ test("strict aggregate runs after failed classes and requires complete successfu
   assert.match(step.run, /python3 ops\/ci-evidence.py verdict/);
   const fixture = mkdtempSync(join(tmpdir(), "ci-verdict-test-"));
   try {
-    const python = spawnSync("python3", ["-c", "import sys; print(sys.executable)"], { encoding: "utf8" });
-    assert.equal(python.status, 0, python.stderr);
-    // Scope the simulated deadline to the verdict; subprocess keeps its real clock.
-    const interpreter = join(fixture, "python3");
-    writeFileSync(interpreter, `#!${python.stdout.trim()}\n` +
-      "import runpy, sys, types\nscript = runpy.run_path(sys.argv[1])\nclock = [0]\n" +
-      "def sleep(seconds):\n    clock[0] = 235\n" +
-      "script['main'].__globals__['time'] = types.SimpleNamespace(monotonic=lambda: clock[0], sleep=sleep)\n" +
-      "sys.argv = sys.argv[1:]\nraise SystemExit(script['main']())\n");
-    chmodSync(interpreter, 0o755);
-    const jobs = ci.jobs.classes.strategy.matrix.classes.map(group => ({
-      name: "ops/ci.sh --strict --only " + group, status: "completed", conclusion: "success" }));
-    const gh = join(fixture, "gh");
-    for (const evidence of [jobs, jobs.slice(0, 1)]) {
-      writeFileSync(gh, "#!/usr/bin/env node\nconst fs = require('node:fs');\n" +
-        "process.stdout.write(" + JSON.stringify(JSON.stringify([{ jobs: evidence }]) + "\n") +
-        ", () => { fs.closeSync(1); fs.closeSync(2); setTimeout(() => {}, 100); });\n");
-      chmodSync(gh, 0o755);
-      for (const result of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
+    assert.equal(step.env.CI_NEEDS, "${{ toJSON(needs) }}");
+    for (const classes of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
+      for (const fixtures of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
         const output = spawnSync("bash", ["-e", "-c", step.run], {
           cwd: new URL("../../", import.meta.url),
-          env: { PATH: fixture + ":" + process.env.PATH, CLASSES_RESULT: result,
-            DB_FULL: "true", FIXTURES_RESULT: "success",
-            GITHUB_REPOSITORY: "DoctorCRE/carr-system", GITHUB_RUN_ID: "1",
-            GITHUB_RUN_ATTEMPT: "1", GITHUB_STEP_SUMMARY: join(fixture,"summary") },
+          env: { PATH: process.env.PATH, CI_DRAFT: "false",
+            CI_NEEDS: JSON.stringify({ scope: { result: "success", outputs: { full: "true" } },
+              classes: { result: classes }, "migration-fixtures": { result: fixtures } }),
+            GITHUB_STEP_SUMMARY: join(fixture, "summary") },
           encoding: "utf8", timeout: 5000 });
         assert.ifError(output.error);
-        assert.equal(output.status === 0, result === "success" && evidence.length === jobs.length, output.stdout + output.stderr);
-        if (result === "success" && evidence.length !== jobs.length) assert.match(output.stdout, /MISSING/);
+        assert.equal(output.status === 0, classes === "success" && fixtures === "success", output.stdout + output.stderr);
       }
     }
   } finally { rmSync(fixture, { recursive: true, force: true }); }

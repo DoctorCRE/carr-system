@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Renumber a PR's pending migrations after merging fetched origin/main.
 
-The serialized merge queue runs these commands on its owned PR branch:
+Prepare these changes on an isolated PR branch before approving its head:
   git fetch origin main
   git merge origin/main
   python3 tools/renumber-at-merge.py
