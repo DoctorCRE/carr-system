@@ -1,64 +1,7 @@
-# carr-system disposable-Postgres acceptance — the lane nothing hosted was running.
-#
-# WHY THIS FILE EXISTS. ops/local-pg-ci.py and the ~40 db acceptance programs it
-# drives had ZERO hosted coverage until this workflow. Nothing in
-# .github/workflows invoked them, so `./run.sh local-db-ci` was exercised only by
-# a developer who happened to run it by hand. That is not a theoretical gap: the
-# rule-delivery cutover acceptance sat RED on main across at least four separate
-# re-pins of ops/config/rule-enforcement-map.json, through a stale activation
-# digest and a retired rule's leftover delivery row, while the required
-# `ops/ci.sh --strict` context stayed green on every one of those commits —
-# because that context does not run this lane and never did. Filed as defect
-# fa03017b, class gate-with-no-hosted-coverage. Fixed on main by migration 0363
-# only because a person went looking.
-#
-# NO CHECK LOGIC LIVES HERE, the same rule ci.yml states for itself (a8c55a47):
-# the logic is ops/local-pg-ci.py, which is byte-for-byte what a developer runs
-# as `./run.sh local-db-ci --class migration`. This workflow installs a database
-# and calls that entry point. If a check were written here it would run hosted
-# and not locally, and the two would drift.
-#
-# WHY THIS IS A SEPARATE FILE AND NOT A JOB IN ci.yml. ci.yml's `checks` job is a
-# REQUIRED status check (ruleset "main: CI must be green", id 20824501), and its
-# own header explains why path filters are a trap there: a required context that
-# never reports blocks the merge instead of speeding it. This workflow is NOT a
-# required context, so it is free to use path filters — which is the only way to
-# get pre-merge cover on the changes that can break this lane without adding a
-# multi-minute job to every documentation PR. Registering this as required is a
-# deliberate later decision, not something to do by accident; the honest order is
-# to let it run for a while and see its false-positive rate first.
-#
-# COST. ci.yml records that spend has to come out of run COUNT, not duration.
-# This adds roughly one run per DB-touching PR plus one daily, against a lane
-# that was previously never checked at all.
-
+# Manual serial-versus-shard diagnostics. Required CI owns PR and nightly database proof.
 name: DB acceptance
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-    # Only the paths that can actually break the disposable-Postgres lane: the
-    # migrations themselves, the committed snapshot they apply onto, the CI
-    # entry points, and the libraries/tools the acceptance programs import.
-    paths:
-      - "migrations/**"
-      - "db/**"
-      - "bin/schema-snapshot.sh"
-      - "ops/**"
-      - "lib/**"
-      - "tools/**"
-      - "mcp-server/src/**"
-      - "mcp-server/test/codex-continuity.test.mjs"
-      - "mcp-server/test/codex-continuity-migration.test.mjs"
-      - "mcp-server/test/codex-continuity-postgres.sql"
-      - "mcp-server/package.json"
-      - "mcp-server/package-lock.json"
-      - "run.sh"
-      - ".github/workflows/db-acceptance.yml"
-  schedule:
-    # 06:45 UTC daily — after ci.yml's 06:20 backstop, so a quiet-period failure
-    # here lands next to that run rather than racing it.
-    - cron: "45 6 * * *"
   workflow_dispatch:
     inputs:
       shard_trial:
@@ -118,11 +61,8 @@ jobs:
           fetch-depth: 0
 
       - name: Decide whether this diff can change the database lane
-        # The path filter above is deliberately wide (ops/**, tools/**), so most
-        # PRs start this job. ops/db-acceptance-scope.py narrows it to
-        # migration, schema and record-layer database files; any other diff
-        # skips the 34-45 minute install and run and the job still reports
-        # green. Schedule, manual and undecidable runs stay full.
+        # Manual diagnostics always run full proof. Required PR and nightly
+        # proof belongs to ci.yml; its applicability has one scope inventory.
         id: scope
         run: python3 ops/db-acceptance-scope.py
 

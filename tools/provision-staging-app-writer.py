@@ -47,6 +47,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 import tomllib
 import uuid
 from dataclasses import dataclass, field
@@ -1686,20 +1687,32 @@ def bulk_worker_database_secrets(
         raise ProvisioningRefusal("Worker database secret bulk payload is not exact")
     payload = json.dumps(dict(values),
                          sort_keys=True, separators=(",", ":"))
+    command = [wrangler, "secret", "bulk", "--env", "staging",
+               "--config", str(WRANGLER_CONFIG)]
+    worker_env = worker_environment(environ if environ is not None else os.environ)
     try:
-        result = run(
-            [wrangler, "secret", "bulk", "--env", "staging",
-             "--config", str(WRANGLER_CONFIG)],
-            input=payload, capture_output=True, text=True, timeout=60,
-            env=worker_environment(environ if environ is not None else os.environ),
-        )
+        for attempt in range(2):
+            result = run(
+                command, input=payload, capture_output=True, text=True, timeout=60,
+                env=worker_env,
+            )
+            if result.returncode == 0:
+                return
+            output = "\n".join(
+                stream for stream in (result.stdout, result.stderr)
+                if isinstance(stream, str)
+            )
+            codes = set(re.findall(r"\[code:\s*(\d+)\s*\]", output))
+            if attempt == 0 and codes == {"10500"}:
+                time.sleep(2)
+                continue
+            break
     except Exception as exc:
         raise ProvisioningRefusal(
             "Worker database secret bulk outcome is uncertain; output suppressed") from exc
-    if result.returncode != 0:
-        raise ProvisioningRefusal(
-            f"Worker database secret bulk failed (rc={result.returncode}); output suppressed"
-        )
+    raise ProvisioningRefusal(
+        f"Worker database secret bulk failed (rc={result.returncode}); output suppressed"
+    )
 
 
 def read_worker_database_secret_names(
