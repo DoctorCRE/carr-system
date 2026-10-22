@@ -259,3 +259,23 @@ test("add-loop: a due date with NO marker still infers 'dated' — that path is 
   assert.ok(db.inserted.includes("dated"), "marker must have been inferred as dated");
   assert.ok(db.inserted.includes("2026-09-01"), "the date must actually be stored");
 });
+
+for (const owner of ["joe", "dell"]) {
+  test(`an agent can add and reassign a loop to ${owner}`, async () => {
+    const agent = { id: "10000000-0000-0000-0000-000000000009", slug: "codex", human: false, via: "agent-token" };
+    const added = new AddLoopFake();
+    const result = await TOOLS["add-loop"].handler(added, agent, {
+      idempotency_key: `agent-loop-${owner}`, kind: "open_loop", owner, number: "701",
+      body: "Example partner follow-up", blocker: "other_lane", blocker_detail: "Waiting for example.test reply",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(added.inserted[6], owner);
+    assert.equal(added.inserted[16], agent.id);
+    const updated = new LoopFake();
+    await TOOLS["update-loop"].handler(updated, agent, {
+      idempotency_key: `agent-reassign-${owner}`, loop_id: ids.loop, base_version: 1, owner,
+    });
+    assert.equal(updated.loop.owner, owner);
+    assert.equal(updated.loop.updated_by, agent.id);
+  });
+}

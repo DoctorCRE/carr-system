@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Restore a refreshed snapshot after a migration changes a carried seed."""
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
+from git_env import fixture_env
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("shadow", ROOT / "ops/migration-shadow.py")
@@ -39,15 +42,63 @@ def main():
         run([bindir / "createdb", "-h", "127.0.0.1", "-p", str(port), "-U", "carr_ci", "carr_ci"], "createdb")
         sql(dsn, "create role neondb_owner")
         run([bindir / "psql", dsn, "-Xq", "-v", "ON_ERROR_STOP=1", "-f", ROOT / "db/schema.sql"], "load committed snapshot")
+        source = fixture.root / "source"
+        shadow.run(["git", "clone", "--quiet", "--shared", ROOT, source], fixture_env(env),
+                   "clone snapshot source", log)
+        shutil.copyfile(ROOT / "bin/schema-snapshot.sh", source / "bin/schema-snapshot.sh")
+        migration = source / "migrations/9999_snapshot_regeneration_probe.sql"
+        migration.write_text("create table public.snapshot_regeneration_probe(id integer primary key);\n")
+        checksum = hashlib.sha256(migration.read_bytes()).hexdigest()
+
+        def apply_probe(database):
+            run([bindir / "psql", database, "-Xq", "-v", "ON_ERROR_STOP=1", "-f", migration],
+                "apply new migration")
+            sql(database, "insert into public.schema_migrations(filename,sha256) values "
+                f"('{migration.name}','{checksum}')")
+
+        apply_probe(dsn)
         # A later seeding migration may update an existing reviewed contract.
         # Its applied ledger prevents replay; the refreshed snapshot owns it.
         sql(dsn, "update ops.job_definition set retry_policy=jsonb_set(retry_policy,'{base_seconds}','31') where key='engineering-slice' and version=1")
         candidate = fixture.root / "candidate.sql"
-        run([ROOT / "bin/schema-snapshot.sh", "--from-disposable-local", dsn,
+        run([source / "bin/schema-snapshot.sh", "--from-disposable-local", dsn,
              "--output-candidate", candidate], "refresh snapshot")
+        run([bindir / "createdb", "-h", "127.0.0.1", "-p", str(port), "-U", "carr_ci", "reapplied"],
+            "createdb independent regeneration")
+        reapplied = dsn.rsplit("/", 1)[0] + "/reapplied"
+        run([bindir / "psql", reapplied, "-Xq", "-v", "ON_ERROR_STOP=1", "-f", ROOT / "db/schema.sql"],
+            "reload committed snapshot")
+        apply_probe(reapplied)
+        sql(reapplied, "update ops.job_definition set retry_policy=jsonb_set(retry_policy,'{base_seconds}','31') where key='engineering-slice' and version=1")
+        applied_time = f"select applied_at from public.schema_migrations where filename='{migration.name}'"
+        assert sql(dsn, applied_time) != sql(reapplied, applied_time), "fixture must reapply at different times"
+        print("PASS: independent rebuilds apply the new migration at different times")
+        admin = dsn.rsplit("/", 1)[0] + "/postgres"
+        sql(admin, "alter database carr_ci rename to first_build")
+        sql(admin, "alter database reapplied rename to carr_ci")
+        second = fixture.root / "second.sql"
+        run([source / "bin/schema-snapshot.sh", "--from-disposable-local", dsn,
+             "--output-candidate", second], "repeat snapshot")
+        assert candidate.read_bytes() == second.read_bytes(), "independent regenerations must be byte-identical"
+        print("PASS: independent regenerations with a new migration are byte-identical")
+        def ledger(snapshot):
+            head = b"COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;\n"
+            rows = snapshot.read_bytes().split(head)[1].split(b"\\.\n", 1)[0]
+            return dict((parts[0], parts[1:]) for row in rows.split(b"\n") if row
+                        for parts in [row.split(b"\t")])
+
+        original = ledger(ROOT / "db/schema.sql")
+        generated = ledger(candidate)
+        assert all(generated[name] == row for name, row in original.items())
+        print("PASS: recorded migration checksums and applied times survive regeneration")
+        assert generated[migration.name.encode()] == [checksum.encode(), b"1970-01-01 00:00:00+00"]
+        print("PASS: a new migration has a deterministic snapshot apply time")
         run([bindir / "createdb", "-h", "127.0.0.1", "-p", str(port), "-U", "carr_ci", "rebuilt"], "createdb rebuild")
         rebuilt = dsn.rsplit("/", 1)[0] + "/rebuilt"
         run([bindir / "psql", rebuilt, "-Xq", "-v", "ON_ERROR_STOP=1", "-f", candidate], "restore refreshed snapshot")
+        run([bindir / "psql", rebuilt, "-Xq", "-v", "ON_ERROR_STOP=1", "-f",
+             ROOT / "ops/release-schema-provenance-canary.sql"], "release schema provenance canary")
+        print("PASS: release schema provenance accepts the regenerated ledger and rejects mismatches")
         actual = sql(rebuilt, "select retry_policy->>'base_seconds' from ops.job_definition where key='engineering-slice' and version=1")
         assert actual == "31", f"refreshed snapshot lost applied seed update: expected 31, rebuilt {actual}"
         print("PASS: refreshed snapshot preserves a later migration's seed update")

@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[1]
@@ -202,7 +203,6 @@ class FakeCodex:
         if argv[0] == "ssh":
             payload = json.loads(kw["input"])
             from lib import cloudflare_tokens as cf
-            from unittest.mock import patch
             status = "ok"
             if argv[-2] == "studio":
                 path = token_store.destination(payload["name"]).path
@@ -232,7 +232,8 @@ class World:
         minter = cm.Minter(self.plan, self.machine, http=self.http, clock=self.clock,
                            run=self.codex, call_verb=self.board,
                            state_path=self.state, receipts_path=self.receipts)
-        return minter.run_once()
+        with patch("lib.cloudflare_tokens.socket.gethostname", return_value="fixture.example.test"):
+            return minter.run_once()
 
     def stored(self, name: str) -> str | None:
         return token_store.read(name)

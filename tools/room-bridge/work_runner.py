@@ -124,7 +124,7 @@ def worker(queue, card_id, token, registry, results):
         result = dispatch.dispatch(row['desk'], row['task'], registry=Registry(registry),
                                    results_path=results, on_started=started, **options)
     except DeskError as exc:
-        result = {'status': 'failed', 'detail': str(exc), 'termination_confirmed': True}
+        result = {'status': 'failed', 'code': exc.code, 'detail': f'{exc.code}: {exc}', 'termination_confirmed': True}
     except Exception as exc:
         result = {'status': 'failed', 'detail': f'{type(exc).__name__}: {exc}',
                   'termination_confirmed': False}
@@ -154,7 +154,7 @@ def main(argv=None):
                 def publish():
                     if os.environ.get('PROGRESS_BOARD_LOCAL_ONLY') == '1':
                         raise RuntimeError('board publication disabled by PROGRESS_BOARD_LOCAL_ONLY')
-                    progress_board.publish_board('carr-v5', refresh_inventory=False)
+                    progress_board.publish_orchestrator(progress_board.read_state('carr-v5'))
                 queue.publish(publish)
             return 0
         lock = Resources._try(args.db.with_suffix('.runner.lock'))

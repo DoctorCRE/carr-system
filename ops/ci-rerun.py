@@ -31,7 +31,10 @@ ALLOWED_REPOS = (REPO, 'jbookout/doctorcre-app', 'jbookout/software-factory')
 MAX_ATTEMPTS = 3  # Initial run plus two job-only retries; job timeouts unchanged.
 # Retryable jobs in other repositories: (workflow name, path) -> job names.
 APP_JOBS = {
-    'jbookout/doctorcre-app': {('e2e', '.github/workflows/e2e.yml'): frozenset({'journeys'})},
+    'jbookout/doctorcre-app': {
+        ('CI', '.github/workflows/ci.yml'): frozenset({'test'}),
+        ('e2e', '.github/workflows/e2e.yml'): frozenset({'journeys'}),
+    },
 }
 GREEN = ('success', 'skipped', 'neutral')
 

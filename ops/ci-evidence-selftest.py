@@ -40,6 +40,8 @@ class HostedVerdict(unittest.TestCase):
             {'id': 118174315239, 'run_attempt': 1, 'status': 'in_progress',
              'conclusion': None, 'name': 'ops/ci.sh --strict'},
         ]
+        groups = [job['name'].split('--only ', 1)[1] for job in self.jobs if '--only ' in job['name']]
+        self.enterContext(patch.object(evidence, 'class_groups', return_value=groups))
 
     def response(self, jobs):
         return subprocess.CompletedProcess([], 0, stdout=json.dumps([
