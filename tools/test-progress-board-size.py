@@ -2,6 +2,7 @@
 """Regression for the live board's duplicated watchdog command diagnostics."""
 import copy
 import importlib.util
+import os
 import unittest
 import json
 import tempfile
@@ -67,9 +68,8 @@ class CostSnapshotTests(unittest.TestCase):
 
 class SnapshotSizeTests(unittest.TestCase):
     def setUp(self):
-        queue = patch.object(board.work_queue_module(), 'board_projection', return_value=None)
-        queue.start()
-        self.addCleanup(queue.stop)
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(patch.dict(os.environ, {"CARR_WORK_QUEUE_DB": str(root / "work-queue.sqlite3")}))
 
     def test_trimming_removes_defaults_no_remaining_card_inherits(self):
         for field, value in (("title", "X" * 240000),
