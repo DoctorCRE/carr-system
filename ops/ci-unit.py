@@ -34,7 +34,7 @@ def main():
                          'npm', '--prefix', package, 'test'], cwd=ROOT,
                         env=env, stdout=output, stderr=subprocess.STDOUT)
                 output = log.read_text(errors='replace')
-                counts = test_counts(output, multiple=True)
+                counts = test_counts(output)
                 if result.returncode:
                     reason = f'command exited {result.returncode}'
                 elif counts is None:
