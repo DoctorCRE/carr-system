@@ -1060,6 +1060,12 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       bad migration "control-plane registry sync failed after migrations"
       return
     fi
+    if ! DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-service-registry-sync.log" \
+         "$PY" tools/ops-record.py sync-registry; then
+      tail -30 "$LOGDIR/migration-service-registry-sync.log" >&2
+      bad migration "service registry sync failed after migrations"
+      return
+    fi
 
     local dsn_read='environ\.get\("(CARR_CI_)?DATABASE_URL"|environ\["(CARR_CI_)?DATABASE_URL"\]|getenv\("(CARR_CI_)?DATABASE_URL"'
     if [[ "$MIGRATION_PART" != proofs && "$MIGRATION_PART" != acceptance ]]; then
