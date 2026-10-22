@@ -20,6 +20,23 @@ spec.loader.exec_module(fixtures)
 
 
 class ReviewProbes(unittest.TestCase):
+    def test_thread_without_termination_confirmation_is_kept(self):
+        import job_watchdog
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            ledger = root / 'dispatch.jsonl'
+            ledger.write_text(json.dumps(dict(status='completed', thread_id='unconfirmed',
+                dispatched_at='2020-01-01T00:00:00Z')) + '\n')
+            archived = []
+            def archive(tid, **kwargs):
+                archived.append(tid)
+                return dict(kind='thread', thread_id=tid, status='archived')
+            report = machine_cleanup.run(root, job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json'),
+                hook=None, tmp_root=root, roots={}, dispatch_path=ledger, provider=object(),
+                process_probe=lambda paths: set(), archive_thread=archive)
+            self.assertEqual(archived, [])
+            self.assertEqual(report['kept'][0]['reason'], 'finished dispatch not proven')
+
     def test_clone_writer_lock_and_missing_termination_keep_checkout(self):
         for condition in ('live-lock', 'late-lock', 'missing-termination'):
             with self.subTest(condition=condition):
@@ -332,7 +349,7 @@ class ReviewProbes(unittest.TestCase):
         pr = fixtures.pull(1, head, fixture.git('rev-parse', 'main'))
         pr['head']['ref'] = 'job'
         provider = fixtures.FakeProvider([pr])
-        receipt = machine_cleanup.clean_clone(workspace, {'status': 'completed',
+        receipt = machine_cleanup.clean_clone(workspace, {'status': 'completed', 'termination_confirmed': True,
             'checkout_path': str(clone), 'checkout_workspace': str(workspace),
             'dispatched_at': '2020-01-01T00:00:00+00:00'}, provider=provider,
             process_probe=lambda paths: set(), now=time.time() + 8 * 86400,
@@ -354,7 +371,7 @@ class ReviewProbes(unittest.TestCase):
                 pr = fixtures.pull(1, 'f' * 40 if condition == 'advanced_open' else head, head)
                 pr['head']['ref'] = 'job'
                 pr['state'] = 'open' if condition == 'advanced_open' else 'closed'
-                dispatch = {'status': 'completed', 'checkout_path': str(clone),
+                dispatch = {'status': 'completed', 'termination_confirmed': True, 'checkout_path': str(clone),
                     'checkout_workspace': str(workspace), 'dispatched_at': '2020-01-01T00:00:00+00:00'}
                 if condition != 'unbound_closed':
                     dispatch['checkout_branch'] = 'job'

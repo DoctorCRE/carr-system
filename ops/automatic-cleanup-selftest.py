@@ -380,7 +380,7 @@ class JobCloneTests(unittest.TestCase):
                         fixture.git('--git-dir=' + str(fixture.remote), 'update-ref', '-d', 'refs/tags/' + tag)
                         return []
                     provider.open_pulls = remove_tag
-                dispatch = {'status': 'running' if guard == 'unfinished' else 'completed',
+                dispatch = {'status': 'running' if guard == 'unfinished' else 'completed', 'termination_confirmed': True,
                     'checkout_path': str(clone), 'checkout_workspace': str(workspace),
                     'dispatched_at': '2020-01-01T00:00:00Z'}
                 row = cleanup.clean_clone(workspace, dispatch, provider=provider,
@@ -406,7 +406,7 @@ class JobCloneTests(unittest.TestCase):
         workspace.mkdir()
         clone = workspace / 'checkout'
         fixture.git('clone', str(fixture.remote), str(clone))
-        result = cleanup.clean_clone(workspace, {'status': 'completed',
+        result = cleanup.clean_clone(workspace, {'status': 'completed', 'termination_confirmed': True,
             'checkout_path': str(clone), 'checkout_workspace': str(workspace),
             'dispatched_at': '2020-01-01T00:00:00+00:00'}, provider=GitHub(),
             process_probe=lambda paths: set(), now=time.time(), older_than=1, dry_run=False)
@@ -439,7 +439,7 @@ class JobCloneTests(unittest.TestCase):
                 provider.branch_pulls = lambda repo, branch: provider.rows
                 probe = lambda paths: None if condition == 'unknown_process' else ({str(workspace)} if condition == 'live' else set())
                 row = {'checkout_path': str(clone), 'checkout_workspace': str(workspace),
-                       'status': 'timed_out' if condition == 'unfinished' else 'completed',
+                       'status': 'timed_out' if condition == 'unfinished' else 'completed', 'termination_confirmed': True,
                        'dispatched_at': '2020-01-01T00:00:00+00:00'}
                 receipt = cleanup.clean_clone(workspace, row, provider=provider, process_probe=probe,
                                                now=time.time(), older_than=7 * 86400, dry_run=False)
@@ -472,7 +472,7 @@ class JobCloneTests(unittest.TestCase):
                 provider = fixtures.FakeProvider([pr] if rule == 'closed' else [])
                 provider.branch_pulls = lambda repo, branch: provider.rows
                 row = {'checkout_path': str(clone), 'checkout_workspace': str(workspace),
-                       'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00+00:00'}
+                       'status': 'completed', 'termination_confirmed': True, 'dispatched_at': '2020-01-01T00:00:00+00:00'}
                 now = time.time() + (8 * 86400 if rule == 'aged' else 0)
                 receipt = cleanup.clean_clone(workspace, row, provider=provider, process_probe=lambda paths: set(),
                                                now=now, older_than=7 * 86400, dry_run=False)
@@ -492,7 +492,7 @@ class JobCloneTests(unittest.TestCase):
         provider = fixtures.FakeProvider()
         with patch.object(provider, 'verify_repository') as verify:
             receipt = cleanup.clean_clone(workspace,
-                {'status': 'completed', 'checkout_path': str(clone), 'checkout_workspace': str(workspace)},
+                {'status': 'completed', 'termination_confirmed': True, 'checkout_path': str(clone), 'checkout_workspace': str(workspace)},
                 provider=provider, process_probe=lambda paths: set(), now=time.time(), older_than=1, dry_run=False)
         verify.assert_not_called()
         self.assertEqual(receipt['status'], 'kept')
@@ -511,7 +511,7 @@ class JobCloneTests(unittest.TestCase):
             live.append(True)
             return []
         provider.open_pulls = open_pulls
-        result = cleanup.clean_clone(workspace, {'status': 'completed', 'checkout_path': str(clone),
+        result = cleanup.clean_clone(workspace, {'status': 'completed', 'termination_confirmed': True, 'checkout_path': str(clone),
             'checkout_workspace': str(workspace), 'dispatched_at': '2020-01-01T00:00:00+00:00'},
             provider=provider, process_probe=lambda paths: set(paths) if live else set(),
             now=time.time(), older_than=1, dry_run=False)
@@ -801,7 +801,7 @@ class ScheduledCleanupTests(unittest.TestCase):
             clones = root / 'clones'
             clones.mkdir()
             dispatch = root / 'dispatch.jsonl'
-            dispatch.write_text(''.join(json.dumps({'thread_id': thread, 'status': 'completed',
+            dispatch.write_text(''.join(json.dumps({'thread_id': thread, 'status': 'completed', 'termination_confirmed': True,
                 'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n' for thread in ('first', 'second')))
             config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
             config['machine_cleanup']['max_items'] = 1
@@ -927,7 +927,7 @@ class ScheduledCleanupTests(unittest.TestCase):
                 clones = root / 'clones'
                 clones.mkdir()
                 ledger = root / 'dispatch.jsonl'
-                ledger.write_text(json.dumps({'thread_id': 'finished', 'status': 'completed',
+                ledger.write_text(json.dumps({'thread_id': 'finished', 'status': 'completed', 'termination_confirmed': True,
                     'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n')
                 elapsed, calls, timed_out = [0.0], [], [False]
                 thread = {'id': 'finished', 'updatedAt': 10, 'status': {'type': 'idle'},
@@ -987,7 +987,7 @@ class ScheduledCleanupTests(unittest.TestCase):
             fixture.git('clone', str(fixture.remote), str(clone))
             fixture.git('switch', 'main', cwd=clone)
             dispatches.append({'checkout_workspace': str(workspace),
-                'checkout_path': str(clone), 'status': 'completed',
+                'checkout_path': str(clone), 'status': 'completed', 'termination_confirmed': True,
                 'dispatched_at': '2020-01-01T00:00:00Z'})
         broken = clones / 'room-codex-a-broken'
         healthy = clones / 'room-codex-b-healthy'
@@ -1018,7 +1018,7 @@ class ScheduledCleanupTests(unittest.TestCase):
         fixture.git('remote', 'remove', 'origin', cwd=clone)
         ledger = fixture.base / 'dispatch.jsonl'
         ledger.write_text(json.dumps({'checkout_workspace': str(workspace),
-            'checkout_path': str(clone), 'status': 'completed',
+            'checkout_path': str(clone), 'status': 'completed', 'termination_confirmed': True,
             'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n')
         config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
         report = cleanup.run(fixture.repo, config, hook=fixtures.hook, tmp_root=clones,
@@ -1050,7 +1050,7 @@ class ScheduledCleanupTests(unittest.TestCase):
                     fixture.git('clone', str(fixture.remote), str(clone))
                     fixture.git('switch', 'main', cwd=clone)
                     dispatches.append({'checkout_workspace': str(workspace), 'checkout_path': str(clone),
-                        'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00Z'})
+                        'status': 'completed', 'termination_confirmed': True, 'dispatched_at': '2020-01-01T00:00:00Z'})
                 ledger = fixture.base / 'dispatch.jsonl'
                 ledger.write_text(''.join(json.dumps(row) + '\n' for row in dispatches))
                 config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
@@ -1169,7 +1169,7 @@ class ScheduledCleanupTests(unittest.TestCase):
         fixture.git('switch', 'main', cwd=clone)
         ledger = fixture.base / 'dispatch.jsonl'
         ledger.write_text(json.dumps({'checkout_path': str(clone), 'checkout_workspace': str(workspace),
-            'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n')
+            'status': 'completed', 'termination_confirmed': True, 'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n')
         elapsed = [0.0]
         provider = fixtures.FakeProvider()
         def expire(*args):
@@ -1378,7 +1378,7 @@ class ScheduledCleanupTests(unittest.TestCase):
         fixture.git('switch', 'main', cwd=clone)
         ledger = fixture.base / 'dispatch.jsonl'
         ledger.write_text(json.dumps({'checkout_path': str(clone), 'checkout_workspace': str(workspace),
-            'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00+00:00', 'thread_id': 'finished'}) + '\n')
+            'status': 'completed', 'termination_confirmed': True, 'dispatched_at': '2020-01-01T00:00:00+00:00', 'thread_id': 'finished'}) + '\n')
         config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
         provider = fixtures.FakeProvider()
         provider.branch_pulls = lambda repo, branch: []
@@ -1407,7 +1407,7 @@ class ScheduledCleanupTests(unittest.TestCase):
         fixture.git('switch', 'main', cwd=clone)
         ledger = fixture.base / 'dispatch.jsonl'
         ledger.write_text(json.dumps({'checkout_path': str(clone), 'checkout_workspace': str(workspace),
-            'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00+00:00'}) + '\n')
+            'status': 'completed', 'termination_confirmed': True, 'dispatched_at': '2020-01-01T00:00:00+00:00'}) + '\n')
         config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
         provider = fixtures.FakeProvider()
         real_rename = os.rename
