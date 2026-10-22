@@ -1,0 +1,7 @@
+# Reviewed credential readers require the existing full-access profile.
+# Native path denials would block those subprocesses; the shell hook inspects direct reads.
+[rules]
+prefix_rules = [
+  { pattern = [{ token = "gh" }, { token = "workflow" }, { token = "run" }], decision = "forbidden", justification = "Use the metered CI workflow instead of manual Actions dispatch." },
+  { pattern = [{ token = "gh" }, { token = "run" }, { token = "rerun" }], decision = "forbidden", justification = "Use ops/ci-rerun.sh RUN_ID --job JOB_ID." },
+]

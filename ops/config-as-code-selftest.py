@@ -35,6 +35,8 @@ TASK_SOURCE = (Path(REPO) / "ops/scheduled-tasks/calendar-fetch-daily.SKILL.md")
 # The fixture below tests config reconciliation. Machine dependencies have their
 # own hermetic suite and must not be inferred from a temporary HOME.
 setattr(mod, "PREREQUISITE_CHECK", lambda _repo: [])
+# Native managed policy is exercised by hook-safety-selftest, never deployed here.
+mod.managed_safety_plan = lambda: []
 
 
 

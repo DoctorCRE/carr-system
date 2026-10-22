@@ -16,9 +16,9 @@ class RegenTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         shutil.copytree(regen.ROOT / 'hooks', self.root / 'hooks')
         (self.root / 'ops/config').mkdir(parents=True)
-        for path in ['ops/config/gate-baseline.json', 'lib/hook_runtime.py',
-                     'ops/config/hook-script-policy.json', 'ops/config/hooks.json',
-                     'ops/config/codex-hooks.json', 'ops/config/rule-enforcement-map.json', 'ops/config/model-floors.json']:
+        gate = regen.module('hooks/gate-integrity.py')
+        for path in ['ops/config/gate-baseline.json',
+                     *(str(path.relative_to(regen.ROOT)) for path in gate.CONTRACTS.values())]:
             target = self.root / path
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(regen.ROOT / path, target)

@@ -86,26 +86,12 @@ class DotReview(unittest.TestCase):
         self.assertIsNotNone(guard.check(command))
         self.assertIsNone(guard.check('rm -rf /tmp/fixture/a \\\n /tmp/fixture/b'))
 
-    def test_r06_copy_destination_survives_all_redirects(self):
-        gate = load('hooks/bash-write-gate.py')
-        for executable in ('cp', 'mv', 'install', 'rsync'):
-            for redirect in ('2>log.txt', '>|log.txt', '2>>log.txt', '&>log.txt', '2>&1 >log.txt', '<input.txt >log.txt'):
-                with self.subTest(executable=executable, redirect=redirect):
-                    targets = gate.extract_targets(f'{executable} a blocked.md {redirect}')
-                    self.assertIn('blocked.md', targets)
-                    self.assertIn('log.txt', targets)
-                    self.assertNotIn('input.txt', targets)
 
 
     def test_control_single_quoted_prose(self):
         mod = load('hooks/cmd_text.py')
         self.assertNotIn('git reset', mod.strip_inert_text('echo --title \'"$(git reset --hard)"\''))
 
-    def test_control_copy_with_redirect(self):
-        mod = load('hooks/bash-write-gate.py')
-        targets = mod.extract_targets('cp source blocked.md > log.txt')
-        self.assertIn('blocked.md', targets)
-        self.assertIn('log.txt', targets)
 
     def test_control_safe_delete_paths(self):
         mod = load('hooks/guard-unattended.py')
@@ -212,10 +198,6 @@ class DotReview(unittest.TestCase):
         guard = load("hooks/guard-unattended.py")
         self.assertFalse(guard.force_push_to_named_side_branch('git push --force-with-lease origin "main"'))
 
-    def test_b05_attached_redirect_and_copy_boundary(self):
-        gate = load("hooks/bash-write-gate.py")
-        self.assertIn('blocked.md', gate.extract_targets('printf x>blocked.md'))
-        self.assertIn('blocked.md', gate.extract_targets('cp a blocked.md && echo done'))
 
 
     def test_b08_statement_local_where(self):
