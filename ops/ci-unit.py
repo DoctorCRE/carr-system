@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Execute every required Node package and refuse unmeasured success."""
-import json
 import os
 from pathlib import Path
 import subprocess

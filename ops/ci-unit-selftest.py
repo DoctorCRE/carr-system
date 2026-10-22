@@ -120,6 +120,9 @@ class UnitClassTests(unittest.TestCase):
 
     def test_mcp_failed_suite_survives_later_passing_suites(self):
         self.all_packages()
+        package_body = "import test from 'node:test';" + "".join(
+            f"test('later {i}', () => {{}});" for i in range(60))
+        (self.root / 'mcp-server/test/suite.test.mjs').write_text(package_body)
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
         (mcp / 'test/chrome-launch.test.mjs').write_text(

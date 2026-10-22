@@ -37,6 +37,7 @@ async function main() {
   for (const file of files.filter(file => /\.test\.(?:js|mjs)$/.test(file))) {
     if ((await readFile(path.join(ROOT, "test", file), "utf8")).includes("chrome-launch.mjs")) browserFiles.push(file);
   }
+  const failures = [];
   for (const batch of suiteBatches(files, browserFiles)) {
     if (!batch.length) continue;
     let cursor = 0;
@@ -45,16 +46,22 @@ async function main() {
     await Promise.all(Array.from({ length: workers }, async () => {
       while (cursor < batch.length) {
         const file = batch[cursor++];
+        let output = '';
         const code = await new Promise((resolve, reject) => {
           const child = spawn(process.execPath, ['--test', path.join(ROOT, 'test', file)],
-            { cwd: ROOT, stdio: 'inherit' });
+            { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+          for (const [stream, destination] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
+            stream.on('data', chunk => { output += chunk; destination.write(chunk); });
+          }
           child.once('error', reject);
           child.once('close', (exitCode) => resolve(exitCode ?? 1));
         });
-        if (code !== 0) process.exitCode = 1;
+        if (code !== 0) { process.exitCode = 1; failures.push({ file, output }); }
       }
     }));
   }
+  for (const { file, output } of failures) console.error(`FAILED SUITE ${file}\n${output}`);
+  if (failures.length) console.error(`Failed suites: ${failures.map(({ file }) => file).join(", ")}`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
