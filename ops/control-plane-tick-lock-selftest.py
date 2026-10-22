@@ -107,7 +107,7 @@ class TickWatchdogTests(unittest.TestCase):
     def test_bad_overlap_evidence_cannot_clear_a_finding(self):
         config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
         config["repositories"] = []
-        config["paths"].update(merge_queue="queue", queue_logs=[], release_log="release")
+        config["paths"].update(release_log="release")
         with tempfile.TemporaryDirectory() as directory, patch("job_watchdog.sys.platform", "linux"):
             root = Path(directory)
             marker = root / "out/control-plane-tick.lock/overlap"
@@ -127,7 +127,7 @@ class TickWatchdogTests(unittest.TestCase):
     def test_persistent_skips_become_a_finding_and_clear_on_recovery(self):
         config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
         config["repositories"] = []
-        config["paths"].update(merge_queue="queue", queue_logs=[], release_log="release")
+        config["paths"].update(release_log="release")
         with tempfile.TemporaryDirectory() as directory, patch("job_watchdog.sys.platform", "linux"):
             root = Path(directory)
             marker = root / "out/control-plane-tick.lock/overlap"

@@ -3716,7 +3716,7 @@ export const TOOLS = {
 
   "integrity-digest": {
     write: false,
-    description: "The heartbeat's lines: row counts, export freshness (dead-man; stale/last_ok per target), writes_by_dell_24h, norm_owed_open, merge_queue, triage queue.",
+    description: "The heartbeat's lines: row counts, export freshness (dead-man; stale/last_ok per target), writes_by_dell_24h, norm_owed_open, triage queue.",
     inputSchema: { type: "object", properties: {} },
     handler: async (c) => ({ digest: (await c.query("select * from v_integrity_digest")).rows }),
   },

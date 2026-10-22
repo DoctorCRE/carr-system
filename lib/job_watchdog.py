@@ -32,8 +32,6 @@ EVIDENCE = {
     "vendor_releases": frozenset({"vendor_release_fetch_error"}),
     "jobs": frozenset({"job_failed", "job_dead", "job_hang", "job_silent", "job_over_limit"}),
     "prs": frozenset({"pr_blocked_review", "pr_ci_red", "pr_conflict", "pr_draft_idle", "pr_ready"}),
-    "merge_queue": frozenset({"pr_ready"}),
-    "queue_log": frozenset({"queue_error"}),
     "release_log": frozenset({"pipeline_blocked", "pipeline_stale"}),
     "branches": frozenset({"branch_idle"}),
 }
@@ -64,7 +62,7 @@ def load_config(path):
         if not isinstance(value, (int, float)) or value <= 0:
             raise ValueError(f"invalid threshold {key}")
     for action in config["actions"].values():
-        if isinstance(action, str) and action not in {"restart_once", "fix_once", "enqueue", "report"}:
+        if isinstance(action, str) and action not in {"restart_once", "fix_once", "report"}:
             raise ValueError("unknown watchdog action")
     ids = set()
     for watch in config.get("vendor_release_watches", []):
@@ -389,7 +387,6 @@ def detect(facts, config, now):
             emit("jobs", "job_silent", subject, "log silent for at least the configured limit" + evidence, **fields)
         if now - epoch(job["start"]) >= job["limit"]:
             emit("jobs", "job_over_limit", subject, "registered run exceeded its time limit" + evidence, **fields)
-    queue = {tuple(line.split()[:3]) for line in facts.get("queue", "").splitlines() if len(line.split()) >= 3}
     for pr in facts.get("prs", []):
         repo, number, head = pr["repo"], pr["number"], pr["headRefOid"]
         subject = f"{repo}#{number}@{head}"
@@ -421,16 +418,12 @@ def detect(facts, config, now):
             emit("prs", "pr_conflict", subject, "current head has merge conflicts", **fields)
         if pr.get("isDraft") and now - epoch(pr["updatedAt"]) >= t["draft_idle_seconds"]:
             emit("prs", "pr_draft_idle", subject, "draft idle for configured limit", **fields)
-        if latest and not latest[2] and _green_current(checks) and not pr.get("isDraft") and pr.get("mergeable") == "MERGEABLE" and (repo, str(number), head) not in queue and not pr.get("mergeQueueEntry"):
-            emit("prs", "pr_ready", subject, "approved current head with green CI outside merge queue", **fields)
+        if latest and not latest[2] and _green_current(checks) and not pr.get("isDraft") and pr.get("mergeable") == "MERGEABLE" and not pr.get("autoMergeRequest"):
+            emit("prs", "pr_ready", subject, "approved current head with green CI and auto-merge disabled", **fields)
     for log in facts.get("logs", []):
         source = log["type"] + "_log"
-        if log["type"] == "queue":
-            kind, lines = "queue_error", [line for line in log.get("tail", "").splitlines()
-                                          if any(p.lower() in line.lower() for p in config["queue_error_patterns"])]
-        else:
-            kind, lines = "pipeline_blocked", [line for line in release_outcomes(log.get("tail", "")).values()
-                                               if line.split(": ", 1)[1].startswith("BLOCKED")]
+        kind, lines = "pipeline_blocked", [line for line in release_outcomes(log.get("tail", "")).values()
+                                           if line.split(": ", 1)[1].startswith("BLOCKED")]
         # Line digest identifies a durable failure, rather than rediscovering it each interval.
         for line in lines:
             emit(source, kind, log["path"] + ":" + hashlib.sha256(line.encode()).hexdigest()[:16], line)
@@ -810,7 +803,7 @@ def reconcile(root, config, found, effects, now, complete=True, *, clear_kinds=N
     return list(current.values())
 
 
-PR_FIELDS = "number,headRefOid,headRefName,updatedAt,isDraft,mergeable,comments,reviews,commits,mergeStateStatus"
+PR_FIELDS = "number,headRefOid,headRefName,updatedAt,isDraft,mergeable,comments,reviews,commits,mergeStateStatus,autoMergeRequest"
 
 
 def collect_pr(repo, number, config):
@@ -818,13 +811,10 @@ def collect_pr(repo, number, config):
     pr["repo"] = repo
     # gh's exporter omits check providers and workflow IDs. Read those bound to
     # the same head, so equal names cannot collide. The PR snapshot cache keeps
-    # this second query to changed or stale PRs. Only a repository that uses
-    # GitHub's merge queue can have a queue entry, so others skip that field.
-    queue_field = "mergeQueueEntry{id}" if repo in config.get("github_merge_queue_repositories", []) else ""
+    # this second query to changed or stale PRs.
     owner, name = repo.split("/")
     query = """query($owner:String!,$name:String!,$number:Int!){
       repository(owner:$owner,name:$name){pullRequest(number:$number){
-        """ + queue_field + """
         commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){
           pageInfo{hasNextPage}
           nodes{__typename
@@ -848,7 +838,6 @@ def collect_pr(repo, number, config):
     if (contexts.get("pageInfo") or {}).get("hasNextPage"):
         raise RuntimeError("CI evidence exceeds the bounded check collection")
     pr["statusCheckRollup"] = contexts["nodes"]
-    pr["mergeQueueEntry"] = observed.get("mergeQueueEntry")
     return pr
 
 
@@ -935,7 +924,7 @@ def rate_limit_reason(config, original):
 
 def collect(root, config, now=None):
     now = time.time() if now is None else now
-    facts = {"jobs": [], "prs": [], "logs": [], "branches": [], "errors": [], "queue": ""}
+    facts = {"jobs": [], "prs": [], "logs": [], "branches": [], "errors": []}
     missing, limited = {}, {}
     def error(subject, exc, evidence):
         blinds = EVIDENCE[evidence]
@@ -1011,12 +1000,6 @@ def collect(root, config, now=None):
                 roots=repository_roots(config), now=now, user_tmp_root=storage_roots()[0])
         except Exception as exc:
             error("machine cleanup", exc, "machine_cleanup")
-    queue = path_at(root, config["paths"]["merge_queue"])
-    if queue.exists():
-        try:
-            facts["queue"] = queue.read_text()
-        except OSError as exc:
-            error("merge queue", exc, "merge_queue")
     # Each PR's GraphQL snapshot is reused while the REST listing shows the same
     # head and updated_at, bounded by an age limit for changes that bump neither.
     cache_path = path_at(root, config["paths"]["pr_cache"])
@@ -1097,7 +1080,7 @@ def collect(root, config, now=None):
                             "open_pr": branch["name"] in open_branches})
         except Exception as exc:
             error(repo + " branches", exc, "branches")
-    logs = [(p, "queue") for p in config["paths"]["queue_logs"]] + [(config["paths"]["release_log"], "release")]
+    logs = [(config["paths"]["release_log"], "release")]
     for configured, kind in logs:
         log = path_at(root, configured)
         if not log.exists():
@@ -1156,7 +1139,7 @@ class Effects:
                        "blocker_detail": ("Joe must restore authentication through the provider login; "
                                           "the watchdog cannot supply this credential. Evidence: " + f["reason"])
                        if f.get("needs_joe") == "credentials" else f["reason"] if f.get("needs_joe")
-                       else "Orchestrator's named executor or queue repair: " + f["subject"]}
+                       else "Orchestrator's named executor: " + f["subject"]}
             request = json.dumps([episode_key, payload], sort_keys=True)
             payload["idempotency_key"] = "job-watchdog:report-v2:" + hashlib.sha256(request.encode()).hexdigest()
             result = command([str(SOURCE / "run.sh"), "call", "add-loop", json.dumps(payload, sort_keys=True)], c)
@@ -1181,7 +1164,7 @@ class Effects:
                        "source_note": "job watchdog: " + f["subject"],
                        "marker": "decision" if f.get("needs_joe") or f.get("board_status") == "question-for-orchestrator" else "none",
                        **loop_blocker(f),
-                       "blocker_detail": f["reason"] if f.get("needs_joe") else "Orchestrator's named executor or queue repair: " + f["subject"]}
+                       "blocker_detail": f["reason"] if f.get("needs_joe") else "Orchestrator's named executor: " + f["subject"]}
         response = self._record("add-loop", payload)
         if response.get("ok") is not True or not response.get("loop_id"):
             raise RuntimeError("record layer refused watchdog defect: " + str(response))
@@ -1277,18 +1260,6 @@ class Effects:
         return self.launch(job, job["command"], job["cwd"], job_id=uuid.uuid4().hex,
                            restart_count=job.get("restart_count", 0) + 1, root_id=job.get("root_id", job["id"]))
 
-    def enqueue(self, f):
-        queue = path_at(self.root, self.config["paths"]["merge_queue"])
-        wanted = [f["repo"], str(f["pr"]), f["head"]]
-        with locked(queue) as handle:
-            handle.seek(0)
-            if any(line.split()[:3] == wanted for line in handle):
-                return {"already_queued": True}
-            handle.seek(0, os.SEEK_END)
-            handle.write(" ".join(wanted) + " watchdog: approved current head + green CI\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        return {"queued": True}
 
     def checkout_fixer(self, f):
         """Create a head-verified checkout without registering or launching a job."""
@@ -1345,7 +1316,7 @@ class Effects:
     def act(self, action, f):
         if action == "restart_once":
             return self.restart(f)
-        return self.enqueue(f) if action == "enqueue" else self.fix(f)
+        return self.fix(f)
 
 
 def digest(root, config, *, session_id=None):

@@ -63,7 +63,7 @@ class ReplayTests(unittest.TestCase):
             root = Path(folder)
             config['repositories'] = ['jbookout/carr-system']
             config['repository_roots']['jbookout/carr-system'] = str(root)
-            config['paths'].update(merge_queue='queue.txt', queue_logs=[], release_log='release.log')
+            config['paths'].update(release_log='release.log')
             directory = root / 'synthetic-refresh'
             config['paths']['salesforce_refresh'] = str(directory)
             with patch('job_watchdog.command', return_value='[]'):
@@ -128,7 +128,7 @@ class ReplayTests(unittest.TestCase):
         import job_watchdog as w
         config = w.load_config(ROOT / "ops/config/job-watchdog.json")
         config["repositories"] = []
-        config["paths"].update(merge_queue="queue.txt", queue_logs=[], release_log="release.log")
+        config["paths"].update(release_log="release.log")
         effects = Mock()
         effects.report.return_value = {}
         with tempfile.TemporaryDirectory() as directory:
@@ -300,25 +300,6 @@ class ReplayTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "head changed"):
                 w.collect_pr("example/repo", 1, w.load_config(ROOT / "ops/config/job-watchdog.json"))
 
-    def test_merge_queue_membership_is_read_only_for_listed_repositories(self):
-        import job_watchdog as w
-        from unittest.mock import patch
-        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
-        self.assertEqual(config["github_merge_queue_repositories"], [])
-        head = "a" * 40
-        def response(entry):
-            observed = {"commits": {"nodes": [{"commit": {"oid": head, "statusCheckRollup": None}}]}}
-            return json.dumps({"data": {"repository": {"pullRequest": {**observed, **entry}}}})
-        with patch.object(w, "command", side_effect=[json.dumps({"headRefOid": head}), response({})]) as command:
-            pr = w.collect_pr("example/repo", 1, config)
-        self.assertIsNone(pr["mergeQueueEntry"])
-        self.assertNotIn("mergeQueueEntry", command.call_args.args[0][4])
-        queued = {**config, "github_merge_queue_repositories": ["example/repo"]}
-        with patch.object(w, "command", side_effect=[json.dumps({"headRefOid": head}),
-                                                     response({"mergeQueueEntry": {"id": "q"}})]) as command:
-            pr = w.collect_pr("example/repo", 1, queued)
-        self.assertEqual(pr["mergeQueueEntry"], {"id": "q"})
-        self.assertIn("mergeQueueEntry", command.call_args.args[0][4])
 
     def test_fixtures_have_only_synthetic_name_vocabulary(self):
         # No record-layer access or client-name literals. Unknown name-like
@@ -364,17 +345,14 @@ class ReplayTests(unittest.TestCase):
                          "log_tail": (FIXTURES / name).read_text()}]}
                 self.assertIn("job_hang", {f["kind"] for f in w.detect(facts, config, 2000)})
 
-    def test_review_and_queue_replay(self):
+    def test_review_replay(self):
         import job_watchdog as w
         config = w.load_config(ROOT / "ops/config/job-watchdog.json")
         prs = [dict(json.loads((FIXTURES / f"pr-{n}.json").read_text()),
                     repo="jbookout/doctorcre-app") for n in range(1, 7)]
-        found = w.detect({"prs": prs, "queue": "", "logs": [
-            {"path": "queue.log", "type": "queue", "mtime": 2000000000,
-             "tail": (FIXTURES / "queue.log").read_text()}]}, config, 2000000000)
+        found = w.detect({"prs": prs}, config, 2000000000)
         blocked = {f["pr"] for f in found if f["kind"] == "pr_blocked_review"}
         self.assertEqual(blocked, {1, 2, 3, 5, 6})
-        self.assertIn("queue_error", {f["kind"] for f in found})
         # Synthetic PR4 is approved and green, but GitHub reports UNKNOWN mergeability.
         # It must not be queued until a fresh mergeability read can establish it.
         self.assertFalse(any(f.get("pr") == 4 for f in found))
@@ -537,7 +515,7 @@ class ReplayTests(unittest.TestCase):
             (root / c["paths"]["registry"]).parent.mkdir(parents=True, exist_ok=True)
             (root / c["paths"]["registry"]).write_text("not json\n")
             c["repositories"] = []
-            c["paths"]["queue_logs"] = []
+
             facts = w.collect(root, c)
         self.assertEqual(facts["errors"], [{"kind": "collection_error", "source": "job registry",
                                             "reason": facts["errors"][0]["reason"],
@@ -549,8 +527,8 @@ class ReplayTests(unittest.TestCase):
         c = w.load_config(ROOT / "ops/config/job-watchdog.json")
         with tempfile.TemporaryDirectory() as directory, \
              patch.dict(os.environ, {"PATH": directory}):
-            c["paths"]["merge_queue"] = directory + "/queue.txt"
-            c["paths"]["queue_logs"] = []
+
+
             facts = w.collect(Path(directory), c)
         found = w.detect(facts, c, 2000)
         self.assertEqual([(f["kind"], f["subject"]) for f in found], [("environment", "gh")])
@@ -688,8 +666,8 @@ class GithubBudgetTests(unittest.TestCase):
         self.root = Path(self.directory.name)
         c = w.load_config(ROOT / "ops/config/job-watchdog.json")
         c["repositories"] = [self.REPO]
-        c["paths"]["merge_queue"] = "queue.txt"
-        c["paths"]["queue_logs"] = []
+
+
         c["paths"]["release_log"] = "release.log"
         self.c = c
         self.listing = [{"number": 7, "head": {"sha": "a" * 40, "ref": "claude/x",
@@ -912,41 +890,6 @@ class GithubBudgetTests(unittest.TestCase):
         self.w.reconcile(self.root, self.c, self.w.detect(facts, self.c, 1000), effects, 1000)
         self.assertIsNone(self.w.read_latest(self.root / self.c["paths"]["findings"])[prior["key"]]["cleared_at"])
 
-    def test_cached_readiness_does_not_consume_enqueue_before_ci_recovers(self):
-        from unittest.mock import patch
-        original = self.gh
-        state = ["SUCCESS"]
-        def approved(argv, config, cwd=None):
-            out = original(argv, config, cwd)
-            if argv[:3] == ["gh", "pr", "view"]:
-                pr = json.loads(out)
-                pr["comments"] = [{"body": "REVIEW: APPROVED\nReviewed-SHA: " + "a" * 40,
-                                   "createdAt": pr["updatedAt"]}]
-                pr["statusCheckRollup"] = [{"status": "IN_PROGRESS" if state[0] == "PENDING" else "COMPLETED",
-                                            "conclusion": state[0]}]
-                return json.dumps(pr)
-            return out
-        self.gh = approved
-        queue = self.root / "queue.txt"
-        queue.write_text(self.REPO + " 7 " + "a" * 40 + "\n")
-        self.assertEqual(self.w.detect(self.collect(1000), self.c, 1000), [])
-        queue.write_text("")
-        state[0] = "PENDING"
-        effects = self.w.Effects(self.root, self.c)
-        with patch.object(self.w, "command", side_effect=self.transport), patch.object(effects, "report", return_value={}):
-            stale = self.w.detect(self.w.collect(self.root, self.c, 1120), self.c, 1120)
-            self.assertEqual([f["kind"] for f in stale], ["pr_ready"])
-            self.w.reconcile(self.root, self.c, stale, effects, 1120)
-            self.assertEqual(self.w.read_latest(self.root / self.c["paths"]["actions"]), {})
-            self.assertEqual(queue.read_text(), "")
-            state[0] = "SUCCESS"
-            found = self.w.reconcile(self.root, self.c, stale, effects, 1240)
-            self.assertNotIn("action_error", [f["kind"] for f in found])
-            self.assertEqual(len(queue.read_text().splitlines()), 1)
-            actions = self.w.read_latest(self.root / self.c["paths"]["actions"])
-            self.assertEqual(actions[stale[0]["key"]]["status"], "done")
-            self.w.reconcile(self.root, self.c, stale, effects, 3000)
-            self.assertEqual(len(queue.read_text().splitlines()), 1)
 
     def test_empty_checks_recollect_when_checks_are_created(self):
         original = self.gh
@@ -1114,8 +1057,8 @@ class RunnerTests(unittest.TestCase):
             executable.chmod(0o755)
             config = json.loads((ROOT / "ops/config/job-watchdog.json").read_text())
             config["vendor_release_watches"] = []  # Offline clean-scan fixture.
-            config["paths"]["merge_queue"] = "queue.txt"
-            config["paths"]["queue_logs"] = []
+
+
             config["actions"]["file_defects"] = False
             cp = root / "config.json"
             cp.write_text(json.dumps(config))
@@ -1495,8 +1438,8 @@ runpy.run_path(sys.argv[0], run_name='__main__')
                 root = Path(directory)
                 c = w.load_config(ROOT / "ops/config/job-watchdog.json")
                 c["repositories"] = []
-                c["paths"]["merge_queue"] = "queue.txt"
-                c["paths"]["queue_logs"] = []
+
+
                 c["paths"]["release_log"] = "release.log"
                 c["actions"]["job_failed"] = "report"
                 self.assertTrue(c["actions"]["file_defects"])
@@ -1879,7 +1822,7 @@ runpy.run_path(sys.argv[0], run_name='__main__')
             self.assertEqual(w.read_latest(root / c["paths"]["findings"])[f["key"]]["cleared_at"], w.stamp(400))
             self.assertEqual(board.read_bytes(), before)
 
-    def test_fixer_and_enqueue_are_once_per_head_and_findings_clear(self):
+    def test_fixer_is_once_per_head_and_findings_clear(self):
         import job_watchdog as w
         c = w.load_config(ROOT / "ops/config/job-watchdog.json")
         class Effects:
@@ -1944,17 +1887,23 @@ runpy.run_path(sys.argv[0], run_name='__main__')
             w.reconcile(Path(directory), c, [f], effects, 100)
             self.assertEqual(effects.calls, ["report"])
 
-    def test_enqueue_is_deduplicated_and_digest_reads_only_open_findings(self):
+    def test_ready_pr_is_reported_without_starting_a_merge(self):
+        import job_watchdog as w
+        from unittest.mock import Mock
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        effects = Mock()
+        effects.report.return_value = {}
+        with tempfile.TemporaryDirectory() as directory:
+            w.reconcile(Path(directory), c, [w.finding("pr_ready", "repo#1@abc", "ready", c)], effects, 100)
+        effects.report.assert_called_once()
+        effects.act.assert_not_called()
+
+    def test_digest_reads_only_open_findings(self):
         import job_watchdog as w
         c = w.load_config(ROOT / "ops/config/job-watchdog.json")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            c["paths"]["merge_queue"] = "queue.txt"
-            effects = w.Effects(root, c)
-            p = {"repo": "jbookout/carr-system", "pr": 5, "head": "a" * 40}
-            effects.enqueue(p)
-            effects.enqueue(p)
-            self.assertEqual(len((root / "queue.txt").read_text().splitlines()), 1)
+
             w.append(root / c["paths"]["findings"], {"key": "closed", "reason": "gone", "cleared_at": "now"})
             w.append(root / c["paths"]["findings"], {"key": "open", "kind": "job_hang", "reason": "stdin", "next_action": "inspect", "cleared_at": None})
             digest = w.digest(root, c)
@@ -2048,8 +1997,8 @@ runpy.run_path(sys.argv[0], run_name='__main__')
                 raise RuntimeError("head changed")
         with tempfile.TemporaryDirectory() as directory:
             effects = Effects()
-            w.reconcile(Path(directory), c, [w.finding("pr_ready", "repo#1@abc", "ready", c)], effects, 100)
-            self.assertEqual(effects.reported, ["pr_ready", "action_error"])
+            w.reconcile(Path(directory), c, [w.finding("pr_blocked_review", "repo#1@abc", "blocked", c)], effects, 100)
+            self.assertEqual(effects.reported, ["pr_blocked_review", "action_error"])
 
 
 if __name__ == "__main__":

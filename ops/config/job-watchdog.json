@@ -43,7 +43,6 @@
     "digest_reason_chars": 220
   },
   "repositories": ["jbookout/carr-system", "jbookout/doctorcre-app", "jbookout/software-factory"],
-  "github_merge_queue_repositories": [],
   "repository_roots": {
     "jbookout/carr-system": "~/carr-system",
     "jbookout/doctorcre-app": "~/doctorcre-app",
@@ -59,11 +58,6 @@
     "scan_lock": "out/watchdog/scan.lock",
     "scan_ledger": "out/watchdog/runs.jsonl",
     "pr_cache": "out/watchdog/pr-cache.json",
-    "merge_queue": "/private/tmp/claude-501/-Users-booko-carr-system/cc59a986-2fb1-445d-a055-bcbb0f0da0e2/scratchpad/merge-queue.txt",
-    "queue_logs": [
-      "/private/tmp/claude-501/-Users-booko-carr-system/cc59a986-2fb1-445d-a055-bcbb0f0da0e2/scratchpad/merge-queue.log",
-      "/private/tmp/claude-501/-Users-booko-carr-system/cc59a986-2fb1-445d-a055-bcbb0f0da0e2/scratchpad/watchdog/merge-queue.log"
-    ],
     "release_log": "out/release-pipeline.log",
     "salesforce_refresh": "~/.config/carr/salesforce-refresh"
   },
@@ -73,7 +67,6 @@
     "(?m)^Reading additional input from stdin(?:\\.\\.\\.)?\\s*$",
     "(?mi)^Waiting for (?:user input|approval|authentication)(?:\\.\\.\\.)?\\s*$"
   ],
-  "queue_error_patterns": ["NONGREEN", "parse error", "MERGE NOT ON MAIN"],
   "needs_joe_patterns": {
     "credentials": ["waiting for authentication", "authentication required", "not logged in", "bad credentials", "token expired", "login required", "salesforce sign-in needed"],
     "money": ["payment required", "billing approval required"],
@@ -83,7 +76,7 @@
     "job_hang": "restart_once",
     "job_silent": "restart_once",
     "pr_blocked_review": "fix_once",
-    "pr_ready": "enqueue",
+    "pr_ready": "report",
     "default": "report",
     "file_defects": true
   },
@@ -96,12 +89,11 @@
     "job_over_limit": "Inspect progress and stop or revise the registered limit.",
     "job_failed": "Read the recorded exit and log tail; repair the failing command.",
     "pr_blocked_review": "Launch one head-bound Codex fixer; inspect its draft PR and checks.",
-    "pr_ready": "Append the approved green head to the orchestrator merge queue.",
+    "pr_ready": "Enable GitHub auto-merge for the approved current head with tools/approve-merge.sh.",
     "pr_ci_red": "Repair the failing hosted check on this head.",
     "pr_conflict": "Resolve conflicts in an isolated worktree and rerun checks.",
     "pr_draft_idle": "Inspect the draft and its executor; resume or close the work.",
     "branch_idle": "Inspect the branch and resume or retire its work.",
-    "queue_error": "Inspect the queue entry and repair the reported queue failure.",
     "pipeline_blocked": "Inspect the BLOCKED line and unblock the release stage.",
     "pipeline_stale": "Inspect the release worker and restart only after verifying its state.",
     "collection_error": "Restore the named evidence source; retained findings remain open.",
