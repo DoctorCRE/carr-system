@@ -985,6 +985,17 @@ class QueueTests(unittest.TestCase):
         self.assertEqual((row['phase'], row['outcome']), ('superseded', 'head_moved'))
         self.assertEqual(self.calls('merge'), [])
 
+    def test_author_commit_supersedes_even_when_regeneration_receipt_is_unknown(self):
+        self.prepare_pinned_head()
+        (self.root / 'tools/prepare_pr.py').write_text('raise SystemExit("lost receipt")\n')
+        self.q.tick()
+        self.load()
+        self.pr(head=self.changed)
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.approved,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome']), ('superseded', 'head_moved'))
+        self.assertEqual(self.calls('merge'), [])
+
     def test_regeneration_without_a_matching_receipt_does_not_advance_pin(self):
         card_id = self.prepare_pinned_head()
         self.q.prepare(module.REPOS[0], self.data['prs'][f'{module.REPOS[0]}#1'])
