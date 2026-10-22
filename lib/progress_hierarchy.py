@@ -7,7 +7,7 @@ import json
 import re
 from collections import Counter
 
-REPOSITORIES = {'jbookout/carr-system': 'carr', 'jbookout/doctorcre-app': 'app',
+REPOSITORIES = {'DoctorCRE/carr-system': 'carr', 'jbookout/doctorcre-app': 'app',
                 'jbookout/software-factory': 'factory'}
 
 
@@ -72,7 +72,7 @@ def project(state):
         sid = target['id']
         identity = str(task.get('job_id') or task.get('job_ref') or key)
         allocation = jobs.setdefault(sid, {})
-        links = task.get('pr_links') or ([{'repo': task.get('repo', 'jbookout/carr-system'), 'pr': task['pr']}] if task.get('pr') else [{}])
+        links = task.get('pr_links') or ([{'repo': task.get('repo', 'DoctorCRE/carr-system'), 'pr': task['pr']}] if task.get('pr') else [{}])
         pr_keys = [f"pr:{row.get('repo')}#{row['pr']}" for row in links if row.get('pr')]
         number = allocation.get(identity)
         if number is None:
@@ -330,16 +330,16 @@ def backfill(state, catalog=None, facts=None, summaries=None):
     related = related_pr_groups(facts)
     for key, original in {**state.get('legacy_history', {}), **state.get('tasks', {})}.items():
         task = copy.deepcopy(original)
-        fact = facts.get(f"{task.get('repo', 'jbookout/carr-system')}#{task.get('pr')}", {})
+        fact = facts.get(f"{task.get('repo', 'DoctorCRE/carr-system')}#{task.get('pr')}", {})
         if not fact:
             target = re.search(r'(carr-system|doctorcre-app|software-factory)-(\d+)$', key)
             if target:
-                fact = facts.get(f'jbookout/{target[1]}#{target[2]}', {})
+                fact = facts.get(f"{'DoctorCRE' if target[1] == 'carr-system' else 'jbookout'}/{target[1]}#{target[2]}", {})
         if not fact:
             note = str(task.get('note') or '')
             opened = re.search(r'Opened (carr-system|doctorcre-app|software-factory) PR (\d+)', note)
             if opened:
-                fact = facts.get(f'jbookout/{opened[1]}#{opened[2]}', {})
+                fact = facts.get(f"{'DoctorCRE' if opened[1] == 'carr-system' else 'jbookout'}/{opened[1]}#{opened[2]}", {})
         if fact:
             task['title'] = fact.get('title') or task.get('title')
             task['body'] = fact.get('body')
@@ -359,7 +359,7 @@ def backfill(state, catalog=None, facts=None, summaries=None):
         if not series:
             match = re.search(r'\b(V\d+)\s+([A-Z]\d+[A-Za-z]?|\d+[A-Z]|[A-Z])\b', text)
             series = match[1] if match else None
-        pr_key = f"{original.get('repo', 'jbookout/carr-system')}#{original.get('pr')}"
+        pr_key = f"{original.get('repo', 'DoctorCRE/carr-system')}#{original.get('pr')}"
         standalone = related.get(pr_key) if original.get('pr') and fact else None
         group = ref or ('series:' + str(series) if series else standalone or 'legacy')
         request = requests.setdefault(group, copy.deepcopy(catalog.get(ref) or state.get('work_requests', {}).get(ref) or {

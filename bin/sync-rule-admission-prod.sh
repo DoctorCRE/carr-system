@@ -15,7 +15,7 @@
 # nearly unpopulated". Only four rules had ever been admitted, all four through
 # the admit-rule verb, one rule at a time.
 #
-# The cause was the same structural one bin/sync-control-plane-prod.sh names for
+# The cause was structural for
 # Phase 2: tools/sync-rule-admission.py, the bulk backfill that compiles
 # ops/config/rule-enforcement-map.json into the admission shape, had no
 # production caller. There was no door, so there was no drift to notice —

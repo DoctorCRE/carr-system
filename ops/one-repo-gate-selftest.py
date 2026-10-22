@@ -5,7 +5,7 @@ written before the gate (rule e65efc68: write the test before the thing, and
 especially before a gate).
 
 WHY THE GATE EXISTS. CARR's CLAUDE.md rev 10 says the code lives in ONE repo,
-jbookout/carr-system, and a session that cannot reach it must STOP and say so
+DoctorCRE/carr-system, and a session that cannot reach it must STOP and say so
 rather than improvise a home. That is prose, so it binds only the sessions that
 read it and obey it — which is exactly how it failed. A cloud session that could
 not see carr-system filed an entire system audit plus two specs into an empty

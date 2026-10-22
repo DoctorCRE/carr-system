@@ -56,7 +56,7 @@ class CacheTests(unittest.TestCase):
   result=cache.collect_github(NOW,read,branches=self.branches)
   self.assertTrue(result['complete'])
   self.assertEqual(owners,[('DoctorCRE','carr-system'),('jbookout','doctorcre-app')])
- def test_inventory_bytes_match_original_rest_projection(self):
+ def test_inventory_preserves_recorded_ids_with_current_links(self):
   result=cache.collect_github(NOW,self.read,{'synthetic':{'action':'progress','label':"The Dot's suggestion"}},branches=self.branches)
   expected=(Path(__file__).parent/'fixtures/system-work-cache/inventory.json').read_text().rstrip('\n')
   self.assertEqual(json.dumps(result,sort_keys=True),expected)

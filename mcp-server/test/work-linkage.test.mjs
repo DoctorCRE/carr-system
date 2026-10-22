@@ -54,12 +54,12 @@ test('recorded WR and GitHub PR associations count without treating unreadable W
  const calls=[];
  const client={query:async(sql,args)=>{
   calls.push([sql,args]);
-  return {rows:sql.includes('from board_snapshot')?[stored({a:{work_request:'WR-900',pr:22,repo:'jbookout/carr-system'},b:{work_request_ref:'WR-901'}})]
+  return {rows:sql.includes('from board_snapshot')?[stored({a:{work_request:'WR-900',pr:22,repo:'DoctorCRE/carr-system'},b:{work_request_ref:'WR-901'}})]
   :sql.includes('from ops.work_request')?[{ref:'WR-900',title:'Readable WR'}]:[]};
  }};
  const read=await boardAnswerTools({})['read-progress-board'].handler(client,actor,{board_id:'demo-project'});
  const refs=read.snapshot.snapshot_json.tasks.a.linkage.references;
- assert.deepEqual(refs.map(r=>[r.relation,r.ref,r.state]),[['work_request','WR-900','resolved'],['pull_request','https://github.com/jbookout/carr-system/pull/22','resolved']]);
+ assert.deepEqual(refs.map(r=>[r.relation,r.ref,r.state]),[['work_request','WR-900','resolved'],['pull_request','https://github.com/DoctorCRE/carr-system/pull/22','resolved']]);
  assert.deepEqual(refs[0].target,{work_request:'WR-900'});
  const hidden=read.snapshot.snapshot_json.tasks.b.linkage.references[0];
  assert.equal(hidden.state,'unavailable');assert.equal(hidden.target,null);
@@ -173,7 +173,7 @@ state['tasks']['one']['slice_id']='queue'
 state['tasks']['two']['slice_id']='review'
 original=h.project(state)['aliases']['one']
 state['tasks']['two'].update(blocked_by_task_ids=[original],parent_task_id=original)
-state['tasks']['one'].update(pr=1960,repo='jbookout/carr-system')
+state['tasks']['one'].update(pr=1960,repo='DoctorCRE/carr-system')
 h.project(state)
 state['tasks']['one']['slice_id']='review'
 h.project(state)

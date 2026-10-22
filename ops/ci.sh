@@ -1043,7 +1043,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 
     _mstep triggers
     if ! DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-control-plane-sync.log" \
-         "$PY" tools/control-plane.py sync; then
+         "$PY" tools/workflow-registry.py sync; then
       tail -30 "$LOGDIR/migration-control-plane-sync.log" >&2
       bad migration "control-plane registry sync failed after migrations"
       return

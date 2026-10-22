@@ -122,7 +122,7 @@ above record this projection's provenance, not a current-version gate.
 
 The only authorized code homes are:
 
-- `jbookout/carr-system`: the CARR-specific runtime and authority — canonical
+- `DoctorCRE/carr-system`: the CARR-specific runtime and authority — canonical
   business records, domain rules and doctrine, versioned APIs and MCP,
   migrations, runtime control plane, assurance fabric, authentication,
   environments, and CARR releases.

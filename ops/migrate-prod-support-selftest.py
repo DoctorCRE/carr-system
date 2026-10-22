@@ -44,7 +44,7 @@ class NeonDsnTests(unittest.TestCase):
     def test_provider_failure_preserves_exit_code_and_redacts_diagnostics(self):
         canary = uuid.uuid4().hex
         result = subprocess.CompletedProcess(
-            [], 7, "untrusted provider output", f"fixture failure {canary} postgres://fixture:{canary}@invalid/db")
+            [], 7, "untrusted provider output", f"fixture failure {canary} postgres://fixture:{canary}@invalid/db")  # ci-secret-scan: allow
         with patch.dict(os.environ, {"NEON_API_KEY": canary}, clear=True):
             code, output, error, _ = self.invoke([result])
         self.assertEqual(code, 7)

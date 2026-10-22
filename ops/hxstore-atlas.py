@@ -136,7 +136,7 @@ def render_store(atlas):
         for evidence in entry["evidence"]:
             source = evidence["source"]
             revision = atlas["sources"][source]["revision"]
-            lines.append(f"- [`{source}` at `{revision}`](https://github.com/jbookout/carr-system/blob/{revision}/{source}), `{evidence['symbol']}`.")
+            lines.append(f"- [`{source}` at `{revision}`](https://github.com/DoctorCRE/carr-system/blob/{revision}/{source}), `{evidence['symbol']}`.")
         lines.append("")
     if atlas.get('decode_hypotheses'):
         lines.extend(['## Decode hypotheses', '', '```json', json.dumps(atlas['decode_hypotheses'], indent=2), '```', ''])

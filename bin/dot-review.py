@@ -47,7 +47,7 @@ from lib.dot_processes import run_bounded
 REVIEW = vars(review_policy)
 REVIEW_CONFIG = json.loads((ROOT / "ops/config/review-delivery.v1.json").read_text())
 
-REPOS = {'jbookout/carr-system', 'jbookout/doctorcre-app', 'jbookout/software-factory'}
+REPOS = {'DoctorCRE/carr-system', 'jbookout/doctorcre-app', 'jbookout/software-factory'}
 DOT_MARKER = dot_review_receipts.DOT_MARKER
 SHA = re.compile(r'[0-9a-f]{40}')
 META = re.compile(r'^Dot-Review: (.+)$', re.M)

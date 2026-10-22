@@ -154,9 +154,9 @@ class SnapshotSizeTests(unittest.TestCase):
             task = {"title": f"Synthetic publication task {n:03d} with representative board title",
                     "status": status, "stage": stage, "executor": "codex",
                     "provider": "openai", "model": "gpt-6", "effort": "high",
-                    "repo": "jbookout/carr-system", "pr": 2000 + n,
+                    "repo": "DoctorCRE/carr-system", "pr": 2000 + n,
                     "pr_head": f"{n:040x}", "pr_checks": "1 pass · 0 pending · 0 fail",
-                    "pr_url": f"https://github.com/jbookout/carr-system/pull/{2000 + n}",
+                    "pr_url": f"https://github.com/DoctorCRE/carr-system/pull/{2000 + n}",
                     "created_at": "2026-10-18T00:00:00+00:00", "updated_at": "2026-10-18T04:00:00+00:00",
                     "stage_entered_at": history[-1]["entered_at"], "stage_history": history}
             if n < 30:
@@ -209,7 +209,7 @@ class SnapshotSizeTests(unittest.TestCase):
 
     def test_app_evidence_and_inline_question_survive_projection(self):
         task = {"title": "Review", "status": "review", "stage": "review", "pr": 1553,
-                "repo": "jbookout/carr-system", "pr_head": "a" * 40, "pr_checks": "failure",
+                "repo": "DoctorCRE/carr-system", "pr_head": "a" * 40, "pr_checks": "failure",
                 "pr_links": [{"repo": "jbookout/doctorcre-app", "number": 42, "head_sha": "b" * 40}],
                 "question": "Which delivery target applies?"}
         projected = board.board_snapshot({"project": "fixture", "tasks": {"review": task}},
@@ -227,7 +227,7 @@ class SnapshotSizeTests(unittest.TestCase):
             reason = "GitHub read failed: " + ("diagnostic line\n" * 1800 if n < 29 else "retry the source read")
             tasks[f"task-{n}"] = {
                 "title": f"Scheduled task {n}", "status": "blocked" if n < 297 else "running" if n < 337 else "done",
-                "stage": stage, "executor": "orchestrator", "repo": "jbookout/carr-system",
+                "stage": stage, "executor": "orchestrator", "repo": "DoctorCRE/carr-system",
                 "created_at": "2026-09-29T00:00:00Z", "updated_at": "2026-10-05T00:00:00Z",
                 "stage_entered_at": "2026-09-29T00:00:00Z",
                 "stage_history": [{"stage": stage, "entered_at": "2026-09-29T00:00:00Z"}],

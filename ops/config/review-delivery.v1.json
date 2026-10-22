@@ -1,7 +1,7 @@
 {
   "schema": "carr-review-delivery.v1",
   "worker": {
-    "github_repo": "jbookout/carr-system",
+    "github_repo": "DoctorCRE/carr-system",
     "release_paths": [
       "mcp-server/",
       "migrations/",

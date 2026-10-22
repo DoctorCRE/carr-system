@@ -181,14 +181,6 @@
         "requested_lifetime_minutes": 120,
         "active_nondefault_branches": 2
       }
-    },
-    "cognition-provider": {
-      "platform": "anthropic-claude",
-      "installed": true,
-      "installed_enforcement_ref": "tools/control-plane.py:_reserve->ops.admit_job_cost",
-      "required_true": [],
-      "required_nonempty": [],
-      "maximums": {}
     }
   },
   "control_scope": {

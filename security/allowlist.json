@@ -193,7 +193,7 @@
     },
     {
       "path": "ops/rule-claim-gate-selftest.py",
-      "sha256": "15946b9193562e81d294a7c8b58a816a54cd68b9d4403ed94045f259b6afd285",
+      "sha256": "0ed8e583c7357cb3ab75563f7e4e724e1f16a17a4fc4eb2919e8fd0d779718b1",
       "rule": "pii-email",
       "reason": "Exact rule-claim Git fixture revision. The email-shaped strings are GitHub SSH transport endpoints using the public git service account, not personal contact data."
     },

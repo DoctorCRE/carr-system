@@ -196,56 +196,7 @@ class BudgetUpgradeTests(Harness):
 
 
 class RecordingAttributionTests(Harness):
-    def test_keyless_controller_execution_does_not_invent_job_attribution(self):
-        spec = importlib.util.spec_from_file_location("keyless_controller", REPO / "tools/control-plane.py")
-        controller = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(controller)
-        workflow = {"execution": {"entrypoint": "bin/nightly.sh", "args": [], "shadow_args": []}}
-        with patch.dict(os.environ, {"CARR_JEV_JOB": "unrelated-parent"}), \
-                patch.object(controller.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
-            controller._execute_deterministic(workflow, {}, timeout=10, mode="shadow")
-        env = run.call_args.kwargs["env"]
-        self.assertNotIn("CARR_JEV_JOB", env)
-        with patch.dict(os.environ, env, clear=True):
-            self.assertIsNone(client._job_label())
 
-    def test_controller_nightly_child_can_read_deals_without_agent_environment(self):
-        self.enterContext(patch.object(client, "JEV_CALL_SITES_PATH", str(REGISTRY_PATH)))
-        spec = importlib.util.spec_from_file_location("nightly_controller", REPO / "tools/control-plane.py")
-        controller = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(controller)
-        manifest = json.loads(controller.MANIFEST_PATH.read_text())
-        workflow = next(w for w in manifest["workflows"] if w["key"] == "nightly-record-layer")
-        with patch.object(controller.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
-            controller._execute_deterministic(workflow, {"scheduled_for": "2026-10-04T03:00:00Z"},
-                                              timeout=10, mode="live")
-        env = {**run.call_args.kwargs["env"], "CARR_JEV_SEMANTIC_CACHE": str(self.log)+".semantic"}
-        self.assertFalse(any(key in env for key in client.SESSION_ID_ENV_KEYS))
-        with patch.dict(os.environ, env, clear=True):
-            _, entry = client._admit_paid_call("jev_deal_read", None, {}, [], None, None)
-            self.assertEqual(entry["caller"], "jev_deal_read")
-            self.assertEqual(client._job_label(), "nightly-record-layer")
-            spec = importlib.util.spec_from_file_location("jev_deal_read", REPO / "ops/jev_deal_read.py")
-            reader = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(reader)
-            bundle = {"has_evidence": True, "evidence_chars": 900, "name": "Fixture deal",
-                      "client": "Fixture practice", "phase": "research", "deal_type": "startup",
-                      "segment": "Dental", "city": "Fixture city", "owner": "fixture",
-                      "next_step": "Review terms", "next_step_due": None,
-                      "status_narrative": "Terms discussed", "history": [], "days_since_record_touched": 1}
-            answers = {"movement": {"type": "score", "score": 1.0, "confidence": 0.9},
-                       "waiting_on": {"type": "choice", "choice": "client", "confidence": 0.9},
-                       "silence_is_bad": {"type": "noul", "noul": 0.1}}
-            def opener(request, timeout=None):
-                self.requests.append(request)
-                return FakeResponse(json.dumps({**ANSWER, "answers": answers}).encode())
-            with patch.object(reader, "ts", client), patch.object(client.urllib.request, "urlopen", opener), \
-                    patch.dict(client.ask.__kwdefaults__, cache_path=str(self.root / "deal-cache.json"),
-                               calls_log=str(self.log)):
-                reading = reader.read_deal(bundle, api_key="offline-fixture")
-            self.assertTrue(reading["judged"], reading.get("reason"))
-            self.assertEqual(len(self.requests), 1)
-            self.assertEqual(self.rows()[-1]["job"], "nightly-record-layer")
 
     def test_quill_post_call_checks_work_without_agent_environment(self):
         self.enterContext(patch.object(client, "JEV_CALL_SITES_PATH", str(REGISTRY_PATH)))
