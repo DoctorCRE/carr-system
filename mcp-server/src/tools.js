@@ -246,6 +246,18 @@ export function pgConstraintError(e) {
   return null;
 }
 
+function isRepairIncident(source) {
+  return typeof source === "string" && /^repair-loop:[a-z0-9][a-z0-9:_-]{0,127}$/.test(source);
+}
+
+async function activeRepairIncident(c, source) {
+  await c.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [source]);
+  const result = await c.query(
+    "select id, number from loop_item where source_note=$1 and kind='open_loop' and domain='system' and status='open' order by created_at, id",
+    [source]);
+  return result.rows[0];
+}
+
 // [ORDER 34 review, blocker 1] The old array-replacer form of JSON.stringify
 // FILTERED nested keys instead of canonicalizing them — links[]/building/spaces
 // payloads hashed as empty, so a corrected retry under a reused key replayed
@@ -340,6 +352,8 @@ async function withEnvelope(client, actor, verb, args, fn) {
   if (verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
+  if (verb === "add-loop" && isRepairIncident(args.source_note))
+    await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
   if (prior.rows.length) {
     if (prior.rows[0].request_hash !== hash) throw new ToolError({ error: "key_reuse" });
@@ -1198,7 +1212,7 @@ async function resolveLoop(client, args, opts = {}) {
   if (args.loop_id) {
     const r = await client.query(
       `select li.id, li.kind, li.number, li.status, li.marker, li.due_on,
-              li.close_outcome, li.blocker_class, lb.block_key as section
+              li.close_outcome, li.blocker_class, li.source_note, li.domain, lb.block_key as section
          from loop_item li join loop_block lb on lb.id = li.block_id
         where li.id = $1`, [args.loop_id]);
     if (!r.rows.length) throw new ToolError({ error: "not_found", loop_id: args.loop_id });
@@ -1209,7 +1223,7 @@ async function resolveLoop(client, args, opts = {}) {
       hint: "pass loop_id, or number (plus kind when the number is shared across kinds)" });
   const r = await client.query(
     `select li.id, li.kind, li.number, li.status, li.marker, li.due_on,
-            li.close_outcome, li.blocker_class, lb.block_key as section, lb.rel_path
+            li.close_outcome, li.blocker_class, li.source_note, li.domain, lb.block_key as section, lb.rel_path
        from loop_item li join loop_block lb on lb.id = li.block_id
       where li.number = $1 and (${anyStatus ? "true" : "li.status = 'open'"})
         and ($2::text is null or li.kind = $2)`, [args.number, args.kind || null]);
@@ -3728,6 +3742,7 @@ export const TOOLS = {
       number: { type: "string", description: "the loop number as a human writes it, with or without the leading #" },
       loop_id: { type: "string", description: "exact uuid; wins over number" },
       kind: { type: "string", enum: LOOP_KINDS, description: "narrows an ambiguous number" },
+      source_note: { type: "string", description: "Exact repair-loop:<service>:<failure>:v1 identity. Returns the active system incident, or loop:null." },
     } },
     handler: async (c, _a, args) => {
       const cols = `id as loop_id, kind, number, domain, blocker_class, blocker_detail, status,
@@ -3739,6 +3754,14 @@ export const TOOLS = {
       if (args.loop_id) {
         const r = await c.query(`select ${cols} from loop_item where id=$1`, [args.loop_id]);
         if (!r.rows.length) return { error: "not_found", hint: "no loop carries that id" };
+        return await withAmendmentHistory(c, r.rows[0]);
+      }
+      if (args.source_note !== undefined) {
+        if (!isRepairIncident(args.source_note))
+          throw new ToolError({ error: "invalid_incident_identity" });
+        const r = await c.query(`select ${cols} from loop_item where source_note=$1 and kind='open_loop' and domain='system' and status='open' order by created_at, id`, [args.source_note]);
+        if (!r.rows.length) return { loop: null, amended: false, amendments: [] };
+        if (r.rows.length > 1) throw new ToolError({ error: "ambiguous_incident_identity" });
         return await withAmendmentHistory(c, r.rows[0]);
       }
       const num = String(args.number || "").replace(/^#/, "").trim();
@@ -7503,15 +7526,15 @@ export const TOOLS = {
           hint: "the loop importer has not run for this kind — nothing to render into" });
       const block = b.rows[0];
 
+      if (isRepairIncident(args.source_note) && (args.kind !== "open_loop" || args.domain !== "system"))
+        throw new ToolError({ error: "incident_identity_requires_system_loop" });
+
       // Monitor incident identity is shared across principals; envelope replay is not.
       if (args.kind === "open_loop" && args.domain === "system" &&
-          args.source_note === "uptime-monitor:availability:v1") {
-        await c.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [args.source_note]);
-        const incident = await c.query(
-          "select id, number from loop_item where source_note=$1 and kind='open_loop' and domain='system' and status='open' for update",
-          [args.source_note]);
-        if (incident.rows.length) return { ok: true, loop_id: incident.rows[0].id,
-          number: incident.rows[0].number, kind: args.kind, deduplicated: true };
+          (args.source_note === "uptime-monitor:availability:v1" || isRepairIncident(args.source_note))) {
+        const incident = await activeRepairIncident(c, args.source_note);
+        if (incident) return { ok: true, loop_id: incident.id,
+          number: incident.number, kind: args.kind, deduplicated: true };
       }
 
       const num = args.number || await nextLoopNumber(c, args.kind);
@@ -7589,6 +7612,18 @@ export const TOOLS = {
       if (cur.status !== "open")
         throw new ToolError({ error: "loop_not_open", loop_id: cur.id, status: cur.status,
           hint: "a closed loop is history; open a new one rather than editing the record of what happened" });
+
+      if (isRepairIncident(cur.source_note) &&
+          ((args.source_note !== undefined && args.source_note !== cur.source_note) ||
+           (args.domain !== undefined && args.domain !== "system")))
+        throw new ToolError({ error: "incident_identity_immutable" });
+      if (isRepairIncident(args.source_note)) {
+        if (cur.kind !== "open_loop" || (args.domain !== undefined ? args.domain : cur.domain) !== "system")
+          throw new ToolError({ error: "incident_identity_requires_system_loop" });
+        const incident = await activeRepairIncident(c, args.source_note);
+        if (incident && incident.id !== cur.id)
+          throw new ToolError({ error: "incident_identity_taken", loop_id: incident.id });
+      }
 
       // Ownership gate on the edit path too — otherwise the rule holds only for
       // rows filed after it shipped, and a session that wants a joint owner

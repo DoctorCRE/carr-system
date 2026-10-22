@@ -20,7 +20,7 @@ def receipt(ts):
 
 
 def loop_reply(name, row):
-    return {"loop": row, "amended": False, "amendments": []} if name == "read-loop" else row
+    return {"loop": {"source_note": health.INCIDENT_IDENTITY, **row}, "amended": False, "amendments": []} if name == "read-loop" else row
 
 
 class IncidentRecords:
@@ -77,6 +77,149 @@ class OutageTests(unittest.TestCase):
             self.assertEqual(health.reconcile(warning, state, records), "open")
             self.assertEqual(json.loads(state.read_text())["loop_id"], original)
             self.assertEqual(len(records.loops), 1)
+
+    def test_two_writers_with_independent_local_state_converge(self):
+        records = IncidentRecords(threading.Barrier(2))
+        warning = {"status": "warn", "reason": "state_unreadable"}
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory) / f"writer-{n}.json" for n in range(2)]
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                outcomes = list(pool.map(lambda path: health.reconcile(warning, path, records), paths))
+            self.assertCountEqual(outcomes, ["opened", "open"])
+            self.assertEqual({json.loads(path.read_text())["loop_id"] for path in paths}, {"incident-1"})
+            self.assertEqual(len(records.loops), 1)
+
+    def test_recovery_with_lost_state_finds_incident_without_opening_one(self):
+        records = IncidentRecords()
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            health.reconcile({"status": "warn", "reason": "state_unreadable"}, state, records)
+            state.unlink()
+            recovered = {"status": "ok", "state": "healthy", "recovered_by_usable_success": True}
+            self.assertEqual(health.reconcile(recovered, state, records), "cleared")
+            self.assertEqual(len(records.loops), 1)
+            self.assertEqual(records.loops["incident-1"]["status"], "done")
+            self.assertEqual(health.reconcile(recovered, state, records), "none")
+
+    def test_later_failure_uses_new_incident_but_reason_changes_do_not(self):
+        records = IncidentRecords()
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            warning = {"status": "warn", "reason": "state_unreadable"}
+            health.reconcile(warning, state, records)
+            self.assertEqual(health.reconcile(dict(warning, reason="billing_exhausted"), state, records), "updated")
+            self.assertEqual(len(records.loops), 1)
+            health.reconcile({"status": "ok", "state": "healthy", "recovered_by_usable_success": True}, state, records)
+            self.assertEqual(health.reconcile(warning, state, records), "opened")
+            self.assertEqual(len(records.loops), 2)
+            self.assertEqual([row["status"] for row in records.loops.values()], ["done", "open"])
+
+    def test_pending_legacy_open_replays_unchanged_before_identity_adoption(self):
+        records = IncidentRecords()
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            payload = {"idempotency_key": "legacy-pending", "body": health._body("state_unreadable"),
+                       "kind": "open_loop", "domain": "system", **health.outage_blocker("state_unreadable")}
+            state.write_text(json.dumps({"open_key": "legacy-pending", "open_payload": payload}))
+            sent = []
+            def verb(name, args):
+                sent.append((name, dict(args)))
+                return records(name, args)
+            self.assertIn(health.reconcile({"status": "warn", "reason": "state_unreadable"}, state, verb), ("opened", "updated"))
+            self.assertEqual(sent[0], ("add-loop", payload))
+            self.assertEqual(records.loops["incident-1"].get("source_note"), health.INCIDENT_IDENTITY)
+
+    def test_legacy_binding_reattaches_when_another_writer_already_owns_identity(self):
+        records = IncidentRecords()
+        legacy = records("add-loop", {"body": health._body("state_unreadable")})["loop_id"]
+        canonical = records("add-loop", {"body": health._body("state_unreadable"),
+                                         "source_note": health.INCIDENT_IDENTITY})["loop_id"]
+        def verb(name, payload):
+            if name == "update-loop" and payload["loop_id"] == legacy:
+                return {"ok": False, "refused": True, "error": "incident_identity_taken", "loop_id": canonical}
+            return records(name, payload)
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            state.write_text(json.dumps({"loop_id": legacy, "body": health._body("state_unreadable")}))
+            self.assertEqual(health.reconcile({"status": "warn", "reason": "state_unreadable"}, state, verb), "open")
+            self.assertEqual(json.loads(state.read_text())["loop_id"], canonical)
+            self.assertEqual(records.loops[legacy]["status"], "open")
+            self.assertEqual(len(records.loops), 2)
+
+    def test_refused_update_and_close_refresh_their_optimistic_versions(self):
+        for mutation in ("update-loop", "close-loop"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                records = IncidentRecords()
+                state = Path(directory) / "state.json"
+                warning = {"status": "warn", "reason": "state_unreadable"}
+                health.reconcile(warning, state, records)
+                desired = (dict(warning, reason="billing_exhausted") if mutation == "update-loop" else
+                           {"status": "ok", "state": "healthy", "recovered_by_usable_success": True})
+                sent = []
+                def verb(name, payload):
+                    if name == mutation:
+                        sent.append(dict(payload))
+                        if len(sent) == 1:
+                            records.loops[payload["loop_id"]]["version"] += 1
+                            return {"ok": False, "refused": True, "error": "version_conflict"}
+                    return records(name, payload)
+                self.assertEqual(health.reconcile(desired, state, verb), "error")
+                self.assertNotIn("update_payload" if mutation == "update-loop" else "close_payload",
+                                 json.loads(state.read_text()))
+                self.assertEqual(health.reconcile(desired, state, verb), "updated" if mutation == "update-loop" else "cleared")
+                self.assertEqual([payload["base_version"] for payload in sent], [1, 2])
+                self.assertNotEqual(sent[0]["idempotency_key"], sent[1]["idempotency_key"])
+
+    def test_unconfirmed_update_and_close_replay_exactly(self):
+        for mutation in ("update-loop", "close-loop"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                records = IncidentRecords()
+                state = Path(directory) / "state.json"
+                warning = {"status": "warn", "reason": "state_unreadable"}
+                health.reconcile(warning, state, records)
+                desired = (dict(warning, reason="billing_exhausted") if mutation == "update-loop" else
+                           {"status": "ok", "state": "healthy", "recovered_by_usable_success": True})
+                sent = []
+                committed = None
+                def verb(name, payload):
+                    nonlocal committed
+                    if name == mutation:
+                        sent.append(dict(payload))
+                        if len(sent) == 1:
+                            committed = records(name, payload)
+                            return {"ok": False}
+                        return committed
+                    return records(name, payload)
+                self.assertEqual(health.reconcile(desired, state, verb), "error")
+                self.assertIn(health.reconcile(desired, state, verb), ("updated", "cleared"))
+                if mutation == "update-loop":
+                    self.assertEqual(sent[0], sent[1])
+                else:
+                    self.assertEqual(records.loops["incident-1"]["status"], "done")
+
+    def test_collision_settles_legacy_pending_close_before_reattaching(self):
+        records = IncidentRecords()
+        legacy = records("add-loop", {"body": health._body("state_unreadable")})["loop_id"]
+        canonical = records("add-loop", {"body": health._body("state_unreadable"),
+                                         "source_note": health.INCIDENT_IDENTITY})["loop_id"]
+        pending = {"loop_id": legacy, "idempotency_key": "pending-legacy-close", "base_version": 1,
+                   "resolution": "done", "outcome": "A usable judgment verified the earlier outage."}
+        sent = []
+        def verb(name, payload):
+            sent.append((name, dict(payload)))
+            if name == "update-loop" and payload["loop_id"] == legacy:
+                return {"ok": False, "refused": True, "error": "incident_identity_taken"}
+            return records(name, payload)
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            state.write_text(json.dumps({"loop_id": legacy, "body": health._body("state_unreadable"),
+                                         "close_payload": pending}))
+            self.assertEqual(health.reconcile({"status": "warn", "reason": "state_unreadable"}, state, verb), "open")
+            self.assertEqual([p for n, p in sent if n == "close-loop"], [pending])
+            self.assertNotIn("close_payload", json.loads(state.read_text()))
+            recovered = {"status": "ok", "state": "healthy", "recovered_by_usable_success": True}
+            self.assertEqual(health.reconcile(recovered, state, verb), "cleared")
+            self.assertEqual(records.loops[canonical]["status"], "done")
 
     def test_refused_loop_read_reports_error_and_preserves_open_loop(self):
         from unittest import mock
@@ -222,7 +365,7 @@ class OutageTests(unittest.TestCase):
                 now=health.parse_time("2026-09-28T13:03:00Z"), state_path=state)
             self.assertEqual(recovered["status"], "ok")
             self.assertEqual(health.reconcile(recovered, state,
-                lambda name, payload: self.fail(f"unexpected {name}")), "cleared")
+                lambda name, payload: {"loop": None} if name == "read-loop" else self.fail(f"unexpected {name}")), "cleared")
             self.assertEqual(json.loads(state.read_text())["state"], "healthy")
 
     def test_stale_success_with_expired_402_attempt_warns_and_recovers(self):
@@ -412,7 +555,7 @@ class OutageTests(unittest.TestCase):
             with self.subTest(kind=kind), mock.patch.object(
                     health.record_call, "call_verb",
                     return_value=VerbResult("add-loop", kind, reply={"error": "fixture"})):
-                self.assertEqual(health.call_verb("add-loop", {}), {"ok": False, "refused": refused})
+                self.assertEqual(health.call_verb("add-loop", {}), {"ok": False, "refused": refused, "error": "fixture"})
         with mock.patch.object(health.record_call, "call_verb",
                                return_value=VerbResult("add-loop", "ok", reply={"ok": True, "loop_id": "l"})):
             self.assertEqual(health.call_verb("add-loop", {}), {"ok": True, "loop_id": "l"})
@@ -427,7 +570,7 @@ class OutageTests(unittest.TestCase):
             warning = {"status": "warn", "reason": "billing_exhausted", "age_hours": 10}
             self.assertEqual(health.reconcile(warning, state, verb), "opened")
             self.assertEqual(health.reconcile(warning, state, verb), "open")
-            self.assertEqual(len(calls), 1)
+            self.assertEqual(len(calls), 2)
             self.assertEqual(calls[0][1]["owner"], "Joe")
             self.assertIn("add TypeSafe credits", calls[0][1]["body"])
             recovered = health.transition({"state": "outage_open"}, "usable_success",
@@ -459,6 +602,9 @@ class OutageTests(unittest.TestCase):
                 def verb(name, payload):
                     nonlocal loop_status, close_failed
                     mutations.append((name, payload))
+                    if name == "read-loop" and "source_note" in payload:
+                        return {"loop": None} if loop_status != "open" else loop_reply(name,
+                            {"loop_id": "loop-123", "version": 1, "status": loop_status})
                     if name == "close-loop":
                         if fail_close and not close_failed:
                             close_failed = True

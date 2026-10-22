@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib import record_call, repair_loop  # noqa: E402
 
+INCIDENT_IDENTITY = "repair-loop:jev:availability:v1"
 THRESHOLD_HOURS = 2
 REMEDIATION = {
     "billing_exhausted": "add TypeSafe credits",
@@ -305,7 +306,8 @@ def reconcile(result, state_path, verb):
         if result["status"] == "warn":
             reason = result["reason"]
             payload = {"kind": "open_loop", "domain": "system", **outage_blocker(reason), "body": _body(reason)}
-            outcome = repair_loop.reconcile(state, payload, verb, save)
+            outcome = repair_loop.reconcile(state, payload, verb, save,
+                                            identity=INCIDENT_IDENTITY, refresh=True)
             if state.get("loop_id"):
                 state["state"] = "outage_open"
             save()
@@ -313,7 +315,8 @@ def reconcile(result, state_path, verb):
         if (result["status"] == "ok" and result.get("state") == "healthy" and
                 result.get("recovered_by_usable_success") is True):
             outcome = repair_loop.reconcile(state, None, verb, save, outcome=
-                "A new usable Jev judgment verified that the TypeSafe outage cleared.")
+                "A new usable Jev judgment verified that the TypeSafe outage cleared.",
+                identity=INCIDENT_IDENTITY)
             save()
             return "cleared" if outcome == "cleared" or previous.get("first_failure_at") else "none"
         return "none"
@@ -327,4 +330,5 @@ def call_verb(name, payload):
     result = record_call.call_verb(name, payload, timeout=35)
     if result.ok and isinstance(result.reply, dict):
         return result.reply
-    return {"ok": False, "refused": result.kind == record_call.REFUSED}
+    return {"ok": False, "refused": result.kind == record_call.REFUSED,
+            **({"error": result.error} if result.error else {})}

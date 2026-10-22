@@ -55,27 +55,27 @@ test(`${source} does not deduplicate ordinary source notes`, async () => {
 
 test(`${source} concurrent writers return one incident under the transaction lock`, async () => {
   const db = new Records();
-  let writer = Promise.resolve();
+  const writers = new Map();
   let readers = 0;
   let ready;
   const bothReady = new Promise(resolve => { ready = resolve; });
   async function transaction(principal, key) {
-    let release;
+    const releases = [];
     const client = { async query(sql, params) {
       if (sql.startsWith('select request_hash, response')) {
         if (++readers === 2) ready();
         await bothReady;
       }
       if (sql.includes('pg_advisory_xact_lock')) {
-        const previous = writer;
-        writer = new Promise(resolve => { release = resolve; });
+        const previous = writers.get(params[0]);
+        writers.set(params[0], new Promise(resolve => { releases.push(resolve); }));
         await previous;
         return { rows: [] };
       }
       return db.query(sql, params);
     } };
     try { return await TOOLS['add-loop'].handler(client, actor(principal), args(key)); }
-    finally { release?.(); }
+    finally { releases.forEach(release => release()); }
   }
   const [first, second] = await Promise.all([transaction('a', 'concurrent-a'), transaction('b', 'concurrent-b')]);
   assert.equal(first.loop_id, second.loop_id);
