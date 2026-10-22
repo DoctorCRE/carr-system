@@ -14,17 +14,28 @@ LOCK_DIR="${CARR_CONTROL_PLANE_LOCK_DIR:-$REPO/out/control-plane-tick.lock}"
 DB_ENV="${CARR_CONTROL_PLANE_DB_ENV:-$HOME/.config/carr/db.env}"
 PROVIDER_ENV="${CARR_CONTROL_PLANE_PROVIDER_ENV:-$HOME/.config/carr/control-plane.env}"
 
-# mkdir is atomic.  A second launchd wake is expected under slow provider or
-# database conditions; it is an already-covered opportunity, not an error.
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-  print -ru2 -- "control-plane-tick: already active; skipping overlapping wake"
+# Never unlink these files: replacing an inode would split the lock domain.
+mkdir -p "$LOCK_DIR" || exit "$EX_CONFIG"
+zmodload zsh/system || exit "$EX_CONFIG"
+touch "$LOCK_DIR/owner" "$LOCK_DIR/state" || exit "$EX_CONFIG"
+zsystem flock -f state_fd "$LOCK_DIR/state" || exit "$EX_CONFIG"
+zsystem flock -e -t 0.001 -f owner_fd "$LOCK_DIR/owner"
+lock_result=$?
+if (( lock_result == 2 )); then
+  if [[ ! -d "$LOCK_DIR/overlap" ]]; then
+    mkdir "$LOCK_DIR/overlap" || exit "$EX_CONFIG"
+    print -ru2 -- "control-plane-tick: already active; skipping overlapping wakes"
+  fi
   exit 0
+elif (( lock_result != 0 )); then
+  print -ru2 -- "control-plane-tick: cannot acquire process lock"
+  exit "$EX_CONFIG"
 fi
-
-release_lock() {
-  rmdir "$LOCK_DIR" 2>/dev/null || true
-}
-trap release_lock EXIT
+if [[ -d "$LOCK_DIR/overlap" ]]; then
+  rmdir "$LOCK_DIR/overlap" || exit "$EX_CONFIG"
+  print -ru2 -- "control-plane-tick: overlap cleared; running tick"
+fi
+zsystem flock -u "$state_fd" || exit "$EX_CONFIG"
 
 # Read a local KEY=VALUE file without treating it as a shell program.  The
 # tick adapter handles credentials, so ``source``/``eval`` would give a local
@@ -142,9 +153,9 @@ fi
 # canary contract is enabled; live once an accepted canary receipt exists, or
 # once accepted shadow exists where the workflow's contract disables canary.
 # This wrapper only wakes the ledger -- it never chooses a tier itself.
-env -i PATH="$PATH" HOME="$HOME" CARR_DB_JOBS_URL="$jobs_url" \
+exec env -i PATH="$PATH" HOME="$HOME" CARR_DB_JOBS_URL="$jobs_url" \
   CARR_AI_ROUTE_PRIMARY_URL="$primary_url" \
   CARR_AI_ROUTE_PRIMARY_TOKEN="$primary_token" \
   CARR_AI_ROUTE_SECONDARY_URL="$secondary_url" \
   CARR_AI_ROUTE_SECONDARY_TOKEN="$secondary_token" \
-  "$PYTHON" "$REPO/tools/control-plane.py" tick --mode auto
+  "$PYTHON" "$REPO/tools/control-plane.py" tick --mode auto "$@"

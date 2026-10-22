@@ -73,3 +73,16 @@ The upstream README and SPEC contain inconsistent summaries of deduplication
 and version acceptance. This copy preserves the pinned implementation and the
 specified CARR patch. Tests establish synthetic behavior, not recovery coverage
 for a real Outlook cache or compatibility with future Outlook formats.
+
+## Atlas-backed names
+
+The WR-000439 store-source extension replaces the hand-maintained schema key enum,
+label mapping, and tally iteration list with generated definitions from
+`spec/outlook/hxstore-atlas.json`. `build.rs` invokes `ops/hxstore-atlas.py` using
+Python 3. Python is a build dependency only. No registry dependency was added.
+Copy this crate together with those two repository files when building outside this tree.
+
+The extraction selectors and SQLite contracts retain their existing behavior.
+`python3 ops/hxstore-atlas-selftest.py` rebuilds a temporary copy after an atlas
+rename and checks the actual `map` output using a synthetic block.
+The repository gates class discovers this test alongside the existing surface tests.
