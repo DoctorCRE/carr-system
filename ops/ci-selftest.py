@@ -326,9 +326,6 @@ def test_hosted_migration_ownership():
     check("required aggregate waits for independent fixtures", "migration-fixtures" in wf["jobs"]["checks"]["needs"])
     aggregate = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Fail unless every class group succeeded")
     with tempfile.TemporaryDirectory() as directory:
-        fake = pathlib.Path(directory) / "python3"
-        fake.write_text("#!/bin/sh\nexit 0\n")
-        fake.chmod(0o755)
         for full, fixtures, classes, draft, expected in (
             ("true", "success", "success", "false", 0), ("false", "skipped", "success", "false", 0),
             ("", "skipped", "success", "false", 1), ("true", "failure", "success", "false", 1),
@@ -338,8 +335,11 @@ def test_hosted_migration_ownership():
             ("true", "skipped", "success", "false", 1),
         ):
             result = subprocess.run(["bash", "-e", "-c", aggregate["run"]], capture_output=True, text=True,
-                                    env={**scrubbed_env(), "PATH": directory + os.pathsep + os.environ["PATH"],
-                                         "DB_FULL": full, "CI_DRAFT": draft, "FIXTURES_RESULT": fixtures, "CLASSES_RESULT": classes})
+                                    env={**scrubbed_env(), "PATH": str(pathlib.Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
+                                         "CI_DRAFT": draft, "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary"),
+                                         "CI_NEEDS": json.dumps({"scope": {"result": "success", "outputs": {"full": full}},
+                                                                 "classes": {"result": classes},
+                                                                 "migration-fixtures": {"result": fixtures}})})
             check(f"aggregate scope={full!r} fixtures={fixtures} classes={classes}", result.returncode == expected)
     record = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Record the tested tree and class contract")
     check("not-applicable proof cannot be reused as full main evidence", "full != 'false'" in record.get("if", ""))
