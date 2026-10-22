@@ -89577,7 +89577,8 @@ CREATE VIEW public.v_deal_room_action AS
     n.description,
     n.due_on,
     n.status,
-    n.updated_at
+    n.updated_at,
+    n.hold_until
    FROM (public.next_action n
      JOIN public.actor a ON ((a.id = n.owner_id)))
   WHERE (n.subject_type = 'deal'::text)
@@ -89588,7 +89589,8 @@ UNION ALL
     pca.description,
     pca.due_on,
     pca.status,
-    pca.updated_at
+    pca.updated_at,
+    NULL::date AS hold_until
    FROM (public.capture_post_call_action pca
      JOIN public.actor a ON ((a.id = pca.owner_id)));
 
@@ -123000,6 +123002,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0923_deal_status_next_step.sql	705736e4c549801b820d7844447b9c84a63c5db8a1c67c306a27debfa24d83be	1970-01-01 00:00:00+00
 0924_jev_attempt_settlement_lookup.sql	20eb98baf8e1075c9bd90f3ab12447787b112492207c5219a085117ba8e4646d	1970-01-01 00:00:00+00
 0926_jev_receipt_audit_lookup.sql	c6b07553d4e818dcb7da686a9446dd020c660e8fc663637626c06cff2507ab3a	1970-01-01 00:00:00+00
+0927_deal_action_hold_date.sql	ce7522c72d7ab978aeaf70a78362144c65cdde0c310dc3681f596c3f2cab4848	1970-01-01 00:00:00+00
 \.
 
 
