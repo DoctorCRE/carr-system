@@ -3332,8 +3332,8 @@ export const TOOLS = {
       cursor: { type: "string", minLength: 1, maxLength: 1000 },
     } },
     handler: async (c, _actor, args) => {
-      const owners = args.owners ?? "all";
-      const limit = args.limit ?? 50;
+      const owners = args.owners === undefined ? "all" : args.owners;
+      const limit = args.limit === undefined ? 50 : args.limit;
       if (!["all", "partners"].includes(owners) || !Number.isInteger(limit) || limit < 1 || limit > 50)
         throw new ToolError({ error: "triage_page_invalid" });
       let after = null;
@@ -3341,15 +3341,15 @@ export const TOOLS = {
         try {
           if (typeof args.cursor !== "string" || !args.cursor.length || args.cursor.length > 1000) throw Error();
           after = JSON.parse(atob(args.cursor));
-          if (!after || after.v !== 1 || after.owners !== owners || !isCalendarDate(after.on)
+          if (!after || after.v !== 1 || after.owners !== owners || !isCalendarDate(after.on) || after.on < "0001-01-01"
               || ![0, 1].includes(after.rank)
-              || !(after.due_on === null || isCalendarDate(after.due_on))
+              || !(after.due_on === null || (isCalendarDate(after.due_on) && after.due_on >= "0001-01-01"))
               || !["next_action", "post_call_action", "critical_date", "ingest"].includes(after.item_kind)
               || typeof after.id !== "string" || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(after.id)) throw Error();
         } catch { throw new ToolError({ error: "triage_cursor_invalid" }); }
       }
       const rows = (await c.query(`with scoped as (
-        select *, coalesce($4::date, current_date)::text as triage_on,
+        select *, due_on::text as triage_due_on, coalesce($4::date, current_date)::text as triage_on,
           case when item_kind = 'critical_date'
             and due_on between coalesce($4::date, current_date) and coalesce($4::date, current_date) + 14
             then 0 else 1 end as triage_rank
@@ -3369,9 +3369,9 @@ export const TOOLS = {
       const has_more = page.length > limit;
       const last = page[Math.min(page.length, limit) - 1];
       const next_cursor = has_more ? btoa(JSON.stringify({ v: 1, owners, on: last.triage_on,
-        rank: last.triage_rank, due_on: last.due_on instanceof Date ? last.due_on.toISOString().slice(0, 10) : last.due_on,
+        rank: last.triage_rank, due_on: last.triage_due_on,
         item_kind: last.item_kind, id: last.id })) : null;
-      const items = page.slice(0, limit).map(({ triage_total, triage_rank, triage_on, ...row }) => row);
+      const items = page.slice(0, limit).map(({ triage_total, triage_rank, triage_on, triage_due_on, ...row }) => row);
       return { items, total, has_more, next_cursor };
     },
   },
