@@ -19,14 +19,14 @@ class HookTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "out/watchdog/findings.jsonl"
             path.parent.mkdir(parents=True)
-            path.write_text(json.dumps({"key": "hang", "kind": "job_hang", "reason": "stdin stalled",
+            path.write_text(json.dumps({"key": "job_failed:fixture:exit_7", "kind": "job_failed", "exit_code": 7, "reason": "fixture exit 7: last error",
                                         "next_action": "inspect log", "cleared_at": None}) + "\n")
             result = subprocess.run([sys.executable, str(ROOT / "hooks/job-watchdog-digest.py")],
                                     input="{}", text=True, capture_output=True,
                                     env=dict(os.environ, CARR_JOB_ROOT=directory))
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(result.stdout)
-            self.assertIn("stdin stalled", payload["hookSpecificOutput"]["additionalContext"])
+            self.assertIn("last error", payload["hookSpecificOutput"]["additionalContext"])
         hooks = json.loads((ROOT / "ops/config/hooks.json").read_text())
         self.assertTrue(any("job-watchdog-digest.py" in h["command"] for entry in hooks["UserPromptSubmit"] for h in entry["hooks"]))
 
@@ -34,7 +34,7 @@ class HookTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "out/watchdog/findings.jsonl"
             path.parent.mkdir(parents=True)
-            row = {"key": "hang", "kind": "job_hang", "reason": "stdin stalled",
+            row = {"key": "job_failed:fixture:exit_7", "kind": "job_failed", "exit_code": 7, "reason": "fixture exit 7: last error",
                    "next_action": "inspect log", "cleared_at": None, "last_seen": 1}
             def invoke(session):
                 result = subprocess.run([sys.executable, str(ROOT / "hooks/job-watchdog-digest.py")],
@@ -43,12 +43,12 @@ class HookTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 return result.stdout
             path.write_text(json.dumps(row) + "\n")
-            self.assertIn("stdin stalled", invoke("one"))
+            self.assertIn("last error", invoke("one"))
             self.assertEqual(invoke("one"), "")
             row["last_seen"] = 2
             path.write_text(json.dumps(row) + "\n")
             self.assertEqual(invoke("one"), "")
-            self.assertIn("stdin stalled", invoke("two"))
+            self.assertIn("last error", invoke("two"))
             row["reason"] = "process exited"
             path.write_text(json.dumps(row) + "\n")
             self.assertIn("process exited", invoke("one"))
@@ -59,22 +59,21 @@ class HookTests(unittest.TestCase):
             path.write_text(json.dumps(row) + "\n")
             self.assertIn("process exited", invoke("one"))
 
-    def test_idle_branches_collapse_without_hiding_other_findings(self):
+    def test_digest_is_five_lines_and_ignores_retired_findings(self):
         config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             path = root / config["paths"]["findings"]
             path.parent.mkdir(parents=True)
-            rows = [{"key": f"branch:{i}", "kind": "branch_idle", "reason": f"branch {i} is idle",
-                     "next_action": "inspect branch", "cleared_at": None} for i in range(20)]
-            rows.append({"key": "job:hang", "kind": "job_hang", "reason": "stdin stalled",
-                         "next_action": "inspect log", "cleared_at": None})
+            rows = [{"key": f"branch:{i}", "kind": "branch_idle", "reason": "old branch", "cleared_at": None} for i in range(20)]
+            rows.extend({"key": f"job_failed:fixture-{i}:exit_7", "kind": "job_failed", "exit_code": 7,
+                         "reason": f"fixture-{i} exit 7: first line\nsecond line", "cleared_at": None} for i in range(10))
             path.write_text("".join(json.dumps(row) + "\n" for row in rows))
             context = watchdog.digest(root, config)
-            self.assertEqual(context.count("branch_idle"), 1)
-            self.assertIn("branch_idle: 20", context)
-            self.assertIn("stdin stalled", context)
-            self.assertIn("21 open finding(s)", context)
+            self.assertEqual(len(context.splitlines()), 5)
+            self.assertIn("10 open finding(s)", context)
+            self.assertIn("7 more", context)
+            self.assertNotIn("branch", context)
 
     def test_launchd_cadence_is_config_projection(self):
         config = json.loads((ROOT / "ops/config/job-watchdog.json").read_text())
