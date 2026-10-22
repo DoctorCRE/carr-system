@@ -22,7 +22,7 @@ spec.loader.exec_module(fixtures)
 class ReviewProbes(unittest.TestCase):
     def test_interrupted_temp_effect_is_reconciled_in_next_receipt(self):
         from unittest.mock import patch
-        import job_watchdog
+        import local_jobs
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             scratch, clones = root / 'scratch', root / 'clones'
@@ -31,7 +31,7 @@ class ReviewProbes(unittest.TestCase):
             candidate = scratch / 'carr-ci-test-owned'
             candidate.mkdir()
             os.utime(candidate, (0, 0))
-            config = job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+            config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
             options = dict(hook=None, tmp_root=clones, user_tmp_root=scratch, roots={},
                 dispatch_path=root / 'absent.jsonl', provider=object(),
                 process_probe=lambda paths: set(), archive_thread=lambda *a, **k: None)
@@ -72,7 +72,7 @@ class ReviewProbes(unittest.TestCase):
             self.assertGreater(report['staged_allocated_bytes'], 0)
 
     def test_unknown_pending_kind_preserves_previous_evidence_on_repeated_runs(self):
-        import job_watchdog
+        import local_jobs
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             receipt = root / 'out/machine-cleanup.json'
@@ -82,7 +82,7 @@ class ReviewProbes(unittest.TestCase):
                 'kept': [{'kind': 'test_temp', 'path': 'protected', 'status': 'kept'}],
                 'pending': {'kind': 'unknown', 'path': 'uncertain'}, 'errors': []}
             receipt.write_text(json.dumps(previous))
-            config = job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+            config = local_jobs.load_config(ROOT / 'ops/config/local-jobs.json')
             for _ in range(2):
                 report = machine_cleanup.run(root, config, hook=None, tmp_root=root,
                     dispatch_path=root / 'absent', roots={}, provider=object(),
@@ -92,7 +92,7 @@ class ReviewProbes(unittest.TestCase):
                     self.assertEqual(report[key], previous[key])
 
     def test_thread_recovery_observes_previous_receipt_before_replacing_it(self):
-        import job_watchdog
+        import local_jobs
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             receipt = root / 'out/machine-cleanup.json'
@@ -106,7 +106,7 @@ class ReviewProbes(unittest.TestCase):
                 self.assertTrue(kwargs['dry_run'])
                 self.assertEqual(kwargs['before'], 100)
                 return {'kind': 'thread', 'thread_id': tid, 'status': 'archived'}
-            report = machine_cleanup.run(root, job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json'),
+            report = machine_cleanup.run(root, local_jobs.load_config(ROOT / 'ops/config/local-jobs.json'),
                 hook=None, tmp_root=root, dispatch_path=root / 'absent', roots={}, provider=object(),
                 process_probe=lambda paths: set(), archive_thread=archive)
             self.assertEqual(report['status'], 'completed')
@@ -116,7 +116,7 @@ class ReviewProbes(unittest.TestCase):
 
     def test_interrupted_thread_reconciliation_keeps_original_receipt(self):
         from unittest.mock import patch
-        import job_watchdog
+        import local_jobs
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             receipt = root / 'out/machine-cleanup.json'
@@ -127,14 +127,14 @@ class ReviewProbes(unittest.TestCase):
             receipt.write_text(json.dumps(previous))
             with patch.object(machine_cleanup, 'save') as save:
                 with self.assertRaises(KeyboardInterrupt):
-                    machine_cleanup.run(root, job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json'),
+                    machine_cleanup.run(root, local_jobs.load_config(ROOT / 'ops/config/local-jobs.json'),
                         hook=None, tmp_root=root, dispatch_path=root / 'absent', roots={}, provider=object(),
                         process_probe=lambda paths: set(), archive_thread=lambda *a, **k: (_ for _ in ()).throw(KeyboardInterrupt()))
                 save.assert_not_called()
             self.assertEqual(json.loads(receipt.read_text()), previous)
 
     def test_interrupted_temp_missing_manifest_stays_failed_with_evidence(self):
-        import job_watchdog
+        import local_jobs
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             receipt = root / 'out/machine-cleanup.json'
@@ -144,7 +144,7 @@ class ReviewProbes(unittest.TestCase):
                 'kept': [], 'pending': {'kind': 'test_temp', 'path': str(root / 'carr-ci-test-missing'),
                     'status': 'removing'}, 'errors': []}
             receipt.write_text(json.dumps(previous))
-            report = machine_cleanup.run(root, job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json'),
+            report = machine_cleanup.run(root, local_jobs.load_config(ROOT / 'ops/config/local-jobs.json'),
                 hook=None, tmp_root=root, dispatch_path=root / 'absent', roots={}, provider=object(),
                 process_probe=lambda paths: set(), archive_thread=lambda *a, **k: None)
             self.assertEqual(report['status'], 'failed')

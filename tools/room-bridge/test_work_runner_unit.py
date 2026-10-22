@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,59 @@ from work_runner import Runner, Resources
 
 
 class RunnerTests(unittest.TestCase):
+    def test_quota_exhaustion_stops_desk_claims_until_requeue_and_success_clears_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with WorkQueue(root / 'queue.sqlite3') as q:
+                for card in ('A', 'B'):
+                    q.enqueue(card, desk='grok-review', task=card, actor='test')
+                resources = Resources(root / 'locks', root / 'slots')
+                launched = []
+                fake_grok = root / 'grok'
+                success_flag = root / 'grok-healthy'
+                fake_grok.write_text('#!' + sys.executable + "\n" + '''
+import json, os, sys
+from pathlib import Path
+if Path(os.environ['GROK_HEALTHY_FLAG']).exists():
+    print(json.dumps({'type': 'text', 'data': 'Review complete.'}))
+    print(json.dumps({'type': 'end', 'stopReason': 'end_turn', 'requestId': 'req-1',
+        'sessionId': 'session-1', 'modelUsage': {'grok-4.7-build': {'modelCalls': 1}}}))
+else:
+    sys.stderr.write('API error (status 402 Payment Required): Grok Build usage balance exhausted\\n')
+    raise SystemExit(1)
+''')
+                fake_grok.chmod(0o755)
+                import grok_wire
+
+                def launch(card, _handles):
+                    launched.append(card['card_id'])
+                    env = {**os.environ, 'PATH': f"{root}:{os.environ['PATH']}",
+                           'GROK_HEALTHY_FLAG': str(success_flag)}
+                    result = grok_wire.run_request('review', receipt_path=root / (card['card_id'] + '.receipt.json'),
+                        invoke=lambda prompt, **options: grok_wire.invoke_cli(
+                            prompt, run=subprocess.run, env=env, **options))
+                    q.finish(card['card_id'], card['claim'], result, actor='worker')
+
+                runner = Runner(q, resources, launch=launch, terminated=lambda _owner: False)
+                runner.tick()
+                self.assertEqual(launched, ['A'])
+                stopped = q.quota_exhausted_desks()
+                self.assertIn('grok-review', stopped)
+                self.assertTrue(stopped['grok-review'])
+                receipt = json.loads((root / 'A.receipt.json').read_text())
+                self.assertEqual(receipt['provider_message'],
+                    'API error (status 402 Payment Required): Grok Build usage balance exhausted')
+
+                runner.tick()
+                self.assertEqual(launched, ['A'])
+                self.assertTrue(q.get('B')['ready'])
+
+                success_flag.touch()
+                q.requeue('B', stage='queued', actor='orchestrator', reason='provider rechecked')
+                runner.tick()
+                self.assertEqual(launched, ['A', 'B'])
+                self.assertNotIn('grok-review', q.quota_exhausted_desks())
+
     def test_busy_slots_do_not_block_sender_or_reorder_other_desks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

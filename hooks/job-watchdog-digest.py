@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # doctrine: job-watchdog
-"""Give the orchestrator open watchdog findings without running a scan or action."""
+"""Give the orchestrator open watchdog findings within five lines, without running a scan."""
 import json
 import os
 import sys
@@ -13,13 +13,13 @@ import job_watchdog as watchdog  # noqa: E402
 
 def main():
     payload = json.load(sys.stdin)
-    config = watchdog.load_config(os.environ.get("CARR_WATCHDOG_CONFIG", str(SOURCE / "ops/config/job-watchdog.json")))
     try:
+        config = watchdog.load_config(os.environ.get("CARR_WATCHDOG_CONFIG", str(SOURCE / "ops/config/job-watchdog.json")))
         root = Path(os.environ["CARR_JOB_ROOT"]) if os.environ.get("CARR_JOB_ROOT") else Path(
             watchdog.command(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], config, SOURCE).strip()).parent
         context = watchdog.digest(root, config, session_id=payload.get("session_id"))
     except (OSError, ValueError, RuntimeError) as exc:
-        context = "Orchestrator watchdog digest unavailable; inspect out/watchdog/findings.jsonl: " + str(exc)
+        context = "Orchestrator watchdog digest unavailable; inspect out/watchdog/findings.jsonl: " + " ".join(str(exc).split())[:300]
     if context:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}))
     return 0
