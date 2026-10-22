@@ -610,6 +610,13 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
     return
   fi
   _mstep production-proof-fixture
+  if ! run_quiet "$LOGDIR/migration-restore-security.log" \
+       "$PY" ops/restore-rehearse-record-selftest.py --postgres; then
+    tail -30 "$LOGDIR/migration-restore-security.log" >&2
+    bad migration "restore security parity failed against the disposable PostgreSQL fixture"
+    return
+  fi
+  _mstep restore-security
   if ! DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration.log" "$PY" tools/migrate.py --apply --yes; then
     tail -30 "$LOGDIR/migration.log" >&2
     bad migration "a pending migration did not apply to the committed schema"

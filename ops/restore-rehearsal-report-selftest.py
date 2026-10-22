@@ -10,7 +10,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 from lib.control_plane_facts import evaluate_stage
 from lib.loadpy import load_module_from_path
-PASS = "  RESTORE REHEARSAL: PASS\n  teardown: branch br-synthetic deleted\n"
+PASS = "  SECURITY PARITY: PASS\n  RESTORE REHEARSAL: PASS\n  teardown: branch br-synthetic deleted\n"
 
 
 class RestoreReportTests(unittest.TestCase):
@@ -38,6 +38,14 @@ class RestoreReportTests(unittest.TestCase):
                 result = self.run_report(text)
                 self.assertEqual(result.returncode, 1)
                 self.assertEqual(json.loads(result.stdout), {'verdict': 'FAIL'})
+
+    def test_dropped_grant_cannot_complete_a_restore(self):
+        for text in (PASS.replace("SECURITY PARITY: PASS", "SECURITY PARITY: FAIL"),
+                     PASS.replace("  SECURITY PARITY: PASS\n", ""),
+                     PASS + "  SECURITY PARITY: FAIL\n",
+                     PASS.replace("  SECURITY PARITY: PASS\n", "") + "  SECURITY PARITY: PASS\n"):
+            result = self.run_report(text)
+            self.assertEqual(result.returncode, 1, result.stdout)
 
     def test_expected_snapshot_drift_is_not_failure(self):
         result = self.run_report('expected: rows postdate this dump\n(drift)\n' + PASS)

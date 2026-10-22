@@ -112,6 +112,7 @@ from typing import Any, Callable, Iterable
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
+from tools.restore_security import declaration, rebuild_security
 from lib.recovery_evidence import CORE_TABLES, bind, canonical_json, check_clock_skew  # noqa: E402
 
 COPY_RE = re.compile(
@@ -493,6 +494,19 @@ def read_copy_record(repository: str, run_id: int) -> dict[str, Any]:
     }
 
 
+def artifact_declaration(repository: str, run_id: int):
+    import base64
+    bws = _status_module()
+    _, identity = _backup_run(bws, repository, run_id)
+    got = bws.api(f"/repos/{repository}/contents/db/schema.sql", query={"ref": identity.head_sha})
+    if isinstance(got, dict) and re.fullmatch("[0-9a-f]{40}", str(got.get("sha", ""))):
+        got = bws.api(f"/repos/{repository}/git/blobs/{got['sha']}")
+    if not isinstance(got, dict) or got.get("encoding") != "base64":
+        raise ValueError("artifact db/schema.sql revision cannot be identified")
+    text = base64.b64decode(got.get("content", "")).decode("utf-8")
+    return declaration(text, identity.head_sha, got.get("sha"))
+
+
 def download_copy(repository: str, artifact_id: int, out_dir: Path) -> tuple[Path, Path]:
     """Download one stored artifact ZIP and extract its one dump. Returns (zip, dump)."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -693,8 +707,8 @@ def branch_target_start(project_id: str, branch_id: str, admin_dsn: str, databas
 
 
 # The statement classes a scoped plain pg_dump carries that a fresh throwaway
-# database cannot apply (see bin/restore-rehearse.sh, THE PORTABILITY FILTER).
-# Unlike the script's sed, this never touches COPY data lines.
+# database cannot apply. Replay the pinned declaration after loading.
+# COPY data lines always pass through unchanged.
 RESTORE_STATEMENT_FILTER = re.compile(
     rb"^(CREATE SCHEMA public;|ALTER DEFAULT PRIVILEGES|GRANT |REVOKE |ALTER .* OWNER TO |COMMENT ON EXTENSION )")
 RESTORE_EXTENSIONS = ("pg_trgm", "pgcrypto")
@@ -877,6 +891,7 @@ def verify_restore(*, repository: str, run_id: int, identity: Path, target_kind:
         armed()
     work_dir.mkdir(parents=True, exist_ok=True)
     record = read_copy_record(repository, run_id)
+    declared = artifact_declaration(repository, run_id)
     archive, dump = download_copy(repository, record.pop("_artifact_id"), work_dir)
     observed = file_digest(archive)
     artifact = artifact_watermark_from(dump, identity)
@@ -894,12 +909,14 @@ def verify_restore(*, repository: str, run_id: int, identity: Path, target_kind:
         started_at = local_target_start(admin_dsn)
     target = create_target_database(admin_dsn, database)
     load_artifact(dump, identity, target, work_dir)
+    security_parity = rebuild_security(target, declared)
     restored = restored_watermark(target, artifact)
     finished = now()  # this process's own clock, after its last read; it also stamps the binding
     check_clock_skew(finished, server_clock(target), "the restore target server")
     finished_at = _utc_seconds(finished)
     receipt = {
         "receipt_kind": RECEIPT_KIND,
+        "security_parity": security_parity,
         "target_kind": target_kind,
         "copy": {k: record[k] for k in COPY_KEYS},
         "oracle_id": ORACLE_ID,

@@ -11,7 +11,10 @@ def report(text):
                if re.fullmatch(r'teardown: branch \S+ deleted', line)]
     failed = any(line.startswith(('REHEARSAL FAILED:', 'teardown: COULD NOT DELETE',
                                   'teardown: KEEPING')) for line in lines)
-    passed = (len(verdicts) == len(deleted) == 1
+    security = [i for i, line in enumerate(lines) if line.startswith('SECURITY PARITY:')]
+    passed = (len(security) == len(verdicts) == len(deleted) == 1
+              and lines[security[0]] == 'SECURITY PARITY: PASS'
+              and security[0] < verdicts[0]
               and lines[verdicts[0]] == 'RESTORE REHEARSAL: PASS'
               and deleted[0] > verdicts[0] and not failed)
     return {'verdict': 'PASS' if passed else 'FAIL'}
