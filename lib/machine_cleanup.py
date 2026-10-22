@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import fcntl
 import os
 import subprocess
 from pathlib import Path
@@ -11,6 +12,31 @@ import uuid
 from branch_retirement import CommandError, GitHub, git, command, process_paths, save, fetch_remote_refs, remote_preserves
 from job_watchdog import epoch
 from lib.cleanup_budget import BudgetExhausted, bounded, check, entries
+
+
+def clone_writer_active(clone):
+    from job_watchdog import process_group_alive
+    lock = Path(clone) / '.git/room-writer.lock'
+    try:
+        if lock.is_symlink():
+            return True
+        with lock.open() as stream:
+            try:
+                fcntl.flock(stream, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            text = stream.read()
+            if not text.strip():
+                return False
+            executor = json.loads(text)
+            pgid = executor.get('pgid')
+            if executor.get('kind') == 'process_group' and type(pgid) is int and pgid > 0:
+                return process_group_alive(pgid)
+            return True
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError, AttributeError):
+        return True
 
 
 def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than, dry_run, deadline=None):
@@ -26,11 +52,13 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         check(deadline)
         if workspace.resolve() != workspace or clone.resolve() != clone or not (clone / '.git').is_dir() or (clone / '.git').is_symlink():
             return keep('symlink or unrecognized standalone checkout')
-        if not dispatch or dispatch.get('status') != 'completed' or dispatch.get('termination_confirmed') is False:
+        if not dispatch or dispatch.get('status') != 'completed' or dispatch.get('termination_confirmed') is not True:
             return keep('finished dispatch not proven')
         if (dispatch.get('checkout_path') != str(clone) or
                 dispatch.get('checkout_workspace') != str(workspace)):
             return keep('dispatch checkout identity mismatch')
+        if clone_writer_active(clone):
+            return keep('live writer or writer evidence unavailable')
         identity = workspace.stat().st_ino, clone.stat().st_ino
         repo = 'jbookout/carr-system'
         try:
@@ -70,6 +98,8 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
                 not branch and any(p['state'] == 'open' for p in provider.commit_pulls(repo, head))):
             return keep('open PR appeared before staging')
         fetch_remote_refs(clone)
+        if clone_writer_active(clone):
+            return keep('writer appeared before staging')
         busy = process_probe([str(workspace)])
         if (busy is None or busy or workspace.resolve() != workspace or clone.resolve() != clone or
                 identity != (workspace.stat().st_ino, clone.stat().st_ino) or
@@ -173,6 +203,7 @@ def latest_dispatch(path, *, workspace=None, thread_id=None, deadline=None):
 def recover_clone(workspace, *, deadline=None):
     workspace = Path(workspace)
     observed = None
+    no_effect = None
     staging = workspace.parent / '_to_delete'
     candidates = entries(staging, deadline) if staging.is_dir() else ()
     for entry in candidates:
@@ -188,10 +219,9 @@ def recover_clone(workspace, *, deadline=None):
             continue
         staged = Path(row['staged_path'])
         if workspace.exists() and not staged.exists():
-            if git(workspace / 'checkout', 'rev-parse', 'HEAD') != row['head']:
-                raise RuntimeError('interrupted clone candidate changed')
             check(deadline)
-            save(manifest, {**row, 'status': 'verified_no_effect'})
+            no_effect = {**row, 'kind': 'job_clone', 'status': 'verified_no_effect'}
+            save(manifest, no_effect)
             continue
         if observed or workspace.exists() or not staged.exists() or git(staged / 'checkout', 'rev-parse', 'HEAD') != row['head']:
             raise RuntimeError('interrupted clone move is ambiguous')
@@ -200,7 +230,7 @@ def recover_clone(workspace, *, deadline=None):
         save(manifest, observed)
     if not workspace.exists() and observed is None:
         raise RuntimeError('interrupted clone destination unavailable')
-    return observed
+    return observed or no_effect
 
 
 def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
@@ -410,7 +440,7 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                         except BudgetExhausted:
                             report['budget_exhausted'] = True
                             break
-                        if latest.get('status') != 'completed' or latest.get('termination_confirmed') is False:
+                        if latest.get('status') != 'completed' or latest.get('termination_confirmed') is not True:
                             result = {'kind': 'thread', 'thread_id': tid, 'status': 'kept', 'reason': 'finished dispatch not proven'}
                         elif now - epoch(latest['dispatched_at']) < policy['thread_age_seconds']:
                             result = {'kind': 'thread', 'thread_id': tid, 'status': 'kept', 'reason': 'recent dispatch'}

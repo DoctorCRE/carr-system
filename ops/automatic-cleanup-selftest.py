@@ -1246,12 +1246,16 @@ class ScheduledCleanupTests(unittest.TestCase):
         receipt = fixture.repo / 'out/machine-cleanup.json'
         receipt.parent.mkdir()
         receipt.write_text(json.dumps({'pending': pending, 'at': 0}))
+        later = fixture.base / 'carr-ci-test-later'
+        later.mkdir()
+        os.utime(later, (0, 0))
         config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
         report = cleanup.run(fixture.repo, config, hook=fixtures.hook,
-            tmp_root=fixture.base, dispatch_path=fixture.base / 'absent', roots={},
+            tmp_root=fixture.base, user_tmp_root=fixture.base, dispatch_path=fixture.base / 'absent', roots={},
             provider=fixtures.FakeProvider(), process_probe=lambda paths: set(),
             archive_thread=lambda *a, **k: None)
         self.assertEqual(report['status'], 'completed', report)
+        self.assertTrue(any(row.get('path') == str(later) for row in report['removed']), report)
         self.assertNotIn('pending', report)
         self.assertFalse(report['errors'], report)
         self.assertEqual(json.loads((target / 'manifest.json').read_text())['status'], 'verified_no_effect')
