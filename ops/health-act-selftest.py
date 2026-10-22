@@ -63,9 +63,9 @@ JOBS = ("WARN scheduled jobs com.carr.calendar-eventkit failing_exit: last exit 
         "owner orchestrator · fix: inspect the job log and repair the failing command; verify a successful run · "
         "verify: python3 ops/scheduled-jobs-check.py · auto-clear: next complete scan without failing_exit for "
         "com.carr.calendar-eventkit")
-MISSED_JOB = ("example-workflow-daily MISSED its 2026-10-12 06:30 CDT run (never scheduled); "
+PREBRIEF = ("calendar-prebrief-projection-joe-daily MISSED its 2026-10-12 06:30 CDT run (never scheduled); "
             "2 of the last 2 weekday slot(s) missed · on breach: update loop #665 (owner joe-desk session) — "
-            "read out/example-workflow.log and the job's failure_class, fix the named gate, verify "
+            "read out/calendar-prebrief-joe-launchd.log and the job's failure_class, fix the named gate, verify "
             "with the next 06:30 weekday receipt; clears when the latest due slot succeeds with event_count > 0")
 UPTIME = ("WARN production uptime · monitor unreachable or response invalid · on breach: carr-uptime replays "
           "one production incident loop; this reader opens one monitor-availability loop if monitoring fails; "
@@ -162,7 +162,7 @@ RED = [
     finding("branch_janitor", JANITOR, "three-repo-retirement"),   # bound, no loop yet -> filed
     finding("ai_seat_health", SEAT, "grok"),                       # reader-filed loop -> covered
     finding("export_receipt", "STALE vendors.xlsx (last ok 2026-10-09T07:13)", "vendors.xlsx"),  # unbound
-    finding("calendar_prebrief_missed_run", MISSED_JOB, "example-workflow-daily"),  # #665
+    finding("calendar_prebrief_missed_run", PREBRIEF, "calendar-prebrief-projection-joe-daily"),  # #665
     finding("grok_session", GROK),                                 # Joe-owned, no loop -> filed as joe
     finding("scheduled_jobs_failing_exit", JOBS, "com.carr.calendar-eventkit"),  # names its filer -> delegated
 ]
@@ -218,7 +218,7 @@ def scenario(lib):
         expect(decisions.get("ai_seat_health/grok") == "covered", "reader-filed seat loop must be covered")
         seat = [r for r in report.receipts if r["row_id"] == "ai_seat_health/grok"]
         expect(bool(seat) and seat[0].get("duplicates") == ["713", "738"], "duplicates must be receipted")
-        expect(decisions.get("calendar_prebrief_missed_run/example-workflow-daily") == "covered",
+        expect(decisions.get("calendar_prebrief_missed_run/calendar-prebrief-projection-joe-daily") == "covered",
                "a row naming loop #665 is covered by #665 while it is open")
         expect(decisions.get("export_receipt/vendors.xlsx") == "unbound", "an unbound row is never filed")
         expect(decisions.get(jobs_row) == "delegated" and not [a for _, a in adds if "eventkit" in a["body"]],
@@ -375,9 +375,9 @@ class HealthActTests(unittest.TestCase):
                 self.assertEqual((b.action.owner, b.action.remediation, b.action.verify, b.action.auto_clear),
                                  (owner, remediation, verify, clear))
                 self.assertEqual(b.dedup_key, dedup)
-        missed_job = lib.breach_from_finding(finding("calendar_prebrief_missed_run", MISSED_JOB))
-        self.assertEqual((missed_job.dedup_key, missed_job.action.owner), ("#665", "joe-desk session"))
-        self.assertTrue(missed_job.action.remediation.startswith("read out/example-workflow.log"))
+        prebrief = lib.breach_from_finding(finding("calendar_prebrief_missed_run", PREBRIEF))
+        self.assertEqual((prebrief.dedup_key, prebrief.action.owner), ("#665", "joe-desk session"))
+        self.assertTrue(prebrief.action.remediation.startswith("read out/calendar-prebrief-joe-launchd.log"))
         self.assertIsNone(lib.breach_from_finding(finding("export_receipt", "STALE vendors.xlsx")).action)
 
     def test_reader_phrases_still_appear_in_their_readers(self):

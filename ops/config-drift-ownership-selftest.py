@@ -52,7 +52,7 @@ REPORT = """config-as-code: DRIFT — 2 of 49 items
 """
 
 LAUNCHD_REPORT = """config-as-code: DRIFT — 1 of 49 items
-  launchd com.carr.example-job.plist
+  launchd com.carr.calendar-prebrief-joe.plist
       TRACKED BUT DIFFERENT from the live copy
 """
 
@@ -64,8 +64,8 @@ check("a launchd repair does not inherit somebody else's scheduled-task drift",
 
 # ── WHAT MUST STILL FAIL, or the narrowing is a hole ─────────────────────────
 check("a branch touching the drifting launchd file still owns it",
-      mod.owned(["ops/launchd/com.carr.example-job.plist"], LAUNCHD_REPORT)
-      == ["launchd com.carr.example-job.plist"])
+      mod.owned(["ops/launchd/com.carr.calendar-prebrief-joe.plist"], LAUNCHD_REPORT)
+      == ["launchd com.carr.calendar-prebrief-joe.plist"])
 
 check("a branch touching the drifting scheduled task still owns it",
       mod.owned(["ops/scheduled-tasks/notes-sweep-hourly.json"], REPORT)
@@ -93,9 +93,9 @@ check("a clean report yields nothing to own",
                 "config-as-code: 49 of 49 items match") == [])
 
 check("the plist suffix is not required to match on either side",
-      mod.owned(["ops/launchd/com.carr.example-job.plist"],
-                "  launchd com.carr.example-job\n      DIFFERENT")
-      == ["launchd com.carr.example-job"])
+      mod.owned(["ops/launchd/com.carr.calendar-prebrief-joe.plist"],
+                "  launchd com.carr.calendar-prebrief-joe\n      DIFFERENT")
+      == ["launchd com.carr.calendar-prebrief-joe"])
 
 # ── ONE CODE PATH, TWO CALLERS ───────────────────────────────────────────────
 # ops/ci.sh must ask THIS module rather than carry its own copy of the rule.

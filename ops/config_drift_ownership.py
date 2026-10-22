@@ -49,7 +49,7 @@ MECHANISM_PATHS = ("ops/config-as-code.py", "ops/config/settings")
 
 # The families the drift report names. A drift line looks like
 #     "  scheduled-task notes-sweep-hourly"
-#     "  launchd com.carr.example-job.plist"
+#     "  launchd com.carr.calendar-prebrief-joe.plist"
 # ITEM LINES SIT AT TWO SPACES, DETAIL LINES AT SIX. Keying on indentation
 # rather than on a closed list of families is what lets an UNRECOGNISED family
 # be seen at all — and being seen is what lets it be treated as owned rather
@@ -61,7 +61,7 @@ FAMILY_DIR = {"launchd": "ops/launchd/", "scheduled-task": "ops/scheduled-tasks/
 
 # A declaration is named on disk with an extension and in the drift report
 # usually without one. Only these suffixes are stripped: chopping at the last
-# dot unconditionally would mangle com.carr.example-job into
+# dot unconditionally would mangle com.carr.calendar-prebrief-joe into
 # com.carr.calendar-prebrief.
 _SUFFIXES = (".plist", ".json", ".yaml", ".yml", ".toml")
 
