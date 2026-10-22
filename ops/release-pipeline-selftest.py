@@ -691,8 +691,14 @@ LEGACY_HEALTH_FAILURE = json.loads(r'''{
 
 
 class LegacyHealthPromotion(Base):
-    def legacy(self, *, exact=False):
+    def legacy(self, *, exact=False, recorded=False):
         row = json.loads(json.dumps(LEGACY_HEALTH_FAILURE))
+        if recorded:
+            row.update(sha='51e850dba50234f95834e585a804c5aabd21868f',
+                       from_sha='04169fded30637383ec06ede425f8a7d453c8dcd',
+                       run_id='20261021T225805Z-bb7c7c')
+            row['promotion'].update(sha=row['sha'],
+                                    provider_version_id='e8091a37-a3d9-4deb-9a53-bb959d1669c2')
         self.legacy_calls = getattr(self, 'legacy_calls', 0) + 1
         target = self.fx.commit({'mcp-server/src/a.js': f'legacy promoted {self.legacy_calls}'})
         if not exact:
@@ -705,6 +711,10 @@ class LegacyHealthPromotion(Base):
                  'failed_step': 'health', 'failed_run_id': row['run_id'],
                  'last_shipped_proof': 'old-healthy-proof'}}
         pipe.store.save(state)
+        if recorded:
+            pipe.store.record_durable({'lane': 'worker', 'status': 'worker_promoted',
+                'run_id': row['run_id'], 'from_sha': row['from_sha'], **row['promotion']})
+            row['promotion'] = None
         pipe.store.record_durable(row)
         run = pipe.store.root / 'runs' / row['run_id']
         run.mkdir(parents=True, exist_ok=True)
@@ -725,6 +735,25 @@ class LegacyHealthPromotion(Base):
         if exact:
             pipe._at_or_before = lambda a, b, repo: True
         return pipe, state, row, runner, target
+
+    def test_recorded_health_failure_recovers_from_its_run_after_source_checkpoint_advanced(self):
+        pipe, state, row, runner, main = self.legacy(exact=True, recorded=True)
+        state['worker'].update(last_released_sha='2d6f77b543255d27d61cc796a48aee4815493fee',
+                               pending_promotion=None)
+        pipe.store.save(state)
+        pipe.reconcile_worker_identity(state, pipe.cfg['worker'], main)
+        saved = pipe.store.load()['worker']
+        self.assertEqual(saved['last_released_sha'], row['sha'])
+        self.assertEqual(saved['failed_sha'], row['sha'])
+        self.assertEqual(saved['failed_step'], 'health')
+        self.assertEqual(saved['failed_run_id'], row['run_id'])
+        self.assertEqual(saved['last_shipped_proof'], 'old-healthy-proof')
+        receipt = pipe.store.records()[-1]
+        self.assertEqual(receipt['recovered_failure'], {'run_id': row['run_id'], 'step': 'health'})
+        self.assertFalse(receipt['legacy_promotion']['health_verified'])
+        self.assertEqual(pipe.store.records()[1]['promotion'], None)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.slice_marks, [])
 
     def test_exact_legacy_health_failure_recovers_identity_without_claiming_health(self):
         pipe, state, row, runner, main = self.legacy(exact=True)
