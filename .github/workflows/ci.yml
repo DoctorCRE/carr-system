@@ -163,6 +163,7 @@ jobs:
             if [ "${{ needs.scope.outputs.full }}" = false ]; then
               echo "migration: not applicable; see db-scope receipt" | tee -a "$GITHUB_STEP_SUMMARY"
             else
+              python3 ops/migration-open-pr-gate.py
               python ops/local-pg-ci.py --class migration --migration-part core
             fi
           else
