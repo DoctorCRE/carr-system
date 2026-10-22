@@ -36,6 +36,9 @@ for path in ('migrations/0363_x.sql', 'db/schema.sql', 'mcp-server/src/tools.js'
 for path in ('hooks/rule-pack-preuse-reselection.py', 'web/app.js', 'README.md',
              'docs/agents/domain.md'):
     check(f'{path} alone skips the lane', not scope.needs_full([path]))
+for path in subprocess.run(['git', 'ls-files', '*.sql'], cwd=Path(__file__).resolve().parents[1],
+                           env=ENV, capture_output=True, text=True, check=True).stdout.splitlines():
+    check(f'tracked SQL {path} runs the lane', scope.needs_full([path]))
 check('one DB file among others runs the lane',
       scope.needs_full(['README.md', 'hooks/a.py', 'migrations/0400_y.sql']))
 # Derive the lane's own inputs from the files that name them, so the list cannot drift.
