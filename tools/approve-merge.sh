@@ -15,8 +15,13 @@ if [ "$#" = 1 ] && [ "$1" = --from-work-queue ]; then
   done <<< "$pins"
   exit 0
 fi
+reason=''
+if [ "$#" = 5 ] && [ "$4" = --skip-skill-audit ] && [[ "$5" =~ [^[:space:]] ]]; then
+  reason=$5
+  set -- "$1" "$2" "$3"
+fi
 if [ "$#" != 3 ] || ! [[ "$1" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$2" =~ ^[1-9][0-9]*$ && "$3" =~ ^[0-9a-f]{40}$ ]]; then
-  echo 'Usage: tools/approve-merge.sh <owner/repo> <pr> <approved_sha> | --from-work-queue' >&2
+  echo 'Usage: tools/approve-merge.sh <owner/repo> <pr> <approved_sha> [--skip-skill-audit "reason"] | --from-work-queue' >&2
   exit 64
 fi
 repo=$1
@@ -38,6 +43,17 @@ fi
 if jq -e '.labels | any(.name == "do_not_merge")' <<< "$snapshot" >/dev/null; then
   echo 'Refusing approval: do_not_merge label is present.' >&2
   exit 1
+fi
+if ! python3 "$root/tools/skill-audit.py" --pr "$repo#$pr" --expected-head "$approved_sha"; then
+  if [ -z "$reason" ]; then
+    echo 'Refusing approval: skill use is not VERIFIED for the approved head.' >&2
+    exit 1
+  fi
+  comment=$(mktemp)
+  trap 'rm -f "$comment"' EXIT
+  printf 'Skill audit bypass for head `%s`.\n\nReason: %s\n' "$approved_sha" "$reason" > "$comment"
+  sleep 2
+  gh pr comment "$pr" --repo "$repo" --body-file "$comment"
 fi
 if jq -e '.autoMergeRequest != null' <<< "$snapshot" >/dev/null; then
   exit 0

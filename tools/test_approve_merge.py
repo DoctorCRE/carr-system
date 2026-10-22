@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -18,6 +19,17 @@ class ApproveMergeTests(unittest.TestCase):
         self.log = self.root / 'calls'
         self.snapshot = self.root / 'pr.json'
         self.pr = dict(state='OPEN', headRefOid=SHA, labels=[], autoMergeRequest=None)
+        tools = self.root / 'tools'
+        tools.mkdir()
+        self.command = tools / 'approve-merge.sh'
+        shutil.copyfile(ROOT / 'tools/approve-merge.sh', self.command)
+        (tools / 'room-bridge').symlink_to(ROOT / 'tools/room-bridge', target_is_directory=True)
+        (tools / 'skill-audit.py').write_text('''import os, sys
+from pathlib import Path
+Path(os.environ['AUDIT_TEST_LOG']).write_text(' '.join(sys.argv[1:]))
+print('MISSING' if os.environ.get('AUDIT_TEST_EXIT') == '1' else 'VERIFIED')
+sys.exit(int(os.environ.get('AUDIT_TEST_EXIT', '0')))
+''')
         gh = self.root / 'gh'
         gh.write_text('''#!/usr/bin/env python3
 import json, os, sys
@@ -26,6 +38,9 @@ with open(os.environ['GH_TEST_LOG'], 'a') as log:
     log.write(json.dumps(sys.argv[1:]) + '\\n')
 if sys.argv[1:3] == ['pr', 'view']:
     print(Path(os.environ['GH_TEST_PR']).read_text())
+elif sys.argv[1:3] == ['pr', 'comment']:
+    if os.environ.get('COMMENT_TEST_FAIL'): sys.exit(1)
+    Path(os.environ['COMMENT_TEST_BODY']).write_text(Path(sys.argv[sys.argv.index('--body-file')+1]).read_text())
 elif sys.argv[1:3] != ['pr', 'merge']:
     sys.exit('unexpected GitHub command')
 ''')
@@ -34,11 +49,13 @@ elif sys.argv[1:3] != ['pr', 'merge']:
         sleep.write_text('#!/bin/sh\nexit 0\n')
         sleep.chmod(0o755)
         self.env = dict(os.environ, PATH=str(self.root) + os.pathsep + os.environ['PATH'],
-                        GH_TEST_LOG=str(self.log), GH_TEST_PR=str(self.snapshot))
+                        GH_TEST_LOG=str(self.log), GH_TEST_PR=str(self.snapshot),
+                        AUDIT_TEST_LOG=str(self.root / 'audit-call'),
+                        COMMENT_TEST_BODY=str(self.root / 'comment-body'))
 
     def run_command(self, *args):
         self.snapshot.write_text(json.dumps(self.pr))
-        return subprocess.run(['bash', str(ROOT / 'tools/approve-merge.sh'), *args],
+        return subprocess.run(['bash', str(self.command), *args],
                               env=self.env, text=True, capture_output=True)
 
     def calls(self):
@@ -64,6 +81,34 @@ elif sys.argv[1:3] != ['pr', 'merge']:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls()[-1], ['pr', 'merge', '12', '--repo', 'example/repo',
                                           '--auto', '--squash', '--match-head-commit', SHA])
+        self.assertEqual((self.root / 'audit-call').read_text(),
+                         '--pr example/repo#12 --expected-head ' + SHA)
+
+    def test_missing_skill_evidence_refuses_auto_merge(self):
+        self.env['AUDIT_TEST_EXIT'] = '1'
+        result = self.run_command('example/repo', '12', SHA)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(c[:2] == ['pr', 'merge'] for c in self.calls()))
+
+    def test_bypass_posts_reason_before_requesting_auto_merge(self):
+        self.env['AUDIT_TEST_EXIT'] = '1'
+        result = self.run_command('example/repo', '12', SHA, '--skip-skill-audit', 'Legacy emergency repair')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([c[:2] for c in self.calls()], [['pr', 'view'], ['pr', 'comment'], ['pr', 'merge']])
+        self.assertIn('Legacy emergency repair', (self.root / 'comment-body').read_text())
+        self.assertIn(SHA, (self.root / 'comment-body').read_text())
+
+    def test_failed_bypass_comment_never_enables_auto_merge(self):
+        self.env['AUDIT_TEST_EXIT'] = '1'
+        self.env['COMMENT_TEST_FAIL'] = '1'
+        result = self.run_command('example/repo', '12', SHA, '--skip-skill-audit', 'Visible reason required')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(c[:2] == ['pr', 'merge'] for c in self.calls()))
+
+    def test_blank_bypass_reason_refuses(self):
+        result = self.run_command('example/repo', '12', SHA, '--skip-skill-audit', '  ')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.calls())
 
     def test_missing_label_evidence_refuses(self):
         del self.pr['labels']
