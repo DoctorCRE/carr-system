@@ -7,9 +7,15 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops"))
+from git_env import fixture_env  # noqa: E402
+
+GIT_ENV = fixture_env()
 
 SPEC = importlib.util.spec_from_file_location("board", Path(__file__).with_name("progress_board.py"))
 assert SPEC is not None and SPEC.loader is not None
@@ -347,7 +353,7 @@ class ReleaseAncestry(unittest.TestCase):
     def test_local_git_distinguishes_ancestor_descendant_and_missing_objects(self):
         with tempfile.TemporaryDirectory() as root:
             def git(*args):
-                return subprocess.run(['git', '-C', root, *args], check=True, capture_output=True, text=True).stdout.strip()
+                return subprocess.run(['git', '-C', root, *args], check=True, capture_output=True, text=True, env=GIT_ENV).stdout.strip()
             git('init', '-q')
             git('-c', 'user.name=Synthetic', '-c', 'user.email=jbookout@users.noreply.github.com',
                 'commit', '--allow-empty', '-qm', 'base')
