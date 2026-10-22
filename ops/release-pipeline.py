@@ -815,10 +815,7 @@ class Pipeline:
         directories = {
             "MINIFLARE_CACHE_DIR": root / "miniflare",
             "WRANGLER_CACHE_DIR": root / "wrangler-cache",
-            "XDG_CONFIG_HOME": root / "config",
-            "XDG_CACHE_HOME": root / "cache",
             "WRANGLER_LOG_PATH": root / "logs",
-            "TMPDIR": root / "tmp",
         }
         for path in (root, *directories.values()):
             if (not path.resolve().is_relative_to(self.run_dir.resolve())
@@ -826,9 +823,7 @@ class Pipeline:
                 raise Blocked("toolchain_runtime_path", "runtime directory resolves into the pinned toolchain or outside this run")
         for path in directories.values():
             path.mkdir(parents=True, exist_ok=True)
-        github_config = env.get("GH_CONFIG_DIR") or str(
-            Path(env.get("XDG_CONFIG_HOME") or Path(env["HOME"]) / ".config") / "gh")
-        return {**env, "GH_CONFIG_DIR": github_config,
+        return {**env,
                 **{name: str(path) for name, path in directories.items()},
                 "CLOUDFLARE_CF_FETCH_PATH": str(directories["MINIFLARE_CACHE_DIR"] / "cf.json")}
 
@@ -836,9 +831,7 @@ class Pipeline:
                     env: dict[str, str] | None = None, timeout: int = 3600) -> Result:
         for home in self.toolchain_integrity:
             self.verify_toolchain(home)
-        env = self.env if env is None else env
-        if Path(argv[0]).name not in {"git", "gh"}:
-            env = self.runtime_env(env)
+        env = self.runtime_env(self.env if env is None else env)
         try:
             return self.runner.run(argv, cwd=cwd, log=log, env=env,
                                    timeout=timeout, read_only=tuple(self.toolchain_integrity))
