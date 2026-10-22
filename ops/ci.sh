@@ -21,11 +21,6 @@ if [ "${1:-}" = "--doc-drift" ]; then
   exec "${CARR_DOC_DRIFT_PYTHON:-$PY}" "$REPO/scripts/doc-drift/ci.py" "$@"
 fi
 
-if [ "${1:-}" = "--pr-skills" ]; then
-  node --test mcp-server/test/pr-skills.test.mjs || exit 1
-  exec node ops/check-pr-skills.mjs
-fi
-
 STRICT=0
 ONLY=""
 MIGRATION_PART=all
@@ -429,7 +424,7 @@ check_pushfloor() {
 
   run_quiet "$LOGDIR/pushfloor-hook-deletion.log" "$PY" ops/hook-deletion-check.py \
     || { cat "$LOGDIR/pushfloor-hook-deletion.log" >&2
-         floor_fail hook-deletion "unwire hook scripts in a prior PR before deleting or renaming them"; }
+         floor_fail hook-deletion "remove hook registrations before deleting or renaming their scripts"; }
 
   if [ -n "$changed" ] && [ -f ops/githooks/path-hygiene-check.py ]; then
     local added
@@ -500,7 +495,7 @@ check_pushfloor() {
 
   local gate_surface=""
   if [ -n "$changed" ]; then
-    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(delegation-gate-hook|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
+    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(hook-script-policy|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
   fi
   if [ -n "$gate_surface" ]; then
     ran="$ran gate-closure"

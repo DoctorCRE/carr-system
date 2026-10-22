@@ -215,7 +215,7 @@ def check_and_install_cases() -> list[bool]:
     """Drive the refusal through cmd_check and cmd_install, not only the helpers."""
     out: list[bool] = []
     saved = {name: getattr(mod, name) for name in (
-        "HOME", "REPO", "REPO_HERE", "SETTINGS", "CLAUDE_CONTINUITY_MODE_FILE", "CLAUDE_MCP_CONFIG",
+        "HOME", "REPO", "REPO_HERE", "SETTINGS",
         "TASKS_SRC", "TASKS_REPO", "TASKS_QUARANTINE", "LAUNCHD_SRC", "LAUNCHD_REPO",
         "LAUNCHD_ALT_REPO", "HOOKS_REPO", "CODEX_HOOKS_SRC", "CODEX_CONFIG",
         "PREREQUISITE_CHECK")}
@@ -248,12 +248,6 @@ def check_and_install_cases() -> list[bool]:
             launchd.mkdir(parents=True)
             (repo / "ops" / "scheduled-tasks").mkdir(parents=True)
             (repo / "ops" / "config").mkdir(parents=True, exist_ok=True)
-            for relative in ("ops/config/claude-continuity-hooks.json",
-                             "ops/claude-continuity-hook.py",
-                             "mcp-server/continuity-stdio-proxy.mjs"):
-                target = repo / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes((REPO / relative).read_bytes())
             (repo / "ops" / "config" / "hooks.json").write_text(
                 '{\n  "PreToolUse": []\n}\n', encoding="utf-8")
             planted = plistlib.dumps({"Label": "com.carr.planted",
@@ -267,8 +261,6 @@ def check_and_install_cases() -> list[bool]:
             mod.HOME = str(home)
             mod.REPO = mod.REPO_HERE = str(repo)
             mod.SETTINGS = str(home / ".claude" / "settings.json")
-            mod.CLAUDE_CONTINUITY_MODE_FILE = str(home / ".config/carr/claude-continuity-mode.json")
-            mod.CLAUDE_MCP_CONFIG = str(home / ".claude.json")
             mod.TASKS_SRC = str(home / ".claude" / "scheduled-tasks")
             mod.TASKS_REPO = str(repo / "ops" / "scheduled-tasks")
             mod.TASKS_QUARANTINE = str(home / ".claude" / "scheduled-tasks-quarantine")

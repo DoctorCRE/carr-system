@@ -39,20 +39,6 @@
       ]
     },
     {
-      "caller": "jev_executor_tier",
-      "trigger": "PreToolUse Agent: pick the cheapest qualified model tier",
-      "runs_in": "interactive Claude sessions via hooks/executor-tier-gate.py",
-      "attribution": "session",
-      "unattended": "off",
-      "hourly_budget": 0,
-      "daily_budget": 0,
-      "owner": "orchestrator",
-      "value": "verdict consumed by code (rewrites or denies the subagent model); ~4 calls a day",
-      "sources": [
-        "ops/jev_executor_tier.py"
-      ]
-    },
-    {
       "caller": "jev_code_review",
       "trigger": "PostToolUse Write/Edit/apply_patch with <=400 added lines and a signature match",
       "runs_in": "interactive sessions via hooks/lint-gate.py",

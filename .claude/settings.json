@@ -12,26 +12,11 @@
             "timeout": 10
           }
         ]
-      },
-      {
-        "matcher": "Bash|Read|Grep|Glob|WebFetch|WebSearch",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; fi; if [ ! -e \"$r/hooks/delegation-gate.py\" ] && [ ! -L \"$r/hooks/delegation-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/delegation-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/delegation-gate.py\"",
-            "timeout": 10
-          }
-        ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; fi; if [ ! -e \"$r/hooks/delegation-gate.py\" ] && [ ! -L \"$r/hooks/delegation-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/delegation-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/delegation-gate.py\"",
-            "timeout": 10
-          },
           {
             "type": "command",
             "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; fi; if [ ! -e \"$r/hooks/rule-claim-gate.py\" ] && [ ! -L \"$r/hooks/rule-claim-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/rule-claim-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/rule-claim-gate.py\"",

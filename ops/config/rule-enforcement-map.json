@@ -219,7 +219,6 @@
       "meaning": "An external control refuses the named operation before it runs.",
       "test": [
         "ops/guard-selftest.py",
-        "ops/delegation-gate-selftest.py",
         "ops/conduct-gate-selftest.py"
       ]
     },
@@ -249,13 +248,10 @@
     "session_task_rail": {
       "friction": "No prompt-time ceremony for ordinary work.",
       "implementation": [
-        "session-brief.py",
-        "delegation-gate.py"
+        "session-brief.py"
       ],
       "meaning": "A task-start or phase-boundary rail supplies state, routing, or reminders; it is not a universal operation denial.",
-      "test": [
-        "ops/delegation-gate-selftest.py"
-      ]
+      "test": []
     },
     "transactional_schema": {
       "friction": "Only an invalid or concurrent write is refused.",
@@ -413,15 +409,6 @@
         "ops/room-bridge-selftest.py"
       ]
     },
-    "delegation_tripwire": {
-      "failure_mode": "PreToolUse block (WR-000019 S4, 2026-08-27: no longer a deny \u2014 the gate never returns exit 2 or {\"decision\": \"block\"} from anywhere now. It records a per-session ledger row at Stop (out/delegation-gate-ledger.jsonl, queryable via ops/delegation-telemetry-report.py) and speaks a non-reopening Stop ANNOUNCE only when a session materially under-delegated. hooks/executor-tier-gate.py (control executor_tier) is a different rule's control and still denies a subagent spawn naming no model or reasoning effort.)",
-      "implementation": [
-        "hooks/delegation-gate.py"
-      ],
-      "test": [
-        "ops/delegation-gate-selftest.py"
-      ]
-    },
     "draft_export_read": {
       "failure_mode": "surfaces the draft's age beside the live render; allows the read, never denies",
       "implementation": [
@@ -438,15 +425,6 @@
       ],
       "test": [
         "ops/guard-selftest.py"
-      ]
-    },
-    "executor_tier": {
-      "failure_mode": "PreToolUse deny",
-      "implementation": [
-        "hooks/executor-tier-gate.py"
-      ],
-      "test": [
-        "external:no dedicated suite yet"
       ]
     },
     "gate_integrity": {
@@ -727,6 +705,16 @@
       "test": [
         "ops/whose-work-selftest.py"
       ]
+    },
+    "delegation_guidance": {
+      "failure_mode": "Native agent instructions and task briefs supply model-selection guidance without automated refusal.",
+      "implementation": [
+        "AGENTS.md",
+        "tools/room-bridge/brief-footer.md"
+      ],
+      "test": [
+        "ops/harness-retirement-selftest.py"
+      ]
     }
   },
   "default_category": "judgment_advisory",
@@ -804,7 +792,7 @@
     "185013c6": {
       "binding_moment": "model selection",
       "category": "session_task_rail",
-      "control": "delegation_tripwire",
+      "control": "delegation_guidance",
       "enforcement_class": "surfacing",
       "exceptions": "peer tier when qualification requires"
     },
@@ -904,7 +892,7 @@
     "2b66211d": {
       "binding_moment": "fan-out brief",
       "category": "session_task_rail",
-      "control": "delegation_tripwire",
+      "control": "delegation_guidance",
       "enforcement_class": "surfacing",
       "exceptions": "mechanical verifier tier"
     },
@@ -1622,7 +1610,7 @@
     "c6f69dee": {
       "binding_moment": "agent staffing",
       "category": "session_task_rail",
-      "control": "delegation_tripwire",
+      "control": "delegation_guidance",
       "enforcement_class": "surfacing",
       "exceptions": "main retains final call"
     },
@@ -1732,7 +1720,7 @@
     "df55c398": {
       "binding_moment": "delegated scope brief",
       "category": "session_task_rail",
-      "control": "delegation_tripwire",
+      "control": "delegation_guidance",
       "enforcement_class": "surfacing",
       "exceptions": "explicit human data-class expansion"
     },
