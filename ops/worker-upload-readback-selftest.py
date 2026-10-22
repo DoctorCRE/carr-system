@@ -3,11 +3,13 @@
 import json
 import fcntl
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from git_env import fixture_env
@@ -122,6 +124,19 @@ class UploadReadback(unittest.TestCase):
         result = self.deploy()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls.read_text().count('versions upload'), 2)
+
+    def test_process_timeout_with_partial_identity_never_authorizes_retry(self):
+        module = runpy.run_path(str(ROOT / 'tools/worker-upload-readback.py'))
+        upload = module['upload']
+        expired = subprocess.TimeoutExpired(['fixture-upload'], 300,
+                                             output='Worker Version ID: ' + VERSION)
+        with mock.patch.dict(upload.__globals__, resolve=mock.Mock(return_value=None)), \
+                mock.patch.object(module['subprocess'], 'run', side_effect=expired) as run, \
+                mock.patch.object(module['time'], 'sleep') as sleep:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                upload(str(self.wrangler), SHA, DIGEST, self.root / '.git', [])
+        self.assertEqual(run.call_count, 1)
+        sleep.assert_not_called()
 
     def test_live_claim_blocks_concurrent_upload_and_expires_with_owner(self):
         self.provider([])

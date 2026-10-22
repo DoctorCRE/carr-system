@@ -116,12 +116,9 @@ def upload(wrangler: str, sha: str, digest: str, common_dir: Path, args: list[st
                 raise ValueError('existing candidate cannot attest requested secret rotation')
             return existing
         for attempt in range(3):
-            try:
-                result = subprocess.run([wrangler, 'versions', 'upload', *args], capture_output=True,
-                                        text=True, timeout=300, stdin=subprocess.DEVNULL)
-                output, rc = result.stdout + result.stderr, result.returncode
-            except subprocess.TimeoutExpired:
-                output, rc = 'network timeout', 124
+            result = subprocess.run([wrangler, 'versions', 'upload', *args], capture_output=True,
+                                    text=True, timeout=300, stdin=subprocess.DEVNULL)
+            output, rc = result.stdout + result.stderr, result.returncode
             identifiers = set(re.findall(r'Worker Version ID:\s*(' + UUID.pattern + ')', output.lower(), re.I))
             if len(identifiers) > 1:
                 raise ValueError('upload named conflicting immutable identities')
