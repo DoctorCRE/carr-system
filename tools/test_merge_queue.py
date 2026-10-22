@@ -1918,14 +1918,28 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.calls('merge'), [])
 
 
-    def test_behind_update_requires_enqueue_of_new_head_before_merge(self):
+    def test_daemon_merge_only_update_advances_work_pin_and_waits_for_ci(self):
         self.pr(state='behind')
+        self.data['required'] = [{'bucket': 'pending'}]
+        self.save()
         self.q.enqueue(module.REPOS[0], 1, self.approved)
         self.q.tick()
+        self.restart()
         self.q.tick()
         self.assertEqual(self.calls('merge'), [])
-        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], 'head_moved')
-        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            card = work.get(f'{module.REPOS[0]}#1@{self.approved}')
+            self.assertEqual(card['prs'][0]['head'], self.updated)
+            self.assertEqual(work.merge_order()['entries'][0]['head'], self.updated)
+            event = card['last_event']
+            self.assertEqual(event['actor'], 'merge-daemon')
+            self.assertIn('merge-only', event['reason'])
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.updated,)).fetchone()
+        self.assertEqual(row['outcome'], 'waiting_ci')
+        self.assertFalse(self.q.db.execute("SELECT 1 FROM entries WHERE outcome='head_moved'").fetchone())
+        self.load()['required'] = [{'bucket': 'pass'}]
+        self.save()
         self.q.tick()
         self.assertEqual(len(self.calls('merge')), 1)
         self.assertEqual(self.calls('merge')[0][-1], self.updated)
