@@ -4,6 +4,7 @@ import { invoiceTrackerTools } from "./invoice-tracker.js";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.js";
 import { readDealChecklist } from "./deal-checklist.js";
+import { dealItemTools, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.js";
 import { bindReferralDeal } from "./relationship-network.js";
 import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
 import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLeadLifecycle } from "./lead-workspace.js";
@@ -2303,7 +2304,7 @@ async function appendDealNextStep(c, actor, dealId, text, nextDate, key) {
   // their own on the deal; replacing yours drops (does not complete) it.
   await c.query(
     `update next_action set status='dropped', updated_by=$1
-      where subject_type='deal' and subject_id=$2 and owner_id=$1 and status='open'
+      where subject_type='deal' and subject_id=$2 and owner_id=$1 and status='open' and item_title is null
       /* dealroom:drop-prior-action */`, [actor.id, dealId]);
   const action = await c.query(
     `insert into next_action (subject_type, subject_id, owner_id, due_on,
@@ -2350,17 +2351,17 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
     `select d.next_date::text as next_date, d.next_date < current_date as overdue, d.owner,
             n.id as action_id, b.next_step
        from deal d left join v_deal_room_board b on b.id=d.id left join lateral (
-         select id, description from next_action where subject_type='deal' and subject_id=d.id and status='open'
+         select id, description from next_action where subject_type='deal' and subject_id=d.id and status='open' and item_title is null
           order by updated_at desc, id desc limit 1
        ) n on true where d.id=$1 /* dealroom:status-plan */`, [dealId])).rows[0];
   const dropped = (await c.query(
     `update next_action set status='dropped', updated_by=$2
-      where subject_type='deal' and subject_id=$1 and owner_id=any($3::uuid[]) and status='open'
+      where subject_type='deal' and subject_id=$1 and owner_id=any($3::uuid[]) and status='open' and item_title is null
         and ((id=$4 and $5::boolean) or (id is distinct from $4 and due_on < current_date))
       returning id, description, due_on::text as due_on /* dealroom:supersede-overdue */`, [dealId, actor.id, ownerIds, current.action_id, current.overdue])).rows;
   const postCall = (await c.query(
     `update capture_post_call_action set status='dropped', updated_at=clock_timestamp(), completed_at=null
-      where deal_id=$1 and owner_id=any($2::uuid[]) and status='open' and due_on < current_date
+      where deal_id=$1 and owner_id=any($2::uuid[]) and status='open' and item_title is null and due_on < current_date
       returning id, description, due_on::text as due_on /* dealroom:supersede-overdue-post-call */`,
     [dealId, ownerIds])).rows;
   const supersededIds = [...dropped, ...postCall].map(a => a.id);
@@ -2376,7 +2377,7 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
       superseded_post_call_action_ids: postCall.map(a => a.id) } : {}) };
   const next = (await c.query(
     `select description, due_on::text as due_on from next_action
-      where subject_type='deal' and subject_id=$1 and status='open'
+      where subject_type='deal' and subject_id=$1 and status='open' and item_title is null
       order by updated_at desc, id desc limit 1 /* dealroom:remaining-plan */`, [dealId])).rows[0];
   const nextDate = next?.due_on ?? null;
   await c.query("update deal set next_date=$2, updated_by=$3 where id=$1 /* dealroom:set-next-date */",
@@ -3519,8 +3520,13 @@ export const TOOLS = {
       // never been edited simply has no key — which the client must read as "no
       // base", never as a base of null-meaning-anything.
       const deals = await c.query(
-        `select b.id, b.name, b.type, b.phase, b.owner, b.attention,
+        `select b.id, b.name, b.short_name, b.type, b.phase, b.owner, b.attention,
                 to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step,
+                '${DEAL_ITEMS_SCHEMA}'::text as item_schema_version,
+                coalesce((select jsonb_agg(jsonb_build_object('id',i.id,'title',i.item_title,
+                  'due_on',to_jsonb(i.due_on)#>>'{}','status',i.status,'bullets',i.item_bullets,'source_ref',i.source_ref)
+                  order by i.created_order,i.id) from v_deal_room_action i where i.deal_id=b.id
+                  and i.item_title is not null and i.status <> 'dropped'),'[]'::jsonb) as items,
                 (b.next_step is null or b.next_date is null) as next_step_required, b.market, b.segment,
                 b.client_id, b.client_ref, b.client_name, ce.client_status, ce.client_version,
                 ce.prospect_engagement_status, b.account_client_id, b.account_client_ref,
@@ -4058,11 +4064,11 @@ export const TOOLS = {
       // metadata too, and 'done' would inflate any completion measure built on this.
       await c.query(
         `update next_action set status='dropped', updated_by=$4 where subject_type=$2 and subject_id=$3
-         and owner_id=$1 and status='open'`, [ownerId, s.type, s.id, actor.id]);
+         and owner_id=$1 and status='open' and item_title is null`, [ownerId, s.type, s.id, actor.id]);
       const droppedPostCall = s.type === "deal" ? (await c.query(
         `update capture_post_call_action
             set status='dropped',updated_at=now(),completed_at=null
-          where deal_id=$1 and owner_id=$2 and status='open'
+          where deal_id=$1 and owner_id=$2 and status='open' and item_title is null
           returning id,description /* capture:replace-post-call-actions */`,
         [s.id, ownerId])).rows : [];
       const droppedPostCallIds = [...(superseded.superseded_post_call_action_ids || []), ...droppedPostCall.map(x => x.id)];
@@ -4108,23 +4114,23 @@ export const TOOLS = {
       // it by hand.
       const r = await c.query(
         `update next_action set status='done', updated_by=$1
-          where subject_type=$2 and subject_id=$3 and owner_id=$1 and status='open'
+          where subject_type=$2 and subject_id=$3 and owner_id=$1 and status='open' and item_title is null
           returning id, description, due_on`, [actor.id, s.type, s.id]);
       const postCall = s.type === "deal" ? (await c.query(
         `update capture_post_call_action
             set status='done',updated_at=now(),completed_at=now()
-          where deal_id=$1 and owner_id=$2 and status='open'
+          where deal_id=$1 and owner_id=$2 and status='open' and item_title is null
           returning id,description,due_on /* capture:complete-post-call-actions */`,
         [s.id, actor.id])).rows : [];
       if (!r.rows.length && !postCall.length) {
         const others = (await c.query(
           `select a.slug as owner, n.description, n.due_on from next_action n
              join actor a on a.id = n.owner_id
-            where n.subject_type=$1 and n.subject_id=$2 and n.status='open'`, [s.type, s.id])).rows;
+            where n.subject_type=$1 and n.subject_id=$2 and n.status='open' and n.item_title is null`, [s.type, s.id])).rows;
         const otherPostCall = s.type === "deal" ? (await c.query(
           `select a.slug as owner,pca.description,pca.due_on
              from capture_post_call_action pca join actor a on a.id=pca.owner_id
-            where pca.deal_id=$1 and pca.status='open'
+            where pca.deal_id=$1 and pca.status='open' and pca.item_title is null
             /* capture:other-post-call-actions */`, [s.id])).rows : [];
         const openForOthers = [...others, ...otherPostCall];
         throw new ToolError({ error: "no_open_action", subject: s,
@@ -4957,12 +4963,12 @@ export const TOOLS = {
       // stays untouched.
       const done = await c.query(
         `update next_action set status='done', updated_by=$1
-          where subject_type=$2 and subject_id=$3 and owner_id=$1 and status='open'
+          where subject_type=$2 and subject_id=$3 and owner_id=$1 and status='open' and item_title is null
           returning id, description`, [actor.id, s.type, s.id]);
       const postCallDone = s.type === "deal" ? (await c.query(
         `update capture_post_call_action
             set status='done',updated_at=now(),completed_at=now()
-          where deal_id=$1 and owner_id=$2 and status='open'
+          where deal_id=$1 and owner_id=$2 and status='open' and item_title is null
           returning id,description,due_on /* capture:outreach-complete-post-call-actions */`,
         [s.id, actor.id])).rows : [];
 
@@ -9052,6 +9058,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
 
 
 const TOOL_REGISTRATION_SOURCE = Object.freeze({
+  'deal-items': 'mcp-server/src/deal-items.js',
   'feature-switches':'mcp-server/src/feature-switches.js',
   "inline": "mcp-server/src/tools.js",
   "deal-room-inline": "mcp-server/src/tools.js",
@@ -9154,7 +9161,7 @@ registerTools({
       const s = await resolveSubject(c, args.deal);
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
       let deal = await c.query(
-        `select b.id, b.name, b.phase, b.owner, b.type, b.market as city, b.segment, b.attention,
+        `select b.id, b.name, b.short_name, b.phase, b.owner, b.type, b.market as city, b.segment, b.attention,
                 to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step,
                 (b.next_step is null or b.next_date is null) as next_step_required, b.client_id, b.client_ref, b.client_name,
                 b.account_client_id, b.account_client_ref, b.account_name, b.account_owner,
@@ -9202,13 +9209,13 @@ registerTools({
         [s.id],
       );
       const actions = await c.query(
-        `select n.id, n.owner, n.description,
+        `select n.id, n.owner, n.description, n.item_title as title, n.item_bullets as bullets, n.source_ref,
                 to_jsonb(n.due_on)#>>'{}' as due_on, n.status,
                 to_jsonb(n.hold_until)#>>'{}' as hold_until,
                 to_jsonb(n.updated_at)#>>'{}' as updated_at
            from v_deal_room_action n
           where n.deal_id=$1
-          order by (n.status='open') desc, n.updated_at desc, n.id desc`, [s.id]);
+          order by n.created_order, n.id`, [s.id]);
       const activities = await c.query(
         `select a.id, to_jsonb(a.occurred_at)#>>'{}' as occurred_at, a.actor,
                 a.kind, a.summary, a.detail, a.source
@@ -9246,6 +9253,8 @@ registerTools({
       return stripDealPlaceholders({ schema_version: "deal-timeline.v1", checklist, lease: lease.rows[0] || null,
         deal_id: s.id, ...deal.rows[0], thread: thread.rows,
         critical_dates: criticalDates.rows, next_actions: actions.rows,
+        item_schema_version: DEAL_ITEMS_SCHEMA, items: actions.rows.filter(i => i.title && i.status !== 'dropped')
+          .map(({ id,title,due_on,status,bullets,source_ref }) => ({ id,title,due_on,status,bullets,source_ref })),
         activities: activities.rows, participants: participants.rows,
         premises: premises.rows, negotiation_rounds: negotiation.rows,
         documents: documents.rows, events: history.rows });
@@ -9734,8 +9743,29 @@ registerTools({
       if (!verb) throw new ToolError({ error: "unknown_candidate_kind", kind: candidate.kind });
       const innerArgs = { ...candidate.payload, idempotency_key: `capture:${candidate.id}` };
       if (candidate.kind === "meeting_record") innerArgs.kind = "meeting";
+      if (candidate.kind === 'next_step') {
+        const subject = await resolveSubject(c, candidate.payload.deal);
+        await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [subject.id]);
+      }
       const result = await executeRegisteredTool(c, actor, verb, innerArgs);
       if (!result || result.ok === false) throw new ToolError(result || { error: "inner_write_failed" });
+      if (candidate.kind === 'next_step') {
+        result.items = [];
+        for (const [index,item] of splitDealNextStep(candidate.payload.text, candidate.payload.next_date || null,
+          `capture_candidate:${candidate.id}`).entries()) {
+          const { status, ...facts } = item;
+          const stored = await executeRegisteredTool(c, actor, 'record-deal-item', {
+            ...facts, deal: result.deal_id,
+            idempotency_key: `capture:${candidate.id}:item:${index}`,
+          });
+          result.items.push(stored.item);
+        }
+        await c.query("update next_action set status='dropped',updated_by=$2 where id=$1 and item_title is null", [result.next_action_id, actor.id]);
+        await writeEvent(c, actor, 'resolve-candidate', 'deal', result.deal_id, {
+          field: 'deal_items_conversion', old: { next_action_id: result.next_action_id },
+          new: { item_ids: result.items.map(i => i.id), source_ref: `capture_candidate:${candidate.id}` }, idempotency_key: args.idempotency_key,
+        });
+      }
       const ref = candidate.kind === "phase_move" ? result.deal_id
         : candidate.kind === "next_step" ? result.next_step_id
         : candidate.kind === "new_deal" ? result.deal_id
@@ -9765,7 +9795,7 @@ registerTools({
       if (typeof args.accept !== "boolean") throw new ToolError({ error: "accept_required" });
       const found = await c.query(
         `select id,kind,deal_id,assignee_slug,action_description,due_on,recipient_party_id,
-                recipient_ref,email_subject,body_sha256,status,resulting_ref
+                recipient_ref,email_subject,body_sha256,status,resulting_ref,evidence_quote
            from capture_post_call_candidate where id=$1 for update
            /* capture:resolve-post-call-read */`, [args.candidate_id]);
       if (!found.rows.length)
@@ -9804,12 +9834,18 @@ registerTools({
         [candidate.assignee_slug]);
       if (!assignee.rows.length)
         throw new ToolError({ error: "assignee_not_provisioned", assignee: candidate.assignee_slug });
+      const proposed = splitDealNextStep(candidate.action_description, candidate.due_on || null,
+        `capture_post_call_candidate:${candidate.id}`);
+      const item = validateDealItem({ ...proposed[0], bullets: [
+        ...proposed.flatMap(i => i.bullets),
+        ...shortFacts(candidate.evidence_quote).map(text => ({ date: null, kind: 'call', text })),
+      ] }, ToolError);
       const action = await c.query(
-        `insert into capture_post_call_action (candidate_id,deal_id,owner_id,due_on,description,accepted_by)
-         values ($1,$2,$3,$4,$5,$6) returning id
+        `insert into capture_post_call_action (candidate_id,deal_id,owner_id,due_on,description,accepted_by,item_title,item_bullets,source_ref)
+         values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) returning id
          /* capture:resolve-post-call-action */`,
         [candidate.id, candidate.deal_id, assignee.rows[0].id, candidate.due_on || null,
-         candidate.action_description, actor.id]);
+         candidate.action_description, actor.id, item.title, JSON.stringify(item.bullets), item.source_ref]);
       await c.query(
         `update capture_post_call_candidate
             set status='confirmed',resolved_by=$2,resolution_note=$3,resulting_ref=$4,resolved_at=now()
@@ -10125,6 +10161,8 @@ registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
 registerTools(researchSiteTools({ withEnvelope, writeEvent }), "research-sites");
 registerTools(partyIdentityTools({ withEnvelope, writeEvent, versionGuard, resolvePartyForWrite }), "party-identity");
 registerTools(scheduleBoardTools(), "schedule-board");
+registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject, ToolError,
+  canExercisePartnerAuthority, partnerAuthoritySlugForActor }), "deal-items");
 
 // WR-AI-006: curation proposals are machine-callable; approval and retirement
 // remain human-only inside their handlers and the dispatcher boundary.
