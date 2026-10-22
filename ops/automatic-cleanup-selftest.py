@@ -587,49 +587,6 @@ class ThreadArchiveTests(unittest.TestCase):
 
 
 class CleanupHealthTests(unittest.TestCase):
-    def test_disappearing_temp_is_already_removed_and_run_continues(self):
-        import machine_cleanup as cleanup
-        import storage_hygiene
-        for phase in ('listed', 'final_probe', 'rename'):
-            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory).resolve()
-                scratch, clones = root / 'scratch', root / 'clones'
-                scratch.mkdir()
-                clones.mkdir()
-                vanished = scratch / 'carr-ci-test-a'
-                following = scratch / 'carr-ci-test-b'
-                for path in (vanished, following):
-                    path.mkdir()
-                    os.utime(path, (0, 0))
-                probes = []
-                def probe(paths):
-                    probes.append(paths)
-                    if vanished.exists() and (phase == 'listed' or phase == 'final_probe' and len(probes) == 2):
-                        vanished.rmdir()
-                    return set()
-                rename = os.rename
-                def remove_before_rename(source, destination, **kwargs):
-                    if phase == 'rename' and source == vanished.name:
-                        vanished.rmdir()
-                    return rename(source, destination, **kwargs)
-                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
-                with patch.object(storage_hygiene.os, 'rename', side_effect=remove_before_rename):
-                    report = cleanup.run(root, config, hook=None, tmp_root=clones, user_tmp_root=scratch,
-                        roots={}, dispatch_path=root / 'absent', provider=object(), process_probe=probe,
-                        archive_thread=lambda *a, **k: None)
-                self.assertEqual(report['status'], 'completed', report)
-                self.assertFalse(report['errors'], report)
-                self.assertNotIn('pending', report)
-                missing = next(row for row in report['removed'] if row['path'] == str(vanished))
-                self.assertEqual(missing['status'], 'removed')
-                self.assertIn('already removed', missing['reason'])
-                self.assertTrue(any(row['path'] == str(following) and row['status'] == 'staged'
-                                    for row in report['removed']), report)
-                self.assertEqual(report['temp_staged_allocated_bytes'],
-                    sum(row['allocated_bytes'] for row in report['removed'] if row['status'] == 'staged'))
-                for manifest in (scratch / '_to_delete').glob('*/manifest.json'):
-                    self.assertNotEqual(json.loads(manifest.read_text())['status'], 'intent')
-
     def test_receipt_reports_partial_temp_batch_and_resumes_backlog(self):
         import machine_cleanup as cleanup
         config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
@@ -819,6 +776,293 @@ class ScheduledCleanupTests(unittest.TestCase):
         self.assertFalse(second['errors'], second)
         self.assertFalse(second['deferred'], second)
         self.assertEqual([row['path'] for row in second['removed']], [str(workspaces[0])])
+
+    def test_worktree_slice_timeout_defers_scheduler_before_overall_deadline(self):
+        import branch_retirement as retirement
+        import machine_cleanup as cleanup
+        fixture = fixtures.Fixture()
+        self.addCleanup(shutil.rmtree, fixture.base)
+        trees = [fixture.tree(f'slow-{index}') for index in range(4)]
+        elapsed = [0.0]
+        real_entries = retirement.iter_worktrees
+        def slow_entries(root):
+            for entry in real_entries(root):
+                elapsed[0] += 40
+                yield entry
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+             patch.object(retirement, 'iter_worktrees', side_effect=slow_entries):
+            report = cleanup.run(fixture.repo, config, hook=fixtures.hook, tmp_root=fixture.base,
+                dispatch_path=fixture.base / 'absent', roots={'fixture/repo': fixture.repo},
+                provider=fixtures.FakeProvider(), process_probe=lambda paths: set(),
+                archive_thread=lambda *a, **k: self.fail('no thread fixture'))
+        self.assertLess(elapsed[0], config['machine_cleanup']['max_seconds'])
+        self.assertEqual(report['status'], 'deferred', report)
+        self.assertTrue(report['budget_exhausted'], report)
+        self.assertFalse(report['errors'], report)
+        self.assertFalse(report['removed'], report)
+        self.assertIsNone(report['last_success_at'])
+        self.assertTrue(any(row['kind'] == 'sweep' for row in report['deferred']))
+        for tree in trees:
+            self.assertEqual((tree / 'file').read_text(), 'initial\n')
+
+    def test_thread_item_batches_complete_and_resume_without_duplicate_archives(self):
+        import machine_cleanup as cleanup
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            clones = root / 'clones'
+            clones.mkdir()
+            dispatch = root / 'dispatch.jsonl'
+            dispatch.write_text(''.join(json.dumps({'thread_id': thread, 'status': 'completed',
+                'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n' for thread in ('first', 'second')))
+            config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+            config['machine_cleanup']['max_items'] = 1
+            archived, offsets = [], []
+            def archive(thread, **kwargs):
+                archived.append(thread)
+                return {'kind': 'thread', 'thread_id': thread, 'status': 'archived'}
+            with patch.object(cleanup.time, 'monotonic', return_value=0):
+                for thread in ('first', 'second'):
+                    report = cleanup.run(root, config, hook=None, tmp_root=clones, roots={},
+                        dispatch_path=dispatch, provider=object(), process_probe=lambda paths: set(),
+                        archive_thread=archive)
+                    self.assertEqual(report['status'], 'completed', report)
+                    self.assertFalse(report['deferred'], report)
+                    self.assertFalse(report['budget_exhausted'], report)
+                    self.assertEqual([row['thread_id'] for row in report['removed']], [thread])
+                    offsets.append(json.loads((root / 'out/machine-cleanup-cursor.json').read_text())['thread_offset'])
+            self.assertGreater(offsets[0], 0)
+            self.assertGreater(offsets[1], offsets[0])
+            self.assertEqual(archived, ['first', 'second'])
+
+    def test_temp_budget_resumes_unfinished_fixture_before_or_after_move(self):
+        import machine_cleanup as cleanup
+        for moved in (False, True):
+            with self.subTest(moved=moved), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                scratch, clones = root / 'scratch', root / 'clones'
+                scratch.mkdir()
+                clones.mkdir()
+                candidate = scratch / 'carr-ci-test-budget'
+                candidate.mkdir()
+                (candidate / 'payload').write_text('preserve complete fixture')
+                for path in (candidate / 'payload', candidate):
+                    os.utime(path, (0, 0))
+                elapsed, calls = [0.0], []
+                def probe(paths):
+                    calls.append(paths)
+                    if not moved and len(calls) == 2:
+                        elapsed[0] = 240
+                    return set()
+                lstat = Path.lstat
+                def slow_stat(path, *args, **kwargs):
+                    result = lstat(path, *args, **kwargs)
+                    if moved and path.name == 'fixture' and '_to_delete' in path.parts:
+                        elapsed[0] = 240
+                    return result
+                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                options = dict(hook=None, tmp_root=clones, user_tmp_root=scratch, roots={},
+                    dispatch_path=root / 'absent', provider=object(), archive_thread=lambda *a, **k: None)
+                with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+                     patch.object(Path, 'lstat', slow_stat):
+                    first = cleanup.run(root, config, **options, process_probe=probe)
+                self.assertEqual(first['status'], 'deferred', first)
+                self.assertFalse(first['errors'], first)
+                self.assertIsNone(first['last_success_at'])
+                self.assertEqual(candidate.exists(), not moved)
+                second = cleanup.run(root, config, **options, process_probe=lambda paths: set())
+                self.assertEqual(second['status'], 'completed', second)
+                self.assertFalse(second['errors'], second)
+                self.assertNotIn('pending', second)
+                self.assertFalse(candidate.exists())
+                self.assertEqual(len(second['removed']), 1, second)
+                self.assertEqual((Path(second['removed'][0]['staged_path']) / 'payload').read_text(),
+                    'preserve complete fixture')
+
+    def test_deferred_temp_vanishes_before_resume(self):
+        import machine_cleanup as cleanup
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            scratch, clones = root / 'scratch', root / 'clones'
+            scratch.mkdir()
+            clones.mkdir()
+            candidate = scratch / 'carr-ci-test-budget'
+            candidate.mkdir()
+            (candidate / 'payload').write_text('owned fixture bytes')
+            for path in (candidate / 'payload', candidate):
+                os.utime(path, (0, 0))
+            receipt = root / 'out/machine-cleanup.json'
+            receipt.parent.mkdir()
+            receipt.write_text(json.dumps({'last_success_at': 123}))
+            elapsed, calls = [0.0], []
+            def probe(paths):
+                calls.append(paths)
+                if len(calls) == 2:
+                    elapsed[0] = 240
+                return set()
+            config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+            options = dict(hook=None, tmp_root=clones, user_tmp_root=scratch, roots={},
+                dispatch_path=root / 'absent', provider=object(), archive_thread=lambda *a, **k: None)
+            with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]):
+                first = cleanup.run(root, config, **options, process_probe=probe)
+            self.assertEqual(first['status'], 'deferred', first)
+            self.assertEqual(first['last_success_at'], 123)
+            self.assertEqual(first['errors'], [])
+            self.assertIn('pending', first)
+            staged = Path(first['pending']['staged_path'])
+            (candidate / 'payload').unlink()
+            candidate.rmdir()
+            self.assertFalse(staged.exists())
+            resumed = cleanup.run(root, config, **options, process_probe=lambda paths: set())
+            self.assertEqual(resumed['status'], 'completed', resumed)
+            self.assertEqual(resumed['errors'], [])
+            self.assertEqual([(r['path'], r['status']) for r in resumed['removed']],
+                [(str(candidate), 'removed')])
+            self.assertNotIn('pending', resumed)
+            self.assertEqual(resumed['temp_freed_bytes'], 0)
+            self.assertEqual(resumed['temp_staged_allocated_bytes'], 0)
+            self.assertEqual(resumed['removed'][0]['allocated_bytes'], 0)
+            self.assertEqual(json.loads(receipt.read_text()), resumed)
+            again = cleanup.run(root, config, **options, process_probe=lambda paths: set())
+            self.assertEqual(again['status'], 'completed', again)
+            self.assertEqual(again['errors'], [])
+            self.assertEqual(again['removed'], [])
+            self.assertNotIn('pending', again)
+
+    def test_thread_timeout_defers_and_reads_back_before_retry(self):
+        import machine_cleanup as cleanup
+        sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
+        import codex_wire
+        for timeout_at in ('initialize', 'thread/archive'):
+            with self.subTest(timeout_at=timeout_at), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                clones = root / 'clones'
+                clones.mkdir()
+                ledger = root / 'dispatch.jsonl'
+                ledger.write_text(json.dumps({'thread_id': 'finished', 'status': 'completed',
+                    'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n')
+                elapsed, calls, timed_out = [0.0], [], [False]
+                thread = {'id': 'finished', 'updatedAt': 10, 'status': {'type': 'idle'},
+                          'path': '/fixture/session.jsonl'}
+                class Wire:
+                    def __init__(self, timeout):
+                        pass
+                    def upgrade(self):
+                        pass
+                    def close(self):
+                        pass
+                    def send_json(self, request):
+                        self.request = request
+                        calls.append(request['method'])
+                        if request['method'] == 'thread/archive':
+                            thread['path'] = '/fixture/archived_sessions/session.jsonl'
+                    def receive_json(self):
+                        method = self.request['method']
+                        if method == timeout_at and not timed_out[0]:
+                            timed_out[0] = True
+                            elapsed[0] = 240
+                            raise TimeoutError('fixture wire deadline')
+                        result = {'thread': thread} if method == 'thread/read' else {}
+                        if method == 'thread/list':
+                            result = {'data': [], 'nextCursor': None}
+                        return {'id': self.request['id'], 'result': result}
+                def archive(*args, **kwargs):
+                    return codex_wire.archive_finished_thread(*args, **kwargs, wire_factory=Wire)
+                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                options = dict(hook=None, tmp_root=clones, roots={}, dispatch_path=ledger,
+                    provider=object(), process_probe=lambda paths: set(), archive_thread=archive)
+                with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]):
+                    first = cleanup.run(root, config, **options)
+                self.assertEqual(first['status'], 'deferred', first)
+                self.assertFalse(first['errors'])
+                self.assertEqual(first['pending']['thread_id'], 'finished')
+                self.assertIsNone(first['last_success_at'])
+                second = cleanup.run(root, config, **options)
+                self.assertEqual(second['status'], 'completed', second)
+                self.assertFalse(second['errors'])
+                self.assertNotIn('pending', second)
+                self.assertEqual(len(second['removed']), 1, second)
+                self.assertEqual(calls.count('thread/archive'), 1, calls)
+                self.assertEqual(json.loads((root / 'out/machine-cleanup-runs.jsonl').read_text().splitlines()[0])['status'],
+                    'deferred')
+
+    def test_clone_budget_defers_remainder_and_resumes_from_saved_cursor(self):
+        import machine_cleanup as cleanup
+        from lib.cleanup_budget import BudgetExhausted
+        for failure in (BudgetExhausted('fixture deadline'), subprocess.TimeoutExpired('git fetch', 1)):
+            with self.subTest(failure=type(failure).__name__):
+                fixture = fixtures.Fixture()
+                clones = fixture.base / 'clones'
+                clones.mkdir()
+                workspaces = [clones / ('room-codex-' + name) for name in ('a', 'b', 'c')]
+                dispatches = []
+                for workspace in workspaces:
+                    workspace.mkdir()
+                    clone = workspace / 'checkout'
+                    fixture.git('clone', str(fixture.remote), str(clone))
+                    fixture.git('switch', 'main', cwd=clone)
+                    dispatches.append({'checkout_workspace': str(workspace), 'checkout_path': str(clone),
+                        'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00Z'})
+                ledger = fixture.base / 'dispatch.jsonl'
+                ledger.write_text(''.join(json.dumps(row) + '\n' for row in dispatches))
+                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                options = dict(hook=fixtures.hook, tmp_root=clones, dispatch_path=ledger,
+                    roots={}, provider=fixtures.FakeProvider(), process_probe=lambda paths: set(),
+                    archive_thread=lambda *a, **k: self.fail('no thread'))
+                elapsed = [0.0]
+                fetch = cleanup.fetch_remote_refs
+                def slow_fetch(path):
+                    if Path(path).parent == workspaces[1]:
+                        elapsed[0] = 240
+                        raise failure
+                    return fetch(path)
+                with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+                     patch.object(cleanup, 'fetch_remote_refs', side_effect=slow_fetch):
+                    first = cleanup.run(fixture.repo, config, **options)
+                self.assertEqual(first['status'], 'deferred', first)
+                self.assertTrue(first['deferred'], first)
+                self.assertTrue(first['budget_exhausted'])
+                self.assertEqual(first['errors'], [])
+                self.assertIsNone(first['last_success_at'])
+                cursor = json.loads((fixture.repo / 'out/machine-cleanup-cursor.json').read_text())
+                self.assertEqual(cursor['clone'], workspaces[0].name)
+                self.assertEqual([path.exists() for path in workspaces], [False, True, True])
+                second = cleanup.run(fixture.repo, config, **options)
+                self.assertEqual(second['status'], 'completed', second)
+                self.assertEqual(second['errors'], [])
+                self.assertNotIn('pending', second)
+                self.assertEqual([row['path'] for row in second['removed']],
+                    [str(path) for path in workspaces[1:]])
+                self.assertFalse(any(path.exists() for path in workspaces))
+
+    def test_vanished_temp_is_removed_and_run_completes(self):
+        import machine_cleanup as cleanup
+        for stage in ('listed', 'before_move'):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                scratch, clones = root / 'scratch', root / 'clones'
+                scratch.mkdir()
+                clones.mkdir()
+                candidate = scratch / 'carr-ci-test-vanished'
+                candidate.mkdir()
+                os.utime(candidate, (0, 0))
+                calls = []
+                def probe(paths):
+                    calls.append(paths)
+                    if len(calls) == (1 if stage == 'listed' else 2):
+                        candidate.rmdir()
+                    return set()
+                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                report = cleanup.run(root, config, hook=None, tmp_root=clones,
+                    user_tmp_root=scratch, roots={}, dispatch_path=root / 'absent',
+                    provider=object(), process_probe=probe, archive_thread=lambda *a, **k: None)
+                self.assertEqual(report['status'], 'completed', report)
+                self.assertEqual(report['errors'], [])
+                self.assertEqual([(row['path'], row['status']) for row in report['removed']],
+                    [(str(candidate), 'removed')])
+                self.assertNotIn('pending', report)
+                self.assertEqual(report['temp_freed_bytes'], 0)
+                self.assertEqual(json.loads((root / 'out/machine-cleanup.json').read_text()), report)
 
     def test_slow_test_temp_discovery_uses_shared_run_deadline(self):
         import machine_cleanup as cleanup

@@ -10,6 +10,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
+from progress_board_test_support import seed_captured_task
+
 FIXTURES = ROOT / "tools/fixtures/job-watchdog"
 
 
@@ -1136,6 +1138,7 @@ class RunnerTests(unittest.TestCase):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            seed_captured_task(root / "out", "carr-v5", "synthetic-card", "executor")
             calls = root / "github-calls"
             gh = root / "gh"
             gh.write_text("#!" + sys.executable + "\nfrom pathlib import Path\n"
@@ -1167,6 +1170,7 @@ class RunnerTests(unittest.TestCase):
     def test_command_gets_eof_and_exit_is_recorded_on_board(self):
         with tempfile.TemporaryDirectory() as directory:
             env = dict(os.environ, CARR_JOB_ROOT=directory, CARR_JOB_BOARD="test")
+            seed_captured_task(Path(directory) / "out", "test", "stdin-card")
             result = subprocess.run(["bash", str(ROOT / "bin/agent-run.sh"), "stdin-card",
                                      "deterministic", "1", "--", sys.executable, "-c",
                                      "import sys; print('EOF=' + repr(sys.stdin.read())); sys.exit(7)"],
@@ -1189,6 +1193,7 @@ class RunnerTests(unittest.TestCase):
             cp = root / "config.json"
             cp.write_text(json.dumps(c))
             env = dict(os.environ, CARR_JOB_ROOT=directory, CARR_WATCHDOG_CONFIG=str(cp), CARR_JOB_BOARD="test")
+            seed_captured_task(root / "out", "test", "hung-card")
             proc = subprocess.Popen(["bash", str(ROOT / "bin/agent-run.sh"), "hung-card", "deterministic", "1", "--",
                                      sys.executable, "-u", "-c", "import time; print('Reading additional input from stdin...'); time.sleep(60)"],
                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env)
@@ -1497,6 +1502,7 @@ runpy.run_path(sys.argv[0], run_name='__main__')
                 self.assertTrue(c["actions"]["file_defects"])
                 board = root / "out/boards" / (c["board"] + ".json")
                 if existing_board:
+                    seed_captured_task(root / "out", c["board"], "shared-card", "executor")
                     w.board_task(root, c, "shared-card", "executor", "running", "Work in progress")
                     before = board.read_bytes()
                 for index in range(3):
@@ -1834,6 +1840,7 @@ runpy.run_path(sys.argv[0], run_name='__main__')
                 card = "shared-card"
                 board = root / "out/boards" / (c["board"] + ".json")
                 if existing_board:
+                    seed_captured_task(root / "out", c["board"], card, "executor")
                     w.board_task(root, c, card, "executor", "review", "New executor evidence")
                     before = board.read_bytes()
                 f = w.finding("job_hang", "synthetic-job", "Synthetic failure", c, card=card)
@@ -1861,6 +1868,7 @@ runpy.run_path(sys.argv[0], run_name='__main__')
                           card="reopened", blinds=[])
             w.reconcile(root, c, [f], effects, 100)
             w.reconcile(root, c, [], effects, 200)
+            seed_captured_task(root / "out", c["board"], "reopened", "executor")
             w.board_task(root, c, "reopened", "executor", "review", "New verification in progress")
             board = root / "out/boards" / (c["board"] + ".json")
             before = board.read_bytes()

@@ -121,6 +121,65 @@ class NativeTests(unittest.TestCase):
         self.assertTrue(built[0]['skip_background_review'])
         self.assertIs(run_agent.AIAgent, Agent)
 
+    def test_record_layer_config_and_agent_tools_are_carr_only(self):
+        from types import SimpleNamespace
+        built, sent = [], []
+        class Agent:
+            def __init__(self, **kwargs):
+                built.append(kwargs)
+                self.tools = [{'type': 'function', 'function': {'name': name}} for name in
+                              ('mcp_carr_standing_context', 'terminal', 'mcp_other_read')]
+            def _execute_tool_calls(self, *args, **kwargs):
+                sent.append(args)
+        run_agent = SimpleNamespace(AIAgent=Agent)
+        config = SimpleNamespace(load_config=lambda: {'mcp_servers': {'other': {}}})
+        mcp_config = SimpleNamespace(_load_mcp_config=lambda: {'other': {}})
+        mcp = SimpleNamespace(_mcp_tool_server_names={'mcp_carr_standing_context': 'carr', 'mcp_other_read': 'other'})
+        startup = SimpleNamespace(set_mcp_server_filter=lambda names: None)
+        def oneshot(*args, **kwargs):
+            self.assertEqual(config.load_config()['mcp_servers'], {
+                'carr': {'url': 'https://api.doctorcre.com/mcp', 'auth': 'oauth'}})
+            self.assertEqual(mcp_config._load_mcp_config(), config.load_config()['mcp_servers'])
+            self.assertEqual(kwargs['toolsets'], ['carr'])
+            agent = run_agent.AIAgent(base_url='https://inference.example/v1', provider='nous', model='glm-current')
+            self.assertEqual(agent.valid_tool_names, {'mcp_carr_standing_context'})
+            self.assertEqual([t['function']['name'] for t in agent.tools], ['mcp_carr_standing_context'])
+            for name in ('terminal', 'mcp_other_read', 'delegate_task'):
+                message = SimpleNamespace(tool_calls=[SimpleNamespace(function=SimpleNamespace(name=name))])
+                with self.assertRaisesRegex(ValueError, 'record-layer'):
+                    agent._execute_tool_calls(message, [], 'task')
+            message = SimpleNamespace(tool_calls=[SimpleNamespace(function=SimpleNamespace(name='mcp_carr_standing_context'))])
+            agent._execute_tool_calls(message, [], 'task')
+            return 0
+        @contextmanager
+        def no_http():
+            yield
+        guard = self.guard()
+        modules = {'run_agent': run_agent, 'hermes_cli.oneshot': SimpleNamespace(run_oneshot=oneshot),
+            'hermes_cli.config': config, 'tools.mcp_tool_config': mcp_config, 'tools.mcp_tool': mcp,
+            'hermes_cli.mcp_startup': startup}
+        with patch.dict('sys.modules', modules), patch.object(guard, 'enforce', no_http):
+            self.assertEqual(hermes_native.run_native('Read.', 'glm-current', 'medium', 'usage.json', guard,
+                                                    posture='record-layer'), 0)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual({k: built[0][k] for k in ('enabled_toolsets', 'skip_memory', 'skip_context_files')},
+                         {'enabled_toolsets': ['carr'], 'skip_memory': True, 'skip_context_files': True})
+        self.assertEqual(config.load_config(), {'mcp_servers': {'other': {}}})
+
+    def test_record_layer_rejects_non_carr_request_schemas_and_an_empty_inventory(self):
+        guard = self.guard()
+        guard.record_tools = frozenset({'mcp_carr_standing_context'})
+        for tool in ({'type': 'web_search'}, {'type': 'function', 'function': {'name': 'terminal'}},
+                     {'type': 'function', 'function': {'name': 'mcp_other_read'}}):
+            with self.assertRaisesRegex(ValueError, 'record-layer'):
+                guard.admit(request(tools=[tool]))
+        self.assertEqual(guard.reserved, 0)
+        guard.admit(request(tools=[{'type': 'function', 'function': {'name': 'mcp_carr_standing_context'}}]))
+        self.assertGreater(guard.reserved, 0)
+        with patch.dict('sys.modules', {'tools.mcp_tool': SimpleNamespace(_mcp_tool_server_names={})}):
+            with self.assertRaisesRegex(ValueError, 'record-layer requires live CARR tools'):
+                hermes_native.restrict_tools(SimpleNamespace(tools=[]))
+
     def test_token_allowance_tracks_selected_price_and_remaining_dollars(self):
         expensive = hermes_native.CallBudget('1.00', {
             'input_usd_per_token': '0.000001', 'output_usd_per_token': '0.000001'}, 'glm-current')

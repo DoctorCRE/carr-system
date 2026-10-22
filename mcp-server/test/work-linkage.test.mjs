@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
 import { readSystemWorkCensus } from '../src/system-work-census.v5.js';
 
 const actor = { slug: 'joe', human: true };
@@ -137,4 +138,100 @@ test('empty legacy publications cannot certify absence of metadata omitted by an
  const snapshot=await boardRead({legacy:{title:'Previously compacted work'}});
  assert.equal(snapshot.snapshot_json.tasks.legacy.linkage.state,'unavailable');
  assert.equal(snapshot.snapshot_json.tasks.legacy.linkage.reason,'source_linkage_not_observed');
+});
+
+function hierarchyPublication(tasks, prepare = '') {
+ return JSON.parse(execFileSync('python3', ['-c', `import importlib.util,json,sys
+spec=importlib.util.spec_from_file_location("board","tools/progress_board.py")
+board=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(board)
+state=json.load(sys.stdin)
+${prepare}
+print(json.dumps(board.board_snapshot(state,costs={})))
+`], {cwd:new URL('../..',import.meta.url),encoding:'utf8',timeout:10000,input:JSON.stringify({
+  project:'test',work_requests:{'WR-000014':{title:'Queue ordering',description:'Keep ordering safe.'}},
+  tasks:Object.fromEntries(Object.entries(tasks).map(([id,task])=>[id,{title:'Queue ordering',work_request:'WR-000014',status:'running',...task}]))
+ })}));
+}
+
+test('hierarchy publication keeps blocker and task parent references resolving after cards are rekeyed',async()=>{
+ const publication=hierarchyPublication({one:{},two:{title:'Review checks',status:'blocked',blocked_by_task_ids:['one'],parent_task_id:'one'}});
+ const read=await boardRead(publication.tasks);
+ const refs=read.snapshot_json.tasks['WR14.S1.J2'].linkage.references.filter(ref=>ref.relation==='blocked_by'||ref.ref==='WR14.S1.J1'||ref.ref==='one');
+ assert.deepEqual(refs.map(ref=>[ref.relation,ref.ref,ref.state,ref.target]),[
+  ['blocked_by','WR14.S1.J1','resolved',{board_id:'demo-project',task_id:'WR14.S1.J1'}],
+  ['parent','WR14.S1.J1','resolved',{board_id:'demo-project',task_id:'WR14.S1.J1'}]
+ ]);
+});
+
+test('hierarchy linkage resolves original addresses after a job gains a PR and moves slices',async()=>{
+ const publication=hierarchyPublication({one:{job_id:'dispatch-a'},two:{title:'Review checks',status:'blocked'}},`
+from lib import progress_hierarchy as h
+state['work_requests']['WR-000014']['slices']=[
+ {'slice_id':'queue','title':'Queue ordering'}, {'slice_id':'review','title':'Review checks'}]
+state['tasks']['one']['slice_id']='queue'
+state['tasks']['two']['slice_id']='review'
+original=h.project(state)['aliases']['one']
+state['tasks']['two'].update(blocked_by_task_ids=[original],parent_task_id=original)
+state['tasks']['one'].update(pr=1960,repo='jbookout/carr-system')
+h.project(state)
+state['tasks']['one']['slice_id']='review'
+h.project(state)
+`);
+ const target='WR14.S2.J2.carr#1960';
+ assert.ok(publication.tasks[target]);
+ const tasks=(await boardRead(publication.tasks)).snapshot_json.tasks;
+ const key=publication.hierarchy.aliases.two;
+ const refs=tasks[key].linkage.references
+  .filter(ref=>ref.relation==='blocked_by'||ref.ref===publication.tasks[key].parent_task_id);
+ assert.deepEqual(refs.map(ref=>[ref.relation,ref.ref,ref.state,ref.target]),[
+  ['blocked_by',target,'resolved',{board_id:'demo-project',task_id:target}],
+  ['parent',target,'resolved',{board_id:'demo-project',task_id:target}]
+ ]);
+});
+
+test('hierarchy linkage terminates alias cycles and preserves exact published targets',async()=>{
+ const publication=hierarchyPublication({one:{},two:{blocked_by_task_ids:['cycle-a','self','WR14.S1.J1'],parent_task_id:'cycle-a'}},`
+state['card_aliases']={'cycle-a':'cycle-b','cycle-b':'cycle-a','self':'self','WR14.S1.J1':'cycle-a'}
+`);
+ const tasks=(await boardRead(publication.tasks)).snapshot_json.tasks;
+ const key=publication.hierarchy.aliases.two;
+ const refs=tasks[key].linkage.references
+  .filter(ref=>ref.relation==='blocked_by'||ref.ref===publication.tasks[key].parent_task_id);
+ const unresolved=refs.filter(ref=>ref.state==='unresolved');
+ assert.deepEqual(unresolved.map(ref=>ref.relation),['blocked_by','blocked_by','parent']);
+ assert.ok(unresolved.every(ref=>ref.target===null));
+ assert.deepEqual(refs.filter(ref=>ref.state==='resolved').map(ref=>[ref.ref,ref.target]),[
+  ['WR14.S1.J1',{board_id:'demo-project',task_id:'WR14.S1.J1'}]
+ ]);
+});
+
+test('hierarchy publication retains unsupported linkage markers and never certifies complete linkage',async()=>{
+ const unsupported=['dependency_refs','depends_on','blocked_by','blocker_ref','blocker_task_id','parent_refs','related_refs','dependencies'];
+ const tasks=Object.fromEntries(unsupported.map(field=>[field,{[field]:['one']}]));
+ tasks.held={held:{blocker:{task_id:'one'},private_diagnostic:'Do not publish'}};
+ const publication=hierarchyPublication({one:{},...tasks});
+ const read=await boardRead(publication.tasks);
+ for(const id of Object.keys(tasks)) {
+  const key=publication.hierarchy.aliases[id];
+  assert.equal(publication.tasks[key].linkage_metadata_unavailable,true,id);
+  assert.equal(read.snapshot_json.tasks[key].linkage.state,'unavailable',id);
+  assert.equal(read.snapshot_json.tasks[key].linkage.reason,'unsupported_recorded_association',id);
+  assert.equal(publication.tasks[key].held,undefined);
+ }
+});
+
+test('hierarchy linkage preserves aliases, duplicate blockers, canonical keys, and unresolved diagnostics',async()=>{
+ const publication=hierarchyPublication({
+  one:{card_id:'WR14.S9.J9'},
+  two:{blocked_by_task_ids:['one','WR14.S9.J9','WR14.S1.J1','missing','two'],parent_task_id:'WR14.S9.J9'},
+  'z-invalid':{blocked_by_task_ids:[42],parent_task_id:{invalid:true}}
+ });
+ const tasks=(await boardRead(publication.tasks)).snapshot_json.tasks;
+ const refs=tasks[publication.hierarchy.aliases.two].linkage.references;
+ assert.deepEqual(refs.filter(ref=>ref.relation==='blocked_by').map(ref=>[ref.ref,ref.state]),[
+  ['WR14.S1.J1','resolved'],['missing','unresolved'],['WR14.S1.J2','unresolved']
+ ]);
+ assert.equal(refs.find(ref=>ref.relation==='parent'&&ref.ref==='WR14.S1.J1').state,'resolved');
+ assert.equal(tasks[publication.hierarchy.aliases['z-invalid']].linkage.reason,'reference_structure_invalid');
 });

@@ -43,7 +43,9 @@
 //      pinned to the compiled binding so it cannot become one. A draft that names
 //      a recipient nobody can route to is not a draft a program can send; it is a
 //      draft a human opens in the client that already holds the thread. That is
-//      the whole design: Joe sends.
+//      the whole design: this module carries no send capability. Sending is
+//      Joe's call and goes through his own accounts when he asks (decision
+//      41906a30).
 //   2. THIS MODULE NAMES NO PROVIDER OPERATION. F10 owns the connector operation
 //      registry, and every write in it — send_mail_message included — refuses
 //      there by name. Re-deciding it here would be a second authority for a
@@ -654,8 +656,8 @@ function scanFieldNames(object, fragments, path, code, describe) {
 
 function assertNoDispatchFields(object, path) {
   scanFieldNames(object, V5_J103_DISPATCH_FRAGMENTS, path, "dispatch_instruction_refused",
-    fragment => `looks like a dispatch instruction ("${fragment}"); there is no send capability`
-      + " anywhere in CARR — drafts are produced and a human sends them");
+    fragment => `looks like a dispatch instruction ("${fragment}"); this module has no send capability`
+      + " — sends go through Joe's own accounts when he asks (decision 41906a30)");
 }
 
 function assertNoSourceContentFields(object, path) {
