@@ -27166,7 +27166,8 @@ begin
       from ops.jev_call_receipt r
      where not exists (
        select 1 from public.tool_call t
-        where t.idempotency_key = r.idempotency_key
+        where t.verb in ('ask-jev', 'ask-jev-attempt')
+          and t.idempotency_key = r.idempotency_key
           and t.verb = case when r.model_answered = 'jev-attempt-pending'
                             then 'ask-jev-attempt' else 'ask-jev' end
           and t.actor_id = r.actor_id
@@ -27203,7 +27204,8 @@ begin
     into v_calls, v_tokens, v_unknown
     from ops.jev_call_receipt r
     left join public.tool_call t
-      on t.idempotency_key = r.idempotency_key
+      on t.verb in ('ask-jev', 'ask-jev-attempt')
+     and t.idempotency_key = r.idempotency_key
      and t.verb = case when r.model_answered = 'jev-attempt-pending'
                        then 'ask-jev-attempt' else 'ask-jev' end
      and t.actor_id = r.actor_id
@@ -89575,8 +89577,7 @@ CREATE VIEW public.v_deal_room_action AS
     n.description,
     n.due_on,
     n.status,
-    n.updated_at,
-    n.hold_until
+    n.updated_at
    FROM (public.next_action n
      JOIN public.actor a ON ((a.id = n.owner_id)))
   WHERE (n.subject_type = 'deal'::text)
@@ -89587,8 +89588,7 @@ UNION ALL
     pca.description,
     pca.due_on,
     pca.status,
-    pca.updated_at,
-    NULL::date AS hold_until
+    pca.updated_at
    FROM (public.capture_post_call_action pca
      JOIN public.actor a ON ((a.id = pca.owner_id)));
 
@@ -102882,6 +102882,13 @@ CREATE INDEX source_capture_session_trgm ON public.source_capture USING gin (ses
 --
 
 CREATE INDEX tool_call_correlation_idx ON public.tool_call USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
+
+
+--
+-- Name: tool_call_jev_receipt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX tool_call_jev_receipt_idx ON public.tool_call USING btree (verb) WHERE (verb = ANY (ARRAY['ask-jev'::text, 'ask-jev-attempt'::text]));
 
 
 --
@@ -122992,7 +122999,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0922_deal_checklist_commissions.sql	8edbca77f0e994b1c0a18e6e0a9d0d42ab226852188107dc7141e6f3d5af539d	1970-01-01 00:00:00+00
 0923_deal_status_next_step.sql	705736e4c549801b820d7844447b9c84a63c5db8a1c67c306a27debfa24d83be	1970-01-01 00:00:00+00
 0924_jev_attempt_settlement_lookup.sql	20eb98baf8e1075c9bd90f3ab12447787b112492207c5219a085117ba8e4646d	1970-01-01 00:00:00+00
-0925_deal_action_hold_date.sql	ce7522c72d7ab978aeaf70a78362144c65cdde0c310dc3681f596c3f2cab4848	1970-01-01 00:00:00+00
+0926_jev_receipt_audit_lookup.sql	c6b07553d4e818dcb7da686a9446dd020c660e8fc663637626c06cff2507ab3a	1970-01-01 00:00:00+00
 \.
 
 
