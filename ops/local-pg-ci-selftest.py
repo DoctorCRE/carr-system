@@ -296,13 +296,13 @@ check("core partition remains strict and runs the full acceptance manifest",
       result == 0 and any(event[-3:] == ("--strict", "--migration-part", "core") for event in core_events)
       and any(event[-1].endswith("tools/test-f03-production-migration.py") for event in core_events)
       and any("--verify-only" in event for event in core_events))
-for invalid in ("fixtures", "unknown"):
+for invalid_part in ("fixtures", "unknown"):
     try:
-        mod.run_local_ci(repo=REPO, ci_class="migration", port=55432, runner=FakeRunner(), migration_part=invalid)
+        mod.run_local_ci(repo=REPO, ci_class="migration", port=55432, runner=FakeRunner(), migration_part=invalid_part)
     except mod.LocalPGRefusal:
-        check(f"local lane refuses migration part {invalid}", True)
+        check(f"local lane refuses migration part {invalid_part}", True)
     else:
-        check(f"local lane refuses migration part {invalid}", False)
+        check(f"local lane refuses migration part {invalid_part}", False)
 
 events.clear()
 with (

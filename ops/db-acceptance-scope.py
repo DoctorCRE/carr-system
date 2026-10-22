@@ -66,8 +66,9 @@ def main() -> int:
     parser.add_argument('--receipt', type=Path)
     args = parser.parse_args()
     full, paths, reason = classify()
+    status = 'required' if full else 'not applicable'
     receipt = {'schema': 'carr-db-scope/v1', 'full': full,
-               'status': 'required' if full else 'not applicable',
+               'status': status,
                'paths': paths, 'reason': reason,
                'event': os.environ.get('GITHUB_EVENT_NAME'),
                'tested_sha': os.environ.get('GITHUB_SHA'),
@@ -77,7 +78,7 @@ def main() -> int:
     print(json.dumps(receipt))
     if os.environ.get('GITHUB_STEP_SUMMARY'):
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
-            summary.write('Database migration proof: ' + receipt['status'] + '\n')
+            summary.write('Database migration proof: ' + status + '\n')
     line = f'full={"true" if full else "false"}'
     print(line)
     if os.environ.get('GITHUB_OUTPUT'):

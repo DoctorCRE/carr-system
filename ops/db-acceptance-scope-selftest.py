@@ -1,5 +1,6 @@
 """Selftest for ops/db-acceptance-scope.py."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import re
@@ -63,6 +64,18 @@ with tempfile.TemporaryDirectory() as tmp:
     Path(tmp, 'migrations/0001_a.sql').write_text('select 1;\n' * 20)
     vcs('add', '-A')
     vcs('commit', '-q', '-m', 'a')
+    base = vcs('rev-parse', 'HEAD')
+    Path(tmp, 'web').mkdir()
+    Path(tmp, 'web/app.js').write_text('export const app = true;\n')
+    vcs('add', 'web/app.js')
+    vcs('commit', '-q', '-m', 'app-only change')
+    setattr(scope, 'ROOT', Path(tmp))
+    app_event = {'pull_request': {'base': {'ref': 'main', 'sha': base}, 'head': {'sha': vcs('rev-parse', 'HEAD')}}}
+    event_file = Path(tmp, 'event.json')
+    event_file.write_text(json.dumps(app_event))
+    os.environ['GITHUB_EVENT_NAME'] = 'pull_request'
+    os.environ['GITHUB_EVENT_PATH'] = str(event_file)
+    check('a real app-only PR diff skips database proof', not scope.decide())
     vcs('mv', 'migrations/0001_a.sql', 'notes.txt')
     vcs('commit', '-q', '-m', 'b')
     setattr(scope, 'ROOT', Path(tmp))
@@ -71,6 +84,8 @@ with tempfile.TemporaryDirectory() as tmp:
     paths = scope.changed_paths(pr_event) or []
     check('a rename out of migrations/ lists the old path', 'migrations/0001_a.sql' in paths)
     check('a rename out of migrations/ runs the full lane', scope.needs_full(paths))
+    event_file.write_text(json.dumps(pr_event))
+    check('a real migration PR diff runs database proof', scope.decide())
 
 check('an empty diff skips', not scope.needs_full([]))
 for event in ('schedule', 'workflow_dispatch', 'push'):
