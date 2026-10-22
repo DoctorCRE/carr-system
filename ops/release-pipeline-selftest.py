@@ -474,6 +474,18 @@ class Base(unittest.TestCase):
 
 
 class EarlyWorkerPrerequisites(Base):
+    def test_pending_credentials_reach_provisioner_without_final_files(self):
+        self.fx.commit({'mcp-server/src/a.js': '1'})
+        for label in ('reader', 'writer'):
+            path = self.fx.cred / f'staging-{label}.env'
+            path.rename(path.with_suffix('.env.pending'))
+        live = {'sha': self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        self.assertEqual(pipe.tick(['worker']), 0)
+        self.assertIn('staging-app-writer', runner.names())
+        self.assertEqual(self.fx.records()[-1]['status'], 'shipped')
+
     def test_missing_staging_rollback_files_stop_before_network_or_setup(self):
         self.fx.commit({'mcp-server/src/a.js': '1'})
         for filename in ('staging-reader.env', 'staging-writer.env'):
