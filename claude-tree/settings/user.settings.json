@@ -163,16 +163,6 @@
         ]
       },
       {
-        "matcher": "Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/executor-tier-gate.py",
-            "timeout": 10
-          }
-        ]
-      },
-      {
         "matcher": "Bash|mcp__claude-in-chrome__.*",
         "hooks": [
           {
@@ -246,7 +236,6 @@
           }
         ]
       }
-    ],
-    "UserPromptSubmit": []
+    ]
   }
 }

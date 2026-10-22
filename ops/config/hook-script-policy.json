@@ -1,0 +1,30 @@
+{
+  "missing_script_policy": {
+    "_note": "Missing safety scripts fail closed. Optional telemetry and machine setup scripts warn and skip.",
+    "safety": [
+      "hooks/bash-write-gate.py",
+      "hooks/canonical-edit-gate.py",
+      "hooks/costar-lane-gate.py",
+      "hooks/draft-export-gate.py",
+      "hooks/gate-integrity.py",
+      "hooks/github-burst-guard.py",
+      "hooks/guard-unattended.py",
+      "hooks/lint-gate.py",
+      "hooks/model-floor-gate.py",
+      "hooks/one-repo-gate.py",
+      "hooks/record-home-gate.py",
+      "hooks/rule-pack-preuse-reselection.py",
+      "hooks/scheduled-run-record.py",
+      "hooks/weekend-quiet-gate.py",
+      "hooks/write-effect-check.py"
+    ],
+    "optional": [
+      "hooks/builder-agent-gate.py",
+      "hooks/job-watchdog-digest.py",
+      "hooks/machine-converge.py",
+      "hooks/worktree-self-plumb.py",
+      "hooks/rule-claim-gate.py"
+    ],
+    "safety_stop_failure_limit": 1
+  }
+}

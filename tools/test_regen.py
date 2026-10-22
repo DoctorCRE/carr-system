@@ -17,7 +17,7 @@ class RegenTests(unittest.TestCase):
         shutil.copytree(regen.ROOT / 'hooks', self.root / 'hooks')
         (self.root / 'ops/config').mkdir(parents=True)
         for path in ['ops/config/gate-baseline.json', 'lib/hook_runtime.py',
-                     'ops/config/delegation-gate-hook.json', 'ops/config/hooks.json',
+                     'ops/config/hook-script-policy.json', 'ops/config/hooks.json',
                      'ops/config/codex-hooks.json', 'ops/config/rule-enforcement-map.json', 'ops/config/model-floors.json']:
             target = self.root / path
             target.parent.mkdir(parents=True, exist_ok=True)
