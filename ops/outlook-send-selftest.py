@@ -26,6 +26,8 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from lib import system_sender as ss
+from lib.record_call import VerbResult
 from lib import outlook_send as send_mod
 from lib import outlook_ui as ui
 from lib.outlook_send import EventRow, Ports, SentRow, Snapshot, State
@@ -204,15 +206,31 @@ class Harness:
         self.front_idle = 600
         self.frontmost = lambda: self.previous
         self.carr_calls: list[tuple[str, dict]] = []
+        config = ss.load_config()
+        config['mail'] = {'self_addresses': [ACCOUNT, 'person-b@example.test', 'person-c@example.test'],
+                          'self_test_address': ACCOUNT}
+        carr = self.carr
+        self.policy = ss.Sender(config=config, state_dir=out / 'policy',
+                                verb=lambda name, args: VerbResult(name, 'ok', carr(name, dict(args))),
+                                lint=lambda text, surface: (True, ''),
+                                now=lambda: datetime.fromtimestamp(self.clock.now(), timezone.utc))
         self.ports = Ports(open_form=lambda item: send_mod.open_form(item, ui.Waits(settle_seconds=0,
                                                                                    poll_seconds=0,
                                                                                    new_window_seconds=0)),
                            mailbox=self.mailbox, idle_seconds=lambda: self.idle[0] if len(self.idle) == 1
                            else self.idle.pop(0), carr=self.carr, now=self.clock.now, sleep=self.clock.sleep,
                            out=out, close_seconds=30, confirm_seconds=300, poll_seconds=20)
+        self.ports.sender = self.policy
 
     def carr(self, verb: str, args: dict) -> dict:
         self.carr_calls.append((verb, args))
+        if verb == 'next-signals':
+            return {'count': 0}
+        if verb == 'mail-contact-policy':
+            return {'recipients': [{'email': email, 'blocked': False} for email in args['emails']]}
+        if verb == 'get-call-context':
+            return {'deals': [{'id': '11111111-2222-3333-4444-555555555555', 'name': 'Synthetic deal',
+                               'participants': [{'email': 'person-a@example.test'}]}]}
         if verb == 'find':
             return {'parties': [{'name': 'client-001', 'ref': 'C-1', 'merged': False}]}
         return {'ok': True}
@@ -226,7 +244,9 @@ class Harness:
                 patch.object(send_mod, '_activate', lambda bundle: self.fake.calls.append(('activate', bundle))), \
                 patch.object(send_mod.time, 'sleep', lambda s: None):
             return send_mod.send(spec['to'], spec['cc'], spec['bcc'], spec['subject'], spec['body'],
-                                 idempotency_key=key, record=record, ports=self.ports)
+                                 idempotency_key=key, record=record, ports=self.ports,
+                                 deal_id='11111111-2222-3333-4444-555555555555',
+                                 follow_up={'next_on': '2030-01-03', 'next_step': 'Check reply'})
 
 
 EVENT = dict(subject='event-001', start=datetime(2030, 1, 2, 15, tzinfo=timezone.utc),
@@ -240,7 +260,9 @@ def event(h, key='event-key', **overrides):
             patch.object(send_mod, '_idle_seconds', lambda: 600), patch.object(send_mod, '_frontmost', lambda: 'com.example.editor'), \
             patch.object(send_mod, '_activate', lambda _: None):
         return send_mod.create_event(**{**EVENT, **overrides}, idempotency_key=key,
-                                     record='client-001', ports=h.ports)
+                                     record='client-001', ports=h.ports,
+                                     deal_id='11111111-2222-3333-4444-555555555555',
+                                     follow_up={'next_on': '2030-01-03', 'next_step': 'Check reply'})
 
 
 class SendTests(unittest.TestCase):
@@ -254,6 +276,123 @@ class SendTests(unittest.TestCase):
     def ledger(self) -> list[dict]:
         path = self.out / send_mod.LEDGER
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def test_policy_kill_switch_blocks_before_outlook(self):
+        h = Harness(self.out)
+        h.policy.stop_file.parent.mkdir(parents=True)
+        h.policy.stop_file.touch()
+        result = h.send()
+        self.assertEqual(result.reason, 'kill_switch_engaged')
+        self.assertFalse(result.ok)
+        self.assertEqual(h.fake.press_count, 0)
+        self.assertEqual(h.mailbox.reads, 0)
+
+    def test_eleventh_send_is_refused_by_shared_daily_cap(self):
+        h = Harness(self.out)
+        for i in range(10):
+            self.assertTrue(h.send(key=f'cap-{i}', subject=f'Individual note {i}').ok)
+        result = h.send(key='cap-11', subject='Individual note eleven')
+        self.assertEqual(result.reason, 'daily_cap')
+        self.assertEqual(h.fake.press_count, 10)
+        self.assertEqual(h.policy.sends_today('mail'), 10)
+
+    def test_do_not_contact_refuses_every_recipient_field(self):
+        for field in ('to', 'cc', 'bcc'):
+            with self.subTest(field=field):
+                h = Harness(self.out / field)
+                original = h.policy._verb
+                def verb(name, args):
+                    if name == 'mail-contact-policy':
+                        return VerbResult(name, 'ok', {'recipients': [
+                            {'email': email, 'blocked': email == 'person-a@example.test'}
+                            for email in args['emails']]})
+                    return original(name, args)
+                h.policy._verb = verb
+                spec = {'to': [ACCOUNT], 'cc': [], 'bcc': [], field: ['person-a@example.test']}
+                result = h.send(**spec)
+                self.assertEqual(result.reason, 'do_not_contact')
+                self.assertEqual(h.fake.press_count, 0)
+                self.assertEqual(h.mailbox.reads, 0)
+
+    def test_invites_and_personal_saves_use_mail_policy(self):
+        for attendees in (['person-a@example.test'], []):
+            with self.subTest(attendees=attendees):
+                h = Harness(self.out / ('invite' if attendees else 'save'))
+                h.policy.stop_file.parent.mkdir(parents=True)
+                h.policy.stop_file.touch()
+                result = event(h, attendees=attendees)
+                self.assertEqual(result.reason, 'kill_switch_engaged')
+                self.assertEqual(h.fake.press_count, 0)
+                self.assertEqual(h.mailbox.reads, 0)
+
+    def test_outside_recipient_is_refused_in_mail_and_invites(self):
+        for kind in ('to', 'cc', 'bcc', 'invite'):
+            with self.subTest(kind=kind):
+                h = Harness(self.out / kind)
+                result = (event(h, attendees=['stranger@example.test']) if kind == 'invite' else
+                          h.send(**{'to': [ACCOUNT], 'cc': [], 'bcc': [], kind: ['stranger@example.test']}))
+                self.assertEqual(result.reason, 'recipient_not_allowed')
+                self.assertEqual(h.fake.press_count, 0)
+                self.assertEqual(h.mailbox.reads, 0)
+
+    def test_lint_and_shadow_apply_to_invites(self):
+        h = Harness(self.out)
+        h.policy._lint = lambda text, surface: (False, 'synthetic lint')
+        self.assertEqual(event(h).reason, 'lint')
+        self.assertEqual(h.fake.press_count, 0)
+        h.policy._lint = lambda text, surface: (True, '')
+        h.policy._live_start = None
+        self.assertEqual(event(h).state, State.POLICY_SHADOW)
+        self.assertEqual(h.fake.press_count, 0)
+
+    def test_bulk_external_recipients_are_refused(self):
+        h = Harness(self.out)
+        result = h.send(to=['person-a@example.test', 'other@example.test'])
+        self.assertEqual(result.reason, 'one_to_one_required')
+        self.assertEqual(h.fake.press_count, 0)
+
+    def test_unreadable_suppression_fails_closed_for_mail_and_invites(self):
+        replies = [None, {}, {'recipients': []}, {'recipients': [{'email': 'person-a@example.test'}]},
+                   {'recipients': [{'email': 'person-a@example.test', 'blocked': 'false'}]}]
+        for i, reply in enumerate(replies):
+            for kind in ('mail', 'invite'):
+                with self.subTest(reply=reply, kind=kind):
+                    h = Harness(self.out / f'{i}-{kind}')
+                    original = h.policy._verb
+                    h.policy._verb = lambda name, args: (VerbResult(name, 'ok', reply) if
+                        name == 'mail-contact-policy' else original(name, args))
+                    result = h.send() if kind == 'mail' else event(h)
+                    self.assertEqual(result.reason, 'contact_policy_unreadable')
+                    self.assertEqual(h.fake.press_count, 0)
+                    self.assertEqual(h.mailbox.reads, 0)
+
+    def test_do_not_contact_blocks_invite(self):
+        h = Harness(self.out)
+        original = h.policy._verb
+        h.policy._verb = lambda name, args: (VerbResult(name, 'ok', {'recipients': [
+            {'email': 'person-a@example.test', 'blocked': True}]}) if
+            name == 'mail-contact-policy' else original(name, args))
+        self.assertEqual(event(h).reason, 'do_not_contact')
+        self.assertEqual(h.fake.press_count, 0)
+
+    def test_legacy_mail_and_invites_share_the_ten_send_cap(self):
+        h = Harness(self.out)
+        h.policy._outlook = lambda url, subject: 'SENT'
+        for i in range(9):
+            self.assertEqual(h.policy.send_mail(to=[ACCOUNT], subject=f'Private note {i}',
+                             body='Synthetic body').outcome, ss.SENT)
+        self.assertTrue(event(h).ok)
+        self.assertEqual(h.send().reason, 'daily_cap')
+        self.assertEqual(h.fake.press_count, 1)
+        self.assertEqual(h.policy.sends_today('mail'), 10)
+
+    def test_configuration_cannot_raise_mail_cap_above_ten(self):
+        h = Harness(self.out)
+        config = {**h.policy.config, 'daily_caps': {'mail': 11, 'social': 5}}
+        h.ports.sender = ss.Sender(config=config, state_dir=self.out / 'raised-cap',
+                                  verb=h.policy._verb, lint=lambda text, surface: (True, ''))
+        self.assertEqual(h.send().reason, 'config_invalid')
+        self.assertEqual(h.fake.press_count, 0)
 
     def test_transport_timeout_never_exposes_message_in_diagnostics(self):
         h = Harness(self.out)

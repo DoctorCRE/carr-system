@@ -44,8 +44,8 @@ check = CHECK.check
 
 T0 = dt.datetime(2026, 10, 13, 15, 0, tzinfo=dt.timezone.utc)   # 10:00 Central
 DEAL = "11111111-2222-3333-4444-555555555555"
-PARTICIPANT = "Dr.Lee@Example-Clinic.com"
-JOE = "joe.bookout@carr.us"
+PARTICIPANT = "Dr.Lee@example.test"
+JOE = "sender@example.test"
 ACCOUNTS = {"linkedin": {"accountId": "27007", "pageId": "27007"},
             "facebook": {"accountId": "39262", "pageId": "102825118368840"},
             "twitter": {"accountId": "21335"}}
@@ -82,6 +82,9 @@ class Fakes:
                 return VerbResult(name, "transient", detail="could not reach the deployed Worker")
             return VerbResult(name, "ok", reply={"ok": True, "count": self.signals[args["status"]],
                                                  "signals": []})
+        if name == "mail-contact-policy":
+            return VerbResult(name, "ok", reply={"recipients": [
+                {"email": email, "blocked": False} for email in args["emails"]]})
         if name == "get-call-context":
             if not self.call_context_ok:
                 return VerbResult(name, "refused", reply={"error": "invalid_call_context_deals"})
@@ -121,7 +124,8 @@ class Env:
         accounts = self.root / "accounts.json"
         accounts.write_text(json.dumps(ACCOUNTS))
         self.config = ss.load_config()
-        self.config.update(live_from=live_from, daily_caps=caps or {"mail": 20, "social": 5})
+        self.config.update(live_from=live_from, daily_caps=caps or {"mail": 10, "social": 5})
+        self.config["mail"] = {"self_addresses": [JOE, "partner@example.test"], "self_test_address": JOE}
         self.config["social"] = {**self.config["social"], "accounts_file": str(accounts)}
         self.fakes = Fakes()
         self.clock = Clock(T0)
@@ -215,10 +219,10 @@ def test_shipped_config_is_live() -> None:
               and env.receipts()[0]["mode"] == "live", r)
     finally:
         env.close()
-    check("shipped config: caps are 20 mail and 5 social",
-          config["daily_caps"] == {"mail": 20, "social": 5}, config["daily_caps"])
-    check("shipped config cites decision cbe91287",
-          "cbe91287-10a2-48d0-bda7-3b1784b4bb93" in config["_comment"])
+    check("shipped config: caps are 10 mail and 5 social",
+          config["daily_caps"] == {"mail": 10, "social": 5}, config["daily_caps"])
+    check("shipped config cites current outreach ruling",
+          "6624fed2" in config["_comment"])
     accounts = json.loads((ss.REPO / config["social"]["accounts_file"]).read_text())
     check("shipped config: every allowed platform has an account in the Blotato accounts file",
           all(p in accounts for p in config["social"]["platforms"]), accounts.keys())
@@ -320,7 +324,7 @@ def test_mail_allowlist() -> None:
         check("mail: an unreadable deal context refuses", r.reason == "deal_context_unreadable", r)
         check("mail: no refused mail reached Outlook", env.fakes.outlook_calls == [])
         env.fakes.call_context_ok = True
-        r = env.mail(to=["Joe.Bookout@CARR.us", "dell.mccraney@carr.us"], subject="Status")
+        r = env.mail(to=["Sender@Example.Test", "partner@example.test"], subject="Status")
         check("mail: the partners' own addresses send (case-insensitive)", r.outcome == ss.SENT, r)
         r = env.mail(to=[PARTICIPANT.upper()], deal_id=DEAL, subject="Tour for Dr Lee",
                      follow_up={"next_on": "2026-10-20", "next_step": "Confirm the tour"})
@@ -333,7 +337,7 @@ def test_mail_allowlist() -> None:
               and outreach[0]["next_on"] == "2026-10-20", outreach)
         url = env.fakes.outlook_calls[-1][0]
         check("mail: the compose URL uses bin/outlook-draft.py's encoding (%20, literal @)",
-              url.startswith("mailto:dr.lee@example-clinic.com?") and "Tour%20for%20Dr%20Lee" in url, url)
+              url.startswith("mailto:dr.lee@example.test?") and "Tour%20for%20Dr%20Lee" in url, url)
     finally:
         env.close()
 
@@ -989,7 +993,7 @@ def test_send_self_test_goes_through_the_chain() -> None:
         f = env.fakes
         check("self-test: sent", r.outcome == ss.SENT, r)
         check("self-test: addressed to Joe's own address only",
-              f.outlook_calls and f.outlook_calls[0][0].startswith("mailto:joe.bookout@carr.us?"), f.outlook_calls)
+              f.outlook_calls and f.outlook_calls[0][0].startswith("mailto:sender@example.test?"), f.outlook_calls)
         check("self-test: ran the kill switch and lint", len(f.verbs("next-signals")) == 2
               and len(f.lint_calls) == 1, f.verb_calls)
         env.fakes.signals.update(open=1)
@@ -1007,7 +1011,7 @@ def test_send_self_test_goes_through_the_chain() -> None:
         check("self-test: the library carries no hard-coded address",
               JOE not in ss.REPO.joinpath("lib/system_sender.py").read_text(encoding="utf-8"))
         check("self-test: the shipped config names Joe's address and says the first caller is the live test",
-              ss.load_config()["mail"]["self_test_address"] == JOE
+              ss.load_config()["mail"]["self_test_address"] in ss.load_config()["mail"]["self_addresses"]
               and "FIRST CALLER IS THE LIVE TEST" in ss.load_config()["_note"])
     finally:
         env.close()

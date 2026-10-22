@@ -4,21 +4,24 @@ New Outlook's AppleScript model has no Exchange account and HxStore.hxd is a
 read cache, so the only write path is the app's own window, driven through the
 cua-driver accessibility CLI (lib/outlook_ui.py). One call is one item:
 
-1. Refuse an idempotency key the private ledger already holds, and refuse an
+1. Run Sender's existing policy chain before Outlook is read or opened, including
+   kill switch, lint, exact recipient policy and suppression, shared dedupe and
+   the shared daily cap of ten. Calendar invitations use the same chain.
+2. Refuse an idempotency key the private ledger already holds, and refuse an
    item the decoded mailbox already shows (same subject and recipient sent in
    the last 24 hours; same subject and start for an event).
-2. Open the compose or event form, fill it, and read every field back. Any
+3. Open the compose or event form, fill it, and read every field back. Any
    mismatch discards the form.
-3. Write the key to the ledger as "pressing", then press Send or Save once.
+4. Write the key to the ledger as "pressing", then press Send or Save once.
    Try background AX first. Only an explicit pre-dispatch background refusal
    permits front fallback, after a fresh five-minute idle check. Restore focus.
-4. Confirm the window closed, then confirm the item in a fresh decode of the
+5. Confirm the window closed, then confirm the item in a fresh decode of the
    mailbox. Anything short of that is a distinct result that is never retried.
-5. Log to the named or exact-recipient-matched CARR records with log-activity.
+6. Log to the named or exact-recipient-matched CARR records with log-activity.
    Report unmatched records and failed logs separately from mailbox confirmation.
 
-Nothing with an address, a subject or a body reaches stdout, the run row or a
-launchd log; the ledger holds keys, states and a fingerprint only.
+Transport diagnostics contain no addresses, subjects or bodies. The transport
+ledger holds keys, states and a fingerprint. Sender owns the policy receipts.
 """
 from __future__ import annotations
 
@@ -44,6 +47,7 @@ from urllib.parse import quote
 import uuid
 
 from lib import outlook_ui as ui
+from lib.system_sender import Sender
 
 ACCOUNT_CONFIG = Path.home() / '.config/carr/outlook-account'
 OUT = Path('out/outlook-send')
@@ -69,6 +73,8 @@ class State(Enum):
     FIELD_MISMATCH = 'field_mismatch'
     NOT_IDLE = 'not_idle'
     FAILED = 'failed'
+    POLICY_REFUSED = 'policy_refused'
+    POLICY_SHADOW = 'policy_shadow'
 
     @property
     def pressed(self) -> bool:
@@ -160,6 +166,7 @@ class Ports:
     close_seconds: float = 30
     confirm_seconds: float = 300
     poll_seconds: float = 20
+    sender: Sender | None = None
 
 
 class UiFailure(Exception):
@@ -288,7 +295,7 @@ def _kind(item: Mail | Event) -> str:
     return 'send' if isinstance(item, Mail) else 'event'
 
 
-def write(item: Mail | Event, key: str, ports: Ports, record: str | None = None) -> Result:
+def _write_transport(item: Mail | Event, key: str, ports: Ports, record: str | None = None) -> Result:
     """Send one mail or save one event, at most once per key and per mailbox match."""
     if not isinstance(key, str) or not key.strip():
         raise ValueError('idempotency_key is required')
@@ -834,22 +841,28 @@ def default_ports(repo: Path | None = None) -> Ports:
 # ---- public interface --------------------------------------------------------
 
 def send(to, cc, bcc, subject: str, body: str, *, idempotency_key: str, record: str | None = None,
-         ports: Ports | None = None) -> Result:
+         ports: Ports | None = None, deal_id: str | None = None,
+         follow_up: dict[str, str] | None = None) -> Result:
     """Send one email from Joe's carr.us Outlook. See the module docstring for the guarantees."""
     mail = Mail(_addresses(to), _addresses(cc), _addresses(bcc), subject, body)
     if not mail.to or not subject.strip():
         raise ValueError('an email needs a To address and a subject')
-    return write(mail, idempotency_key, ports or default_ports(), record)
+    ports = ports or default_ports()
+    return (ports.sender or Sender()).send_outlook(mail, idempotency_key=idempotency_key, ports=ports,
+                                                 record=record, deal_id=deal_id, follow_up=follow_up)
 
 
 def create_event(subject: str, start: datetime, end: datetime, location: str, body: str,
                  attendees=(), *, idempotency_key: str, record: str | None = None,
-                 ports: Ports | None = None) -> Result:
+                 ports: Ports | None = None, deal_id: str | None = None,
+                 follow_up: dict[str, str] | None = None) -> Result:
     """Save one event on Joe's carr.us calendar; with attendees the save sends invitations."""
     if start.tzinfo is None or end.tzinfo is None or end <= start or not subject.strip():
         raise ValueError('an event needs a subject and a timezone-aware start before its end')
     event = Event(subject, start, end, location, body, _addresses(attendees))
-    return write(event, idempotency_key, ports or default_ports(), record)
+    ports = ports or default_ports()
+    return (ports.sender or Sender()).send_outlook(event, idempotency_key=idempotency_key, ports=ports,
+                                                  record=record, deal_id=deal_id, follow_up=follow_up)
 
 
 EXIT = {State.DONE: 0, State.ACTIVITY_LOG_FAILED: 4, State.NOT_IDLE: 75, State.PRESSED_UNCONFIRMED: 3, State.WINDOW_NOT_CLOSED: 3}
@@ -869,12 +882,13 @@ def main(argv: list[str]) -> int:
         return 1
     spec = json.loads(args.json.read_text())
     key, record = spec.pop('idempotency_key'), spec.pop('record', None)
+    policy = {'deal_id': spec.pop('deal_id', None), 'follow_up': spec.pop('follow_up', None)}
     if args.kind == 'send':
         result = send(spec.get('to', ()), spec.get('cc', ()), spec.get('bcc', ()), spec['subject'],
-                      spec.get('body', ''), idempotency_key=key, record=record)
+                      spec.get('body', ''), idempotency_key=key, record=record, **policy)
     else:
         result = create_event(spec['subject'], datetime.fromisoformat(spec['start']),
                               datetime.fromisoformat(spec['end']), spec.get('location', ''),
-                              spec.get('body', ''), spec.get('attendees', ()), idempotency_key=key, record=record)
+                              spec.get('body', ''), spec.get('attendees', ()), idempotency_key=key, record=record, **policy)
     print(result.line(args.kind))
     return EXIT.get(result.state, 1)

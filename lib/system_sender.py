@@ -21,7 +21,8 @@ Every call runs the SAME chain, in this order, before anything leaves:
   b. writing lint  `run.sh lint <file> --surface email|social`. ANY finding
                    refuses, REVIEW and RATION included, because no human reads
                    the draft after this point.
-  c. allowlist     mail: a non-empty subject (the transport finds the compose
+  c. allowlist     mail: existing party/lead suppression instructions must be readable
+                   and clear for every recipient; at most one external recipient; a non-empty subject (the transport finds the compose
                    window by its exact title), then Joe's or Dell's own address,
                    or an exact participant
                    email on the named deal (get-call-context, read live). A
@@ -36,7 +37,7 @@ Every call runs the SAME chain, in this order, before anything leaves:
                    a hash of the message AND its Central calendar date, so the
                    same words may go again on a later day; a caller's explicit
                    dedupe_key is used as given.
-  e. daily caps    from config (20 mail, 5 social) per local day in the
+  e. daily caps    from config (10 mail, 5 social) per local day in the
                    config's timezone. The slot is counted and reserved in the
                    SAME ledger lock as the dedupe claim, so concurrent senders
                    cannot overshoot; a released claim frees its slot.
@@ -102,10 +103,13 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from lib.record_call import VerbResult, call_verb
+
+if TYPE_CHECKING:
+    from lib.outlook_send import Event, Mail, Ports, Result
 
 REPO = Path(__file__).resolve().parents[1]
 CONFIG_PATH = REPO / "ops" / "config" / "system-sender.v1.json"
@@ -425,6 +429,8 @@ def validate_config(config: Any) -> str | None:
     caps = config.get("daily_caps")
     if not (isinstance(caps, Mapping) and all(_is_count(caps.get(ch)) for ch in ("mail", "social"))):
         problems.append("daily_caps needs mail and social as non-negative integers")
+    if isinstance(caps, Mapping) and _is_count(caps.get('mail')) and caps['mail'] > 10:
+        problems.append('daily_caps.mail cannot exceed 10')
     mail = config.get("mail")
     own = mail.get("self_addresses") if isinstance(mail, Mapping) else None
     if not (isinstance(own, list) and own and all(isinstance(a, str) and _EMAIL.fullmatch(a) for a in own)):
@@ -656,6 +662,45 @@ class Sender:
                          lambda: self._allow_mail(attempt, recipients, subject, deal_id, follow_up),
                          lambda: self._deliver_mail(recipients, subject, body))
 
+    def send_outlook(self, item: Mail | Event, *, idempotency_key: str, ports: Ports,
+                     record: str | None = None, deal_id: str | None = None,
+                     follow_up: Mapping[str, str] | None = None) -> Result:
+        """Mail and calendar writes use the same policy, ledger and cap as send_mail."""
+        from lib.outlook_send import Mail, Result, State, _write_transport, fields
+
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+            raise ValueError('idempotency_key is required')
+        recipients = sorted(set(item.recipients if isinstance(item, Mail) else item.attendees))
+        # A private calendar save has no external recipients. It still uses the chain.
+        mail_config = self.config.get('mail')
+        own = mail_config.get('self_test_address', '') if isinstance(mail_config, Mapping) else ''
+        policy_recipients = recipients or [own]
+        text = '\n'.join(fields(item).values())
+        attempt = _Attempt(channel='mail', target=','.join(recipients), subject=item.subject,
+                           text_sha256=_sha256(text), dedupe_key=idempotency_key)
+        delivered: Result | None = None
+
+        def transport() -> _Delivery:
+            nonlocal delivered
+            delivered = _write_transport(item, idempotency_key, ports, record)
+            if delivered.state in (State.DONE, State.ACTIVITY_LOG_FAILED):
+                return _Delivery('sent')
+            if delivered.state.pressed or delivered.state in (State.DUPLICATE_KEY, State.ALREADY_IN_MAILBOX):
+                return _Delivery('unknown')
+            return _Delivery('not_sent', reason=delivered.reason)
+
+        result = self._run(attempt, text, 'email',
+                           lambda: self._allow_mail(attempt, policy_recipients, item.subject,
+                                                    deal_id, follow_up), transport)
+        if delivered is not None:
+            return delivered
+        if result.reason == 'duplicate':
+            return Result(State.DUPLICATE_KEY, result.reason)
+        if result.outcome == UNKNOWN:
+            return Result(State.PRESSED_UNCONFIRMED, result.reason)
+        state = State.POLICY_SHADOW if result.outcome == WOULD_SEND else State.POLICY_REFUSED
+        return Result(state, result.reason)
+
     def send_self_test(self, *, subject: str, body: str,
                        dedupe_key: str | None = None) -> SendResult:
         """A mail to Joe's own address (config mail.self_test_address) through
@@ -793,8 +838,20 @@ class Sender:
         malformed = [r for r in recipients if not _EMAIL.fullmatch(r)]
         if malformed:
             return "recipient_malformed", f"{len(malformed)} malformed address(es)"
+        # Read the existing party/lead suppression facts for every address, including copies.
+        result = self._verb('mail-contact-policy', {'emails': recipients})
+        rows = result.reply.get('recipients') if result.ok and isinstance(result.reply, dict) else None
+        if (not isinstance(rows, list) or len(rows) != len(recipients)
+                or any(not isinstance(row, dict) or not isinstance(row.get('email'), str)
+                       or type(row.get('blocked')) is not bool for row in rows)
+                or {row['email'] for row in rows} != set(recipients)):
+            return 'contact_policy_unreadable', 'exact recipient suppression status unavailable'
+        if any(row['blocked'] for row in rows):
+            return 'do_not_contact', 'recipient has a standing suppression instruction'
         own = {a.lower() for a in self.config["mail"]["self_addresses"]}
         outside = [r for r in recipients if r not in own]
+        if len(outside) > 1:
+            return 'one_to_one_required', 'mail permits at most one external recipient'
         if not outside:
             return None
         if not deal_id:
