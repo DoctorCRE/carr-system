@@ -26,7 +26,7 @@ def identities(run):
     if parsed.version != 4 or str(parsed) != run:
         raise ValueError('fixture run must be a canonical random UUID')
     return {name: str(uuid.uuid5(NAMESPACE, f'{run}:{name}')) for name in (
-        'party', 'client', 'lease', 'tour', 'route', 'projection', 'rights', 'evidence',
+        'party', 'client', 'lease', 'deal', 'note_a', 'note_b', 'tour', 'route', 'projection', 'rights', 'evidence',
         'property_a', 'property_b', 'unrelated_property', 'stop_a', 'stop_b')}
 
 
@@ -49,6 +49,8 @@ def owner(cur):
 def manifest(run):
     ids = identities(run)
     return {'schema': SCHEMA, 'run': run,
+            'deal': {'id': ids['deal'], 'name': f'Synthetic staging QA {run[:8]} deal',
+                     'updates': ['Synthetic staging QA initial update', 'Synthetic staging QA follow-up update']},
             'lease': {'id': ids['lease'], 'client_id': ids['client'], 'client_name': f'Synthetic staging QA {run[:8]} lease'},
             'tour': {'id': ids['tour'], 'name': 'Synthetic staging QA accepted tour', 'route_id': ids['route'],
                      'property_ids': [ids['property_a'], ids['property_b']], 'stop_ids': [ids['stop_a'], ids['stop_b']],
@@ -69,7 +71,10 @@ def read(conn, run):
         lease = scalar(cur, 'select leases from public.v_client_lease_radar')
         lease = next((row for row in lease if row['id'] == ids['lease']), None)
         tour = scalar(cur, 'select ops.read_tour_internal_detail(%s,%s,%s)', (TENANT, ids['tour'], 'joe'))
-        return {'lease': lease, 'tour': tour}
+        deal = scalar(cur, 'select to_jsonb(d) from public.v_deal_room_deal d where id=%s', (ids['deal'],))
+        cur.execute('select id,text from public.v_deal_room_note where deal_id=%s order by created_at,id', (ids['deal'],))
+        notes = [{'id': str(row[0]), 'text': row[1]} for row in cur.fetchall()]
+        return {'lease': lease, 'tour': tour, 'deal': {**(deal or {}), 'notes': notes}}
 
 
 def prepare(conn, run):
@@ -88,6 +93,12 @@ def prepare(conn, run):
                    notes_path=f'fixtures/staging-journey/{run}', created_by=joe, updated_by=joe)
             insert(cur, 'public.client', id=ids['client'], party_id=ids['party'], status='past_client',
                    owner_id=joe, notes_path=f'fixtures/staging-journey/{run}', created_by=joe, updated_by=joe)
+            insert(cur, 'public.deal', id=ids['deal'], client_id=ids['client'], name=result['deal']['name'],
+                   deal_type='startup', phase='pending', lane='territory', owner='joe',
+                   notes_path=f'fixtures/staging-journey/{run}', created_by=joe, updated_by=joe)
+            for index, suffix in enumerate(('a', 'b')):
+                cur.execute("insert into public.deal_note(id,deal_id,kind,text,actor_id,created_at) values(%s,%s,'note',%s,%s,now()+(%s*interval '1 second'))",
+                            (ids[f'note_{suffix}'], ids['deal'], result['deal']['updates'][index], joe, index - 2))
             cur.execute("insert into public.lease(id,client_id,owner_id,expiration_on,source,created_by) values(%s,%s,%s,(now() at time zone 'America/Chicago')::date+365,%s,%s)",
                         (ids['lease'], ids['client'], joe, f'synthetic-staging-journey:{run}', joe))
             stamp = scalar(cur, "select now()-interval '1 minute'")
@@ -156,6 +167,9 @@ def verify(conn, run):
         if scalar(cur, 'select client_id=%s and source=%s from public.lease where id=%s',
                   (ids['client'], f'synthetic-staging-journey:{run}', ids['lease'])) is not True:
             raise ValueError('fixture lease identity or provenance changed')
+        if scalar(cur, 'select client_id=%s and name=%s and notes_path=%s from public.deal where id=%s',
+                  (ids['client'], expected['deal']['name'], f'fixtures/staging-journey/{run}', ids['deal'])) is not True:
+            raise ValueError('fixture deal identity or provenance changed')
         if scalar(cur, 'select canonical_dataset_version=%s and subject_id=%s from ops.tour where id=%s',
                   (f'synthetic-staging-journey:{run}', ids['client'], ids['tour'])) is not True:
             raise ValueError('fixture Tour identity or provenance changed')
@@ -165,6 +179,8 @@ def verify(conn, run):
     value = read(conn, run)
     if not value['lease'] or value['lease']['client_name'] != expected['lease']['client_name']:
         raise ValueError('fixture lease did not reach the radar')
+    if value['deal'].get('id') != ids['deal'] or [note['text'] for note in value['deal']['notes']] != expected['deal']['updates']:
+        raise ValueError('fixture deal update history changed')
     route = value['tour']['routes'][0]
     if route['id'] != ids['route'] or not route['accepted'] or [s['property_id'] for s in route['stops']] != expected['tour']['property_ids']:
         raise ValueError('accepted fixture route identity or order changed')
@@ -196,6 +212,8 @@ def owned_rows(run):
         ('ops.tour_rights_receipt', 'id=%s', (ids['rights'],)),
         ('ops.tour_property', 'id in (%s,%s,%s)', (ids['property_a'], ids['property_b'], ids['unrelated_property'])),
         ('public.lease', 'id=%s', (ids['lease'],)),
+        ('public.deal_note', 'deal_id=%s', (ids['deal'],)),
+        ('public.deal', 'id=%s', (ids['deal'],)),
         ('public.client', 'id=%s', (ids['client'],)),
         ('public.party', 'id=%s', (ids['party'],))]
 

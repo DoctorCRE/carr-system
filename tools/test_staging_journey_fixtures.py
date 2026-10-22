@@ -33,6 +33,13 @@ class JourneyContractTests(unittest.TestCase):
             with self.subTest(run=run), self.assertRaises(ValueError):
                 journey.identities(run)
 
+    def test_manifest_includes_a_run_owned_deal_with_recorded_updates(self):
+        run = str(uuid.uuid4())
+        value = journey.manifest(run)
+        self.assertEqual(value['deal']['id'], journey.identities(run)['deal'])
+        self.assertEqual(len(value['deal']['updates']), 2)
+        self.assertTrue(all(text.startswith('Synthetic staging QA') for text in value['deal']['updates']))
+
 
 class JourneyBindingTests(unittest.TestCase):
     def setUp(self):
@@ -228,6 +235,9 @@ class JourneyPostgresTests(unittest.TestCase):
         with cls.conn.cursor() as cur:
             cur.execute("insert into actor(slug,display_name,kind) values('joe','Synthetic broker','human'),('system','Synthetic system','system') on conflict do nothing")
             cur.execute("insert into client_status(slug,label,sort) values('past_client','Past client',1) on conflict do nothing")
+            cur.execute("insert into deal_type_ref(slug,label,sort) values('startup','Startup',1) on conflict do nothing")
+            cur.execute("insert into deal_phase(slug,label,sort) values('pending','Pending',1) on conflict do nothing")
+            cur.execute("insert into deal_lane(slug,label,sort) values('territory','Territory',1) on conflict do nothing")
         cls.conn.commit()
 
     def test_create_read_repeat_and_complete_cleanup(self):
@@ -237,6 +247,8 @@ class JourneyPostgresTests(unittest.TestCase):
         self.assertEqual(journey.prepare(self.conn, run), manifest)
         readback = journey.read(self.conn, run)
         self.assertEqual(readback['lease']['client_name'], manifest['lease']['client_name'])
+        self.assertEqual(readback['deal']['id'], manifest['deal']['id'])
+        self.assertEqual([note['text'] for note in readback['deal']['notes']], manifest['deal']['updates'])
         self.assertEqual(readback['tour']['routes'][0]['id'], manifest['tour']['route_id'])
         self.assertTrue(readback['tour']['routes'][0]['accepted'])
         self.assertEqual([s['property_id'] for s in readback['tour']['routes'][0]['stops']], manifest['tour']['property_ids'])
