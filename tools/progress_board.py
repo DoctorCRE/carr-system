@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 from http.client import HTTPException
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, Collection, Iterator
+from typing import Any, Callable, Iterator
 from urllib.request import Request, urlopen
 from urllib.parse import urlencode
 
@@ -1975,8 +1975,7 @@ def render(project: str, *, discover: bool = False) -> None:
     (board_dir() / f"{safe_project(project)}.html").unlink(missing_ok=True)
 
 
-def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict[str, Any]],
-                        keep: Collection[str] = ()) -> int:
+def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict[str, Any]]) -> int:
     """Expire old GitHub cards and watchdog projections while retaining their notes."""
     proposed, report = dispose_legacy(state, {}, now_utc())
     archived = report["counts"]["legacy, unverified"]
@@ -1988,7 +1987,7 @@ def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict
     cutoff = now_utc() - RECENT_MERGED
     expired = []
     for task_id, task in state.get("tasks", {}).items():
-        generated = task_id.startswith("wd-") and task.get("pr") is None and task_id not in keep
+        generated = task_id.startswith("wd-") and task.get("pr") is None
         if task.get("pr") is None and not generated:
             continue
         info = facts.get(pr_key(task), {}) if task.get("pr") is not None else {}
@@ -2122,8 +2121,7 @@ def command_dispose_legacy(args: argparse.Namespace) -> None:
 
 def apply_sync(state: dict[str, Any],
                fetched: dict[tuple[str, int], tuple[dict[str, Any] | None, str | None]],
-               evidence: dict[tuple[str, int], str | None] | None = None,
-               keep: Collection[str] = ()) -> bool:
+               evidence: dict[tuple[str, int], str | None] | None = None) -> bool:
     changed = False
     known = {pr_key(task) for task in state.get("tasks", {}).values() if task.get("pr") is not None}
     failed: list[dict[str, str]] = [
@@ -2152,7 +2150,7 @@ def apply_sync(state: dict[str, Any],
             changed = True
         if delivered_live(task, task_repo(task), at, (evidence or {}).get(key)):
             changed = True
-    if retain_recent_cards(state, {key: info for key, (info, error) in fetched.items() if info and not error}, keep):
+    if retain_recent_cards(state, {key: info for key, (info, error) in fetched.items() if info and not error}):
         changed = True
     if fetched and not os.environ.get("PROGRESS_BOARD_SKIP_GH"):
         raw_sync = state.get("github_sync")
@@ -2343,8 +2341,11 @@ def work_queue_module():
 
 
 def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
-    """The versioned data contract the app page renders, including fresh local
-    cost evidence. Full diagnostics stay local; the app receives bounded cards."""
+    return fit_snapshot(project_board_snapshot(state, costs=costs))
+
+
+def project_board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
+    """Project display fields before transport fitting; raw diagnostics stay local."""
     if state.get("work_requests"):
         return hierarchy_snapshot(state, costs=costs)
     tasks = {}
@@ -2380,7 +2381,7 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
          "answered_at": q.get("answered_at") or q.get("updated_at")}
         for qid, q in (state.get("questions") or {}).items() if q.get("answer")
     ]
-    return fit_snapshot({
+    return {
         **({'work_queue': work_queue_module().board_projection()}
            if state['project'] == 'carr-v5' else {}),
         "schema": SNAPSHOT_SCHEMA,
@@ -2413,7 +2414,7 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
         "costs": costs if costs is not None else cost_snapshot_reader()(REPO_ROOT / "out" / "system-costs.json", now=at),
         "omitted": {"live": 0, "merged": 0, "history": 0},
         "updated_at": state.get("updated_at"),
-    })
+    }
 
 
 def orchestrator_snapshot(state: dict[str, Any]) -> dict[str, Any]:
@@ -2534,6 +2535,19 @@ def question_revision(question: dict[str, Any], project: str) -> dict[str, Any]:
     }
 
 
+def publish_immutable_page(board_id: str, payload: dict[str, Any]) -> int:
+    if snapshot_size(payload) > SNAPSHOT_BUDGET:
+        raise SnapshotTooLarge("snapshot page exceeds publication budget; previous observation retained")
+    before = call_verb("read-progress-board", {"board_id": board_id}).get("snapshot")
+    if before is None:
+        args = {"board_id": board_id, "base_version": 0, "snapshot": payload}
+        call_verb("publish-board-snapshot", {**args, "idempotency_key": stable_key("publish-board-snapshot", args)})
+    after = call_verb("read-progress-board", {"board_id": board_id}).get("snapshot")
+    if not after or after.get("snapshot_json") != payload:
+        raise RuntimeError("snapshot page did not read back; previous observation retained")
+    return int(after["version"])
+
+
 def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
     """Publish immutable bounded pages before switching the manifest pointer."""
     pages: list[dict[str, Any]] = []
@@ -2543,14 +2557,8 @@ def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
         encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
         digest = hashlib.sha256(encoded.encode()).hexdigest()
         board_id = 'carr-v5-external-' + digest
-        before = call_verb('read-progress-board', {'board_id': board_id}).get('snapshot')
-        if before is None:
-            args = {'board_id': board_id, 'base_version': 0, 'snapshot': payload}
-            call_verb('publish-board-snapshot', {**args, 'idempotency_key': stable_key('publish-board-snapshot', args)})
-        after = call_verb('read-progress-board', {'board_id': board_id}).get('snapshot')
-        if not after or after.get('snapshot_json') != payload:
-            raise RuntimeError('external inventory page did not read back')
-        pages.append({'board_id': board_id, 'version': int(after['version']), 'count': len(rows), 'digest': digest})
+        version = publish_immutable_page(board_id, payload)
+        pages.append({'board_id': board_id, 'version': version, 'count': len(rows), 'digest': digest})
     for row in cache['items']:
         candidate = [*batch, row]
         if len(json.dumps({'items': candidate}, ensure_ascii=False)) > 120000:
@@ -2565,6 +2573,78 @@ def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
             'schema': 'system-work-external.v2', 'pages': pages, 'item_count': len(cache['items'])}
 
 
+def publish_paged_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Keep a legacy preview; publish the lossless JSON pages before its manifest.
+
+    Readers join page content in manifest order, verify the UTF-8 SHA-256 digest,
+    then parse JSON. Immutable page IDs preserve older observations on failures.
+    """
+    content = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    pages, payloads = [], []
+    offset = 0
+    while offset < len(content):
+        low, high = 1, min(len(content) - offset, SNAPSHOT_BUDGET)
+        while low <= high:
+            middle = (low + high) // 2
+            payload = {"schema": "carr-progress-board-page.v1", "content": content[offset:offset + middle]}
+            if snapshot_size(payload) <= SNAPSHOT_BUDGET:
+                low = middle + 1
+            else:
+                high = middle - 1
+        if not high:
+            raise SnapshotTooLarge("snapshot page cannot fit; no data published")
+        payload = {"schema": "carr-progress-board-page.v1", "content": content[offset:offset + high]}
+        digest = hashlib.sha256(payload["content"].encode()).hexdigest()
+        board_id = snapshot["project"] + "-snapshot-" + digest
+        payloads.append((board_id, payload))
+        pages.append({"board_id": board_id, "version": 1, "digest": digest})
+        offset += high
+
+    preview = copy.deepcopy(snapshot)
+    omitted: dict[str, int] = {}
+    preview["pagination"] = {"schema": "carr-progress-board-pages.v1", "encoding": "json",
+                             "digest": hashlib.sha256(content.encode()).hexdigest(),
+                             "pages": pages, "omitted": omitted}
+    notice = {"text": ""}
+    preview.setdefault("notes", []).append(notice)
+    while True:
+        counts = {**{key: value for key, value in preview["omitted"].items() if value}, **omitted}
+        notice["text"] = ("Board preview. Omitted from this preview: " + json.dumps(counts, sort_keys=True) +
+                          ". All records remain in the published snapshot pages. "
+                          "Retrieve them with read-progress-board using pagination.pages. Full queue overview: "
+                          "https://app.doctorcre.com/progress-board?board=orchestrator")
+        try:
+            fit_snapshot(preview)
+        except SnapshotTooLarge:
+            pass
+        if snapshot_size(preview) <= SNAPSHOT_BUDGET:
+            break
+        collections = [(key, preview, key) for key, value in preview.items()
+                       if isinstance(value, (list, dict)) and value
+                       and key not in {"pagination", "task_defaults", "task_counts", "omitted", "work_queue"}
+                       and (key != "notes" or len(value) > 1)]
+        queue = preview.get("work_queue") or {}
+        collections.extend(("work_queue." + key, queue, key) for key, value in queue.items()
+                           if isinstance(value, (list, dict)) and value and key != "omitted")
+        if not collections:
+            raise SnapshotTooLarge("snapshot page manifest exceeds publication budget; previous observation retained")
+        path, parent, key = max(collections, key=lambda entry: snapshot_size(entry[1][entry[2]]))
+        value = parent[key]
+        if key == "notes" and parent is preview:
+            value = value[:-1]
+        keep = len(value) // 2
+        omitted[path] = omitted.get(path, 0) + len(value) - keep
+        parent[key] = dict(list(value.items())[:keep]) if isinstance(value, dict) else value[:keep]
+        if key == "notes" and parent is preview:
+            parent[key].append(notice)
+
+    for page, (board_id, payload) in zip(pages, payloads):
+        page["version"] = publish_immutable_page(board_id, payload)
+    if snapshot_size(preview) > SNAPSHOT_BUDGET:
+        raise SnapshotTooLarge("verified page manifest exceeds publication budget; previous observation retained")
+    return preview
+
+
 def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -> dict[str, int]:
     state = read_state(project)
     board = safe_project(project)
@@ -2572,7 +2652,7 @@ def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -
         publish_orchestrator(state)
     before = call_verb("read-progress-board", {"board_id": board})
     remote_snapshot = before.get("snapshot")
-    snapshot = board_snapshot(state, costs=costs)
+    snapshot = project_board_snapshot(state, costs=costs)
     if board == "carr-v5" and refresh_inventory:
         from system_work_cache import cached_github
         snapshot["external_inventory"] = publish_external_inventory(cached_github(board_dir() / "system-work-github-cache.json",
@@ -2581,7 +2661,13 @@ def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -
         inventory = remote_snapshot.get("snapshot_json", {}).get("external_inventory")
         if inventory is not None:
             snapshot["external_inventory"] = inventory
-    snapshot = fit_snapshot(snapshot)
+    try:
+        fitted = fit_snapshot(copy.deepcopy(snapshot))
+    except SnapshotTooLarge:
+        if board != LAUNCHD_BOARD:
+            raise
+        fitted = publish_paged_snapshot(snapshot)
+    snapshot = fitted
     if remote_snapshot is None or remote_snapshot.get("snapshot_json") != snapshot:
         args = {"board_id": board, "base_version": int(remote_snapshot["version"]) if remote_snapshot else 0,
                 "snapshot": snapshot}
@@ -2753,15 +2839,13 @@ def add_v1_cards(state: dict[str, Any], discovered: dict) -> bool:
     return changed
 
 
-def reconcile_state(state: dict[str, Any], fetched: dict, at: str,
-                    preserved_cards: set[str] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Cleanup plan on a copy: drop unprotected watchdog cards, fold duplicate PR cards, then
+def reconcile_state(state: dict[str, Any], fetched: dict, at: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Cleanup plan on a copy: drop watchdog cards, fold duplicate PR cards, then
     apply the scheduled sync rule. GitHub read failures keep cards and fail the check."""
     result = copy.deepcopy(state)
     tasks = result.setdefault("tasks", {})
-    preserved_cards = preserved_cards or set()
     removed = {key: tasks.pop(key) for key in list(tasks)
-               if key.startswith("wd-") and key not in preserved_cards}
+               if key.startswith("wd-")}
     folds = {}
     for task_id in list(tasks):
         task = tasks[task_id]
@@ -2782,7 +2866,7 @@ def reconcile_state(state: dict[str, Any], fetched: dict, at: str,
         removed[task_id] = tasks.pop(task_id)
         folds[task_id] = canonical
     add_v1_cards(result, fetched)
-    apply_sync(result, fetched, keep=preserved_cards)
+    apply_sync(result, fetched)
     failures = [{"card": f"{repo}#{number}", "error": error or "No PR facts"}
                 for (repo, number), (info, error) in fetched.items() if info is None or error]
     failures += [{"card": task_id, "error": "PR not read"} for task_id, task in tasks.items()
@@ -2824,17 +2908,7 @@ def command_reconcile(args: argparse.Namespace) -> None:
             fetched.update(discover_v1())
         except RuntimeError as exc:
             discovery_error = str(exc)
-    watchdog = repo_lib("job_watchdog")
-    config = watchdog.load_config(os.environ.get("CARR_WATCHDOG_CONFIG",
-                                                str(REPO_ROOT / "ops/config/job-watchdog.json")))
-    preserved_cards = set()
-    if os.environ.get("CARR_JOB_BOARD", config["board"]) == args.project:
-        root = board_dir().parent.parent
-        effects = watchdog.Effects(root, config)
-        findings = watchdog.read_latest(watchdog.path_at(root, config["paths"]["findings"]))
-        preserved_cards = {effects.card(finding) for finding in findings.values()
-                           if finding.get("kind") == "vendor_release_fetch_error" and not finding.get("cleared_at")}
-    proposed, report = reconcile_state(initial, fetched, stamp(), preserved_cards)
+    proposed, report = reconcile_state(initial, fetched, stamp())
     if discovery_error:
         report["failures"].append({"card": "V1 discovery", "error": discovery_error})
         report["check_passed"] = False

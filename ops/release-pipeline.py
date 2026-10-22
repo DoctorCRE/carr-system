@@ -164,13 +164,27 @@ class Runner:
     """Runs one command with stdin closed, output to its own log file."""
 
     def run(self, argv: list[str], *, cwd: Path, log: Path, env: dict[str, str],
-            timeout: int = 3600) -> Result:
+            timeout: int = 3600, read_only: tuple[Path, ...] = ()) -> Result:
+        command = argv
+        if read_only:
+            sandbox = Path("/usr/bin/sandbox-exec")
+            if sys.platform != "darwin" or not sandbox.is_file():
+                raise Blocked("toolchain_write_isolation", "pinned toolchain execution requires the macOS write sandbox")
+            denied = []
+            for home in read_only:
+                home = home.resolve()
+                denied.append(f'(deny file-write* (subpath {json.dumps(str(home))}) '
+                              f'(literal {json.dumps(str(home.with_name(home.name + ".sha256")))}))')
+                for parent in home.parents:
+                    denied.append(f'(deny file-write-unlink (literal {json.dumps(str(parent))}))')
+            profile = "(version 1)(allow default)" + "".join(denied)
+            command = [str(sandbox), "-p", profile, *argv]
         log.parent.mkdir(parents=True, exist_ok=True)
         with open(log, "a", encoding="utf-8") as fh:
             fh.write(f"$ (cd {cwd}) {' '.join(argv)}\n")
             fh.flush()
             try:
-                proc = subprocess.run(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+                proc = subprocess.run(command, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                       text=True, timeout=timeout)
                 out, rc = proc.stdout or "", proc.returncode
@@ -182,6 +196,8 @@ class Runner:
             out = redact_text(out, known_secrets=sensitive_env_values(env))
             fh.write(out)
             fh.write(f"\n[exit {rc}]\n")
+        if read_only and out.startswith("sandbox-exec:"):
+            raise Blocked("toolchain_write_isolation", "macOS could not apply the pinned toolchain write sandbox")
         return Result(rc, out)
 
 
@@ -792,6 +808,37 @@ class Pipeline:
                           cwd=cwd, trim_output=False)
         return [path for path in output.split("\0") if path]
 
+    def runtime_env(self, env: dict[str, str]) -> dict[str, str]:
+        """Keep Wrangler and Miniflare state outside the sealed installation."""
+        root = (self.run_dir / "runtime").absolute()
+        pinned = (self.store.root / "toolchain").resolve()
+        directories = {
+            "MINIFLARE_CACHE_DIR": root / "miniflare",
+            "WRANGLER_CACHE_DIR": root / "wrangler-cache",
+            "WRANGLER_LOG_PATH": root / "logs",
+        }
+        for path in (root, *directories.values()):
+            if (not path.resolve().is_relative_to(self.run_dir.resolve())
+                    or path.resolve().is_relative_to(pinned)):
+                raise Blocked("toolchain_runtime_path", "runtime directory resolves into the pinned toolchain or outside this run")
+        for path in directories.values():
+            path.mkdir(parents=True, exist_ok=True)
+        return {**env,
+                **{name: str(path) for name, path in directories.items()},
+                "CLOUDFLARE_CF_FETCH_PATH": str(directories["MINIFLARE_CACHE_DIR"] / "cf.json")}
+
+    def run_command(self, argv: list[str], *, cwd: Path, log: Path,
+                    env: dict[str, str] | None = None, timeout: int = 3600) -> Result:
+        for home in self.toolchain_integrity:
+            self.verify_toolchain(home)
+        env = self.runtime_env(self.env if env is None else env)
+        try:
+            return self.runner.run(argv, cwd=cwd, log=log, env=env,
+                                   timeout=timeout, read_only=tuple(self.toolchain_integrity))
+        finally:
+            for home in self.toolchain_integrity:
+                self.verify_toolchain(home)
+
     def step(self, name: str, argv: list[str], cwd: Path, *, timeout: int = 3600,
              env: dict[str, str] | None = None) -> Result:
         """Run one step, or in dry-run only print it. Nonzero is StepFailed.
@@ -801,15 +848,11 @@ class Pipeline:
         if self.dry_run:
             self.out(f"  [dry-run] (cd {cwd}) {shown}")
             return Result(0, "")
-        for home in self.toolchain_integrity:
-            if Path(argv[0]).is_relative_to(home) or (env is not None and CLOUDFLARE_TOKEN_NAME in env):
-                self.verify_toolchain(home)
         n = len(self.executed) + 1
         log = self.run_dir / f"{n:02d}-{name}.log"
         self.out(f"  -> {name}: {shown}")
         self.executed.append(name)
-        res = self.runner.run(argv, cwd=cwd, log=log, env=self.env if env is None else env,
-                              timeout=timeout)
+        res = self.run_command(argv, cwd=cwd, log=log, env=env, timeout=timeout)
         if res.rc != 0:
             raise StepFailed(name, res.rc, str(log))
         res.log = str(log)
@@ -831,8 +874,8 @@ class Pipeline:
         findings_path = self.run_dir / f"{n:02d}-{name}-findings.json"
         self.out(f"  -> {name}: ./run.sh health --findings-json {findings_path}")
         self.executed.append(name)
-        res = self.runner.run(["./run.sh", "health", "--findings-json", str(findings_path)],
-                              cwd=cwd, log=log, env=self.env, timeout=900)
+        res = self.run_command(["./run.sh", "health", "--findings-json", str(findings_path)],
+                               cwd=cwd, log=log, timeout=900)
         res.log = str(log)
         findings, complete = read_health_findings(res.out, findings_path)
         self.dependency_evidence[name] = evidence_digest({"rc": res.rc, "complete": complete, "findings": findings})
@@ -1458,6 +1501,17 @@ class Pipeline:
                 raise Blocked("promotion_unresolved", "checkpoint cannot advance while promotion intent is unresolved")
             self.store.resolve_promotion(state, lane, resolution)
         lane_state["last_released_sha"] = sha
+        lane_state["last_evaluated_sha"] = sha
+        lane_state["last_evaluated_from"] = sha
+        if not self.dry_run:
+            self.store.save(state)
+
+    def advance_source_checkpoint(self, state: dict, lane: str, sha: str) -> None:
+        lane_state = state.setdefault(lane, {})
+        if lane_state.get("pending_promotion"):
+            raise Blocked("promotion_unresolved", "source checkpoint cannot advance while promotion intent is unresolved")
+        lane_state["last_evaluated_sha"] = sha
+        lane_state["last_evaluated_from"] = lane_state.get("last_released_sha")
         if not self.dry_run:
             self.store.save(state)
 
@@ -1487,8 +1541,8 @@ class Pipeline:
                 "resolution_evidence": {"replacement_sha": target, "sha": sha,
                                         "provider_version_id": version, "receipt_digest": evidence_digest(receipt)}}
 
-    def legacy_health_promotion(self, failure: dict, lane_cfg: dict, main: str) -> dict:
-        """Bind a pre-intent promotion to its immutable source and successful provider steps."""
+    def legacy_health_promotion(self, failure: dict, lane_cfg: dict, main: str, promotion: dict) -> dict:
+        """Bind a health failure to its run identity and successful provider steps."""
         try:
             run_id = failure['run_id']
             if (not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}", run_id)
@@ -1513,7 +1567,15 @@ class Pipeline:
                     or not any(route.get('pattern') == host and route.get('custom_domain') is True
                                for route in identities[0]['routes'])):
                 raise ValueError('Worker account or route changed')
-            version = failure['promotion']['provider_version_id']
+            recorded = [row for row in self.store.records()
+                        if row.get('lane') == 'worker' and row.get('status') == 'worker_promoted'
+                        and row.get('run_id') == run_id]
+            expected_identity = {'from_sha': previous, **promotion}
+            if (failure.get('promotion') not in (None, promotion)
+                    or (failure.get('promotion') is None and not recorded)
+                    or any(row.get(key) != value for row in recorded for key, value in expected_identity.items())):
+                raise ValueError('run promotion identity differs or is missing')
+            version = promotion['provider_version_id']
             receipts = {}
             for name, command in (('11-upload.log', f'bin/deploy-worker.sh --upload-version --release-sha {sha}'),
                                   ('13-promote.log', f'bin/deploy-worker.sh --promote-version {version}')):
@@ -1541,8 +1603,12 @@ class Pipeline:
                 if versions != [version] or len(sources) != 1 or sources[0] not in {sha, '[REDACTED]'}:
                     raise ValueError('provider receipt identity differs or is missing')
                 receipts[name] = hashlib.sha256(raw).hexdigest()
-            return {'failure_digest': evidence_digest(failure), 'provider_receipts': receipts,
-                    'worker_identity': identities[0], 'health_verified': False}
+            proof = {'failure_digest': evidence_digest(failure), 'provider_receipts': receipts,
+                     'worker_identity': identities[0], 'health_verified': False}
+            if recorded:
+                self.store.recover_durable(recorded[-1])
+                proof['promotion_receipt_digest'] = evidence_digest(recorded[-1])
+            return proof
         except (KeyError, IndexError, ValueError, TypeError, OSError, StepFailed) as exc:
             raise Blocked('live_target_unreceipted', 'legacy health failure lacks exact source and provider receipts') from exc
 
@@ -1591,8 +1657,8 @@ class Pipeline:
                     or failure.get("step") != lane_state.get("failed_step")
                     or not failure.get("run_id")
                     or failure["run_id"] != lane_state.get("failed_run_id")
-                    or failure.get("from_sha") != previous
-                    or failure.get("promotion") != promotion
+                    or (failure.get("step") != "health" and (failure.get("from_sha") != previous
+                                                             or failure.get("promotion") != promotion))
                     or not isinstance(failure.get("executed"), list)
                     or (failure["executed"][-1:] != ["promote"] and failure.get("step") != "health")):
                 raise Blocked("live_target_unreceipted", "failed release source identity has no matching promotion evidence")
@@ -1603,7 +1669,11 @@ class Pipeline:
                            {'failed', 'shipped', 'worker_promoted', 'promotion_retired'}), None)
             if latest != failure:
                 raise Blocked('live_target_unreceipted', 'legacy failed journal is no longer current')
-            legacy = self.legacy_health_promotion(failure, lane_cfg, main)
+            if (failure.get('from_sha') != previous
+                    and not (self._at_or_before(sha, previous, self.repo)
+                             and self._at_or_before(previous, main, self.repo))):
+                raise Blocked('live_target_unreceipted', 'health recovery checkpoint is outside its source history')
+            legacy = self.legacy_health_promotion(failure, lane_cfg, main, promotion)
         self.controller_current(state)
         if not self._at_or_before(sha, main, self.repo):
             raise Blocked("history_diverged", f"live Worker {sha[:12]} is not an ancestor of main {main[:12]}")
@@ -1961,7 +2031,7 @@ class Pipeline:
                     if lane == "worker":
                         self.reconcile_worker_promotion(state, sha)
             live = (self.reconcile_worker_identity(state, lane_cfg, sha) if lane == "worker" else
-                    None if sha == lane_state.get("last_released_sha") else self.http(lane_cfg["live_release_url"]))
+                    None if lane_state.get("last_released_sha") else self.http(lane_cfg["live_release_url"]))
             base = self.last_released(state, lane, lane_cfg, live)
             if (not self.dry_run and not lane_state.get("last_released_sha")
                     and lane_state.get("failed_sha") == base):
@@ -1986,6 +2056,12 @@ class Pipeline:
                              f"{lane_state.get('failed_step')}; waiting for prerequisite repair or a fix-forward merge")
                     return 0
                 recovered_failure = sha
+            if (sha == lane_state.get("last_evaluated_sha")
+                    and base == lane_state.get("last_evaluated_from")
+                    and not lane_state.get("pending_promotion") and not recovered_failure):
+                return 0
+            if lane == "app" and live is None:
+                live = self.http(lane_cfg["live_release_url"])
             try:
                 self.git("merge-base", "--is-ancestor", base, sha, cwd=repo_dir)
             except StepFailed:
@@ -2024,19 +2100,18 @@ class Pipeline:
                 if not self.dry_run and not lane_state.get("last_released_sha"):
                     raise Blocked("bootstrap_unreceipted", "source-only advancement has no durable prior release checkpoint")
                 if not self.dry_run:
-                    resolution = None
                     if lane_state.get("pending_promotion"):
                         if self.canary_verdict(self.github_factory(lane_cfg["github_repo"]), lane_cfg, sha) != "green":
                             raise Blocked("canary_pending", "source-only replacement requires its own green canary")
                         replacement_live = self.http(lane_cfg["live_release_url"])
                         resolution = self.promotion_replacement(state, lane, sha, replacement_live)
                         live_sha = replacement_live["git_sha"]["value"]
+                        self.advance_checkpoint(state, lane, live_sha, resolution=resolution)
                         if classify(self.changed_paths(live_sha, sha), lane_cfg)[0]:
-                            self.advance_checkpoint(state, lane, live_sha, resolution=resolution)
                             return 0
                     self.store.record_durable({"lane": lane, "sha": sha, "from_sha": base,
                                                "status": "no_release_needed", "run_id": self.run_id})
-                    self.advance_checkpoint(state, lane, sha, resolution=resolution)
+                    self.advance_source_checkpoint(state, lane, sha)
                 return 0
             if lane == "worker":
                 result = self.release_worker(lane_cfg, base, sha, state, lane)
@@ -2900,7 +2975,7 @@ class Pipeline:
         log = self.run_dir / f"{n:02d}-{step}.log"
         self.out(f"  -> {step}: {' '.join(argv)}")
         self.executed.append(step)
-        result = self.runner.run(argv, cwd=self.repo, log=log, env=self.env, timeout=1800)
+        result = self.run_command(argv, cwd=self.repo, log=log, timeout=1800)
         try:
             summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -3563,7 +3638,8 @@ def _clear_failed_locked(store: Store, lane: str, sha: str, reason: str, *, repo
             "status": "promotion_retired", "reason": reason,
             "resolution_evidence": {"command": "clear-failed", "retirement_id": receipt_id, "cleared_sha": sha}})
     lane_state.update({"failed_sha": None, "failed_step": None, "failed_at": None})
-    for field in ("failed_worktree_retirement", "failed_worktree", "failed_run_id", "rejection"):
+    for field in ("failed_worktree_retirement", "failed_worktree", "failed_run_id", "rejection",
+                  "last_evaluated_sha", "last_evaluated_from"):
         lane_state.pop(field, None)
     store.save(state)
     retired = f"; kept worktree moved to {moved}" if moved else ""
