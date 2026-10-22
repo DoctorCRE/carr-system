@@ -925,6 +925,26 @@ class QueueTests(unittest.TestCase):
             self.assertEqual(work.get(card_id)['prs'][0]['head'], self.updated)
         self.assertEqual(self.calls('merge'), [])
 
+    def test_known_unlanded_push_timeouts_do_not_exhaust_uncertainty(self):
+        card_id = self.prepare_pinned_head()
+        script = self.root / 'tools/prepare_pr.py'
+        script.write_text(script.read_text().replace(
+            'state = Path(os.environ["FAKE_GH_STATE"])',
+            'marker = receipt.with_suffix(".attempt")\n'
+            'attempt = int(marker.read_text()) + 1 if marker.exists() else 1\n'
+            'marker.write_text(str(attempt))\n'
+            f'if attempt <= {module.MAX_ATTEMPTS}:\n'
+            ' import subprocess; raise subprocess.TimeoutExpired(["git", "push"], 120)\n'
+            'state = Path(os.environ["FAKE_GH_STATE"])'))
+        for _ in range(module.MAX_ATTEMPTS + 3):
+            self.q.tick()
+            self.restart()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.updated)
+        action = self.q.db.execute("SELECT * FROM actions WHERE kind='regen' AND head=?", (self.approved,)).fetchone()
+        self.assertEqual((action['phase'], action['attempts']), ('done', module.MAX_ATTEMPTS + 1))
+        self.assertEqual(self.calls('merge'), [])
+
     def test_hold_during_lost_regeneration_response_requires_manual_repin(self):
         card_id = self.prepare_pinned_head()
         script = self.root / 'tools/prepare_pr.py'
