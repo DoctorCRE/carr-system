@@ -71,9 +71,15 @@ jobs:
           fetch-depth: 0
 
       - name: Refuse to roll production back to an older commit
+        shell: bash
         run: |
+          set -o pipefail
           live="$(curl -fsS --max-time 20 "$RELEASE_URL" | jq -r '.git_sha.value // empty')"
-          if [ -n "$live" ] && [ "$live" != "$SHA" ] && git merge-base --is-ancestor "$SHA" "$live" 2>/dev/null; then
+          if [ -z "$live" ]; then
+            echo "::error::could not read the commit production serves from $RELEASE_URL; refusing to deploy blind."
+            exit 1
+          fi
+          if [ "$live" != "$SHA" ] && git merge-base --is-ancestor "$SHA" "$live" 2>/dev/null; then
             echo "::error::production already serves $live, which contains $SHA. Roll back with a revert on main, not by re-running an old deploy."
             exit 1
           fi
@@ -92,11 +98,6 @@ jobs:
         run: |
           python -m pip install -r requirements.lock
           npm --prefix mcp-server ci --no-audit
-
-      - name: Apply pending database migrations
-        env:
-          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
-        run: python tools/migrate.py --apply --yes
 
       - name: Materialize the pinned DoctorCRE app assets
         run: |
@@ -139,6 +140,13 @@ jobs:
         run: |
           echo "::error::wrangler.toml declares a Durable Object migration production has not applied. 'versions upload' cannot apply it. Check that the routes in mcp-server/wrangler.toml match production's custom domains, then run this workflow by hand with apply_durable_object_migration ticked."
           exit 1
+
+      # Migrate only after every check that can still stop the deploy, so a
+      # refused run never leaves the database ahead of the serving Worker.
+      - name: Apply pending database migrations
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: python tools/migrate.py --apply --yes
 
       - name: Deploy with the Durable Object migration (100% of traffic)
         if: steps.do_migration.outputs.pending == 'true' && inputs.apply_durable_object_migration
