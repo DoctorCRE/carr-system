@@ -54,6 +54,9 @@ def main():
             conn.execute("create table public.census_busy(id integer)")
             conn.execute("create table ops.census_empty(id integer)")
             conn.execute("create table public.census_unknown(id integer)")
+            conn.execute("create extension pg_trgm")
+            conn.execute("create table public.census_extension_owned(id integer)")
+            conn.execute("alter extension pg_trgm add table public.census_extension_owned")
             conn.execute("create table excluded.census_hidden(id integer)")
             conn.execute("create table ops.census_partitioned(id integer) partition by range(id)")
             conn.execute("create table ops.census_child partition of ops.census_partitioned for values from (0) to (10)")
@@ -68,7 +71,9 @@ def main():
         with psycopg.connect(dsn) as conn:
             snapshot = census.collect_catalog(conn)
         rows = {f"{row['schema']}.{row['name']}": row for row in snapshot["tables"]}
-        assert len(rows) == 5, rows.keys()
+        assert "public.census_extension_owned" in snapshot["backup_tables"]
+        assert "public.census_extension_owned" in rows, rows.keys()
+        assert len(rows) == 6, rows.keys()
         busy = rows["public.census_busy"]
         assert (busy["inserts"], busy["updates"], busy["deletes"]) == (3, 1, 1), busy
         assert busy["estimated_rows"] == 2, busy
@@ -81,7 +86,7 @@ def main():
         assert any(item.get("function") == "ops.census_dynamic(text)" for item in unresolved)
         report = census.build_report(snapshot["tables"], references=refs,
                                      unresolved=unresolved, backup_tables=set(snapshot["backup_tables"]))
-        assert report["counts"] == {"active": 1, "quiet": 4, "empty-and-unreferenced": 0}, report["counts"]
+        assert report["counts"] == {"active": 1, "quiet": 5, "empty-and-unreferenced": 0}, report["counts"]
         artifact = fixture.root / "out/census.json"
         census.write_report(report, artifact)
         assert json.loads(artifact.read_text())["counts"] == report["counts"]
@@ -90,11 +95,11 @@ def main():
                              capture_output=True, text=True, timeout=60)
         assert cli.returncode == 0, cli.stderr
         generated = json.loads((ROOT / "out/table-usage-census.json").read_text())
-        assert generated["counts"]["active"] == 1 and len(generated["tables"]) == 5
+        assert generated["counts"]["active"] == 1 and len(generated["tables"]) == 6
         assert generated["provenance"]["transaction_read_only"] == "on"
         assert generated["provenance"]["inventory_entries"] > 0
         print(census.render_summary(report))
-        print("PASS: 15 PostgreSQL fixture checks; owned cluster teardown follows")
+        print("PASS: 17 PostgreSQL fixture checks; owned cluster teardown follows")
     return 0
 
 
