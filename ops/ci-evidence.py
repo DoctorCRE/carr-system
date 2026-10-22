@@ -22,6 +22,26 @@ def class_groups(root=ROOT):
     return re.findall(r'^          - "([^"]+)"', block, re.M)
 
 
+def class_jobs(root=ROOT):
+    """Read display-name admission from the workflow's class matrix metadata."""
+    script = """const yaml=require('js-yaml'),fs=require('fs');
+    const job=yaml.load(fs.readFileSync(0,'utf8')).jobs.classes;
+    console.log(JSON.stringify({name:job.name,matrix:job.strategy.matrix}));"""
+    job = json.loads(subprocess.check_output(['node', '-e', script],
+        input=(root / '.github/workflows/ci.yml').read_text(),
+        cwd=root / 'mcp-server', text=True, timeout=30))
+    if len(job['matrix']['job_names']) != 1:
+        raise ValueError('CI class names must be a single metadata dimension')
+    groups = {}
+    for row in job['matrix']['job_names'][0].values():
+        if row['name'] in groups or row['classes'] not in job['matrix']['classes']:
+            raise ValueError('ambiguous or unknown CI class job')
+        groups[row['name']] = row['classes']
+    if set(groups.values()) != set(job['matrix']['classes']):
+        raise ValueError('CI class job metadata is incomplete')
+    return groups
+
+
 def verdict(jobs, groups, *, db_full=True, draft=False):
     """Report job conclusions for every class, failing closed on missing jobs."""
     lines, passed = [], True

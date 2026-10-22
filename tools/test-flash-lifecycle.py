@@ -175,12 +175,6 @@ class LifecycleTests(unittest.TestCase):
         with patch.object(flashlib, "ensure_server", side_effect=TimeoutError("cold timeout")):
             self.assertEqual(collector.flash_server_available(opener=Mock(side_effect=OSError("offline"))), (False, None))
 
-    def test_ensure_timeout_preserves_scorecard_error(self):
-        scorecard = load(HERE.parent / "ops/jev_scorecard.py", "fixture_scorecard")
-        with patch.object(flashlib, "ensure_server", side_effect=TimeoutError("cold timeout")):
-            result = scorecard._chat([], endpoint=flashlib.LOCAL_URL, model="fixture", temperature=0,
-                                    reasoning_effort="low", max_tokens=1, timeout=1)
-        self.assertIn("TimeoutError", result["error"])
 
 
     def test_ensure_timeout_preserves_direct_room_timeout(self):

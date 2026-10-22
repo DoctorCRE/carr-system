@@ -233,17 +233,15 @@ class HookSandbox:
             HOME=str(self.home), CARR_ROOT=str(self.carr),
             CARR_REPO_ROOT=str(self.repo),
             CARR_HOOK_GUARD_LOG=str(self.guard_log),
-            CARR_JEV_WORKER="off",
             CARR_STOP_LATCH_STATE=str(self.root / "stop-latch")))
         configured = {key: value for key, value in self.env.items()
                       if key.startswith("CARR_") and key in {
                           "CARR_HOOK_FIXTURE", "CARR_HOOK_TELEMETRY", "CARR_ROOT",
-                          "CARR_REPO_ROOT", "CARR_HOOK_GUARD_LOG", "CARR_JEV_WORKER",
+                          "CARR_REPO_ROOT", "CARR_HOOK_GUARD_LOG",
                           "CARR_STOP_LATCH_STATE"}}
         self.env = {key: value for key, value in self.env.items()
                     if not key.startswith("CARR_")}
         self.env.update(configured)
-        self.env["CARR_JEV_OFFLINE"] = "1"
 
     def __enter__(self):
         return self

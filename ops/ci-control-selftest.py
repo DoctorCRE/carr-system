@@ -26,18 +26,20 @@ def workflow(filename="ci.yml"):
         str(ROOT / '.github/workflows' / filename)], cwd=ROOT / 'mcp-server', text=True))
 
 
-def expression(value, github, cancelled=False):
+def expression(value, github, cancelled=False, matrix=None):
     # Evaluate the workflow's actual expression with GitHub's missing-property
     # semantics; no reimplementation of the intended event predicate.
     source = '''const get=(o,p)=>p.split('.').reduce((v,k)=>v&&v[k],o)||'';
     const github=JSON.parse(process.argv[1]);const always=()=>true;const cancelled=()=>JSON.parse(process.argv[3]);const fromJSON=JSON.parse;
     const needs={scope:{outputs:{full:'true'}}};
+    const matrix=JSON.parse(process.argv[4]);
+    const format=(template,...args)=>template.replace(/\\{(\\d+)\\}/g,(_,i)=>args[Number(i)]);
     const e=process.argv[2].replace(/github(?:\\.[a-zA-Z_]+)+/g,p=>JSON.stringify(get({github},p)));
     console.log(JSON.stringify(eval(e)));'''
     import re
     def evaluate(match):
         return json.loads(subprocess.check_output(['node', '-e', source,
-            json.dumps(github), match.group(1), json.dumps(cancelled)], text=True))
+            json.dumps(github), match.group(1), json.dumps(cancelled), json.dumps(matrix or {})], text=True))
     if value.startswith('${{') and value.endswith('}}') and value.count('${{') == 1:
         return evaluate(re.fullmatch(r'\$\{\{(.*?)\}\}', value))
     return re.sub(r'\$\{\{(.*?)\}\}', lambda m: str(evaluate(m)), value)
@@ -248,6 +250,57 @@ class Controls(unittest.TestCase):
         with self.assertRaises(Exception): mod.rerun(remote,123,456,'a'*40,policy,checks,dispatch)
         dispatch.assert_not_called()
 
+    def test_rerun_accepts_every_workflow_class_job_but_not_the_aggregate(self):
+        mod = load('ci-rerun')
+        job_spec = workflow()['jobs']['classes']
+        matrix = job_spec['strategy']['matrix']
+        event = {'event_name': 'pull_request', 'event': {'pull_request': {'draft': False}}}
+        exclusions = expression(matrix['exclude'], event)
+        run = {'id': 123, 'name': 'CI', 'path': '.github/workflows/ci.yml',
+               'event': 'pull_request', 'status': 'completed', 'conclusion': 'failure',
+               'head_sha': 'a' * 40, 'run_attempt': 1}
+        pr = {'state': 'open', 'head': {'sha': 'a' * 40}}
+        names = set()
+        for group in matrix['classes']:
+            for shard in matrix['gate_shard']:
+                row = {'classes': group, 'gate_shard': shard, 'job_names': matrix['job_names'][0]}
+                if any(all(row.get(k) == v for k, v in excluded.items()) for excluded in exclusions):
+                    continue
+                name = expression(job_spec['name'], event, matrix=row)
+                names.add(name)
+                job = {'id': 456, 'run_id': 123, 'name': name,
+                       'status': 'completed', 'conclusion': 'failure'}
+                with self.subTest(name=name):
+                    self.assertEqual(mod.admit(run, job, pr, 'a' * 40), group)
+                    if group in ('gates', 'migration'):
+                        with self.assertRaises(mod.Refusal):
+                            mod.admit(run, job, {**pr, 'draft': True}, 'a' * 40)
+        self.assertIn('Gates selftests shard 2 of 2', names)
+        with self.assertRaises(mod.Refusal):
+            mod.admit(run, {**job, 'name': 'ops/ci.sh --strict'}, pr, 'a' * 40)
+
+    def test_rerun_tracks_a_workflow_job_rename(self):
+        mod = load('ci-rerun')
+        wf = workflow()
+        metadata = wf['jobs']['classes']['strategy']['matrix']['job_names'][0]
+        previous = metadata['gates_shard_2']['name']
+        metadata['gates_shard_2']['name'] = 'Synthetic renamed gates shard'
+        run = {'id': 123, 'name': 'CI', 'path': '.github/workflows/ci.yml',
+               'event': 'pull_request', 'status': 'completed', 'conclusion': 'failure',
+               'head_sha': 'a' * 40, 'run_attempt': 1}
+        job = {'id': 456, 'run_id': 123, 'name': 'Synthetic renamed gates shard',
+               'status': 'completed', 'conclusion': 'failure'}
+        pr = {'state': 'open', 'head': {'sha': 'a' * 40}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / '.github/workflows').mkdir(parents=True)
+            (root / '.github/workflows/ci.yml').write_text(json.dumps(wf))
+            (root / 'mcp-server').symlink_to(ROOT / 'mcp-server', target_is_directory=True)
+            with patch.object(mod, 'ROOT', root):
+                self.assertEqual(mod.admit(run, job, pr, 'a' * 40), 'gates')
+                with self.assertRaises(mod.Refusal):
+                    mod.admit(run, {**job, 'name': previous}, pr, 'a' * 40)
+
     def test_rerun_ignores_repository_and_mergeability_cache_changes(self):
         mod = load('ci-rerun')
         head = 'a' * 40
@@ -352,6 +405,7 @@ class Controls(unittest.TestCase):
 
     def test_rerun_repository_selection(self):
         mod = load('ci-rerun')
+        job_groups = mod.evidence.class_jobs()
         run = {'id':123, 'name':'CI', 'path':'.github/workflows/ci.yml',
                'event':'pull_request', 'status':'completed', 'conclusion':'failure',
                'head_sha':'a'*40, 'run_attempt':1, 'pull_requests':[{'number':1665}]}
@@ -390,6 +444,7 @@ class Controls(unittest.TestCase):
                             patch.object(mod.tempfile, 'gettempdir', return_value=attempt), \
                             patch.object(mod.subprocess, 'check_output', side_effect=git_output), \
                             patch.object(mod.subprocess, 'run', side_effect=execute), \
+                            patch.object(mod.evidence, 'class_jobs', return_value=job_groups), \
                             patch.object(mod, 'local_checks') as checks:
                         self.assertEqual(mod.main(), 0)
                     if repo == mod.REPO:
@@ -403,6 +458,7 @@ class Controls(unittest.TestCase):
                             patch.object(mod.tempfile, 'gettempdir', return_value=attempt), \
                             patch.object(mod.subprocess, 'check_output', side_effect=git_output), \
                             patch.object(mod.subprocess, 'run', side_effect=execute), \
+                            patch.object(mod.evidence, 'class_jobs', return_value=job_groups), \
                             patch.object(mod, 'local_checks'):
                         self.assertEqual(mod.main(), 1)
                     self.assertTrue(all(command[:2] == ['gh', 'api'] for command in calls))

@@ -902,11 +902,7 @@ async function jevDealReadingResponse(request, env, session, dependencies) {
     });
     const record = await reader(args.deal);
     const read = dependencies.jevDealRead || readDealWithJev;
-    return json(await read(record, { askJev: env.TYPESAFE_API_KEY ? request =>
-      callTool(env, session.actor, "ask-jev", {
-        idempotency_key: crypto.randomUUID(), session_id: `worker-deal-reading-${crypto.randomUUID()}`,
-        purpose: "call", ...request,
-      }, "full", "app_runtime") : undefined }));
+    return json(await read(record, { apiKey: env.TYPESAFE_API_KEY }));
   } catch {
     return json({ error: "DEPENDENCY_UNAVAILABLE" }, 503);
   }

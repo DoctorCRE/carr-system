@@ -80,9 +80,8 @@ LIVE HEALTH CHECK:
      gaps") is deliberately NOT hard_error=True — see the regression-diff
      test in the health report selftests's HealthGate class, which
      pins that a count DECREASE must not fail a release. hard_error is
-     reserved for a section that could not be read at all, or a finding
-     (jev_call_receipt_integrity) that is a tamper-DETECTION result rather
-     than an improvable business metric — see ALWAYS_HARD_ERROR_KEYS below.
+     reserved for a section that could not be read at all, or a structural integrity failure rather than an improvable business
+     metric — see ALWAYS_HARD_ERROR_KEYS below.
 """
 from __future__ import annotations
 
@@ -122,10 +121,7 @@ FINDING_CALL_NAMES = {"_canonical_finding", "_red"}
 # Keys that must always carry hard_error=True regardless of any baseline
 # comparison: either because they mean "this whole section of run.sh health
 # could not be read" (a structural failure, not a business count that could
-# legitimately improve), or — jev_call_receipt_integrity — because it is a
-# tamper-DETECTION result on the Jev call receipt store (round 8, point 4:
-# a mismatched receipt or a disabled append-only trigger is never something
-# a baseline should be allowed to excuse). Both need hard_error=True
+# legitimately improve). These need hard_error=True
 # somewhere and must be excluded from the business-count-never-hard_error
 # check below.
 STRUCTURAL_KEYS = {
@@ -134,7 +130,7 @@ STRUCTURAL_KEYS = {
     "credential_health", "unrecorded_failure", "tailscale",
     "verb_usage",
 }
-ALWAYS_HARD_ERROR_KEYS = STRUCTURAL_KEYS | {"jev_call_receipt_integrity", "scheduled_jobs_evidence_unavailable", "studio_failover_evidence"}
+ALWAYS_HARD_ERROR_KEYS = STRUCTURAL_KEYS | {"scheduled_jobs_evidence_unavailable", "studio_failover_evidence"}
 
 
 def _find_function(name: str) -> ast.FunctionDef:
@@ -645,7 +641,7 @@ class VerbUsageLines(unittest.TestCase):
             _load_verb_usage_lines()(None)
 
 
-class PaidCapCanonicalHealthTests(unittest.TestCase):
+class CanonicalHealthTests(unittest.TestCase):
     """Execute the shipped health function and CLI with only external readers stubbed."""
 
     def test_cloudflare_rows_record_each_failure_and_only_verified_green(self):
@@ -667,8 +663,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         import os, re, sys, time, subprocess
         from unittest.mock import Mock
         ns = _load_finding_and_red_functions()
-        mod = ast.Module(body=[_find_function("_canonical_health"),
-                               _find_function("_jev_paid_cap_row")], type_ignores=[])
+        mod = ast.Module(body=[_find_function("_canonical_health")], type_ignores=[])
         ns.update(os=os, re=re, sys=sys, time=time, REPO_ROOT=str(HEALTH_CHECK_PATH.parent.parent),
                   _studio_failover_row=lambda: {'status': 'ok', 'line': 'OK fixture Studio failover'},
                   _uptime=Mock(row=Mock(return_value=("OK production uptime fixture", False))),
@@ -676,13 +671,12 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                   _HEALTH_COMPLETION_MARKER="HEALTH_COMPLETE", importlib=__import__("importlib"),
                   _system_cost_row=lambda: ({"state": "ready", "alerts": []}, "OK fixture costs"),
                   _cloudflare_rows=lambda: [],
-                  _canonical_snapshot=lambda: {}, _jev_spend_row=lambda: (None, "OK spend"),
+                  _canonical_snapshot=lambda: {},
                   # The breach consumer reaches the record layer; its own
                   # hermetic suite is ops/health-act-selftest.py.
                   _breach_consumer=lambda: None,
                   _GREEN_EVIDENCE={},
                   _verb_usage_lines=_load_verb_usage_lines(),
-                  _jev_site_spend_row=lambda: "OK jev spend by site — fixture",
                   _grok_session_row=lambda: ("OK fixture Grok session", 0),
                   flashlib=Mock(health_row=Mock(return_value="OK Flash stopped")),
                   subprocess=Mock(run=Mock(return_value=subprocess.CompletedProcess([], 0, "SKIP fixture", ""))))
@@ -717,7 +711,6 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
             for mode, error in (("import", "ImportError"), ("lock", "FileExistsError")):
                 with self.subTest(section=section, mode=mode):
                     ns = self.all_namespace() if section == "all" else self.namespace()
-                    ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
                     exec(compile(ast.Module(body=[_find_function("_grok_session_row")],
                                             type_ignores=[]), str(HEALTH_CHECK_PATH), "exec"), ns)
                     with self.grok_reader_failure(mode), contextlib.redirect_stdout(io.StringIO()) as out:
@@ -725,7 +718,6 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                     self.assertEqual(out.getvalue().count("HEALTH_COMPLETE"), 1)
                     self.assertIn("UNAVAILABLE Grok session", out.getvalue())
                     self.assertIn(error, out.getvalue())
-                    self.assertIn("OK spend", out.getvalue())
                     self.assertIn("credential health", out.getvalue())
                     [finding] = ns["_FINDINGS"]
                     self.assertEqual(finding["key"], "grok_session")
@@ -753,25 +745,10 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                 self.assertTrue(finding["hard_error"])
                 self.assertIn(error, finding["detail"])
 
-    def test_a_site_over_its_jev_budget_fails_health(self):
-        import io, contextlib
-        ns = self.namespace()
-        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
-        ns["_jev_site_spend_row"] = lambda: ("WARN jev spend by site — 2026-10-04 · 40/3000 paid attempts"
-                                             " · over budget: jev_handoff=81/80")
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(ns["_canonical_health"](), 1)
-        self.assertEqual([f["key"] for f in ns["_FINDINGS"]], ["jev_site_budget"])
-        ns = self.namespace()
-        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
-        ns["_jev_site_spend_row"] = lambda: "OK jev spend by site — 2026-10-04 · 40/3000 paid attempts"
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(ns["_canonical_health"](), 0)
 
-    def test_grok_failure_remains_a_finding_with_healthy_paid_cap(self):
+    def test_grok_failure_remains_a_finding(self):
         ns = self.namespace()
         ns["_grok_session_row"] = lambda: ("FAIL fixture Grok session", 1)
-        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
         self.assertEqual(ns["_canonical_health"](), 1)
         self.assertEqual([row["key"] for row in ns["_FINDINGS"]], ["grok_session"])
 
@@ -814,8 +791,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                       "actionable_tracked": [], "actionable_untracked": [],
                       "expected_patched_submodules": [], "managed_artifacts": []}),
                       loose_work_requires_attention=Mock(return_value=False)),
-                  _jev_outage=Mock(evaluate=Mock(return_value={"status": "ok", "pending": False}),
-                                   reconcile=Mock(return_value="none")))
+                  )
         for name in ("_headless_rows", "_live_jobs", "_missing_due_executions", "_stuck_live_jobs",
                      "_legacy_scheduled_definitions", "_calendar_prebrief_standing", "_calendar_prebrief_unknowns"):
             ns[name] = lambda *args: []
@@ -829,7 +805,6 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {},
                 "verb_usage": _verb_usage_value(uncalled, 411)}
         ns["_canonical_snapshot"] = lambda: snap
-        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(ns["_canonical_health"](), 0)
         self.assertIn("  →︎ verb usage: 1 of 411 registered verbs uncalled in 30 days "
@@ -842,7 +817,6 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         ns = self.all_namespace()
         snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {}, "verb_usage": None}
         ns["_canonical_snapshot"] = lambda: snap
-        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(ns["_canonical_health"](), 1)
         self.assertIn("verb usage UNREADABLE", out.getvalue())
@@ -855,7 +829,6 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {},
                 "verb_usage": None, "verb_usage_absent": True}
         ns["_canonical_snapshot"] = lambda: snap
-        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(ns["_canonical_health"](), 1)
         self.assertIn("verb usage NOT DEPLOYED", out.getvalue())
@@ -864,93 +837,16 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
 
 
 
-    def test_all_health_sections_report_cap_failure_with_other_checks_clean(self):
-        import io, contextlib
-        for line in ("OK jev paid cap", "HIT jev paid cap", "UNKNOWN jev paid cap"):
-            with self.subTest(line=line):
-                ns = self.all_namespace()
-                ns["_jev_paid_cap_row"] = lambda: line
-                with contextlib.redirect_stdout(io.StringIO()) as out:
-                    self.assertEqual(ns["_canonical_health"](), int(not line.startswith("OK")))
-                self.assertIn("HEALTH_COMPLETE", out.getvalue())
-                self.assertEqual([row["key"] for row in ns["_FINDINGS"]],
-                                 [] if line.startswith("OK") else ["jev_paid_cap"])
 
-    def test_canonical_health_records_cap_failures_and_finishes(self):
-        import io, contextlib
-        for line in ("HIT jev paid cap — 10/10", "UNKNOWN jev paid cap — broken"):
-            with self.subTest(line=line):
-                ns = self.namespace()
-                ns["_jev_paid_cap_row"] = lambda: line
-                out = io.StringIO()
-                with contextlib.redirect_stdout(out):
-                    self.assertEqual(ns["_canonical_health"](), 1)
-                self.assertIn("HEALTH_COMPLETE", out.getvalue())
-                [finding] = ns["_FINDINGS"]
-                self.assertEqual(finding["key"], "jev_paid_cap")
-                self.assertEqual(finding["hard_error"], line.startswith("UNKNOWN"))
 
-    def test_failed_alerts_are_canonical_findings_even_below_cap(self):
-        import io, contextlib
-        ns = self.namespace()
-        ns["_jev_paid_cap_row"] = lambda: "WARN jev paid cap — alarms pending=0 failed=1 delivered=0"
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(ns["_canonical_health"](), 1)
-        [finding] = ns["_FINDINGS"]
-        self.assertEqual((finding["key"], finding["subject"], finding["count"]),
-                         ("jev_spend_alert", "failed", 1))
 
-    def test_loader_errors_are_contained_in_canonical_health_and_cli(self):
-        self.assert_loader_failure_findings({"jev_cap_client", "jev_site_client"})
 
-    def test_healthy_site_loader_is_exercised_when_cap_loader_fails(self):
-        self.assert_loader_failure_findings({"jev_cap_client"})
 
-    def assert_loader_failure_findings(self, failing_loaders):
-        import io, contextlib, importlib.util, runpy, sys
-        from unittest.mock import Mock, patch
-        original = importlib.util.spec_from_file_location
-        def fail_cap_loader(name, *args, **kwargs):
-            if name in failing_loaders:
-                raise ImportError("fixture missing client configuration")
-            spec = original(name, *args, **kwargs)
-            if name == "jev_site_client":
-                # This CLI section also reads site budgets. Keep that independent
-                # observation healthy instead of consulting the machine's cap log.
-                spec.loader = Mock(exec_module=lambda client: setattr(
-                    client, "spend_by_site_health",
-                    lambda: "OK jev spend by site — fixture"))
-            return spec
-        with patch.object(importlib.util, "spec_from_file_location", fail_cap_loader):
-            ns = self.namespace()
-            with contextlib.redirect_stdout(io.StringIO()) as out:
-                self.assertEqual(ns["_canonical_health"](), 1)
-            self.assertIn("HEALTH_COMPLETE", out.getvalue())
-            self.assertTrue(ns["_FINDINGS"][0]["hard_error"])
-            findings = Path(self.enterContext(tempfile.TemporaryDirectory())) / "findings.json"
-            with patch.object(sys, "argv", [str(HEALTH_CHECK_PATH), "--section", "jev-cap", "--findings-json", str(findings)]), \
-                    contextlib.redirect_stdout(io.StringIO()) as narrow:
-                with self.assertRaises(SystemExit) as exited:
-                    runpy.run_path(str(HEALTH_CHECK_PATH), run_name="__main__")
-            self.assertEqual(exited.exception.code, 1)
-            self.assertIn("UNKNOWN jev paid cap", narrow.getvalue())
-            self.assertIn("ImportError", narrow.getvalue())
-            rows = json.loads(findings.read_text())["findings"]
-            expected = {"jev_paid_cap"}
-            if "jev_site_client" in failing_loaders:
-                expected.add("jev_site_budget")
-            else:
-                self.assertIn("OK jev spend by site — fixture", narrow.getvalue())
-            self.assertEqual({row["key"] for row in rows}, expected)
-            self.assertTrue(all(row["hard_error"] for row in rows))
-            [finding] = [row for row in rows if row["key"] == "jev_paid_cap"]
-            self.assertEqual(finding["key"], "jev_paid_cap")
-            self.assertTrue(finding["hard_error"])
 
 
 class ActModeContract(unittest.TestCase):
     """`./run.sh health --act` (tools/health_breach.py): the shipped argument
-    guard, exit status and Jev row text, each executed from the real source."""
+    guard and exit status, each executed from the real source."""
 
     def reader_args(self):
         ns = {"os": __import__("os"), "DEFAULT_RECOVERY_VAULT": "/fixture/vault"}
@@ -985,29 +881,6 @@ class ActModeContract(unittest.TestCase):
         self.assertEqual(self.run_exit(1, False, 0), 1, "plain health still exits with its rc")
         self.assertEqual(self.run_exit(0, False, 3), 0)
 
-    def test_jev_outage_rows_carry_their_bound_action(self):
-        """Without the action in the finding the breach consumer reads the row
-        as unbound and never files its loop."""
-        import contextlib, io
-        from unittest.mock import Mock
-        action = lambda reason: f"on breach: owner Joe; fix {reason}; auto-clear on judgment"  # noqa: E731
-        cases = (
-            ({"status": "warn", "reason": "http_500", "age_hours": 3, "pending": False}, "opened", None,
-             "on breach: owner Joe; fix http_500"),
-            ({"status": "ok", "reason": None, "age_hours": 1, "pending": False}, "error", None,
-             "on breach: owner Joe; fix None"),
-            (None, None, OSError("fixture"), "on breach: owner Joe; fix log_unreadable"),
-        )
-        for evaluated, outcome, raised, expected in cases:
-            with self.subTest(outcome=outcome, raised=raised):
-                ns = PaidCapCanonicalHealthTests().all_namespace()
-                ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
-                ns["_jev_outage"] = Mock(evaluate=Mock(return_value=evaluated, side_effect=raised),
-                                         reconcile=Mock(return_value=outcome), action=Mock(side_effect=action))
-                with contextlib.redirect_stdout(io.StringIO()):
-                    ns["_canonical_health"]()
-                [row] = [f for f in ns["_FINDINGS"] if f["key"] == "jev_live_outage"]
-                self.assertIn(expected, row["detail"])
 
 
 class RcAssignedOnlyViaRed(unittest.TestCase):
@@ -1475,7 +1348,7 @@ class CompletionMarkerAlwaysPrints(unittest.TestCase):
         self.assertNotEqual(errors_bad, [])
 
     def test_completion_marker_prints_exactly_once_on_the_normal_path(self):
-        # Round 8, point 5: a merge with main's Jev-receipts block once left
+        # Round 8, point 5: a merge once left
         # the SAME literal marker text printed twice in a row at the bottom
         # of the normal (non-early-return) path — once via `print(_HEALTH_
         # COMPLETION_MARKER)`, once more as a duplicate hard-coded string

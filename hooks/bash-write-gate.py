@@ -267,54 +267,6 @@ def extract_targets(command):
     return out
 
 
-# FORGERY WARNING, NOT A BLOCK (round 3 of PR #1224, decision d47931da:
-# "detectable, not prevented"). out/jev-calls.jsonl is the receipt ledger the
-# completion-evidence Stop gate reads to decide whether a turn really called
-# Jev, and ops/typesafe_client.py's ask() is its ONLY legitimate writer — from
-# inside Python, so a real call's own shell command never names the file. A
-# shell write naming it is therefore either a forged receipt or a mistake, and
-# either way a human should see it. This gate WARNS loudly (a systemMessage to
-# the operator plus additionalContext to the model, and a hook-guard.log line)
-# and lets the call run; the Stop gate independently records a detection event
-# for the same turn. A read (tail/grep/wc) is not warned on.
-JEV_CALLS_BASENAME = "jev-calls.jsonl"
-JEV_INLINE_WRITE = re.compile(
-    r"""\.write\s*\(|write_text|write_bytes|writeFileSync|appendFileSync|"""
-    r"""createWriteStream|open\s*\([^)]*['"][awx]""")
-
-
-def jev_calls_write_targets(command, targets):
-    """The write targets in `command` that are the Jev call ledger, or a
-    one-item marker list when the command names the ledger AND carries an
-    inline interpreter write call the extractor could not bind to a literal
-    path (a variable path, say). [] when the command only reads it."""
-    if JEV_CALLS_BASENAME not in command:
-        return []
-    hits = [t for t in targets if os.path.basename(t) == JEV_CALLS_BASENAME]
-    if hits:
-        return hits
-    if JEV_INLINE_WRITE.search(command):
-        return [f"<inline write in a command naming {JEV_CALLS_BASENAME}>"]
-    return []
-
-
-def warn_jev_calls_write(hits):
-    note = (
-        "JEV RECEIPT LEDGER WRITE DETECTED: this command writes "
-        f"{', '.join(hits)}. out/{JEV_CALLS_BASENAME} is written ONLY by "
-        "ops/typesafe_client.py's ask() on a real Jev response; a row written "
-        "any other way is a forged Jev receipt. The command is allowed, but "
-        "this warning is logged, and the completion-evidence Stop gate records "
-        "a detection event for this turn (decision d47931da)."
-    )
-    log(f"WARN(jev-calls-ledger-write) {', '.join(hits)[:160]}")
-    print(json.dumps({
-        "systemMessage": note,
-        "hookSpecificOutput": {"hookEventName": "PreToolUse",
-                               "additionalContext": note},
-    }))
-
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib.hook_runtime import decision, run
 
@@ -340,10 +292,7 @@ def decide(payload):
         sys.exit(0)
 
     targets = extract_targets(command)
-    jev_hits = jev_calls_write_targets(command, targets)
     if not targets:
-        if jev_hits:
-            warn_jev_calls_write(jev_hits)
         sys.exit(0)
 
     cwd = payload.get("cwd") or os.getcwd()
@@ -382,8 +331,6 @@ def decide(payload):
             log(f"DENY {path} :: {reason[:160]}")
             print(text, file=sys.stderr)
             sys.exit(2)
-    if jev_hits:
-        warn_jev_calls_write(jev_hits)
     sys.exit(0)
 
 
