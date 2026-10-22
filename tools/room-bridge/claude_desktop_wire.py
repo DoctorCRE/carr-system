@@ -41,6 +41,22 @@ ACTIVE_STATES = {"starting", "running", "working", "idle"}
 COMPLETED_STATES = {"completed", "done"}
 FAILED_STATES = {"failed", "stopped", "killed"}
 NEEDS_INPUT_STATES = {"needs_input", "needs-input", "blocked"}
+CARR_MCP_URL = json.loads(
+    (Path(__file__).resolve().parents[2] / "ops/config/release-pipeline.v1.json").read_text()
+)["worker"]["live_url"] + "/mcp"
+# --bare skips inherited customizations and OAuth/keychain auth. A missing
+# explicit auth source must fail rather than retry with inherited settings.
+TOOL_POSTURES = {
+    "record-layer": [
+        "--bare", "--setting-sources", "",
+        "--settings", json.dumps({"disableAllHooks": True, "enabledPlugins": {}}),
+        "--disable-slash-commands",
+        "--tools", "",
+        "--strict-mcp-config",
+        "--mcp-config", json.dumps({"mcpServers": {"carr": {"type": "http", "url": CARR_MCP_URL}}}),
+        "--allowedTools", "mcp__carr",
+    ],
+}
 
 
 class ClaudeDesktopError(RuntimeError):
@@ -79,12 +95,18 @@ def launch_background(
             "invalid_background_contract",
             "Claude background dispatch requires model, effort, cwd, and a non-empty task",
         )
+    if entry.get("posture") == "record-layer" and os.environ.get("CARR_MCP_URL", CARR_MCP_URL) != CARR_MCP_URL:
+        raise ClaudeDesktopError(
+            "untrusted_carr_endpoint",
+            "record-layer launch requires the configured CARR endpoint " + CARR_MCP_URL,
+        )
     argv = [
         claude_bin,
         "--bg",
         "--name", f"model-room-{request[:8]}",
         "--model", model,
         "--effort", effort,
+        *TOOL_POSTURES.get(str(entry.get("posture")), []),
         "--permission-mode", permission_mode,
         desk_prompt(task),
     ]

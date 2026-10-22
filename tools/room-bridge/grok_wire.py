@@ -376,6 +376,8 @@ def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFOR
 
 def run_task(entry: dict, task: str, *, retrieval=False, run=subprocess.run, env=None,
              timeout_seconds=TIMEOUT_S) -> dict:
+    from record_layer import enforce
+    enforce(entry, kind='grok-cli')
     validate_entry(entry)
     try:
         model = resolve_model(run=run, env=env) if entry['model'] == 'grok' else entry['model']

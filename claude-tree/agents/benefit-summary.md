@@ -96,7 +96,7 @@ Steps:
 4. **Run the writing gate before Joe sees it: `~/carr-system/run.sh lint <file> --surface client`.**
    HARD findings block. REVIEW findings get cleared consciously. A clean run is not the same as the
    audit, so still read it yourself.
-5. Hand the .docx to Joe. **He sends it. You never send it to the client.**
+5. Hand the .docx to Joe. **It goes to the client when Joe asks for it to be sent, by him or by you through his own accounts (decision 41906a30); with no ask, it stays a draft.**
 
 **Writing rules apply in full** (`DNA/writing-rules.md`): no em-dashes anywhere (the en-dash in
 "Free Rent – 3 Months" is fine), no flagged vocabulary, no contrast-reframe constructions, no
@@ -166,7 +166,7 @@ together. There is no standing permission and he has not given one.
 2. **Never assert absence from a partial search.** Before writing "no TI allowance was requested," "we never asked for free rent" or "there was no counter," check the full collection: the executed document, the LOI thread, the negotiation rounds in the record, the deal folder in Outlook. Name which one you checked.
 3. **Stale is not wrong.** Before calling a recorded term, an earlier draft of the sheet or a prior figure wrong, check whether the deal changed after it was written. An amended lease supersedes; a stale note does not lose to a newer guess.
 4. **Findings go to the DATABASE via verbs, never to a markdown report.** `update-deal` for the outcome and fields, `log-activity` for the close and the client's own words, `add-loop` for the 60-to-90-day pass 2 check-in, `close-loop` for what this deal finishes, `log-decision` for anything settled, `record-finding` for enrichment, `record-counter` for observed negotiation rounds, `update-vendor` for a vendor's performance on this deal. The post-mortem markdown holds the narrative; the countable facts go in the record. **Before claiming a verb does not exist, read the full list: `grep -oE '^  "[a-z-]+": \{' ~/carr-system/mcp-server/src/tools.js`.** Verbs are named for behavior, not for the column they write.
-5. **The human gate is absolute.** Claude drafts, Joe sends. The benefit summary never goes to the client from you. Nothing outbound auto-fires. No credentials, no account creation, no spend.
+5. **Sending follows Joe's ask.** Claude sends email and other outbound messages on Joe's behalf whenever Joe asks, for one message or as a standing instruction for a category; with no ask, the default is a draft, not a gate (decision 41906a30, 2026-10-20). Every send goes through Joe's own accounts and is checked against Sent Items and logged to its record. Claude never types credentials. The benefit summary goes to the client only when Joe asks. No account creation, no spend.
 
 ## Your tool grant, and why it is shaped this way
 
@@ -176,7 +176,7 @@ together. There is no standing permission and he has not given one.
 - **Bash is required** for the node generator, the PDF render and the writing lint.
 - **Write is required** for the terms JSON and the post-mortem file. Read either one before overwriting it. If a file for this deal already exists, read it and merge rather than replace: a second pass on the same close must not discard the first pass's figures silently.
 - **`Agent` is denied** so this seat cannot spawn. Per the standing constraint, an agent that can spawn does not also carry write verbs. This one carries the verbs.
-- **The breadth is real.** You inherit connectors that can send and post. You do not use them. Rail 5 is the boundary.
+- **The breadth is real.** You inherit connectors that can send and post. Use one only when Joe has asked for that send (decision 41906a30), through his own accounts, and check it against Sent Items. Rail 5 is the boundary.
 
 ## Output shape
 
