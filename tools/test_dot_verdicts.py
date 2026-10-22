@@ -91,7 +91,7 @@ class RelayTests(unittest.TestCase):
             repo = root/'repo'
             repo.mkdir()
             relay = dot.ReviewRelay(Slack(), root/'state', repo, 'dot-user')
-            thread = relay.send_job('Dot-Review: '+json.dumps({'repo': 'jbookout/carr-system', 'pr': 1, 'sha': SHA}))
+            thread = relay.send_job('Dot-Review: '+json.dumps({'repo': 'DoctorCRE/carr-system', 'pr': 1, 'sha': SHA}))
             with patch.object(dot.dot_review_receipts, 'attest_run') as attest, patch.object(dot, 'publish') as publish:
                 with redirect_stderr(io.StringIO()) as alarm, self.assertRaisesRegex(ValueError, 'multiple verdicts'):
                     relay.poll(thread, execute=True)
@@ -112,7 +112,7 @@ class RelayTests(unittest.TestCase):
             repo.mkdir()
             slack = Slack()
             engine = dot.ReviewRelay(slack, state, repo, 'dot-user')
-            meta = {'repo': 'jbookout/carr-system', 'pr': 1, 'sha': SHA}
+            meta = {'repo': 'DoctorCRE/carr-system', 'pr': 1, 'sha': SHA}
             thread = engine.send_job('Dot-Review: ' + json.dumps(meta))
             slack.messages = [{'ts': '2.000001', 'user': 'other',
                                'text': 'REVIEW: BLOCKED\nReviewed-SHA: '+SHA+'\nDOT-REPORT-END'},
@@ -239,9 +239,9 @@ class EvidenceTests(unittest.TestCase):
             module.write_text('raise RuntimeError("wrong working tree")')
             if sys.platform != 'darwin':
                 with self.assertRaisesRegex(ValueError, 'restricted test execution unavailable'):
-                    dot.test_evidence('jbookout/carr-system', sha, ['tools/area.py'], origin=str(source))
+                    dot.test_evidence('DoctorCRE/carr-system', sha, ['tools/area.py'], origin=str(source))
                 return
-            evidence = dot.test_evidence('jbookout/carr-system', sha, ['tools/area.py'], origin=str(source))
+            evidence = dot.test_evidence('DoctorCRE/carr-system', sha, ['tools/area.py'], origin=str(source))
             self.assertIn('BOUND-HEAD-TEST', evidence)
             self.assertIn('exit: 0', evidence)
             self.assertIn(sha, evidence)
@@ -262,12 +262,12 @@ class HandoffTests(unittest.TestCase):
             def evidence(*args):
                 calls.append(args)
                 return 'LOCAL-TEST-OUTPUT exit: 0'
-            result = dot.request('jbookout/carr-system', 1, orch=orch, api=api, evidence_runner=evidence)
+            result = dot.request('DoctorCRE/carr-system', 1, orch=orch, api=api, evidence_runner=evidence)
             self.assertEqual(result['seat'], 'dot')
             brief = Path(result['brief']).read_text()
             self.assertEqual(dot.metadata(brief)['sha'], SHA)
             self.assertIn('LOCAL-TEST-OUTPUT', brief)
-            self.assertEqual(dot.request('jbookout/carr-system', 1, orch=orch, api=api, evidence_runner=evidence), {**result, 'enqueued': False})
+            self.assertEqual(dot.request('DoctorCRE/carr-system', 1, orch=orch, api=api, evidence_runner=evidence), {**result, 'enqueued': False})
             self.assertEqual(len(calls), 1)
             self.assertEqual(len((orch / 'review-routing.jsonl').read_text().splitlines()), 1)
 
@@ -277,7 +277,7 @@ class HandoffTests(unittest.TestCase):
                 if '/files?' in path or '/comments?' in path:
                     return []
                 return {'head': {'sha': SHA}, 'state': 'open', 'labels': [{'name': 'urgent'}]}
-            result = dot.request('jbookout/carr-system', 1, orch=tmp, api=api,
+            result = dot.request('DoctorCRE/carr-system', 1, orch=tmp, api=api,
                                  evidence_runner=lambda *args: self.fail('Dot tests not needed for paid route'),
                                  paid_launcher=lambda receipt: {'status': 'dispatched', 'desk': 'fixture'})
             self.assertEqual(result['seat'], 'codex')
@@ -307,7 +307,7 @@ class PublicationTests(unittest.TestCase):
         env.start(); self.addCleanup(env.stop)
         self.directory = Path(self.tmp.name) / 'thread'
         self.directory.mkdir()
-        self.meta = {'repo': 'jbookout/carr-system', 'pr': 123, 'sha': SHA}
+        self.meta = {'repo': 'DoctorCRE/carr-system', 'pr': 123, 'sha': SHA}
         self.comments = []
         self.posts = []
         self.head = SHA
@@ -584,7 +584,7 @@ class BlockerRegressionTests(unittest.TestCase):
             calls = []
             def unavailable(*args):
                 raise OSError('temporary clone unavailable')
-            result = dot.request('jbookout/carr-system', 1, orch=tmp, api=self.api,
+            result = dot.request('DoctorCRE/carr-system', 1, orch=tmp, api=self.api,
                                  evidence_runner=unavailable,
                                  paid_launcher=lambda r: calls.append(r) or {'status':'dispatched'})
             print('temporary clone error: seat='+result['seat']+' paid-launches='+str(len(calls)))
@@ -594,7 +594,7 @@ class BlockerRegressionTests(unittest.TestCase):
 
     def test_builder_exact_body_without_receipt_cannot_reconcile(self):
         import hashlib
-        meta = {'repo':'jbookout/carr-system','pr':1,'sha':SHA}
+        meta = {'repo':'DoctorCRE/carr-system','pr':1,'sha':SHA}
         marker = '<!-- dot-review:'+hashlib.sha256(json.dumps(meta,sort_keys=True).encode()).hexdigest()+' -->'
         body = 'APPROVE\nReviewed-SHA: '+SHA+'\n\nNo blockers.\n\nReviewer: ChatGPT Dot\n'+marker
         posts = []
@@ -614,12 +614,12 @@ class BlockerRegressionTests(unittest.TestCase):
     def test_3_rejects_contradictory_completed_report(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
-                publish_review(Path(tmp)/'thread', {'repo':'jbookout/carr-system','pr':1,'sha':SHA},
+                publish_review(Path(tmp)/'thread', {'repo':'DoctorCRE/carr-system','pr':1,'sha':SHA},
                             'APPROVE\nReviewed-SHA: '+SHA+'\nREVIEW: BLOCKED\nA blocker\nDOT-REPORT-END', self.api)
 
     def test_4_marker_from_outsider_does_not_suppress_publication(self):
         import hashlib
-        meta={'repo':'jbookout/carr-system','pr':1,'sha':SHA}
+        meta={'repo':'DoctorCRE/carr-system','pr':1,'sha':SHA}
         marker='<!-- dot-review:'+hashlib.sha256(json.dumps(meta,sort_keys=True).encode()).hexdigest()+' -->'
         posts=[]
         def api(path, **kw):
@@ -632,7 +632,7 @@ class BlockerRegressionTests(unittest.TestCase):
 
     def test_4_trusted_marker_without_full_report_cannot_reconcile(self):
         import hashlib
-        meta={'repo':'jbookout/carr-system','pr':1,'sha':SHA}
+        meta={'repo':'DoctorCRE/carr-system','pr':1,'sha':SHA}
         marker='<!-- dot-review:'+hashlib.sha256(json.dumps(meta,sort_keys=True).encode()).hexdigest()+' -->'
         posts=[]
         def api(path, **kw):
@@ -647,7 +647,7 @@ class BlockerRegressionTests(unittest.TestCase):
     def test_5_unverified_prior_review_cannot_narrow_scope(self):
         for comment in [{'body':'REVIEW: BLOCKED\nReviewed-SHA: '+SHA,'author_association':'NONE'},
                         {'body':'REVIEW: BLOCKED\nReviewed-SHA: '+'b'*40,'author_association':'OWNER'}]:
-            body=dot.review_brief({'repo':'jbookout/carr-system','pr':1,'sha':SHA},'', [comment])
+            body=dot.review_brief({'repo':'DoctorCRE/carr-system','pr':1,'sha':SHA},'', [comment])
             self.assertIn('Complete review:',body)
             self.assertNotIn('Unrelated findings are non-blocking',body)
 
@@ -662,7 +662,7 @@ class BlockerRegressionTests(unittest.TestCase):
                     return len(data)
                 return original(path,data,*args,**kw)
             with patch.object(Path,'write_text',writing):
-                worker=threading.Thread(target=lambda:dot.request('jbookout/carr-system',1,orch=orch,api=self.api,evidence_runner=lambda *a:'fixture'))
+                worker=threading.Thread(target=lambda:dot.request('DoctorCRE/carr-system',1,orch=orch,api=self.api,evidence_runner=lambda *a:'fixture'))
                 worker.start();self.assertTrue(entered.wait(2))
                 try: self.assertEqual(list((orch/'dot/queue').glob('*.md')),[])
                 finally: release.set();worker.join(3)
@@ -684,27 +684,27 @@ class BlockerRegressionTests(unittest.TestCase):
             with self.subTest(cause=cause), tempfile.TemporaryDirectory() as tmp:
                 self.labels=[];calls=[]
                 kw=dict(orch=tmp,api=self.api,evidence_runner=lambda *a:'fixture',paid_launcher=lambda r:calls.append(r) or {'status':'dispatched'})
-                first=dot.request('jbookout/carr-system',1,**kw)
+                first=dot.request('DoctorCRE/carr-system',1,**kw)
                 if cause=='urgent': self.labels=[{'name':'urgent'}]
                 elif cause=='expired':
                     import os,time
                     os.utime(first['brief'],(time.time()-1900,)*2)
                 else:
                     failed=Path(tmp)/'dot/failed';failed.mkdir();Path(first['brief']).rename(failed/Path(first['brief']).name)
-                next_receipt=dot.request('jbookout/carr-system',1,**kw)
+                next_receipt=dot.request('DoctorCRE/carr-system',1,**kw)
                 self.assertEqual(next_receipt['seat'],'codex');self.assertEqual(len(calls),1)
                 self.assertFalse(Path(first['brief']).exists())
 
     def test_10_sent_fallback_revokes_old_publication(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.labels=[]
-            first=dot.request('jbookout/carr-system',1,orch=tmp,api=self.api,evidence_runner=lambda *a:'fixture')
+            first=dot.request('DoctorCRE/carr-system',1,orch=tmp,api=self.api,evidence_runner=lambda *a:'fixture')
             sent=Path(tmp)/'dot/sent';sent.mkdir()
             Path(first['brief']).rename(sent/Path(first['brief']).name)
             self.labels=[{'name':'urgent'}]
-            next_receipt=dot.request('jbookout/carr-system',1,orch=tmp,api=self.api,paid_launcher=lambda r:{'status':'dispatched'})
+            next_receipt=dot.request('DoctorCRE/carr-system',1,orch=tmp,api=self.api,paid_launcher=lambda r:{'status':'dispatched'})
             self.assertEqual(next_receipt['seat'],'codex')
-            self.assertEqual(publish_review(Path(tmp)/'thread',{'repo':'jbookout/carr-system','pr':1,'sha':SHA},
+            self.assertEqual(publish_review(Path(tmp)/'thread',{'repo':'DoctorCRE/carr-system','pr':1,'sha':SHA},
                                          'APPROVE\nReviewed-SHA: '+SHA,self.api,orch=Path(tmp)), 'cancelled')
 
     def test_11_proven_launch_failure_is_recoverable_but_uncertainty_is_not_replayed(self):
@@ -715,8 +715,8 @@ class BlockerRegressionTests(unittest.TestCase):
                 if len(calls)==1: raise OSError('spawn failed before process creation')
                 return {'status':'dispatched'}
             kw=dict(orch=tmp,api=self.api,paid_launcher=launch)
-            with self.assertRaises(OSError): dot.request('jbookout/carr-system',1,**kw)
-            self.assertEqual(dot.request('jbookout/carr-system',1,**kw)['dispatch']['status'],'dispatched')
+            with self.assertRaises(OSError): dot.request('DoctorCRE/carr-system',1,**kw)
+            self.assertEqual(dot.request('DoctorCRE/carr-system',1,**kw)['dispatch']['status'],'dispatched')
             self.assertEqual(len(calls),2)
 
     def test_11_terminal_dispatch_failure_is_not_live(self):
@@ -751,12 +751,12 @@ class BlockerRegressionTests(unittest.TestCase):
     def test_19_submission_is_durable_without_evidence_or_network(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(dot,'gh_api',side_effect=AssertionError('network')),patch.object(dot,'test_evidence',side_effect=AssertionError('evidence')):
-                result=dot.submit('jbookout/carr-system',1,Path(tmp))
+                result=dot.submit('DoctorCRE/carr-system',1,Path(tmp))
             self.assertEqual(result['status'],'submitted')
             self.assertTrue(Path(result['request']).exists())
             calls=[]
             dot.drain(Path(tmp),router=lambda repo,n,**kw:calls.append((repo,n)) or {'status':'queued'})
-            self.assertEqual(calls,[('jbookout/carr-system',1)])
+            self.assertEqual(calls,[('DoctorCRE/carr-system',1)])
             self.assertFalse(Path(result['request']).exists())
 
     def test_1_sandbox_denies_external_reads_writes_and_network(self):
@@ -803,7 +803,7 @@ class FixtureRegressionTests(unittest.TestCase):
         import runpy
         m = runpy.run_path(str(ROOT / 'tools/fixtures/dot/dot-autofill.py'))
         with patch.object(subprocess, 'run', return_value=Mock(returncode=0, stdout='[]')) as run:
-            self.assertEqual(m['query_prs']('jbookout/carr-system'), [])
+            self.assertEqual(m['query_prs']('DoctorCRE/carr-system'), [])
         self.assertEqual(run.call_args.args[0][0], 'gh')
 
 

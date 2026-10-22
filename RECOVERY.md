@@ -22,7 +22,7 @@ Nothing important is only on the Mac. Confirmed 2026-08-14:
 
 | thing | where it lives | reachable with |
 |---|---|---|
-| All code, config, migrations, this file | GitHub, `jbookout/carr-system` | your GitHub login |
+| All code, config, migrations, this file | GitHub, `DoctorCRE/carr-system` | your GitHub login |
 | Every record — clients, deals, doctrine, rules | Neon Postgres, hosted | your Neon login |
 | The API, Deal Room, OAuth | Cloudflare Worker, hosted | your Cloudflare login |
 | Encrypted nightly dumps | Cloudflare R2 bucket `carr-documents` | your Cloudflare login |

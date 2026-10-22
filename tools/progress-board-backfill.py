@@ -46,7 +46,7 @@ def main():
     for key, task in state['tasks'].items():
         if task.get('pr'):
             assignment = proposal['assignments'][key]
-            identity = (assignment['request_key'], assignment['slice_id'], task.get('repo', 'jbookout/carr-system'), task['pr'])
+            identity = (assignment['request_key'], assignment['slice_id'], task.get('repo', 'DoctorCRE/carr-system'), task['pr'])
             identities[identity] = identities.get(identity, False) or hierarchy.merged(task)
     proposal['counts'] = {'work_requests': len(proposal['requests']),
         'slices': sum(max(1, len(row['slices'])) for row in proposal['requests'].values()),

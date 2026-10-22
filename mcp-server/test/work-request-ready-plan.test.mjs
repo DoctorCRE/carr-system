@@ -76,7 +76,7 @@ test("source merge scope is an exact sorted file set inside the human-accepted p
   scoped.idempotency_key = "10000000-0000-0000-0000-000000000098";
   scoped.caps.source_merge = {
     schema_version: "source-merge-scope.v1",
-    repository: "jbookout/carr-system",
+    repository: "DoctorCRE/carr-system",
     base_branch: "main",
     authorized_paths: [
       "mcp-server/src/source-merge-policy.js",

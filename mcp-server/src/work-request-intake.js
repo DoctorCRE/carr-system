@@ -212,7 +212,7 @@ function validatePlan(args, ToolError) {
   const merge = args.caps.source_merge;
   if (merge !== undefined && (!merge || typeof merge !== "object" || Array.isArray(merge) ||
       Object.keys(merge).sort().join(",") !== "authorized_paths,base_branch,repository,schema_version" ||
-      merge.schema_version !== "source-merge-scope.v1" || merge.repository !== "jbookout/carr-system" ||
+      merge.schema_version !== "source-merge-scope.v1" || merge.repository !== "DoctorCRE/carr-system" ||
       merge.base_branch !== "main" || !Array.isArray(merge.authorized_paths) || !merge.authorized_paths.length ||
       merge.authorized_paths.length > 100 || merge.authorized_paths.some(path => typeof path !== "string" ||
         path.length > 500 || !/^[!-~]+$/.test(path) || path.startsWith("/") || path.endsWith("/") ||
@@ -925,7 +925,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
             source_merge: { type: "object", additionalProperties: false,
               required: ["schema_version", "repository", "base_branch", "authorized_paths"], properties: {
                 schema_version: { type: "string", const: "source-merge-scope.v1" },
-                repository: { type: "string", const: "jbookout/carr-system" },
+                repository: { type: "string", const: "DoctorCRE/carr-system" },
                 base_branch: { type: "string", const: "main" },
                 authorized_paths: { type: "array", minItems: 1, maxItems: 100,
                   uniqueItems: true, items: { type: "string", minLength: 1, maxLength: 500 } },

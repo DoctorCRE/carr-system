@@ -17,7 +17,7 @@ This inventory classifies credentials by capability and blast radius. A credenti
 | name | class | scope | location | rotated | blast radius if leaked |
 |---|---|---|---|---|---|
 | Blotato API key | **SEND** (posts to X/LinkedIn/FB/IG) | Joe's connected socials | Cowork connector + TO VERIFY any local copy | never | posts as Joe on every platform; drain credits |
-| GitHub PAT (jbookout/carr-system) | WRITE | scope TO VERIFY — A14 requires single-repo scope; verify at next use, narrow if broader | local git credential store | never | repo tamper; NO PII once dumps are age-encrypted (A9), which is why encryption starts with the FIRST dump |
+| GitHub PAT (DoctorCRE/carr-system) | WRITE | scope TO VERIFY — A14 requires single-repo scope; verify at next use, narrow if broader | local git credential store | never | repo tamper; NO PII once dumps are age-encrypted (A9), which is why encryption starts with the FIRST dump |
 | Salesforce login (Joe) | WRITE (in SF) | Joe's profile, export disabled | Joe's head + browser profile | corp policy | CARR corporate data; browser-bound by design, never stored by us |
 | CoStar / GCCMLS / CREXI logins | READ | market data | Joe's browser profile (automation Chrome profile) | never | data-license exposure; browser-bound by design |
 | Google Drive (both partners) | WRITE | the vault | OS-level (Drive clients) | n/a | the whole vault; governed by Google account 2FA |
