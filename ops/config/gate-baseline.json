@@ -8,16 +8,16 @@
     "gate-integrity.py": "f55dff3680d726f2200f559963403624d49de082f5d638af613af153e1105166",
     "gate_paths.py": "81f8ca48e4b70f5732c5dc769e5aa3876df4cde1c07e897335356086312ef7dd",
     "grok_invocation.py": "7c9d026d5763fd184355af653ed9ffc8fc135bfd6abc1f8700813b312e785976",
-    "guard-unattended.py": "51bd7926dc09d22c912dc8c52399f1acb93d2146c32570fbb01a7793631bdb75",
+    "guard-unattended.py": "325e6361d07c655b480db178f2136a946a10fcc9ad4338c0830a183a3e43a1a5",
     "hook_meter.py": "b6c82a172dff034ddd8b54425c520b48a31187a8122c33f493b785e78f502c6d",
     "job-watchdog-digest.py": "07d7523fb6240e5248d629f0359e6bfe517c0884d5f97f1b89548313a0c0de72",
-    "lint-gate.py": "60de08faf7bc3ac82a60f053a171fb4c6b03ed0a37198bde62eb3930bc7da98c",
+    "lint-gate.py": "e04ac9ff6686193f9fedf8643c1e7f4abe85d1fff01074c741fbbc1937c52dcd",
     "machine-converge.py": "171cb8f02e6ce258580b213f3ad46a3d4241d81076bcb37875710ff68ddcaf09",
     "md_manifest.py": "1256e5634d46e3c2a14e43fa31db2979515c15b906b4277301e09f12eb5bacd6",
     "record-home-gate.py": "0f990831758d08838f82280fdf2016c0d1ba2275aebe40e8d8e9ac716171de9f",
     "refused_content.py": "d3283e0efe48c63561c84cfa72b5cf363f5d53414c7e803584c569d4b26f1f4c",
     "rule-claim-gate.py": "c6b35389455f4b5912b63dcccb450f05fb53316759303fdc0146c32354dd0157",
-    "rule-pack-preuse-reselection.py": "c2f378043dc9febae8a56f124f4f62ccd59efa66c61819968444d0b318d183a4",
+    "rule-pack-preuse-reselection.py": "f5675dfeeae313aa1f15fa9ca03f4ee666b00ccaad708d6d6831c90c79975ca6",
     "scheduled-run-record.py": "34d230bf7dc9ad92fd30de7b21ce6263624fb3d1dfdf56a72ba121f613e31c80",
     "session-brief.py": "9f1d6324629be14184409ea711c859d24da0fcd3570def8e600dc9e121175e28",
     "turn_origin.py": "7fe75beaec283cd3ce3a3c8a109ef36e44999eb1b27dcebbffafff590a261f7e",
@@ -32,9 +32,9 @@
     "rule-enforcement-map.json": "7108a6907924e650c353ac2f04ced936feff45d02c17c3b57ca41a71dae5ae39",
     "model-floors.json": "298d84503a8730197dcd51613e73bd18505f1ee448562803603308cd278ce062",
     "github_spacing.py": "dda6808e02b423cddce62949b6a9eb2c8c39b79d57409dabdb739944c80d674e",
+    "native_shell.py": "6b2f3b64b1a5f2be1e48383e7979a011fe2f88be91cc27627e9531464105f268",
     "claude-managed-settings.json": "f5ef66d1078d196d2964cba43edaff6184e43433030dd1ab68d74bb9c7be46e5",
     "codex-requirements.toml": "f9361cff2a7b24d87b1169e2666a556c921db54745db531104c260b7209dc7c4",
-    "codex-permissions.toml": "e5d533440b4ef6587293b3596dda46dd8525f9a39107108b75c67b6f2e49aafc",
-    "native_shell.py": "6b2f3b64b1a5f2be1e48383e7979a011fe2f88be91cc27627e9531464105f268"
+    "codex-permissions.toml": "e5d533440b4ef6587293b3596dda46dd8525f9a39107108b75c67b6f2e49aafc"
   }
 }

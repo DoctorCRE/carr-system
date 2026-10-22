@@ -431,7 +431,7 @@ def _run_flash_code(question: str, spec: dict, task_id: str | None, *, command: 
     """Run tools/flash-run.py on a NEW branch of the project, in a throwaway git worktree, never the project's own
     tree: {"outcome": "success"|"blocked", "summary", "text", "branch"?}. flash-run runs SANDBOXED (--sandbox on):
     it refuses here if macOS sandbox-exec is absent, so model-driven code never runs unsandboxed. It also gets
-    --escalate suggest (never dispatches another desk) and --no-learn (posted room text never seeds a later Flash
+    --escalate suggest (never dispatches another desk); posted room text never seeds a later Flash
     prompt). Stale flash/queue-* worktrees are swept first. On a pass the desk re-runs the test itself, sandboxed,
     then commits on the new branch and keeps it; nothing is merged or pushed. Anything else drops the worktree AND
     the branch. The whole run, including the re-check, ends within CODE_TIMEOUT_S; a timeout SIGKILLs the whole
@@ -482,7 +482,7 @@ def _run_flash_code(question: str, spec: dict, task_id: str | None, *, command: 
             if os.path.isdir(os.path.join(project, dep)) and not os.path.lexists(os.path.join(tree, dep)):
                 os.symlink(os.path.join(project, dep), os.path.join(tree, dep))
         argv = [*(command or [sys.executable, str(FLASH_RUN)]), "run", "--cwd", tree, "--test", spec["test"],
-                "--sandbox", "on", "--no-learn", "--escalate", "suggest", "--", question]
+                "--sandbox", "on", "--escalate", "suggest", "--", question]
         rc, log = _run_group(argv, tree, env, deadline - time.monotonic())
         if rc is None:
             return blocked(f"Flash's code run did not finish in {timeout:.0f}s")

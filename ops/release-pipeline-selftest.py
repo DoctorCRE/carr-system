@@ -2615,9 +2615,7 @@ class Batching(Base):
                                        "--release-key", "r-2026-09-30-01"])
         self.assertIs(kwargs["start_new_session"], True)
         self.assertIs(kwargs["stdin"], rp.subprocess.DEVNULL)
-        self.assertEqual(set(kwargs["env"]) - {"HOME", "PATH", "LANG", "CARR_JEV_JOB"}, set())
-        self.assertEqual(kwargs["env"]["CARR_JEV_JOB"], "release-pipeline.slice-marker",
-                         "the detached marker's paid Jev calls are attributed to this job")
+        self.assertEqual(set(kwargs["env"]) - {"HOME", "PATH", "LANG"}, set())
         run.assert_not_called()
         started.wait.assert_not_called()
         started.communicate.assert_not_called()

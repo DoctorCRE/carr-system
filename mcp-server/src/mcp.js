@@ -23,9 +23,6 @@ import { authenticatedIdentity, isKnownPartner, authorizationClassForActor, orga
 import { deriveTrustedPrincipalBinding,
   ExactEffectRefusal, SCAC_TRUSTED_PRINCIPAL_READBACK_SQL } from "./scac-exact-effects.js";
 import { scheduleFailureRecord, rpcInternalErrorFailureClass, actorUnresolvedFailureClass, RPC_INTERNAL_ERROR_CODE } from "./trace.js";
-import { providerFor as judgeProviderFor } from "./judge-provider.js";
-import { countPaidJevAttemptsToday, jevAskBinding, prefetchJevAnswer, reserveJevCallAttempt,
-  validateAskJevArgs } from "./jev-call-receipt.js";
 import { parksADecision, classifyLoopText, needsDecider, loopRowText,
          ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.js";
 import { controllerOperationInput, controllerToolList, isEngineeringControllerActor,
@@ -624,7 +621,7 @@ const CORE_TOOL_NAMES = new Set([
   "read-doctrine", "read-loop", "read-room", "search-doctrine",
   "deal-room-board", "get-deal-room", "lead-board", "morning-brief", "today-triage",
   "engineering-passport-source", "doctrine-sections",
-  "ask-jev", "add-room-turn", "map-architecture",
+  "add-room-turn", "map-architecture",
   "applicable-rules", "resolve-doctrine-rules", "doctrine-index",
 ]);
 
@@ -779,7 +776,7 @@ export async function executeWithTrustedPrincipal(actor, readback, requiredBundl
 
 // Exported for deterministic no-network identity-gate tests. It remains the
 // single normal dispatcher path; callers receive no additional route or grant.
-export async function callTool(env, actor, name, args, profile = "full", judgeWorkClass = "system_work") {
+export async function callTool(env, actor, name, args, profile = "full") {
   const personalScope = personalScopeForActor(actor);
   if (personalScope.status === "error") {
     throw new ToolError({ error: personalScope.error,
@@ -953,49 +950,13 @@ export async function callTool(env, actor, name, args, profile = "full", judgeWo
 
   // Writes use the routine writer pool except the two authority operations,
   // which receive a separate DB identity and cannot fall back to writer.
-  // A billable Jev call needs a durable attempt before any vendor request.
-  // Cache promotion waits until the receipt transaction commits below.
-  let validatedJevRequest = null;
-  if (tool.jevProxy === true && env?.TYPESAFE_API_KEY) {
-    const jevArgs = args || {};
-    await assertRegisteredToolInput(name, tool, jevArgs);
-    coerceArgsToSchema(tool.inputSchema, jevArgs);
-    const normalized = validateAskJevArgs(jevArgs);
-    validatedJevRequest = { state: normalized.state, model: normalized.model,
-      questions: normalized.questions };
-  }
   const needsAuthority = requiresAuthorityConnection(tool, actor, args);
   const connectionString = needsAuthority ? authorityDsnForActor(env, actor) : env.DATABASE_URL_WRITER;
   const pool = new Pool({ connectionString });
   const client = await pool.connect();
-  let jevPrefetched, jevAsk, jevRequest;
-  let jevKeyLocked = false;
   const writerRead = tool.writerConnection === true && !tool.write;
   let readOk = true, readErrorKind = null;
   try {
-    if (tool.jevProxy === true && (env?.TYPESAFE_API_KEY || judgeProviderFor(judgeWorkClass) === "decisions")) {
-      const jevArgs = args || {};
-      jevRequest = validatedJevRequest;
-      // An envelope replay already has its receipt; do not spend or reserve
-      // another attempt. Serialize the check through commit so concurrent
-      // same-key calls cannot both pay before the envelope replay check.
-      await client.query("select pg_advisory_lock(hashtextextended($1,0))", [jevArgs.idempotency_key]);
-      jevKeyLocked = true;
-      // withEnvelope still checks the full request hash.
-      const prior = await client.query("select 1 from tool_call where idempotency_key=$1", [jevArgs.idempotency_key]);
-      if (!prior.rows.length) {
-        const actorRow = (await client.query("select id from actor where slug=$1", [actor.slug])).rows[0];
-        if (!actorRow?.id)
-          throw new ToolError({ error: "actor_not_provisioned", slug: actor.slug });
-        jevAsk = jevAskBinding(env, fetch, {
-          countPaidAttemptsToday: () => countPaidJevAttemptsToday(client),
-          reserveAttempt: async dailyCap => {
-            return reserveJevCallAttempt(client, { ...actor, id: actorRow.id }, jevArgs, dailyCap);
-          } });
-        jevPrefetched = await prefetchJevAnswer(jevArgs, jevAsk, judgeWorkClass);
-        client.jevPrefetched = jevPrefetched;
-      }
-    }
     await client.query(tool.writerConnection && !tool.write ? "begin read only" : "begin");
     const a = await client.query("select id from actor where slug=$1", [actor.slug]);
     // Guarded 2026-08-03. Unguarded, a missing actor row made this a raw
@@ -1018,8 +979,6 @@ export async function callTool(env, actor, name, args, profile = "full", judgeWo
       needsAuthority ? "carr_authority" : "carr_writer",
       fullActor => executeRegisteredTool(client, fullActor, name, args || {}));
     await client.query("commit");
-    if (jevPrefetched?.ok === true && result?.ok === true)
-      await jevAsk.cacheAfterCommit(jevRequest, jevPrefetched.result);
     return result;
   } catch (e) {
     await client.query("rollback").catch(() => {});
@@ -1063,8 +1022,6 @@ export async function callTool(env, actor, name, args, profile = "full", judgeWo
     }
     throw e;
   } finally {
-    if (jevKeyLocked)
-      await client.query("select pg_advisory_unlock(hashtextextended($1,0))", [args.idempotency_key]).catch(() => {});
     client.release();
     // Actor-scoped read doors use a read-only writer transaction. Record their
     // metadata through the same detached audit path as ordinary reader calls;

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare numbered builder obligations with evidence at one PR head.
 
-    bin/brief-check <owner/repo> <pr> [--brief PATH] [--post] [--jev] [--json]
+    bin/brief-check <owner/repo> <pr> [--brief PATH] [--post] [--json]
     bin/brief-check --stamp <brief>
 
 Builders put the helper's `Brief: <path> sha256:<hex>` line in the PR body.
@@ -22,8 +22,6 @@ API has no cross-host lock or head-conditional write; additional publishers
 must use that same host. Head checks bracket writes and all source links pin
 the inspected revision.
 
---jev is opt-in advisory judgment. Shared translation and observation policy
-owns its result; vendor or loader failures preserve the deterministic report.
 """
 from __future__ import annotations
 
@@ -408,42 +406,6 @@ def check(brief_text, pr, *, exists_in_base=None, local_reference=None, brief_pa
 
 # ── Jev on the residue ────────────────────────────────────────────────────────
 
-def add_jev(report, *, judge=None, noul=None):
-    residue = [r for r in report["requirements"] if r["verdict"] == "needs judgment"]
-    if not residue:
-        return report
-    if report_status(report) == 2:
-        for row in residue:
-            row["jev"] = "Jev unavailable (brief provenance conflict)"
-        return report
-    policy = None
-    try:
-        policy = _jev_policy()
-        if judge is None or noul is None:
-            judge, noul = _jev()
-        questions = {f"r{r['n']}": noul(
-            f"Requirement {r['n']}: {r['text']}\n"
-            "Using only the PR evidence in the state, was this requirement met?") for r in residue}
-        subject = {"pr_body": report.get("body") or "", "head": report["head"],
-                   "evidence": {f"r{r['n']}": r["evidence"] for r in residue}}
-        answer = judge(subject, questions, caller="brief_check", timeout=20, retries=0,
-                       deadline=time.monotonic() + 20)
-        for r in residue:
-            decision = policy.read(answer, f"r{r['n']}")
-            word = "unsure" if decision["escalate"] else "likely met" if decision["outcome"] == "yes" else "likely not met"
-            r["jev"] = f"Jev (advisory, needs-judgment residue): {word}, p={decision['value']:.2f}"
-        policy.record("brief_check", f"{report['url']}@{report['head']}", answer,
-                      {f"r{r['n']}": r["verdict"] for r in residue},
-                      family="brief_requirement", consequence_class="review_advisory",
-                      downstream_action="advisory_only")
-    except Exception as exc:
-        for r in residue:
-            r["jev"] = f"Jev unavailable ({type(exc).__name__})"
-        if policy:
-            policy.record("brief_check", f"{report['url']}@{report['head']}", None,
-                          error=type(exc).__name__, family="brief_requirement",
-                          consequence_class="review_advisory", downstream_action="deterministic_only")
-    return report
 
 
 def _load_module(name):
@@ -455,12 +417,8 @@ def _load_module(name):
     return module
 
 
-def _jev_policy():
-    return _load_module("jev_judge")
 
 
-def _jev():
-    return _jev_policy().judge, _load_module("typesafe_client").noul
 
 
 # ── comment ───────────────────────────────────────────────────────────────────
@@ -484,7 +442,7 @@ def render_comment(report):
         "|---|---|---|---|",
     ]
     for r in report["requirements"]:
-        evidence = "<br>".join(_cell(e) for e in r["evidence"] + ([r["jev"]] if r.get("jev") else []))
+        evidence = "<br>".join(_cell(e) for e in r["evidence"])
         text = r["text"]
         lines.append(f"| {r['n']} | {_cell(text)} | **{r['verdict']}** | {evidence} |")
     lines += ["", "<sub>ops/brief-check.py: met = every sentence of the requirement has deterministic evidence; "
@@ -676,7 +634,6 @@ def main(argv=None):
     parser.add_argument("--brief-root", help="where a relative Brief: path resolves (default: this repo's main checkout)")
     parser.add_argument("--checkout", help="clone of <repo> for exact PR base revision lookups (default: ~/<repo name>)")
     parser.add_argument("--post", action="store_true", help="create or update the one brief-check comment on the PR")
-    parser.add_argument("--jev", action="store_true", help="ask Jev about the needs-judgment residue (paid, advisory)")
     parser.add_argument("--json", action="store_true", help="print the report as JSON instead of the comment")
     args = parser.parse_args(argv)
 
@@ -715,11 +672,6 @@ def main(argv=None):
         exists_in_base=base_lookup,
         local_reference=_local_reference(checkout) if base_lookup else None,
         brief_path=args.brief or read_stamp(pr.get("body"))[0])
-    if args.jev:
-        report["body"] = pr.get("body")
-        add_jev(report)
-        report.pop("body", None)
-
     comment = render_comment(report)
     print(json.dumps(report, indent=2) if args.json else comment)
     if args.post:
