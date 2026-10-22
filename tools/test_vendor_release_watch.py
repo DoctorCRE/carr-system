@@ -353,9 +353,9 @@ class VendorWatchTests(unittest.TestCase):
         w.append(self.root / self.config['paths']['findings'],
                  {'key': 'unrelated', 'kind': 'job_dead', 'reported': True, 'reason': 'unrelated job', 'next_action': 'inspect'})
         self.error = False
-        with patch.object(w, 'fetch_document', self.fetch), patch.object(w, 'time') as clock:
-            state = w.read_latest(self.root / self.config['paths']['vendor_release_ledger'])
-            clock.time.return_value = state['openai-decisions']['checked_at'] + 3600
+        state = w.read_latest(self.root / self.config['paths']['vendor_release_ledger'])
+        with patch.object(w, 'fetch_document', self.fetch), patch.object(
+                w.time, 'time', return_value=state['openai-decisions']['checked_at'] + 3600):
             self.assertEqual(w.scan(self.root, self.config, vendor_only=True), 0)
         rows = w.read_latest(self.root / self.config['paths']['findings'])
         error = next(f for f in rows.values() if f['kind'] == 'vendor_release_fetch_error')
