@@ -14,7 +14,7 @@ import dispatch
 class BuilderSkillsTests(unittest.TestCase):
     def send(self, task, *flags):
         with tempfile.TemporaryDirectory() as root, \
-             patch.object(dispatch, 'dispatch', return_value={'status': 'completed'}) as send, \
+             patch('work_cli.send', return_value={'status': 'queued'}) as send, \
              contextlib.redirect_stdout(io.StringIO()):
             result = dispatch.main(['--registry', str(Path(root) / 'desks.json'),
                                     'send', 'builder', task, *flags])

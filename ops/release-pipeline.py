@@ -8,6 +8,9 @@ provider identity, production smoke, rollback and live verification.
 Run one tick with ops/release-pipeline.py, inspect commands with --dry-run,
 report shipped releases with report, or clear a failed SHA with clear-failed.
 The configured kill switches and single-run lock apply to both release lanes.
+Use stage-candidate --lane app --sha <full-sha> for a temporary staging taste,
+then restore-candidate --lane app to restore the recorded prior version.
+Candidate operations keep their own durable journal and never advance release state.
 """
 
 from __future__ import annotations
@@ -18,14 +21,20 @@ import dataclasses
 import datetime as dt
 import fcntl
 import hashlib
+import http.client
 import json
 import os
 import re
 import runpy
+import shlex
 import shutil
+import socket
 import subprocess
 import sys
+import tempfile
 import time
+import tomllib
+import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
@@ -38,6 +47,7 @@ from lib.github_reader import SOURCE_BYTES as GITHUB_READER_SOURCE_BYTES, GitHub
 from lib.secret_redaction import SOURCE_BYTES as REDACTION_SOURCE_BYTES, redact_text, sensitive_env_values  # noqa: E402
 CONTROLLER_SOURCE_BYTES = Path(__file__).read_bytes()
 CONFIG_PATH = REPO / "ops" / "config" / "release-pipeline.v1.json"
+APP_STAGING_RELEASE_URL = "https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev/app-release"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 ROOM_NAMESPACE = uuid.UUID("3d0e3c55-6a51-4c3e-9b8f-2b6c1f0a7e41")
@@ -169,6 +179,7 @@ class Runner:
                 out += f"\nrelease-pipeline: timed out after {timeout}s\n"
             except OSError as exc:
                 out, rc = f"release-pipeline: could not start: {exc}\n", 127
+            out = redact_text(out, known_secrets=sensitive_env_values(env))
             fh.write(out)
             fh.write(f"\n[exit {rc}]\n")
         return Result(rc, out)
@@ -281,6 +292,31 @@ def wrangler_toolchain(repo: Path, store_root: Path) -> Path:
     return store_root / "toolchain" / f"mcp-server-{digest.hexdigest()[:16]}"
 
 
+def toolchain_digest(home: Path) -> str:
+    """Bind installed contents, executable modes and internal link destinations."""
+    if home.is_symlink() or not home.is_dir():
+        raise ValueError("toolchain root must be a regular directory")
+    digest = hashlib.sha256()
+    for path in sorted(home.rglob("*")):
+        name = path.relative_to(home).as_posix()
+        if path.is_symlink():
+            if not path.resolve(strict=True).is_relative_to(home.resolve()):
+                raise ValueError("toolchain link escapes its install")
+            entry = [name, "link", os.readlink(path)]
+        elif path.is_file():
+            content = hashlib.sha256()
+            with path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    content.update(chunk)
+            entry = [name, "file", oct(path.stat().st_mode & 0o777), content.hexdigest()]
+        elif path.is_dir():
+            entry = [name, "directory"]
+        else:
+            raise ValueError("toolchain contains a special file")
+        digest.update(json.dumps(entry, separators=(",", ":")).encode() + b"\n")
+    return digest.hexdigest()
+
+
 def expand(p: str) -> Path:
     return Path(os.path.expanduser(p))
 
@@ -349,6 +385,30 @@ class Store:
         recorded = {"ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), **row}
         self.record(recorded)
         self.readback_durable(recorded)
+
+    def resolve_promotion(self, state: dict, lane: str, resolution: dict | None) -> None:
+        pending = state[lane].get("pending_promotion")
+        if not pending:
+            return
+        if resolution is None or resolution.get("intent") != pending or not resolution.get("reason"):
+            raise Blocked("journal_proof_invalid", "promotion resolution does not bind the pending intent and reason")
+        receipt = resolution.get("receipt")
+        if receipt:
+            if (receipt.get("status") not in {"worker_promoted", "shipped"}
+                    or any(receipt.get(key) != pending[key] for key in
+                           ("lane", "sha", "from_sha", "run_id", "provider_version_id", "release_endpoint"))):
+                raise Blocked("journal_proof_invalid", "promotion acknowledgement differs from its original intent")
+            self.recover_durable(receipt)
+        else:
+            row = {**pending, **{key: value for key, value in resolution.items() if key != "intent"}}
+            previous = next((item for item in reversed(self.records())
+                             if all(item.get(key) == value for key, value in row.items())), None)
+            if previous:
+                self.recover_durable(previous)
+            else:
+                self.record_durable(row)
+        # The caller saves removal together with its checkpoint or clearance.
+        state[lane].pop("pending_promotion")
 
     def recover_durable(self, row: dict) -> None:
         with self.records_path.open("rb") as fh:
@@ -617,6 +677,7 @@ class Pipeline:
         self.run_dir = self.store.root / "runs" / self.run_id
         self.executed: list[str] = []   # step names that actually ran, in order
         self.worktrees: list[tuple[Path, Path]] = []
+        self.toolchain_integrity: dict[Path, str] = {}
         self.db_ahead_of_worker = False
         self.do_migration: dict | None = None   # a Durable Object migration the upload step applied
         self.mutated = False   # set when the first worktree is created; nothing before it writes
@@ -680,16 +741,45 @@ class Pipeline:
         return outcome
 
     def git(self, *args: str, cwd: Path | None = None, trim_output: bool = True) -> str:
-        if args and args[0] == "fetch":
+        fetching = bool(args and args[0] == "fetch")
+        if fetching:
             # Ordinary fetches keep the shared remote-tracking refs and
             # FETCH_HEAD untouched. App publication has one explicit,
             # verified ref refresh below because its unchanged release guard
             # requires the detached candidate to equal refs/remotes/origin/main.
             args = ("fetch", "--no-write-fetch-head", "--refmap=", *args[1:])
-        proc = subprocess.run(["git", "-C", str(cwd or self.repo), *args], env=self.env,
-                              stdin=subprocess.DEVNULL, capture_output=True, timeout=300)
+        argv = ["git", "-C", str(cwd or self.repo), *args]
+        log = self.run_dir / "git-fetch.log" if fetching and not self.dry_run else None
+        for attempt in range(1, 3 if fetching else 2):
+            try:
+                proc = subprocess.run(argv, env=self.env, stdin=subprocess.DEVNULL,
+                                      capture_output=True, timeout=300)
+            except subprocess.TimeoutExpired as exc:
+                if not fetching:
+                    raise
+                proc = subprocess.CompletedProcess(argv, 124, exc.stdout or b"",
+                                                   (exc.stderr or b"") + b"\ngit fetch timed out after 300s\n")
+            detail = os.fsdecode(proc.stderr).strip()
+            if fetching:
+                detail = redact_text(detail, known_secrets=sensitive_env_values(self.env))
+                if log is not None:
+                    log.parent.mkdir(parents=True, exist_ok=True)
+                    diagnostic = (f"[attempt {attempt}] $ {shlex.join(argv)}\n"
+                                  f"[stdout]\n{os.fsdecode(proc.stdout)}\n"
+                                  f"[stderr]\n{os.fsdecode(proc.stderr)}\n[exit {proc.returncode}]\n")
+                    with log.open("a", encoding="utf-8", errors="backslashreplace") as sink:
+                        sink.write(redact_text(diagnostic, known_secrets=sensitive_env_values(self.env)))
+                transport_failure = proc.returncode == 124 or (proc.returncode == 128 and any(
+                    message in detail.lower() for message in (
+                        "operation timed out", "connection timed out", "could not resolve host",
+                        "could not resolve proxy", "connection reset by peer", "recv failure",
+                        "failed to connect", "remote end hung up unexpectedly")))
+                if attempt == 1 and transport_failure:
+                    self.sleep(2)
+                    continue
+            break
         if proc.returncode != 0:
-            raise StepFailed(f"git {args[0]}", proc.returncode, "", os.fsdecode(proc.stderr).strip()[:300])
+            raise StepFailed(f"git {args[0]}", proc.returncode, str(log) if log is not None else "", detail[:300])
         # fsdecode preserves filename bytes via surrogateescape. text=True
         # applies universal-newline conversion and would corrupt CR/CRLF names
         # in the NUL-delimited path list used by changed_paths().
@@ -711,6 +801,9 @@ class Pipeline:
         if self.dry_run:
             self.out(f"  [dry-run] (cd {cwd}) {shown}")
             return Result(0, "")
+        for home in self.toolchain_integrity:
+            if Path(argv[0]).is_relative_to(home) or (env is not None and CLOUDFLARE_TOKEN_NAME in env):
+                self.verify_toolchain(home)
         n = len(self.executed) + 1
         log = self.run_dir / f"{n:02d}-{name}.log"
         self.out(f"  -> {name}: {shown}")
@@ -1150,6 +1243,18 @@ class Pipeline:
         env[CLOUDFLARE_TOKEN_NAME] = token
         return env
 
+    def verify_toolchain(self, home: Path) -> None:
+        """Never rebaseline an existing install, including after a build runs."""
+        try:
+            recorded = self.toolchain_integrity.get(home)
+            if recorded is None:
+                recorded = home.with_name(home.name + ".sha256").read_text().strip()
+            if not re.fullmatch(r"[0-9a-f]{64}", recorded) or toolchain_digest(home) != recorded:
+                raise ValueError("content digest mismatch")
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise Blocked("toolchain_integrity", "pinned toolchain integrity check failed; refusing execution") from exc
+        self.toolchain_integrity[home] = recorded
+
     def auth_wrangler(self) -> Path:
         """The wrangler binary that checks the deploy token: the pipeline's
         own install under <store>/toolchain, keyed by this checkout's
@@ -1158,11 +1263,20 @@ class Pipeline:
         running `npm ci` there can leave it empty, and on 2026-10-05 one did,
         so `wrangler whoami` exited 127 on both lanes. Installed into a
         `.partial` sibling and renamed into place, so an existing directory
-        is always a finished install."""
+        is always a finished install. Its recorded content digest must match
+        before reuse and before each toolchain or credentialed step."""
         home = wrangler_toolchain(self.repo, self.store.root)
         wrangler = home / "node_modules/.bin/wrangler"
-        if wrangler.exists():
-            return wrangler
+        if home.exists():
+            receipt = home.with_name(home.name + ".sha256")
+            if receipt.exists() or receipt.is_symlink() or home.is_symlink() or not home.is_dir():
+                self.verify_toolchain(home)
+                return wrangler
+            if not self.dry_run:
+                quarantine = self.store.root / "_to_delete" / f"{home.name}-{uuid.uuid4().hex}"
+                quarantine.parent.mkdir(parents=True, exist_ok=True)
+                home.rename(quarantine)
+                self.toolchain_integrity.pop(home, None)
         if self.dry_run:
             self.out(f"  [dry-run] would install the token-check wrangler into {home}")
             return wrangler
@@ -1177,9 +1291,15 @@ class Pipeline:
                              f"npm ci in {partial} finished without installing node_modules/.bin/wrangler")
         shutil.rmtree(home, ignore_errors=True)
         partial.rename(home)
+        receipt = home.with_name(home.name + ".sha256")
+        receipt.write_text(toolchain_digest(home) + "\n")
+        self.verify_toolchain(home)
         for stale in home.parent.iterdir():
-            if stale != home:
-                shutil.rmtree(stale, ignore_errors=True)
+            if stale not in (home, receipt):
+                if stale.is_dir() and not stale.is_symlink():
+                    shutil.rmtree(stale, ignore_errors=True)
+                else:
+                    stale.unlink(missing_ok=True)
         return wrangler
 
     def wrangler_auth(self) -> None:
@@ -1331,10 +1451,130 @@ class Pipeline:
             raise Blocked("bootstrap_unknown", f"{lane_cfg['live_release_url']} names no full SHA")
         return value
 
+    def advance_checkpoint(self, state: dict, lane: str, sha: str, *, resolution: dict | None = None) -> None:
+        lane_state = state.setdefault(lane, {})
+        if lane_state.get("pending_promotion"):
+            if resolution is None:
+                raise Blocked("promotion_unresolved", "checkpoint cannot advance while promotion intent is unresolved")
+            self.store.resolve_promotion(state, lane, resolution)
+        lane_state["last_released_sha"] = sha
+        if not self.dry_run:
+            self.store.save(state)
+
+    def promotion_replacement(self, state: dict, lane: str, target: str, live: dict) -> dict | None:
+        pending = state[lane].get("pending_promotion")
+        if not pending:
+            return None
+        sha = (live.get("git_sha") or {}).get("value")
+        version = (live.get("worker_version") or {}).get("id")
+        if (not isinstance(sha, str) or not SHA_RE.fullmatch(sha)
+                or not UUID_RE.fullmatch(str(version or ""))
+                or target == pending["sha"] or not self._at_or_before(pending["sha"], target, self.repo)
+                or not self._at_or_before(sha, target, self.repo)):
+            raise Blocked("promotion_unresolved", "replacement target has no verified live checkpoint")
+        receipt = next((row for row in reversed(self.store.records())
+                        if row.get("lane") == lane and row.get("release_endpoint") == pending["release_endpoint"]
+                        and ((row.get("status") in {"shipped", "live_identity_reconciled", "worker_promoted", "promotion_retired"}
+                              and row.get("sha") == sha and row.get("provider_version_id") == version)
+                             or (row.get("status") == "promotion_prepared"
+                                 and row.get("run_id") == pending["run_id"]
+                                 and row.get("prior_identity") == {"sha": sha, "provider_version_id": version}))), None)
+        if receipt is None:
+            raise Blocked("promotion_unresolved", "live identity does not match a durable checkpoint receipt")
+        self.store.recover_durable(receipt)
+        return {"intent": dict(pending), "status": "promotion_retired",
+                "reason": "verified live checkpoint before replacement target",
+                "resolution_evidence": {"replacement_sha": target, "sha": sha,
+                                        "provider_version_id": version, "receipt_digest": evidence_digest(receipt)}}
+
+    def legacy_health_promotion(self, failure: dict, lane_cfg: dict, main: str, promotion: dict) -> dict:
+        """Bind a health failure to its run identity and successful provider steps."""
+        try:
+            run_id = failure['run_id']
+            if (not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}", run_id)
+                    or failure.get('rc') != 1 or failure.get('do_migration') is not None
+                    or not isinstance(failure.get('db_ahead_of_worker'), bool)
+                    or failure['executed'][-2:] != ['promote', 'health']
+                    or failure['executed'].count('promote') != 1
+                    or failure['executed'].count('health') != 1):
+                raise ValueError('uncertain promotion effects')
+            sha, previous = failure['sha'], failure['from_sha']
+            if not SHA_RE.fullmatch(previous) or not self._at_or_before(previous, sha, self.repo):
+                raise ValueError('promotion source does not descend from checkpoint')
+            identities = []
+            for source in (previous, sha, main):
+                cfg = tomllib.loads(self.git('show', f'{source}:mcp-server/wrangler.toml'))
+                identity = {key: cfg[key] for key in ('name', 'account_id', 'routes')}
+                if not identity['name'] or not re.fullmatch(r'[0-9a-f]{32}', identity['account_id']):
+                    raise ValueError('unbound Worker account')
+                identities.append(identity)
+            host = urllib.parse.urlsplit(lane_cfg['live_release_url']).hostname
+            if (identities[1:] != identities[:-1]
+                    or not any(route.get('pattern') == host and route.get('custom_domain') is True
+                               for route in identities[0]['routes'])):
+                raise ValueError('Worker account or route changed')
+            recorded = [row for row in self.store.records()
+                        if row.get('lane') == 'worker' and row.get('status') == 'worker_promoted'
+                        and row.get('run_id') == run_id]
+            expected_identity = {'from_sha': previous, **promotion}
+            if (failure.get('promotion') not in (None, promotion)
+                    or (failure.get('promotion') is None and not recorded)
+                    or any(row.get(key) != value for row in recorded for key, value in expected_identity.items())):
+                raise ValueError('run promotion identity differs or is missing')
+            version = promotion['provider_version_id']
+            receipts = {}
+            for name, command in (('11-upload.log', f'bin/deploy-worker.sh --upload-version --release-sha {sha}'),
+                                  ('13-promote.log', f'bin/deploy-worker.sh --promote-version {version}')):
+                raw = (self.store.root / 'runs' / run_id / name).read_bytes()
+                log = raw.decode('utf-8')
+                display = re.fullmatch(r'\$ (?:\(cd /[^()\r\n]*\) )?(bin/deploy-worker\.sh .+)',
+                                       log.splitlines()[0])
+                if display is None:
+                    raise ValueError('unsupported provider command display')
+                argv, expected = shlex.split(display[1]), shlex.split(command)
+                if (argv[:len(expected)] != expected
+                        or argv.count(expected[0]) != 1
+                        or not log.rstrip().endswith('[exit 0]') or log.count('[exit ') != 1):
+                    raise ValueError('provider step not acknowledged')
+                modes = ('--upload-version', '--promote-version')
+                if sum(arg == mode or arg.startswith(mode + '=') for arg in argv for mode in modes) != 1:
+                    raise ValueError('ambiguous provider operation')
+                for flag, wanted in (('--release-sha', sha), ('--promote-version', version)):
+                    values = [argv[i + 1] if arg == flag else arg.partition('=')[2]
+                              for i, arg in enumerate(argv) if arg == flag or arg.startswith(flag + '=')]
+                    if values and values != [wanted]:
+                        raise ValueError('ambiguous provider identity arguments')
+                versions = [value.strip() for value in re.findall(r'(?m)^[ \t]*provider version:([^\r\n]*)$', log)]
+                sources = [value.strip() for value in re.findall(r'(?m)^[ \t]*(?:recorded )?git SHA:([^\r\n]*)$', log)]
+                if versions != [version] or len(sources) != 1 or sources[0] not in {sha, '[REDACTED]'}:
+                    raise ValueError('provider receipt identity differs or is missing')
+                receipts[name] = hashlib.sha256(raw).hexdigest()
+            proof = {'failure_digest': evidence_digest(failure), 'provider_receipts': receipts,
+                     'worker_identity': identities[0], 'health_verified': False}
+            if recorded:
+                self.store.recover_durable(recorded[-1])
+                proof['promotion_receipt_digest'] = evidence_digest(recorded[-1])
+            return proof
+        except (KeyError, IndexError, ValueError, TypeError, OSError, StepFailed) as exc:
+            raise Blocked('live_target_unreceipted', 'legacy health failure lacks exact source and provider receipts') from exc
+
     def reconcile_worker_identity(self, state: dict, lane_cfg: dict, main: str) -> dict:
         url = lane_cfg["live_release_url"]
         try:
-            live = self.http(url)
+            for attempt in range(1, 3):
+                try:
+                    live = self.http(url)
+                    break
+                except (ConnectionError, TimeoutError, http.client.IncompleteRead,
+                        urllib.error.URLError, socket.gaierror) as exc:
+                    cause = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+                    transient = not isinstance(exc, urllib.error.HTTPError) and (
+                        isinstance(cause, (ConnectionError, TimeoutError, http.client.IncompleteRead))
+                        or isinstance(cause, socket.gaierror) and cause.errno == socket.EAI_AGAIN)
+                    if attempt == 1 and transient:
+                        self.sleep(2)
+                        continue
+                    raise
             sha = live["git_sha"]["value"]
             version = live["worker_version"]["id"]
             if (not isinstance(sha, str) or not SHA_RE.fullmatch(sha)
@@ -1344,22 +1584,119 @@ class Pipeline:
             raise Blocked("live_identity_unreadable", f"{url} names no readable full Worker identity") from exc
         lane_state = state["worker"]
         previous = lane_state.get("last_released_sha")
-        if not previous or previous == sha:
+        if lane_state.get("pending_promotion") or not previous or previous == sha:
             return live
-        if lane_state.get("failed_sha") == sha:
-            raise Blocked("live_target_unreceipted", "failed release source identity has no durable shipped checkpoint")
+        failure = None
+        retired = next((row for row in reversed(self.store.records())
+                        if row.get('status') == 'promotion_retired' and row.get('lane') == 'worker'
+                        and row.get('sha') == sha and row.get('provider_version_id') == version
+                        and row.get('release_endpoint') == url), None)
+        if retired:
+            self.store.recover_durable(retired)
+        if lane_state.get("failed_sha") == sha and not retired:
+            failures = [row for row in self.store.records() if isinstance(row, dict)
+                        and row.get("lane") == "worker" and row.get("sha") == sha
+                        and row.get("status") == "failed"]
+            failure = failures[-1] if failures else None
+            promotion = {"sha": sha, "provider_version_id": version, "release_endpoint": url}
+            if (not failure or failure.get("step") not in {"promote", "verify-live", "health"}
+                    or failure.get("step") != lane_state.get("failed_step")
+                    or not failure.get("run_id")
+                    or failure["run_id"] != lane_state.get("failed_run_id")
+                    or (failure.get("step") != "health" and (failure.get("from_sha") != previous
+                                                             or failure.get("promotion") != promotion))
+                    or not isinstance(failure.get("executed"), list)
+                    or (failure["executed"][-1:] != ["promote"] and failure.get("step") != "health")):
+                raise Blocked("live_target_unreceipted", "failed release source identity has no matching promotion evidence")
+        legacy = None
+        if failure and failure['step'] == 'health':
+            latest = next((row for row in reversed(self.store.records())
+                           if row.get('lane') == 'worker' and row.get('status') in
+                           {'failed', 'shipped', 'worker_promoted', 'promotion_retired'}), None)
+            if latest != failure:
+                raise Blocked('live_target_unreceipted', 'legacy failed journal is no longer current')
+            if (failure.get('from_sha') != previous
+                    and not (self._at_or_before(sha, previous, self.repo)
+                             and self._at_or_before(previous, main, self.repo))):
+                raise Blocked('live_target_unreceipted', 'health recovery checkpoint is outside its source history')
+            legacy = self.legacy_health_promotion(failure, lane_cfg, main, promotion)
         self.controller_current(state)
         if not self._at_or_before(sha, main, self.repo):
             raise Blocked("history_diverged", f"live Worker {sha[:12]} is not an ancestor of main {main[:12]}")
+        if legacy:
+            fresh = self.http(url)
+            if ((fresh.get('git_sha') or {}).get('value') != sha
+                    or (fresh.get('worker_version') or {}).get('id') != version):
+                raise Blocked('live_target_unreceipted', 'legacy promotion identity changed during recovery')
         self.out(f"release-pipeline[worker]: recorded {previous[:12]} differs from live {sha[:12]}")
         if not self.dry_run:
-            self.store.record_durable({"lane": "worker", "status": "live_identity_reconciled",
+            receipt = {"lane": "worker", "status": "live_identity_reconciled",
                 "from_sha": previous, "sha": sha, "provider_version_id": version,
-                "release_endpoint": url, "run_id": self.run_id})
-        lane_state["last_released_sha"] = sha
-        if not self.dry_run:
-            self.store.save(state)
+                "release_endpoint": url, "run_id": self.run_id}
+            if failure:
+                self.store.recover_durable(failure)
+                receipt["recovered_failure"] = {"run_id": failure["run_id"], "step": failure["step"]}
+                if legacy:
+                    receipt["legacy_promotion"] = legacy
+                written = next((row for row in reversed(self.store.records())
+                                if isinstance(row, dict) and all(row.get(k) == v for k, v in receipt.items()
+                                                                if k != "run_id")), None)
+                if written:
+                    self.store.recover_durable(written)
+                else:
+                    self.store.record_durable(receipt)
+            else:
+                self.store.record_durable(receipt)
+        if failure and not legacy:
+            lane_state.update({"failed_sha": None, "failed_step": None, "failed_at": None})
+            lane_state.pop("failed_run_id", None)
+            lane_state.pop("rejection", None)
+        self.advance_checkpoint(state, "worker", sha)
         return live
+
+    def reconcile_worker_promotion(self, state: dict, main: str) -> None:
+        lane_state = state.setdefault("worker", {})
+        pending = lane_state.get("pending_promotion")
+        if not pending:
+            return
+        # Fully verified releases retain the stronger journal recovery path.
+        if any(row.get("status") == "release_verified"
+               and all(row.get(key) == pending.get(key) for key in
+                       ("lane", "sha", "from_sha", "run_id", "provider_version_id", "release_endpoint"))
+               for row in self.store.records()):
+            return
+        cfg = self.cfg["worker"]
+        if (pending.get("release_endpoint") != cfg["live_release_url"]
+                or pending.get("from_sha") != lane_state.get("last_released_sha", pending.get("from_sha"))
+                or not SHA_RE.fullmatch(str(pending.get("sha") or ""))
+                or not UUID_RE.fullmatch(str(pending.get("provider_version_id") or ""))
+                or not self._at_or_before(pending["sha"], main, self.repo)):
+            raise Blocked("journal_proof_invalid", "pending Worker promotion does not match its source and lane")
+        live = self.http(cfg["live_release_url"])
+        if ((live.get("git_sha") or {}).get("value") == pending["sha"]
+                and (live.get("worker_version") or {}).get("id") == pending["provider_version_id"]):
+            receipt = next((row for row in reversed(self.store.records())
+                            if row.get("status") == "worker_promoted"
+                            and all(row.get(key) == value for key, value in pending.items())), None)
+            if receipt:
+                self.store.recover_durable(receipt)
+            else:
+                self.store.record_durable({**pending, "status": "worker_promoted"})
+                receipt = next(row for row in reversed(self.store.records())
+                               if row.get("status") == "worker_promoted"
+                               and all(row.get(key) == value for key, value in pending.items()))
+            resolution = {"intent": dict(pending), "receipt": receipt,
+                          "reason": "exact promoted SHA and provider version acknowledged"}
+        else:
+            resolution = None
+        failed = lane_state.get("failed_sha")
+        if failed != pending["sha"] and (not failed or self._at_or_before(failed, pending["sha"], self.repo)):
+            lane_state.update({"failed_sha": pending["sha"],
+                               "failed_step": "post-promote-verification-incomplete"})
+        if resolution:
+            self.advance_checkpoint(state, "worker", pending["sha"], resolution=resolution)
+        else:
+            self.store.save(state)
 
     def tick(self, lanes: Iterable[str]) -> int:
         why = kill_switch(self.cfg)
@@ -1392,7 +1729,7 @@ class Pipeline:
     REJECTION_RECHECK_SECONDS = 900
     # These prerequisites depend on live state without a cheap GitHub change
     # signal. An elapsed interval permits a fresh judgment, never a promotion.
-    LIVE_REJECTIONS = frozenset({"github_unreadable", "bootstrap_unknown",
+    LIVE_REJECTIONS = frozenset({"github_unreadable", "bootstrap_unknown", "toolchain_integrity",
         "live_identity_unreadable", "credential_missing", "health_baseline_unavailable", "health_baseline_stalled",
         "health_baseline_hard_error"})
 
@@ -1534,9 +1871,22 @@ class Pipeline:
                            if row.get("proof_digest") == proof["proof_digest"] and row.get("status") == "shipped")
         lane_state = state.setdefault(lane, {})
         lane_state.pop("rejection", None)
-        lane_state.update({"last_released_sha": proof["sha"], "failed_sha": None, "failed_step": None,
+        lane_state.pop("failed_run_id", None)
+        pending = lane_state.get("pending_promotion")
+        resolution = None
+        if pending:
+            if pending["sha"] == proof["sha"]:
+                resolution = {"intent": dict(pending), "receipt": shipped,
+                              "reason": "exact promotion fully verified and shipped"}
+            else:
+                if not self._at_or_before(pending["sha"], proof["sha"], self.repo):
+                    raise Blocked("journal_proof_invalid", "verified release cannot supersede unrelated promotion intent")
+                resolution = {"intent": dict(pending), "status": "promotion_retired",
+                              "reason": "newer verified release supersedes promotion intent",
+                              "resolution_evidence": {"proof_digest": proof["proof_digest"]}}
+        lane_state.update({"failed_sha": None, "failed_step": None,
                            "last_shipped_at": shipped["ts"], "last_shipped_proof": proof["proof_digest"]})
-        self.store.save(state)
+        self.advance_checkpoint(state, lane, proof["sha"], resolution=resolution)
 
     def reconcile_release_proof(self, state: dict, lane: str, lane_cfg: dict, main: str) -> None:
         checkpoint = state.get(lane, {}).get("last_released_sha")
@@ -1624,6 +1974,8 @@ class Pipeline:
                 if not self.dry_run:
                     self.reconcile_release_proof(state, lane, lane_cfg, sha)
                     lane_state = state.setdefault(lane, {})
+                    if lane == "worker":
+                        self.reconcile_worker_promotion(state, sha)
             live = (self.reconcile_worker_identity(state, lane_cfg, sha) if lane == "worker" else
                     None if sha == lane_state.get("last_released_sha") else self.http(lane_cfg["live_release_url"]))
             base = self.last_released(state, lane, lane_cfg, live)
@@ -1687,12 +2039,20 @@ class Pipeline:
             if not needed:
                 if not self.dry_run and not lane_state.get("last_released_sha"):
                     raise Blocked("bootstrap_unreceipted", "source-only advancement has no durable prior release checkpoint")
-                self.out(f"release-pipeline[{lane}]: doc/test-only batch; nothing to release")
                 if not self.dry_run:
-                    lane_state["last_released_sha"] = sha
-                    self.store.save(state)
-                    self.store.record({"lane": lane, "sha": sha, "from_sha": base,
-                                       "status": "no_release_needed", "run_id": self.run_id})
+                    resolution = None
+                    if lane_state.get("pending_promotion"):
+                        if self.canary_verdict(self.github_factory(lane_cfg["github_repo"]), lane_cfg, sha) != "green":
+                            raise Blocked("canary_pending", "source-only replacement requires its own green canary")
+                        replacement_live = self.http(lane_cfg["live_release_url"])
+                        resolution = self.promotion_replacement(state, lane, sha, replacement_live)
+                        live_sha = replacement_live["git_sha"]["value"]
+                        if classify(self.changed_paths(live_sha, sha), lane_cfg)[0]:
+                            self.advance_checkpoint(state, lane, live_sha, resolution=resolution)
+                            return 0
+                    self.store.record_durable({"lane": lane, "sha": sha, "from_sha": base,
+                                               "status": "no_release_needed", "run_id": self.run_id})
+                    self.advance_checkpoint(state, lane, sha, resolution=resolution)
                 return 0
             if lane == "worker":
                 result = self.release_worker(lane_cfg, base, sha, state, lane)
@@ -1828,8 +2188,13 @@ class Pipeline:
         if self.dry_run:
             return 1
         state.setdefault(lane, {}).update({
-            "failed_sha": sha, "failed_step": step,
+            "failed_sha": sha, "failed_step": step, "failed_run_id": self.run_id,
             "failed_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")})
+        if lane == "worker" and state[lane].get("pending_promotion"):
+            try:
+                self.reconcile_worker_promotion(state, self.observed_main)
+            except Exception as exc:
+                self.out(f"release-pipeline[worker]: promotion checkpoint remains pending: {type(exc).__name__}")
         owned = [wt for _, wt in self.worktrees if wt.name.startswith(f"{lane}-{sha[:12]}-")]
         if owned:
             state[lane]["failed_worktree"] = str(owned[-1])
@@ -1962,9 +2327,10 @@ class Pipeline:
 
         # Post-release proof, part 1: what production serves and how its
         # journeys fare BEFORE this release changes anything.
-        prior_version = smoke_baseline = None
+        prior_live = self.live_value(lane_cfg, lambda live: live) or {}
+        prior_version = served_version("worker", prior_live)
+        smoke_baseline = None
         if smoke_on:
-            prior_version = self.live_value(lane_cfg, lambda live: served_version("worker", live))
             smoke_baseline = self.smoke_run("worker", sha, "baseline", worker_dir=mcp)
 
         # 2-3. staging replacement and app writer
@@ -2039,6 +2405,18 @@ class Pipeline:
         # 7. promotion
         if not staging_ok:  # pragma: no cover — structural; StepFailed above already left
             raise StepFailed("promote", 1, "", "staging did not pass")
+        if not self.dry_run:
+            if state[lane].get("pending_promotion"):
+                resolution = self.promotion_replacement(state, lane, sha, self.http(lane_cfg["live_release_url"]))
+                self.store.resolve_promotion(state, lane, resolution)
+            state[lane]["pending_promotion"] = {
+                "lane": lane, "sha": sha, "from_sha": base, "run_id": self.run_id,
+                "provider_version_id": version, "release_endpoint": lane_cfg["live_release_url"],
+                "live_identity": {"url": lane_cfg["live_url"]},
+                "prior_identity": {"sha": (prior_live.get("git_sha") or {}).get("value"),
+                                   "provider_version_id": prior_version}}
+            self.store.record_durable({**state[lane]["pending_promotion"], "status": "promotion_prepared"})
+            self.store.save(state)
         self.step("promote", ["bin/deploy-worker.sh", "--promote-version", version, *budget], wt,
                   env=self.deploy_env())
 
@@ -2046,7 +2424,11 @@ class Pipeline:
         if self.dry_run:
             self.out(f"  [dry-run] GET {lane_cfg['live_release_url']} and require git_sha.value == {sha}")
         else:
-            live = self.verify_worker_live(lane_cfg, sha, version)
+            live = self.http(lane_cfg["live_release_url"])
+            if ((live.get("git_sha") or {}).get("value") != sha
+                    or (live.get("worker_version") or {}).get("id") != version):
+                raise StepFailed("verify-live", 1, "", "production /release does not serve the released SHA and version")
+            self.store.record_durable({**state[lane]["pending_promotion"], "status": "worker_promoted"})
         health_excused = self.health_gate(wt, health_baseline)
         post_release = self.post_release_proof(
             "worker", sha, smoke_baseline, worker_dir=mcp,
@@ -2219,25 +2601,209 @@ class Pipeline:
                          f"source_commit={last.get('source_commit')} environment={last.get('environment')}"
                          f"{read_error}; log {log}")
 
-    def verify_worker_live(self, lane_cfg: dict, sha: str, version: str, *, attempts: int = 12) -> dict:
-        """Read until production serves both the released SHA and provider version."""
-        matched, last, error, log = self.await_live(
-            lane_cfg, "worker-verify-live",
-            lambda live: (live.get("git_sha") or {}).get("value") == sha
-            and (live.get("worker_version") or {}).get("id") == version,
-            attempts=attempts)
-        if matched:
-            return last
-        raw_git_sha = last.get("git_sha")
-        raw_worker_version = last.get("worker_version")
-        git_sha = raw_git_sha if isinstance(raw_git_sha, dict) else {}
-        worker_version = raw_worker_version if isinstance(raw_worker_version, dict) else {}
-        read_error = f" last_read_error={error}" if error else ""
-        raise StepFailed("verify-live", 1, str(log),
-                         f"/release did not serve SHA {sha} and provider version {version} "
-                         f"after {attempts} reads; last_sha={git_sha.get('value')} "
-                         f"last_version={worker_version.get('id')}"
-                         f"{read_error}; log {log}")
+    def app_checks_green(self, lane_cfg: dict, sha: str, *, hosted: bool = False) -> None:
+        checks = self.github_factory(lane_cfg["github_repo"]).check_runs(sha)
+        for name in lane_cfg.get("required_checks") or ["test"]:
+            runs = [c for c in checks if c.get("name") == name]
+            if not runs:
+                raise Blocked("checks_missing", f"required check `{name}` has not reported on {sha[:12]}")
+            if hosted and any(c.get("head_sha") != sha or (c.get("app") or {}).get("slug") != "github-actions"
+                              for c in runs):
+                raise Blocked("checks_untrusted", f"`{name}` is not hosted CI for exact SHA {sha[:12]}")
+            if any(c.get("status") != "completed" for c in runs):
+                raise Blocked("checks_pending", f"`{name}` still running on {sha[:12]}")
+            if any(c.get("conclusion") != "success" for c in runs):
+                raise Blocked("checks_red", f"`{name}` is not green on {sha[:12]}")
+
+    @staticmethod
+    def staging_identity(value: Any) -> dict:
+        if (not isinstance(value, dict) or value.get("environment") != "staging"
+                or not isinstance(value.get("source_commit"), str)
+                or not SHA_RE.fullmatch(value["source_commit"])
+                or not isinstance(value.get("provider_version_id"), str)
+                or not UUID_RE.fullmatch(value["provider_version_id"])):
+            raise Blocked("candidate_identity", "staging requires a full source SHA, staging environment and provider version")
+        return {key: value[key] for key in ("source_commit", "environment", "provider_version_id")}
+
+    def build_candidate(self, repo_dir: Path, sha: str, toolchain: Path) -> Path:
+        """Build without deploy configuration; hand off only regular artifact files."""
+        with tempfile.TemporaryDirectory(prefix="carr-app-candidate-", dir="/tmp") as root:
+            wt = Path(root) / "build"
+            self.step("app-worktree", ["git", "init", "--quiet", str(wt)], Path(root))
+            self.step("app-source-fetch", ["git", "fetch", "--quiet", "--no-write-fetch-head",
+                                          "--no-tags", str(repo_dir), sha], wt)
+            self.step("app-source-checkout", ["git", "checkout", "--quiet", "--detach", sha], wt)
+            for path in [*wt.glob("wrangler.*"), wt / ".wrangler", wt / ".npmrc",
+                         *wt.glob(".env*"), *wt.glob(".dev.vars*")]:
+                if path.is_dir() and not path.is_symlink():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink(missing_ok=True)
+            home = wt / ".build-home"
+            home.mkdir()
+            env = {"PATH": BREW_PATH, "HOME": str(home), "TMPDIR": str(home),
+                   "LANG": "en_US.UTF-8", "CI": "1", "DOCTORCRE_SOURCE_COMMIT": sha,
+                   "NPM_CONFIG_USERCONFIG": "/dev/null", "NPM_CONFIG_GLOBALCONFIG": str(home / "npm-global")}
+            self.step("app-npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], wt, timeout=1800, env=env)
+            self.step("app-build", ["npm", "run", "build"], wt, timeout=3600, env=env)
+            self.step("app-artifact-verify", ["node", "scripts/build-artifact.mjs", "prepare-deployment"], wt, env=env)
+            self.step("app-worker-build", [str(toolchain / "node_modules/.bin/esbuild"), "src/worker.js",
+                                          "--bundle", "--format=esm", "--platform=browser",
+                                          "--external:cloudflare:*", "--outfile=dist/worker.mjs"], wt, env=env)
+            source = wt / "dist"
+            artifact = self.run_dir / "app-artifact"
+            if source.is_symlink() or not source.is_dir():
+                raise Blocked("candidate_artifact", "build output must be a regular directory")
+            paths = [source / "worker.mjs", source / "site"]
+            if not paths[0].is_file() or not paths[1].is_dir():
+                raise Blocked("candidate_artifact", "build output requires Worker bundle and site directory")
+            for path in [*paths, *paths[1].rglob("*")]:
+                if path.is_symlink() or not (path.is_file() or path.is_dir()):
+                    raise Blocked("candidate_artifact", "artifact handoff cannot contain links or special files")
+            artifact.mkdir(parents=True)
+            shutil.copy2(paths[0], artifact / "worker.mjs")
+            shutil.copytree(paths[1], artifact / "site")
+            return artifact
+
+    def candidate_publisher(self, repo_dir: Path, tooling_sha: str) -> tuple[Path, dict[str, str]]:
+        """Materialize trusted configuration outside the discarded build checkout."""
+        publish = self.run_dir / "app-publish"
+        publish.mkdir(parents=True, exist_ok=True)
+        config = self.git("show", f"{tooling_sha}:wrangler.jsonc", cwd=repo_dir)
+        (publish / "wrangler.jsonc").write_text(config + "\n")
+        home = publish / ".home"
+        home.mkdir(exist_ok=True)
+        env = {"PATH": BREW_PATH, "HOME": str(home), "TMPDIR": str(home), "CI": "1", "NO_COLOR": "1",
+               CLOUDFLARE_TOKEN_NAME: self.deploy_env()[CLOUDFLARE_TOKEN_NAME]}
+        return publish, env
+
+    def candidate(self, command: str, *, lane: str, sha: str | None = None) -> int:
+        """Temporarily publish an app SHA to staging under the release lock."""
+        if lane != "app" or command not in ("stage-candidate", "restore-candidate"):
+            raise Blocked("candidate_scope", "candidate operations support only the app staging lane")
+        if self.dry_run:
+            raise Blocked("candidate_scope", "candidate operations do not support --dry-run")
+        if command == "stage-candidate" and (sha is None or not SHA_RE.fullmatch(sha)):
+            raise Blocked("candidate_sha", "stage-candidate requires a full commit SHA")
+        if command == "restore-candidate" and sha is not None:
+            raise Blocked("candidate_sha", "restore-candidate uses its recorded staging identity")
+        sha = sha or ""
+        with single_run_lock(self.store.root) as got:
+            if not got:
+                raise Blocked("candidate_locked", "another release run holds the lock")
+            why = kill_switch(self.cfg, "app")
+            if why:
+                raise Blocked("candidate_disabled", why)
+            self.controller_current({})
+            if command == "stage-candidate":
+                self.app_checks_green(self.cfg["app"], sha, hosted=True)
+            journal_store = Store(self.store.root / "app-candidate")
+            try:
+                journal = {}
+                if journal_store.state_path.exists():
+                    journal = json.loads(journal_store.state_path.read_text())
+                    if (not isinstance(journal, dict)
+                            or journal.get("status") not in ("publishing", "staged", "restoring", "restored")
+                            or any(not isinstance(journal.get(key), str) or not SHA_RE.fullmatch(journal[key])
+                                   for key in ("sha", "tooling_sha"))):
+                        raise ValueError("invalid candidate journal")
+                    self.staging_identity(journal["prior"])
+                    if journal["status"] in ("staged", "restoring"):
+                        self.staging_identity(journal["observed"])
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                raise Blocked("candidate_journal", "candidate journal is unreadable; refusing publication") from exc
+            staging = {"live_release_url": APP_STAGING_RELEASE_URL}
+            live = self.staging_identity(self.http(APP_STAGING_RELEASE_URL))
+            prior_sha = self.store.load().get("app", {}).get("last_released_sha")
+            if (journal and journal["prior"]["source_commit"] != prior_sha
+                    and live["source_commit"] == prior_sha):
+                journal_store.state_path.unlink()
+                journal = {}
+                if command == "restore-candidate":
+                    return 0
+            prior = journal["prior"] if journal and (command == "restore-candidate" or journal["status"] != "restored") else live
+            recorded_prior = bool(journal and prior == journal["prior"])
+            if (not isinstance(prior_sha, str) or not SHA_RE.fullmatch(prior_sha)
+                    or (prior["source_commit"] != prior_sha and not recorded_prior)):
+                raise Blocked("candidate_prior", "restore target must match recorded main or the last released app main SHA")
+            if journal and (command == "restore-candidate" or journal["status"] != "restored"):
+                if command == "restore-candidate" and live == journal["prior"]:
+                    journal["status"] = "restored"
+                    journal_store.save(journal)
+                    return 0
+                owns_live = (live["source_commit"] == journal["sha"] and live != journal["prior"]
+                             and live["provider_version_id"] == journal.get("published_version_id"))
+                if command == "stage-candidate":
+                    if sha == journal["sha"] and owns_live and journal["status"] in ("publishing", "staged"):
+                        journal.update(status="staged", observed=live)
+                        journal_store.save(journal)
+                        return 0
+                    raise Blocked("candidate_pending", "restore the recorded candidate before staging another; no publication retried")
+                if not owns_live or journal["status"] == "restored":
+                    raise Blocked("candidate_drift", "staging no longer serves the recorded candidate; refusing rollback")
+                sha = journal["sha"]
+            elif command == "restore-candidate":
+                raise Blocked("candidate_missing", "no candidate staging identity was recorded")
+            repo_dir = lane_repo_dir(self.cfg, "app", self.repo)
+            if command == "stage-candidate":
+                self.git("fetch", "--quiet", "origin", sha, cwd=repo_dir)
+                main = self.git("ls-remote", "--exit-code", "origin", "refs/heads/main", cwd=repo_dir).split()
+                if len(main) != 2 or not SHA_RE.fullmatch(main[0]) or main[1] != "refs/heads/main":
+                    raise Blocked("candidate_tooling", "cannot establish trusted app main")
+                tooling_sha = main[0]
+                self.git("fetch", "--quiet", "origin", tooling_sha, cwd=repo_dir)
+                changed = self.git("diff", "--name-only", tooling_sha, sha, "--", "scripts", "package.json",
+                                   "package-lock.json", "wrangler.*", ".wrangler", ".npmrc", cwd=repo_dir)
+                if changed:
+                    raise Blocked("candidate_tooling", "candidate publication scripts, dependencies and staging target must match app main")
+            else:
+                tooling_sha = journal["tooling_sha"]
+                self.git("fetch", "--quiet", "origin", tooling_sha, cwd=repo_dir)
+            wrangler = self.auth_wrangler()
+            try:
+                artifact = None
+                if command == "stage-candidate":
+                    artifact = self.build_candidate(repo_dir, sha, wrangler.parents[2])
+                    self.app_checks_green(self.cfg["app"], sha, hosted=True)
+                if self.staging_identity(self.http(APP_STAGING_RELEASE_URL)) != live:
+                    raise Blocked("candidate_drift", "staging changed during preparation; refusing publication")
+                publish, env = self.candidate_publisher(repo_dir, tooling_sha)
+                common = ["--config", str(publish / "wrangler.jsonc"), "--env", "staging"]
+                if command == "stage-candidate":
+                    assert artifact is not None
+                    journal = {"sha": sha, "tooling_sha": tooling_sha, "prior": live, "status": "publishing"}
+                    journal_store.save(journal)
+                    publication = self.step("app-candidate-upload", [str(wrangler), "versions", "upload",
+                                            str(artifact / "worker.mjs"), "--no-bundle", "--assets", str(artifact / "site"),
+                                            *common, "--tag", "staging-" + sha[:12], "--var", "GIT_SHA:" + sha],
+                                            publish, timeout=900, env=env)
+                    versions = set(re.findall(r"Worker Version ID:\s*(" + UUID_RE.pattern + r")", publication.out))
+                    if len(versions) != 1:
+                        raise StepFailed("app-candidate-upload", 1, publication.log, "provider returned no unique version ID")
+                    journal["published_version_id"] = versions.pop()
+                    journal_store.save(journal)
+                    self.step("app-candidate-publish", [str(wrangler), "versions", "deploy",
+                              journal["published_version_id"] + "@100%", *common, "--yes"],
+                              publish, timeout=900, env=env)
+                    expected = lambda value: (value.get("source_commit") == sha
+                                              and value.get("environment") == "staging"
+                                              and value.get("provider_version_id") == journal["published_version_id"])
+                else:
+                    journal["status"] = "restoring"
+                    journal_store.save(journal)
+                    self.step("app-candidate-restore", [str(wrangler), "versions", "deploy",
+                              journal["prior"]["provider_version_id"] + "@100%", *common, "--yes"],
+                              publish, timeout=900, env=env)
+                    expected = lambda value: all(value.get(k) == v for k, v in journal["prior"].items())
+                matched, identity, _, log = self.await_live(staging, command + "-verify", expected)
+                if not matched:
+                    raise StepFailed(command + "-verify", 1, str(log), "staging /app-release identity did not match")
+                journal.update(status="staged" if command == "stage-candidate" else "restored",
+                               observed=self.staging_identity(identity))
+                journal_store.save(journal)
+                return 0
+            finally:
+                self.remove_worktrees()
 
     def release_app(self, lane_cfg: dict, repo_dir: Path, base: str, sha: str) -> dict:
         """The named required checks
@@ -2245,17 +2811,7 @@ class Pipeline:
         smoke_on = smoke_enabled(lane_cfg)
         gh = self.github_factory(lane_cfg["github_repo"])
 
-        def checks_green() -> None:
-            checks = gh.check_runs(sha)
-            for name in lane_cfg.get("required_checks") or ["test"]:
-                runs = [c for c in checks if c.get("name") == name]
-                if not runs:
-                    raise Blocked("checks_missing", f"required check `{name}` has not reported on {sha[:12]}")
-                if any(c.get("status") != "completed" for c in runs):
-                    raise Blocked("checks_pending", f"`{name}` still running on {sha[:12]}")
-                if any(c.get("conclusion") != "success" for c in runs):
-                    raise Blocked("checks_red", f"`{name}` is not green on {sha[:12]}")
-        self.dry_tolerant("app checks", checks_green, None)
+        self.dry_tolerant("app checks", lambda: self.app_checks_green(lane_cfg, sha), None)
         prs = self.dry_tolerant("app source", lambda: self.merged_source(gh, lane_cfg, repo_dir, base, sha), [])
         self.wrangler_auth()
         wt = self.store.release_worktree("app", sha, self.run_id)
@@ -2712,6 +3268,11 @@ def health_regression(baseline: list[dict], live: list[dict]) -> tuple[list[str]
     only before promotion: the candidate source registers the required verb,
     so its continued absence after promotion always fails.
 
+    Cloudflare token rows block only for observed bad token or file states.
+    Unreachable and unverifiable rows stay in canonical health for watchdog
+    loops, including on Studio. They cannot excuse a later verified failure
+    through a matching baseline. Explicit hard_error rows still always fail.
+
     `excused` is every live finding whose key is on `HEALTH_REGRESSION_
     FIRST_APPEARANCE_ALLOWLIST` (`export_receipt`'s STALE variant,
     `job_missing_due`, `doctrine_stale`, and the two canonical main-lag
@@ -2767,8 +3328,13 @@ def health_regression(baseline: list[dict], live: list[dict]) -> tuple[list[str]
     # PRIOR of the same rolling-ness, so a STALE->FAILED transition (or the
     # reverse) is a genuinely absent baseline entry for that row's own
     # (key, subject, time_rolling) identity, not a false match.
+    def cloudflare_warning(row: dict) -> bool:
+        return (row['key'] == 'cloudflare_token' and not row.get('hard_error')
+                and row.get('status') not in {'failed', 'missing', 'unreadable', 'expiring_soon',
+                                              'unsafe_file', 'insecure_permissions'})
+
     baseline_by_key_subject = {(row["key"], row["subject"], bool(row.get("time_rolling"))): row
-                               for row in baseline}
+                               for row in baseline if not cloudflare_warning(row)}
     bad: list[str] = []
     excused: list[str] = []
     for row in live:
@@ -2777,6 +3343,8 @@ def health_regression(baseline: list[dict], live: list[dict]) -> tuple[list[str]
         detail = row.get("detail", "")
         if row.get("hard_error"):
             bad.append(f"{row['key']}[{row['subject']}]: hard_error — {detail}")
+            continue
+        if cloudflare_warning(row):
             continue
         if row["key"] == "feature_switch_pending_deploy":
             bad.append(f"{row['key']}[{row['subject']}]: required verb still pending deploy after promotion — {detail}")
@@ -2923,7 +3491,27 @@ def _clear_failed_locked(store: Store, lane: str, sha: str, reason: str, *, repo
     state = store.load()
     lane_state = state.get(lane) or {}
     if not lane_state.get("failed_sha"):
-        return f"release-pipeline[{lane}]: nothing to clear"
+        pending = lane_state.get("pending_promotion")
+        if pending:
+            if pending["sha"] != sha:
+                raise SystemExit(f"release-pipeline[{lane}]: pending promotion is {pending['sha']}, not {sha}")
+            store.resolve_promotion(state, lane, {"intent": dict(pending), "status": "promotion_retired",
+                                                 "reason": reason, "resolution_evidence": {"command": "clear-failed"}})
+            store.save(state)
+            return f"release-pipeline[{lane}]: retired pending promotion {sha[:12]} ({reason})"
+        rejection = lane_state.get("rejection")
+        if not rejection:
+            return f"release-pipeline[{lane}]: nothing to clear"
+        target = next((row for row in reversed(store.records()) if row.get("lane") == lane
+                       and row.get("status") == "blocked"
+                       and row.get("rejection_fingerprint") == rejection["fingerprint"]), None)
+        if not target or target.get("sha") != sha:
+            raise SystemExit(f"release-pipeline[{lane}]: rejection SHA mismatch; refusal NOT cleared")
+        store.record_durable({"lane": lane, "sha": sha, "status": "rejection_cleared", "reason": reason,
+                              "rejection_fingerprint": rejection["fingerprint"]})
+        lane_state.pop("rejection")
+        store.save(state)
+        return f"release-pipeline[{lane}]: cleared rejection for {sha[:12]}; next tick retries it"
     if lane_state["failed_sha"] != sha:
         raise SystemExit(f"release-pipeline[{lane}]: failed SHA is {lane_state['failed_sha']}, not {sha}")
     kept = Path(lane_state.get("failed_worktree") or store.release_worktree(lane, sha))
@@ -2974,7 +3562,7 @@ def _clear_failed_locked(store: Store, lane: str, sha: str, reason: str, *, repo
     retirement["phase"] = "registration_removed"
     retirement.setdefault("id", uuid.uuid4().hex)
     store.save(state)
-    previous = {k: lane_state.get(k) for k in ("failed_sha", "failed_step", "failed_at")}
+    previous = {k: lane_state.get(k) for k in ("failed_sha", "failed_step", "failed_at", "failed_run_id")}
     receipt_id = retirement.setdefault("id", uuid.uuid4().hex)
 
     def receipted() -> bool:
@@ -2986,8 +3574,12 @@ def _clear_failed_locked(store: Store, lane: str, sha: str, reason: str, *, repo
             **({"cleared_worktree": str(moved)} if moved else {})})
     if not receipted():  # only a durable, readable receipt authorizes clearing
         raise SystemExit(f"release-pipeline[{lane}]: clearance receipt unreadable; failure NOT cleared")
+    if lane_state.get("pending_promotion"):
+        store.resolve_promotion(state, lane, {"intent": dict(lane_state["pending_promotion"]),
+            "status": "promotion_retired", "reason": reason,
+            "resolution_evidence": {"command": "clear-failed", "retirement_id": receipt_id, "cleared_sha": sha}})
     lane_state.update({"failed_sha": None, "failed_step": None, "failed_at": None})
-    for field in ("failed_worktree_retirement", "failed_worktree", "rejection"):
+    for field in ("failed_worktree_retirement", "failed_worktree", "failed_run_id", "rejection"):
         lane_state.pop(field, None)
     store.save(state)
     retired = f"; kept worktree moved to {moved}" if moved else ""
@@ -2998,9 +3590,9 @@ def _clear_failed_locked(store: Store, lane: str, sha: str, reason: str, *, repo
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("command", nargs="?", default="tick",
-                    choices=("tick", "report", "clear-failed", "health-preflight"))
+                    choices=("tick", "report", "clear-failed", "health-preflight", "stage-candidate", "restore-candidate"))
     ap.add_argument("--sha", help="clear-failed: the exact failed SHA being cleared; "
-                    "health-preflight: the sha to check out (defaults to origin/main)")
+                    "health-preflight: the sha to check out (defaults to origin/main); stage-candidate: exact app SHA")
     ap.add_argument("--reason", help="clear-failed: why a retry of the same SHA is now right")
     ap.add_argument("--dry-run", action="store_true", help="print the exact commands; execute no deploy")
     ap.add_argument("--lane", choices=("worker", "app"), action="append")
@@ -3015,7 +3607,20 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("--rotate-lost-staging-credential needs `tick --lane worker` and no other lane")
     if len(set(args.rotate_lost_staging_credential)) != len(args.rotate_lost_staging_credential):
         ap.error("--rotate-lost-staging-credential names each profile at most once")
+    if args.command in ("stage-candidate", "restore-candidate"):
+        if args.lane != ["app"] or args.dry_run:
+            ap.error("candidate commands require exactly --lane app and do not support --dry-run")
+        if args.command == "stage-candidate" and not SHA_RE.fullmatch(args.sha or ""):
+            ap.error("stage-candidate requires --sha <full-sha>")
+        if args.command == "restore-candidate" and args.sha is not None:
+            ap.error("restore-candidate uses the recorded prior staging version, without --sha")
     cfg = load_config()
+    if args.command in ("stage-candidate", "restore-candidate"):
+        try:
+            return Pipeline(cfg).candidate(args.command, lane="app", sha=args.sha)
+        except (Blocked, StepFailed) as exc:
+            print(f"release-pipeline: {exc}", file=sys.stderr)
+            return 1
     if args.command == "clear-failed":
         if not args.lane or len(args.lane) != 1 or not args.sha or not args.reason:
             ap.error("clear-failed needs exactly one --lane, --sha and --reason")

@@ -16,6 +16,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import desks
 import dispatch
+import work_runner
 import seat_gate
 host_liveness = seat_gate.host_liveness
 CONFIG = host_liveness.load_config()
@@ -77,7 +78,8 @@ class SendThroughTheGate(unittest.TestCase):
         self.root = Path(tmp.name)
         Path(self.root, 'models_cache.json').write_text(json.dumps({'models': [{'slug': 'gpt-6.1-sol', 'display_name': 'GPT-6.1-Sol'}]}))
         env = patch.dict(os.environ, {'CODEX_HOME': str(self.root),
-                                      'CARR_CODEX_SLOT_DIR': str(self.root / 'slots')})
+                                      'CARR_CODEX_SLOT_DIR': str(self.root / 'slots'),
+                                      'CARR_WORK_QUEUE_DB': str(self.root / 'work-queue.sqlite3')})
         env.start()
         self.addCleanup(env.stop)
         self.reg = desks.Registry(self.root / 'desks.json')
@@ -87,7 +89,7 @@ class SendThroughTheGate(unittest.TestCase):
 
     def send(self, name, liveness):
         launched, err = ([], io.StringIO())
-        with patch.object(host_liveness, 'observe', return_value=liveness) as self.observe, patch.object(dispatch, '_to_codex', side_effect=lambda *a, **k: launched.append('codex') or {'status': 'completed'}), patch.object(dispatch.claude_remote_wire, 'run_task', side_effect=lambda *a, **k: launched.append('remote') or {'status': 'completed'}), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+        with patch.object(host_liveness, 'observe', return_value=liveness) as self.observe, patch.object(work_runner, 'kick'), patch.object(dispatch, '_to_codex', side_effect=lambda *a, **k: launched.append('codex') or {'status': 'completed'}), patch.object(dispatch.claude_remote_wire, 'run_task', side_effect=lambda *a, **k: launched.append('remote') or {'status': 'completed'}), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
             code = dispatch.main(['--registry', str(self.reg.path), '--results', str(self.results), 'send', name, 'work'])
         return (code, launched, err.getvalue())
 
@@ -97,13 +99,13 @@ class SendThroughTheGate(unittest.TestCase):
         self.assertIn('refused (seat_host_offline)', err)
         self.assertIn('mac-studio', err)
 
-    def test_online_seat_still_dispatches(self):
+    def test_online_seat_enqueues_without_launch(self):
         code, launched, _ = self.send('cx', live(MACBOOK, studio_online=False))
-        self.assertEqual((code, launched), (0, ['codex']))
+        self.assertEqual((code, launched), (0, []))
         code, launched, _ = self.send('studio-desk', live(MACBOOK))
-        self.assertEqual((code, launched), (0, ['remote']))
+        self.assertEqual((code, launched), (0, []))
         code, launched, _ = self.send('cx', live(MACBOOK))
-        self.assertEqual((code, launched), (0, ['codex']))
+        self.assertEqual((code, launched), (0, []))
 
     def test_each_send_reads_the_tailnet_once(self):
         self.send('cx', live(MACBOOK))

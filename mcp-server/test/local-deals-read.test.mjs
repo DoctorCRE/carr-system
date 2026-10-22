@@ -46,3 +46,27 @@ test('invoice read additions preserve sealed verb input schemas and authority fl
     assert.equal(sealed.authority_only, false, name);
   }
 });
+
+
+test('deal room includes closed and invoiced history from the all-deal read', async () => {
+  const archived = {id:'demo-closed',name:'Demo Closed Clinic',client_name:'Demo Client',type:'renewal',phase:'closed',closed_on:'2026-10-01'};
+  let archiveQuery;
+  const result = await TOOLS['deal-room-board'].handler({query:async (sql,args) => {
+    if (sql.includes('dealroom:closed-deals')) { archiveQuery=sql; assert.equal(args[0],'team'); return {rows:[archived]}; }
+    return {rows:[]};
+  }},{slug:'joe'},{workspace:'team'});
+  assert.deepEqual(result.closed_deals,[archived]);
+  assert.match(archiveQuery,/from v_deal_board b/);
+  assert.doesNotMatch(archiveQuery,/join v_deal_room_board/);
+  assert.match(archiveQuery,/b.phase = 'closed'/);
+  assert.match(archiveQuery,/b.outcome is not null/);
+  assert.match(archiveQuery,/b.invoiced_on is not null/);
+});
+
+
+test('lost outcomes stay separate from won and ambiguous historical closures',async()=>{
+ const rows=[{id:'demo-won',outcome:'won',phase:'closed'},{id:'demo-lost',outcome:'lost',phase:'pending'},{id:'demo-unknown',phase:'closed',outcome:null},{id:'demo-paused',phase:'closed',outcome:'paused',closed_on:'2026-10-01'}];
+ const value=await TOOLS['deal-room-board'].handler({query:async sql=>({rows:sql.includes('dealroom:closed-deals')?rows:[]})},{slug:'joe'},{});
+ assert.deepEqual(value.closed_deals.map(d=>d.id),['demo-won']);
+ assert.deepEqual(value.lost_deals.map(d=>d.id),['demo-lost']);
+});

@@ -22,6 +22,10 @@ DESK KINDS:
   codex-session    a standing Codex thread, resumed per task through the CLI
   codex-live       a live Codex app-server, addressed by its unix socket
   flash-local      the local Flash model itself, answering direct questions (flash_wire.py)
+  claude-api       a fresh API-key coding agent in a retained job checkout
+
+A desk registered with posture record-layer is a business
+desk: it gets the CARR verbs and nothing else, and takes only business briefs.
 
 BOTH KINDS KEEP THEIR CONTEXT, and that is the whole point. Joe, 2026-08-20:
 The kinds differ only in HOW a turn reaches them: a Claude desk is a live
@@ -42,14 +46,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import codex_models
+import claude_api_config
 
 NAME_OK = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
 PID_SOCKET = re.compile(r"^\d+\.sock$")
 
-KINDS = ("claude-session", "claude-desktop", "claude-remote", "codex-session", "codex-live", "flash-local", "grok-cli", "hermes-nous")
+KINDS = ("claude-session", "claude-desktop", "claude-remote", "codex-session", "codex-live", "flash-local", "grok-cli", "claude-api", "hermes-nous")
 KIND_ALIASES = {"codex-exec": "codex-session"}
 AUTOMATIC_CODEX_DESKS = frozenset({"luna-desk", "sol-fixer", "codex-desk"})
 EFFORT_CHOICES = ("minimal", "low", "medium", "high", "xhigh")
+# Record-layer is independent of provider. Each wire enforces or refuses it.
+POSTURES = ("record-layer",)
+RECORD_LAYER_KINDS = ("hermes-nous", "grok-cli", "flash-local", "codex-session", "claude-desktop")
 
 DESK_INSTRUCTION = (
     "Model Room desk instruction: If you need approvals, permissions, or decisions, "
@@ -124,7 +132,7 @@ def refuse_pid_socket(sock: str) -> None:
 def _normalize_effort(kind: str, effort: str | None) -> str | None:
     if effort is None:
         return None
-    choices = ("low", "medium", "high", "xhigh", "max") if kind == "claude-remote" else EFFORT_CHOICES
+    choices = ("low", "medium", "high", "xhigh", "max") if kind in ("claude-remote", "claude-api") else EFFORT_CHOICES
     if effort not in choices:
         raise DeskError(
             "bad_effort",
@@ -137,6 +145,11 @@ def _normalize_effort(kind: str, effort: str | None) -> str | None:
             "chooses its own model and reasoning profile",
         )
     return effort
+
+
+def tool_posture(kind: str, posture: object) -> None:
+    if posture is not None and (kind not in RECORD_LAYER_KINDS or posture not in POSTURES):
+        raise DeskError("bad_posture", "record-layer requires a Nous, Grok, Flash, Codex session, or Claude Desktop desk")
 
 
 def remote_posture(entry: dict) -> None:
@@ -153,6 +166,19 @@ def remote_posture(entry: dict) -> None:
     timeout = entry.get("timeout_s")
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 3600:
         raise DeskError("bad_remote_timeout", "remote desk deadline must be greater than 0 and at most 3600 seconds")
+
+
+def api_posture(entry: dict) -> None:
+    model = entry.get('model')
+    if not isinstance(model, str) or not re.fullmatch(r'claude-[a-z0-9]+(?:-[a-z0-9]+)+', model):
+        raise DeskError('missing_model', 'Claude API desk requires a full Claude model ID')
+    if not entry.get('effort'):
+        raise DeskError('missing_effort', 'Claude API desk requires explicit effort')
+    _normalize_effort('claude-api', entry['effort'])
+    dispatched_permission_mode(entry.get('permission_mode'))
+    timeout = entry.get('timeout_s')
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 7200:
+        raise DeskError('bad_api_timeout', 'Claude API deadline must be greater than 0 and at most 7200 seconds')
 
 
 def grok_posture(entry: dict) -> None:
@@ -230,6 +256,7 @@ class Registry:
         family: str | None = None,
         network_access: bool = False,
         provider: str | None = None,
+        posture: str | None = None,
     ) -> dict:
         if not NAME_OK.match(name or ""):
             raise DeskError(
@@ -245,6 +272,7 @@ class Registry:
         if network_access and kind != "codex-live":
             raise DeskError("bad_network_access", "network_access is supported only by codex-live")
         effort = _normalize_effort(kind, effort)
+        tool_posture(kind, posture)
         if kind in codex_models.CODEX_KINDS:
             family = codex_models.family_default(family, model)
         elif kind != 'hermes-nous' and family is not None:
@@ -269,6 +297,11 @@ class Registry:
                 "cwd": str(cwd or Path.cwd()),
                 "permission_mode": dispatched_permission_mode(permission_mode),
             }
+        elif kind == "claude-api":
+            entry = {'kind': kind, 'model': model or claude_api_config.MODEL,
+                     'effort': effort, 'timeout_s': timeout_s,
+                     'permission_mode': dispatched_permission_mode(permission_mode)}
+            api_posture(entry)
         elif kind == "claude-remote":
             entry = {"kind": kind, "host": host, "model": model, "effort": effort,
                      "timeout_s": timeout_s, "permission_mode": dispatched_permission_mode(permission_mode)}
@@ -307,6 +340,8 @@ class Registry:
             if add_dirs:
                 entry["add_dirs"] = [str(x) for x in add_dirs]
 
+        if posture:
+            entry["posture"] = posture
         entry["registered_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         with self._locked():
             data = self._load_locked()
@@ -344,6 +379,9 @@ class Registry:
         entry = {**entry, "kind": kind}
         if kind not in KINDS:
             raise DeskError("bad_kind", f"desk {name!r} has kind {kind!r}")
+        tool_posture(kind, entry.get("posture"))
+        if kind == "claude-api":
+            api_posture(entry)
         if kind == "claude-remote":
             remote_posture(entry)
         if kind == "grok-cli":

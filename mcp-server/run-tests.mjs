@@ -4,7 +4,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const BROWSER_SHIM = "workspace-command-center-browser.test.mjs";
 const LAUNCH_REGRESSIONS = "chrome-launch.test.mjs";
 const PRIVATE_POSTGRES_SUITES = new Set([
   "feature-switches-postgres.test.mjs",
@@ -16,14 +15,13 @@ const PRIVATE_POSTGRES_SUITES = new Set([
 
 export function suiteBatches(files, browserFiles = []) {
   const suites = files.filter((file) => /\.test\.(?:js|mjs)$/.test(file)).sort();
-  if (!suites.includes(BROWSER_SHIM)) throw new Error("Chrome browser shim is missing from the Node suites");
-  const browsers = suites.filter((file) => ![BROWSER_SHIM, LAUNCH_REGRESSIONS].includes(file)
+  const browsers = suites.filter((file) => file !== LAUNCH_REGRESSIONS
     && (browserFiles.includes(file) || /-browser\.test\.(?:js|mjs)$/.test(file)));
   const postgres = suites.filter((file) => PRIVATE_POSTGRES_SUITES.has(file) && !browsers.includes(file));
-  return [[BROWSER_SHIM], suites.filter((file) => file === LAUNCH_REGRESSIONS),
+  return [suites.filter((file) => file === LAUNCH_REGRESSIONS),
     ...browsers.map((file) => [file]),
     ...postgres.map((file) => [file]),
-    suites.filter((file) => ![BROWSER_SHIM, LAUNCH_REGRESSIONS, ...browsers, ...postgres].includes(file))];
+    suites.filter((file) => ![LAUNCH_REGRESSIONS, ...browsers, ...postgres].includes(file))];
 }
 
 async function main() {

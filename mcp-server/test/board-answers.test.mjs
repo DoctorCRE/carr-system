@@ -250,3 +250,15 @@ test("typed board records install reference monitors and question uniqueness", (
   }
   assert.match(schema, /unique \(organization_tenant_id,sponsoring_human_slug,board_id,question_id,question_revision\)/i);
 });
+
+test('hierarchy snapshots preserve evidence beyond the old display budget with a bounded v4 limit', async () => {
+  const run = snapshot => TOOLS['publish-board-snapshot'].handler(new Fake(), sponsoredRobot, {
+    board_id: 'hierarchy', base_version: 1, idempotency_key: 'hierarchy-size', snapshot,
+  });
+  await assert.rejects(() => run({ schema: 'carr-progress-board.v4', evidence: 'x'.repeat(300000) }),
+    error => error.payload?.error === 'board_version_conflict');
+  await assert.rejects(() => run({ schema: 'carr-progress-board.v4', evidence: 'x'.repeat(2097152) }),
+    error => error.payload?.error === 'board_snapshot_invalid');
+  await assert.rejects(() => run({ schema: 'carr-progress-board.v3', evidence: 'x'.repeat(300000) }),
+    error => error.payload?.error === 'board_snapshot_invalid');
+});

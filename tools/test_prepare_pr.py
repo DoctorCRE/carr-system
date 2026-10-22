@@ -9,7 +9,8 @@ from unittest.mock import patch
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops"))
 from git_env import fixture_env
-from prepare_pr import prepare
+import prepare_pr
+from prepare_pr import prepare, regen_env
 
 
 class PrepareTests(unittest.TestCase):
@@ -53,6 +54,27 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(self.git('show', f'{sha}:generated.txt', repo=self.remote), 'fresh')
         self.assertEqual(json.loads(self.receipt.read_text())['prepared'], sha)
 
+    def test_clone_borrows_reference_objects_and_survives_a_missing_reference(self):
+        clones = []
+        real_git = prepare_pr.git
+        def spy(repo, *args, **kwargs):
+            if args and args[0] == 'clone':
+                clones.append((args, kwargs.get('timeout')))
+            return real_git(repo, *args, **kwargs)
+        with patch.object(prepare_pr, 'git', spy):
+            prepare(str(self.remote), 'feature', self.head, self.main, self.receipt, lambda repo: None,
+                    reference=self.repo)
+        self.assertIn('--reference-if-able', clones[0][0])
+        self.assertIn('--dissociate', clones[0][0])
+        self.assertGreaterEqual(clones[0][1], 600)
+        sha = prepare(str(self.remote), 'feature', self.git('rev-parse', 'feature', repo=self.remote),
+                      self.main, self.receipt, lambda repo: None, reference=self.root / 'missing')
+        self.assertEqual(self.git('rev-parse', 'feature', repo=self.remote), sha)
+
+    def test_regeneration_keeps_the_stored_gh_login(self):
+        env = regen_env({'PATH': '/bin', 'HOME': '/Users/x', 'GIT_DIR': '/elsewhere', 'SECRET_NOT_NEEDED': 'v'})
+        self.assertEqual(env, {'PATH': '/bin', 'HOME': '/Users/x'})
+
     def test_failed_generator_never_pushes(self):
         def fail(_):
             raise ValueError('seeded generator failure')
@@ -95,6 +117,21 @@ class PrepareTests(unittest.TestCase):
             (repo / 'ops/config/gate-baseline.json').write_text('fresh\n')
         sha = prepare(str(self.remote), 'feature', self.head, self.main, self.receipt, regen)
         self.assertEqual(self.git('show', f'{sha}:ops/config/gate-baseline.json', repo=self.remote), 'fresh')
+
+    def assert_review_only_conflict(self, path):
+        self.conflicting_branches(path)
+        with self.assertRaisesRegex(ValueError, 'source conflict requires review') as error:
+            prepare(str(self.remote), 'feature', self.head, self.main, self.receipt,
+                    lambda _: self.fail('review-only conflict must stop before regeneration'))
+        self.assertIn(path, str(error.exception))
+        self.assertEqual(self.git('rev-parse', 'feature', repo=self.remote), self.head)
+        self.assertFalse(self.receipt.exists())
+
+    def test_registry_conflict_preserves_database_metadata_for_review(self):
+        self.assert_review_only_conflict('mcp-server/src/scac-mutation-registry.current.generated.js')
+
+    def test_dependency_lock_conflict_requires_review(self):
+        self.assert_review_only_conflict('requirements.lock')
 
     def test_pr_race_before_push_refuses(self):
         def advance(repo):

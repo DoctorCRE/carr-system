@@ -3,6 +3,7 @@ import { safeInteger, integerFields } from "./safe-integer.js";
 import { invoiceTrackerTools } from "./invoice-tracker.js";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.js";
+import { readDealChecklist } from "./deal-checklist.js";
 import { bindReferralDeal } from "./relationship-network.js";
 import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
 import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLeadLifecycle } from "./lead-workspace.js";
@@ -336,7 +337,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if (verb === "record-commission-receipt" || ["record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if (verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
@@ -2266,12 +2267,128 @@ function assertSingleOwner(owner) {
 
 
 async function lockDealField(c, dealId, field) {
-  // Same-field writers serialize; different fields deliberately use different
-  // advisory keys and can commit independently on the same deal.
+  // Phase changes can supersede the current plan. Acquire its locks before
+  // the phase lock, matching update-deal and preventing an inverted lock order.
+  if (field === "phase") {
+    await lockDealField(c, dealId, "next_date");
+    await lockDealField(c, dealId, "next_step");
+  }
   await c.query(
     "select pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0)) /* dealroom:field-lock */",
     [dealId, field],
   );
+}
+
+async function appendDealNextStep(c, actor, dealId, text, nextDate, key) {
+  assertDealRoomField("next_date", nextDate, ToolError);
+  // The step also changes next_date. Take that cell's lock first so its
+  // field history cannot race a direct date edit or undo.
+  await lockDealField(c, dealId, "next_date");
+  await lockDealField(c, dealId, "next_step");
+  const oldDate = (await c.query("select next_date::text as next_date from deal where id=$1", [dealId])).rows[0]?.next_date ?? null;
+  const prior = await c.query(
+    "select id, text from deal_note where deal_id=$1 and kind='next_step' order by created_at desc, id desc limit 1 /* dealroom:current-step */",
+    [dealId],
+  );
+  const note = await c.query(
+    "insert into deal_note (deal_id, kind, text, actor_id, created_at) values ($1,'next_step',$2,$3,clock_timestamp()) returning id, to_jsonb(created_at)#>>'{}' as created_at /* dealroom:add-next-step */",
+    [dealId, text, actor.id],
+  );
+  await c.query(
+    "update deal set next_date=$2, updated_by=$3 where id=$1 /* dealroom:set-next-date */",
+    [dealId, nextDate, actor.id],
+  );
+  // The Deal Room's next step and the operating system's next action are
+  // one fact, not parallel lists. Each partner still keeps one ball of
+  // their own on the deal; replacing yours drops (does not complete) it.
+  await c.query(
+    `update next_action set status='dropped', updated_by=$1
+      where subject_type='deal' and subject_id=$2 and owner_id=$1 and status='open'
+      /* dealroom:drop-prior-action */`, [actor.id, dealId]);
+  const action = await c.query(
+    `insert into next_action (subject_type, subject_id, owner_id, due_on,
+                              description, created_by, updated_by, updated_at)
+     values ('deal',$1,$2,$3,$4,$2,$2,clock_timestamp()) returning id
+     /* dealroom:add-next-action */`,
+    [dealId, actor.id, nextDate, text]);
+  await writeEvent(c, actor, "set-next-step", "deal", dealId, {
+    field: "next_step",
+    old: { next_step: prior.rows[0]?.text ?? null },
+    new: { next_step: text, next_date: nextDate },
+    recorded_at_after_lock: true,
+    idempotency_key: key,
+  });
+  await writeEvent(c, actor, "set-next-step", "deal", dealId, {
+    field: "next_date",
+    old: { next_date: oldDate },
+    new: { next_date: nextDate },
+    recorded_at_after_lock: true,
+    idempotency_key: key,
+  });
+  return { ok: true, deal_id: dealId, next_step_id: note.rows[0].id,
+    next_action_id: action.rows[0].id,
+    supersedes: prior.rows[0]?.id ?? null, created_at: note.rows[0].created_at };
+}
+
+function dealNextStepStatus(step, date) {
+  const required = !step || !date;
+  return { next_step_required: required,
+    ...(required ? { prompt: "Doc needs the new next step and date for this deal. Use set-next-step to record both." } : {}) };
+}
+
+async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-deal-note") {
+  const partner = partnerAuthoritySlugForActor(actor);
+  if (!partner) return {};
+  const ownerIds = [actor.id];
+  if (partner !== actor.slug) {
+    const sponsor = (await c.query("select id from actor where slug=$1", [partner])).rows[0];
+    if (sponsor) ownerIds.push(sponsor.id);
+  }
+  await lockDealField(c, dealId, "next_date");
+  await lockDealField(c, dealId, "next_step");
+  const current = (await c.query(
+    `select d.next_date::text as next_date, d.next_date < current_date as overdue, d.owner,
+            n.id as action_id, b.next_step
+       from deal d left join v_deal_room_board b on b.id=d.id left join lateral (
+         select id, description from next_action where subject_type='deal' and subject_id=d.id and status='open'
+          order by updated_at desc, id desc limit 1
+       ) n on true where d.id=$1 /* dealroom:status-plan */`, [dealId])).rows[0];
+  const dropped = (await c.query(
+    `update next_action set status='dropped', updated_by=$2
+      where subject_type='deal' and subject_id=$1 and owner_id=any($3::uuid[]) and status='open'
+        and ((id=$4 and $5::boolean) or (id is distinct from $4 and due_on < current_date))
+      returning id, description, due_on::text as due_on /* dealroom:supersede-overdue */`, [dealId, actor.id, ownerIds, current.action_id, current.overdue])).rows;
+  const postCall = (await c.query(
+    `update capture_post_call_action set status='dropped', updated_at=clock_timestamp(), completed_at=null
+      where deal_id=$1 and owner_id=any($2::uuid[]) and status='open' and due_on < current_date
+      returning id, description, due_on::text as due_on /* dealroom:supersede-overdue-post-call */`,
+    [dealId, ownerIds])).rows;
+  const supersededIds = [...dropped, ...postCall].map(a => a.id);
+  if (supersededIds.length) await writeEvent(c, actor, verb, "deal", dealId, {
+    field: "next_action", old: { actions: [...dropped, ...postCall] },
+    new: { superseded_action_ids: supersededIds, status: "dropped" },
+    recorded_at_after_lock: true, idempotency_key: key,
+  });
+  const replacesCurrent = dropped.some(a => a.id === current.action_id) ||
+    (!current.action_id && current.overdue && current.owner === partner);
+  if (!replacesCurrent) return { ...dealNextStepStatus(current.next_step, current.next_date),
+    ...(supersededIds.length ? { superseded_action_ids: supersededIds,
+      superseded_post_call_action_ids: postCall.map(a => a.id) } : {}) };
+  const next = (await c.query(
+    `select description, due_on::text as due_on from next_action
+      where subject_type='deal' and subject_id=$1 and status='open'
+      order by updated_at desc, id desc limit 1 /* dealroom:remaining-plan */`, [dealId])).rows[0];
+  const nextDate = next?.due_on ?? null;
+  await c.query("update deal set next_date=$2, updated_by=$3 where id=$1 /* dealroom:set-next-date */",
+    [dealId, nextDate, actor.id]);
+  for (const [field, before, after] of [["next_date", current.next_date, nextDate],
+    ["next_step", current.next_step, next?.description ?? null]])
+    await writeEvent(c, actor, verb, "deal", dealId, {
+      field, old: { [field]: before }, new: { [field]: after, superseded_action_ids: supersededIds },
+      recorded_at_after_lock: true, idempotency_key: key,
+    });
+  return { superseded_action_ids: supersededIds, superseded_post_call_action_ids: postCall.map(a => a.id),
+    ...dealNextStepStatus(next?.description, nextDate) };
 }
 
 async function latestFieldConflict(c, dealId, field, baseEventId) {
@@ -2393,7 +2510,10 @@ async function applyDealRoomField(c, actor, dealId, field, value, idempotencyKey
       where subject_type='deal' and subject_id=$1 and field=$2 and idempotency_key=$3
       order by recorded_at desc, id desc limit 1 /* dealroom:written-event */`,
     [dealId, field, idempotencyKey]))?.rows?.[0] || null;
+  const status = field === "phase" && oldRow.rows[0].value !== value
+    ? await supersedeOverdueDealAction(c, actor, dealId, idempotencyKey, verb) : {};
   return {
+    ...status,
     old_value: oldRow.rows[0].value,
     new_value: value,
     // Null when this write carried no key to find the row by. A client that gets
@@ -2518,6 +2638,10 @@ function morningCostSnapshot(value) {
       ...(money(value.projection_usd) ? { projection_usd: value.projection_usd } : {}) };
   } catch { return unavailable; }
 }
+
+const TODO_OWNER_PARTNER = new Map([
+  ["joe", "joe"], ["joe-local", "joe"], ["dell", "dell"], ["dell-local", "dell"],
+]);
 
 export const TOOLS = {
 
@@ -3235,9 +3359,16 @@ export const TOOLS = {
       };
       const ownOrShared = (row) => !row?.owner || String(row.owner).toLowerCase() === scope.sponsor;
 
+      // Partner visibility is shared; autonomous queues stay out of the brief.
       const today = await section(async () => {
         const value = await executeRegisteredTool(c, actor, "today-triage", {});
-        return { items: value.items.filter(ownOrShared) };
+        const items = [];
+        for (const row of value.items) {
+          const owner_partner = row?.owner ? TODO_OWNER_PARTNER.get(String(row.owner).toLowerCase()) : null;
+          if (owner_partner === undefined) continue;
+          items.push({ ...row, owner_partner });
+        }
+        return { items };
       });
       const claimCard = await section(async () => {
         const value = await executeRegisteredTool(c, actor, "claim-card", { limit: 5, include_needs_contact: false });
@@ -3253,9 +3384,16 @@ export const TOOLS = {
           accounts: value.accounts.filter((row) => String(row?.account_owner || "").toLowerCase() === scope.sponsor) };
       });
       const loops = await section(async () => {
-        const value = await executeRegisteredTool(c, actor, "loop-board",
-          { kind: "open_loop", status: "open", owner: scope.sponsor, limit: 60 });
-        return { items: value.loops };
+        // loop-board is a shared read that already accepts owner 'joe' or
+        // 'dell' from any caller, so showing both partners' loops adds no
+        // authority. The caller's own loops lead.
+        const items = [];
+        for (const owner_partner of [scope.sponsor, scope.sponsor === "joe" ? "dell" : "joe"]) {
+          const value = await executeRegisteredTool(c, actor, "loop-board",
+            { kind: "open_loop", status: "open", owner: owner_partner, limit: 60 });
+          items.push(...value.loops.map((row) => ({ ...row, owner_partner })));
+        }
+        return { items };
       });
       const renewals = await section(async () => {
         const status = await c.query(
@@ -3382,8 +3520,10 @@ export const TOOLS = {
       // base", never as a base of null-meaning-anything.
       const deals = await c.query(
         `select b.id, b.name, b.type, b.phase, b.owner, b.attention,
-                to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step, b.market, b.segment,
-                b.client_id, b.client_ref, b.client_name, b.account_client_id, b.account_client_ref,
+                to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step,
+                (b.next_step is null or b.next_date is null) as next_step_required, b.market, b.segment,
+                b.client_id, b.client_ref, b.client_name, ce.client_status, ce.client_version,
+                ce.prospect_engagement_status, b.account_client_id, b.account_client_ref,
                 b.account_name, b.account_owner, b.market_agent,
                 to_jsonb(b.last_touch)#>>'{}' as last_touch,
                 to_jsonb(b.last_review_at)#>>'{}' as last_review_at, b.workspace_kind,
@@ -3391,6 +3531,8 @@ export const TOOLS = {
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on, b.lane, b.outcome,
                 (select to_jsonb(pc) from v_deal_room_phase_change pc where pc.deal_id=b.id) as phase_change,
+                coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
+                            from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
                 to_jsonb(b.parked_at)#>>'{}' as parked_at, b.parked_by,
                 coalesce((
                   select jsonb_object_agg(latest.field,
@@ -3403,16 +3545,36 @@ export const TOOLS = {
                            order by e.field, e.recorded_at desc, e.id desc) latest
                 ), '{}'::jsonb) as field_base
            from v_deal_room_board b
+           join v_client_engagement_status ce on ce.client_id=b.client_id
           where ($1 = 'all' or b.workspace_kind = $1)
             and ($2::uuid is null or b.account_client_id = $2::uuid)
           order by b.attention desc, b.next_date nulls last, b.name
           /* dealroom:board-field-base */`,
         [workspace, args.account_client_id || null, [...DEAL_ROOM_FIELDS]]);
+      const closedDeals = await c.query(
+        `select b.id, b.name, b.client_ref, b.client_name, b.deal_type as type,
+                b.phase, b.outcome, b.lead_owner as owner,
+                to_jsonb(b.closed_on)#>>'{}' as closed_on,
+                to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
+                a.account_client_id,
+                case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind
+           from v_deal_board b
+           left join v_client_account a on a.client_id=b.client_id and a.is_sub_client
+          where (b.phase = 'closed' or b.outcome is not null or b.invoiced_on is not null)
+            and ($1 = 'all' or case when a.account_client_id is null then 'team' else 'national_account' end = $1)
+            and ($2::uuid is null or a.account_client_id = $2::uuid)
+          order by b.closed_on desc nulls last, b.name, b.id
+          /* dealroom:closed-deals */`,
+        [workspace, args.account_client_id || null]);
       const accounts = await c.query(
-        `select account_client_id, account_client_ref, account_name, account_owner,
-                open_deals, attention_deals, overdue_deals, stale_deals,
-                to_jsonb(last_review_at)#>>'{}' as last_review_at, parked_deals
-           from v_deal_room_account order by account_name`);
+        `select a.account_client_id, a.account_client_ref, a.account_name, a.account_owner,
+                a.open_deals, a.attention_deals, a.overdue_deals, a.stale_deals,
+                to_jsonb(a.last_review_at)#>>'{}' as last_review_at, a.parked_deals,
+                ce.client_status, ce.client_version, ce.prospect_engagement_status
+           from v_deal_room_account a
+           join v_client_engagement_status ce on ce.client_id=a.account_client_id
+          where ce.client_status <> 'prospect' or ce.prospect_engagement_status = 'active'
+          order by a.account_name`);
       const session = await c.query(
         `select session_id, workspace_kind, account_client_id,
                 to_jsonb(started_at)#>>'{}' as started_at
@@ -3422,7 +3584,7 @@ export const TOOLS = {
             and ($3::uuid is null or account_client_id=$3::uuid)
           order by started_at desc limit 1`,
         [actor.slug, workspace, args.account_client_id || null]);
-      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows, accounts: accounts.rows,
+      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows, closed_deals: closedDeals.rows.filter(d => d.outcome === 'won' || !d.outcome && (d.closed_on || d.invoiced_on)), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
         open_session: session.rows[0] || null };
     },
   },
@@ -3863,20 +4025,25 @@ export const TOOLS = {
 
   "set-next-action": {
     write: true,
-    description: "Set ONE open ball on a subject (replaces that owner's previous open one; the other partner's stays untouched). Defaults to your ball. Only the server-issued Hermes CoS door may name its Joe sponsor as owner; created_by remains the runtime.",
+    description: "Set ONE open ball on a subject (replaces that owner's previous open one; the other partner's stays untouched). Defaults to your ball. Any authenticated caller, agent seats included, may name owner 'joe' or 'dell'; created_by remains the real runtime.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, ref: { type: "string" },
       description: { type: "string" }, due_on: { type: "string", description: "YYYY-MM-DD, optional" },
-      owner: { type: "string", description: "optional server-derived owner; only the caller or a Hermes CoS runtime's Joe sponsor" } },
+      owner: { type: "string", description: "Optional owner. Any authenticated caller may name the caller, 'joe', or 'dell'. Defaults to the caller. created_by records the real runtime." } },
       required: ["idempotency_key","ref","description"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "set-next-action", args, async () => {
       const s = await resolveSubject(c, args.ref);
+      if (s.type === "deal") {
+        assertDealRoomField("next_date", args.due_on || null, ToolError);
+        await lockDealField(c, s.id, "next_date");
+        await lockDealField(c, s.id, "next_step");
+      }
       const permitted = permittedActionOwnerSlugs(actor);
       const ownerSlug = args.owner === undefined || args.owner === null || args.owner === ""
         ? actor.slug : String(args.owner).trim().toLowerCase();
       if (!permitted.includes(ownerSlug))
         throw new ToolError({ error: "owner_not_permitted", owner: ownerSlug, permitted,
-          hint: "a ball may be set for yourself; only the Hermes CoS door may hand one to its verified Joe sponsor, never Dell" });
+          hint: "a ball may be set for yourself, Joe, or Dell" });
       let ownerId = actor.id;
       if (ownerSlug !== actor.slug) {
         const owner = await c.query("select id from actor where slug=$1", [ownerSlug]);
@@ -3884,6 +4051,8 @@ export const TOOLS = {
           hint: "the selected owner has no actor row" });
         ownerId = owner.rows[0].id;
       }
+      const superseded = s.type === "deal"
+        ? await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-action") : {};
       // [amendment 8] Replacing an unfinished ball used to record the old one as
       // 'done'. It wasn't done — it was superseded. No-fabrication applies to
       // metadata too, and 'done' would inflate any completion measure built on this.
@@ -3896,9 +4065,12 @@ export const TOOLS = {
           where deal_id=$1 and owner_id=$2 and status='open'
           returning id,description /* capture:replace-post-call-actions */`,
         [s.id, ownerId])).rows : [];
+      const droppedPostCallIds = [...(superseded.superseded_post_call_action_ids || []), ...droppedPostCall.map(x => x.id)];
+      const oldDate = s.type === "deal" ? (await c.query(
+        "select next_date::text as next_date from deal where id=$1", [s.id])).rows[0]?.next_date ?? null : null;
       const r = await c.query(
-        `insert into next_action (subject_type, subject_id, owner_id, due_on, description, created_by)
-         values ($1,$2,$3,$4,$5,$6) returning id`,
+        `insert into next_action (subject_type, subject_id, owner_id, due_on, description, created_by, updated_at)
+         values ($1,$2,$3,$4,$5,$6,clock_timestamp()) returning id`,
         [s.type, s.id, ownerId, args.due_on || null, args.description, actor.id]);
       await writeEvent(c, actor, "set-next-action", s.type, s.id,
         { old: droppedPostCall.length ? { post_call_actions: droppedPostCall.map(x =>
@@ -3906,10 +4078,18 @@ export const TOOLS = {
           new: { summary: `ball → ${ownerSlug}: ${args.description}`,
             next_action: args.description, due: args.due_on, owner: ownerSlug,
             set_by: actor.slug,
-            dropped_post_call_action_ids: droppedPostCall.map(x => x.id) },
+            dropped_post_call_action_ids: droppedPostCallIds },
           idempotency_key: args.idempotency_key });
+      if (s.type === "deal") {
+        await c.query("update deal set next_date=$2, updated_by=$3 where id=$1 /* dealroom:set-next-date */",
+          [s.id, args.due_on || null, actor.id]);
+        await writeEvent(c, actor, "set-next-action", "deal", s.id, {
+          field: "next_date", old: { next_date: oldDate }, new: { next_date: args.due_on || null },
+          recorded_at_after_lock: true, idempotency_key: args.idempotency_key,
+        });
+      }
       return { ok: true, next_action_id: r.rows[0].id, subject: s, owner: ownerSlug,
-        dropped_post_call_action_ids: droppedPostCall.map(x => x.id) };
+        dropped_post_call_action_ids: droppedPostCallIds };
     }),
   },
 
@@ -4063,7 +4243,7 @@ export const TOOLS = {
 
   "update-deal": {
     write: true,
-    description: "Field-level change to a deal (deal_type, phase, segment, outcome, notes_path, salesforce_id, city, lane, invoiced_on, sf_close_date_placeholder). invoiced_on (YYYY-MM-DD) marks the deal invoiced, which takes it out of the Salesforce reconciliation absence scope (V5-RW02). deal_type uses the closed deal_type_ref vocabulary. Requires base_version from a fresh read; a same-field conflict means someone else wrote the same column — ask the human, never retry blind. A version bump from a DIFFERENT field (someone else's disjoint edit) is rebased automatically and reported back as `rebased`/`rebase_receipt`; nothing about this call's own fields is ever silently changed. To move a deal to a DIFFERENT CLIENT, use reassign-deal: client_id is deliberately not settable here.",
+    description: "Field-level change to a deal (deal_type, phase, segment, outcome, notes_path, salesforce_id, city, lane, invoiced_on, sf_close_date_placeholder). A changed partner phase or outcome supersedes that partner's overdue action and returns any next-step/date gap. invoiced_on (YYYY-MM-DD) marks the deal invoiced, which takes it out of the Salesforce reconciliation absence scope (V5-RW02). deal_type uses the closed deal_type_ref vocabulary. Requires base_version from a fresh read; a same-field conflict means someone else wrote the same column — ask the human, never retry blind. A version bump from a DIFFERENT field (someone else's disjoint edit) is rebased automatically and reported back as `rebased`/`rebase_receipt`; nothing about this call's own fields is ever silently changed. To move a deal to a DIFFERENT CLIENT, use reassign-deal: client_id is deliberately not settable here.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, deal: { type: "string" },
       base_version: { type: "integer" },
@@ -4094,6 +4274,11 @@ export const TOOLS = {
           hint: "invoiced_on is a calendar date YYYY-MM-DD, or null to clear it" });
       // Legacy phase edits share the Deal Room event stream. Acquire its lock
       // before versionGuard can lock the deal row, matching Deal Room lock order.
+      const partnerStatus = canExercisePartnerAuthority(actor) && keys.some(k => k === "phase" || k === "outcome");
+      if (partnerStatus) {
+        await lockDealField(c, s.id, "next_date");
+        await lockDealField(c, s.id, "next_step");
+      }
       if (keys.includes("phase")) await lockDealField(c, s.id, "phase");
       // touchedFields = keys: computed BEFORE the guard so a version bump from
       // some OTHER field can be told apart from a bump on one of THESE fields.
@@ -4107,7 +4292,9 @@ export const TOOLS = {
         await writeEvent(c, actor, "update-deal", "deal", s.id,
           { field: k, old: { [k]: old[k] }, new: { [k]: args.fields[k] },
             recorded_at_after_lock: k === "phase" || k === "invoiced_on", idempotency_key: args.idempotency_key });
-      return { ok: true, updated: keys,
+      const status = partnerStatus && keys.some(k => (k === "phase" || k === "outcome") && old[k] !== args.fields[k])
+        ? await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "update-deal") : {};
+      return { ok: true, updated: keys, ...status,
                ...(guard.rebased ? { rebased: true, rebase_receipt: guard.rebase_receipt } : {}) };
     }),
   },
@@ -4826,6 +5013,69 @@ export const TOOLS = {
                note: completedActions.length
                  ? "your open ball on this subject was completed, which is what feeds the follow-up cadence"
                  : "no open ball of yours existed on this subject; nothing to complete" };
+    }),
+  },
+
+  "set-prospect-engagement-status": {
+    write: true, humanOnly: true,
+    description: "Move a prospect between the deal board and the existing Leads pipeline atomically. Inactive uses nurture_drip; active uses opportunity. Preserves deals, suppression, history and audit. Requires a fresh client version from deal-room-board or the Leads workspace.",
+    inputSchema: { type: "object", properties: {
+      idempotency_key: { type: "string" }, client_id: { type: "string" },
+      base_version: { type: "integer" }, status: { type: "string", enum: ["active","inactive"] },
+      reason: { type: "string" }, human_quote: { type: "string" }, expected_actor: { type: "string", minLength: 1 } },
+      required: ["idempotency_key","client_id","base_version","status","reason"] },
+    handler: async (c, actor, args) => withEnvelope(c, actor, "set-prospect-engagement-status", args, async () => {
+      if (args.expected_actor && args.expected_actor !== actor.slug) throw new ToolError({ error: "account_changed" });
+      if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "human_confirmation_required" });
+      if (!["active","inactive"].includes(args.status))
+        throw new ToolError({ error: "invalid_engagement_status", allowed: ["active","inactive"] });
+      if (typeof args.reason !== "string" || !args.reason.trim())
+        throw new ToolError({ error: "engagement_reason_required" });
+      await versionGuard(c, "client", args.client_id, args.base_version);
+      const current = (await c.query(
+        "select prospect_engagement_status,status,party_id,merged_into from client where id=$1", [args.client_id])).rows[0];
+      if (current.merged_into) throw new ToolError({ error: "client_merged_away", merged_into: current.merged_into });
+      if (current.status !== "prospect") throw new ToolError({ error: "not_a_prospect" });
+      const party = (await c.query("select merged_into,deleted_at,contact_state from party where id=$1 for share",[current.party_id])).rows[0];
+      if (!party || party.merged_into || party.deleted_at || args.status === "active" && party.contact_state === "do_not_contact")
+        throw new ToolError({ error: "prospect_party_protected" });
+      let leads = (await c.query(`select id,client_id,stage,suppressed,version from lead
+        where client_id=$1 or (party_id=$2 and client_id is null) order by id for update`,
+        [args.client_id,current.party_id])).rows;
+      const protectedLead = lead => lead.suppressed || ["archived","do_not_contact"].includes(lead.stage);
+      if (args.status === "active" && leads.some(protectedLead))
+        throw new ToolError({ error: "prospect_lead_protected" });
+      const stage = args.status === "inactive" ? "nurture_drip" : "opportunity";
+      if (!leads.length) {
+        const created = await TOOLS["new-lead"].handler(c,actor,{
+          idempotency_key: `${args.idempotency_key}:lead`,party_id:current.party_id,stage });
+        leads = [{id:created.lead_id,client_id:null,stage,suppressed:false,version:1}];
+      }
+      for (const lead of leads) {
+        if (!lead.client_id) {
+          await c.query("update lead set client_id=$1,updated_by=$2 where id=$3",[args.client_id,actor.id,lead.id]);
+          await writeEvent(c,actor,"link-lead-client","lead",lead.id,{
+            field:"client_id",old:{client_id:null},new:{client_id:args.client_id},
+            agent_rationale:args.reason.trim(),idempotency_key:args.idempotency_key });
+        }
+        if (!protectedLead(lead) && lead.stage !== stage) {
+          const version = (await c.query("select version from lead where id=$1",[lead.id])).rows[0].version;
+          await TOOLS["update-lead"].handler(c,actor,{
+            idempotency_key:`${args.idempotency_key}:stage:${lead.id}`,lead:lead.id,base_version:version,
+            fields:{stage},stage_review:{reason:args.reason.trim(),evidence_ids:[],human_quote:args.human_quote} });
+        }
+      }
+      const updated = (await c.query(
+        "update client set prospect_engagement_status=$2,updated_by=$3 where id=$1 returning version",
+        [args.client_id, args.status, actor.id])).rows[0];
+      await writeEvent(c, actor, "set-prospect-engagement-status", "client", args.client_id, {
+        field: "prospect_engagement_status",
+        old: { prospect_engagement_status: current.prospect_engagement_status },
+        new: { prospect_engagement_status: args.status },
+        agent_rationale: args.reason.trim(), human_quote: args.human_quote || null,
+        idempotency_key: args.idempotency_key });
+      return { ok: true, client_id: args.client_id, prospect_engagement_status: args.status,
+        client_version: updated.version, lead_id: leads[0].id };
     }),
   },
 
@@ -8898,14 +9148,15 @@ registerTools(invoiceTrackerTools({ ToolError, withEnvelope, writeEvent }), "inv
 // the rest of this registry; the one explicit exception is the ephemeral lease.
 registerTools({
   "get-deal-room": {
-    description: "Read one complete open Deal Room work record: board/workspace and active/parked fields, next actions, notes, critical dates, activity, parties, premises, current economics, documents, and attributed history. Includes salesforce_id and base_version only so a reconciler can make one guarded follow-on write. Placeholder Salesforce fields are structurally excluded.",
+    description: "Read one complete Deal Room work record, including closed and invoiced deals: board/workspace and active/parked fields, next actions, notes, critical dates, activity, parties, premises, current economics, documents, and attributed history. Includes salesforce_id and base_version only so a reconciler can make one guarded follow-on write. Placeholder Salesforce fields are structurally excluded.",
     inputSchema: { type: "object", properties: { deal: { type: "string" } }, required: ["deal"] },
     handler: async (c, _actor, args) => {
       const s = await resolveSubject(c, args.deal);
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
-      const deal = await c.query(
+      let deal = await c.query(
         `select b.id, b.name, b.phase, b.owner, b.type, b.market as city, b.segment, b.attention,
-                to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step, b.client_ref, b.client_name,
+                to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step,
+                (b.next_step is null or b.next_date is null) as next_step_required, b.client_id, b.client_ref, b.client_name,
                 b.account_client_id, b.account_client_ref, b.account_name, b.account_owner,
                 b.market_agent, to_jsonb(b.last_touch)#>>'{}' as last_touch,
                 to_jsonb(b.last_review_at)#>>'{}' as last_review_at, b.workspace_kind,
@@ -8913,11 +9164,28 @@ registerTools({
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on, b.lane, b.outcome,
                 (select to_jsonb(pc) from v_deal_room_phase_change pc where pc.deal_id=b.id) as phase_change,
+                coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
+                            from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
                 to_jsonb(b.parked_at)#>>'{}' as parked_at, b.parked_by,
-                r.salesforce_id, r.base_version
+                r.salesforce_id, r.base_version, ce.client_status, ce.client_version, ce.prospect_engagement_status
            from v_deal_room_board b
            join v_deal_reconciliation_read r on r.id=b.id
+           join v_client_engagement_status ce on ce.client_id=b.client_id
           where b.id=$1`, [s.id]);
+      if (!deal.rows.length) deal = await c.query(
+        `select b.id, b.name, b.phase, b.lead_owner as owner, b.deal_type as type,
+                b.client_ref, b.client_name, b.client_id, a.account_client_id,
+                case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind,
+                to_jsonb(b.closed_on)#>>'{}' as closed_on,
+                to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on, b.outcome, b.lane,
+                coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
+                            from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
+                r.salesforce_id, r.base_version, ce.client_status, ce.client_version, ce.prospect_engagement_status
+           from v_deal_board b
+           join v_deal_reconciliation_read r on r.id=b.id
+           join v_client_engagement_status ce on ce.client_id=b.client_id
+           left join v_client_account a on a.client_id=b.client_id
+          where b.id=$1 /* dealroom:archived-detail */`, [s.id]);
       if (!deal.rows.length) throw new ToolError({ error: "not_found", table: "deal", id: s.id });
       const thread = await c.query(
         "select id, kind, text, actor, to_jsonb(created_at)#>>'{}' as created_at from v_deal_room_note where deal_id=$1 order by created_at desc, id desc",
@@ -8973,7 +9241,8 @@ registerTools({
                 to_jsonb(expiration_on)#>>'{}' as expiration_on,
                 options_note, evidence_kind, evidence_ref, source
            from v_deal_room_current_lease where deal_id=$1`, [s.id]);
-      return stripDealPlaceholders({ schema_version: "deal-timeline.v1", lease: lease.rows[0] || null,
+      const checklist = await readDealChecklist(c, { ...deal.rows[0], lease: lease.rows[0] || null, critical_dates: criticalDates.rows });
+      return stripDealPlaceholders({ schema_version: "deal-timeline.v1", checklist, lease: lease.rows[0] || null,
         deal_id: s.id, ...deal.rows[0], thread: thread.rows,
         critical_dates: criticalDates.rows, next_actions: actions.rows,
         activities: activities.rows, participants: participants.rows,
@@ -9070,22 +9339,31 @@ registerTools({
 
   "add-deal-note": {
     write: true,
-    description: "Append context or an answer to a deal's immutable thread. Existing rows are never edited or deleted.",
+    description: "Record a partner status update in the immutable deal thread. After the due date, this supersedes your overdue action, never marks it completed. Supply next_step and next_date together, or Doc prompts for the missing plan. Other partners' actions and manual attention remain unchanged.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, deal: { type: "string" }, text: { type: "string" },
+      next_step: { type: "string" }, next_date: { type: "string", description: "YYYY-MM-DD; required with next_step" },
     }, required: ["idempotency_key", "deal", "text"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "add-deal-note", args, async () => {
       const s = await resolveSubject(c, args.deal);
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
       if (typeof args.text !== "string" || !args.text.trim()) throw new ToolError({ error: "text_required" });
+      const hasPlan = args.next_step !== undefined || args.next_date !== undefined;
+      if (hasPlan && (typeof args.next_step !== "string" || !args.next_step.trim() || !isCalendarDate(args.next_date)))
+        throw new ToolError({ error: "next_step_and_date_required", hint: "supply a next step and a calendar date together" });
+      const superseded = await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key);
       const note = await c.query(
         "insert into deal_note (deal_id, kind, text, actor_id) values ($1,'note',$2,$3) returning id, created_at /* dealroom:add-note */",
         [s.id, args.text.trim(), actor.id],
       );
       await writeEvent(c, actor, "add-deal-note", "deal", s.id, {
-        field: "note", new: { note: args.text.trim() }, idempotency_key: args.idempotency_key,
+        field: "note", new: { note: args.text.trim(), superseded_action_ids: superseded.superseded_action_ids || [] }, idempotency_key: args.idempotency_key,
       });
-      return { ok: true, deal_id: s.id, note_id: note.rows[0].id, created_at: note.rows[0].created_at };
+      const plan = hasPlan ? await appendDealNextStep(c, actor, s.id,
+        args.next_step.trim(), args.next_date, args.idempotency_key) : null;
+      return { ok: true, deal_id: s.id, note_id: note.rows[0].id, created_at: note.rows[0].created_at,
+        ...(plan ? { superseded_action_ids: superseded.superseded_action_ids || [],
+          next_step_id: plan.next_step_id, next_action_id: plan.next_action_id, next_step_required: false } : superseded) };
     }),
   },
 
@@ -9101,53 +9379,8 @@ registerTools({
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
       if (typeof args.text !== "string" || !args.text.trim()) throw new ToolError({ error: "text_required" });
       assertDealRoomField("next_date", args.next_date ?? null, ToolError);
-      // The step also changes next_date. Take that cell's lock first so its
-      // field history cannot race a direct date edit or undo.
-      await lockDealField(c, s.id, "next_date");
-      await lockDealField(c, s.id, "next_step");
-      const oldDate = (await c.query("select next_date::text as next_date from deal where id=$1", [s.id])).rows[0]?.next_date ?? null;
-      const prior = await c.query(
-        "select id, text from deal_note where deal_id=$1 and kind='next_step' order by created_at desc, id desc limit 1 /* dealroom:current-step */",
-        [s.id],
-      );
-      const note = await c.query(
-        "insert into deal_note (deal_id, kind, text, actor_id, created_at) values ($1,'next_step',$2,$3,clock_timestamp()) returning id, to_jsonb(created_at)#>>'{}' as created_at /* dealroom:add-next-step */",
-        [s.id, args.text.trim(), actor.id],
-      );
-      await c.query(
-        "update deal set next_date=$2, updated_by=$3 where id=$1 /* dealroom:set-next-date */",
-        [s.id, args.next_date ?? null, actor.id],
-      );
-      // The Deal Room's next step and the operating system's next action are
-      // one fact, not parallel lists. Each partner still keeps one ball of
-      // their own on the deal; replacing yours drops (does not complete) it.
-      await c.query(
-        `update next_action set status='dropped', updated_by=$1
-          where subject_type='deal' and subject_id=$2 and owner_id=$1 and status='open'
-          /* dealroom:drop-prior-action */`, [actor.id, s.id]);
-      const action = await c.query(
-        `insert into next_action (subject_type, subject_id, owner_id, due_on,
-                                  description, created_by, updated_by)
-         values ('deal',$1,$2,$3,$4,$2,$2) returning id
-         /* dealroom:add-next-action */`,
-        [s.id, actor.id, args.next_date ?? null, args.text.trim()]);
-      await writeEvent(c, actor, "set-next-step", "deal", s.id, {
-        field: "next_step",
-        old: { next_step: prior.rows[0]?.text ?? null },
-        new: { next_step: args.text.trim(), next_date: args.next_date ?? null },
-        recorded_at_after_lock: true,
-        idempotency_key: args.idempotency_key,
-      });
-      await writeEvent(c, actor, "set-next-step", "deal", s.id, {
-        field: "next_date",
-        old: { next_date: oldDate },
-        new: { next_date: args.next_date ?? null },
-        recorded_at_after_lock: true,
-        idempotency_key: args.idempotency_key,
-      });
-      return { ok: true, deal_id: s.id, next_step_id: note.rows[0].id,
-        next_action_id: action.rows[0].id,
-        supersedes: prior.rows[0]?.id ?? null, created_at: note.rows[0].created_at };
+      await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-step");
+      return appendDealNextStep(c, actor, s.id, args.text.trim(), args.next_date ?? null, args.idempotency_key);
     }),
   },
 
@@ -10061,7 +10294,8 @@ registerTools(journeyOneClockDoorTools({ withEnvelope, ToolError }), "journey-on
 // DoctorCRE V5-J103: the governed correspondence store. Two reads
 // (correspondence-readiness, read-correspondence-thread) and the humanOnly
 // consent pair, each partner only for their own carr.us mailbox. There is no
-// send verb and no draft verb: a draft can never dispatch, and Joe sends. Reads
+// send verb and no draft verb: a draft can never dispatch from here, and sends
+// go through Joe's own accounts when he asks (decision 41906a30). Reads
 // answer unavailable until the F10 local-store adapter lands with a reviewed
 // grant for the read-receipt writer.
 registerTools(governedCorrespondenceStoreTools({ withEnvelope, writeEvent, ToolError }),

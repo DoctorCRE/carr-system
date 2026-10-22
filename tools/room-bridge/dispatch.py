@@ -14,9 +14,16 @@ to route costs the tokens the routing was supposed to save.
     dispatch.py register codex-desk --family sol --effort high --cwd ~/carr-system
     dispatch.py where            # how to find THIS session's socket
 
-Codex desks preserve their thread context. The registry names a default family,
-never a model version. Each send resolves Sol or Luna from the current local
-Codex catalog, prints the executor slug and effort, and records them in its row.
+`send` saves a card in the durable work queue and returns its queued receipt.
+The detached runner claims cards in the current global order when their desk
+and a Codex slot are free. `prioritize`, `requeue`, `show`, `history`, `export`
+and `merge-order` all use that same store.
+
+The worker resolves the current Codex family at execution time and records the
+executor model and effort on the card. The `dispatch()` function is the
+synchronous executor used by workers and existing bounded adapters. Execution
+receipts still append to the requested NDJSON results file. Asynchronous desks
+report delivery there and retain their queue reservation until completion.
 
 Grok desks default to full workspace tools and select the newest standard model
 from `grok models`. Only `send --retrieve` runs read-only source retrieval.
@@ -57,11 +64,14 @@ This is a local request ceiling using Portal prices, not a provider billing limi
     dispatch.py nous-budget
     dispatch.py send nous-builder "fix and test the build; commit, push and open a PR" --checkout new:nous-fix
 
-EVERY DISPATCH LEAVES A LINE in the results file, NDJSON, one object per
-dispatch. That file is how Hermes learns what happened without holding a
-connection open — a claude-session answers in its own window on its own time,
-so the line records that the turn was DELIVERED, not what the session decided.
-A headless Codex run is synchronous, so its line carries the actual result.
+Business work for the partner goes to the first available record-layer desk with `--brief business`,
+which swaps the engineering footer for business-brief-footer.md. That desk runs
+with no built-in tools (no shell, no file edits) and only the CARR verbs.
+Scheduled jobs reach it through lib/business_dispatch.py.
+
+    dispatch.py register biz-nous --kind hermes-nous --family glm --effort medium --posture record-layer
+    dispatch.py send business - --brief business --card-id biz:<uuid5> --actor outlook-intake
+
 """
 
 from __future__ import annotations
@@ -97,11 +107,14 @@ from desks import AUTOMATIC_CODEX_DESKS, DeskError, Registry  # noqa: E402
 import claude_wire as inject_mod  # noqa: E402  — the Idea 78 wire, see the module
 import claude_desktop_wire  # noqa: E402 — background supervisor + supported /desktop
 import claude_remote_wire
+import claude_api_wire
 import codex_wire  # noqa: E402  — Codex worked out this protocol, see the module
 import codex_ipc  # noqa: E402  — a thread Codex Desktop holds open, see the module
 import grok_wire  # noqa: E402 — authenticated public retrieval, provider metadata checked
 import hermes_wire
 import nous_budget
+import record_layer
+import business_routing
 import flash_wire  # noqa: E402  — the local Flash model as a desk, see the module
 import verb_io  # noqa: E402 — the ONE path to the record layer; see that module
 
@@ -123,27 +136,57 @@ CODEX_TIMEOUT_S = float(os.environ.get("CARR_HERMES_CODEX_TIMEOUT", "5400"))
 CODEX_CAPACITY_ATTEMPTS = 6
 CODEX_CAPACITY_BACKOFF_S = 300
 
-# WR-000356: five or more concurrent Codex jobs died mid-run with "exceeded
-# retry limit, last status: 429"; four ran clean. A job past its start may
-# already have committed or pushed, so retrying it is not safe. Instead every
-# Codex job sent through `dispatch.py send` holds one of a few machine-wide
-# slots for its whole run and extra jobs wait for one. flock slots free
-# themselves when a process dies, so a killed job never leaves one held.
-CODEX_MAX_CONCURRENT = 4
-CODEX_SLOT_DIR = Path.home() / ".config" / "carr" / "codex-slots"
-CODEX_SLOT_POLL_S = 5.0
 HERMES_SLOT_DIR = Path.home() / '.config' / 'carr' / 'hermes-slots'
 HERMES_SLOT_POLL_S = 1.0
 
 # Codex prints this on STDOUT and still exits 0, so the exit code lies.
 QUOTA_HINT = re.compile(r"hit your usage limit", re.I)
 RETRY_AT = re.compile(r"try again at ([0-9:]+ ?[AP]M)", re.I)
+SAFETY_REFUSAL = re.compile(
+    r'safety[ _-](?:classifier|refusal|system)|content_policy_violation', re.I)
 
 
-def _codex_slot(env):
-    limit = max(1, int(env.get("CARR_CODEX_MAX_CONCURRENT") or CODEX_MAX_CONCURRENT))
-    slot_dir = Path(env.get("CARR_CODEX_SLOT_DIR") or CODEX_SLOT_DIR)
-    return _slot(limit, slot_dir, 'Codex', CODEX_SLOT_POLL_S)
+def _phrasing_hint(task: str, *, examples_on_miss: bool = False) -> str:
+    rules = json.loads((HERE / 'dispatch-phrasing.json').read_text(encoding='utf-8'))
+    matches = [rule for rule in rules if re.search(
+        r'(?<!\w)' + r'\s+'.join(re.escape(word) for word in rule['phrase'].split())
+        + r'(?!\w)', task, re.I)]
+    if not matches and not examples_on_miss:
+        return ''
+    examples = matches or rules
+    return ('Describe checks as properties to confirm. '
+            + '; '.join(f"{rule['phrase']!r} -> {rule['suggestion']!r}" for rule in examples)
+            + '. Use --allow-phrasing to override the local phrasing lint.')
+
+
+# A brief profile names the footer every task of that profile carries. The
+# business profile belongs only to record-layer desks, and those desks take
+# nothing else: a client task never reaches a coding seat with repo write.
+BRIEF_FOOTERS = {'engineering': 'brief-footer.md', 'business': 'business-brief-footer.md'}
+
+
+def _with_footer(task: str, brief: str) -> str:
+    for block in (HERE / BRIEF_FOOTERS[brief]).read_text(encoding='utf-8').strip().split('\n\n'):
+        if block.startswith('Skills:') and re.search(r'^Skills:', task, re.M | re.I):
+            continue
+        if block not in task:
+            task += '\n\n' + block
+    return task
+
+
+def _check_brief_desk(brief: str, desk_entry) -> None:
+    record_layer = isinstance(desk_entry, dict) and desk_entry.get('posture') == 'record-layer'
+    if (brief == 'business') != record_layer:
+        raise DeskError('brief_desk_mismatch',
+                        'a business brief goes only to a record-layer desk, and a record-layer '
+                        'desk takes only business briefs')
+
+
+def _lint_phrasing(task: str, allow_phrasing: bool) -> None:
+    if not allow_phrasing:
+        hint = _phrasing_hint(task)
+        if hint:
+            raise DeskError('brief_phrasing', hint)
 
 
 def _hermes_slot(env):
@@ -307,6 +350,7 @@ def _run_headless_process(argv, env, timeout, on_executor, stream_output, **opti
         else:
             stdout, stderr = proc.communicate(timeout=timeout)
     except BaseException as exc:
+        cleanup_deadline = time.monotonic() + 2
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
@@ -322,7 +366,11 @@ def _run_headless_process(argv, env, timeout, on_executor, stream_output, **opti
             if reader is not None:
                 reader.join(timeout=2)
                 exc.output = ''.join(chunks)
-            exc.termination_confirmed = write_ownership.process_terminated(identity, group=True)
+            while not (confirmed := write_ownership.process_terminated(identity, group=True)):
+                if time.monotonic() >= cleanup_deadline:
+                    break
+                time.sleep(0.01)
+            exc.termination_confirmed = confirmed
         raise
     finally:
         if reader is None or not reader.is_alive():
@@ -357,8 +405,19 @@ def _to_codex(
     timeout_s lets a caller with its own authority window (the Engineering
     controller's 930 s lease) pin a shorter limit than the router default.
     """
+    record_layer.enforce(entry, kind='codex-session')
     limit_s = CODEX_TIMEOUT_S if timeout_s is None else float(timeout_s)
     task = desks.desk_prompt(task)
+    if entry.get('posture') == 'record-layer':
+        if config_overrides:
+            raise DeskError('bad_codex_config', 'record-layer Codex config cannot be overridden')
+        def confined_run(argv, **options):
+            if provider_run is not None:
+                return provider_run(argv, **options)
+            return _run_headless_process(argv, options['env'], options['timeout'],
+                                         on_executor, stream_output, cwd=options['cwd'])
+        return record_layer.run_codex(entry, task, env=env, run=confined_run, timeout_s=limit_s)
+
     thread = None if fresh else entry.get("thread_id")
     # A THREAD CODEX DESKTOP HOLDS OPEN CANNOT BE RESUMED FROM HERE. Found live
     # 2026-09-27: the orchestrator's Desktop thread refused `codex exec resume`
@@ -554,10 +613,18 @@ def _execute(request: dict, *, on_executor=None) -> dict:
             outcome = _to_claude(entry, task, msg_id)
     elif entry["kind"] == "claude-desktop":
         outcome = _to_claude_desktop(entry, task)
+    elif entry["kind"] == "claude-api":
+        api_entry = dict(entry)
+        if codex_timeout_s is not None:
+            api_entry['timeout_s'] = min(entry['timeout_s'], codex_timeout_s)
+        outcome = claude_api_wire.run_task(api_entry, task, env=env, **executor_options)
     elif entry["kind"] == "claude-remote":
         outcome = claude_remote_wire.run_task(entry, task, msg_id)
     elif entry["kind"] == "grok-cli":
         grok_options: dict = {"retrieval": True} if retrieval else {}
+        if entry.get('checkout_path'):
+            # A checkout job is real work; the 180-second default is for room replies.
+            grok_options['timeout_seconds'] = codex_timeout_s if codex_timeout_s is not None else CODEX_TIMEOUT_S
         if env is not None:
             grok_options['env'] = scrubbed_env(env)
         if request.get('provider_run') is not None:
@@ -569,7 +636,7 @@ def _execute(request: dict, *, on_executor=None) -> dict:
         outcome = hermes_wire.run_task(entry, task, env=scrubbed_env(env), run=run_cli,
                                       results_path=request['budget_results_path'], run_id=msg_id)
     elif entry["kind"] == "flash-local":
-        outcome = flash_wire.run_task(task)
+        outcome = flash_wire.run_task(task, **({'posture': entry['posture']} if entry.get('posture') else {}))
     elif entry["kind"] == "codex-live":
         outcome = codex_wire.run_turn(
             entry["socket"], task,
@@ -613,6 +680,10 @@ def dispatch(
     effort: str | None = None,
     writes: list[str] | None = None,
     checkout: str | None = None,
+    on_started=None,
+    allow_phrasing: bool = False,
+    brief_kind: str | None = None,
+    posture: str | None = None,
 ) -> dict:
     """Send one task to one desk. Raises DeskError when the desk is not usable.
 
@@ -627,6 +698,7 @@ def dispatch(
     `provider_run` lets a bounded adapter confine the Codex/Grok child while
     retaining this module's dispatch and result contract. Ordinary callers
     keep the default runner."""
+    _lint_phrasing(task, allow_phrasing)
     registry = registry or Registry()
     results_path = Path(results_path or DEFAULT_RESULTS)
     if name == "flash" and registry.entries().get(name, {}).get("kind") == "claude-session":
@@ -635,15 +707,22 @@ def dispatch(
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise DeskError("desk_not_live", str(exc)) from exc
     entry = registry.resolve(name)
+    if brief_kind is not None:
+        _check_brief_desk(brief_kind, entry)
+    if posture is not None and entry.get('posture') != posture:
+        raise DeskError('brief_desk_mismatch', 'resolved desk no longer carries the queued posture')
+    record_layer.enforce(entry)
     if name in AUTOMATIC_CODEX_DESKS and entry["kind"] != "codex-session":
         raise DeskError("unsafe_automatic_desk", "automatic work requires a Codex subscription desk")
     network_access = entry.get('network_access', False)
     if network_access and not fresh:
         raise DeskError('network_access_requires_fresh_thread',
                         'network_access desks require --fresh for every dispatched turn')
-    checkout_kinds = (*codex_models.CODEX_KINDS, 'grok-cli', 'hermes-nous')
+    if entry['kind'] == 'claude-api' and checkout is None:
+        raise DeskError('api_checkout_required', 'Claude API jobs require --checkout new:<name> or an existing branch')
+    checkout_kinds = (*codex_models.CODEX_KINDS, 'grok-cli', 'hermes-nous', 'claude-api')
     if checkout is not None and entry['kind'] not in checkout_kinds:
-        raise DeskError('unsupported_checkout', '--checkout requires a Codex, Grok or Hermes desk')
+        raise DeskError('unsupported_checkout', '--checkout requires a coding desk')
     if entry["kind"] in codex_models.CODEX_KINDS:
         entry = {**entry, "family": codex_models.family_default(family or entry.get("family"), entry.get("model")),
                  "effort": desks._normalize_effort(entry["kind"], effort or entry.get("effort"))}
@@ -660,7 +739,7 @@ def dispatch(
     if entry["kind"] != "claude-desktop":
         task = desks.desk_prompt(task)
     msg_id = str(uuid.uuid4())
-    if entry["kind"] in ("claude-desktop", "claude-remote", "codex-session", "codex-live", "flash-local", "grok-cli"):
+    if entry["kind"] in ("claude-desktop", "claude-remote", "codex-session", "codex-live", "flash-local", "grok-cli", "claude-api"):
         if not entry.get("model") or not str(entry.get("model")).strip():
             raise DeskError(
                 "unnamed_model_or_effort",
@@ -684,11 +763,14 @@ def dispatch(
     if declared_writes and provider_run is not None:
         raise DeskError('unsupported_owned_runner', 'a confined custom runner cannot own writes')
     if declared_writes and entry['kind'] not in checkout_kinds:
-        raise DeskError('unsupported_owned_adapter', 'writing dispatch requires a Codex, Grok or Hermes adapter')
+        raise DeskError('unsupported_owned_adapter', 'writing dispatch requires a coding adapter')
 
     if entry["kind"] in codex_models.CODEX_KINDS:
         print(f"executor: {entry['model']} / {entry['effort']} (family {entry['family']}, desk {name})",
               file=sys.stderr, flush=True)
+
+    if on_started is not None:
+        on_started(entry)
 
     if checkout is not None:
         prepared = codex_checkout.prepare(checkout, env)
@@ -709,8 +791,16 @@ def dispatch(
                'claim_id': msg_id if declared_writes else None}
     workspace = base.get('checkout_path') or cwd or entry.get('cwd') or str(Path.cwd())
     with (_hermes_slot(env or os.environ) if entry['kind'] == 'hermes-nous' else nullcontext()), \
-         (write_ownership.checkout_writer(workspace) if declared_writes else nullcontext()) as bind:
+         (write_ownership.checkout_writer(workspace) if declared_writes or entry['kind'] == 'claude-api' else nullcontext()) as bind:
         for attempt in range(CODEX_CAPACITY_ATTEMPTS):
+            if entry.get('posture') == 'record-layer':
+                try:
+                    reason = business_routing.unavailable(
+                        entry, results_path, business_routing.limit_states(results_path))
+                except (DeskError, OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+                    reason = f'execution unavailable: {type(exc).__name__}'
+                if reason:
+                    raise DeskError('business_desk_unavailable', reason)
             outcome = _execute(request, on_executor=bind)
             if (entry['kind'] not in codex_models.CODEX_KINDS
                     or outcome['status'] not in ('failed', 'capacity')
@@ -732,6 +822,9 @@ def dispatch(
         'status': outcome['status'],
         **({'ephemeral_thread': True, 'thread_resumable': False} if network_access else {}),
     }
+    if row['status'] == 'failed' and SAFETY_REFUSAL.search(row.get('detail', '')):
+        print('Provider safety refusal. ' + _phrasing_hint(original_task, examples_on_miss=True),
+              file=sys.stderr, flush=True)
     _record(results_path, row)
     return row
 
@@ -1007,10 +1100,20 @@ def _cmd_where() -> int:
 
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description=__doc__,
+                                epilog=('Claude API uses macOS Keychain item '
+                                        + claude_api_wire.config.KEYCHAIN_SERVICE + ' (account '
+                                        + claude_api_wire.config.KEYCHAIN_ACCOUNT + '). Setup: '
+                                        + claude_api_wire.config.KEY_SETUP),
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--registry", default=None, help="desk registry file")
     p.add_argument("--results", default=None, help="NDJSON results file")
     sub = p.add_subparsers(dest="cmd", required=True)
+    import work_cli
+    work_cli.add_commands(sub)
+
+    spend = sub.add_parser('claude-api-spend', help='read monthly API spend and sticky stop')
+    spend.add_argument('--clear-stop', action='store_true',
+                       help='human recovery after billing is fixed; preserves spend and reservations')
 
     r = sub.add_parser("register", help="name a desk")
     r.add_argument("name")
@@ -1022,10 +1125,12 @@ def main(argv: list[str]) -> int:
     r.add_argument("--effort", default=None, choices=[*desks.EFFORT_CHOICES, "max"])
     r.add_argument("--cwd", default=None)
     r.add_argument("--host", default=None, help="SSH destination for a claude-remote desk")
-    r.add_argument("--timeout", type=float, default=900, help="remote or Hermes whole-job deadline in seconds")
+    r.add_argument("--timeout", type=float, default=900, help="remote, Hermes or Claude API execution deadline in seconds")
     r.add_argument("--sandbox", default=None,
                    choices=["read-only", "workspace-write", "danger-full-access"],
                    help="Codex sandbox for this desk; Grok posture is chosen by --retrieve")
+    r.add_argument('--posture', choices=desks.POSTURES,
+                   help='record-layer gives only CARR tools; unsupported wires refuse before launch')
     r.add_argument("--network-access", action="store_true",
                    help="opt in to read-only network access for fresh codex-live turns only")
     r.add_argument("--add-dir", dest="add_dirs", action="append", default=None,
@@ -1045,9 +1150,21 @@ def main(argv: list[str]) -> int:
     sp = sub.add_parser("stop", help="take a desk down")
     sp.add_argument("name")
     sub.add_parser("where", help="print how to find and name THIS session's socket")
-    s = sub.add_parser("send", help="dispatch one task to one desk")
+    s = sub.add_parser("send", help="enqueue one task; return a durable receipt immediately")
+    s.add_argument('--card-id')
+    s.add_argument('--wr')
+    s.add_argument('--slice')
+    s.add_argument('--title')
+    s.add_argument('--description')
+    s.add_argument('--actor', default='orchestrator')
+    s.add_argument('--stage', choices=('building', 'review', 'fixing'),
+                   help='requeue a stage of an existing --card-id at the tail')
     s.add_argument("name")
     s.add_argument("task")
+    s.add_argument('--brief', choices=tuple(BRIEF_FOOTERS), default='engineering',
+                   help='footer profile; business goes only to a record-layer desk')
+    s.add_argument('--allow-phrasing', action='store_true',
+                   help='override the local brief phrasing lint; provider policy still applies')
     s.add_argument("--family", choices=codex_models.FAMILIES)
     s.add_argument("--effort", choices=desks.EFFORT_CHOICES)
     s.add_argument("--writes", action="append", help="repository-relative write glob (repeatable)")
@@ -1069,6 +1186,15 @@ def main(argv: list[str]) -> int:
     results = Path(a.results) if a.results else DEFAULT_RESULTS
 
     try:
+        handled = work_cli.handle(a, reg, results)
+        if handled is not None:
+            return handled
+        if a.cmd == 'claude-api-spend':
+            ledger = claude_api_wire.Ledger()
+            if a.clear_stop:
+                ledger.clear_stop()
+            print(json.dumps(ledger.read(), indent=2))
+            return 0
         if a.cmd == 'nous-budget':
             try:
                 print(json.dumps(nous_budget.Ledger(DEFAULT_RESULTS).read(), indent=2))
@@ -1101,7 +1227,7 @@ def main(argv: list[str]) -> int:
                                  sandbox=getattr(a, "sandbox", None),
                                  network_access=a.network_access,
                                  add_dirs=getattr(a, "add_dirs", None), host=a.host, timeout_s=a.timeout,
-                                 provider=a.provider)
+                                 provider=a.provider, posture=a.posture)
             print(json.dumps({a.name: entry}, indent=2))
             return 0
 
@@ -1134,26 +1260,27 @@ def main(argv: list[str]) -> int:
         task = sys.stdin.read() if a.task == "-" else a.task
         if not task.strip():
             raise DeskError("empty_task", "dispatch requires a non-empty task")
-        for block in (HERE / 'brief-footer.md').read_text(encoding='utf-8').strip().split('\n\n'):
-            if block.startswith('Skills:') and re.search(r'^Skills:', task, re.M | re.I):
-                continue
-            if block not in task:
-                task += '\n\n' + block
+        task = _with_footer(task, a.brief)
+        _lint_phrasing(task, a.allow_phrasing)
         # An offline host or a seat whose last probe failed is refused here,
         # with the reason, before any claim or launch (tools/room-bridge/seat_gate.py).
         desk_entry = reg.entries().get(a.name)
-        if isinstance(desk_entry, dict):
-            blocked = seat_gate.check({**desk_entry, "name": a.name})
-            if blocked:
-                raise DeskError(*blocked)
-        codex_job = isinstance(desk_entry, dict) and desk_entry.get("kind") in codex_models.CODEX_KINDS
-        with _codex_slot(os.environ) if codex_job else nullcontext():
-            row = dispatch(a.name, task, registry=reg, results_path=results,
-                           fresh=getattr(a, "fresh", False), stream_output=a.stream_output,
-                           retrieval=a.retrieve, family=a.family, effort=a.effort, writes=a.writes,
-                           checkout=a.checkout)
+        if a.brief != 'business' or a.name != 'business':
+            _check_brief_desk(a.brief, desk_entry)
+        if a.brief == 'business':
+            row = work_cli.send_business(a, task, reg, results)
+        else:
+            if isinstance(desk_entry, dict):
+                blocked = seat_gate.check({**desk_entry, "name": a.name})
+                if blocked:
+                    raise DeskError(*blocked)
+            row = work_cli.send(a, task, reg, results)
         print(json.dumps(row, indent=2))
-        return 0 if row["status"] in ("delivered", "completed") else 1
+        return 0
+
+    except (ValueError, OSError) as e:
+        print(f'refused: {e}', file=sys.stderr)
+        return 2
 
     except DeskError as e:
         print(f"refused ({e.code}): {e}", file=sys.stderr)

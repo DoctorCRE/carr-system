@@ -20,6 +20,7 @@ from typing import Callable
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "lib"))
+from lib.cleanup_budget import BudgetExhausted, check, entries, walk
 AGE_SECONDS = 24 * 60 * 60
 DATA_THRESHOLD_BYTES = 1_000_000_000_000
 TMP_PREFIXES = (
@@ -500,7 +501,8 @@ def _temp_activity(path, deadline, *, max_entries=None):
     seen = set()
     def inspect(entry):
         nonlocal latest, size
-        if deadline() or max_entries is not None and len(seen) >= max_entries:
+        check(deadline)
+        if max_entries is not None and len(seen) >= max_entries:
             raise TimeoutError('fixture inspection budget')
         info = entry.lstat()
         identity = info.st_dev, info.st_ino
@@ -511,9 +513,7 @@ def _temp_activity(path, deadline, *, max_entries=None):
         digest.update(repr((str(entry.relative_to(path)), info.st_dev, info.st_ino,
                             info.st_mode, info.st_size, info.st_mtime_ns)).encode())
     inspect(path)
-    def fail(error):
-        raise error
-    for parent, dirs, files in os.walk(path, followlinks=False, onerror=fail):
+    for parent, dirs, files in walk(path, deadline):
         dirs.sort()
         for name in sorted(dirs + files):
             inspect(Path(parent) / name)
@@ -532,14 +532,25 @@ def recover_test_temp(pending, *, deadline):
     if (row['path'] != str(source) or staged != manifest.parent / 'fixture' or
             staged.resolve() != staged or row['status'] not in {'intent', 'staged', 'verified_no_effect'}):
         raise RuntimeError('interrupted fixture manifest mismatch')
-    if source.exists() == staged.exists():
+    present = {}
+    for path in (source, staged):
+        try:
+            present[path] = path.lstat()
+        except FileNotFoundError:
+            pass
+    if not present:
+        check(deadline)
+        row.update(status='removed', reason='fixture already absent; no move performed', allocated_bytes=0)
+        save(manifest, {**row, 'status': 'verified_no_effect'})
+        return row
+    if len(present) != 1:
         raise RuntimeError('interrupted fixture move is ambiguous')
-    actual = staged if staged.exists() else source
-    info = actual.lstat()
+    actual, info = next(iter(present.items()))
     if (info.st_dev, info.st_ino) != tuple(row['identity']):
         raise RuntimeError('interrupted fixture directory changed')
     if actual == staged and _temp_activity(staged, deadline)[0] != row['activity']:
         raise RuntimeError('interrupted staged fixture changed')
+    check(deadline)
     row.update(status='staged' if actual == staged else 'verified_no_effect',
                reason='interrupted fixture move read back before retry')
     save(manifest, row)
@@ -551,14 +562,17 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
     import heapq
     from branch_retirement import save
     root = Path(root)
-    report = {'removed': [], 'kept': [], 'cursor': cursor, 'staged_allocated_bytes': 0,
+    report = {'removed': [], 'kept': [], 'deferred': [], 'cursor': cursor, 'staged_allocated_bytes': 0,
               'freed_bytes': 0, 'budget_exhausted': False, 'errors': []}
     descriptor = _open_root(root)
     identity = os.fstat(descriptor)
     try:
-        with os.scandir(descriptor) as entries:
-            names = heapq.nsmallest(max_items, (e.name for e in entries
+        try:
+            names = heapq.nsmallest(max_items, (e.name for e in entries(descriptor, deadline)
                 if e.name.startswith(TEST_TMP_PREFIXES) and e.name > cursor))
+        except BudgetExhausted:
+            report['budget_exhausted'] = True
+            return report
         for offset in range(0, len(names), 50):
             if deadline():
                 report['budget_exhausted'] = True
@@ -605,6 +619,7 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                                 row.update(status='would_stage', reason='old inactive disposable test fixture', allocated_bytes=size)
                             else:
                                 assert target is not None
+                                check(deadline)
                                 os.rename(name, target / 'fixture', src_dir_fd=descriptor)
                                 staged_busy = process_probe([str(path), str(target / 'fixture')])
                                 verification_deadline = time.monotonic() + 2
@@ -623,20 +638,29 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                                     'status': 'staged' if row['status'] == 'staged' else 'verified_no_effect'})
                 except TimeoutError:
                     if target is not None and (target / 'fixture').exists():
-                        row.update(error='TimeoutError', reason='staged fixture inspection incomplete')
-                        report['errors'].append({'kind': 'test_temp', 'error': 'TimeoutError'})
+                        row.update(status='deferred', reason='staged fixture inspection timed out; read back before retry')
                     else:
-                        row.update(status='kept', reason='fixture inspection budget exhausted; no move performed')
+                        row.update(status='deferred' if deadline() else 'kept',
+                                   reason='fixture inspection budget exhausted; no move performed')
                         if target is not None:
                             save(target / 'manifest.json', {**row, 'status': 'verified_no_effect'})
-                    report['budget_exhausted'] = deadline()
+                    report['budget_exhausted'] |= row['status'] == 'deferred'
                 except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
-                    row.update(status='kept', reason='fixture evidence or staging failed', error=type(exc).__name__)
-                    report['errors'].append({'kind': 'test_temp', 'error': type(exc).__name__})
-                report['removed' if row['status'] == 'staged' else 'kept'].append(row)
-                report['cursor'] = name
+                    if (isinstance(exc, FileNotFoundError) and not path.exists() and not path.is_symlink()
+                            and (target is None or not (target / 'fixture').exists())):
+                        row.update(status='removed', reason='fixture already absent; no move performed')
+                        if target is not None:
+                            save(target / 'manifest.json', {**row, 'status': 'verified_no_effect'})
+                    else:
+                        row.update(status='kept', reason='fixture evidence or staging failed', error=type(exc).__name__)
+                        report['errors'].append({'kind': 'test_temp', 'error': type(exc).__name__})
+                collection = ('deferred' if row['status'] == 'deferred' else
+                              'removed' if row['status'] in {'staged', 'removed'} else 'kept')
+                report[collection].append(row)
+                if not row.get('error') and row['status'] != 'deferred':
+                    report['cursor'] = name
                 record(row)
-                if row.get('error'):
+                if row.get('error') or row['status'] == 'deferred':
                     return report
             if report['budget_exhausted']:
                 break

@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -13,6 +14,8 @@ from unittest.mock import patch
 
 import desks
 import dispatch
+from work_runner import Resources
+import write_ownership
 from ops.git_env import fixture_env
 
 
@@ -291,11 +294,49 @@ print(json.dumps({'paidRecommendedModels': [
     def test_timeout_kills_the_entire_process_group_and_records_once(self):
         self.register(timeout_s=0.3)
         self.env['FAKE_MODE'] = 'timeout'
-        row = self.send()
+        killpg = os.killpg
+        killed, settling = set(), set()
+
+        def delayed_reaping(pgid, sig):
+            if sig == signal.SIGKILL:
+                killed.add(pgid)
+            elif pgid in killed and pgid not in settling:
+                settling.add(pgid)
+                return
+            return killpg(pgid, sig)
+
+        with patch.object(os, 'killpg', side_effect=delayed_reaping):
+            row = self.send()
         self.assertEqual(row['status'], 'timed_out')
         self.assertTrue(row['termination_confirmed'])
         time.sleep(0.6)
         self.assertFalse((self.root / 'escaped').exists())
+        self.assertEqual(len(self.results.read_text().splitlines()), 1)
+
+    def test_timeout_confirms_a_zombie_only_process_group(self):
+        self.register(timeout_s=0.3)
+        self.env['FAKE_MODE'] = 'timeout'
+        killpg = os.killpg
+        run = subprocess.run
+        killed_group = []
+
+        def group_probe(pgid, sig):
+            if sig == 0 and pgid in killed_group:
+                return None
+            if sig == signal.SIGKILL:
+                killed_group.append(pgid)
+            return killpg(pgid, sig)
+
+        def inventory(argv, **options):
+            if argv == ['/bin/ps', '-axo', 'pgid=,stat=']:
+                return subprocess.CompletedProcess(argv, 0, f'1 S\n{killed_group[-1]} Z\n', '')
+            return run(argv, **options)
+
+        with patch.object(write_ownership.os, 'killpg', side_effect=group_probe), \
+             patch.object(write_ownership.subprocess, 'run', side_effect=inventory):
+            row = self.send()
+        self.assertEqual(row['status'], 'timed_out')
+        self.assertTrue(row['termination_confirmed'], row)
         self.assertEqual(len(self.results.read_text().splitlines()), 1)
 
     def test_deadline_includes_auth_preflight(self):
@@ -306,12 +347,31 @@ print(json.dumps({'paidRecommendedModels': [
         self.assertEqual(row['status'], 'timed_out')
         self.assertLess(time.monotonic() - started, 1)
 
+    def test_timeout_leaves_a_persistent_group_unconfirmed(self):
+        self.register(timeout_s=0.1)
+        self.env['FAKE_MODE'] = 'slow-auth'
+        killpg = os.killpg
+
+        def persistent_group(pgid, sig):
+            if sig:
+                return killpg(pgid, sig)
+
+        started = time.monotonic()
+        with patch.object(os, 'killpg', side_effect=persistent_group):
+            row = self.send()
+        self.assertEqual(row['status'], 'timed_out')
+        self.assertFalse(row['termination_confirmed'])
+        self.assertLess(time.monotonic() - started, 3)
+
     def test_hermes_queues_after_two_jobs_without_consuming_codex_slots(self):
         self.register()
         slots = {**self.env, 'CARR_CODEX_MAX_CONCURRENT': '1',
                  'CARR_CODEX_SLOT_DIR': str(self.root / 'codex-slots')}
-        with dispatch._codex_slot(slots), dispatch._hermes_slot(slots), dispatch._hermes_slot(slots), \
+        resources = Resources(self.root / 'desk-locks', slots=slots['CARR_CODEX_SLOT_DIR'], limit=1)
+        with contextlib.ExitStack() as held, dispatch._hermes_slot(slots), dispatch._hermes_slot(slots), \
              patch.object(dispatch, 'HERMES_SLOT_POLL_S', 0.01):
+            for handle in resources.acquire('codex', codex=True):
+                held.enter_context(handle)
             completed = []
             job = threading.Thread(target=lambda: completed.append(self.send()))
             job.start()
@@ -320,7 +380,9 @@ print(json.dumps({'paidRecommendedModels': [
         job.join(5)
         self.assertFalse(job.is_alive())
         self.assertEqual(completed[0]['status'], 'completed')
-        with dispatch._codex_slot(slots):
+        with contextlib.ExitStack() as held:
+            for handle in resources.acquire('codex', codex=True):
+                held.enter_context(handle)
             self.assertEqual(self.send()['status'], 'completed')
 
     def test_write_job_commits_pushes_and_opens_pr_from_its_checkout(self):

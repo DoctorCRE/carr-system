@@ -83,31 +83,6 @@ export function shapeDispositionError(value) {
   return null;
 }
 
-export function implementationShapeError(work, currentShape) {
-  const dispositionError = shapeDispositionError({
-    disposition: work?.shape_disposition,
-    fixed_surface_ref: work?.shape_fixed_surface_ref,
-    rationale: work?.shape_rationale,
-  });
-  if (dispositionError) return {
-    error: "work_shape_disposition_required",
-    work_request: work?.ref,
-    work_request_version: Number(work?.version),
-    resolution: "set an explicit required or not_required shape disposition before implementation; not_required must cite the already-fixed surface",
-  };
-  if (work.shape_disposition === "not_required") return null;
-  const shapeWorkVersion = currentShape ? Number(currentShape.work_request_version) : null;
-  if (shapeWorkVersion !== Number(work.version)) return {
-    error: "work_shape_required",
-    reason: shapeWorkVersion === null ? "missing" : "stale_after_work_request_change",
-    work_request: work.ref,
-    work_request_version: Number(work.version),
-    shape_work_request_version: shapeWorkVersion,
-    resolution: "read the current Work Request and shape stream, then append a shape revision bound to the fresh Work Request version",
-  };
-  return null;
-}
-
 async function sourcedDispositionLineage(c, workRequestId) {
   const row = (await c.query(
     `select ops.read_sourced_work_request_shape_disposition_lineage($1::uuid) as lineage /* work-shape:disposition-lineage */`,

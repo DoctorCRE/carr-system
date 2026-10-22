@@ -62,7 +62,8 @@
       "/private/tmp/claude-501/-Users-booko-carr-system/cc59a986-2fb1-445d-a055-bcbb0f0da0e2/scratchpad/merge-queue.log",
       "/private/tmp/claude-501/-Users-booko-carr-system/cc59a986-2fb1-445d-a055-bcbb0f0da0e2/scratchpad/watchdog/merge-queue.log"
     ],
-    "release_log": "out/release-pipeline.log"
+    "release_log": "out/release-pipeline.log",
+    "salesforce_refresh": "~/.config/carr/salesforce-refresh"
   },
   "board": "carr-v5",
   "board_github_enabled": false,
@@ -72,7 +73,7 @@
   ],
   "queue_error_patterns": ["NONGREEN", "parse error", "MERGE NOT ON MAIN"],
   "needs_joe_patterns": {
-    "credentials": ["waiting for authentication", "authentication required", "not logged in", "bad credentials", "token expired", "login required"],
+    "credentials": ["waiting for authentication", "authentication required", "not logged in", "bad credentials", "token expired", "login required", "salesforce sign-in needed"],
     "money": ["payment required", "billing approval required"],
     "client-facing": ["client-facing approval required", "external send approval required"]
   },
@@ -106,6 +107,7 @@
     "action_error": "Verify the recorded action intent and any process before retrying.",
     "record_error": "Read the reason: repair the request the record layer or board refused, or restore the one that was unreachable; then retry the same idempotency key.",
     "vendor_release_fetch_error": "Orchestrator: restore access to the named vendor source; the next hourly fetch clears this error on success.",
+    "salesforce_refresh": "Inspect the private refresh receipt. Restore Salesforce sign-in in Chrome for sign-out; repair page-shape drift or reconcile an incomplete journal before retry. Auto-clear on a fresh successful refresh.",
     "machine_cleanup": "Orchestrator: inspect out/machine-cleanup.json and retained-work reasons; verify the storage-hygiene calendar job on this machine. Auto-clear after a fresh successful cleanup and counts below thresholds."
   },
   "fixer": {
@@ -123,7 +125,7 @@
     "job_clone_threshold": 30,
     "success_max_age_seconds": 86400,
     "max_seconds": 240,
-    "max_items": 20,
+    "max_items": 200,
     "test_temp_age_seconds": 21600,
     "test_temp_max_items": 1000,
     "user_temp_bytes_threshold": 21474836480,

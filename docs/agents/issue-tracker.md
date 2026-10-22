@@ -19,9 +19,13 @@ request takes `base_version` from a fresh `work-request-card` read.
   that still need a bounded human action, and it takes no filters.
 - **Triage**: `review-and-triage`, which is **human-only**. An agent proposes the
   classification and Joe records it. See `triage-labels.md`.
-- **Withdraw**: `decline-work-request` with an `exit_reason`, or
-  `supersede-work-request` naming the replacement request. Both work only from
-  `captured`.
+- **Withdraw**: `decline-work-request` with an `exit_reason` works from
+  `captured` or `triaged` and preserves triage and withdrawal history.
+  Declining requires a human partner or a human-sponsored agent at both the
+  registered handler and database function.
+  `supersede-work-request` names the replacement request and works from `captured`,
+  or `triaged` when no downstream evidence names the request. Neither withdraws
+  `ready` or later work.
 - **Plan**: `propose-ready-plan` on a triaged request. Heavy work goes through the
   full research, review and acceptance path.
 

@@ -22,6 +22,7 @@ import json
 import os
 import re
 import subprocess
+import sqlite3
 import time
 import sys
 import tempfile
@@ -42,6 +43,12 @@ STATUSES = ("queued", "running", "review", "blocked", "question-for-orchestrator
 RETIRED_STATUSES = ("failed", "superseded")
 CONSUMER_PROOF_PENDING = "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
 CONSUMER_PROOF_FIELDS = frozenset({"schema", "outcome", "repo", "source_sha", "target", "workflow", "evidence_ref", "observed_at"})
+# PR #1940 introduced consumer proof. This cutoff never advances with the clock.
+LEGACY_PROOF_CUTOFF = datetime(2026, 10, 19, 9, 33, 8, tzinfo=timezone.utc)
+LEGACY_PR_REF = re.compile(
+    r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)"
+    r"|(?:(jbookout/(?:carr-system|doctorcre-app|software-factory)|carr-system|doctorcre-app|software-factory|App)\s+)?"
+    r"\bPR\s*#?\s*(\d+)", re.IGNORECASE)
 PIPELINE_STAGES = ("queued", "build", "review", "ci", "merged", "live")
 PR_STAGES = PIPELINE_STAGES[1:] + ("measured",)
 STAGE_LABELS = {
@@ -79,8 +86,9 @@ SNAPSHOT_TASK_FIELDS = frozenset("""
     pr_phase pr_head merge_sha pr_checks pr_links question review_verdict summary blocked_reason next_action evidence
     release_wait created_at updated_at completed_at merged_at manual_stage
     stage_entered_at stage_history question_ids human_ref kind related
-    work_request work_request_ref plan_ref plan_id slice_ref slice_id task_ref task_id job_ref job_id
-    milestone milestone_source slice
+    work_request work_request_ref work_request_id canonical_work_ref plan_ref plan_id plan slice_ref slice_id task_ref task_id job_ref job_id
+    parent_ref parent_id parent linkage_metadata_unavailable
+    milestone milestone_source slice blocked_by_task_ids parent_task_id
     delivery_target delivery_workflow delivery_source_sha consumer_proof
 """.split())
 BLOCKER_EXCERPT_LIMIT = 192
@@ -262,6 +270,8 @@ def atomic_write(path: Path, text: str) -> None:
 
 
 def write_json(state: dict[str, Any]) -> None:
+    if state.get("work_requests"):
+        repo_lib("progress_hierarchy").project(state)
     atomic_write(state_path(state["project"]), json.dumps(state, indent=2, sort_keys=False) + "\n")
 
 
@@ -1708,7 +1718,7 @@ def assemble_all_repos(prior: dict[str, Any],
     raw_tasks = prior.get("tasks")
     prior_tasks: dict[str, Any] = raw_tasks if isinstance(raw_tasks, dict) else {}
     at = stamp()
-    tasks: dict[str, dict[str, Any]] = {}
+    tasks: dict[str, dict[str, Any]] = copy.deepcopy(prior_tasks) if prior.get("work_requests") else {}
     rows = []
     failed = []
     for repo, result in reads.items():
@@ -1726,7 +1736,8 @@ def assemble_all_repos(prior: dict[str, Any],
                 key = card_key(repo, pr["number"])
                 card = pr_card(repo, pr, merged)
                 previous = prior_tasks.get(key) or {}
-                for field in ("delivery_target", "delivery_workflow", "consumer_proof", "consumer_proofs"):
+                for field in ("delivery_target", "delivery_workflow", "consumer_proof", "consumer_proofs",
+                              "work_request", "slice_id", "job_id", "job_ref", "card_id", "card_title", "card_description", "proposed_copy"):
                     if field in previous:
                         card[field] = previous[field]
                 if merged and pr.get("_legacy_terminal") and previous:
@@ -1749,6 +1760,7 @@ def assemble_all_repos(prior: dict[str, Any],
     raw_sync = prior.get("github_sync")
     previous_sync: dict[str, Any] = raw_sync if isinstance(raw_sync, dict) else {}
     return {
+        **{key: copy.deepcopy(prior[key]) for key in ("work_requests", "card_jobs", "card_aliases", "legacy_work_request", "later_triage") if key in prior},
         "version": 2, "project": ALL_REPOS_BOARD, "title": "All repositories", "kind": "all-repos",
         "created_at": prior.get("created_at") or at,
         "updated_at": max((str(t.get("updated_at") or "") for t in tasks.values()), default=at) or at,
@@ -1966,6 +1978,13 @@ def render(project: str, *, discover: bool = False) -> None:
 def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict[str, Any]],
                         keep: Collection[str] = ()) -> int:
     """Expire old GitHub cards and watchdog projections while retaining their notes."""
+    proposed, report = dispose_legacy(state, {}, now_utc())
+    archived = report["counts"]["legacy, unverified"]
+    if archived:
+        state["tasks"] = proposed["tasks"]
+        state["legacy_history"] = proposed["legacy_history"]
+    if state.get("work_requests"):
+        return archived
     cutoff = now_utc() - RECENT_MERGED
     expired = []
     for task_id, task in state.get("tasks", {}).items():
@@ -1985,7 +2004,120 @@ def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict
         expired.append(task_id)
     for task_id in expired:
         del state["tasks"][task_id]
-    return len(expired)
+    return len(expired) + archived
+
+
+def legacy_card(task: dict[str, Any]) -> bool:
+    created = parse_time(task.get("created_at"))
+    return (created is not None and created < LEGACY_PROOF_CUTOFF
+            and (task.get("pr") is not None or not is_retired(task))
+            and not task.get("consumer_proof") and not task.get("consumer_proofs"))
+
+
+def legacy_pr_refs(task: dict[str, Any]) -> set[tuple[str, int]]:
+    if task.get("pr") is not None:
+        repo, recorded_number = pr_key(task)
+        return {(repo.lower(), recorded_number)}
+    refs = set()
+    text = "\n".join(str(task.get(field) or "") for field in ("title", "note", "summary"))
+    for match in LEGACY_PR_REF.finditer(text):
+        if match[1]:
+            repo, number = match[1], match[2]
+        else:
+            repo, number = match[3] or task_repo(task), match[4]
+            if repo.lower() == "app":
+                repo = "doctorcre-app"
+            if "/" not in repo:
+                repo = "jbookout/" + repo
+        refs.add((repo.lower(), int(number)))
+    for repo, number in re.findall(r"reports/[\w.-]*-AF-(carr-system|doctorcre-app|software-factory)-(\d+)\.txt\b", text):
+        refs.add((f"jbookout/{repo}", int(number)))
+    return refs
+
+
+def legacy_pr_matches_subject(task: dict[str, Any], info: dict[str, Any]) -> bool:
+    ignored = set("the and for with from over into that this shared layer check test tests "
+                  "review independent public pull request follow build code fix add update "
+                  "opened tracked complete done carr system jbookout".split())
+
+    def words(text: str) -> set[str]:
+        return set(re.findall(r"[a-z][a-z0-9]{2,}", text.lower())) - ignored
+
+    subject = words(str(task.get("title") or ""))
+    candidates = [str(info.get("title") or "")]
+    candidates.extend(str(file.get("path") or "") for file in info.get("files", []))
+    return any(len(subject & words(candidate)) >= 2 for candidate in candidates)
+
+
+def dispose_legacy(state: dict[str, Any], fetched: dict, at: datetime) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Plan the pre-proof migration on a copy; never grants consumer proof."""
+    result = copy.deepcopy(state)
+    counts = {key: 0 for key in ("done", "dropped", "legacy, unverified", "kept")}
+    sample_groups: dict[str, list[dict[str, Any]]] = {key: [] for key in counts}
+    for task_id, task in list(result.get("tasks", {}).items()):
+        disposition, reason = "kept", "Outside the legacy disposition"
+        if legacy_card(task):
+            refs = legacy_pr_refs(task)
+            updated = parse_time(task.get("updated_at"))
+            if refs and (updated is None or updated >= LEGACY_PROOF_CUTOFF):
+                reason = "PR card updated since consumer proof was introduced, or update time is unknown"
+            elif len(refs) == 1:
+                repo, number = next(iter(refs))
+                info, error = fetched.get((repo, number), (None, "PR not read"))
+                reason = f"GitHub not verified: {error}" if error or not info else f"GitHub {info.get('state')}; keep"
+                if not error and info and task.get("pr") is None and not legacy_pr_matches_subject(task, info):
+                    reason = f"{repo}#{number}; PR title/files do not corroborate card subject; keep"
+                elif not error and info and info.get("state") == "MERGED" and merge_sha(info):
+                    disposition = "done"
+                    reason = (f"{repo}#{number}; merge SHA {merge_sha(info)}; "
+                              "legacy pre-proof card verified by GitHub state")
+                elif not error and info and info.get("state") == "CLOSED" and not info.get("mergeCommit"):
+                    disposition = "dropped"
+                    reason = (f"{repo}#{number}; merge SHA none (closed unmerged); "
+                              "legacy pre-proof card verified by GitHub state")
+            elif not refs and task_id.startswith(("dot-", "build-")):
+                if updated is not None and updated < at - STALE_AFTER:
+                    disposition = "legacy, unverified"
+                    reason = (f"legacy, unverified; retired {'Dot reports' if task_id.startswith('dot-') else 'builder handoffs'} "
+                              f"producer; last updated {task['updated_at']}; older than 14 days; no verifiable PR")
+            elif refs:
+                reason = "Multiple PR references; keep for review"
+        counts[disposition] += 1
+        if disposition != "kept":
+            result.setdefault("legacy_history", {})[task_id] = {
+                **result["tasks"].pop(task_id), "status": "archived" if disposition == "legacy, unverified" else disposition,
+                "reason": reason,
+                "legacy_disposition": {"schema": "carr-legacy-disposition.v1", "observed_at": at.isoformat()}}
+        if len(sample_groups[disposition]) < 10:
+            sample_groups[disposition].append({"card": task_id, "title": task.get("title", task_id),
+                                               "class": disposition, "reason": reason})
+    samples = [group[i] for i in range(10) for group in sample_groups.values() if len(group) > i][:10]
+    return result, {"counts": counts, "samples": samples}
+
+
+def command_dispose_legacy(args: argparse.Namespace) -> None:
+    initial = read_state(args.project)
+    keys = {next(iter(refs)) for task in initial.get("tasks", {}).values()
+            if legacy_card(task) and len(refs := legacy_pr_refs(task)) == 1}
+    fetched: dict[tuple[str, int], tuple[dict[str, Any] | None, str | None]] = {}
+    for repo, number in sorted(keys):
+        time.sleep(2)
+        try:
+            info = gh_json(["pr", "view", str(number), "--repo", repo, "--json",
+                            "number,title,files,state,mergeCommit,mergedAt,closedAt,url"])
+            if not isinstance(info, dict) or info.get("number") != number or info.get("url") != f"https://github.com/{repo}/pull/{number}":
+                raise RuntimeError("GitHub returned a mismatched PR identity")
+            fetched[repo, number] = info, None
+        except RuntimeError as exc:
+            fetched[repo, number] = None, str(exc)
+    proposed, report = dispose_legacy(initial, fetched, now_utc())
+    print("APPLY (local state only)" if args.apply else "DRY RUN (no board writes or publishes)")
+    print(json.dumps(report, indent=2))
+    if args.apply and proposed != initial:
+        with board_lock(args.project):
+            if read_state(args.project) != initial:
+                raise SystemExit("Board changed during legacy disposition; rerun dry-run")
+            write_json(proposed)
 
 
 def apply_sync(state: dict[str, Any],
@@ -2083,6 +2215,10 @@ def fit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     Merged cards, then the oldest History rows. Milestone cards, in-flight work, notes,
     decisions and the ledger are never dropped; if they alone are too large
     the snapshot is refused rather than published short."""
+    if snapshot.get("schema") == "carr-progress-board.v4":
+        if snapshot_size(snapshot) > 2097152:
+            raise SnapshotTooLarge("Work Request snapshot exceeds 2097152 UTF-16 units; no evidence was dropped")
+        return snapshot
     tasks, history = snapshot["tasks"], snapshot["history"]
 
     def discard_unused_defaults() -> int:
@@ -2187,9 +2323,30 @@ def cost_snapshot_reader() -> Callable:
     return module.load_snapshot
 
 
+def snapshot_linkage_metadata(task: dict[str, Any]) -> dict[str, Any]:
+    metadata = {"linkage_metadata_version": 1}
+    unsupported_linkage = ("dependency_refs", "depends_on", "blocked_by", "blocker_ref",
+                           "blocker_task_id", "parent_refs", "related_refs", "dependencies")
+    held = task.get("held")
+    if (any(task.get(key) is not None for key in unsupported_linkage)
+            or isinstance(held, dict) and held.get("blocker") is not None):
+        metadata["linkage_metadata_unavailable"] = True
+    return metadata
+
+
+@functools.lru_cache(maxsize=1)
+def work_queue_module():
+    spec = importlib.util.spec_from_file_location('carr_work_queue', REPO_ROOT / 'tools/room-bridge/work_queue.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
     """The versioned data contract the app page renders, including fresh local
     cost evidence. Full diagnostics stay local; the app receives bounded cards."""
+    if state.get("work_requests"):
+        return hierarchy_snapshot(state, costs=costs)
     tasks = {}
     all_tasks = state.get("tasks") or {}
     active = {task_id: copy.deepcopy(task) for task_id, task in all_tasks.items() if not is_retired(task)}
@@ -2199,6 +2356,7 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
         provider, model, effort = task_identity(task)
         card = {key: value for key, value in task.items()
                 if key in SNAPSHOT_TASK_FIELDS and value is not None}
+        card.update(snapshot_linkage_metadata(task))
         for key, value in card.items():
             if key.endswith("_at") and isinstance(value, str) and value.endswith("+00:00"):
                 card[key] = value[:-6] + "Z"
@@ -2223,6 +2381,8 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
         for qid, q in (state.get("questions") or {}).items() if q.get("answer")
     ]
     return fit_snapshot({
+        **({'work_queue': work_queue_module().board_projection()}
+           if state['project'] == 'carr-v5' else {}),
         "schema": SNAPSHOT_SCHEMA,
         "kind": state.get("kind") or "project",
         "project": state["project"],
@@ -2237,7 +2397,8 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
             task_id: {"title": task.get("title", task_id), "status": task.get("status"),
                       "reason": retired_reason(task), "executor": task.get("executor", "unassigned"),
                       "pr": task.get("pr"), "repo": task.get("repo"), "updated_at": task.get("updated_at")}
-            for task_id, task in all_tasks.items() if is_retired(task)},
+            for task_id, task in {**{k: t for k, t in all_tasks.items() if is_retired(t)},
+                                 **state.get("legacy_history", {})}.items()},
         "deliverables": list(state.get("deliverables") or [])[:24],
         "notes": [*list(state.get("notes") or []),
                   *({"text": str(note.get("title") or task_id) + "\n" + note["note"]}
@@ -2253,6 +2414,113 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
         "omitted": {"live": 0, "merged": 0, "history": 0},
         "updated_at": state.get("updated_at"),
     })
+
+
+def orchestrator_snapshot(state: dict[str, Any]) -> dict[str, Any]:
+    from progress_orchestrator import project
+    try:
+        queue = work_queue_module().board_projection()
+    except (OSError, RuntimeError, sqlite3.Error):
+        queue = None
+    portfolio = read_json_file(state_path(ALL_REPOS_BOARD))
+    normalized = copy.deepcopy(state)
+    for task in normalized.get('tasks', {}).values():
+        normalize_task(task)
+        task['activity_status'] = activity_status(task, now_utc())
+    return {'schema': SNAPSHOT_SCHEMA, 'project': 'orchestrator', 'title': 'Orchestrator',
+            'tasks': {}, 'history': {}, 'omitted': {'live': 0, 'merged': 0, 'history': 0},
+            'orchestrator': project(normalized, queue, portfolio=portfolio)}
+
+
+def require_primary_publication() -> None:
+    if not repo_lib('machine_role').is_primary(str(REPO_ROOT)):
+        raise RuntimeError('Orchestrator publication requires this machine to be primary')
+
+
+def publish_orchestrator(state: dict[str, Any]) -> int:
+    require_primary_publication()
+    # All local publishers, including other checkouts, share this lock.
+    path = Path(tempfile.gettempdir()) / 'carr-orchestrator-publication.lock'
+    with path.open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _publish_orchestrator(state)
+
+
+def _publish_orchestrator(state: dict[str, Any]) -> int:
+    from progress_orchestrator import retain_unavailable_queue
+    before = call_verb('read-progress-board', {'board_id': 'orchestrator'}).get('snapshot')
+    snapshot = orchestrator_snapshot(state)
+    view = snapshot['orchestrator']
+    bank = 1 - (before or {}).get('snapshot_json', {}).get('orchestrator', {}).get('bank', 1)
+    view['bank'] = bank
+    if before:
+        previous = copy.deepcopy(before.get('snapshot_json', {}).get('orchestrator'))
+        if previous:
+            for page in previous.get('pages', []):
+                saved = call_verb('read-progress-board', {'board_id': page['board_id']}).get('snapshot')
+                if not saved or saved['version'] != page['version']:
+                    raise RuntimeError('previous orchestrator page unavailable; observation retained')
+                previous['cards'].extend(saved['snapshot_json']['cards'])
+            retain_unavailable_queue(view, previous)
+    cards = sorted(view['cards'], key=lambda card: (card.get('changed_at') or '', card['id']), reverse=True)
+    view['total_cards'] = len(cards)
+    view['state_counts'] = dict(Counter(card['state'] for card in cards))
+    view['cards'], view['pages'] = cards[:100], []
+    for offset in range(100, len(cards), 100):
+        payload = {'cards': cards[offset:offset + 100]}
+        if snapshot_size(payload) > SNAPSHOT_BUDGET:
+            raise SnapshotTooLarge('orchestrator page exceeds publication budget; no work dropped')
+        board_id = f'orchestrator-page-{bank}-{offset // 100}'
+        saved = call_verb('read-progress-board', {'board_id': board_id}).get('snapshot')
+        if not saved or saved.get('snapshot_json') != payload:
+            args = {'board_id': board_id, 'base_version': int(saved['version']) if saved else 0, 'snapshot': payload}
+            call_verb('publish-board-snapshot', {**args, 'idempotency_key': stable_key('publish-board-snapshot', args)})
+            saved = call_verb('read-progress-board', {'board_id': board_id}).get('snapshot')
+        if not saved or saved.get('snapshot_json') != payload:
+            raise RuntimeError('orchestrator page did not read back')
+        view['pages'].append({'board_id': board_id, 'version': int(saved['version']), 'count': len(payload['cards'])})
+    if snapshot_size(snapshot) > SNAPSHOT_BUDGET:
+        raise SnapshotTooLarge('orchestrator manifest exceeds publication budget; previous observation retained')
+    args = {'board_id': 'orchestrator', 'base_version': int(before['version']) if before else 0,
+            'snapshot': snapshot}
+    call_verb('publish-board-snapshot', {**args, 'idempotency_key': stable_key('publish-board-snapshot', args)})
+    after = call_verb('read-progress-board', {'board_id': 'orchestrator'}).get('snapshot') or {}
+    if after.get('snapshot_json') != snapshot:
+        raise RuntimeError('published orchestrator observation did not read back')
+    return int(after['version'])
+
+
+def hierarchy_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
+    projection = repo_lib("progress_hierarchy").project(copy.deepcopy(state))
+    fields = (SNAPSHOT_TASK_FIELDS - {"plan_id", "plan_ref", "title", "summary", "stage_history", "release_wait"}) | {
+        "id", "parent_id", "done", "archived", "legacy_disposition", "card_title", "card_description", "branch", "reason"}
+    cards = {key: {**{field: value for field, value in card.items() if field in fields and value is not None},
+                   **snapshot_linkage_metadata(card)}
+             for key, card in projection.pop("cards").items()}
+    aliases = projection["aliases"]
+
+    def resolve_alias(ref: str) -> str:
+        seen: set[str] = set()
+        while ref not in cards and ref in aliases and ref not in seen:
+            seen.add(ref)
+            ref = aliases[ref]
+        return ref
+
+    for card in cards.values():
+        if isinstance(card.get("blocked_by_task_ids"), list):
+            card["blocked_by_task_ids"] = [
+                resolve_alias(ref) if isinstance(ref, str) else ref
+                for ref in card["blocked_by_task_ids"]]
+        parent = card.get("parent_task_id")
+        if isinstance(parent, str):
+            card["parent_task_id"] = resolve_alias(parent)
+    snapshot = {"schema": "carr-progress-board.v4", "project": state["project"],
+        "title": state.get("title") or "Work Requests", "kind": state.get("kind", "project"),
+        "tasks": cards, "hierarchy": projection, "task_counts": activity_counts(state.get("tasks", {}), now_utc()),
+        "github_sync": state.get("github_sync"), "updated_at": state.get("updated_at"),
+        "questions": state.get("questions", {}), "history": {}, "omitted": {"live": 0, "merged": 0, "history": 0},
+        "costs": costs if costs is not None else cost_snapshot_reader()(REPO_ROOT / "out" / "system-costs.json", now=now_utc())}
+    return fit_snapshot(snapshot)
 
 
 def question_revision(question: dict[str, Any], project: str) -> dict[str, Any]:
@@ -2300,6 +2568,8 @@ def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
 def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -> dict[str, int]:
     state = read_state(project)
     board = safe_project(project)
+    if board == LAUNCHD_BOARD:
+        publish_orchestrator(state)
     before = call_verb("read-progress-board", {"board_id": board})
     remote_snapshot = before.get("snapshot")
     snapshot = board_snapshot(state, costs=costs)
@@ -2598,27 +2868,44 @@ def command_reconcile(args: argparse.Namespace) -> None:
 
 @with_github_read_pass
 def command_render(args: argparse.Namespace) -> None:
+    if args.project == LAUNCHD_BOARD:
+        require_primary_publication()
     if args.project == ALL_REPOS_BOARD:
         build_all_repos()
         if args.publish:
             publish_board(ALL_REPOS_BOARD)
         return
     render(args.project, discover=True)
-    if args.publish or args.project == LAUNCHD_BOARD:
+    if args.project != LAUNCHD_BOARD:
+        if args.publish:
+            publish_board(args.project)
+        return
+    # Refresh source facts before publish_board projects the Orchestrator view.
+    # Legacy publication failures must not strand the canonical portfolio.
+    portfolio_available = True
+    try:
+        build_all_repos()
+    except RuntimeError as exc:
+        log(f"all-repos rebuild failed, publishing last known state: {exc}")
+        portfolio_available = state_path(ALL_REPOS_BOARD).exists()
+    publication_error = None
+    try:
         publish_board(args.project)
-    if args.project == LAUNCHD_BOARD:
+    except Exception as exc:
+        publication_error = exc
+        log(f"{args.project} publication failed: {exc}")
+    if publication_error is None:
         poll_board_answers(args.project)
         publish_needs_joe_local()
-        # The system-wide board rides the same scheduled job, after the
-        # project board so a gh outage never holds that one back. A failed
-        # rebuild is logged and the last known board is published again.
+    if portfolio_available:
         try:
-            build_all_repos()
-        except RuntimeError as exc:
-            log(f"all-repos rebuild failed, publishing last known state: {exc}")
-            if not state_path(ALL_REPOS_BOARD).exists():
-                return
-        publish_board(ALL_REPOS_BOARD)
+            publish_board(ALL_REPOS_BOARD)
+        except Exception as exc:
+            log(f"all-repos publication failed: {exc}")
+            if publication_error is None:
+                raise
+    if publication_error is not None:
+        raise publication_error
 
 
 def publish_needs_joe_local() -> None:
@@ -2662,6 +2949,9 @@ def command_init(args: argparse.Namespace) -> None:
 
 
 def command_task(args: argparse.Namespace) -> None:
+    binding = None
+    if getattr(args, "work_request", None):
+        binding = repo_lib("progress_hierarchy").load_request(args.work_request, call_verb)
     expected = json.loads(args.expected_task) if args.expected_task is not None else None
     if args.expected_task is not None and not isinstance(expected, dict):
         raise SystemExit("--expected-task must be a task object")
@@ -2674,6 +2964,11 @@ def command_task(args: argparse.Namespace) -> None:
                 for key, value in expected.items()):
             receipt["after"] = before
             return False
+        if binding is not None:
+            registry = state.setdefault("work_requests", {})
+            edited = {key: value for key, value in registry.get(args.work_request, {}).items()
+                      if key in {"card_title", "card_description", "proposed_copy"}}
+            registry[args.work_request] = {**binding, **edited}
         update_task(state, args)
         receipt["applied"] = True
         receipt["after"] = copy.deepcopy(state["tasks"][args.task_id])
@@ -2699,6 +2994,14 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> None:
     if args.evidence and stage != "live":
         raise SystemExit("--evidence requires --stage live")
     task = dict(prior)
+    for field in ("work_request", "slice_id", "job_id", "card_title", "card_description"):
+        value = getattr(args, field, None)
+        if value is not None:
+            task[field] = value
+    if not prior or state.get("work_requests"):
+        if task.get("work_request") not in state.get("work_requests", {}):
+            raise SystemExit("Capture and bind the Work Request before dispatching its job")
+        task.setdefault("slice_id", "implicit")
     if args.delivery_target is not None:
         task["delivery_target"] = args.delivery_target
     for field in ("delivery_workflow", "delivery_source_sha"):
@@ -2872,6 +3175,11 @@ def parser() -> argparse.ArgumentParser:
     task.add_argument("--creation-defaults", action="store_true",
                       help="apply title and executor metadata only when creating a task")
     task.add_argument("--summary")
+    task.add_argument("--work-request")
+    task.add_argument("--slice-id")
+    task.add_argument("--job-id")
+    task.add_argument("--card-title")
+    task.add_argument("--card-description")
     task.add_argument("--pr", type=int)
     task.add_argument("--repo")
     task.add_argument("--domain", choices=("system", "deals", "unclassified"))
@@ -2921,6 +3229,10 @@ def parser() -> argparse.ArgumentParser:
     reconcile.add_argument("--live", action="store_true", help="preview the published snapshot (read-only)")
     reconcile.add_argument("--apply", action="store_true", help="apply a verified plan to local state and publish")
     reconcile.set_defaults(func=command_reconcile)
+    legacy = commands.add_parser("dispose-legacy", help="preview pre-proof legacy disposition; never publishes")
+    legacy.add_argument("project")
+    legacy.add_argument("--apply", action="store_true", help="move verified or expired legacy cards to local History")
+    legacy.set_defaults(func=command_dispose_legacy)
     poll = commands.add_parser("poll-answers")
     poll.add_argument("project")
     poll.set_defaults(func=command_poll)
