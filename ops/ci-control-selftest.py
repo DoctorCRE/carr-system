@@ -43,6 +43,25 @@ def expression(value, github, cancelled=False):
 
 
 class Controls(unittest.TestCase):
+    def test_node_install_reuses_downloads_without_duplicating_dependency_audit(self):
+        wf = workflow()
+        setup = next(step for step in wf['jobs']['classes']['steps']
+                     if 'actions/setup-node@' in step.get('uses', ''))
+        self.assertEqual(setup['with'].get('cache'), 'npm')
+        self.assertEqual(setup['with'].get('cache-dependency-path', '').split(),
+                         ['mcp-server/package-lock.json', 'practice-plugin/package-lock.json'])
+        install = next(step for step in wf['jobs']['classes']['steps']
+                       if step.get('name') == 'Install Node dependencies')
+        commands = install['run'].splitlines()
+        self.assertEqual(commands, ['npm --prefix mcp-server ci --no-audit',
+                                    'npm --prefix practice-plugin ci --no-audit'])
+        self.assertTrue(any('dependency' in group for group in
+                            wf['jobs']['classes']['strategy']['matrix']['classes']))
+        # The strict class, rather than install's informational audit, retains
+        # the existing vulnerability policy and fails on unavailable reports.
+        self.assertIn('["npm", "audit", "--omit=dev", "--audit-level=high", "--json"]',
+                      (ROOT / 'ops/ci-dep-check.py').read_text())
+
     def test_events(self):
         wf = workflow()
         def event(action, sha='a', base='main', run=1):
