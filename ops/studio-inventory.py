@@ -123,7 +123,7 @@ def compare(root):
     folder = root / 'out/studio-failover'
     s, m = [json.loads((folder / (h + '.json')).read_text()) for h in ('studio', 'macbook')]
     labels = {p.removesuffix('.plist') for p in PRIMARY_ONLY}
-    captured = {'com.carr.cliproxyapi', 'local.carr-progress-board', 'com.carr.fix-train',
+    captured = {'com.carr.cliproxyapi', 'local.carr-progress-board',
                 'local.ds4-flash-next', 'local.flash-desk'}
     labels.update(captured)
     credentials = {
@@ -167,7 +167,6 @@ def compare(root):
                          'enabled': not installed_role['disabled']})
     manual = [
         ('guarded host startup', 'verify guarded or safely disabled startup on both hosts; bootstrap Studio with failback-to-studio.sh while MacBook is fenced; keep an unprepared returning host off until its old startup jobs are disabled'),
-        ('generated fix-train executable', 'provision and verify out/orch/fix-train.sh from its owning orchestrator'),
         ('local model runtimes', 'provision model binaries and weights; verify their local server endpoints'),
         ('local PostgreSQL instances', 'classify observed test clusters; restore and verify any persistent cluster'),
         ('Model Room profile state', 'restore Hermes profiles and verify non-interactive desk authentication'),
