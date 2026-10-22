@@ -877,7 +877,7 @@ class QueueTests(unittest.TestCase):
     def test_regeneration_push_timeout_but_landed_reconciles_automatically(self):
         card_id = self.prepare_pinned_head()
         script = self.root / 'tools/prepare_pr.py'
-        script.write_text(script.read_text() + 'raise SystemExit("git push timed out after landing")\n')
+        script.write_text(script.read_text() + 'import subprocess; raise subprocess.TimeoutExpired(["git", "push"], 120)\n')
         self.q.tick()
         self.restart()
         self.q.tick()
@@ -896,7 +896,7 @@ class QueueTests(unittest.TestCase):
         script.write_text(script.read_text().replace(
             'state = Path(os.environ["FAKE_GH_STATE"])',
             'marker = receipt.with_suffix(".attempt")\n'
-            'if not marker.exists():\n marker.touch(); raise SystemExit("git push timed out before landing")\n'
+            'if not marker.exists():\n marker.touch(); import subprocess; raise subprocess.TimeoutExpired(["git", "push"], 120)\n'
             'state = Path(os.environ["FAKE_GH_STATE"])'))
         self.q.tick()
         self.assertEqual(self.load()['prs'][f'{module.REPOS[0]}#1']['head']['sha'], self.approved)
@@ -909,6 +909,20 @@ class QueueTests(unittest.TestCase):
         self.assertEqual((action['phase'], action['attempts']), ('done', 2))
         row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.updated,)).fetchone()
         self.assertEqual(row['outcome'], 'waiting_ci')
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_regeneration_transport_timeout_reconciles_a_finished_push(self):
+        card_id = self.prepare_pinned_head()
+        communicate = module.subprocess.Popen.communicate
+        def timeout(process, *args, **kwargs):
+            result = communicate(process, *args, **kwargs)
+            if str(self.root / 'tools/prepare_pr.py') in process.args:
+                raise subprocess.TimeoutExpired(process.args, 1500)
+            return result
+        with patch.object(module.subprocess.Popen, 'communicate', timeout):
+            self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.updated)
         self.assertEqual(self.calls('merge'), [])
 
     def test_hold_during_lost_regeneration_response_requires_manual_repin(self):
