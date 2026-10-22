@@ -59,6 +59,11 @@ test('existing party and lead instructions block exact email matches in PostgreS
         (4, 'stage@example.test', 'active', null, null),
         (5, 'allowed@example.test', 'active', null, null);
       insert into lead values(3, true, 'new'), (4, false, 'do_not_contact');`);
+    // The deployed reader has these column grants (0500 and 0839), not table ownership.
+    await db.query(`create role carr_reader;
+      grant select(id,email,contact_state) on party to carr_reader;
+      grant select(party_id,suppressed,stage) on lead to carr_reader;
+      set role carr_reader;`);
     const read = emails => TOOLS['mail-contact-policy'].handler(db, {}, {emails});
     assert.deepEqual(await read(['unknown@example.test', 'allowed@example.test', 'blocked@example.test',
       'suppressed@example.test', 'stage@example.test']), {recipients: [
@@ -68,7 +73,9 @@ test('existing party and lead instructions block exact email matches in PostgreS
       {email: 'suppressed@example.test', blocked: true},
       {email: 'unknown@example.test', blocked: false},
     ]});
+    await db.query("reset role");
     await db.query("update party set contact_state='do_not_contact' where id=5");
+    await db.query('set role carr_reader');
     assert.deepEqual(await read(['allowed@example.test']),
       {recipients: [{email: 'allowed@example.test', blocked: true}]}, 'each read sees a new instruction');
   } finally {
