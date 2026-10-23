@@ -18,7 +18,7 @@ class Health(unittest.TestCase):
         response = subprocess.CompletedProcess([], 1, '',
             'TOOL ERROR {"error":"unknown_tool","name":"check-feature-switches"}\n')
         with patch.object(sys, 'argv', [str(p)]), \
-             patch.object(subprocess, 'run', return_value=response), \
+             patch('lib.record_call._run_process', return_value=response), \
              redirect_stdout(io.StringIO()) as output:
             code = m.main()
         self.assertEqual(code, 3)
@@ -40,7 +40,7 @@ class Health(unittest.TestCase):
         for rc, stdout, stderr in failures:
             with self.subTest(stderr=stderr, stdout=stdout), \
                  patch.object(sys, 'argv', [str(p)]), \
-                 patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], rc, stdout, stderr)), \
+                 patch('lib.record_call._run_process', return_value=subprocess.CompletedProcess([], rc, stdout, stderr)), \
                  redirect_stdout(io.StringIO()) as output:
                 self.assertEqual(m.main(), 2)
                 self.assertIn('UNKNOWN feature switches:', output.getvalue())

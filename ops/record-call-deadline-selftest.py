@@ -22,6 +22,18 @@ from lib import record_call
 
 class RecordDeadlineTests(unittest.TestCase):
     def test_timeout_stops_descendant_that_ignores_termination(self):
+        self.run_descendant_fixture(interrupt=False)
+
+    def test_stage_interruption_stops_descendants_before_propagating(self):
+        self.run_descendant_fixture(interrupt=True)
+
+    def run_descendant_fixture(self, *, interrupt):
+        class StageExpired(BaseException):
+            pass
+
+        def expire(_signum, _frame):
+            raise StageExpired()
+
         with tempfile.TemporaryDirectory(prefix="rcd-", dir="/tmp") as directory:
             root = Path(directory)
             child = root / "child.py"
@@ -43,18 +55,33 @@ time.sleep(20)
                               "time.sleep(20)\n")
             parent.chmod(0o700)
             started = time.monotonic()
+            previous_handler = signal.signal(signal.SIGALRM, expire)
             try:
                 with patch.object(record_call, "RUN_SH", parent):
-                    result = record_call.call_verb("synthetic-read", {}, timeout=0.4,
-                                                   env={"HOME": directory, "PATH": "/usr/bin:/bin"})
-                self.assertEqual(result.kind, record_call.TRANSIENT)
+                    if interrupt:
+                        signal.setitimer(signal.ITIMER_REAL, 0.4)
+                        with self.assertRaises(StageExpired):
+                            record_call.call_verb("synthetic-read", {}, timeout=10,
+                                                  env={"HOME": directory, "PATH": "/usr/bin:/bin"})
+                    else:
+                        result = record_call.call_verb("synthetic-read", {}, timeout=0.4,
+                                                       env={"HOME": directory, "PATH": "/usr/bin:/bin"})
+                        self.assertEqual(result.kind, record_call.TRANSIENT)
                 self.assertLess(time.monotonic() - started, 2)
                 self.assertTrue(ready.exists(), "descendant started before timeout")
-                with socket.socket(socket.AF_UNIX) as probe:
-                    probe.settimeout(0.2)
-                    self.assertNotEqual(probe.connect_ex(str(address)), 0,
-                                        "timed-out record call left its descendant listening")
+                stopped = False
+                until = time.monotonic() + 0.5
+                while time.monotonic() < until:
+                    with socket.socket(socket.AF_UNIX) as probe:
+                        probe.settimeout(0.05)
+                        if probe.connect_ex(str(address)) != 0:
+                            stopped = True
+                            break
+                    time.sleep(0.01)
+                self.assertTrue(stopped, "timed-out record call left its descendant listening")
             finally:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.signal(signal.SIGALRM, previous_handler)
                 if ready.exists():
                     try:
                         os.kill(int(ready.read_text()), signal.SIGKILL)
@@ -99,6 +126,22 @@ globalThis.fetch = async (_url, options) => ({
             self.assertLess(time.monotonic() - started, 1.5)
             self.assertTrue(marker.exists(), "HTTP body received cancellation")
             self.assertIn("record call deadline exceeded", proc.stderr)
+
+    def test_timeout_owns_deadline_instead_of_inheriting_it(self):
+        selected = []
+
+        def runner(argv, **kwargs):
+            selected.append(kwargs["env"]["CARR_RECORD_DEADLINE_MS"])
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+        before = time.time() * 1000
+        record_call.call_verb("synthetic-read", {}, timeout=5,
+                             env={"CARR_RECORD_DEADLINE_MS": "1"}, runner=runner)
+        self.assertGreaterEqual(int(selected[0]), before + 4999)
+        self.assertLessEqual(int(selected[0]), time.time() * 1000 + 5000)
+        record_call.call_verb("synthetic-read", {}, timeout=None,
+                             env={"CARR_RECORD_DEADLINE_MS": "1"}, runner=runner)
+        self.assertEqual(selected[1], "0")
 
 
 if __name__ == "__main__":
