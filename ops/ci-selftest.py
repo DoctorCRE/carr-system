@@ -186,7 +186,6 @@ def test_gates_build_hxprobe_before_parallel_selftests():
             "Path('gate-ran').touch()\n")
         (root / "hooks").mkdir()
         (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
-        (root / "ops/boot-budget-check.py").write_text("raise SystemExit(0)\n")
         cargo = root / "bin/cargo"
         cargo.write_text("#!/bin/sh\n"
                          'test "$*" = "build --locked" || exit 9\n'
@@ -404,7 +403,6 @@ def test_gate_shards_execute_a_disjoint_complete_inventory():
         for path in inventory:
             (root / path).write_text("")
         (root / "hooks/gate-integrity.py").write_text("")
-        (root / "ops/boot-budget-check.py").write_text("")
         (root / "timeout.py").write_text(
             "import os,sys\n"
             "path=sys.argv[-1]\n"
@@ -414,7 +412,7 @@ def test_gate_shards_execute_a_disjoint_complete_inventory():
                               f"LOGDIR={shlex.quote(str(root / 'logs'))}", "FAILED=0",
                               "CI_SELFTEST_TIMEOUT_SECONDS=1", f"CI_TIMEOUT_HELPER={shlex.quote(str(root / 'timeout.py'))}",
                               "tree_fingerprint() { echo static; }", "ok() { :; }",
-                              "bad() { FAILED=1; }", "inherited_abort() { :; }",
+                              "bad() { FAILED=1; }",
                               'run_quiet() { local log="$1"; shift; "$@" >"$log" 2>&1; }',
                               "fail_tail() { :; }"))
         body = _ci_function_body("check_gates", "check_secret")
