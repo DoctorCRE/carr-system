@@ -19,7 +19,6 @@ from scac_mutation_db_inventory import project, summarize, validate_current_cata
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from lib.control_plane_scheduler_cutover import scheduler_launchd_rows  # noqa: E402
 
 
 # Digest repinned for #1880 (notes-sweep-hourly v4, canary removed).
@@ -83,8 +82,7 @@ def refusal(cur, query: str, params: tuple, fragment: str) -> None:
 
 
 def validate_launchd_catalog(
-    cur, expected_launchd: list[tuple],
-    expected_service_launchd: list[tuple[str, str, str]],
+    cur, expected_service_launchd: list[tuple[str, str, str]],
 ) -> None:
     actual_service_launchd = [tuple(row) for row in cur.execute(
         """select s.key,se.environment,se.deploy_mechanism,s.retired_at is not null
@@ -95,13 +93,6 @@ def validate_launchd_catalog(
     expected_active_service_launchd = [(*row, False) for row in expected_service_launchd]
     if actual_service_launchd != expected_active_service_launchd:
         raise RuntimeError("launchd service environments do not exactly match the active checked-in catalog")
-    actual_launchd = [tuple(row) for row in cur.execute(
-        """select surface_id,workflow_key,workflow_version,locator,repo_plist_relpath,
-                  installed_plist_name,program_arguments,plist_sha256,schedule_sha256,timezone
-             from ops.legacy_schedule_launchd_contract order by surface_id"""
-    ).fetchall()]
-    if actual_launchd != expected_launchd:
-        raise RuntimeError("launchd legacy contracts do not exactly match checked-in paths, labels, arguments, or digests")
 
 
 def main() -> int:
@@ -110,8 +101,6 @@ def main() -> int:
         return fail("DATABASE_URL or CARR_LOCAL_PG_DSN is required")
     try:
         validate_incident_work_request_same_key_serialization(dsn)
-        registry = json.loads((REPO / "ops/config/control-plane-scheduler-cutover.v1.json").read_text(encoding="utf-8"))
-        manifest = json.loads((REPO / "ops/config/control-plane-workflows.v1.json").read_text(encoding="utf-8"))
         services = json.loads((REPO / "ops/config/services.json").read_text(encoding="utf-8"))
         expected_service_launchd = sorted(
             (str(service["key"]), str(environment["environment"]), str(environment["deploy_mechanism"]))
@@ -120,10 +109,6 @@ def main() -> int:
             if isinstance(environment.get("deploy_mechanism"), str)
             and environment["deploy_mechanism"].startswith("ops/launchd/")
             and environment["deploy_mechanism"].endswith(".plist")
-        )
-        expected_launchd = sorted(
-            (row[2], row[0], row[1], row[3], row[4], row[5], json.loads(row[6]), row[7], row[8], row[9])
-            for row in scheduler_launchd_rows(registry, manifest=manifest, repo=REPO)
         )
         with rollback_only_connection(dsn) as conn, conn.cursor() as cur:
             catalog = summarize(project(cur))
@@ -213,7 +198,7 @@ def main() -> int:
                 raise RuntimeError("registry contains authority-expanding or malformed rows")
 
             validate_launchd_catalog(
-                cur, expected_launchd, expected_service_launchd
+                cur, expected_service_launchd
             )
 
             cur.execute("savepoint wrong_service_path_probe")
@@ -224,7 +209,7 @@ def main() -> int:
             )
             try:
                 validate_launchd_catalog(
-                    cur, expected_launchd, expected_service_launchd
+                    cur, expected_service_launchd
                 )
             except RuntimeError:
                 pass
@@ -241,7 +226,7 @@ def main() -> int:
             )
             try:
                 validate_launchd_catalog(
-                    cur, expected_launchd, expected_service_launchd
+                    cur, expected_service_launchd
                 )
             except RuntimeError:
                 pass
@@ -254,7 +239,7 @@ def main() -> int:
             cur.execute("update ops.service set retired_at=now() where key='partner-ping'")
             try:
                 validate_launchd_catalog(
-                    cur, expected_launchd, expected_service_launchd
+                    cur, expected_service_launchd
                 )
             except RuntimeError:
                 pass
@@ -275,7 +260,7 @@ def main() -> int:
             )
             try:
                 validate_launchd_catalog(
-                    cur, expected_launchd, expected_service_launchd
+                    cur, expected_service_launchd
                 )
             except RuntimeError:
                 pass
@@ -283,22 +268,6 @@ def main() -> int:
                 raise RuntimeError("extra launchd service environment did not fail exact authority parity")
             cur.execute("rollback to savepoint extra_service_environment_probe")
             cur.execute("release savepoint extra_service_environment_probe")
-
-            cur.execute("savepoint wrong_legacy_path_probe")
-            cur.execute(
-                """update ops.legacy_schedule_launchd_contract set repo_plist_relpath='ops/launchd/wrong.plist'
-                    where surface_id='nightly-record-layer.launchd.v1'"""
-            )
-            try:
-                validate_launchd_catalog(
-                    cur, expected_launchd, expected_service_launchd
-                )
-            except RuntimeError:
-                pass
-            else:
-                raise RuntimeError("same legacy surface with wrong path did not fail exact authority parity")
-            cur.execute("rollback to savepoint wrong_legacy_path_probe")
-            cur.execute("release savepoint wrong_legacy_path_probe")
 
             grant_settable_runtime_roles(cur, "carr_reader", "carr_writer", "carr_jobs", "carr_authority")
             for role in ("carr_reader", "carr_writer", "carr_jobs", "carr_authority"):

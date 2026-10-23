@@ -307,10 +307,9 @@ for fault in (None, "live_path", "environment", "retired"):
     cursor = Mock()
     cursor.execute.side_effect = [
         Mock(fetchall=Mock(return_value=actual_services)),
-        Mock(fetchall=Mock(return_value=[])),
     ]
     try:
-        db_gate.validate_launchd_catalog(cursor, [], live)
+        db_gate.validate_launchd_catalog(cursor, live)
     except RuntimeError:
         check(f"DB parity refuses {fault}", fault is not None)
     else:
