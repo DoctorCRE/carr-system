@@ -544,6 +544,39 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query("insert into vendor(id,party_id,category,created_by,updated_by) values($1,$2,'banker',$3,$3),($4,$2,'banker',$3,$3)", [id(22),id(21),actor.id,id(23)]);
       return {deal_id:id(4),role:'lender',company_party_id:id(20),contact_party_id:id(21)};
     };
+    await t.test('quoted activity retains human provenance on each vendor assignment event', async () => transaction(async () => {
+      const {deal_id,...entry} = await assignmentFixture();
+      const quote = 'Synthetic partner says this banker is the lender';
+      const key = randomUUID();
+      await TOOLS['log-activity'].handler(c,actor,{ref:deal_id,kind:'call',summary:'Synthetic sourced assignment',human_quote:quote,idempotency_key:key,
+        vendor_assignments:[{...entry,vendor_id:id(22),base_version:1,assignment_base_version:1,note:'Keep this note'},
+          {...entry,role:'attorney',vendor_id:id(23),base_version:1,assignment_base_version:1}]});
+      const events = (await c.query('select field,cause,human_quote,idempotency_key,via,client_id from event where idempotency_key=$1 order by mutation_order',[key])).rows;
+      assert.equal(events.filter(e=>e.field==='vendor_assignment').length,2);
+      assert.equal(events.length,3, 'two role assertions and their activity share the same source');
+      for (const event of events) {
+        assert.equal(event.cause,'human_stated');
+        assert.equal(event.human_quote,quote);
+        assert.equal(event.via,actor.via);
+        assert.equal(event.client_id,actor.client_id);
+      }
+    }));
+
+    await t.test('invoiced deal detail retains vendor cards and agrees with the closed board', async () => transaction(async () => {
+      const {deal_id,...entry} = await assignmentFixture();
+      await TOOLS['update-vendor'].handler(c,actor,{vendor:id(22),base_version:1,assignment_base_version:1,idempotency_key:randomUUID(),fields:{deal_assignments:[{...entry,deal_id}]}});
+      const before = await TOOLS['get-deal-room'].handler(c,actor,{deal:deal_id});
+      assert.equal(before.vendors.length,1);
+      await c.query("update deal set phase='closed',outcome='won',closed_on=current_date,invoiced_on=current_date where id=$1",[deal_id]);
+      const detail = await TOOLS['get-deal-room'].handler(c,actor,{deal:deal_id});
+      assert.deepEqual(detail.vendors,before.vendors);
+      const board = await TOOLS['deal-room-board'].handler(c,actor,{});
+      assert.deepEqual(board.closed_deals.find(d=>d.id===deal_id).vendors,detail.vendors);
+      await c.query('update deal_vendor_assignment set active=false where deal_id=$1',[deal_id]);
+      const empty = await TOOLS['get-deal-room'].handler(c,actor,{deal:deal_id});
+      assert.deepEqual(empty.vendors,[]);
+    }));
+
     await t.test('retired company assignment permits explicit contact reassignment while active duplicates refuse', async () => transaction(async () => {
       const entry = await assignmentFixture();
       await c.query("insert into vendor(id,party_id,category,created_by,updated_by) values($1,$2,'banker',$3,$3)", [id(24),id(20),actor.id]);
