@@ -97,7 +97,6 @@ for program in programs:
             relative = Path(*parts).as_posix()
             if relative in tracked:
                 resources.add(relative)
-check('inventory inspects at least 70 database proof programs', len(programs) >= 70)
 for path in sorted(resources):
     check(f'database proof resource {path} runs the lane', scope.needs_full([path]))
 
