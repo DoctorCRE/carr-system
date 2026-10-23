@@ -1,62 +1,92 @@
-"""Exercise the launcher with a real Git origin and a stand-in Codex CLI."""
+"""Exercise the launcher with fixture files and deterministic subprocess results."""
+import contextlib
+import io
 import json
-import os
 from pathlib import Path
+import runpy
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "ops"))
-from git_env import fixture_env
+sys.path.insert(0, str(ROOT / "bin"))
+import skill_picker
 
 
 class CodexJobTests(unittest.TestCase):
     def setUp(self):
-        self.env = fixture_env()
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.origin = self.root / 'origin'
+        self.origin = self.root / "origin"
         self.origin.mkdir()
-        self.git('init', '-q', '-b', 'main')
-        self.git('config', 'user.email', 'jbookout@users.noreply.github.com')
-        self.git('config', 'user.name', 'Test')
-        (self.origin / 'hello.txt').write_text('hello\n')
-        self.git('add', 'hello.txt')
-        message = self.root / 'commit.txt'
-        message.write_text('fixture\n')
-        self.git('-c', 'core.hooksPath=/dev/null', 'commit', '-q', '-F', str(message))
-        cli = self.root / 'codex'
-        cli.write_text('''#!/usr/bin/env python3
-import json, os, pathlib, subprocess, sys, time
-args = sys.argv[1:]
-clone = pathlib.Path(args[args.index('-C') + 1])
-assert (clone / 'hello.txt').read_text() == 'hello\\n'
-branch = subprocess.check_output(['git', '-C', str(clone), 'branch', '--show-current'], text=True).strip()
-pathlib.Path(os.environ['OBSERVED']).write_text(json.dumps({'args': args, 'clone': str(clone), 'branch': branch, 'stdin': sys.stdin.read()}))
-while os.environ.get('CODEX_WAIT'):
-    time.sleep(.05)
-pathlib.Path(args[args.index('-o') + 1]).write_text('top-level files: 1\\n')
-print('Codex progress')
-sys.exit(int(os.environ.get('CODEX_EXIT', '0')))
-''')
-        cli.chmod(0o755)
-        self.env = {**self.env, 'PATH': str(self.root) + os.pathsep + os.environ['PATH'],
-                    'OBSERVED': str(self.root / 'observed.json'), 'TYPESAFE_API_KEY': ''}
+        (self.origin / "hello.txt").write_text("hello\n")
+        self.exit_code = 0
+        self.terminate_job = False
+        self.branch = None
+        self.handlers = {}
 
-    def git(self, *args):
-        return subprocess.run(['git', '-C', str(self.origin), *args], check=True,
-                              capture_output=True, text=True, env=self.env)
+    def run_command(self, command, **kwargs):
+        """Fake Git and Codex at the launcher's existing subprocess seam."""
+        if command[:2] == ["git", "clone"]:
+            self.assertEqual(command[:-1], ["git", "clone", "--quiet", "--depth", "1", "--", str(self.origin)])
+            self.assertTrue(kwargs["check"])
+            self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
+            shutil.copytree(self.origin, command[-1])
+        elif command[0] == "git":
+            self.assertTrue(kwargs["check"])
+            self.assertEqual(command[1], "-C")
+            self.assertTrue((Path(command[2]) / "hello.txt").exists())
+            if command[3] == "checkout":
+                self.assertEqual(command[3:6], ["checkout", "--quiet", "-b"])
+                self.branch = command[6]
+            else:
+                self.assertEqual(command[3:], ["config", "user.email", "jbookout@users.noreply.github.com"])
+        else:
+            self.assertEqual(command[:2], ["codex", "exec"])
+            args = command[1:]
+            clone = Path(args[args.index("-C") + 1])
+            self.assertEqual((clone / "hello.txt").read_text(), "hello\n")
+            self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
+            self.assertIs(kwargs["stdout"], sys.stderr)
+            (self.root / "observed.json").write_text(json.dumps({
+                "args": args, "clone": str(clone), "branch": self.branch, "stdin": "",
+            }))
+            if self.terminate_job:
+                self.handlers[signal.SIGTERM](signal.SIGTERM, None)
+            Path(args[args.index("-o") + 1]).write_text("top-level files: 1\n")
+            print("Codex progress", file=sys.stderr)
+            return subprocess.CompletedProcess(command, self.exit_code)
+        return subprocess.CompletedProcess(command, 0)
 
     def run_job(self, *extra):
-        return subprocess.run([str(ROOT / 'bin/codex-job'), str(self.origin), 'test/count',
-                               'Count the top-level files and stop.', *extra],
-                              env=self.env, input='do not append this to the brief',
-                              capture_output=True, text=True)
+        argv = [str(ROOT / "bin/codex-job"), str(self.origin), "test/count",
+                "Count the top-level files and stop.", *extra]
+        # Skill selection has its own fake-SDK suite. This launcher test needs
+        # only its prepared brief, never the user's catalog or credential file.
+        def install_handler(signum, handler):
+            self.handlers[signum] = handler
+
+        with mock.patch.object(sys, "argv", argv), \
+                mock.patch.object(sys, "prefix", str(ROOT / ".venv")), \
+                mock.patch.object(signal, "signal", side_effect=install_handler) as signals, \
+                mock.patch.object(sys, "stdin", io.StringIO("do not append this to the brief")), \
+                mock.patch.object(skill_picker, "prepare", side_effect=lambda brief, _: ("Skills:\n\n" + brief, [])) as prepare, \
+                mock.patch.object(subprocess, "run", side_effect=self.run_command), \
+                contextlib.redirect_stdout(io.StringIO()) as stdout, \
+                contextlib.redirect_stderr(io.StringIO()) as stderr:
+            with self.assertRaises(SystemExit) as exited:
+                runpy.run_path(str(ROOT / "bin/codex-job"), run_name="__main__")
+            code = exited.exception.code
+            signals.assert_called_once_with(signal.SIGTERM, self.handlers[signal.SIGTERM])
+            observed = json.loads((self.root / "observed.json").read_text())
+            prepare.assert_called_once_with(argv[3], Path(observed["clone"]))
+        return subprocess.CompletedProcess(argv, code, stdout.getvalue(), stderr.getvalue())
 
     def test_fresh_branch_final_message_and_cleanup(self):
         result = self.run_job('-c', 'model_reasoning_effort=low')
@@ -73,7 +103,7 @@ sys.exit(int(os.environ.get('CODEX_EXIT', '0')))
         self.assertFalse(Path(observed['clone']).parent.exists())
 
     def test_failed_codex_preserves_its_exit_code_and_final_message_then_cleans_up(self):
-        self.env['CODEX_EXIT'] = '7'
+        self.exit_code = 7
         result = self.run_job()
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertEqual(result.stdout, 'top-level files: 1\n')
@@ -81,22 +111,10 @@ sys.exit(int(os.environ.get('CODEX_EXIT', '0')))
         self.assertFalse(Path(observed['clone']).parent.exists())
 
     def test_termination_cleans_up_the_clone(self):
-        self.env['CODEX_WAIT'] = '1'
-        with subprocess.Popen([str(ROOT / 'bin/codex-job'), str(self.origin), 'test/count',
-                               'Count the files and stop.'], env=self.env,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as job:
-            try:
-                deadline = time.monotonic() + 10
-                while not (self.root / 'observed.json').exists() and time.monotonic() < deadline:
-                    time.sleep(.02)
-                self.assertTrue((self.root / 'observed.json').exists())
-                job.terminate()
-                _, error = job.communicate(timeout=10)
-                self.assertEqual(job.returncode, 143, error)
-            finally:
-                if job.poll() is None:
-                    job.kill()
-                    job.communicate(timeout=10)
+        self.terminate_job = True
+        result = self.run_job()
+        self.assertTrue((self.root / 'observed.json').exists())
+        self.assertEqual(result.returncode, 143, result.stderr)
         observed = json.loads((self.root / 'observed.json').read_text())
         self.assertFalse(Path(observed['clone']).parent.exists())
 
