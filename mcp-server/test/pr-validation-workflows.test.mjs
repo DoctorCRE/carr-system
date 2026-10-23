@@ -170,3 +170,22 @@ test("running Worker canary remains independent from subscribed validation event
     assert.notEqual(policy(read(file), event).group, canary.concurrency.group);
   }
 });
+
+
+test("test-first comparisons provide the same isolated PostgreSQL service as unit checks", () => {
+  const ci = read("ci.yml"), footprint = ci.jobs["test-first"];
+  const unit = ci.jobs.classes.services.postgres;
+  const postgres = footprint.services?.postgres;
+  assert.ok(postgres, "changed database tests must run on head, not fail for missing PostgreSQL");
+  assert.ok(unit.image.includes(postgres.image), "use the same pinned PostgreSQL image as unit checks");
+  assert.deepEqual(postgres.env, unit.env);
+  assert.deepEqual(postgres.ports, unit.ports);
+  assert.equal(postgres.options, unit.options);
+  const proof = footprint.steps.find(step => step.name === "Prove changed tests distinguish the base and head code");
+  const dsn = new URL(proof.env.CARR_CI_DATABASE_URL);
+  assert.equal(dsn.hostname, "localhost");
+  assert.equal(dsn.port, "5432");
+  assert.equal(dsn.username, postgres.env.POSTGRES_USER);
+  assert.equal(dsn.password, postgres.env.POSTGRES_PASSWORD);
+  assert.equal(dsn.pathname, `/${postgres.env.POSTGRES_DB}`);
+});
