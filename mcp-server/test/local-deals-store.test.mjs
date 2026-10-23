@@ -810,7 +810,11 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             invoiced_on: null, closed_on: outcome ? '2026-10-01' : null, lane: 'territory', outcome,
           }], name);
           const prior = structuredClone(result);
-          if (name === 'deal-room-board') { delete prior.closed_deals; delete prior.lost_deals; }
+          if (name === 'deal-room-board') {
+            assert.equal(result.deals[0].base_version, reads['read-deal-reconciliation'].base_version,
+              'the displayed board values and replacement writes share the Deal version');
+            delete prior.closed_deals; delete prior.lost_deals;
+          }
           if (name === 'get-deal-room') {
             assert.equal(prior.schema_version,'deal-timeline.v1');
             assert.equal(prior.lease,null);
@@ -825,7 +829,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
           });
           const oldRows = rowsOf(baseline[name]);
           rowsOf(prior).forEach(row => { for (const field of ['client_status','client_version','prospect_engagement_status']) delete row[field]; });
-          rowsOf(prior).forEach((row, index) => [...invoiceFields, 'next_step_required'].forEach(field => {
+          rowsOf(prior).forEach((row, index) => [...invoiceFields, 'next_step_required', 'base_version'].forEach(field => {
             if (!Object.hasOwn(oldRows[index], field)) delete row[field];
           }));
           assert.deepEqual(prior, baseline[name], `${name}: additive response only`);

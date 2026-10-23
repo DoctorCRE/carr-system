@@ -1128,6 +1128,14 @@ async function handleRequest(request, env, ctx, dependencies) {
         if (!sameOrigin(request, env)) {
           return json({ error: "forbidden", reason: "origin_mismatch" }, 403);
         }
+        // S2 callers retain the session's synchronizer token with the operation.
+        // The cookie can change after their fresh session read but before this
+        // request arrives; refuse that race before selecting an actor for MCP.
+        // Legacy clients/readers may omit the header during coordinated rollout.
+        if (request.headers.has("x-carr-csrf") &&
+            !equalStrings(request.headers.get("x-carr-csrf"), session.csrfToken)) {
+          return json({ error: "forbidden", reason: "csrf_mismatch" }, 403);
+        }
         response = await dependencies.mcpHandler(request, env, ctx, session.actor);
       }
       else if (url.pathname === "/pipeline/changes") response = await dependencies.pipelineHandler(request, env, ctx, session.actor);
