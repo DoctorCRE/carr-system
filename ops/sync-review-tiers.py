@@ -1,33 +1,15 @@
 #!/usr/bin/env python3
-"""sync-review-tiers.py — render the review-tier map for the Worker and for
-the cross-language test, and prove both renders are current.
+"""Render the retained JavaScript review-tier map from its JSON source.
 
-doctrine: engineering-workflow-sop
-
-WHY A GENERATED MODULE. The source-merge controller
-(mcp-server/src/source-merge-policy.js) is imported by engineering-runtime.js,
-which mcp.js imports, so it ships inside the Cloudflare Worker bundle, and a
-Worker has no filesystem at request time. The map therefore ships as a
-checked-in module. Python
-consumers read the JSON directly through lib/review_tiers.py.
-
-TWO OUTPUTS, one source (ops/config/review-tiers.v1.json):
-  mcp-server/src/review-tiers.generated.js      the map without its prose
-  ops/fixtures/review-tiers/tier-vectors.v1.json tier and noise decision of
-      the Python reader for a fixed probe set; the JS test asserts its own
-      reader returns the same, which is what holds the two readers equal.
-
-THIS SCRIPT IS THE ONLY WAY EITHER FILE IS MEANT TO BE PRODUCED, and --check
-is the same code path, so the write and the parity check cannot drift apart
-(rule a8c55a47). ops/review-tiers-selftest.py calls check().
+Python callers no longer classify review tiers. The existing parity vectors
+remain fixtures for the JavaScript reader and are not generated here.
 
 Usage:
-    python3 ops/sync-review-tiers.py            # regenerate both files
-    python3 ops/sync-review-tiers.py --check    # exit 1 when either is stale
+    python3 ops/sync-review-tiers.py
+    python3 ops/sync-review-tiers.py --check
 """
 import argparse
 import hashlib
-import importlib.util
 import json
 import os
 import sys
@@ -35,16 +17,7 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE_REL = "ops/config/review-tiers.v1.json"
 MODULE_PATH = os.path.join(REPO, "mcp-server", "src", "review-tiers.generated.js")
-VECTORS_PATH = os.path.join(REPO, "ops", "fixtures", "review-tiers", "tier-vectors.v1.json")
-BASELINE_PATH = os.path.join(REPO, "ops", "fixtures", "review-tiers", "pre-change-baseline.v1.json")
 ROW_KEYS = ("id", "tier", "class", "match", "pattern", "case_insensitive", "basename_prefix")
-
-
-def _reader():
-    spec = importlib.util.spec_from_file_location("review_tiers", os.path.join(REPO, "lib", "review_tiers.py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def _strip(rows):
@@ -97,64 +70,6 @@ def render_module(doc):
     return "\n".join(lines)
 
 
-def probe_paths(doc):
-    """A fixed probe set: every baseline path, plus one hit per rule, plus a
-    near miss per rule, so each match kind is exercised in both languages."""
-    with open(BASELINE_PATH, encoding="utf-8") as handle:
-        probes = list(json.load(handle)["paths"])
-    for row in doc["rules"] + doc["noise_exclusions"] + doc["never_exclude"] + doc.get("test_files", []):
-        pattern, kind = row["pattern"], row["match"]
-        if kind == "path":
-            probes += [pattern, pattern + ".bak", "x/" + pattern]
-        elif kind == "prefix":
-            probes += [pattern + "probe.py", "x/" + pattern + "probe.py"]
-        elif kind == "suffix":
-            basename = row["basename_prefix"] + "probe" if "basename_prefix" in row else "x"
-            probes += ["probe/" + basename + pattern, "probe/" + basename + pattern + ".txt"]
-            if "basename_prefix" in row:
-                probes += ["probe/x" + basename + pattern, "probe/" + basename + "/x" + pattern]
-        elif kind == "basename":
-            probes += ["probe/" + pattern, "probe/x" + pattern]
-        elif kind == "contains":
-            probes += ["probe/" + pattern + "/x.py", "probe/" + pattern.upper() + "/x.py"]
-    seen, ordered = set(), []
-    for path in probes:
-        if path not in seen:
-            seen.add(path)
-            ordered.append(path)
-    return ordered
-
-
-def render_vectors(doc):
-    rt = _reader()
-    vectors = [{"path": p, "tier": rt.tier_for_path(p, doc), "noise": rt.is_review_noise(p, doc), "test": rt.is_test_file(p, doc)}
-               for p in probe_paths(doc)]
-    value = {
-        "schema_version": "review-tier-vectors.v1",
-        "generated_by": "ops/sync-review-tiers.py",
-        "source": SOURCE_REL,
-        "map_digest": map_digest(doc),
-        "vectors": vectors,
-        "change_vectors": [
-            {"changes": [{"path": "lib/example.py", "additions": 2, "deletions": 1},
-                         {"path": "tests/test_example.py", "additions": 400, "deletions": 0}],
-             "summary": {"code_lines": 3, "test_lines": 400, "change_size": "small",
-                         "code_paths": ["lib/example.py"], "test_paths": ["tests/test_example.py"]}, "path_tier": 1},
-            {"changes": [{"path": "tests/test_example.py", "additions": 400, "deletions": 0}],
-             "summary": {"code_lines": 0, "test_lines": 400, "change_size": "small",
-                         "code_paths": [], "test_paths": ["tests/test_example.py"]}, "path_tier": 1},
-            {"changes": [{"path": "ops/example-selftest.py", "additions": 400, "deletions": 0}],
-             "summary": {"code_lines": 0, "test_lines": 400, "change_size": "small",
-                         "code_paths": [], "test_paths": ["ops/example-selftest.py"]}, "path_tier": 3},
-        ],
-    }
-    value["policy_digest"] = "sha256:" + hashlib.sha256(json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    for row in value["change_vectors"]:
-        row["decision"] = rt.review_decision(row["changes"], base="a" * 40, head="b" * 40,
-            policy_revision="c" * 40, diff_digest="sha256:" + "d" * 64, doc=doc)
-    return json.dumps(value, indent=1) + "\n"
-
-
 def _read(path):
     try:
         with open(path, encoding="utf-8") as handle:
@@ -164,16 +79,12 @@ def _read(path):
 
 
 def check():
-    """Problems, empty when the map is valid and both renders are current."""
-    rt = _reader()
-    doc = rt.load()
-    problems = [f"map: {p}" for p in rt.validate(doc)]
-    if problems:
-        return problems
+    """Problems, empty when the retained JavaScript render is current."""
+    with open(os.path.join(REPO, SOURCE_REL), encoding="utf-8") as handle:
+        doc = json.load(handle)
+    problems = []
     if _read(MODULE_PATH) != render_module(doc):
         problems.append(f"{os.path.relpath(MODULE_PATH, REPO)} is stale: run python3 ops/sync-review-tiers.py")
-    if _read(VECTORS_PATH) != render_vectors(doc):
-        problems.append(f"{os.path.relpath(VECTORS_PATH, REPO)} is stale: run python3 ops/sync-review-tiers.py")
     return problems
 
 
@@ -186,20 +97,13 @@ def main(argv=None):
         for problem in problems:
             print(f"FAIL {problem}")
         if not problems:
-            print("ok review-tier module and vectors are current")
+            print("ok retained review-tier module is current")
         return 1 if problems else 0
-    rt = _reader()
-    doc = rt.load()
-    problems = rt.validate(doc)
-    if problems:
-        for problem in problems:
-            print(f"FAIL map: {problem}")
-        return 1
+    with open(os.path.join(REPO, SOURCE_REL), encoding="utf-8") as handle:
+        doc = json.load(handle)
     with open(MODULE_PATH, "w", encoding="utf-8") as handle:
         handle.write(render_module(doc))
-    with open(VECTORS_PATH, "w", encoding="utf-8") as handle:
-        handle.write(render_vectors(doc))
-    print(f"wrote {os.path.relpath(MODULE_PATH, REPO)} and {os.path.relpath(VECTORS_PATH, REPO)}")
+    print(f"wrote {os.path.relpath(MODULE_PATH, REPO)}")
     return 0
 
 
