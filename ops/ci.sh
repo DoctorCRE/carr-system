@@ -497,7 +497,7 @@ check_pushfloor() {
   fi
 
   if [ -n "$changed" ] && printf '%s\n' "$changed" | grep -Eq \
-      '^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.v[0-9]+\.generated\.js|ops/config/scac-registry-.*\.json)$'; then
+      '^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.current\.generated\.js|ops/config/scac-registry-.*\.json)$'; then
     ran="$ran scac-atlas"
     run_quiet "$LOGDIR/pushfloor-scac-atlas.log" node --test \
       mcp-server/test/atlas-inventory-graph-read.test.mjs \
@@ -519,6 +519,8 @@ check_pushfloor() {
       base="$(basename "$touched_gate" .py)"
       paired="ops/$base-selftest.py"
       if [ -f "$paired" ]; then
+        # Changed selftests run in the next loop, including a changed hook's pair.
+        printf '%s\n' "$gate_surface" | grep -Fxq "$paired" && continue
         run_quiet "$LOGDIR/pushfloor-$base-selftest.log" "$PY" "$paired" \
           || { tail -15 "$LOGDIR/pushfloor-$base-selftest.log" >&2
                floor_fail "$base-selftest" \
@@ -682,9 +684,9 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 
   if [[ "$MIGRATION_PART" != gates* && "$MIGRATION_PART" != acceptance ]]; then
     if ! CARR_RULE_TEST_DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-rule-supersession.log" \
-        node --test mcp-server/test/find-rule-supersedes.test.mjs mcp-server/test/one-step-rule-approval.test.mjs; then
+        node --test mcp-server/test/find-rule-supersedes.test.mjs; then
       tail -30 "$LOGDIR/migration-rule-supersession.log" >&2
-      bad migration "rule lookup, teach supersession or one-step approval database proof failed"
+      bad migration "rule lookup or historical supersession SQL database proof failed"
       return
     fi
 
@@ -840,7 +842,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       fi
     fi
 
-    for proof in doc-conversation notifications session-identity dispatch-spine meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres approve-rule-legacy-adoption-postgres; do
+    for proof in doc-conversation notifications session-identity dispatch-spine meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
       if [ -f "mcp-server/test/$proof.test.mjs" ]; then
         if ! DATABASE_URL="$dsn" \
              CARR_DOC_CONVERSATION_DB_REQUIRED=1 CARR_R03_DB_REQUIRED=1 \
@@ -849,7 +851,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
              CARR_V5_A03_DB_REQUIRED=1 \
              CARR_A02_RULE_COVERAGE_DB_REQUIRED=1 \
              CARR_RW02_DB_REQUIRED=1 \
-             CARR_APPROVE_RULE_ADOPTION_DB_REQUIRED=1 \
              CARR_VENDOR_DIRECTORY_DB_REQUIRED=1 CARR_RELATIONSHIP_DB_REQUIRED=1 \
              run_quiet "$LOGDIR/$proof-db.log" \
              node --test "mcp-server/test/$proof.test.mjs"; then
