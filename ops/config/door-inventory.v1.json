@@ -195,18 +195,6 @@
       "evidence": "tools/dictation-rig/bin/install-capture-bridge.sh header (added 21442140)"
     },
     {
-      "path": "tools/doc-voice/master-bracket.py",
-      "class": "hand_tool",
-      "reason": "Joe runs it to A/B the mastering chain by ear against a new TTS engine, one stage at a time.",
-      "evidence": "tools/doc-voice/master-bracket.py docstring (added 09ff7d27)"
-    },
-    {
-      "path": "tools/doc-voice/render-doc.py",
-      "class": "hand_tool",
-      "reason": "Joe runs it to render a line in Doc's voice, roll several takes and keep the one that lands.",
-      "evidence": "tools/doc-voice/render-doc.py docstring (added cb72e9d4)"
-    },
-    {
       "path": "tools/prove-order40-windowing.py",
       "class": "one_shot",
       "reason": "Proved ORDER 40's two decision-history done-tests on the rehearsal branch before the personal set went to records.",
