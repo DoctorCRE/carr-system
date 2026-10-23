@@ -83863,7 +83863,7 @@ CREATE TABLE public.capture_post_call_action (
     CONSTRAINT capture_post_call_action_check CHECK ((((status = 'done'::text) AND (completed_at IS NOT NULL)) OR ((status = ANY (ARRAY['open'::text, 'dropped'::text])) AND (completed_at IS NULL)))),
     CONSTRAINT capture_post_call_action_description_check CHECK ((btrim(description) <> ''::text)),
     CONSTRAINT capture_post_call_action_status_check CHECK ((status = ANY (ARRAY['open'::text, 'done'::text, 'dropped'::text]))),
-    CONSTRAINT capture_post_call_item_shape CHECK (((item_title IS NULL) OR (((cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) >= 2) AND (cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) <= 4)) AND (source_ref IS NOT NULL) AND (btrim(source_ref) <> ''::text) AND (jsonb_typeof(item_bullets) = 'array'::text))))
+    CONSTRAINT capture_post_call_item_shape CHECK (((item_title IS NULL) OR ((cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) >= 2) AND (cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) <= 4) AND (source_ref IS NOT NULL) AND (btrim(source_ref) <> ''::text) AND (jsonb_typeof(item_bullets) = 'array'::text))))
 );
 
 
