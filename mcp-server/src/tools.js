@@ -328,7 +328,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if (verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if (verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
@@ -8405,7 +8405,7 @@ export async function assertRegisteredToolInput(name, tool, args = {}) {
 // authorityOnly verb added later is refused to it until someone adds it here.
 // humanCallerOnly verbs never belong on it.
 export const UNATTENDED_AUTHORITY_VERBS = Object.freeze([
-  "close-incident", "adjudicate-incident",
+
   "review-and-triage",
   "approve-lead-move", "undo-lead-move", "approve-lead-draft",
   "accept-ready-plan", "accept-ready-plan-amendment",
@@ -9666,7 +9666,7 @@ registerTools({
 }, "deploy-gap-inline");
 
 // Doctrine store verbs (P2, decision 82a2fb62) — same envelope, same contracts.
-registerTools(featureSwitchTools({ withEnvelope, writeEvent, executeRegisteredTool }), 'feature-switches');
+registerTools(featureSwitchTools({ withEnvelope, executeRegisteredTool }), 'feature-switches');
 registerTools(doctrineTools({ withEnvelope, writeEvent, ToolError }), "doctrine");
 registerTools(systemWorkTools(), "system-work-census");
 registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
@@ -9747,7 +9747,7 @@ registerTools(workShapeTools({ withEnvelope, writeEvent, ToolError }), "work-sha
 
 // Program 6: sourced additive capture and a safe card only. No lifecycle verbs.
 registerTools(workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }), "work-request-intake");
-registerTools(workPortfolioTools({ withEnvelope, writeEvent, ToolError }), "work-portfolio");
+registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 
 // Pure workbook-derived lease economics. No database, model, or write path.
 registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
@@ -9755,7 +9755,7 @@ registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
 // The partner room (Idea 78): shared AI-to-AI transcript both Macs poll; raw
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
-registerTools(agentProfileTools({ withEnvelope, writeEvent, ToolError }), "agent-profile");
+registerTools(agentProfileTools(), "agent-profile");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
 // src/resource-observation.v5.js.
@@ -9773,11 +9773,11 @@ registerTools(workflowCutoverTools({ withEnvelope, ToolError }), "workflow-cutov
 // Phase 1 CARR-native learning memory: evidence-backed context with explicit
 // candidate/promotion/correction/forgetting lifecycle. Memory never grants
 // authority; actor and sponsor scope are resolved by the server.
-registerTools(memoryTools({ withEnvelope, writeEvent, ToolError, assertNoCallerAuthorityFields }), "memory");
+registerTools(memoryTools({ ToolError, assertNoCallerAuthorityFields }), "memory");
 // Native Codex continuity is a separate, bounded surface.  It stores semantic
 // checkpoint revisions and lifecycle receipts; transcript bodies stay local to
 // the Codex adapter and Claude never reaches these verbs through its config.
-registerTools(codexContinuityTools({ withEnvelope, writeEvent, ToolError, assertNoCallerAuthorityFields }), "codex-continuity");
+registerTools(codexContinuityTools({ ToolError, assertNoCallerAuthorityFields }), "codex-continuity");
 
 // The operational incident ledger gets a front door (2026-08-23 rules-and-verbs
 // council, item 1 from both chairs). ops.incident has been written by two
@@ -9791,7 +9791,7 @@ registerTools(incidentTools({ withEnvelope, writeEvent, ToolError, authorization
 
 // Engineering Passport runtime: typed plan registration, server-derived
 // admission, and read-only closure projection over the canonical job ledger.
-registerTools(engineeringRuntimeTools({ withEnvelope, writeEvent, ToolError }), "engineering-runtime");
+registerTools(engineeringRuntimeTools({ ToolError }), "engineering-runtime");
 
 // Tour Operations Slice 2: bounded rights, evidence, assertion, and immutable
 // public-projection seams. Sealing is authority-only; publication is absent.

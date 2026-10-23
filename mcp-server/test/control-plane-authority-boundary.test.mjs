@@ -58,8 +58,8 @@ test("native OAuth authority is recomputed from current client bindings on every
 
 test("authority operation fails closed instead of falling back to writer credentials", async () => {
   await assert.rejects(() => callTool({ DATABASE_URL_WRITER: "writer-only" }, joe,
-    "retire-workflow-cutover-plan", {
-      idempotency_key: "authority-missing", plan_id: "10000000-0000-0000-0000-000000000001",
-      disable_receipt_id: "10000000-0000-0000-0000-000000000002", reason: "fixture",
+    "bind-rule-context-contract", {
+      idempotency_key: "authority-missing", rule_id: "10000000-0000-0000-0000-000000000001",
+      contract: {},
     }), e => e instanceof ToolError && e.payload.error === "authority_connection_unavailable");
 });
