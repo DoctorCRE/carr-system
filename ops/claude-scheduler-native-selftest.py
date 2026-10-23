@@ -12,8 +12,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from lib.claude_scheduler_native import discover_snapshot, read_native_task, system_timezone
-from lib.control_plane_scheduler_cutover import CutoverRefusal
+from lib.claude_scheduler_native import (
+    NativeSchedulerError, discover_snapshot, read_native_task, system_timezone,
+)
 
 FAILED: list[str] = []
 
@@ -27,13 +28,13 @@ def check(label: str, condition: bool) -> None:
 def refuses(fn) -> bool:
     try:
         fn()
-    except CutoverRefusal:
+    except NativeSchedulerError:
         return True
     return False
 
 
 def value_or_none(fn):
-    """Run fn and return its result, or None on CutoverRefusal -- so a check
+    """Run fn and return its result, or None on NativeSchedulerError -- so a check
     on the RESULT can fail cleanly with a FAIL line instead of the refusal
     propagating out of check()'s own argument evaluation and crashing the
     whole selftest with a traceback. On main's pre-fix code this is exactly
@@ -41,7 +42,7 @@ def value_or_none(fn):
     raises before check() is ever called."""
     try:
         return fn()
-    except CutoverRefusal:
+    except NativeSchedulerError:
         return None
 
 
