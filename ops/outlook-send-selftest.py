@@ -316,17 +316,17 @@ class SendTests(unittest.TestCase):
             script = kwargs['input']
             message = json.loads(script.split('display dialog ', 1)[1].split(' with title ', 1)[0])
             self.assertEqual(message, 'Account: sender@example.test\nTo: person-a@example.test\n'
-                             'Cc: copy@carr.us\nBcc: blind@carr.us\nSubject: ' + subject)
+                             'Cc: copy@example.test\nBcc: blind@example.test\nSubject: ' + subject)
             self.assertIn('buttons {"Cancel", "Send"} default button "Cancel"', script)
             self.assertIn('cancel button "Cancel" giving up after 120', script)
             self.assertIn('not (gave up of answer)', script)
             self.assertIn('button returned of answer is "Send"', script)
             self.assertEqual(h.fake.presses(), 0)
             self.assertEqual(next(iter(h.fake.forms.values())), dict(to=['person-a@example.test'],
-                cc=['copy@carr.us'], bcc=['blind@carr.us'], subject=subject, body=MAIL['body']))
+                cc=['copy@example.test'], bcc=['blind@example.test'], subject=subject, body=MAIL['body']))
             return subprocess.CompletedProcess(command, 0, 'true\n', '')
         self.dialog.side_effect = approve
-        self.assertEqual(h.send(subject=subject, cc=['copy@carr.us'], bcc=['blind@carr.us']).state, State.DONE)
+        self.assertEqual(h.send(subject=subject, cc=['copy@example.test'], bcc=['blind@example.test']).state, State.DONE)
         self.assertEqual(h.fake.presses(), 1)
         self.dialog.assert_called_once()
 
