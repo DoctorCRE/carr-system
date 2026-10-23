@@ -328,7 +328,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if (verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if (["set-next-step", "set-market-agent", "set-national-account-owner"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
@@ -3526,7 +3526,7 @@ export const TOOLS = {
       // never been edited simply has no key — which the client must read as "no
       // base", never as a base of null-meaning-anything.
       const deals = await c.query(
-        `select b.id, b.name, b.type, b.phase, b.owner, b.attention,
+        `select b.id, b.name, b.type, b.phase, b.owner, b.attention, r.base_version,
                 to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step,
                 '${DEAL_ITEMS_SCHEMA}'::text as item_schema_version,
                 coalesce((select jsonb_agg(jsonb_build_object('id',i.id,'title',i.item_title,
@@ -3557,6 +3557,7 @@ export const TOOLS = {
                            order by e.field, e.recorded_at desc, e.id desc) latest
                 ), '{}'::jsonb) as field_base
            from v_deal_room_board b
+           join v_deal_reconciliation_read r on r.id=b.id
            join v_client_engagement_status ce on ce.client_id=b.client_id
           where ($1 = 'all' or b.workspace_kind = $1)
             and ($2::uuid is null or b.account_client_id = $2::uuid)
@@ -3579,7 +3580,7 @@ export const TOOLS = {
           /* dealroom:closed-deals */`,
         [workspace, args.account_client_id || null]);
       const accounts = await c.query(
-        `select a.account_client_id, a.account_client_ref, a.account_name, a.account_owner,
+        `select a.account_client_id, a.account_client_ref, a.account_name, a.account_owner, ce.client_version as base_version,
                 a.open_deals, a.attention_deals, a.overdue_deals, a.stale_deals,
                 to_jsonb(a.last_review_at)#>>'{}' as last_review_at, a.parked_deals,
                 ce.client_status, ce.client_version, ce.prospect_engagement_status
@@ -8911,16 +8912,20 @@ registerTools({
 
   "set-next-step": {
     write: true,
-    description: "Append a new current next step. The prior step remains unchanged as attributed history; newest next_step wins.",
+    description: "Replace the current next step and date using base_version from a fresh get-deal-room read. Conflicts require rereading and human review; retries retain the original key and version. The prior step remains attributed history.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, deal: { type: "string" }, text: { type: "string" },
+      base_version: { type: "integer" },
       next_date: { anyOf: [{ type: "string" }, { type: "null" }] },
-    }, required: ["idempotency_key", "deal", "text"] },
+    }, required: ["idempotency_key", "deal", "text", "base_version"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "set-next-step", args, async () => {
       const s = await resolveSubject(c, args.deal);
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
       if (typeof args.text !== "string" || !args.text.trim()) throw new ToolError({ error: "text_required" });
       assertDealRoomField("next_date", args.next_date ?? null, ToolError);
+      await lockDealField(c, s.id, "next_date");
+      await lockDealField(c, s.id, "next_step");
+      await versionGuard(c, "deal", s.id, args.base_version);
       await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-step");
       return appendDealNextStep(c, actor, s.id, args.text.trim(), args.next_date ?? null, args.idempotency_key);
     }),
@@ -9025,10 +9030,13 @@ registerTools({
       idempotency_key: { type: "string" }, deal: { type: "string" },
       agent_name: { type: "string" }, agent_party_id: { type: "string" },
       market: { type: "string" }, source: { type: "string" },
-    }, required: ["idempotency_key","deal","agent_name","source"] },
+      base_version: { type: "integer", description: "Deal version from a fresh get-deal-room read" },
+    }, required: ["idempotency_key","deal","agent_name","source","base_version"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "set-market-agent", args, async () => {
       const s = await resolveSubject(c, args.deal);
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
+      await lockDealField(c, s.id, "market_agent");
+      await versionGuard(c, "deal", s.id, args.base_version);
       const account = await c.query("select account_client_id from v_deal_room_board where id=$1", [s.id]);
       if (!account.rows[0]?.account_client_id)
         throw new ToolError({ error: "not_a_national_account_deal" });
@@ -9041,6 +9049,7 @@ registerTools({
            source=excluded.source,set_by=excluded.set_by,set_at=now()`,
         [s.id, args.agent_name.trim(), args.agent_party_id || null,
          args.market || null, args.source, actor.id]);
+      await c.query("update deal set updated_by=$2 where id=$1", [s.id, actor.id]);
       await writeEvent(c, actor, "set-market-agent", "deal", s.id, {
         field: "market_agent", old, new: { market_agent: args.agent_name.trim(), market: args.market || null },
         idempotency_key: args.idempotency_key });
@@ -9054,10 +9063,12 @@ registerTools({
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, account_client_id: { type: "string" },
       owner: { type: "string", enum: ["joe","dell"] },
-    }, required: ["idempotency_key","account_client_id","owner"] },
+      base_version: { type: "integer", description: "Account base_version from a fresh deal-room-board read" },
+    }, required: ["idempotency_key","account_client_id","owner","base_version"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "set-national-account-owner", args, async () => {
       const account = await c.query("select id from client where id=$1 and client_type='national_account'", [args.account_client_id]);
       if (!account.rows.length) throw new ToolError({ error: "not_a_national_account" });
+      await versionGuard(c, "client", args.account_client_id, args.base_version);
       const owner = (await c.query("select id from actor where slug=$1 and active", [args.owner])).rows[0];
       if (!owner) throw new ToolError({ error: "unknown_owner" });
       await c.query(
@@ -9065,6 +9076,10 @@ registerTools({
          values ($1,$2,$3) on conflict (account_client_id) do update
          set owner_actor_id=excluded.owner_actor_id,set_by=excluded.set_by,set_at=now()`,
         [args.account_client_id, owner.id, actor.id]);
+      await c.query("update client set updated_by=$2 where id=$1", [args.account_client_id, actor.id]);
+      await writeEvent(c, actor, "set-national-account-owner", "client", args.account_client_id, {
+        field: "account_owner", new: { owner: args.owner }, idempotency_key: args.idempotency_key,
+      });
       return { ok: true, account_client_id: args.account_client_id, owner: args.owner };
     }),
   },
@@ -9267,6 +9282,9 @@ registerTools({
       if (candidate.kind === 'next_step') {
         const subject = await resolveSubject(c, candidate.payload.deal);
         await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [subject.id]);
+        await lockDealField(c, subject.id, "next_date");
+        await lockDealField(c, subject.id, "next_step");
+        innerArgs.base_version = (await c.query("select version from deal where id=$1 for update", [subject.id])).rows[0]?.version;
       }
       const result = await executeRegisteredTool(c, actor, verb, innerArgs);
       if (!result || result.ok === false) throw new ToolError(result || { error: "inner_write_failed" });

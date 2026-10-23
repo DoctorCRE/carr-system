@@ -6,6 +6,7 @@ import { normalizeRoomPaging, ROOM_BODY_MAX } from "../src/partner-room.js";
 
 const HOST = "dealroom.doctorcre.com";
 const ORIGIN = `https://${HOST}`;
+const REQUEST_KEY = "11111111-2222-4333-8444-555555555555";
 const JOE = "joe.bookout.carr.us@gmail.com";
 
 class MemoryKv {
@@ -186,7 +187,7 @@ test("posting a turn ignores every caller-supplied attribution and mints its own
 
   const response = await handler.fetch(new Request(`${ORIGIN}/api/room/turn`, {
     method: "POST", headers: postHeaders(cookie, csrf),
-    body: JSON.stringify({ body: "hello the room", seat: "claude", sponsor: "dell",
+    body: JSON.stringify({ idempotency_key: REQUEST_KEY, body: "hello the room", seat: "claude", sponsor: "dell",
       kind: "system", room: "some-other-room", msg_id: "11111111-1111-1111-1111-111111111111" }),
   }), environment, {});
 
@@ -205,7 +206,8 @@ test("posting a turn ignores every caller-supplied attribution and mints its own
 });
 
 test("a retry of a post whose response was never seen cannot land a second turn", async () => {
-  const { handler, calls } = handlerWith();
+  let clock = 1_800_000_000_000;
+  const { handler, calls } = handlerWith({ now: () => clock });
   const environment = env();
   const cookie = await signedIn(handler, environment);
   const csrf = (await (await handler.fetch(
@@ -213,10 +215,11 @@ test("a retry of a post whose response was never seen cannot land a second turn"
 
   const send = () => handler.fetch(new Request(`${ORIGIN}/api/room/turn`, {
     method: "POST", headers: postHeaders(cookie, csrf),
-    body: JSON.stringify({ body: "the release gate wants four approval values" }),
+    body: JSON.stringify({ idempotency_key: REQUEST_KEY, body: "the release gate wants four approval values" }),
   }), environment, {});
 
   assert.equal((await send()).status, 200);
+  clock += 120_000;
   assert.equal((await send()).status, 200);
   assert.equal(calls.writes.length, 2, "both requests reach the wire — the room, not the Worker, is what dedups");
   assert.equal(calls.writes[0].msgId, calls.writes[1].msgId,
@@ -224,7 +227,7 @@ test("a retry of a post whose response was never seen cannot land a second turn"
 
   await handler.fetch(new Request(`${ORIGIN}/api/room/turn`, {
     method: "POST", headers: postHeaders(cookie, csrf),
-    body: JSON.stringify({ body: "the release gate wants four approval values." }),
+    body: JSON.stringify({ idempotency_key: "22222222-2222-4333-8444-555555555555", body: "the release gate wants four approval values." }),
   }), environment, {});
   assert.notEqual(calls.writes[2].msgId, calls.writes[0].msgId);
 
@@ -234,7 +237,7 @@ test("a retry of a post whose response was never seen cannot land a second turn"
     new Request(`${ORIGIN}/api/room/turns`, { headers: { cookie: otherCookie } }), otherEnv, {})).json()).csrf_token;
   await handler.fetch(new Request(`${ORIGIN}/api/room/turn`, {
     method: "POST", headers: postHeaders(otherCookie, otherCsrf),
-    body: JSON.stringify({ body: "the release gate wants four approval values" }),
+    body: JSON.stringify({ idempotency_key: REQUEST_KEY, body: "the release gate wants four approval values" }),
   }), otherEnv, {});
   assert.notEqual(calls.writes[3].msgId, calls.writes[0].msgId,
     "two sessions saying the same thing are two turns");
@@ -246,9 +249,29 @@ test("a retry of a post whose response was never seen cannot land a second turn"
     new Request(`${ORIGIN}/api/room/turns`, { headers: { cookie: laterCookie } }), laterEnv, {})).json()).csrf_token;
   await later.handler.fetch(new Request(`${ORIGIN}/api/room/turn`, {
     method: "POST", headers: postHeaders(laterCookie, laterCsrf),
-    body: JSON.stringify({ body: "the release gate wants four approval values" }),
+    body: JSON.stringify({ idempotency_key: REQUEST_KEY, body: "the release gate wants four approval values" }),
   }), laterEnv, {});
   assert.match(later.calls.writes[0].msgId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+});
+
+test("room operation keys are required and durable material conflicts remain HTTP 409", async () => {
+  let writes = 0;
+  const { handler } = handlerWith({ roomWriteFn: async () => { writes++; return { ok: false, error: "key_reuse" }; } });
+  const environment = env(), cookie = await signedIn(handler, environment);
+  const csrf = (await (await handler.fetch(new Request(`${ORIGIN}/api/room/turns`, { headers: { cookie } }), environment, {})).json()).csrf_token;
+  for (const idempotency_key of [undefined, "", "not-a-uuid", {}, 1]) {
+    const result = await handler.fetch(new Request(`${ORIGIN}/api/room/turn`, {
+      method: "POST", headers: postHeaders(cookie, csrf), body: JSON.stringify({ body: "Synthetic reviewed command", idempotency_key }),
+    }), environment, {});
+    assert.equal(result.status, 400);
+  }
+  assert.equal(writes, 0);
+  const result = await handler.fetch(new Request(`${ORIGIN}/api/room/turn`, {
+    method: "POST", headers: postHeaders(cookie, csrf), body: JSON.stringify({ body: "Changed synthetic command", idempotency_key: REQUEST_KEY }),
+  }), environment, {});
+  assert.equal(result.status, 409);
+  assert.deepEqual(await result.json(), { error: "key_reuse" });
+  assert.equal(writes, 1);
 });
 
 test("the composer post carries the whole browser-write guard, not a lighter version of it", async () => {
@@ -257,7 +280,7 @@ test("the composer post carries the whole browser-write guard, not a lighter ver
   const cookie = await signedIn(handler, environment);
   const csrf = (await (await handler.fetch(
     new Request(`${ORIGIN}/api/room/turns`, { headers: { cookie } }), environment, {})).json()).csrf_token;
-  const body = JSON.stringify({ body: "hi" });
+  const body = JSON.stringify({ idempotency_key: REQUEST_KEY, body: "hi" });
 
   const cases = [
     [415, { cookie, "content-type": "text/plain", origin: ORIGIN, "sec-fetch-site": "same-origin", "x-carr-csrf": csrf }],
@@ -284,18 +307,18 @@ test("the room's 20,000-character body cap is enforced server-side, on character
     new Request(`${ORIGIN}/api/room/turns`, { headers: { cookie } }), environment, {})).json()).csrf_token;
 
   const atCap = await handler.fetch(new Request(`${ORIGIN}/api/room/turn`, {
-    method: "POST", headers: postHeaders(cookie, csrf), body: JSON.stringify({ body: "x".repeat(ROOM_BODY_MAX) }),
+    method: "POST", headers: postHeaders(cookie, csrf), body: JSON.stringify({ idempotency_key: REQUEST_KEY, body: "x".repeat(ROOM_BODY_MAX) }),
   }), environment, {});
   assert.equal(atCap.status, 200, "exactly at the cap is allowed, as the verb allows it");
 
   const over = await handler.fetch(new Request(`${ORIGIN}/api/room/turn`, {
-    method: "POST", headers: postHeaders(cookie, csrf), body: JSON.stringify({ body: "x".repeat(ROOM_BODY_MAX + 1) }),
+    method: "POST", headers: postHeaders(cookie, csrf), body: JSON.stringify({ idempotency_key: REQUEST_KEY, body: "x".repeat(ROOM_BODY_MAX + 1) }),
   }), environment, {});
   assert.equal(over.status, 413);
   assert.deepEqual(await over.json(), { error: "body_too_long", limit: ROOM_BODY_MAX, got: ROOM_BODY_MAX + 1 });
 
   const empty = await handler.fetch(new Request(`${ORIGIN}/api/room/turn`, {
-    method: "POST", headers: postHeaders(cookie, csrf), body: JSON.stringify({ body: "   " }),
+    method: "POST", headers: postHeaders(cookie, csrf), body: JSON.stringify({ idempotency_key: REQUEST_KEY, body: "   " }),
   }), environment, {});
   assert.equal(empty.status, 400);
   assert.equal(calls.writes.length, 1, "only the at-cap post landed");
@@ -320,7 +343,7 @@ test("the RECONNECT control is an allowlist, and its receipt body is rebuilt rat
 
   const ok = await handler.fetch(new Request(`${ORIGIN}/api/room/turn`, {
     method: "POST", headers: postHeaders(cookie, csrf),
-    body: JSON.stringify({ control: { action: "login", desk: "joe-desk" }, seat: "hermes" }),
+    body: JSON.stringify({ idempotency_key: REQUEST_KEY, control: { action: "login", desk: "joe-desk" }, seat: "hermes" }),
   }), environment, {});
   assert.equal(ok.status, 200);
   assert.deepEqual(
@@ -329,7 +352,7 @@ test("the RECONNECT control is an allowlist, and its receipt body is rebuilt rat
 
   const refused = await handler.fetch(new Request(`${ORIGIN}/api/room/turn`, {
     method: "POST", headers: postHeaders(cookie, csrf),
-    body: JSON.stringify({ control: { action: "shell", desk: "joe-desk" } }),
+    body: JSON.stringify({ idempotency_key: REQUEST_KEY, control: { action: "shell", desk: "joe-desk" } }),
   }), environment, {});
   assert.equal(refused.status, 400);
   assert.deepEqual(await refused.json(), { error: "control_not_allowed" });
