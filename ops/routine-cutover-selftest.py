@@ -26,7 +26,7 @@ class CutoverTests(unittest.TestCase):
             'lead-signals-weekly', 'routine.weekly', '/bin/sh', '{{REPO}}/bin/routine-run.sh', 'lead-signals-weekly'])
         self.assertFalse(plist['RunAtLoad'])
         self.assertEqual(plist['Umask'], 0o77)
-        self.assertTrue((ROOT / 'ops/headless-tasks/com.carr.headless.npi-sweep-weekly.plist').exists())
+        self.assertTrue((ROOT / 'ops/scheduled-tasks/npi-sweep-weekly.SKILL.md').exists())
         from lib.launchd_scope import allowed_on_machine
         self.assertFalse(allowed_on_machine(path.name, False))
         self.assertTrue(allowed_on_machine(path.name, True))
@@ -35,9 +35,7 @@ class CutoverTests(unittest.TestCase):
         self.assertIn('npi-sweep-weekly', keys)
         self.assertIn('radar-weekly', keys)
         tasks = json.loads((ROOT / 'ops/headless-tasks/tasks.json').read_text())['tasks']
-        self.assertIn('npi-sweep-weekly', tasks)
-        self.assertEqual(tasks['npi-sweep-weekly']['cron'], '30 7 * * 1')
-        self.assertIn('radar-weekly', tasks)
+        self.assertEqual(set(tasks), {'deal-history-research-weekly', 'restore-rehearse-weekly'})
 
 
 if __name__ == '__main__':
