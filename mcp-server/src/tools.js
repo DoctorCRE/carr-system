@@ -359,6 +359,23 @@ async function withEnvelope(client, actor, verb, args, fn) {
   return result;
 }
 
+async function prepareCaptureCandidate(client, actor, args, { table, read, skip }) {
+  if (typeof args.accept !== "boolean") throw new ToolError({ error: "accept_required" });
+  const found = await client.query(read, [args.candidate_id]);
+  if (!found.rows.length)
+    throw new ToolError({ error: "not_found", table, id: args.candidate_id });
+  const candidate = found.rows[0];
+  if (candidate.status !== "pending") return { candidate, resolution: {
+    ok: true, candidate_id: candidate.id, already: candidate.status,
+    ref: candidate.resulting_ref || null, note: "already dispositioned; nothing changed",
+  } };
+  if (!args.accept) {
+    await client.query(skip, [candidate.id, actor.id, args.note || null]);
+    return { candidate, resolution: { ok: true, candidate_id: candidate.id, status: "skipped", ref: null } };
+  }
+  return { candidate, resolution: null };
+}
+
 async function writeEvent(client, actor, verb, subjectType, subjectId, fields = {}) {
   const identity = auditIdentity(actor);
   const allowedCauses = new Set(["human_stated", "human_correction", "ingest_email",
@@ -9708,26 +9725,15 @@ registerTools({
       accept: { type: "boolean" }, note: { type: "string" },
     }, required: ["idempotency_key", "candidate_id", "accept"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "resolve-candidate", args, async () => {
-      if (typeof args.accept !== "boolean") throw new ToolError({ error: "accept_required" });
-      const found = await c.query(
-        `select id, kind, payload, status, resulting_ref
+      const { candidate, resolution } = await prepareCaptureCandidate(c, actor, args, {
+        table: "capture_candidate",
+        read: `select id, kind, payload, status, resulting_ref
            from capture_candidate where id=$1 for update /* capture:resolve-read */`,
-        [args.candidate_id]);
-      if (!found.rows.length)
-        throw new ToolError({ error: "not_found", table: "capture_candidate", id: args.candidate_id });
-      const candidate = found.rows[0];
-      if (candidate.status !== "pending") return { ok: true, candidate_id: candidate.id,
-        already: candidate.status, ref: candidate.resulting_ref || null,
-        note: "already dispositioned; nothing changed" };
-
-      if (!args.accept) {
-        await c.query(
-          `update capture_candidate
+        skip: `update capture_candidate
               set status='skipped', resolved_by=$2, resolution_note=$3, resolved_at=now()
             where id=$1 /* capture:resolve-skip */`,
-          [candidate.id, actor.id, args.note || null]);
-        return { ok: true, candidate_id: candidate.id, status: "skipped", ref: null };
-      }
+      });
+      if (resolution) return resolution;
 
       const verbByKind = {
         phase_move: "patch-deal-field",
@@ -9789,26 +9795,17 @@ registerTools({
     handler: async (c, actor, args) => withEnvelope(c, actor, "resolve-post-call-candidate", args, async () => {
       if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "human_only",
         hint: "this verb requires a partner or a server-verified Codex/Claude session sponsored by one" });
-      if (typeof args.accept !== "boolean") throw new ToolError({ error: "accept_required" });
-      const found = await c.query(
-        `select id,kind,deal_id,assignee_slug,action_description,to_jsonb(due_on)#>>'{}' as due_on,recipient_party_id,
+      const { candidate, resolution } = await prepareCaptureCandidate(c, actor, args, {
+        table: "capture_post_call_candidate",
+        read: `select id,kind,deal_id,assignee_slug,action_description,to_jsonb(due_on)#>>'{}' as due_on,recipient_party_id,
                 recipient_ref,email_subject,body_sha256,status,resulting_ref,evidence_quote
            from capture_post_call_candidate where id=$1 for update
-           /* capture:resolve-post-call-read */`, [args.candidate_id]);
-      if (!found.rows.length)
-        throw new ToolError({ error: "not_found", table: "capture_post_call_candidate", id: args.candidate_id });
-      const candidate = found.rows[0];
-      if (candidate.status !== "pending") return { ok: true, candidate_id: candidate.id,
-        already: candidate.status, ref: candidate.resulting_ref || null,
-        note: "already dispositioned; nothing changed" };
-      if (!args.accept) {
-        await c.query(
-          `update capture_post_call_candidate
+           /* capture:resolve-post-call-read */`,
+        skip: `update capture_post_call_candidate
               set status='skipped',resolved_by=$2,resolution_note=$3,resolved_at=now()
             where id=$1 /* capture:resolve-post-call-skip */`,
-          [candidate.id, actor.id, args.note || null]);
-        return { ok: true, candidate_id: candidate.id, status: "skipped", ref: null };
-      }
+      });
+      if (resolution) return resolution;
       if (candidate.kind === "email_draft") {
         await c.query(
           `update capture_post_call_candidate
