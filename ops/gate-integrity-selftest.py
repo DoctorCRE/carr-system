@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Required safety hooks cannot disappear from native settings unnoticed."""
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import unittest
@@ -22,6 +23,67 @@ spec.loader.exec_module(gate)
 
 
 class SafetyHooks(unittest.TestCase):
+    def test_strict_cli_rejects_removed_or_tampered_required_hooks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            hooks = root / 'hooks'
+            config = root / 'ops/config'
+            hooks.mkdir()
+            config.mkdir(parents=True)
+            (hooks / 'gate-integrity.py').write_bytes((REPO / 'hooks/gate-integrity.py').read_bytes())
+            required = {'guard-unattended.py', 'record-home-gate.py'}
+            for name in required | {'lint-gate.py'}:
+                (hooks / name).write_text('# fixture hook\n')
+            baseline = {'hashes': {
+                path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in hooks.iterdir()
+            }, 'contracts': {}}
+            document = {'PreToolUse': [{'hooks': [
+                {'command': f'python {{{{REPO}}}}/hooks/{name}'} for name in sorted(required)
+            ]}]}
+            for name in ('hooks', 'codex-hooks'):
+                (config / f'{name}.json').write_text(json.dumps(document))
+            baseline['contracts'] = {
+                f'{name}.json': hashlib.sha256((config / f'{name}.json').read_bytes()).hexdigest()
+                for name in ('hooks', 'codex-hooks')
+            }
+            (config / 'gate-baseline.json').write_text(json.dumps(baseline))
+
+            def run():
+                return subprocess.run([sys.executable, hooks / 'gate-integrity.py', '--strict'],
+                                      capture_output=True, text=True, env=fixture_env())
+
+            healthy = run()
+            self.assertEqual(healthy.returncode, 0, healthy.stderr)
+            for name in sorted(required):
+                script = hooks / name
+                original = script.read_bytes()
+                with self.subTest(hook=name, mutation='missing script'):
+                    script.unlink()
+                    result = run()
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn(f'MISSING: hooks/{name}', result.stderr)
+                    script.write_bytes(original)
+                with self.subTest(hook=name, mutation='tampered script'):
+                    script.write_bytes(original + b'# tampered\n')
+                    result = run()
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn(f'CHANGED: hooks/{name}', result.stderr)
+                    script.write_bytes(original)
+                for client, config_name in [('claude', 'hooks'), ('codex', 'codex-hooks')]:
+                    with self.subTest(hook=name, client=client, mutation='removed registration'):
+                        path = config / f'{config_name}.json'
+                        removed = {'PreToolUse': [{'hooks': [
+                            hook for hook in document['PreToolUse'][0]['hooks']
+                            if not hook['command'].endswith('/' + name)
+                        ]}]}
+                        path.write_text(json.dumps(removed))
+                        result = run()
+                        self.assertEqual(result.returncode, 1)
+                        self.assertIn(f'{client}: required safety hook is not installed: {name}', result.stderr)
+                        path.write_text(json.dumps(document))
+            self.assertEqual(run().returncode, 0)
+
     def test_native_configuration(self):
         for client, name in [('claude', 'hooks'), ('codex', 'codex-hooks')]:
             document = json.loads((REPO / f'ops/config/{name}.json').read_text())
