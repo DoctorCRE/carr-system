@@ -88,8 +88,8 @@ def check_system_timezone() -> None:
 
 def main() -> int:
     check_system_timezone()
-    locator = "cc-update-audit"
-    portable = REPO / "ops/scheduled-tasks/cc-update-audit.SKILL.md"
+    locator = "radar-weekly"
+    portable = REPO / "ops/scheduled-tasks/radar-weekly.SKILL.md"
     digest = hashlib.sha256(portable.read_bytes()).hexdigest()
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
@@ -100,11 +100,11 @@ def main() -> int:
                         .replace("{{REPO}}", str(REPO)).replace("{{VAULT}}", str(vault)), encoding="utf-8")
         snapshot = home / "Library/Application Support/Claude/claude-code-sessions/account/session/scheduled-tasks.json"
         snapshot.parent.mkdir(parents=True)
-        task = {"id": locator, "cronExpression": "45 9 * * 1", "enabled": True,
+        task = {"id": locator, "cronExpression": "15 8 * * 1", "enabled": True,
                 "filePath": str(live), "cwd": str(vault), "createdAt": 1,
                 "lastRunAt": "2026-08-16T14:45:00Z", "lastScheduledFor": "2026-08-16T14:45:00Z"}
         snapshot.write_text(json.dumps({"scheduledTasks": [task]}), encoding="utf-8")
-        observed = read_native_task(home=home, repo=REPO, locator=locator, expected_cron="45 9 * * 1",
+        observed = read_native_task(home=home, repo=REPO, locator=locator, expected_cron="15 8 * * 1",
                                     expected_timezone="America/Chicago", portable_definition_sha256=digest,
                                     observed_at=datetime(2026, 8, 16, 18, 0, tzinfo=timezone.utc),
                                     host_timezone="America/Chicago")
@@ -116,20 +116,20 @@ def main() -> int:
         bad = dict(task); bad["enabled"] = "false"
         snapshot.write_text(json.dumps({"scheduledTasks": [bad]}), encoding="utf-8")
         check("string/caller-like enabled state is refused", refuses(lambda: read_native_task(
-            home=home, repo=REPO, locator=locator, expected_cron="45 9 * * 1",
+            home=home, repo=REPO, locator=locator, expected_cron="15 8 * * 1",
             expected_timezone="America/Chicago", portable_definition_sha256=digest,
             host_timezone="America/Chicago")))
         snapshot.write_text(json.dumps({"scheduledTasks": [task]}), encoding="utf-8")
         live.write_text("drifted", encoding="utf-8")
         check("live task definition drift is refused", refuses(lambda: read_native_task(
-            home=home, repo=REPO, locator=locator, expected_cron="45 9 * * 1",
+            home=home, repo=REPO, locator=locator, expected_cron="15 8 * * 1",
             expected_timezone="America/Chicago", portable_definition_sha256=digest,
             host_timezone="America/Chicago")))
         live.write_text(portable.read_text(encoding="utf-8").replace("{{HOME}}", str(home))
                         .replace("{{REPO}}", str(REPO)).replace("{{VAULT}}", str(vault)), encoding="utf-8")
         check("host timezone drift is refused instead of assigning the expected zone",
               refuses(lambda: read_native_task(
-                  home=home, repo=REPO, locator=locator, expected_cron="45 9 * * 1",
+                  home=home, repo=REPO, locator=locator, expected_cron="15 8 * * 1",
                   expected_timezone="America/Chicago", portable_definition_sha256=digest,
                   host_timezone="America/New_York")))
         second = snapshot.parent.parent / "other/scheduled-tasks.json"
