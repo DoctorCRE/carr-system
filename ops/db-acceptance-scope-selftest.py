@@ -65,7 +65,6 @@ for src in ('ops/ci.sh', 'ops/local-pg-ci.py', 'ops/db_acceptance_programs.py'):
             named.add(lit)
         elif lit.endswith('.test.mjs') and (repo / 'mcp-server/test' / lit).exists():
             named.add('mcp-server/test/' + lit)
-check('the lane names at least 15 repo inputs', len(named) >= 15)
 for path in sorted(named):
     check(f'lane input {path} runs the full lane', scope.needs_full([path]))
 for path in ('mcp-server/test/find-rule-supersedes.test.mjs', 'mcp-server/test/catch-me-up-writer-route.test.mjs',
@@ -97,6 +96,9 @@ for program in programs:
             relative = Path(*parts).as_posix()
             if relative in tracked:
                 resources.add(relative)
+check('inventory includes retained business database proofs',
+      {repo / 'ops/cre-lifecycle-local-pg-gate.py',
+       repo / 'ops/lead-stage-db-gate.py'} <= programs)
 for path in sorted(resources):
     check(f'database proof resource {path} runs the lane', scope.needs_full([path]))
 

@@ -148,8 +148,8 @@
     {
       "id": "K12",
       "title": "Capture durable corrections now",
-      "wording": "When a partner corrects or overrules you, or states a preference that would recur, propose it through teach this turn with the trade-off; proposals bind nobody yet. A how-to the same partner explains twice: quote both, offer a skill.",
-      "word_count": 39,
+      "wording": "When a partner corrects or overrules you, or states a preference that would recur, propose an edit to the relevant guidance file (CLAUDE.md, AGENTS.md or a skill) in a PR this turn with the trade-off; proposals bind nobody until merged. A how-to the same partner explains twice: quote both, offer a skill.",
+      "word_count": 52,
       "placement": "CORE",
       "merged_from_drafts": [
         "G01",
@@ -1434,8 +1434,8 @@
     {
       "id": "A10",
       "title": "Sweep learning at real boundaries",
-      "wording": "When committing, deploying, checkpointing, or handing off, sweep the exchanges since the last sweep: propose uncaptured rulings via teach, record partner adoption needs as action_required, and tell Joe in one line.",
-      "word_count": 31,
+      "wording": "When committing, deploying, checkpointing, or handing off, sweep the exchanges since the last sweep: propose uncaptured rulings as edits to CLAUDE.md, AGENTS.md or a skill in a PR; proposals bind nobody until merged. Record partner adoption needs as action_required, and tell Joe in one line.",
+      "word_count": 45,
       "placement": "TOOL",
       "merged_from_drafts": [
         "T03",

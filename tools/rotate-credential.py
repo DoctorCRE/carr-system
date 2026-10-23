@@ -52,7 +52,7 @@ byte-identical.
 ORDER OF OPERATIONS FOR THE API KEY, and it matters: mint, verify the new key
 works, write it to db.env, and only then revoke the old one. Revoking first
 would take out every unattended path at once — the GitHub production deployment workflow,
-bin/import-doctrine.sh, bin/restore-rehearse.sh and the partner ping all derive
+record imports, bin/restore-rehearse.sh and the partner ping all derive
 their connection through neonctl — with no way back.
 
   DATABASE_URL=<owner> .venv/bin/python tools/rotate-credential.py --role carr_jobs --generate

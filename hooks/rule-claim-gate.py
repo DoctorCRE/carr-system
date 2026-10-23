@@ -235,7 +235,7 @@ def check_turn(event, records):
                          'launch bin/codex-job with a build brief for a hook, gate, test '
                          'or CI check and say running and not yet enforced; or say not enforced '
                          'and explain why it cannot be checked mechanically. '
-                         'Memory files, CLAUDE.md, AGENTS.md, Markdown and teach do not enforce rules.')
+                         'Guidance files and skills document judgment; machine-enforceable requirements need the relevant code and CI checks in their PR.')
 
 
 if __name__ == '__main__':
