@@ -14,7 +14,7 @@ The runner needs the same local identity as `./run.sh call`. It invokes only an 
 
 The runner captures child stdout and stderr, reports fixed error categories, and saves only record refs, eligibility, and scoring metadata. It never saves names, notes, contact details, or credentials. Doctor queries resolve names in memory from fixture refs through the current Leads workspace or Deal Board. Deal IDs resolve only for returned rows, using an unambiguous exact `(client_ref, name)` lookup in the live Deal Board. A deal appearing solely on that board cannot earn a retrieval hit.
 
-Rescore the committed observations without production access:
+Rescore observations from a previous run without production access:
 
 ```sh
 python3 evals/retrieval-real-misses/run_eval.py --replay /tmp/retrieval-real-misses.json --output /tmp/retrieval-real-misses-replay.json
@@ -22,29 +22,9 @@ python3 evals/retrieval-real-misses/run_eval.py --replay /tmp/retrieval-real-mis
 
 An errored read stays in the denominator and scores no hit. Any read error also makes the runner exit 1. Invalid fixtures or replay inputs exit 2. An ordinary measured miss does not fail execution.
 
-## Baseline on October 6, 2026
-
-The recorded run completed at `2026-10-06T14:44:41.654417+00:00`. All read calls completed. The live-versus-retired assertions passed.
-
-| Cause | Top-five hits | Questions | Hit rate |
-| --- | ---: | ---: | ---: |
-| never-asked | 7 | 9 | 77.8% |
-| never-asked/drift | 3 | 3 | 100.0% |
-| search-quality | 4 | 9 | 44.4% |
-| not-linked | 2 | 3 | 66.7% |
-| not-captured, gap locator | 0 | 3 | 0.0% |
-| Overall retrieval | 16 | 27 | 59.3% |
-
-
-The remaining three questions measure unordered rule availability. Two needed rules were available through the full-text boot or matched deterministic routes, for delivery recall of **2/3, 66.7%**. The stale-notes rule missed that probe. Rule IDs have no relevance ranking, so these questions do not enter the top-five denominator.
-
-This is a purposive regression set with several related phrasings per historical case. It estimates neither general user-question recall nor a quality improvement. Historical migrations have repaired some of the original failures. The observed numbers describe today's post-repair corpus and verbs. There is no candidate implementation or shipping-quality verdict in this step.
-
-The not-linked questions measure whether a targeted lookup reaches the overturning ruling. They do not measure whether reading the dated memo automatically brings that ruling into context. The not-captured questions measure gap-locator reachability, not conversation recovery.
-
 ## Scoring contract
 
-[questions.v1.json](questions.v1.json) contains thirty questions derived from the ten cited cases. `sources` cites migration headers, source comments, current production loops and rules, and the historical synthetic experiment. [resolved-refs.json](resolved-refs.json) records the independent read verbs used to verify every expected ref in production on October 6. Expected labels are fixed independently of baseline responses.
+[questions.v1.json](questions.v1.json) contains thirty questions derived from the ten cited cases. `sources` cites migration headers, source comments, current production loops and rules, and the historical synthetic experiment. Expected labels are fixed independently of baseline responses.
 
 A retrieval question declares one result lane. The runner takes that lane's first five endpoint rows, preserving their returned order and duplicate positions. A hit means any expected ref appears in an eligible row. Ineligible rows still consume positions. One organization row can carry several live refs. Names, snippets, input refs, retired aliases, and unrelated context links cannot earn hits. This is a lane-specific hit rate because `find` returns separately ordered arrays and provides no global relevance ranking across them.
 

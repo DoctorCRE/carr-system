@@ -30,7 +30,7 @@ class ScoringTests(unittest.TestCase):
     def test_public_fixtures_have_no_record_identities(self):
         from ops.pii_guard import identity_spans, load_corpus
         corpus = load_corpus(REPO / 'ops/config/public-source-identities.v1.json')
-        for name in ['questions.v1.json', 'resolved-refs.json']:
+        for name in ['questions.v1.json']:
             text = (REPO / 'evals/retrieval-real-misses' / name).read_text()
             self.assertEqual(identity_spans(text, corpus), [], name)
 

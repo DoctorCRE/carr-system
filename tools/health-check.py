@@ -112,8 +112,8 @@ def _reader_args(argv):
         # A parent shell may carry this old ambient variable.  Normal health must
         # not pass it to any child or let a child silently choose a Drive reader.
         os.environ.pop("CARR_VAULT", None)
-    if section not in ("all", "exports", "jobs", "registry", "credentials", "grok-session", "tailscale", "headless", "costs", "uptime", "sends"):
-        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|grok-session|tailscale|headless|costs|uptime|sends")
+    if section not in ("all", "exports", "jobs", "registry", "credentials", "grok-session", "tailscale", "headless", "costs", "uptime"):
+        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|grok-session|tailscale|headless|costs|uptime")
     if fixture and recovery:
         raise SystemExit("health-check: --fixture is for hermetic canonical tests only")
     # --act executes every red row's bound action (tools/health_breach.py). It
@@ -325,97 +325,8 @@ if "--tasks" in sys.argv:
     sys.exit(classify_tasks(sys.argv[_i + 1]))
 
 
-def _canonical_workflow_truth():
-    """Print the F09 workflow-census section, WHICH IS UNAVAILABLE, and print
-    nothing else.
-
-    WHAT THIS SECTION USED TO DO, AND THE DEFECT THAT ENDED IT.  It performed the
-    V5-F09 control-plane read through ``lib/control_plane_workflow_truth_reader``
-    and printed the census it got back -- how many workflows are declared, how
-    many are evidence-backed, which ones conflict.  The reader resolved its own
-    module-level snapshot function at call time, so a caller sharing the process
-    rebound that name and this section printed the caller's census as the control
-    plane's own answer, under ``run.sh health``.  A reviewer did exactly that and
-    got a summary line of its own choosing out of this surface.
-
-    SO THE ROUTE WAS DELETED RATHER THAN HARDENED.  The reader mints nothing and
-    renders nothing any more; it exports one frozen unavailable answer built from
-    string literals at import time, and this section prints it.  There is no
-    branch here, no input, and no state to print: the same three-part line, every
-    run, whatever anybody has done to any module in this process.
-
-    WHY THE WHOLE SECTION RATHER THAN THE LABEL ONLY.  The A01 label route is what
-    converts a census into a state, and it reported not-proven one round earlier.
-    But this section DISPLAYS a census, and a displayed census is read as a report
-    of the control plane by anybody looking at ``run.sh health`` -- which is the
-    same authority, one surface out.  Both routes on this slice say the same
-    thing now: nothing here can be proven.
-    """
-    print("Workflow truth — census route deleted; this surface derives nothing")
-    try:
-        sys.path.insert(0, REPO_ROOT)
-        from lib.control_plane_workflow_truth_reader import workflow_truth_census
-    except Exception:
-        # Deliberately no exception text: this line is swept for privileged words
-        # by ops/assurance-health-selftest.py, and a traceback is caller content.
-        print("  -- workflow census   UNAVAILABLE — the census route module is absent")
-        return
-    census = workflow_truth_census()
-    print(f"  -- workflow census   UNAVAILABLE — {census['reason']}; item carried as "
-          f"{census['item_disposition']}; owed seam {census['owed_seam']}")
 
 
-def _canonical_assurance_health():
-    """Print the A01 assurance-health item, WHICH IS NOT PROVEN, and print nothing
-    else.
-
-    THERE IS NO STATE ON THIS SECTION, AND THAT IS THE FINDING.  Ten review
-    rounds tried to derive a health label for each bound workflow scope out of the
-    F09 reading, and each round closed the exact forgery route it was shown and
-    left the class open: a caller-supplied census, a caller-supplied receipt, a
-    payload attribute on the reading handle, a stateful mapping honest during
-    verification and forged during rendering, an opaque registry key swapped
-    inside its own ``__hash__``, a raw base-descriptor write to ``__class__``,
-    rebinding the reader's own snapshot function, writing its private mint
-    registry, a hostile mapping key running caller code during the thaw, and
-    finally a ``__del__`` that rebound the label route's own exported strings
-    while it was building its answer.
-
-    SO THE ROUTE WAS DELETED RATHER THAN NARROWED AGAIN.
-    ``lib/assurance_health_sources.assurance_health_census`` now takes NO
-    ARGUMENT and returns one frozen mapping built from string literals at import
-    time: ``available=False``, reason ``handle_integrity_unprovable``, disposition
-    ``not_proven``, and the short name of the durable-store seam that is owed.
-    This section prints those three facts and nothing else.  What is missing is an
-    OWNER for "this census is the one the control plane served"; an object in this
-    process cannot be that owner.
-
-    THE SECTION ABOVE SAYS THE SAME THING NOW, and that is the tenth correction:
-    the workflow-truth section DISPLAYED a census, which a reader of ``run.sh
-    health`` takes as a report of the control plane, so a forged census reached
-    the same authority one surface further out.  Both routes report unavailable.
-
-    THE --fixture DOOR IS A TEST DOOR, LABELS ITSELF AS ONE, AND IS A DIFFERENT
-    FUNCTION.  It is called instead of this one when --fixture is given, reaches
-    the adapter's unexported test hook, and prints every state as an explicit
-    would-be-<state>-if-authoritative hypothetical.  Nothing it says is evidence,
-    nothing it says is healthy, and no finding is recorded from it.
-    """
-    try:
-        sys.path.insert(0, REPO_ROOT)
-        import lib.assurance_health_sources as sources
-    except Exception:
-        # No exception text on this line either: it is swept for privileged words.
-        print("Assurance health — NOT PROVEN; no owner exists for the fact a label "
-              "would need")
-        print("  -- assurance health   UNAVAILABLE — the label route module is absent")
-        return
-    result = sources.assurance_health_census()
-    print("Assurance health — NOT PROVEN; no owner exists for the fact a label would "
-          "need")
-    print(f"  -- assurance health   UNAVAILABLE — {result['reason']}; item carried as "
-          f"{result['item_disposition']}")
-    print(f"  -- OWED SEAM {result['owed_seam']}")
 
 
 # ── the workflow-truth contradiction alarm (twelfth correction, 2026-09-11) ──
@@ -611,74 +522,8 @@ def _canonical_contradiction_alarm():
     return 0
 
 
-def _print_assurance_layer_gaps(projection):
-    """Name the layers this projection could not bind or could not read."""
-    unbindable = sorted({slot for row in projection["rows"]
-                         for slot, layer in row["evidence"].items()
-                         if layer["state"] == "unbindable"})
-    if unbindable:
-        print("  -- UNBINDABLE ON THIS CENSUS " + ", ".join(unbindable) +
-              " — the workflow census carries no Work Request identity, so this layer has "
-              "nothing to join through and no scope read here can reach act capability")
-    unread = sorted({slot for row in projection["rows"]
-                     for slot, layer in row["evidence"].items()
-                     if layer["state"] == "unreadable"})
-    if unread:
-        print("  -- NOT READ BY THIS SURFACE " + ", ".join(unread) +
-              " — no scope can be shown healthy until an authoritative reading of each "
-              "reaches this census; an unread layer is never counted as passing")
 
 
-def _fixture_assurance_health(snap):
-    """The --fixture test door, which prints hypotheticals and returns 0.
-
-    A fixture census is the caller's assertion, so this door reaches the
-    adapter's UNEXPORTED test hook rather than its public entry, prints every
-    state under a would-be-<state>-if-authoritative name, records no finding, and
-    cannot turn this process red.  Its output is deliberately unusable as a
-    health claim: there is no line in it that says a scope is healthy or green.
-    """
-    sys.path.insert(0, REPO_ROOT)
-    import lib.assurance_health_sources as sources
-
-    print("Assurance health — FIXTURE-DERIVED HYPOTHETICAL, NOT A READING (test door)")
-    print("  -- --fixture supplied this census, so the adapter did NOT read the control "
-          "plane. Every line below is what the projection WOULD say IF this fixture were "
-          "authoritative; none of it is evidence, no scope in it is healthy or green, and "
-          "no finding is recorded from it.")
-    workflows = (snap or {}).get("workflows")
-    if workflows is None:
-        print("  -- assurance health   NOT IN FIXTURE (this fixture supplied no census)")
-        return 0
-    try:
-        hypothetical = sources._would_be_assurance_health_if_authoritative(
-            workflows, now=datetime.now(timezone.utc))["would_be_census_if_authoritative"]
-    except Exception as exc:
-        print(f"  -- assurance health   UNAVAILABLE — the projection refused this fixture "
-              f"({type(exc).__name__}: {exc})")
-        return 0
-    if not hypothetical.get("available"):
-        print(f"  -- assurance health   UNAVAILABLE — {hypothetical.get('reason', 'unstated')}")
-        return 0
-
-    projection = hypothetical["projection"]
-    summary = projection["summary"]
-    states = summary["states"]
-    print(f"  {summary['scopes']} bound scope(s) WOULD BE: "
-          + ", ".join(f"{states.get(state, 0)} would-be-{state}-if-authoritative"
-                      for state in projection["states"])
-          + f"; {summary['green']} would-be-green-if-authoritative")
-    for entry in hypothetical.get("unprojectable", []):
-        print(f"  -- WOULD BE UNPROJECTABLE {entry['workflow']} — {entry['reason']}")
-    for row in projection["rows"]:
-        scope = row["scope"]
-        identity = f"{scope['workflow_key']} v{scope['workflow_version']}"
-        if row["state"] in ("failed", "degraded"):
-            print(f"  ⚠︎ {identity} WOULD BE {row['state'].upper()} IF AUTHORITATIVE: "
-                  f"{row['state_reason']} — a fixture evidences nothing, so this is "
-                  "printed and no finding is recorded")
-    _print_assurance_layer_gaps(projection)
-    return 0
 
 
 def _canonical_snapshot():
@@ -1268,14 +1113,6 @@ def _tailscale_row():
     return module.row(binary=os.environ.get("TAILSCALE_BIN", module.TAILSCALE_BIN))
 
 
-def _studio_failover_row():
-    spec = importlib.util.spec_from_file_location(
-        'studio_failover_health', os.path.join(REPO_ROOT, 'ops/studio-failover-health.py'))
-    if spec is None or spec.loader is None:
-        raise ImportError('Studio failover health loader unavailable')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.check(reconcile_loop=True)
 
 
 def _system_cost_row():
@@ -1284,20 +1121,6 @@ def _system_cost_row():
     return snapshot, system_costs.health_row(snapshot, 'nightly collector owns reconciliation')
 
 
-def _system_sends_row():
-    """lib/system_sender.py's own row: today's sends against the cap, shadow vs
-    live, kill-switch state, held dedupe claims, config validity. Same reader
-    the sender's cap uses (rule a8c55a47), so the row cannot disagree with the
-    refusal. It reads the machine-wide state_dir (default
-    ~/carr-local/system-sender: ledger with the cap slots, sends.jsonl, stop
-    file), not this checkout's out/, so it reports this MACHINE."""
-    try:
-        from lib.system_sender import health_row
-        return health_row()
-    except Exception as exc:
-        return (f"UNKNOWN system sends — sender unavailable ({type(exc).__name__}) · on breach: "
-                "owner orchestrator · restore lib/system_sender.py or ops/config/system-sender.v1.json "
-                "· verify: run.sh health --section sends · auto-clear after a successful read", True, True)
 
 
 def _canonical_health():
@@ -1306,25 +1129,13 @@ def _canonical_health():
     _GREEN_EVIDENCE.clear()
     rc = 0
     if CANONICAL_SECTION == "all":
-        try:
-            _failover = _studio_failover_row()
-            print('  ' + _failover['line'])
-            if _failover['status'] == 'warn':
-                rc = _red('studio_failover', _failover['line'])
-        except Exception:
-            _failover_line = ('WARN Studio failover evidence unreadable · on breach: '
-                              'ops/studio-failover-health.py --reconcile opens/updates one loop; '
-                              'owner orchestrator; restore the evidence reader and rerun MacBook dry-run; '
-                              'verify a fresh current-contract receipt; auto-clear on that receipt')
-            print('  ' + _failover_line)
-            rc = _red('studio_failover_evidence', _failover_line, hard_error=True)
         _cost_snapshot, _cost_line = _system_cost_row()
         print("  " + _cost_line)
         if _cost_snapshot['state'] != 'ready' or _cost_snapshot['alerts']:
             rc = _red('system_costs', _cost_line, hard_error=_cost_snapshot['state'] == 'unavailable'
                       and 'system_costs' not in PROVISIONING_PENDING)
     try:
-        snap = {} if CANONICAL_SECTION in ("grok-session", "uptime", "sends") else _canonical_snapshot()
+        snap = {} if CANONICAL_SECTION in ("grok-session", "uptime") else _canonical_snapshot()
     except Exception as exc:
         print(f"canonical health: REFUSED ({type(exc).__name__}: {exc})")
         _red("canonical_health_refused", f"{type(exc).__name__}: {exc}", hard_error=True)
@@ -1505,27 +1316,7 @@ def _canonical_health():
             if not (bad or unreceipted or missing or stuck):
                 print(f"  OK {len(live_jobs)} live job(s), every due window present; "
                       "no terminal failure, stuck state, or unreceipted success")
-        # NEITHER OF THE TWO CENSUS SECTIONS CAN TURN THIS PROCESS RED, and
-        # neither returns a code: both report that their route cannot be proven,
-        # which is a standing fact about this repository rather than a fault of
-        # today's run. The fixture door is the one caller-fed path and it is
-        # labelled as a test door.
-        #
-        # THE ALARM BELOW IS THE EXCEPTION AND IT IS NOT FED BY ANY OF THAT. It
-        # takes no argument, ignores the fixture entirely, and reads the store
-        # itself; a contradiction in the control plane's own rows is the one
-        # condition on this slice that still turns health red. It runs on the
-        # fixture path too, because a caller must not be able to quiet it by
-        # choosing a door. It already records its own finding (workflow_truth_
-        # conflict) before returning 1, so folding its result into `rc` with
-        # `or` — rather than a bare `rc = 1` — keeps this call self-recording
-        # too without recording the same finding a second time.
-        _canonical_workflow_truth()
         rc = _canonical_contradiction_alarm() or rc
-        if CANONICAL_FIXTURE:
-            _fixture_assurance_health(snap)
-        else:
-            _canonical_assurance_health()
 
     if CANONICAL_SECTION in ("all", "registry"):
         feature_command = [sys.executable, os.path.join(REPO_ROOT, "tools/feature-switch-health.py")]
@@ -1817,12 +1608,6 @@ def _canonical_health():
         if failed:
             rc = _red("cloudflare_spend", line, subject="cloudflare-account",
                       hard_error=not (not_run and "cloudflare_spend" in PROVISIONING_PENDING))
-
-    if CANONICAL_SECTION in ("all", "sends") and not CANONICAL_FIXTURE:
-        line, breach, hard = _system_sends_row()
-        print("  " + line)
-        if breach:
-            rc = _red("system_sends", line, subject="system-sender", hard_error=hard)
 
     if CANONICAL_SECTION in ("all", "tailscale"):
         try:
@@ -2863,20 +2648,6 @@ except Exception as e:
     print(f"  ⚠︎ {'machine config':<18} check failed ({type(e).__name__}: {e})")
     rc = 1
 
-try:
-    sys.path.insert(0, REPO_ROOT)
-    from lib import launchd_hold_health as _launchd_hold_health
-    _hold_line, _hold_rc = _launchd_hold_health.check(
-        os.path.expanduser("~"),
-        lambda name, payload: _uptime.call_verb(name, payload))
-    print(f"  {_hold_line}")
-    rc = max(rc, _hold_rc)
-except Exception as e:
-    print(f"  WARN launchd holds response failed ({type(e).__name__}) · "
-          "on breach: owner claude (Platform Engineer) repairs the hold health reader; "
-          "verify rerun health; auto-clear on a successful read")
-    rc = 1
-
 # ── the egress guard: is its LOGIC right, and is its DATA fresh (2026-08-09) ──
 # Two rows, because they fail independently and the 2026-08-08 incident turned on
 # exactly that distinction. `machine config` above answers "is the guard
@@ -3266,23 +3037,6 @@ except Exception as e:
 # went looking by hand. The nightly chain runs this file, so a stranded pull
 # request now surfaces within a day with no inbox involved. Thresholds and the
 # reasoning behind their width live in ops/pr-hygiene-check.py.
-print("\ndefect log")
-# WR-000269: every recorded defect has a Work Request naming it, or it is
-# counted here. ops/defect-bridge.py --health-row prints the row with its bound
-# action inline (rule 590b11e1); a failed read prints UNKNOWN, never all-clear.
-try:
-    _dbp = subprocess.run([os.path.join(REPO_ROOT, ".venv/bin/python"),
-                           os.path.join(REPO_ROOT, "ops", "defect-bridge.py"), "--health-row"],
-                          cwd=REPO_ROOT, capture_output=True, text=True, timeout=300)
-    print((_dbp.stdout or "").rstrip() or
-          "  ⚠︎ unaddressed defects  check produced no output · on breach: run "
-          "ops/defect-bridge.py --dry-run by hand")
-    if _dbp.returncode != 0:
-        rc = 1
-except Exception as e:
-    print(f"  ⚠︎ unaddressed defects check failed ({type(e).__name__}: {e})")
-    rc = 1
-
 print("\nrepo hygiene")
 try:
     _prh = os.path.join(REPO_ROOT, "ops", "pr-hygiene-check.py")

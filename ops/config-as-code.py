@@ -215,7 +215,7 @@ CODEX_PERMISSIONS_END = "# <<< CARR managed permissions <<<"
 TOKENS = [(tok, real) for tok, real in
           (("{{VAULT}}", VAULT), ("{{REPO}}", REPO), ("{{HOME}}", HOME)) if real]
 
-from lib.launchd_scope import PRIMARY_ONLY, SECONDARY_ONLY, HOST_ONLY, allowed_on_machine
+from lib.launchd_scope import PRIMARY_ONLY, SECONDARY_ONLY
 
 
 # A LaunchAgent that invokes this installer cannot unload its own label and
@@ -2035,9 +2035,6 @@ def cmd_install(apply):
                     launchd_activation_failures.append(f)
             else:
                 print(f"  SKIP  {f} (writes shared state; runs on the primary machine only)")
-            continue
-        if f in HOST_ONLY and not allowed_on_machine(f, IS_PRIMARY):
-            print(f"  SKIP  {f} (runs only on its declared host)")
             continue
         if f in SECONDARY_ONLY and IS_PRIMARY:
             print(f"  SKIP  {f} (the nightly chain already does this here)")

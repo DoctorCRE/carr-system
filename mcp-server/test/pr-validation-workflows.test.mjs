@@ -98,6 +98,14 @@ test("expensive proof jobs survive scope failure but stop when superseded", () =
   assert.deepEqual(policy(ci, context(), true, { shard_trial: false }, true).runnable, ["checks"]);
 });
 
+test("test-first installs the shell required by changed nightly tests", () => {
+  const steps = read("ci.yml").jobs["test-first"].steps;
+  const install = steps.findIndex(step => step.run === "ops/ci-zsh.sh");
+  const prove = steps.findIndex(step => step.run?.includes("ops/ci.sh --test-first"));
+  assert.ok(install >= 0 && install < prove, "install zsh before running changed shell tests");
+  assert.equal(steps[install].env?.ZSH_ARCHIVE_DIR, "${{ runner.temp }}/zsh-debs");
+});
+
 test("only unit fixtures provision the shared PostgreSQL service", () => {
   const ci = read("ci.yml"), job = ci.jobs.classes;
   const run = job.steps.find(step => step.name === "Run this group's check classes");

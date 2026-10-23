@@ -833,26 +833,6 @@
       ]
     },
     {
-      "key": "session-trace-archive",
-      "name": "Session trace archive",
-      "purpose": "Nightly local archive of CARR-scoped Claude Code and Codex session transcripts (lib/carr_session_scope.py decides scope; nothing else is archived) as gzip .jsonl.gz into ~/carr-local/session-trace-archive/, so old sessions the clients prune are not lost. Streams bytes only; reads no transcript content beyond a Codex session's cwd metadata line.",
-      "family": "Local Mac edge",
-      "criticality": "medium",
-      "owner_actor": "joe",
-      "repo_path": "ops/session-trace-archive.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.session-trace-archive.plist",
-          "runs_on": "every",
-          "expected_cadence_seconds": 86400,
-          "cadence_grace_seconds": 7200,
-          "notes": "Daily at 03:10 local, plus RunAtLoad. Per-machine by design (both the source transcripts and the destination archive are local to whichever Mac runs it), so it is neither PRIMARY_ONLY nor SECONDARY_ONLY in ops/config-as-code.py, and it depends on nothing in the record layer — no dependencies entry below."
-        }
-      ]
-    },
-    {
       "key": "expert-reply-watch",
       "name": "Expert reply watch",
       "purpose": "Weekly read-only mining of tracked X accounts replies into queued log-capture records, with URL deduplication and a dated local run ledger.",
@@ -907,24 +887,6 @@
           "deploy_mechanism": "ops/launchd/com.carr.cliproxyapi.plist",
           "runs_on": "primary",
           "notes": "Model gateway process; direct files remain outside the repo. Source declaration only; no service import or activation performed."
-        }
-      ]
-    },
-    {
-      "key": "studio-failover-rehearsal",
-      "name": "Monthly MacBook failover readiness",
-      "purpose": "MacBook-only day 5 at 10:15 local. Dry-run receipt and bound orchestrator health loop; never triggers real failover.",
-      "family": "Local Mac edge",
-      "criticality": "high",
-      "owner_actor": "joe",
-      "repo_path": "ops/rehearse-studio-failover.sh",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.studio-failover-rehearsal.plist",
-          "runs_on": "secondary",
-          "notes": "MacBook-only day 5 at 10:15 local. Dry-run receipt and bound orchestrator health loop; never triggers real failover. Source declaration only; no service import or activation performed."
         }
       ]
     },

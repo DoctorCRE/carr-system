@@ -59,6 +59,10 @@ jobs:
           python -m pip install -r requirements.lock
           npm --prefix mcp-server ci --no-audit
           npm --prefix practice-plugin ci --no-audit
+      - name: Install zsh
+        env:
+          ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
+        run: ops/ci-zsh.sh
       - name: Prove changed tests distinguish the base and head code
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.test_first_base }}
