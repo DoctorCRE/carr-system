@@ -2773,24 +2773,23 @@ def command_render(args: argparse.Namespace) -> None:
     except RuntimeError as exc:
         log(f"all-repos rebuild failed, publishing last known state: {exc}")
         portfolio_available = state_path(ALL_REPOS_BOARD).exists()
-    publication_error = None
-    try:
-        publish_board(args.project)
-    except Exception as exc:
-        publication_error = exc
-        log(f"{args.project} publication failed: {exc}")
-    if publication_error is None:
-        poll_board_answers(args.project)
-        publish_needs_joe_local()
+    stages = [
+        ("publication", lambda: publish_board(args.project)),
+        ("answers", lambda: poll_board_answers(args.project)),
+        ("needs-joe", publish_needs_joe_local),
+    ]
     if portfolio_available:
+        stages.append(("all-repos", lambda: publish_board(ALL_REPOS_BOARD)))
+    first_error = None
+    for phase, action in stages:
         try:
-            publish_board(ALL_REPOS_BOARD)
+            action()
         except Exception as exc:
-            log(f"all-repos publication failed: {exc}")
-            if publication_error is None:
-                raise
-    if publication_error is not None:
-        raise publication_error
+            log(f"{args.project} {phase} failed: {exc}")
+            if first_error is None:
+                first_error = exc
+    if first_error is not None:
+        raise first_error
 
 
 def publish_needs_joe_local() -> None:
@@ -2810,6 +2809,7 @@ def publish_needs_joe_local() -> None:
         log(f"needs-joe local page published with {count} item(s)")
     except Exception as exc:
         log(f"needs-joe local page not published: {exc}")
+        raise
 
 
 def command_poll(args: argparse.Namespace) -> None:
