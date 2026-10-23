@@ -25,6 +25,7 @@ import {
   V5_J102_USER_CORRECTIONS,
   V5J102Error,
   applyLifecycleModelProposal,
+  assertLifecycleSubject,
   assertJ102DecisionBinding,
   classifyLegacyLifecycleRow,
   compareMigrationShadow,
@@ -250,6 +251,20 @@ test("the four overruled recommendations are recorded in code with their correct
 test("the authority-injection fragment list agrees with F01's, so the two cannot drift", () => {
   assert.deepEqual([...V5_J102_AUTHORITY_INJECTION_FRAGMENTS].sort(),
     [...V5_F01_AUTHORITY_INJECTION_FRAGMENTS].sort());
+});
+
+test("step 2 reads completed engagements with agreement dates and nullable end facts", () => {
+  const facts = {
+    effective_date: "2026-10-16", executed_at: "2026-10-19T14:00:00Z",
+    term_end: "2027-10-16", ended_at: "2026-11-01T14:00:00Z",
+    end_reason: "First transaction completed", protection_until: "2027-04-30T14:00:00Z",
+    protected_property_ids: ["property-synthetic-1"], governing_state: "FL",
+  };
+  const loaded = assertLifecycleSubject(engagement({ engagement_state: "completed", ...facts }));
+  for (const [field, value] of Object.entries(facts)) assert.deepEqual(loaded[field], value);
+  const old = assertLifecycleSubject(engagement());
+  for (const field of Object.keys(facts)) assert.equal(old[field], null);
+  assert.notEqual(loaded.effective_date, loaded.executed_at.slice(0, 10));
 });
 
 test("the policy digest is stable across calls and covers the transition table", () => {
@@ -2026,9 +2041,9 @@ const GUARD_REFUSAL = Object.freeze({
   required_evidence: "required_evidence_absent",
 });
 
-const EXPECTED_CELLS = 411;
+const EXPECTED_CELLS = 410;
 const EXPECTED_ADMITTING = 82;
-const EXPECTED_REFUSING = 329;
+const EXPECTED_REFUSING = 328;
 
 const SUBJECT_FIXTURE = Object.freeze({
   relationship, engagement, assignment,
