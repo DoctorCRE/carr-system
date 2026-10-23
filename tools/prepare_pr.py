@@ -12,7 +12,12 @@ import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'ops'))
 from git_env import scrubbed_env
-from regen import REGENERATED_OUTPUTS
+REGENERATED_OUTPUTS = {
+    'mcp-server/src/core-rule-ids.js',
+    'mcp-server/test/f03-design-contract-corpus-plan-postgres.generated.sql',
+    'mcp-server/test/f03-design-contract-corpus-slice-postgres.generated.sql',
+    'ops/config/gate-baseline.json', 'db/schema.sql',
+}
 
 
 CANONICAL = Path(__file__).resolve().parents[1]
@@ -27,8 +32,6 @@ def git(repo: Path, *args: str, check: bool = True, timeout: int = 120) -> str:
 
 
 def regen_env(environ) -> dict[str, str]:
-    # HOME carries gh's stored login; without it the migration-slot check's
-    # `gh api` exits 4 (not authenticated) whenever no token is exported.
     return {key: value for key, value in environ.items()
             if key in ('PATH', 'LANG', 'TMPDIR', 'HOME', 'GH_TOKEN', 'GITHUB_TOKEN')}
 
@@ -104,10 +107,16 @@ def main() -> int:
             else:
                 subprocess.run(['npm', '--prefix', 'mcp-server', 'ci', '--ignore-scripts'], cwd=repo,
                                env=env, check=True, capture_output=True, timeout=300)
-            result = subprocess.run([sys.executable, 'tools/regen.py', '--pr', args.pr], cwd=repo,
-                                    env=env, capture_output=True, text=True, timeout=1200)
-            if result.returncode:
-                raise ValueError(result.stderr[-8000:])
+            for command in (
+                [sys.executable, 'ops/sync-core-rule-ids.py'],
+                ['node', 'ops/scac-mutation-inventory.mjs', '--write-current'],
+                ['node', 'mcp-server/test/f03-sql-corpus-generator.mjs', '--write'],
+                [sys.executable, 'ops/migration-shadow.py', '--base', 'origin/main', '--write'],
+            ):
+                result = subprocess.run(command, cwd=repo, env=env, capture_output=True,
+                                        text=True, timeout=1200)
+                if result.returncode:
+                    raise ValueError(result.stderr[-8000:])
         def verify_pr():
             result = subprocess.run(['gh', 'api', f'repos/DoctorCRE/carr-system/pulls/{int(args.pr)}'],
                                     capture_output=True, text=True, check=True, timeout=120)

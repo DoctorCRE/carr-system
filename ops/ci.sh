@@ -608,7 +608,7 @@ check_migration() {
   fi
   if ! run_quiet "$LOGDIR/migration-open-pr.log" "$PY" ops/migration-open-pr-gate.py; then
     cat "$LOGDIR/migration-open-pr.log" >&2
-    bad migration "an earlier PR or main owns a migration slot; run ./run.sh regen --pr <number>"
+    bad migration "an earlier PR or main owns a migration slot; choose a forward filename and update its references"
     return
   fi
   if ! run_quiet "$LOGDIR/migration-baseline.log" "$PY" -m unittest discover -s tools -p 'test_migr*.py'; then
