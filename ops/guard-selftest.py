@@ -876,7 +876,8 @@ case("newfs is refused", bash(f"newfs_hfs {_DISK}"), DENY)
 case("repartitioning a disk is refused", bash(f"diskutil partitionDisk {_DISK} 1 GPT"), DENY)
 
 case("a plus-refspec force push is refused", bash("git push origin +main:main"), DENY)
-case("an ordinary push is still allowed", bash("git push origin main"), ALLOW)
+case("a direct main push uses the PR delivery path", bash("git push origin main"), DENY)
+case("an ordinary branch push is still allowed", bash("git push origin review-fix"), ALLOW)
 
 # ── Rebasing your OWN branch in place, which the blanket block made impossible ──
 #

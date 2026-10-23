@@ -73,12 +73,12 @@ with (pathlib.Path(os.environ['PR_TOOL_FIXTURE']) / 'calls.jsonl').open('a') as 
         with tempfile.TemporaryDirectory() as tmp:
             env = {**os.environ, 'CARR_GITHUB_BURST_STATE': str(Path(tmp) / 'state.json'),
                    'CARR_HOOK_GUARD_LOG': str(Path(tmp) / 'hook.log')}
-            result = subprocess.run([sys.executable, str(ROOT / 'hooks/github-burst-guard.py')],
+            result = subprocess.run([sys.executable, str(ROOT / 'hooks/guard-unattended.py')],
                 input=json.dumps({'tool_name': 'Bash', 'tool_input': {
                     'command': 'for p in $(seq 1 11); do gh pr view "$p"; done'}}),
                 env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
-        self.assertIn('tools/open-prs.sh', result.stderr)
+        self.assertIn('sleep 2', result.stderr)
 
 
 if __name__ == '__main__':
