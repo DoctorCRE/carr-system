@@ -79,7 +79,7 @@ It writes to NOTHING that already existed. Everything it creates it destroys.
 #
 # WHAT ACTUALLY RUNS IT, AND WHY THAT IS CURRENTLY NOTHING. Its runner is the
 # nightly chain, where it was wired on 2026-08-15. That step is presently
-# `bin/routine-admin-refusal.sh` — an unconditional exit 78 — because the Neon
+# an unconditional exit 78 — because the Neon
 # admin capability it needs is not provisioned for the unattended chain. So this
 # gate really does execute nowhere today, and that is a capability Joe has to
 # grant rather than a wiring a session can fix. Open loop 497 carries the three

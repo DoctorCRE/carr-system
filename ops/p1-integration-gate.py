@@ -74,7 +74,7 @@ Fixtures: ops/p1-integration-gate-selftest.py.
 # cannot stage that failure, so passing here would mean less than nothing.
 #
 # WHAT ACTUALLY RUNS IT: the nightly chain, where its step is currently
-# `bin/routine-admin-refusal.sh`, an unconditional exit 78, for want of the same
+# an unconditional exit 78, for want of the same
 # provisioned Neon admin capability. Loops 497 and 499 carry that. Until it is
 # granted this gate executes nowhere, which is a fact worth printing on every
 # push rather than a marker worth faking.
