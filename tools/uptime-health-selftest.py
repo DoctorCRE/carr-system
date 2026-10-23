@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 import importlib.util
+import contextlib
+import io
+import runpy
 import json
 import os
 import subprocess
 import tempfile
 import sys
-import threading
 import time
 import uuid
 from http.client import IncompleteRead
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import unittest
+from functools import partial
+from types import SimpleNamespace
+from urllib.error import HTTPError
+from unittest import mock
 from datetime import datetime, timezone
 
 spec = importlib.util.spec_from_file_location("uptime_health", Path(__file__).with_name("uptime_health.py"))
@@ -21,28 +26,27 @@ spec.loader.exec_module(module)
 NOW = datetime(2026, 10, 5, 19, 0, 0, tzinfo=timezone.utc)
 
 
-def health_cli(root):
-    bootstrap = """
-import runpy
-import sys
-from pathlib import Path
-from unittest.mock import patch
-
-root = Path(sys.argv[1])
-sys.path[:0] = [str(root), str(root / 'tools')]
-from lib.record_call import REFUSED, VerbResult
-
-def offline_record(verb, *args, **kwargs):
-    return VerbResult(verb, REFUSED, {'ok': False, 'error': 'offline_fixture'})
-
-sys.argv = [str(root / 'tools/health-check.py'), *sys.argv[2:]]
-with patch('lib.record_call.call_verb', side_effect=offline_record):
-    runpy.run_path(sys.argv[0], run_name='__main__')
-"""
-    return [sys.executable, "-c", bootstrap, str(root)]
-
-
 class UptimeHealthTests(unittest.TestCase):
+    def run_health(self, read, destination):
+        """Run the real CLI with fixture reads and an empty record-backed audit."""
+        import health_breach
+        path = Path(__file__).with_name("health-check.py")
+        output = destination / "findings.json"
+        with mock.patch.object(sys, "argv", [str(path), "--section", "uptime",
+                                             "--findings-json", str(output)]), \
+                mock.patch.dict(sys.modules, uptime_health=module), \
+                mock.patch.dict(os.environ, {"CARR_UPTIME_RESPONSE_STATE": str(destination / "response.json")}), \
+                mock.patch.object(module, "row", partial(module.row, read=read, now=NOW)), \
+                mock.patch.object(module, "call_verb", return_value={"ok": True, "loop_id": "fixture-loop"}), \
+                mock.patch.object(health_breach, "record_door", return_value=SimpleNamespace(ok=True, reply={"loops": []})), \
+                mock.patch.object(subprocess, "run", side_effect=AssertionError("unexpected subprocess")) as process, \
+                contextlib.redirect_stdout(io.StringIO()) as stdout, \
+                contextlib.redirect_stderr(io.StringIO()) as stderr:
+            with self.assertRaises(SystemExit) as exited:
+                runpy.run_path(str(path), run_name="__main__")
+            process.assert_not_called()
+        return subprocess.CompletedProcess(sys.argv, exited.exception.code, stdout.getvalue(), stderr.getvalue())
+
     def test_refused_or_malformed_loop_read_reports_error(self):
         replies = ({"ok": False, "refused": True}, {"loop": None}, {"loop": []},
                    {"loop_id": "fixture-loop", "version": 1, "status": "open"})
@@ -159,88 +163,43 @@ class UptimeHealthTests(unittest.TestCase):
             "checks": [{"name": name, "ok": True} for name in (
                 "api-release", "app-release", "verb-round-trip")],
         }
-        mode = {"timestamp": None, "partial": False}
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                self.send_response(200)
-                body = json.dumps({**good, "checked_at": mode["timestamp"]}).encode()
-                self.send_header("Content-Length", str(len(body) + (100 if mode["partial"] else 0)))
-                self.end_headers()
-                self.wfile.write(body)
-
-            def log_message(self, *_args):
-                pass
-
-        server = HTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        root = Path(__file__).resolve().parents[1]
-        destination = root / "out/_to_delete" / f"uptime-invalid-{uuid.uuid4()}"
-        destination.mkdir(parents=True)
-        # Refuse local state before any record call; this fixture never contacts production.
-        state = destination / "response.json"
-        state.write_text("not-json")
-        try:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
+            # Refuse local state before any record call, as in the original fixture.
+            (destination / "response.json").write_text("not-json")
             for timestamp in (None, 4, [], {}, "2026-10-05T19:00:00Z"):
-                mode.update(timestamp=timestamp, partial=isinstance(timestamp, str))
-                output = destination / "findings.json"
-                result = subprocess.run(health_cli(root) + [
-                    "--section", "uptime",
-                    "--findings-json", str(output),
-                ], env={**os.environ, "CARR_UPTIME_STATUS_URL": f"http://127.0.0.1:{server.server_port}/healthz",
-                        "CARR_UPTIME_RESPONSE_STATE": str(state)}, capture_output=True, text=True, timeout=15)
-                with self.subTest(timestamp=timestamp):
+                body = json.dumps({**good, "checked_at": timestamp}).encode()
+                response = mock.MagicMock()
+                response.__enter__.return_value = response
+                response.headers = {"Content-Length": str(len(body) + (100 if isinstance(timestamp, str) else 0))}
+                response.read.return_value = body
+                with self.subTest(timestamp=timestamp), mock.patch.object(module, "urlopen", return_value=response):
+                    result = self.run_health(lambda: module._read_status("https://uptime.invalid/healthz"), destination)
                     self.assertEqual(result.returncode, 1, result.stderr)
                     self.assertEqual(result.stdout.splitlines()[-1],
                                      "Projection freshness/tamper checks are recovery evidence; use --recovery --reason <why>.")
-                    self.assertEqual(json.loads(output.read_text())["findings"][0]["key"], "production_uptime")
-        finally:
-            server.shutdown()
-            server.server_close()
-            thread.join()
+                    self.assertEqual(json.loads((destination / "findings.json").read_text())["findings"][0]["key"], "production_uptime")
+                    response.read.assert_called_once_with(65537)
 
     def test_status_deadline_covers_streaming_headers_and_body(self):
-        mode = {"headers": False}
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                try:
-                    if mode["headers"]:
-                        time.sleep(0.8)
-                    self.send_response(200)
-                    self.send_header("Content-Length", "12")
-                    self.end_headers()
-                    for byte in b'{"ok":true} ':
-                        self.wfile.write(bytes([byte]))
-                        self.wfile.flush()
-                        time.sleep(0.08)
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-
-            def log_message(self, *_args):
-                pass
-
-        server = HTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        original = os.environ.get("CARR_UPTIME_STATUS_URL")
-        os.environ["CARR_UPTIME_STATUS_URL"] = f"http://127.0.0.1:{server.server_port}/healthz"
-        try:
-            for headers in (False, True):
-                mode["headers"] = headers
+        # The deadline belongs to the whole fetch subprocess, regardless of
+        # whether it stalls in headers or the body. Simulate expiry immediately.
+        for phase in ("headers", "body"):
+            elapsed = [0.0]
+            def expire(command, *, timeout, **_kwargs):
+                elapsed[0] += timeout
+                raise subprocess.TimeoutExpired(command, timeout)
+            with self.subTest(phase=phase), \
+                    mock.patch.object(time, "monotonic", side_effect=lambda: elapsed[0]), \
+                    mock.patch.object(module.subprocess, "run", side_effect=expire) as process, \
+                    mock.patch.dict(os.environ, {"CARR_UPTIME_STATUS_URL": "https://uptime.invalid/healthz"}):
                 started = time.monotonic()
                 with self.assertRaises((TimeoutError, subprocess.TimeoutExpired)):
                     module.read_status(timeout=0.25)
                 self.assertLess(time.monotonic() - started, 0.7)
-        finally:
-            if original is None:
-                os.environ.pop("CARR_UPTIME_STATUS_URL")
-            else:
-                os.environ["CARR_UPTIME_STATUS_URL"] = original
-            server.shutdown()
-            server.server_close()
-            thread.join()
+                process.assert_called_once_with(
+                    [sys.executable, str(Path(module.__file__).resolve()), "https://uptime.invalid/healthz"],
+                    capture_output=True, timeout=0.25, check=True)
 
     def test_monitor_failure_has_one_loop_and_verified_recovery_closes_it(self):
         root = Path(__file__).resolve().parents[1]
@@ -287,64 +246,43 @@ class UptimeHealthTests(unittest.TestCase):
     def test_health_cli_reads_fixture_status_and_records_a_bound_finding(self):
         payload = {
             "schema": "carr-uptime.v1", "ok": True,
-            "checked_at": datetime.now(timezone.utc).isoformat(), "failures": 0,
+            "checked_at": NOW.isoformat(), "failures": 0,
             "pending_records": 0, "pending_alerts": 0, "active_incident": None,
             "configuration_missing": [], "alert_error": None, "record_error": None,
             "checks": [{"name": name, "ok": True} for name in (
                 "api-release", "app-release", "verb-round-trip")],
         }
 
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                self.send_response(200 if payload["ok"] else 503)
-                self.end_headers()
-                self.wfile.write(json.dumps(payload).encode())
-
-            def log_message(self, *_args):
-                pass
-
-        server = HTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        root = Path(__file__).resolve().parents[1]
-        destination = root / "out" / "_to_delete" / f"uptime-health-fixture-{uuid.uuid4()}"
-        destination.mkdir(parents=True)
-        try:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
             for healthy in (True, False):
                 payload["ok"] = healthy
                 payload["failures"] = 0 if healthy else 3
-                output = destination / "findings.json"
-                result = subprocess.run(health_cli(root) + [
-                    "--section", "uptime",
-                    "--findings-json", str(output),
-                ], env={**os.environ, "CARR_UPTIME_STATUS_URL": f"http://127.0.0.1:{server.server_port}/healthz",
-                        "CARR_UPTIME_RESPONSE_STATE": str(destination / "response.json")},
-                    capture_output=True, text=True, timeout=15)
+                body = json.dumps(payload).encode()
+                response = mock.MagicMock()
+                response.__enter__.return_value = response
+                response.headers = {"Content-Length": str(len(body))}
+                response.read.return_value = body
+                option = ({"return_value": response} if healthy else {"side_effect": HTTPError(
+                    "https://uptime.invalid/healthz", 503, "fixture incident", response.headers, io.BytesIO(body))})
+                with mock.patch.object(module, "urlopen", **option):
+                    result = self.run_health(lambda: module._read_status("https://uptime.invalid/healthz"), destination)
                 self.assertEqual(result.returncode, 0 if healthy else 1, result.stderr)
                 self.assertIn("on breach:", result.stdout)
-                findings = json.loads(output.read_text())["findings"]
+                findings = json.loads((destination / "findings.json").read_text())["findings"]
                 self.assertEqual(len(findings), 0 if healthy else 1)
                 if not healthy:
                     self.assertEqual(findings[0]["key"], "production_uptime")
                     self.assertTrue(findings[0]["hard_error"])
-        finally:
-            server.shutdown()
-            server.server_close()
-            thread.join()
 
     def test_unprovisioned_monitor_warns_without_blocking_release(self):
-        # Joe 2026-10-06: an unprovisioned monitor must not block releases. Unreachable is WARN;
-        # a reachable monitor reporting production failures stays hard (test above).
-        root = Path(__file__).resolve().parents[1]
-        with tempfile.TemporaryDirectory() as tmp:
-            output = Path(tmp) / "findings.json"
-            result = subprocess.run(health_cli(root) + [
-                "--section", "uptime",
-                "--findings-json", str(output),
-            ], env={**os.environ, "CARR_UPTIME_STATUS_URL": "http://127.0.0.1:9/healthz",
-                    "CARR_UPTIME_RESPONSE_STATE": str(Path(tmp) / "response.json")},
-                capture_output=True, text=True, timeout=30)
-            findings = json.loads(output.read_text())["findings"]
+        # Unreachable is WARN; a reachable monitor reporting failures stays hard.
+        def unreachable():
+            raise OSError("fixture monitor unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
+            result = self.run_health(unreachable, destination)
+            findings = json.loads((destination / "findings.json").read_text())["findings"]
             self.assertEqual([f["key"] for f in findings], ["production_uptime"], result.stdout)
             self.assertFalse(findings[0]["hard_error"])
             self.assertIn("monitor unreachable", findings[0]["detail"])
