@@ -19,7 +19,7 @@ The Drive cutoff fired 2026-08-19. The generated Drive `.md` files were moved to
 - `shared/` — code mirrored to the shared DNA tier (lead-board template, vendor intro-path tool, fill-engine pair). The repo is canonical for both partner Macs; Drive copies remain only for cloud-only delivery/runtime until that surface is separately retired.
 - `video/` — the video lane's code, imported 2026-07-25 (it had been living untracked at `~/Movies/CARR Video Pipeline/Scripts` since it was built on Jul 22). AE ExtendScript comp builders + their shell/python drivers: lower thirds, stock b-roll clips, the animated-static builder, the watch-folder encoder, the Premiere XML cutter, and the parked CEP panel. Mapped by `manifest-video.tsv`, whose runtime root is `~/Movies/CARR Video Pipeline` rather than the vault — the pipeline lives outside Drive on purpose because media files are large and Drive sync would churn on them, but the CODE still belongs under version control. Repo is the source of truth, `~/Movies` is the runtime. No output baselines for this lane (video outputs are large binaries and do not belong in git); the review mechanism is the visual pass logged in the pipeline's own `CRITIQUE-LOG.md`. Reasoning and the exclusion list are recorded in the manifest header.
   - Animated statics: `make-animated-static.sh <layers> <name> [--concept K] [--sfx N] [--email] [--dry-run]`, planned by `video/plan-animated-static.py` against `choreography-log.tsv` so a recent shape is never repeated (7 concepts, 5 landing sounds; one sound per piece, varying between pieces). `--email` adds an Outlook-safe cut: legacy Outlook on Windows renders only a GIF's first frame, so that cut leads with the FINISHED card for one frame and does not loop. Social dosing doctrine is in the doctrine store (two per month, never consecutive weeks, IG/FB only, never X); its former vault path was `Marketing/Social Media/social-media-workflow.md`.
-- `bin/` — shell utilities (automation-Chrome launcher, calendar fetcher).
+- `bin/` — local automation utilities, calendar and mail capture, and backup tools.
 - `baselines/` — committed snapshots of each generator's current output. Any code change must show its output diff against these before being accepted (the checkability guardrail: nobody reads this code line-by-line, so the outputs are what get reviewed). The PII-bearing outputs (`lead-board.html`, `deal-room-panhandle.html` since ORDER 42b 2026-08-06, `renewal-radar.json` since 2026-09-26) are hash-only tracked — see the Boundaries section.
 - `tools/health-check.py` — the rule-28 façade check as code (phase 3 pilot): every watched pipeline output tested for STALE-past-cadence and BEHIND-its-inputs. `run.sh health`; the daily heartbeat's JOB 4a calls it.
 - `tools/writing-lint.py` — the writing rules (now in the doctrine store; formerly `DNA/writing-rules.md`) as a deterministic gate (2026-07-25). `run.sh lint <file> [--surface email|social|proposal|web]`. HARD findings are hard bans with a per-instance signature (any hit fails, exit 1); REVIEW findings are hard-ban rules whose pattern has legitimate CRE uses (land, leverage-the-noun, landscape, shift) and always need a human; RATION covers the one-per-piece filler adverbs. It does NOT replace the `writing-audit` skill's judgment pass — it precedes it, the same way the ban list precedes the judgment checks inside writing-rules.md. Product examples are checked by `tools/test-writing-lint.py`.
@@ -55,19 +55,6 @@ Several sessions share this one checkout, so its state is shared state.
   isolated work — it never moves shared HEAD, and two sessions can hold one
   each. A worktree cannot check out a branch another worktree holds, which is
   why detached is the reliable form.
-- **`dictation-phase-b-loop-243` is POISONED and cannot be pushed.** One
-  commit on it (6871583) carries `tools/doc-convo/.venv-qwen`, 8,244 files
-  including a 155MB binary, and GitHub's pre-receive declines any push
-  containing that blob. Nothing of value is trapped: its source was replayed
-  byte-identical onto `codex-doc-convo-clean`, everything else is on `main`
-  or on `origin/dictation-phase-b-loop-243` (which is blob-free). Whoever
-  next works in this tree should clear it:
-
-      git switch -C dictation-phase-b-loop-243 origin/dictation-phase-b-loop-243
-
-  That drops two commits, both already preserved on remotes, and deletes the
-  venv from disk — regenerable, which is why this was left for the tree's
-  next occupant rather than done across lanes.
 - **Never commit build output or environments.** `.build/` (Swift) and
   `.venv*/` (Python) are gitignored as of today, after 274 Swift artifacts
   and one 155MB venv were committed by broad `git add` calls. Add paths

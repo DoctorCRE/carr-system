@@ -43,7 +43,7 @@ filename/checksum ledger with the source. A regression in either side fails CI.
   production data before production (blueprint §4). Build sessions get
   BRANCH credentials only, never the production writer (addendum A14).
 - **Bound an authorized production prefix explicitly.** When newer unrelated
-  files are also pending, `bin/migrate-prod.sh --through NNNN_name.sql` lists
+  files are also pending, `./run.sh migrate --through NNNN_name.sql` lists
   the exact forward prefix selected and every later file held back. Add
   `--apply` only after that displayed prefix is approved. The boundary must be
   an exact checked-in filename; it cannot skip an earlier pending dependency
@@ -82,7 +82,7 @@ filename/checksum ledger with the source. A regression in either side fails CI.
 |---|---|
 | `0001_init.sql` | Full schema v2: tables, triggers, indexes, sequences (addendum §A + §D applied) |
 | `0002_seed.sql` | Actors, reference vocab, system_config thresholds |
-| (build day) `0003_roles_views.sql` | carr_writer / carr_reader roles + the views (v_deal_board, v_export_deals, v_integrity_digest, ...) — needs the Neon project to exist so grants bind to real roles |
+| `0004_roles_views.sql` | carr_writer / carr_reader roles and grants |
 
 ## Two migrations name a file that is not themselves (2026-08-15)
 

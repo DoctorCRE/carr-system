@@ -1,5 +1,5 @@
--- breakglass-snapshot.sql — Artifact C snapshot queries (WR-000046, gated-register-plan.md rev 12,
--- Section 2 "Artifact C"). Read by docs/frontier-finding/breakglass-run.py.
+-- breakglass-snapshot.sql — Artifact C snapshot queries (WR-000046, record-layer gated-register plan rev 12,
+-- Section 2 "Artifact C"). Read by docs/frontier-finding/breakglass_run.py.
 --
 -- CLAIM DISCIPLINE (Section T of the plan): this list is a REVIEWED, EXTENDABLE
 -- surface, not a claim of mechanical completeness over every PostgreSQL catalog
@@ -14,7 +14,7 @@
 --   -- @end
 -- The SELECT must return exactly two columns: identity_key (text, unique
 -- within the block) and row (jsonb, the family's row content for that key).
--- docs/frontier-finding/breakglass-run.py parses this file by the markers,
+-- docs/frontier-finding/breakglass_run.py parses this file by the markers,
 -- not by generic SQL splitting, so a family's SELECT may itself contain
 -- semicolons only inside string/dollar-quoted literals (none do below).
 --
@@ -44,7 +44,7 @@
 -- catalog (that catalog holds only the fixed configuration: start/increment/
 -- min/max/cache/cycle/type). The current value lives in the sequence object
 -- itself and must be read per-sequence with SELECT last_value, is_called FROM
--- <sequence>. docs/frontier-finding/breakglass-run.py runs the @snapshot
+-- <sequence>. docs/frontier-finding/breakglass_run.py runs the @snapshot
 -- pg_sequence block below for the configuration row, then supplements each
 -- row in Python with a per-sequence last_value/is_called read, because no
 -- single catalog-wide SELECT exposes that pair for every sequence at once.

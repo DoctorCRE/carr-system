@@ -58,12 +58,9 @@ PUBKEY_FILE="$REPO/backups-public-key.txt"
 # human eye exactly like it should: this script calls the real `age-keygen`.
 AGE_KEYGEN="age-key""gen"
 
-# --backup ADDED 2026-08-14, folding bin/verify-key-custody.sh into this script
-# rather than keeping two that do one job. That file tested the paper key against
-# an OFF-MAC copy — a GitHub Actions artifact — while this one goes through
-# restore-rehearse, which reads backups/ and therefore tests the copy that dies
-# with this Mac. The off-mac dimension was the only thing it had that this did
-# not, so it is an option here and that file is gone.
+# --backup tests the paper key against an OFF-MAC copy, such as a GitHub
+# Actions artifact. Without it, restore-rehearse reads backups/ and therefore
+# tests the copy that dies with this Mac.
 #
 # WHY IT MATTERS: "the backups restore" and "the backups that would SURVIVE
 # restore" are different claims, and only the second one is about recovery.

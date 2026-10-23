@@ -10,7 +10,7 @@ migrations 0454-0471.
 - `breakglass_selftest.py` — the acceptance suite (3)/(3b)/(3c)/(4) against
   a disposable local Postgres. This one DOES run directly.
 - `breakglass-snapshot.sql` / `census-queries.sql` define the driver's snapshot queries.
-- The research notes, review trail, reports and dispositions were imported into the record layer (doctrine document `frontier-finding-evidence`); their repo copies are staged under `_to_delete/frontier-finding/` for removal.
+- The research notes, review trail, reports and dispositions were imported into the record layer (doctrine document `frontier-finding-evidence`). Git history retains their former repo copies.
 
 ## Import-only libraries
 
@@ -23,4 +23,3 @@ the entrypoint.
 The one-time source-repair launcher is retired. Use forward migrations and the
 normal deployment path for current changes. Git history retains its receipt
 procedure.
-where found.
