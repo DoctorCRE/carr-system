@@ -63,10 +63,11 @@ class VerbLossGuardTests(unittest.TestCase):
             ["git", "rev-parse", "6015711f5"], cwd=REPO, text=True).strip()
         names = source_registry(sha, 377)["verbs"]
         self.assertEqual(len(names), 377)
-        self.assertFalse(set(names[:36]).intersection(self.retired))
+        unlisted = [name for name in names if name not in self.retired][:36]
+        self.assertEqual(len(unlisted), 36)
         for deployed in (377, names):
             with self.subTest(baseline="count" if deployed == 377 else "names"):
-                result = self.run_guard([name for name in names[36:] if name not in self.retired], deployed)
+                result = self.run_guard([name for name in names if name not in self.retired and name not in unlisted], deployed)
                 self.assertNotEqual(result.returncode, 0,
                                     "already-shipped retirements excused 36 unlisted removals")
                 self.assertEqual(result.stdout, "")

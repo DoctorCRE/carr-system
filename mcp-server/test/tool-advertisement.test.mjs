@@ -93,3 +93,20 @@ test("retired Jev gateway verbs are absent from discovery and refuse execution",
     assert.equal(JSON.parse(direct.result.content[0].text).error, "unknown_tool");
   }
 });
+
+test("retired machinery verbs are absent from discovery and refuse execution", async () => {
+  const full = await TOOLS["list-verbs"].handler(null, {}, {});
+  for (const name of ["cadence-status", "record-cadence-receipt", "raise-delivery-cadence-alert",
+    "bot-brief", "read-execution-environment-providers", "activate-context-bundle",
+    "read-context-activation", "render-context-activation", "read-attempt-reliability",
+    "claude-checkpoint", "claude-read-recovery", "close-defect", "read-benchmark-manifest",
+    "read-model-role", "read-journey-one-clock", "register-action-class-successor",
+    "read-action-class-successors", "read-action-class-gate"]) {
+    assert.equal(TOOLS[name], undefined, name);
+    assert.equal(full.verbs.some(verb => verb.name === name), false, name);
+    const direct = await rpc("tools/call", { name, arguments: {} });
+    assert.equal(JSON.parse(direct.result.content[0].text).error, "unknown_tool", name);
+  }
+  for (const name of ["list-my-codex-sessions", "recall-memory", "engineering-passport-source", "read-resource-dashboard"])
+    assert.ok(TOOLS[name], `${name} remains registered`);
+});
