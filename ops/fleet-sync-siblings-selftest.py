@@ -249,24 +249,6 @@ def test_sibling_git_never_waits_on_a_credential_prompt():
     print("PASS  sibling git never waits on a credential prompt")
 
 
-def test_fleet_sync_disables_prompts_before_its_first_git_call():
-    """bin/fleet-sync.sh's own carr-system fetch gets the same protection.
-
-    The export has to come before the script's first git command, or the
-    canonical fetch can still stall on a login prompt.
-    """
-    lines = open(os.path.join(REPO, "bin", "fleet-sync.sh")).read().splitlines()
-    code = [(i, l.strip()) for i, l in enumerate(lines)
-            if l.strip() and not l.strip().startswith("#")]
-    export_at = next((i for i, l in code if l.startswith("export GIT_TERMINAL_PROMPT=0")), None)
-    assert export_at is not None, "bin/fleet-sync.sh never exports GIT_TERMINAL_PROMPT=0"
-    first_git = next(i for i, l in code if "git " in l and not l.startswith("export "))
-    assert export_at < first_git, (export_at, first_git)
-    for needle in ("export GCM_INTERACTIVE=never", "GIT_SSH_COMMAND"):
-        assert any(needle in l for _, l in code), f"bin/fleet-sync.sh missing {needle}"
-    print("PASS  fleet-sync disables prompts before its first git call")
-
-
 def main():
     if not os.path.exists(MODULE):
         print(f"fleet-sync-siblings-selftest: {MODULE} missing", file=sys.stderr)
@@ -279,8 +261,7 @@ def main():
     test_diverged_sibling_is_left_untouched()
     test_sibling_failure_does_not_block_canonical_path()
     test_sibling_git_never_waits_on_a_credential_prompt()
-    test_fleet_sync_disables_prompts_before_its_first_git_call()
-    print("9/9 fleet-sync-siblings cases passed")
+    print("8/8 fleet-sync-siblings cases passed")
     return 0
 
 

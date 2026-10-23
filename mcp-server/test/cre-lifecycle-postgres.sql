@@ -2649,7 +2649,10 @@ begin
         'subject_kind', 'engagement', 'subject_id', v_walk_eng_id,
         'relationship_id', v_walk_rel_id, 'engagement_state', 'active',
         'representation_basis', 'signed_engagement_letter',
-        'effective_from', null, 'effective_to', null),
+        'effective_from', null, 'effective_to', null,
+        'effective_date', null, 'executed_at', null, 'term_end', null,
+        'ended_at', null, 'end_reason', null, 'protection_until', null,
+        'protected_property_ids', null, 'governing_state', null),
       'established_by_transition', 'establish-client-and-engagement',
       'prior_state_digest', null,
       'updated_by', v_actor, 'sponsoring_partner', v_sponsor, 'updated_at', v_now);
@@ -3121,7 +3124,7 @@ begin
     --      the arm that enforces `engagement_state: active` and
     --      `relationship_state: client` on a LOCKED row -- is driven by no case in
     --      this file, and it cannot be: no shipped door writes `expired`,
-    --      `terminated`, `client_paused` or `client_ended` at all, and the
+    --      `completed`, `terminated` or `client_ended` at all, and the
     --      assignment phases outside the negotiation's admitted set (`committed`,
     --      `concluded`) are reached only through a commitment whose evidence is a
     --      counterparty acceptance artifact this fixture does not fabricate. The

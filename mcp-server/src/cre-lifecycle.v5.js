@@ -84,12 +84,8 @@ import { V5_NO_EFFECTS } from "./global-boundaries.v5.js";
 export { V5_NO_EFFECTS };
 
 export const V5_J102_SCHEMA_VERSION = "doctorcre-v5-cre-lifecycle.v1";
-// 3 rather than 2: the policy preimage below gained the initialization contracts
-// (2), and then the reconciliation conflict-kind vocabulary the SQL write boundary
-// now enforces (3). Its digest is a different identity for a different contract
-// each time, and the version is moved with the bytes rather than left to be
-// inferred from them.
-export const V5_J102_POLICY_VERSION = 3;
+// Version 4 adds the engagement facts and revised state vocabulary from J102 step 2.
+export const V5_J102_POLICY_VERSION = 4;
 
 export const V5_J102_SUBJECT_SCHEMA_VERSION = "doctorcre-v5-j102-lifecycle-subject.v1";
 export const V5_J102_EVIDENCE_SCHEMA_VERSION = "doctorcre-v5-j102-lifecycle-evidence.v1";
@@ -585,10 +581,18 @@ export const V5_J102_SUBJECT_KINDS = deepFreeze([
 
 /** Q069 / Q077. Everything before signature is prospect or pre-engagement work. */
 export const V5_J102_RELATIONSHIP_STATES = deepFreeze([
-  "prospect", "client", "client_paused", "client_ended",
+  "prospect", "client", "client_ended",
 ]);
 
-export const V5_J102_ENGAGEMENT_STATES = deepFreeze(["active", "expired", "terminated"]);
+export const V5_J102_ENGAGEMENT_STATES = deepFreeze(["active", "completed", "expired", "terminated"]);
+
+const V5_J102_GOVERNING_STATES = deepFreeze(["FL", "AL"]);
+
+export const V5_J102_ENGAGEMENT_FIELDS = deepFreeze({
+  effective_date: "date", executed_at: "instant", term_end: "date",
+  ended_at: "instant", end_reason: "text", protection_until: "instant",
+  protected_property_ids: "identifiers", governing_state: "governing_state",
+});
 
 /**
  * The representation basis a Client status rests on. Q077 admits an ETL OR
@@ -656,6 +660,7 @@ const RELATIONSHIP_REQUIRED = Object.freeze([
 const ENGAGEMENT_KEYS = Object.freeze([
   "subject_kind", "subject_id", "relationship_id", "engagement_state",
   "representation_basis", "effective_from", "effective_to",
+  ...Object.keys(V5_J102_ENGAGEMENT_FIELDS),
 ]);
 const ASSIGNMENT_KEYS = Object.freeze([
   "subject_kind", "subject_id", "engagement_id", "assignment_phase",
@@ -756,6 +761,33 @@ export function assertLifecycleSubject(subject, path = "subject") {
       out[key] = nullableInstant(value, `${path}.${key}`);
     } else if (COUNT_FIELDS.includes(key)) {
       out[key] = assertSafeInteger(value, `${path}.${key}`, { min: 0, max: 100000 });
+    } else if (kind === "engagement" && V5_J102_ENGAGEMENT_FIELDS[key] !== undefined) {
+      const fieldPath = `${path}.${key}`;
+      switch (V5_J102_ENGAGEMENT_FIELDS[key]) {
+        case "date": {
+          const match = typeof value === "string" && /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+          if (!match || Number(match[1]) < 1 || Number(match[2]) < 1 || Number(match[2]) > 12 ||
+              Number(match[3]) < 1 || Number(match[3]) > daysInMonth(Number(match[1]), Number(match[2]))) {
+            fail("invalid_date", `${fieldPath} must be a calendar date in YYYY-MM-DD form`, { path: fieldPath });
+          }
+          out[key] = value;
+          break;
+        }
+        case "instant":
+          if (typeof value === "string" && value.startsWith("0000")) {
+            fail("invalid_timestamp", `${fieldPath} must use a calendar year from 0001`, { path: fieldPath });
+          }
+          out[key] = nullableInstant(value, fieldPath);
+          break;
+        case "text": out[key] = assertSafeText(value, fieldPath, { maxLength: 1000 }); break;
+        case "identifiers":
+          out[key] = assertArray(value, fieldPath).map((item, index) =>
+            assertExternalIdent(item, `${fieldPath}[${index}]`, { maxLength: 128 }));
+          break;
+        case "governing_state":
+          out[key] = assertEnum(value, V5_J102_GOVERNING_STATES, fieldPath, "unknown_state_value");
+          break;
+      }
     } else if (key === "cancellation_reason") {
       out[key] = assertSafeText(value, `${path}.${key}`, { maxLength: 1000 });
     } else {
@@ -2037,6 +2069,7 @@ function applyTransition({ transition_id, t, subject, related, declared, evidenc
             subject_kind: "engagement", subject_id: engagement_id,
             relationship_id: subject.subject_id, engagement_state: "active",
             representation_basis: basis, effective_from, effective_to,
+            ...Object.fromEntries(Object.keys(V5_J102_ENGAGEMENT_FIELDS).map(field => [field, null])),
           },
         },
         events: [
@@ -2574,7 +2607,7 @@ const INITIALIZATIONS = deepFreeze({
   // relationships at `prospect` and only the ETL moves them, so an assignment
   // before signature really is refused. The lapsed half is DEFENCE IN DEPTH
   // rather than a live path: no shipped transition writes `expired`,
-  // `terminated`, `client_paused` or `client_ended` at all, so those states are
+  // `completed`, `terminated` or `client_ended` at all, so those states are
   // reachable only through a receipted correction. The condition is kept because
   // the day a producer lands it must already be enforced — but it is not
   // currently exercised by any door, and the SQL fixture says so by name rather
@@ -3273,6 +3306,7 @@ export const V5_J102_FIELD_CLASS_REGISTRY = deepFreeze({
   party_id: "lifecycle",
   engagement_state: "lifecycle", representation_basis: "lifecycle",
   effective_from: "lifecycle", effective_to: "lifecycle",
+  ...Object.fromEntries(Object.keys(V5_J102_ENGAGEMENT_FIELDS).map(field => [field, "lifecycle"])),
   // Q080 / Q095 — the assignment and its negotiations.
   assignment_phase: "lifecycle", open_negotiation_count: "lifecycle",
   selected_property_id: "lifecycle", active_lease_draft_target_id: "lifecycle",
@@ -4082,6 +4116,7 @@ export function v5J102PolicyPreimage() {
       relationship: [...V5_J102_RELATIONSHIP_STATES],
       engagement: [...V5_J102_ENGAGEMENT_STATES],
       representation_bases: [...V5_J102_REPRESENTATION_BASES],
+      governing_states: [...V5_J102_GOVERNING_STATES],
       assignment: [...V5_J102_ASSIGNMENT_PHASES],
       property_negotiation: [...V5_J102_NEGOTIATION_STATES],
       instrument_kinds: [...V5_J102_INSTRUMENT_KINDS],
@@ -4095,6 +4130,7 @@ export function v5J102PolicyPreimage() {
       completion_state: [...V5_J102_COMPLETION_STATES],
     },
     deal_axes: [...V5_J102_DEAL_AXES],
+    engagement_fields: V5_J102_ENGAGEMENT_FIELDS,
     evidence_kinds: V5_J102_EVIDENCE_KINDS.map(kind => ({
       evidence_kind: kind,
       source: EVIDENCE_KIND_TABLE[kind].source,

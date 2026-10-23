@@ -19998,866 +19998,7 @@ CREATE FUNCTION ops.j102_admission_policy() RETURNS jsonb
     LANGUAGE sql IMMUTABLE
     SET search_path TO 'pg_catalog'
     AS $_$
-select $policy$
-{
-  "policy_id": "j102-sql-admission.v5",
-  "derived_from": "cre-lifecycle.v5.js v5J102TransitionContract + v5J102EvidenceContract + v5J102InitializationContract + V5_J102_CONFLICT_KINDS + V5_J102_FIELD_CLASS_REGISTRY + applyTransition/axisResult/lifecycleEvent/evaluateLifecycleInitialization/evaluateConcurrentEdit",
-  "invented_business_policy": false,
-  "subject_creation": "coupled_only_never_the_primary_subject",
-  "initialization_writer": "ops.j102_initialize_subject",
-  "initialization_requires_evidence": false,
-  "initialization_performs_transition": false,
-  "derived_event_kinds": false,
-  "stored_subject_schema_version": "doctorcre-v5-j102-stored-lifecycle-subject.v1",
-  "stored_event_schema_version": "doctorcre-v5-j102-stored-lifecycle-event.v1",
-  "event_schema_version": "doctorcre-v5-j102-lifecycle-event.v1",
-  "stored_subject_record_keys": ["schema_version", "tenant", "subject_kind", "subject_id",
-    "state", "established_by_transition", "prior_state_digest", "updated_by",
-    "sponsoring_partner", "updated_at"],
-  "stored_event_record_keys": ["schema_version", "tenant", "event", "transition_id",
-    "evidence_references", "recorded_by", "sponsoring_partner", "recorded_at"],
-  "event_identity_keys": ["schema_version", "event_kind", "subject_kind", "subject_id"],
-  "evidence_reference_keys": ["evidence_kind", "source", "reference"],
-  "parent_reference_fields": {
-    "relationship": "relationship_id",
-    "engagement": "engagement_id",
-    "assignment": "assignment_id",
-    "deal": "pending_deal_id",
-    "property_negotiation": null
-  },
-  "derived_fields": [
-    "relationship.active_engagement_count",
-    "assignment.open_negotiation_count",
-    "assignment.active_lease_draft_target_id"
-  ],
-  "reconciliation": {
-    "writer": "ops.j102_record_reconciliation_item",
-    "conflict_kinds": ["uncharacterized_concurrent_change", "overlapping_field_edit",
-      "material_class_edit", "unclassified_field_edit"],
-    "field_classes": ["lifecycle", "financial", "recipient", "document", "routine"],
-    "material_field_classes": ["lifecycle", "financial", "recipient", "document"],
-    "caller_supplied_field_class_admitted": false,
-    "unregistered_field_class": null,
-    "routine_fields_registered": 0,
-    "field_class_registry": {
-      "active_engagement_count": "lifecycle",
-      "party_id": "lifecycle",
-      "active_lease_draft_target_id": "lifecycle",
-      "assignment_id": "lifecycle",
-      "assignment_phase": "lifecycle",
-      "cancellation_reason": "lifecycle",
-      "closing_date": "lifecycle",
-      "closing_state": "lifecycle",
-      "commission_agreement_state": "financial",
-      "completion_state": "lifecycle",
-      "content_digest": "document",
-      "deal_state": "lifecycle",
-      "diligence_state": "lifecycle",
-      "document_id": "document",
-      "effective_from": "lifecycle",
-      "effective_to": "lifecycle",
-      "engagement_id": "lifecycle",
-      "engagement_state": "lifecycle",
-      "execution_state": "lifecycle",
-      "instrument_kind": "lifecycle",
-      "invoice_state": "financial",
-      "multi_target_exception_ref": "lifecycle",
-      "negotiation_state": "lifecycle",
-      "open_negotiation_count": "lifecycle",
-      "payment_state": "financial",
-      "pending_deal_id": "lifecycle",
-      "property_id": "lifecycle",
-      "relationship_id": "lifecycle",
-      "relationship_state": "lifecycle",
-      "representation_basis": "lifecycle",
-      "selected_property_id": "lifecycle",
-      "subject_id": "lifecycle",
-      "subject_kind": "lifecycle",
-      "supporting_document_id": "document",
-      "version_no": "document"
-    }
-  },
-  "active_negotiation_states": ["loi_drafted", "loi_submitted", "loi_countered", "loi_accepted"],
-  "initializations": {
-    "initialize-prospect-relationship": {
-      "subject_kind": "relationship",
-      "operations": ["initialize-prospect-relationship"],
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"],
-      "decision_refs": ["Q069.D1", "Q077.D1", "Q079.D1"],
-      "requires_evidence": false,
-      "parent_subject_kind": null,
-      "declared_identifiers": [],
-      "optional_declared_identifiers": ["party_id"],
-      "creation_shape": {
-        "subject_kind": { "op": "const", "value": "relationship" },
-        "subject_id": { "op": "proposed_subject_id", "subject": "relationship" },
-        "relationship_state": { "op": "const", "value": "prospect" },
-        "active_engagement_count": { "op": "const", "value": 0 },
-        "party_id": { "op": "optional_declared_identifier", "field": "party_id" }
-      },
-      "required_context": [],
-      "event": {
-        "event_kind": "relationship_initialized", "subject": "relationship",
-        "detail": {
-          "relationship_state": { "op": "subject_field", "subject": "relationship",
-            "source": "proposed", "field": "relationship_state" }
-        }
-      }
-    },
-    "initialize-assignment": {
-      "subject_kind": "assignment",
-      "operations": ["initialize-assignment"],
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"],
-      "decision_refs": ["Q072.D1", "Q077.D1", "Q079.D1", "Q080.D1"],
-      "requires_evidence": false,
-      "parent_subject_kind": "engagement",
-      "parent_reference_field": "engagement_id",
-      "declared_identifiers": [],
-      "optional_declared_identifiers": [],
-      "creation_shape": {
-        "subject_kind": { "op": "const", "value": "assignment" },
-        "subject_id": { "op": "proposed_subject_id", "subject": "assignment" },
-        "engagement_id": { "op": "subject_field", "subject": "engagement",
-          "source": "context", "field": "subject_id" },
-        "assignment_phase": { "op": "const", "value": "research" },
-        "open_negotiation_count": { "op": "const", "value": 0 },
-        "selected_property_id": { "op": "const", "value": null },
-        "active_lease_draft_target_id": { "op": "const", "value": null },
-        "pending_deal_id": { "op": "const", "value": null },
-        "multi_target_exception_ref": { "op": "const", "value": null }
-      },
-      "required_context": [
-        { "subject": "engagement",
-          "identified_by": { "source": "created", "field": "engagement_id" },
-          "conditions": [ { "field": "engagement_state", "equals": "active" } ] },
-        { "subject": "relationship",
-          "identified_by": { "source": "context", "subject": "engagement",
-            "field": "relationship_id" },
-          "conditions": [ { "field": "relationship_state", "equals": "client" } ] }
-      ],
-      "event": {
-        "event_kind": "assignment_initialized", "subject": "assignment",
-        "detail": {
-          "engagement_id": { "op": "subject_field", "subject": "engagement",
-            "source": "context", "field": "subject_id" },
-          "assignment_phase": { "op": "subject_field", "subject": "assignment",
-            "source": "proposed", "field": "assignment_phase" }
-        }
-      }
-    },
-    "initialize-property-negotiation": {
-      "subject_kind": "property_negotiation",
-      "operations": ["initialize-property-negotiation"],
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"],
-      "decision_refs": ["Q080.D1", "Q095.D1"],
-      "requires_evidence": false,
-      "parent_subject_kind": "assignment",
-      "parent_reference_field": "assignment_id",
-      "declared_identifiers": ["property_id"],
-      "optional_declared_identifiers": [],
-      "unique_active_per_property": true,
-      "creation_shape": {
-        "subject_kind": { "op": "const", "value": "property_negotiation" },
-        "subject_id": { "op": "proposed_subject_id", "subject": "property_negotiation" },
-        "assignment_id": { "op": "subject_field", "subject": "assignment",
-          "source": "context", "field": "subject_id" },
-        "property_id": { "op": "declared_identifier", "field": "property_id" },
-        "negotiation_state": { "op": "const", "value": "loi_drafted" }
-      },
-      "required_context": [
-        { "subject": "assignment",
-          "identified_by": { "source": "created", "field": "assignment_id" },
-          "conditions": [ { "field": "assignment_phase",
-            "in": ["research", "search", "negotiation"] } ] }
-      ],
-      "event": {
-        "event_kind": "property_negotiation_initialized", "subject": "property_negotiation",
-        "detail": {
-          "assignment_id": { "op": "subject_field", "subject": "assignment",
-            "source": "context", "field": "subject_id" },
-          "property_id": { "op": "subject_field", "subject": "property_negotiation",
-            "source": "proposed", "field": "property_id" },
-          "negotiation_state": { "op": "subject_field", "subject": "property_negotiation",
-            "source": "proposed", "field": "negotiation_state" }
-        }
-      }
-    }
-  },
-  "evidence": {
-    "signed_engagement_letter": {
-      "source": "f01_document", "binds_subject_kind": "relationship",
-      "record_kind": null, "requires_author_class": null,
-      "requires_closing_date": false,
-      "document_states": { "signature_state": "fully_executed",
-        "validity_state": "effective", "version_state": "current" },
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"]
-    },
-    "approved_representation_equivalent": {
-      "source": "typed_approval", "binds_subject_kind": "relationship",
-      "record_kind": null, "requires_author_class": null,
-      "requires_closing_date": false,
-      "permitted_actor_classes": ["verified_partner"]
-    },
-    "search_initiation": {
-      "source": "first_party_record", "binds_subject_kind": "assignment",
-      "record_kind": "assignment_mandate", "requires_author_class": null,
-      "requires_closing_date": false,
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"]
-    },
-    "submitted_loi": {
-      "source": "f01_document", "binds_subject_kind": "property_negotiation",
-      "record_kind": null, "requires_author_class": null,
-      "requires_closing_date": false,
-      "document_states": { "delivery_state": "delivered", "version_state": "current" },
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"]
-    },
-    "counterparty_loi_acceptance": {
-      "source": "f01_corporate_artifact", "binds_subject_kind": "property_negotiation",
-      "record_kind": null, "requires_author_class": null,
-      "requires_closing_date": false,
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"]
-    },
-    "winner_selection_commitment": {
-      "source": "first_party_record", "binds_subject_kind": "assignment",
-      "record_kind": "winning_property_commitment",
-      "requires_author_class": "verified_partner",
-      "requires_closing_date": false,
-      "permitted_actor_classes": ["verified_partner"]
-    },
-    "executed_lease": {
-      "source": "f01_document", "binds_subject_kind": "deal",
-      "record_kind": null, "requires_author_class": null,
-      "requires_closing_date": false,
-      "document_states": { "signature_state": "fully_executed",
-        "validity_state": "effective", "version_state": "current" },
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"]
-    },
-    "signed_purchase_contract": {
-      "source": "f01_document", "binds_subject_kind": "deal",
-      "record_kind": null, "requires_author_class": null,
-      "requires_closing_date": false,
-      "document_states": { "signature_state": "fully_executed",
-        "version_state": "current" },
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"]
-    },
-    "diligence_outcome": {
-      "source": "first_party_record", "binds_subject_kind": "deal",
-      "record_kind": "diligence_outcome", "requires_author_class": null,
-      "requires_closing_date": false,
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"]
-    },
-    "final_closing_settlement": {
-      "source": "first_party_record", "binds_subject_kind": "deal",
-      "record_kind": "closing_settlement",
-      "requires_author_class": "verified_partner",
-      "requires_closing_date": true,
-      "permitted_actor_classes": ["verified_partner"]
-    },
-    "deal_failure_record": {
-      "source": "first_party_record", "binds_subject_kind": "deal",
-      "record_kind": "deal_failure", "requires_author_class": "verified_partner",
-      "requires_closing_date": false,
-      "permitted_actor_classes": ["verified_partner"]
-    },
-    "commission_agreement": {
-      "source": "f01_document", "binds_subject_kind": "deal",
-      "record_kind": null, "requires_author_class": null,
-      "requires_closing_date": false,
-      "document_states": { "signature_state": "fully_executed",
-        "version_state": "current" },
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"]
-    },
-    "invoice_issued": {
-      "source": "first_party_record", "binds_subject_kind": "deal",
-      "record_kind": "invoice", "requires_author_class": null,
-      "requires_closing_date": false,
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"]
-    },
-    "payment_received": {
-      "source": "first_party_record", "binds_subject_kind": "deal",
-      "record_kind": "payment", "requires_author_class": null,
-      "requires_closing_date": false,
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"]
-    },
-    "completion_recorded": {
-      "source": "first_party_record", "binds_subject_kind": "deal",
-      "record_kind": "completion", "requires_author_class": null,
-      "requires_closing_date": false,
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"]
-    },
-    "manual_correction": {
-      "source": "first_party_record", "binds_subject_kind": null,
-      "record_kind": "lifecycle_correction",
-      "requires_author_class": "verified_partner",
-      "requires_closing_date": false,
-      "permitted_actor_classes": ["verified_partner"]
-    },
-    "multi_target_exception_approval": {
-      "source": "typed_approval", "binds_subject_kind": "assignment",
-      "record_kind": null, "requires_author_class": null,
-      "requires_closing_date": false,
-      "permitted_actor_classes": ["verified_partner"]
-    }
-  },
-  "transitions": {
-    "establish-client-and-engagement": {
-      "subject_kind": "relationship",
-      "operations": ["record-representation-agreement"],
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"],
-      "decision_refs": ["Q069.D1", "Q072.D1", "Q077.D1", "Q079.D1"],
-      "requires_active_engagement": false,
-      "prerequisites": { "relationship_state": ["prospect"] },
-      "instrument_kinds": null,
-      "required_evidence_alternatives":
-        [["signed_engagement_letter"], ["approved_representation_equivalent"]],
-      "coupled_facts": ["relationship.relationship_state", "engagement.engagement_state",
-        "engagement.representation_basis"],
-      "creates_deal": false,
-      "writes": {
-        "relationship": ["relationship_state", "active_engagement_count"],
-        "engagement": ["engagement_state", "representation_basis"]
-      },
-      "subjects": {
-        "relationship": {
-          "role": "primary", "mode": "update",
-          "effects": {
-            "relationship_state": { "op": "const", "value": "client" },
-            "active_engagement_count": { "op": "prior_plus", "subject": "relationship",
-              "field": "active_engagement_count", "add": 1 }
-          }
-        },
-        "engagement": {
-          "role": "coupled", "mode": "create",
-          "creation_shape": {
-            "subject_kind": { "op": "const", "value": "engagement" },
-            "subject_id": { "op": "proposed_subject_id", "subject": "engagement" },
-            "relationship_id": { "op": "proposed_subject_id", "subject": "relationship" },
-            "engagement_state": { "op": "const", "value": "active" },
-            "representation_basis": { "op": "supplied_evidence_kind" },
-            "effective_from": { "op": "case_on_evidence", "cases": {
-              "signed_engagement_letter": { "op": "const", "value": null },
-              "approved_representation_equivalent": { "op": "unbound",
-                "why": "the kernel takes this from the typed approval's approved_at, and ops.j102_typed_approval is private and always raises, so no manifest can reach this branch here" } } },
-            "effective_to": { "op": "const", "value": null }
-          }
-        }
-      },
-      "events": [
-        { "event_kind": "client_status_established", "subject": "relationship",
-          "detail": {
-            "representation_basis": { "op": "subject_field", "subject": "engagement",
-              "source": "proposed", "field": "representation_basis" },
-            "evidence_reference": { "op": "case_on_evidence", "cases": {
-              "signed_engagement_letter": { "op": "evidence_fact",
-                "evidence_kind": "signed_engagement_letter", "fact": "reference" },
-              "approved_representation_equivalent": { "op": "evidence_fact",
-                "evidence_kind": "approved_representation_equivalent", "fact": "reference" } } }
-          } },
-        { "event_kind": "engagement_opened", "subject": "engagement",
-          "detail": {
-            "relationship_id": { "op": "proposed_subject_id", "subject": "relationship" },
-            "representation_basis": { "op": "subject_field", "subject": "engagement",
-              "source": "proposed", "field": "representation_basis" }
-          } }
-      ]
-    },
-    "open-assignment": {
-      "subject_kind": "assignment",
-      "operations": ["open-cre-assignment"],
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"],
-      "decision_refs": ["Q072.D1", "Q079.D1", "Q080.D1"],
-      "requires_active_engagement": true,
-      "prerequisites": { "assignment_phase": ["research", "search"] },
-      "instrument_kinds": null,
-      "required_evidence_alternatives": [["search_initiation"]],
-      "coupled_facts": ["assignment.assignment_phase"],
-      "creates_deal": false,
-      "writes": { "assignment": ["assignment_phase"] },
-      "subjects": {
-        "assignment": {
-          "role": "primary", "mode": "update",
-          "prior_conditions": [
-            { "field": "pending_deal_id", "must_be_null": true },
-            { "field": "selected_property_id", "must_be_null": true },
-            { "field": "active_lease_draft_target_id", "must_be_null": true }
-          ],
-          "effects": {
-            "assignment_phase": { "op": "one_of", "values": ["research", "search"],
-              "guards": [ { "value": "research", "requires": { "subject": "assignment",
-                "source": "prior", "field": "open_negotiation_count", "equals": 0 } } ] }
-          }
-        }
-      },
-      "required_context": [
-        { "subject": "engagement",
-          "identified_by": { "subject": "assignment", "source": "prior", "field": "engagement_id" },
-          "conditions": [ { "field": "engagement_state", "equals": "active" } ] },
-        { "subject": "relationship",
-          "identified_by": { "subject": "engagement", "source": "context", "field": "relationship_id" },
-          "conditions": [ { "field": "relationship_state", "equals": "client" } ] }
-      ],
-      "events": [ { "event_kind": "assignment_opened", "subject": "assignment",
-        "detail": {
-          "engagement_id": { "op": "subject_field", "subject": "engagement",
-            "source": "context", "field": "subject_id" },
-          "assignment_phase": { "op": "subject_field", "subject": "assignment",
-            "source": "proposed", "field": "assignment_phase" },
-          "evidence_reference": { "op": "evidence_fact",
-            "evidence_kind": "search_initiation", "fact": "reference" }
-        } } ]
-    },
-    "record-loi-submission": {
-      "subject_kind": "property_negotiation",
-      "operations": ["record-loi-submission"],
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"],
-      "decision_refs": ["Q072.D1", "Q080.D1", "Q095.D1"],
-      "requires_active_engagement": false,
-      "prerequisites": { "negotiation_state": ["loi_drafted", "loi_countered"] },
-      "instrument_kinds": null,
-      "required_evidence_alternatives": [["submitted_loi"]],
-      "coupled_facts": ["property_negotiation.negotiation_state", "assignment.assignment_phase"],
-      "creates_deal": false,
-      "writes": {
-        "property_negotiation": ["negotiation_state"],
-        "assignment": ["assignment_phase", "open_negotiation_count"]
-      },
-      "subjects": {
-        "property_negotiation": {
-          "role": "primary", "mode": "update",
-          "prior_conditions": [
-            { "field": "assignment_id", "equals_subject_id": "assignment" }
-          ],
-          "effects": {
-            "negotiation_state": { "op": "const", "value": "loi_submitted" }
-          }
-        },
-        "assignment": {
-          "role": "coupled", "mode": "update",
-          "prior_conditions": [
-            { "field": "assignment_phase", "in": ["research", "search", "negotiation"] }
-          ],
-          "effects": {
-            "assignment_phase": { "op": "const", "value": "negotiation" },
-            "open_negotiation_count": { "op": "prior_plus_conditional",
-              "subject": "assignment", "field": "open_negotiation_count", "add": 1,
-              "when": { "subject": "property_negotiation", "source": "prior",
-                "field": "negotiation_state", "equals": "loi_drafted" } }
-          }
-        }
-      },
-      "events": [ { "event_kind": "loi_submitted", "subject": "property_negotiation",
-        "detail": {
-          "assignment_id": { "op": "proposed_subject_id", "subject": "assignment" },
-          "property_id": { "op": "subject_field", "subject": "property_negotiation",
-            "source": "prior", "field": "property_id" },
-          "evidence_reference": { "op": "evidence_fact",
-            "evidence_kind": "submitted_loi", "fact": "reference" }
-        } } ]
-    },
-    "record-loi-acceptance": {
-      "subject_kind": "property_negotiation",
-      "operations": ["record-loi-acceptance"],
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"],
-      "decision_refs": ["Q078.D1", "Q095.D1"],
-      "requires_active_engagement": false,
-      "prerequisites": { "negotiation_state": ["loi_submitted", "loi_countered"] },
-      "instrument_kinds": null,
-      "required_evidence_alternatives": [["counterparty_loi_acceptance"]],
-      "coupled_facts": ["property_negotiation.negotiation_state"],
-      "creates_deal": false,
-      "writes": { "property_negotiation": ["negotiation_state"] },
-      "subjects": {
-        "property_negotiation": {
-          "role": "primary", "mode": "update",
-          "effects": {
-            "negotiation_state": { "op": "const", "value": "loi_accepted" }
-          }
-        }
-      },
-      "events": [ { "event_kind": "loi_accepted", "subject": "property_negotiation",
-        "detail": {
-          "property_id": { "op": "subject_field", "subject": "property_negotiation",
-            "source": "prior", "field": "property_id" },
-          "evidence_reference": { "op": "evidence_fact",
-            "evidence_kind": "counterparty_loi_acceptance", "fact": "reference" }
-        } } ]
-    },
-    "commit-winning-property": {
-      "subject_kind": "assignment",
-      "operations": ["commit-winning-property"],
-      "permitted_actor_classes": ["verified_partner"],
-      "decision_refs": ["Q069.D1", "Q078.D1", "Q080.D1", "Q095.D1"],
-      "requires_active_engagement": false,
-      "prerequisites": { "assignment_phase": ["search", "negotiation"] },
-      "instrument_kinds": null,
-      "required_evidence_alternatives": [["winner_selection_commitment"]],
-      "coupled_facts": ["property_negotiation.negotiation_state", "assignment.assignment_phase",
-        "assignment.selected_property_id", "assignment.pending_deal_id", "deal.deal_state"],
-      "creates_deal": true,
-      "writes": {
-        "property_negotiation": ["negotiation_state"],
-        "assignment": ["assignment_phase", "selected_property_id",
-          "active_lease_draft_target_id", "pending_deal_id"],
-        "deal": ["deal_state"]
-      },
-      "subjects": {
-        "assignment": {
-          "role": "primary", "mode": "update",
-          "prior_conditions": [
-            { "field": "pending_deal_id", "must_be_null": true },
-            { "field": "selected_property_id", "null_or_matches": { "op": "subject_field",
-              "subject": "property_negotiation", "source": "prior", "field": "property_id" } },
-            { "field": "active_lease_draft_target_id", "null_or_matches": { "op": "subject_field",
-              "subject": "property_negotiation", "source": "prior", "field": "property_id" } }
-          ],
-          "effects": {
-            "assignment_phase": { "op": "const", "value": "committed" },
-            "selected_property_id": { "op": "subject_field", "subject": "property_negotiation",
-              "source": "prior", "field": "property_id" },
-            "active_lease_draft_target_id": { "op": "case_on_field", "subject": "deal",
-              "source": "proposed", "field": "instrument_kind",
-              "cases": { "purchase": { "op": "const", "value": null } },
-              "default": { "op": "subject_field", "subject": "property_negotiation",
-                "source": "prior", "field": "property_id" } },
-            "pending_deal_id": { "op": "proposed_subject_id", "subject": "deal" }
-          }
-        },
-        "property_negotiation": {
-          "role": "coupled", "mode": "update",
-          "prior_conditions": [
-            { "field": "assignment_id", "equals_subject_id": "assignment" },
-            { "field": "negotiation_state", "equals": "loi_accepted" }
-          ],
-          "effects": {
-            "negotiation_state": { "op": "const", "value": "selected_winner" }
-          }
-        },
-        "deal": {
-          "role": "coupled", "mode": "create",
-          "creation_shape": {
-            "subject_kind": { "op": "const", "value": "deal" },
-            "subject_id": { "op": "proposed_subject_id", "subject": "deal" },
-            "assignment_id": { "op": "proposed_subject_id", "subject": "assignment" },
-            "property_id": { "op": "subject_field", "subject": "property_negotiation",
-              "source": "prior", "field": "property_id" },
-            "instrument_kind": { "op": "one_of",
-              "values": ["lease", "purchase", "renewal", "amendment"] },
-            "deal_state": { "op": "const", "value": "pending" },
-            "execution_state": { "op": "const", "value": "unexecuted" },
-            "diligence_state": { "op": "const", "value": "not_applicable" },
-            "closing_state": { "op": "const", "value": "not_reached" },
-            "commission_agreement_state": { "op": "const", "value": "absent" },
-            "invoice_state": { "op": "const", "value": "not_invoiced" },
-            "payment_state": { "op": "const", "value": "unpaid" },
-            "completion_state": { "op": "const", "value": "open" },
-            "cancellation_reason": { "op": "const", "value": null },
-            "closing_date": { "op": "const", "value": null }
-          }
-        }
-      },
-      "events": [
-        { "event_kind": "winning_property_selected", "subject": "property_negotiation",
-          "detail": {
-            "property_id": { "op": "subject_field", "subject": "property_negotiation",
-              "source": "prior", "field": "property_id" }
-          } },
-        { "event_kind": "assignment_committed", "subject": "assignment",
-          "detail": {
-            "selected_property_id": { "op": "subject_field", "subject": "property_negotiation",
-              "source": "prior", "field": "property_id" },
-            "pending_deal_id": { "op": "proposed_subject_id", "subject": "deal" }
-          } },
-        { "event_kind": "pending_deal_created", "subject": "deal",
-          "detail": {
-            "assignment_id": { "op": "proposed_subject_id", "subject": "assignment" },
-            "property_id": { "op": "subject_field", "subject": "property_negotiation",
-              "source": "prior", "field": "property_id" },
-            "instrument_kind": { "op": "subject_field", "subject": "deal",
-              "source": "proposed", "field": "instrument_kind" },
-            "evidence_reference": { "op": "evidence_fact",
-              "evidence_kind": "winner_selection_commitment", "fact": "reference" }
-          } }
-      ]
-    },
-    "record-lease-execution": {
-      "subject_kind": "deal",
-      "operations": ["record-deal-execution"],
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"],
-      "decision_refs": ["Q072.D1", "Q078.D1", "Q080.D1"],
-      "requires_active_engagement": false,
-      "prerequisites": { "deal_state": ["pending"], "execution_state": ["unexecuted"] },
-      "instrument_kinds": ["lease", "renewal", "amendment"],
-      "required_evidence_alternatives": [["executed_lease"]],
-      "coupled_facts": ["deal.execution_state"],
-      "creates_deal": false,
-      "writes": { "deal": ["execution_state"] },
-      "subjects": {
-        "deal": {
-          "role": "primary", "mode": "update",
-          "effects": { "execution_state": { "op": "const", "value": "executed" } }
-        }
-      },
-      "events": [ { "event_kind": "lease_executed", "subject": "deal",
-        "detail": {
-          "evidence_reference": { "op": "evidence_fact",
-            "evidence_kind": "executed_lease", "fact": "reference" }
-        } } ]
-    },
-    "record-purchase-contract-execution": {
-      "subject_kind": "deal",
-      "operations": ["record-deal-execution"],
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"],
-      "decision_refs": ["Q072.D1", "Q094.D1"],
-      "requires_active_engagement": false,
-      "prerequisites": { "deal_state": ["pending"], "execution_state": ["unexecuted"] },
-      "instrument_kinds": ["purchase"],
-      "required_evidence_alternatives": [["signed_purchase_contract"]],
-      "coupled_facts": ["deal.execution_state", "deal.diligence_state"],
-      "creates_deal": false,
-      "writes": { "deal": ["execution_state", "diligence_state"] },
-      "subjects": {
-        "deal": {
-          "role": "primary", "mode": "update",
-          "effects": {
-            "execution_state": { "op": "const", "value": "executed" },
-            "diligence_state": { "op": "const", "value": "in_progress" }
-          }
-        }
-      },
-      "events": [ { "event_kind": "purchase_contract_executed", "subject": "deal",
-        "detail": {
-          "evidence_reference": { "op": "evidence_fact",
-            "evidence_kind": "signed_purchase_contract", "fact": "reference" }
-        } } ]
-    },
-    "record-diligence-outcome": {
-      "subject_kind": "deal",
-      "operations": ["record-diligence-outcome"],
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"],
-      "decision_refs": ["Q080.D1", "Q094.D1"],
-      "requires_active_engagement": false,
-      "prerequisites": { "deal_state": ["pending"], "diligence_state": ["in_progress"] },
-      "instrument_kinds": null,
-      "required_evidence_alternatives": [["diligence_outcome"]],
-      "coupled_facts": ["deal.diligence_state"],
-      "creates_deal": false,
-      "writes": { "deal": ["diligence_state"] },
-      "subjects": {
-        "deal": {
-          "role": "primary", "mode": "update",
-          "effects": { "diligence_state": { "op": "one_of",
-            "values": ["waived", "satisfied", "failed"] } }
-        }
-      },
-      "events": [ { "event_kind": "diligence_outcome_recorded", "subject": "deal",
-        "detail": {
-          "diligence_state": { "op": "subject_field", "subject": "deal",
-            "source": "proposed", "field": "diligence_state" },
-          "evidence_reference": { "op": "evidence_fact",
-            "evidence_kind": "diligence_outcome", "fact": "reference" }
-        } } ]
-    },
-    "record-deal-closing": {
-      "subject_kind": "deal",
-      "operations": ["record-deal-closing"],
-      "permitted_actor_classes": ["verified_partner"],
-      "decision_refs": ["Q080.D1", "Q082.D1", "Q094.D1"],
-      "requires_active_engagement": false,
-      "prerequisites": { "deal_state": ["pending"], "execution_state": ["executed"],
-        "closing_state": ["not_reached"] },
-      "instrument_kinds": null,
-      "required_evidence_alternatives": [["final_closing_settlement"]],
-      "coupled_facts": ["deal.deal_state", "deal.closing_state", "deal.closing_date"],
-      "creates_deal": false,
-      "writes": { "deal": ["deal_state", "closing_state", "closing_date"] },
-      "subjects": {
-        "deal": {
-          "role": "primary", "mode": "update",
-          "prior_conditions": [
-            { "field": "diligence_state", "not_in": ["in_progress", "failed"] }
-          ],
-          "effects": {
-            "deal_state": { "op": "const", "value": "closed" },
-            "closing_state": { "op": "const", "value": "closed" },
-            "closing_date": { "op": "evidence_fact",
-              "evidence_kind": "final_closing_settlement", "fact": "closing_date" }
-          }
-        }
-      },
-      "events": [ { "event_kind": "deal_closed", "subject": "deal",
-        "detail": {
-          "closing_date": { "op": "evidence_fact",
-            "evidence_kind": "final_closing_settlement", "fact": "closing_date" },
-          "evidence_reference": { "op": "evidence_fact",
-            "evidence_kind": "final_closing_settlement", "fact": "reference" }
-        } } ]
-    },
-    "cancel-pending-deal": {
-      "subject_kind": "deal",
-      "operations": ["cancel-pending-deal"],
-      "permitted_actor_classes": ["verified_partner"],
-      "decision_refs": ["Q096.D1"],
-      "requires_active_engagement": false,
-      "prerequisites": { "deal_state": ["pending"] },
-      "instrument_kinds": null,
-      "required_evidence_alternatives": [["deal_failure_record"]],
-      "coupled_facts": ["deal.deal_state", "deal.cancellation_reason",
-        "assignment.assignment_phase", "assignment.selected_property_id",
-        "assignment.pending_deal_id"],
-      "creates_deal": false,
-      "writes": {
-        "deal": ["deal_state", "cancellation_reason"],
-        "assignment": ["assignment_phase", "selected_property_id",
-          "active_lease_draft_target_id", "pending_deal_id"]
-      },
-      "subjects": {
-        "deal": {
-          "role": "primary", "mode": "update",
-          "prior_conditions": [
-            { "field": "assignment_id", "equals_subject_id": "assignment" }
-          ],
-          "effects": {
-            "deal_state": { "op": "const", "value": "cancelled" },
-            "cancellation_reason": { "op": "evidence_fact",
-              "evidence_kind": "deal_failure_record", "fact": "reason" }
-          }
-        },
-        "assignment": {
-          "role": "coupled", "mode": "update",
-          "effects": {
-            "assignment_phase": { "op": "one_of", "values": ["search", "negotiation"],
-              "guards": [ { "value": "negotiation", "requires": { "subject": "assignment",
-                "source": "prior", "field": "open_negotiation_count", "at_least": 1 } } ] },
-            "selected_property_id": { "op": "const", "value": null },
-            "active_lease_draft_target_id": { "op": "const", "value": null },
-            "pending_deal_id": { "op": "const", "value": null }
-          }
-        }
-      },
-      "events": [
-        { "event_kind": "pending_deal_cancelled", "subject": "deal",
-          "detail": {
-            "cancellation_reason": { "op": "evidence_fact",
-              "evidence_kind": "deal_failure_record", "fact": "reason" },
-            "evidence_reference": { "op": "evidence_fact",
-              "evidence_kind": "deal_failure_record", "fact": "reference" }
-          } },
-        { "event_kind": "assignment_returned_to_market", "subject": "assignment",
-          "detail": {
-            "assignment_phase": { "op": "subject_field", "subject": "assignment",
-              "source": "proposed", "field": "assignment_phase" }
-          } }
-      ]
-    },
-    "record-commission-agreement": {
-      "subject_kind": "deal",
-      "operations": ["record-deal-axis"],
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"],
-      "decision_refs": ["Q080.D1"],
-      "requires_active_engagement": false,
-      "prerequisites": { "commission_agreement_state": ["absent"] },
-      "instrument_kinds": null,
-      "required_evidence_alternatives": [["commission_agreement"]],
-      "coupled_facts": ["deal.commission_agreement_state"],
-      "creates_deal": false,
-      "writes": { "deal": ["commission_agreement_state"] },
-      "subjects": {
-        "deal": {
-          "role": "primary", "mode": "update",
-          "effects": { "commission_agreement_state": { "op": "const", "value": "agreed" } }
-        }
-      },
-      "events": [ { "event_kind": "commission_agreement_recorded", "subject": "deal",
-        "detail": {
-          "commission_agreement_state": { "op": "subject_field", "subject": "deal",
-            "source": "proposed", "field": "commission_agreement_state" },
-          "evidence_reference": { "op": "evidence_fact",
-            "evidence_kind": "commission_agreement", "fact": "reference" }
-        } } ]
-    },
-    "record-invoice-issued": {
-      "subject_kind": "deal",
-      "operations": ["record-deal-axis"],
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"],
-      "decision_refs": ["Q080.D1"],
-      "requires_active_engagement": false,
-      "prerequisites": { "invoice_state": ["not_invoiced"] },
-      "instrument_kinds": null,
-      "required_evidence_alternatives": [["invoice_issued"]],
-      "coupled_facts": ["deal.invoice_state"],
-      "creates_deal": false,
-      "writes": { "deal": ["invoice_state"] },
-      "subjects": {
-        "deal": {
-          "role": "primary", "mode": "update",
-          "effects": { "invoice_state": { "op": "const", "value": "invoiced" } }
-        }
-      },
-      "events": [ { "event_kind": "invoice_issued", "subject": "deal",
-        "detail": {
-          "invoice_state": { "op": "subject_field", "subject": "deal",
-            "source": "proposed", "field": "invoice_state" },
-          "evidence_reference": { "op": "evidence_fact",
-            "evidence_kind": "invoice_issued", "fact": "reference" }
-        } } ]
-    },
-    "record-payment": {
-      "subject_kind": "deal",
-      "operations": ["record-deal-axis"],
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"],
-      "decision_refs": ["Q072.D1", "Q080.D1"],
-      "requires_active_engagement": false,
-      "prerequisites": { "payment_state": ["unpaid", "partially_paid"] },
-      "instrument_kinds": null,
-      "required_evidence_alternatives": [["payment_received"]],
-      "coupled_facts": ["deal.payment_state"],
-      "creates_deal": false,
-      "writes": { "deal": ["payment_state"] },
-      "subjects": {
-        "deal": {
-          "role": "primary", "mode": "update",
-          "effects": { "payment_state": { "op": "one_of",
-            "values": ["partially_paid", "paid"], "differs_from_prior": true,
-            "prior_subject": "deal", "prior_field": "payment_state" } }
-        }
-      },
-      "events": [ { "event_kind": "payment_recorded", "subject": "deal",
-        "detail": {
-          "payment_state": { "op": "subject_field", "subject": "deal",
-            "source": "proposed", "field": "payment_state" },
-          "evidence_reference": { "op": "evidence_fact",
-            "evidence_kind": "payment_received", "fact": "reference" }
-        } } ]
-    },
-    "record-completion": {
-      "subject_kind": "deal",
-      "operations": ["record-deal-axis"],
-      "permitted_actor_classes": ["verified_partner", "sponsored_agent"],
-      "decision_refs": ["Q072.D1", "Q080.D1"],
-      "requires_active_engagement": false,
-      "prerequisites": { "completion_state": ["open"] },
-      "instrument_kinds": null,
-      "required_evidence_alternatives": [["completion_recorded"]],
-      "coupled_facts": ["deal.completion_state"],
-      "creates_deal": false,
-      "writes": { "deal": ["completion_state"] },
-      "subjects": {
-        "deal": {
-          "role": "primary", "mode": "update",
-          "effects": { "completion_state": { "op": "const", "value": "complete" } }
-        }
-      },
-      "events": [ { "event_kind": "completion_recorded", "subject": "deal",
-        "detail": {
-          "completion_state": { "op": "subject_field", "subject": "deal",
-            "source": "proposed", "field": "completion_state" },
-          "evidence_reference": { "op": "evidence_fact",
-            "evidence_kind": "completion_recorded", "fact": "reference" }
-        } } ]
-    }
-  }
-}
-$policy$::jsonb
+select $policy${"evidence": {"submitted_loi": {"source": "f01_document", "record_kind": null, "document_states": {"version_state": "current", "delivery_state": "delivered"}, "binds_subject_kind": "property_negotiation", "requires_author_class": null, "requires_closing_date": false, "permitted_actor_classes": ["verified_partner", "sponsored_agent"]}, "executed_lease": {"source": "f01_document", "record_kind": null, "document_states": {"version_state": "current", "validity_state": "effective", "signature_state": "fully_executed"}, "binds_subject_kind": "deal", "requires_author_class": null, "requires_closing_date": false, "permitted_actor_classes": ["verified_partner", "sponsored_agent"]}, "invoice_issued": {"source": "first_party_record", "record_kind": "invoice", "binds_subject_kind": "deal", "requires_author_class": null, "requires_closing_date": false, "permitted_actor_classes": ["verified_partner", "sponsored_agent"]}, "payment_received": {"source": "first_party_record", "record_kind": "payment", "binds_subject_kind": "deal", "requires_author_class": null, "requires_closing_date": false, "permitted_actor_classes": ["verified_partner", "sponsored_agent"]}, "diligence_outcome": {"source": "first_party_record", "record_kind": "diligence_outcome", "binds_subject_kind": "deal", "requires_author_class": null, "requires_closing_date": false, "permitted_actor_classes": ["verified_partner", "sponsored_agent"]}, "manual_correction": {"source": "first_party_record", "record_kind": "lifecycle_correction", "binds_subject_kind": null, "requires_author_class": "verified_partner", "requires_closing_date": false, "permitted_actor_classes": ["verified_partner"]}, "search_initiation": {"source": "first_party_record", "record_kind": "assignment_mandate", "binds_subject_kind": "assignment", "requires_author_class": null, "requires_closing_date": false, "permitted_actor_classes": ["verified_partner", "sponsored_agent"]}, "completion_recorded": {"source": "first_party_record", "record_kind": "completion", "binds_subject_kind": "deal", "requires_author_class": null, "requires_closing_date": false, "permitted_actor_classes": ["verified_partner", "sponsored_agent"]}, "deal_failure_record": {"source": "first_party_record", "record_kind": "deal_failure", "binds_subject_kind": "deal", "requires_author_class": "verified_partner", "requires_closing_date": false, "permitted_actor_classes": ["verified_partner"]}, "commission_agreement": {"source": "f01_document", "record_kind": null, "document_states": {"version_state": "current", "signature_state": "fully_executed"}, "binds_subject_kind": "deal", "requires_author_class": null, "requires_closing_date": false, "permitted_actor_classes": ["verified_partner", "sponsored_agent"]}, "final_closing_settlement": {"source": "first_party_record", "record_kind": "closing_settlement", "binds_subject_kind": "deal", "requires_author_class": "verified_partner", "requires_closing_date": true, "permitted_actor_classes": ["verified_partner"]}, "signed_engagement_letter": {"source": "f01_document", "record_kind": null, "document_states": {"version_state": "current", "validity_state": "effective", "signature_state": "fully_executed"}, "binds_subject_kind": "relationship", "requires_author_class": null, "requires_closing_date": false, "permitted_actor_classes": ["verified_partner", "sponsored_agent"]}, "signed_purchase_contract": {"source": "f01_document", "record_kind": null, "document_states": {"version_state": "current", "signature_state": "fully_executed"}, "binds_subject_kind": "deal", "requires_author_class": null, "requires_closing_date": false, "permitted_actor_classes": ["verified_partner", "sponsored_agent"]}, "counterparty_loi_acceptance": {"source": "f01_corporate_artifact", "record_kind": null, "binds_subject_kind": "property_negotiation", "requires_author_class": null, "requires_closing_date": false, "permitted_actor_classes": ["verified_partner", "sponsored_agent"]}, "winner_selection_commitment": {"source": "first_party_record", "record_kind": "winning_property_commitment", "binds_subject_kind": "assignment", "requires_author_class": "verified_partner", "requires_closing_date": false, "permitted_actor_classes": ["verified_partner"]}, "multi_target_exception_approval": {"source": "typed_approval", "record_kind": null, "binds_subject_kind": "assignment", "requires_author_class": null, "requires_closing_date": false, "permitted_actor_classes": ["verified_partner"]}, "approved_representation_equivalent": {"source": "typed_approval", "record_kind": null, "binds_subject_kind": "relationship", "requires_author_class": null, "requires_closing_date": false, "permitted_actor_classes": ["verified_partner"]}}, "policy_id": "j102-sql-admission.v5", "transitions": {"record-payment": {"events": [{"detail": {"payment_state": {"op": "subject_field", "field": "payment_state", "source": "proposed", "subject": "deal"}, "evidence_reference": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "payment_received"}}, "subject": "deal", "event_kind": "payment_recorded"}], "writes": {"deal": ["payment_state"]}, "subjects": {"deal": {"mode": "update", "role": "primary", "effects": {"payment_state": {"op": "one_of", "values": ["partially_paid", "paid"], "prior_field": "payment_state", "prior_subject": "deal", "differs_from_prior": true}}}}, "operations": ["record-deal-axis"], "creates_deal": false, "subject_kind": "deal", "coupled_facts": ["deal.payment_state"], "decision_refs": ["Q072.D1", "Q080.D1"], "prerequisites": {"payment_state": ["unpaid", "partially_paid"]}, "instrument_kinds": null, "permitted_actor_classes": ["verified_partner", "sponsored_agent"], "requires_active_engagement": false, "required_evidence_alternatives": [["payment_received"]]}, "open-assignment": {"events": [{"detail": {"engagement_id": {"op": "subject_field", "field": "subject_id", "source": "context", "subject": "engagement"}, "assignment_phase": {"op": "subject_field", "field": "assignment_phase", "source": "proposed", "subject": "assignment"}, "evidence_reference": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "search_initiation"}}, "subject": "assignment", "event_kind": "assignment_opened"}], "writes": {"assignment": ["assignment_phase"]}, "subjects": {"assignment": {"mode": "update", "role": "primary", "effects": {"assignment_phase": {"op": "one_of", "guards": [{"value": "research", "requires": {"field": "open_negotiation_count", "equals": 0, "source": "prior", "subject": "assignment"}}], "values": ["research", "search"]}}, "prior_conditions": [{"field": "pending_deal_id", "must_be_null": true}, {"field": "selected_property_id", "must_be_null": true}, {"field": "active_lease_draft_target_id", "must_be_null": true}]}}, "operations": ["open-cre-assignment"], "creates_deal": false, "subject_kind": "assignment", "coupled_facts": ["assignment.assignment_phase"], "decision_refs": ["Q072.D1", "Q079.D1", "Q080.D1"], "prerequisites": {"assignment_phase": ["research", "search"]}, "instrument_kinds": null, "required_context": [{"subject": "engagement", "conditions": [{"field": "engagement_state", "equals": "active"}], "identified_by": {"field": "engagement_id", "source": "prior", "subject": "assignment"}}, {"subject": "relationship", "conditions": [{"field": "relationship_state", "equals": "client"}], "identified_by": {"field": "relationship_id", "source": "context", "subject": "engagement"}}], "permitted_actor_classes": ["verified_partner", "sponsored_agent"], "requires_active_engagement": true, "required_evidence_alternatives": [["search_initiation"]]}, "record-completion": {"events": [{"detail": {"completion_state": {"op": "subject_field", "field": "completion_state", "source": "proposed", "subject": "deal"}, "evidence_reference": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "completion_recorded"}}, "subject": "deal", "event_kind": "completion_recorded"}], "writes": {"deal": ["completion_state"]}, "subjects": {"deal": {"mode": "update", "role": "primary", "effects": {"completion_state": {"op": "const", "value": "complete"}}}}, "operations": ["record-deal-axis"], "creates_deal": false, "subject_kind": "deal", "coupled_facts": ["deal.completion_state"], "decision_refs": ["Q072.D1", "Q080.D1"], "prerequisites": {"completion_state": ["open"]}, "instrument_kinds": null, "permitted_actor_classes": ["verified_partner", "sponsored_agent"], "requires_active_engagement": false, "required_evidence_alternatives": [["completion_recorded"]]}, "cancel-pending-deal": {"events": [{"detail": {"evidence_reference": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "deal_failure_record"}, "cancellation_reason": {"op": "evidence_fact", "fact": "reason", "evidence_kind": "deal_failure_record"}}, "subject": "deal", "event_kind": "pending_deal_cancelled"}, {"detail": {"assignment_phase": {"op": "subject_field", "field": "assignment_phase", "source": "proposed", "subject": "assignment"}}, "subject": "assignment", "event_kind": "assignment_returned_to_market"}], "writes": {"deal": ["deal_state", "cancellation_reason"], "assignment": ["assignment_phase", "selected_property_id", "active_lease_draft_target_id", "pending_deal_id"]}, "subjects": {"deal": {"mode": "update", "role": "primary", "effects": {"deal_state": {"op": "const", "value": "cancelled"}, "cancellation_reason": {"op": "evidence_fact", "fact": "reason", "evidence_kind": "deal_failure_record"}}, "prior_conditions": [{"field": "assignment_id", "equals_subject_id": "assignment"}]}, "assignment": {"mode": "update", "role": "coupled", "effects": {"pending_deal_id": {"op": "const", "value": null}, "assignment_phase": {"op": "one_of", "guards": [{"value": "negotiation", "requires": {"field": "open_negotiation_count", "source": "prior", "subject": "assignment", "at_least": 1}}], "values": ["search", "negotiation"]}, "selected_property_id": {"op": "const", "value": null}, "active_lease_draft_target_id": {"op": "const", "value": null}}}}, "operations": ["cancel-pending-deal"], "creates_deal": false, "subject_kind": "deal", "coupled_facts": ["deal.deal_state", "deal.cancellation_reason", "assignment.assignment_phase", "assignment.selected_property_id", "assignment.pending_deal_id"], "decision_refs": ["Q096.D1"], "prerequisites": {"deal_state": ["pending"]}, "instrument_kinds": null, "permitted_actor_classes": ["verified_partner"], "requires_active_engagement": false, "required_evidence_alternatives": [["deal_failure_record"]]}, "record-deal-closing": {"events": [{"detail": {"closing_date": {"op": "evidence_fact", "fact": "closing_date", "evidence_kind": "final_closing_settlement"}, "evidence_reference": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "final_closing_settlement"}}, "subject": "deal", "event_kind": "deal_closed"}], "writes": {"deal": ["deal_state", "closing_state", "closing_date"]}, "subjects": {"deal": {"mode": "update", "role": "primary", "effects": {"deal_state": {"op": "const", "value": "closed"}, "closing_date": {"op": "evidence_fact", "fact": "closing_date", "evidence_kind": "final_closing_settlement"}, "closing_state": {"op": "const", "value": "closed"}}, "prior_conditions": [{"field": "diligence_state", "not_in": ["in_progress", "failed"]}]}}, "operations": ["record-deal-closing"], "creates_deal": false, "subject_kind": "deal", "coupled_facts": ["deal.deal_state", "deal.closing_state", "deal.closing_date"], "decision_refs": ["Q080.D1", "Q082.D1", "Q094.D1"], "prerequisites": {"deal_state": ["pending"], "closing_state": ["not_reached"], "execution_state": ["executed"]}, "instrument_kinds": null, "permitted_actor_classes": ["verified_partner"], "requires_active_engagement": false, "required_evidence_alternatives": [["final_closing_settlement"]]}, "record-invoice-issued": {"events": [{"detail": {"invoice_state": {"op": "subject_field", "field": "invoice_state", "source": "proposed", "subject": "deal"}, "evidence_reference": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "invoice_issued"}}, "subject": "deal", "event_kind": "invoice_issued"}], "writes": {"deal": ["invoice_state"]}, "subjects": {"deal": {"mode": "update", "role": "primary", "effects": {"invoice_state": {"op": "const", "value": "invoiced"}}}}, "operations": ["record-deal-axis"], "creates_deal": false, "subject_kind": "deal", "coupled_facts": ["deal.invoice_state"], "decision_refs": ["Q080.D1"], "prerequisites": {"invoice_state": ["not_invoiced"]}, "instrument_kinds": null, "permitted_actor_classes": ["verified_partner", "sponsored_agent"], "requires_active_engagement": false, "required_evidence_alternatives": [["invoice_issued"]]}, "record-loi-acceptance": {"events": [{"detail": {"property_id": {"op": "subject_field", "field": "property_id", "source": "prior", "subject": "property_negotiation"}, "evidence_reference": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "counterparty_loi_acceptance"}}, "subject": "property_negotiation", "event_kind": "loi_accepted"}], "writes": {"property_negotiation": ["negotiation_state"]}, "subjects": {"property_negotiation": {"mode": "update", "role": "primary", "effects": {"negotiation_state": {"op": "const", "value": "loi_accepted"}}}}, "operations": ["record-loi-acceptance"], "creates_deal": false, "subject_kind": "property_negotiation", "coupled_facts": ["property_negotiation.negotiation_state"], "decision_refs": ["Q078.D1", "Q095.D1"], "prerequisites": {"negotiation_state": ["loi_submitted", "loi_countered"]}, "instrument_kinds": null, "permitted_actor_classes": ["verified_partner", "sponsored_agent"], "requires_active_engagement": false, "required_evidence_alternatives": [["counterparty_loi_acceptance"]]}, "record-loi-submission": {"events": [{"detail": {"property_id": {"op": "subject_field", "field": "property_id", "source": "prior", "subject": "property_negotiation"}, "assignment_id": {"op": "proposed_subject_id", "subject": "assignment"}, "evidence_reference": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "submitted_loi"}}, "subject": "property_negotiation", "event_kind": "loi_submitted"}], "writes": {"assignment": ["assignment_phase", "open_negotiation_count"], "property_negotiation": ["negotiation_state"]}, "subjects": {"assignment": {"mode": "update", "role": "coupled", "effects": {"assignment_phase": {"op": "const", "value": "negotiation"}, "open_negotiation_count": {"op": "prior_plus_conditional", "add": 1, "when": {"field": "negotiation_state", "equals": "loi_drafted", "source": "prior", "subject": "property_negotiation"}, "field": "open_negotiation_count", "subject": "assignment"}}, "prior_conditions": [{"in": ["research", "search", "negotiation"], "field": "assignment_phase"}]}, "property_negotiation": {"mode": "update", "role": "primary", "effects": {"negotiation_state": {"op": "const", "value": "loi_submitted"}}, "prior_conditions": [{"field": "assignment_id", "equals_subject_id": "assignment"}]}}, "operations": ["record-loi-submission"], "creates_deal": false, "subject_kind": "property_negotiation", "coupled_facts": ["property_negotiation.negotiation_state", "assignment.assignment_phase"], "decision_refs": ["Q072.D1", "Q080.D1", "Q095.D1"], "prerequisites": {"negotiation_state": ["loi_drafted", "loi_countered"]}, "instrument_kinds": null, "permitted_actor_classes": ["verified_partner", "sponsored_agent"], "requires_active_engagement": false, "required_evidence_alternatives": [["submitted_loi"]]}, "record-lease-execution": {"events": [{"detail": {"evidence_reference": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "executed_lease"}}, "subject": "deal", "event_kind": "lease_executed"}], "writes": {"deal": ["execution_state"]}, "subjects": {"deal": {"mode": "update", "role": "primary", "effects": {"execution_state": {"op": "const", "value": "executed"}}}}, "operations": ["record-deal-execution"], "creates_deal": false, "subject_kind": "deal", "coupled_facts": ["deal.execution_state"], "decision_refs": ["Q072.D1", "Q078.D1", "Q080.D1"], "prerequisites": {"deal_state": ["pending"], "execution_state": ["unexecuted"]}, "instrument_kinds": ["lease", "renewal", "amendment"], "permitted_actor_classes": ["verified_partner", "sponsored_agent"], "requires_active_engagement": false, "required_evidence_alternatives": [["executed_lease"]]}, "commit-winning-property": {"events": [{"detail": {"property_id": {"op": "subject_field", "field": "property_id", "source": "prior", "subject": "property_negotiation"}}, "subject": "property_negotiation", "event_kind": "winning_property_selected"}, {"detail": {"pending_deal_id": {"op": "proposed_subject_id", "subject": "deal"}, "selected_property_id": {"op": "subject_field", "field": "property_id", "source": "prior", "subject": "property_negotiation"}}, "subject": "assignment", "event_kind": "assignment_committed"}, {"detail": {"property_id": {"op": "subject_field", "field": "property_id", "source": "prior", "subject": "property_negotiation"}, "assignment_id": {"op": "proposed_subject_id", "subject": "assignment"}, "instrument_kind": {"op": "subject_field", "field": "instrument_kind", "source": "proposed", "subject": "deal"}, "evidence_reference": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "winner_selection_commitment"}}, "subject": "deal", "event_kind": "pending_deal_created"}], "writes": {"deal": ["deal_state"], "assignment": ["assignment_phase", "selected_property_id", "active_lease_draft_target_id", "pending_deal_id"], "property_negotiation": ["negotiation_state"]}, "subjects": {"deal": {"mode": "create", "role": "coupled", "creation_shape": {"deal_state": {"op": "const", "value": "pending"}, "subject_id": {"op": "proposed_subject_id", "subject": "deal"}, "property_id": {"op": "subject_field", "field": "property_id", "source": "prior", "subject": "property_negotiation"}, "closing_date": {"op": "const", "value": null}, "subject_kind": {"op": "const", "value": "deal"}, "assignment_id": {"op": "proposed_subject_id", "subject": "assignment"}, "closing_state": {"op": "const", "value": "not_reached"}, "invoice_state": {"op": "const", "value": "not_invoiced"}, "payment_state": {"op": "const", "value": "unpaid"}, "diligence_state": {"op": "const", "value": "not_applicable"}, "execution_state": {"op": "const", "value": "unexecuted"}, "instrument_kind": {"op": "one_of", "values": ["lease", "purchase", "renewal", "amendment"]}, "completion_state": {"op": "const", "value": "open"}, "cancellation_reason": {"op": "const", "value": null}, "commission_agreement_state": {"op": "const", "value": "absent"}}}, "assignment": {"mode": "update", "role": "primary", "effects": {"pending_deal_id": {"op": "proposed_subject_id", "subject": "deal"}, "assignment_phase": {"op": "const", "value": "committed"}, "selected_property_id": {"op": "subject_field", "field": "property_id", "source": "prior", "subject": "property_negotiation"}, "active_lease_draft_target_id": {"op": "case_on_field", "cases": {"purchase": {"op": "const", "value": null}}, "field": "instrument_kind", "source": "proposed", "default": {"op": "subject_field", "field": "property_id", "source": "prior", "subject": "property_negotiation"}, "subject": "deal"}}, "prior_conditions": [{"field": "pending_deal_id", "must_be_null": true}, {"field": "selected_property_id", "null_or_matches": {"op": "subject_field", "field": "property_id", "source": "prior", "subject": "property_negotiation"}}, {"field": "active_lease_draft_target_id", "null_or_matches": {"op": "subject_field", "field": "property_id", "source": "prior", "subject": "property_negotiation"}}]}, "property_negotiation": {"mode": "update", "role": "coupled", "effects": {"negotiation_state": {"op": "const", "value": "selected_winner"}}, "prior_conditions": [{"field": "assignment_id", "equals_subject_id": "assignment"}, {"field": "negotiation_state", "equals": "loi_accepted"}]}}, "operations": ["commit-winning-property"], "creates_deal": true, "subject_kind": "assignment", "coupled_facts": ["property_negotiation.negotiation_state", "assignment.assignment_phase", "assignment.selected_property_id", "assignment.pending_deal_id", "deal.deal_state"], "decision_refs": ["Q069.D1", "Q078.D1", "Q080.D1", "Q095.D1"], "prerequisites": {"assignment_phase": ["search", "negotiation"]}, "instrument_kinds": null, "permitted_actor_classes": ["verified_partner"], "requires_active_engagement": false, "required_evidence_alternatives": [["winner_selection_commitment"]]}, "record-diligence-outcome": {"events": [{"detail": {"diligence_state": {"op": "subject_field", "field": "diligence_state", "source": "proposed", "subject": "deal"}, "evidence_reference": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "diligence_outcome"}}, "subject": "deal", "event_kind": "diligence_outcome_recorded"}], "writes": {"deal": ["diligence_state"]}, "subjects": {"deal": {"mode": "update", "role": "primary", "effects": {"diligence_state": {"op": "one_of", "values": ["waived", "satisfied", "failed"]}}}}, "operations": ["record-diligence-outcome"], "creates_deal": false, "subject_kind": "deal", "coupled_facts": ["deal.diligence_state"], "decision_refs": ["Q080.D1", "Q094.D1"], "prerequisites": {"deal_state": ["pending"], "diligence_state": ["in_progress"]}, "instrument_kinds": null, "permitted_actor_classes": ["verified_partner", "sponsored_agent"], "requires_active_engagement": false, "required_evidence_alternatives": [["diligence_outcome"]]}, "record-commission-agreement": {"events": [{"detail": {"evidence_reference": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "commission_agreement"}, "commission_agreement_state": {"op": "subject_field", "field": "commission_agreement_state", "source": "proposed", "subject": "deal"}}, "subject": "deal", "event_kind": "commission_agreement_recorded"}], "writes": {"deal": ["commission_agreement_state"]}, "subjects": {"deal": {"mode": "update", "role": "primary", "effects": {"commission_agreement_state": {"op": "const", "value": "agreed"}}}}, "operations": ["record-deal-axis"], "creates_deal": false, "subject_kind": "deal", "coupled_facts": ["deal.commission_agreement_state"], "decision_refs": ["Q080.D1"], "prerequisites": {"commission_agreement_state": ["absent"]}, "instrument_kinds": null, "permitted_actor_classes": ["verified_partner", "sponsored_agent"], "requires_active_engagement": false, "required_evidence_alternatives": [["commission_agreement"]]}, "establish-client-and-engagement": {"events": [{"detail": {"evidence_reference": {"op": "case_on_evidence", "cases": {"signed_engagement_letter": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "signed_engagement_letter"}, "approved_representation_equivalent": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "approved_representation_equivalent"}}}, "representation_basis": {"op": "subject_field", "field": "representation_basis", "source": "proposed", "subject": "engagement"}}, "subject": "relationship", "event_kind": "client_status_established"}, {"detail": {"relationship_id": {"op": "proposed_subject_id", "subject": "relationship"}, "representation_basis": {"op": "subject_field", "field": "representation_basis", "source": "proposed", "subject": "engagement"}}, "subject": "engagement", "event_kind": "engagement_opened"}], "writes": {"engagement": ["engagement_state", "representation_basis"], "relationship": ["relationship_state", "active_engagement_count"]}, "subjects": {"engagement": {"mode": "create", "role": "coupled", "creation_shape": {"ended_at": {"op": "const", "value": null}, "term_end": {"op": "const", "value": null}, "end_reason": {"op": "const", "value": null}, "subject_id": {"op": "proposed_subject_id", "subject": "engagement"}, "executed_at": {"op": "const", "value": null}, "effective_to": {"op": "const", "value": null}, "subject_kind": {"op": "const", "value": "engagement"}, "effective_date": {"op": "const", "value": null}, "effective_from": {"op": "case_on_evidence", "cases": {"signed_engagement_letter": {"op": "const", "value": null}, "approved_representation_equivalent": {"op": "unbound", "why": "the kernel takes this from the typed approval's approved_at, and ops.j102_typed_approval is private and always raises, so no manifest can reach this branch here"}}}, "governing_state": {"op": "const", "value": null}, "relationship_id": {"op": "proposed_subject_id", "subject": "relationship"}, "engagement_state": {"op": "const", "value": "active"}, "protection_until": {"op": "const", "value": null}, "representation_basis": {"op": "supplied_evidence_kind"}, "protected_property_ids": {"op": "const", "value": null}}}, "relationship": {"mode": "update", "role": "primary", "effects": {"relationship_state": {"op": "const", "value": "client"}, "active_engagement_count": {"op": "prior_plus", "add": 1, "field": "active_engagement_count", "subject": "relationship"}}}}, "operations": ["record-representation-agreement"], "creates_deal": false, "subject_kind": "relationship", "coupled_facts": ["relationship.relationship_state", "engagement.engagement_state", "engagement.representation_basis"], "decision_refs": ["Q069.D1", "Q072.D1", "Q077.D1", "Q079.D1"], "prerequisites": {"relationship_state": ["prospect"]}, "instrument_kinds": null, "permitted_actor_classes": ["verified_partner", "sponsored_agent"], "requires_active_engagement": false, "required_evidence_alternatives": [["signed_engagement_letter"], ["approved_representation_equivalent"]]}, "record-purchase-contract-execution": {"events": [{"detail": {"evidence_reference": {"op": "evidence_fact", "fact": "reference", "evidence_kind": "signed_purchase_contract"}}, "subject": "deal", "event_kind": "purchase_contract_executed"}], "writes": {"deal": ["execution_state", "diligence_state"]}, "subjects": {"deal": {"mode": "update", "role": "primary", "effects": {"diligence_state": {"op": "const", "value": "in_progress"}, "execution_state": {"op": "const", "value": "executed"}}}}, "operations": ["record-deal-execution"], "creates_deal": false, "subject_kind": "deal", "coupled_facts": ["deal.execution_state", "deal.diligence_state"], "decision_refs": ["Q072.D1", "Q094.D1"], "prerequisites": {"deal_state": ["pending"], "execution_state": ["unexecuted"]}, "instrument_kinds": ["purchase"], "permitted_actor_classes": ["verified_partner", "sponsored_agent"], "requires_active_engagement": false, "required_evidence_alternatives": [["signed_purchase_contract"]]}}, "derived_from": "cre-lifecycle.v5.js v5J102TransitionContract + v5J102EvidenceContract + v5J102InitializationContract + V5_J102_CONFLICT_KINDS + V5_J102_FIELD_CLASS_REGISTRY + applyTransition/axisResult/lifecycleEvent/evaluateLifecycleInitialization/evaluateConcurrentEdit", "derived_fields": ["relationship.active_engagement_count", "assignment.open_negotiation_count", "assignment.active_lease_draft_target_id"], "reconciliation": {"writer": "ops.j102_record_reconciliation_item", "field_classes": ["lifecycle", "financial", "recipient", "document", "routine"], "conflict_kinds": ["uncharacterized_concurrent_change", "overlapping_field_edit", "material_class_edit", "unclassified_field_edit"], "field_class_registry": {"ended_at": "lifecycle", "party_id": "lifecycle", "term_end": "lifecycle", "deal_state": "lifecycle", "end_reason": "lifecycle", "subject_id": "lifecycle", "version_no": "document", "document_id": "document", "executed_at": "lifecycle", "property_id": "lifecycle", "closing_date": "lifecycle", "effective_to": "lifecycle", "subject_kind": "lifecycle", "assignment_id": "lifecycle", "closing_state": "lifecycle", "engagement_id": "lifecycle", "invoice_state": "financial", "payment_state": "financial", "content_digest": "document", "effective_date": "lifecycle", "effective_from": "lifecycle", "diligence_state": "lifecycle", "execution_state": "lifecycle", "governing_state": "lifecycle", "instrument_kind": "lifecycle", "pending_deal_id": "lifecycle", "relationship_id": "lifecycle", "assignment_phase": "lifecycle", "completion_state": "lifecycle", "engagement_state": "lifecycle", "protection_until": "lifecycle", "negotiation_state": "lifecycle", "relationship_state": "lifecycle", "cancellation_reason": "lifecycle", "representation_basis": "lifecycle", "selected_property_id": "lifecycle", "open_negotiation_count": "lifecycle", "protected_property_ids": "lifecycle", "supporting_document_id": "document", "active_engagement_count": "lifecycle", "commission_agreement_state": "financial", "multi_target_exception_ref": "lifecycle", "active_lease_draft_target_id": "lifecycle"}, "material_field_classes": ["lifecycle", "financial", "recipient", "document"], "unregistered_field_class": null, "routine_fields_registered": 0, "caller_supplied_field_class_admitted": false}, "initializations": {"initialize-assignment": {"event": {"detail": {"engagement_id": {"op": "subject_field", "field": "subject_id", "source": "context", "subject": "engagement"}, "assignment_phase": {"op": "subject_field", "field": "assignment_phase", "source": "proposed", "subject": "assignment"}}, "subject": "assignment", "event_kind": "assignment_initialized"}, "operations": ["initialize-assignment"], "subject_kind": "assignment", "decision_refs": ["Q072.D1", "Q077.D1", "Q079.D1", "Q080.D1"], "creation_shape": {"subject_id": {"op": "proposed_subject_id", "subject": "assignment"}, "subject_kind": {"op": "const", "value": "assignment"}, "engagement_id": {"op": "subject_field", "field": "subject_id", "source": "context", "subject": "engagement"}, "pending_deal_id": {"op": "const", "value": null}, "assignment_phase": {"op": "const", "value": "research"}, "selected_property_id": {"op": "const", "value": null}, "open_negotiation_count": {"op": "const", "value": 0}, "multi_target_exception_ref": {"op": "const", "value": null}, "active_lease_draft_target_id": {"op": "const", "value": null}}, "required_context": [{"subject": "engagement", "conditions": [{"field": "engagement_state", "equals": "active"}], "identified_by": {"field": "engagement_id", "source": "created"}}, {"subject": "relationship", "conditions": [{"field": "relationship_state", "equals": "client"}], "identified_by": {"field": "relationship_id", "source": "context", "subject": "engagement"}}], "requires_evidence": false, "parent_subject_kind": "engagement", "declared_identifiers": [], "parent_reference_field": "engagement_id", "permitted_actor_classes": ["verified_partner", "sponsored_agent"], "optional_declared_identifiers": []}, "initialize-property-negotiation": {"event": {"detail": {"property_id": {"op": "subject_field", "field": "property_id", "source": "proposed", "subject": "property_negotiation"}, "assignment_id": {"op": "subject_field", "field": "subject_id", "source": "context", "subject": "assignment"}, "negotiation_state": {"op": "subject_field", "field": "negotiation_state", "source": "proposed", "subject": "property_negotiation"}}, "subject": "property_negotiation", "event_kind": "property_negotiation_initialized"}, "operations": ["initialize-property-negotiation"], "subject_kind": "property_negotiation", "decision_refs": ["Q080.D1", "Q095.D1"], "creation_shape": {"subject_id": {"op": "proposed_subject_id", "subject": "property_negotiation"}, "property_id": {"op": "declared_identifier", "field": "property_id"}, "subject_kind": {"op": "const", "value": "property_negotiation"}, "assignment_id": {"op": "subject_field", "field": "subject_id", "source": "context", "subject": "assignment"}, "negotiation_state": {"op": "const", "value": "loi_drafted"}}, "required_context": [{"subject": "assignment", "conditions": [{"in": ["research", "search", "negotiation"], "field": "assignment_phase"}], "identified_by": {"field": "assignment_id", "source": "created"}}], "requires_evidence": false, "parent_subject_kind": "assignment", "declared_identifiers": ["property_id"], "parent_reference_field": "assignment_id", "permitted_actor_classes": ["verified_partner", "sponsored_agent"], "unique_active_per_property": true, "optional_declared_identifiers": []}, "initialize-prospect-relationship": {"event": {"detail": {"relationship_state": {"op": "subject_field", "field": "relationship_state", "source": "proposed", "subject": "relationship"}}, "subject": "relationship", "event_kind": "relationship_initialized"}, "operations": ["initialize-prospect-relationship"], "subject_kind": "relationship", "decision_refs": ["Q069.D1", "Q077.D1", "Q079.D1"], "creation_shape": {"party_id": {"op": "optional_declared_identifier", "field": "party_id"}, "subject_id": {"op": "proposed_subject_id", "subject": "relationship"}, "subject_kind": {"op": "const", "value": "relationship"}, "relationship_state": {"op": "const", "value": "prospect"}, "active_engagement_count": {"op": "const", "value": 0}}, "required_context": [], "requires_evidence": false, "parent_subject_kind": null, "declared_identifiers": [], "permitted_actor_classes": ["verified_partner", "sponsored_agent"], "optional_declared_identifiers": ["party_id"]}}, "subject_creation": "coupled_only_never_the_primary_subject", "engagement_fields": {"ended_at": "instant", "term_end": "date", "end_reason": "text", "executed_at": "instant", "effective_date": "date", "governing_state": "governing_state", "protection_until": "instant", "protected_property_ids": "identifiers"}, "engagement_states": ["active", "completed", "expired", "terminated"], "derived_event_kinds": false, "event_identity_keys": ["schema_version", "event_kind", "subject_kind", "subject_id"], "relationship_states": ["prospect", "client", "client_ended"], "event_schema_version": "doctorcre-v5-j102-lifecycle-event.v1", "initialization_writer": "ops.j102_initialize_subject", "evidence_reference_keys": ["evidence_kind", "source", "reference"], "parent_reference_fields": {"deal": "pending_deal_id", "assignment": "assignment_id", "engagement": "engagement_id", "relationship": "relationship_id", "property_negotiation": null}, "invented_business_policy": false, "stored_event_record_keys": ["schema_version", "tenant", "event", "transition_id", "evidence_references", "recorded_by", "sponsoring_partner", "recorded_at"], "active_negotiation_states": ["loi_drafted", "loi_submitted", "loi_countered", "loi_accepted"], "stored_subject_record_keys": ["schema_version", "tenant", "subject_kind", "subject_id", "state", "established_by_transition", "prior_state_digest", "updated_by", "sponsoring_partner", "updated_at"], "stored_event_schema_version": "doctorcre-v5-j102-stored-lifecycle-event.v1", "stored_subject_schema_version": "doctorcre-v5-j102-stored-lifecycle-subject.v1", "initialization_requires_evidence": false, "initialization_performs_transition": false}$policy$::jsonb
 $_$;
 
 
@@ -22272,6 +21413,66 @@ $$;
 --
 
 COMMENT ON FUNCTION ops.j102_compatibility_view(p_assignment_id text, p_deal_id text) IS 'Q081: the old single-phase shape, PROJECTED from the current records on every read for callers that have not migrated. Not authoritative, not writable, and it retires nobody.';
+
+
+--
+-- Name: j102_engagement_fields_valid(jsonb); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.j102_engagement_fields_valid(p_state jsonb) RETURNS boolean
+    LANGUAGE plpgsql IMMUTABLE
+    SET search_path TO 'pg_catalog', 'ops'
+    AS $_$
+declare
+  v_field text; v_type text; v_value jsonb; v_text text; v_item jsonb;
+  v_character text; v_point integer; v_length integer;
+begin
+  if jsonb_typeof(p_state) is distinct from 'object' then return false; end if;
+  for v_field, v_type in select * from jsonb_each_text(ops.j102_admission_policy() -> 'engagement_fields') loop
+    v_value := p_state -> v_field;
+    if v_value is null or v_value = 'null'::jsonb then continue; end if;
+    if v_type = 'identifiers' then
+      if jsonb_typeof(v_value) <> 'array' then return false; end if;
+      if jsonb_array_length(v_value) > 512 then return false; end if;
+      for v_item in select * from jsonb_array_elements(v_value) loop
+        if jsonb_typeof(v_item) <> 'string' or
+           (v_item #>> '{}') !~ '^[A-Za-z0-9][A-Za-z0-9._:/@!+=-]{0,127}$' then return false; end if;
+      end loop;
+      continue;
+    end if;
+    if jsonb_typeof(v_value) <> 'string' then return false; end if;
+    v_text := v_value #>> '{}';
+    case v_type
+      when 'date' then
+        if v_text !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' or left(v_text,4) = '0000' then return false; end if;
+        perform v_text::date;
+      when 'instant' then
+        if v_text !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]{1,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$'
+           or left(v_text,4) = '0000' then return false; end if;
+        perform left(v_text,10)::date;
+      when 'governing_state' then
+        if v_text not in ('FL','AL') then return false; end if;
+      when 'text' then
+        if v_text = '' or normalize(v_text, NFC) <> v_text then return false; end if;
+        if ascii(left(v_text,1)) = any(array[9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279])
+           or ascii(right(v_text,1)) = any(array[9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279]) then return false; end if;
+        v_length := 0;
+        for v_character in select regexp_split_to_table(v_text, '') loop
+          v_point := ascii(v_character);
+          if v_point between 0 and 31 or v_point between 127 and 159
+             or v_point between 8203 and 8207 or v_point between 8234 and 8238
+             or v_point between 8288 and 8292 or v_point between 8294 and 8297
+             or v_point = 65279 then return false; end if;
+          v_length := v_length + case when v_point > 65535 then 2 else 1 end;
+        end loop;
+        if v_length > 1000 then return false; end if;
+      else return false;
+    end case;
+  end loop;
+  return true;
+exception when datetime_field_overflow or invalid_datetime_format then return false;
+end;
+$_$;
 
 
 --
@@ -40180,7 +39381,269 @@ end $_$;
 CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
     LANGUAGE sql IMMUTABLE
     SET search_path TO 'pg_catalog'
-    AS $$SELECT '{"relation_dml": [{"grantee": "carr_writer", "relation": "public.deal_vendor_assignment", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "public.deal_vendor_assignment", "grantable": false, "privilege": "update", "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:update", "ingress_kind": "db_relation_acl", "relation_kind": "r"}], "secdef_execute": [{"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text)", "volatility": "v", "ingress_key": "db-function-acl:ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text)", "volatility": "v", "ingress_key": "db-function-acl:ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb)", "volatility": "v", "ingress_key": "db-function-acl:ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.write_feature_switch(p_action text, p_args jsonb)", "volatility": "v", "ingress_key": "db-function-acl:ops.write_feature_switch(p_action text, p_args jsonb):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}], "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d", "registry_version": "scac-mutation-registry.v118", "runtime_dml_grants": {"count": 338, "digest": "sha256:1d16268baa3cd3bf925281f2c8d2ae29b2bf5abd31e098fe0155cf346213fa8b"}, "retired_secdef_execute": [{"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text)", "volatility": "v", "ingress_key": "db-function-acl:ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.classify_sourced_work_request_build(p_work_request text, p_base_version integer, p_scope_summary text, p_dependency_refs jsonb, p_caps jsonb)", "volatility": "s", "ingress_key": "db-function-acl:ops.classify_sourced_work_request_build(p_work_request text, p_base_version integer, p_scope_summary text, p_dependency_refs jsonb, p_caps jsonb):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "public", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.heavy_build_ready_plan_gate()", "volatility": "v", "ingress_key": "db-function-acl:ops.heavy_build_ready_plan_gate():public:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.jev_call_receipt_integrity()", "volatility": "v", "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.jev_call_receipt_integrity()", "volatility": "v", "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)", "volatility": "v", "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)", "volatility": "v", "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_sourced_heavy_build_admission(p_plan_id uuid, p_work_request text, p_base_version integer, p_classifier_reasons jsonb, p_contract jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_sourced_heavy_build_admission(p_plan_id uuid, p_work_request text, p_base_version integer, p_classifier_reasons jsonb, p_contract jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.review_sourced_heavy_build_plan(p_work_request text, p_plan_hash text, p_admission_hash text, p_reviewer_actor_id uuid, p_verdict text, p_reviewer_session_ref text, p_review_summary text, p_evidence_refs jsonb, p_gaps jsonb, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.review_sourced_heavy_build_plan(p_work_request text, p_plan_hash text, p_admission_hash text, p_reviewer_actor_id uuid, p_verdict text, p_reviewer_session_ref text, p_review_summary text, p_evidence_refs jsonb, p_gaps jsonb, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text)", "volatility": "s", "ingress_key": "db-function-acl:ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}]}'::jsonb$$;
+    AS $_$ SELECT $current_grants${
+  "registry_version": "scac-mutation-registry.v118",
+  "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
+  "secdef_execute": [
+    {
+      "config": [
+        "search_path=ops, public, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.write_feature_switch(p_action text, p_args jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.write_feature_switch(p_action text, p_args jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    }
+  ],
+  "retired_secdef_execute": [
+    {
+      "config": [
+        "search_path=ops, public, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.classify_sourced_work_request_build(p_work_request text, p_base_version integer, p_scope_summary text, p_dependency_refs jsonb, p_caps jsonb)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.classify_sourced_work_request_build(p_work_request text, p_base_version integer, p_scope_summary text, p_dependency_refs jsonb, p_caps jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "public",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.heavy_build_ready_plan_gate()",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.heavy_build_ready_plan_gate():public:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.jev_call_receipt_integrity()",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.jev_call_receipt_integrity()",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.record_sourced_heavy_build_admission(p_plan_id uuid, p_work_request text, p_base_version integer, p_classifier_reasons jsonb, p_contract jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.record_sourced_heavy_build_admission(p_plan_id uuid, p_work_request text, p_base_version integer, p_classifier_reasons jsonb, p_contract jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.review_sourced_heavy_build_plan(p_work_request text, p_plan_hash text, p_admission_hash text, p_reviewer_actor_id uuid, p_verdict text, p_reviewer_session_ref text, p_review_summary text, p_evidence_refs jsonb, p_gaps jsonb, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.review_sourced_heavy_build_plan(p_work_request text, p_plan_hash text, p_admission_hash text, p_reviewer_actor_id uuid, p_verdict text, p_reviewer_session_ref text, p_review_summary text, p_evidence_refs jsonb, p_gaps jsonb, p_idempotency_key uuid):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    }
+  ]
+}$current_grants$::jsonb $_$;
 
 
 --
@@ -41676,14 +41139,7 @@ begin
   if registered_count<>jsonb_array_length(current_grants->'secdef_execute') then return false; end if;
   if observed_count<>1267 or observed_digest<>'sha256:587e762e80c6691d4a07c5b35e48a259c7b8bdf885d8595ffd0c14928c657efa' then return false; end if;
   with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper), runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper), capabilities as (select n.nspname,c.relname,c.relkind,c.relowner,acl.grantee,acl.privilege_type,acl.is_grantable from pg_class c join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) acl where n.nspname not in ('pg_catalog','information_schema') and c.relkind in ('r','p','v','m','f')), observed as (select 'db-relation-acl:'||nspname||'.'||relname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type) ingress_key,jsonb_build_object('ingress_key','db-relation-acl:'||nspname||'.'||relname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type),'ingress_kind','db_relation_acl','relation',nspname||'.'||relname,'relation_kind',relkind,'grantee',coalesce(r.rolname,'public'),'privilege',lower(privilege_type),'grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE') and grantee<>relowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
-  select count(*) filter (where row not in (select value from jsonb_array_elements(current_grants->'relation_dml'))),
-    'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(
-      jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C")
-        filter (where row not in (select value from jsonb_array_elements(current_grants->'relation_dml'))),
-      '[]'::jsonb)),'UTF8'),'sha256'),'hex'),
-    count(*) filter (where row in (select value from jsonb_array_elements(current_grants->'relation_dml')))
-    into observed_count,observed_digest,registered_count from observed;
-  if registered_count<>jsonb_array_length(current_grants->'relation_dml') then return false; end if;
+  select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
   if observed_count<>321 or observed_digest<>'sha256:2ece3984f1389d78749dd3055ecf72516f02f97e33d260192e66daff062292e0' then return false; end if;
   with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper), runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper), capabilities as (select n.nspname,c.relname,c.relkind,c.relowner,a.attname,acl.grantee,acl.privilege_type,acl.is_grantable from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(a.attacl) acl where a.attnum>0 and not a.attisdropped and a.attacl is not null and cardinality(a.attacl)>0 and n.nspname not in ('pg_catalog','information_schema') and c.relkind in ('r','p','v','m','f')), observed as (select 'db-column-acl:'||nspname||'.'||relname||'.'||attname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type) ingress_key,jsonb_build_object('ingress_key','db-column-acl:'||nspname||'.'||relname||'.'||attname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type),'ingress_kind','db_column_acl','relation',nspname||'.'||relname,'relation_kind',relkind,'column',attname,'grantee',coalesce(r.rolname,'public'),'privilege',lower(privilege_type),'grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where privilege_type in ('INSERT','UPDATE') and grantee<>relowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
   select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
@@ -60207,8 +59663,8 @@ begin
   select * into registry from ops.scac_mutation_registry_version
     where registry_version=latest.registry_version;
   grant_state:=case when registry.registry_version='scac-mutation-registry.v118' and
-    (grant_snapshot->>'entry_count')::integer=338 and
-    grant_snapshot->>'grant_digest'='sha256:1d16268baa3cd3bf925281f2c8d2ae29b2bf5abd31e098fe0155cf346213fa8b'
+    (grant_snapshot->>'entry_count')::integer=336 and
+    grant_snapshot->>'grant_digest'='sha256:cd7e5cff7db2ff2d98fb626c15d0109af9af9de91927b7b32e53a2d7147e9ee6'
     then 'current' else 'drifted_or_unbound' end;
   with recursive connected(oid) as (
     select oid from pg_roles where rolname in ('carr_writer','carr_jobs','carr_authority')
@@ -75221,6 +74677,9 @@ CREATE TABLE ops.j102_subject_current (
     updated_by text NOT NULL,
     sponsoring_partner text NOT NULL,
     updated_at timestamp with time zone NOT NULL,
+    CONSTRAINT j102_engagement_field_types CHECK (((subject_kind <> 'engagement'::text) OR ops.j102_engagement_fields_valid((envelope #> '{record,state}'::text[])))),
+    CONSTRAINT j102_engagement_state_vocabulary CHECK (((subject_kind <> 'engagement'::text) OR COALESCE(((envelope #>> '{record,state,engagement_state}'::text[]) = ANY (ARRAY['active'::text, 'completed'::text, 'expired'::text, 'terminated'::text])), false))),
+    CONSTRAINT j102_relationship_state_vocabulary CHECK (((subject_kind <> 'relationship'::text) OR COALESCE(((envelope #>> '{record,state,relationship_state}'::text[]) = ANY (ARRAY['prospect'::text, 'client'::text, 'client_ended'::text])), false))),
     CONSTRAINT j102_subject_current_sponsoring_partner_check CHECK ((sponsoring_partner = ANY (ARRAY['joe'::text, 'dell'::text]))),
     CONSTRAINT j102_subject_current_subject_id_check CHECK ((subject_id ~ '^[A-Za-z0-9][A-Za-z0-9._:/@!+=-]{0,127}$'::text)),
     CONSTRAINT j102_subject_current_subject_kind_check CHECK ((subject_kind = ANY (ARRAY['relationship'::text, 'engagement'::text, 'assignment'::text, 'property_negotiation'::text, 'deal'::text]))),
@@ -84414,24 +83873,6 @@ COMMENT ON TABLE public.deal_type_ref IS 'Deal transaction types (amendment 1). 
 
 
 --
--- Name: deal_vendor_assignment; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.deal_vendor_assignment (
-    deal_id uuid NOT NULL,
-    party_id uuid NOT NULL,
-    role text NOT NULL,
-    company_party_id uuid NOT NULL,
-    contact_party_id uuid NOT NULL,
-    active boolean DEFAULT true NOT NULL,
-    note text,
-    updated_by uuid NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT deal_vendor_assignment_role_check CHECK ((role = ANY (ARRAY['lender'::text, 'contractor'::text, 'architect'::text, 'attorney'::text, 'title'::text, 'inspector'::text, 'landlord_rep'::text])))
-);
-
-
---
 -- Name: defect; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -85834,7 +85275,6 @@ CREATE TABLE public.party (
     contact_state_set_by uuid,
     contact_state_set_at timestamp with time zone,
     cell text,
-    vendor_assignment_version integer DEFAULT 1 NOT NULL,
     CONSTRAINT party_kind_check CHECK ((kind = ANY (ARRAY['person'::text, 'org'::text])))
 );
 
@@ -89391,27 +88831,6 @@ SELECT
 
 
 --
--- Name: v_deal_room_vendor; Type: VIEW; Schema: public; Owner: -
---
-
-CREATE VIEW public.v_deal_room_vendor AS
- SELECT a.deal_id,
-    a.party_id,
-    a.role,
-    jsonb_build_object('id', company.id, 'name', company.name) AS company,
-    jsonb_build_object('id', contact.id, 'name', contact.name, 'email', contact.email, 'phone', contact.phone) AS contact,
-    a.note,
-    (to_jsonb(a.updated_at) #>> '{}'::text[]) AS updated_at
-   FROM (((public.deal_vendor_assignment a
-     JOIN public.party p ON (((p.id = a.party_id) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL))))
-     JOIN public.party company ON (((company.id = a.company_party_id) AND (company.merged_into IS NULL) AND (company.deleted_at IS NULL))))
-     JOIN public.party contact ON (((contact.id = a.contact_party_id) AND (contact.merged_into IS NULL) AND (contact.deleted_at IS NULL))))
-  WHERE (a.active AND (EXISTS ( SELECT 1
-           FROM public.vendor v
-          WHERE ((v.party_id = a.party_id) AND (v.merged_into IS NULL)))));
-
-
---
 -- Name: v_defect; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -91613,78 +91032,6 @@ UNION ALL
     e.subject_type
    FROM (public.event e
      JOIN public.actor act ON ((act.id = e.actor_id)));
-
-
---
--- Name: v_vendor_assignment_context; Type: VIEW; Schema: public; Owner: -
---
-
-CREATE VIEW public.v_vendor_assignment_context AS
- SELECT v.id,
-    v.vendor_ref AS ref,
-    v.version AS base_version,
-    p.vendor_assignment_version AS assignment_version,
-    v.party_id,
-        CASE
-            WHEN (company.id IS NOT NULL) THEN jsonb_build_object('id', company.id, 'name', company.name)
-            ELSE NULL::jsonb
-        END AS company,
-    COALESCE(( SELECT jsonb_agg(jsonb_build_object('id', contact.id, 'name', contact.name) ORDER BY contact.name, contact.id) AS jsonb_agg
-           FROM public.party contact
-          WHERE ((contact.kind = 'person'::text) AND (contact.merged_into IS NULL) AND (contact.deleted_at IS NULL) AND (((p.kind = 'person'::text) AND (contact.id = p.id)) OR ((p.kind = 'org'::text) AND (contact.org_id = p.id))))), '[]'::jsonb) AS contacts
-   FROM ((public.vendor v
-     JOIN public.party p ON ((p.id = v.party_id)))
-     LEFT JOIN public.party company ON (((company.id =
-        CASE
-            WHEN (p.kind = 'org'::text) THEN p.id
-            ELSE p.org_id
-        END) AND (company.kind = 'org'::text) AND (company.merged_into IS NULL) AND (company.deleted_at IS NULL))))
-  WHERE ((v.merged_into IS NULL) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL));
-
-
---
--- Name: v_vendor_duplicate_report; Type: VIEW; Schema: public; Owner: -
---
-
-CREATE VIEW public.v_vendor_duplicate_report AS
- WITH live AS (
-         SELECT v.id,
-            v.party_id,
-            p.org_id,
-            NULLIF(lower(btrim(p.email)), ''::text) AS email,
-            NULLIF(lower(regexp_replace(btrim(p.name), '\s+'::text, ' '::text, 'g'::text)), ''::text) AS name
-           FROM (public.vendor v
-             JOIN public.party p ON ((p.id = v.party_id)))
-          WHERE ((v.merged_into IS NULL) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL))
-        ), same_party AS (
-         SELECT count(*) AS n
-           FROM live
-          GROUP BY live.party_id
-         HAVING (count(*) > 1)
-        ), email_match AS (
-         SELECT live.email
-           FROM live
-          WHERE (live.email IS NOT NULL)
-          GROUP BY live.email
-         HAVING (count(DISTINCT live.party_id) > 1)
-        ), name_company_match AS (
-         SELECT live.name,
-            live.org_id
-           FROM live
-          WHERE ((live.name IS NOT NULL) AND (live.org_id IS NOT NULL))
-          GROUP BY live.name, live.org_id
-         HAVING (count(DISTINCT live.party_id) > 1)
-        )
- SELECT ( SELECT (count(*))::integer AS count
-           FROM live) AS live_vendor_rows,
-    ( SELECT (count(*))::integer AS count
-           FROM same_party) AS same_party_groups,
-    ( SELECT (COALESCE(sum((same_party.n - 1)), (0)::numeric))::integer AS "coalesce"
-           FROM same_party) AS extra_vendor_rows,
-    ( SELECT (count(*))::integer AS count
-           FROM email_match) AS email_match_groups,
-    ( SELECT (count(*))::integer AS count
-           FROM name_company_match) AS name_company_match_groups;
 
 
 --
@@ -99578,14 +98925,6 @@ ALTER TABLE ONLY public.deal_type_ref
 
 
 --
--- Name: deal_vendor_assignment deal_vendor_assignment_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.deal_vendor_assignment
-    ADD CONSTRAINT deal_vendor_assignment_pkey PRIMARY KEY (deal_id, party_id, role);
-
-
---
 -- Name: defect defect_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -101907,13 +101246,6 @@ CREATE INDEX deal_review_item_deal_idx ON public.deal_review_item USING btree (d
 --
 
 CREATE UNIQUE INDEX deal_review_one_open_per_actor_workspace ON public.deal_review_session USING btree (started_by, workspace_kind, COALESCE(account_client_id, '00000000-0000-0000-0000-000000000000'::uuid)) WHERE (status = 'open'::text);
-
-
---
--- Name: deal_vendor_assignment_active_contact; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX deal_vendor_assignment_active_contact ON public.deal_vendor_assignment USING btree (deal_id, role, contact_party_id) WHERE active;
 
 
 --
@@ -108030,13 +107362,6 @@ CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDAT
 
 
 --
--- Name: deal_vendor_assignment scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDATE ON public.deal_vendor_assignment FOR EACH ROW EXECUTE FUNCTION ops.scac_reference_monitor_guard();
-
-
---
 -- Name: defect scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -108944,13 +108269,6 @@ CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.d
 --
 
 CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.deal_review_session FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
-
-
---
--- Name: deal_vendor_assignment scac_reference_monitor_guard_truncate; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.deal_vendor_assignment FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
 
 
 --
@@ -115420,46 +114738,6 @@ ALTER TABLE ONLY public.deal
 
 
 --
--- Name: deal_vendor_assignment deal_vendor_assignment_company_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.deal_vendor_assignment
-    ADD CONSTRAINT deal_vendor_assignment_company_party_id_fkey FOREIGN KEY (company_party_id) REFERENCES public.party(id);
-
-
---
--- Name: deal_vendor_assignment deal_vendor_assignment_contact_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.deal_vendor_assignment
-    ADD CONSTRAINT deal_vendor_assignment_contact_party_id_fkey FOREIGN KEY (contact_party_id) REFERENCES public.party(id);
-
-
---
--- Name: deal_vendor_assignment deal_vendor_assignment_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.deal_vendor_assignment
-    ADD CONSTRAINT deal_vendor_assignment_deal_id_fkey FOREIGN KEY (deal_id) REFERENCES public.deal(id);
-
-
---
--- Name: deal_vendor_assignment deal_vendor_assignment_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.deal_vendor_assignment
-    ADD CONSTRAINT deal_vendor_assignment_party_id_fkey FOREIGN KEY (party_id) REFERENCES public.party(id);
-
-
---
--- Name: deal_vendor_assignment deal_vendor_assignment_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.deal_vendor_assignment
-    ADD CONSTRAINT deal_vendor_assignment_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.actor(id);
-
-
---
 -- Name: defect defect_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -117461,6 +116739,7 @@ revoke all on function ops.j102_admission_policy() from public;
 revoke all on function ops.j102_apply_transition(p_transition_id text, p_expected_state_digests jsonb, p_subject_envelopes jsonb, p_event_envelopes jsonb, p_evidence_recheck jsonb, p_idempotency_key text, p_request_digest text, p_diagnostics jsonb) from public;
 revoke all on function ops.j102_claim_idempotency(p_operation text, p_idempotency_key text, p_request_digest text) from public;
 revoke all on function ops.j102_compatibility_view(p_assignment_id text, p_deal_id text) from public;
+revoke all on function ops.j102_engagement_fields_valid(p_state jsonb) from public;
 revoke all on function ops.j102_evidence_subject_link(p_evidence_source text, p_evidence_ref text, p_version_no integer, p_content_digest text, p_subject_kind text, p_subject_id text) from public;
 revoke all on function ops.j102_expected_value(p_effect jsonb, p_prior jsonb, p_proposed jsonb, p_context jsonb, p_ids jsonb, p_facts jsonb) from public;
 revoke all on function ops.j102_first_party_record(p_record_kind text, p_record_id text) from public;
@@ -119752,8 +119031,6 @@ grant select on table public.deal_review_item to dot_reader;
 grant insert, select, update on table public.deal_review_session to carr_writer;
 grant select on table public.deal_review_session to dot_reader;
 grant select on table public.deal_type_ref to dot_reader;
-grant insert, select, update on table public.deal_vendor_assignment to carr_writer;
-grant select on table public.deal_vendor_assignment to dot_reader;
 grant select on table public.defect to carr_exporter;
 grant select on table public.defect to carr_reader;
 grant insert, select on table public.defect to carr_writer;
@@ -120148,9 +119425,6 @@ grant select on table public.v_deal_room_presence to dot_reader;
 grant select on table public.v_deal_room_session to carr_reader;
 grant select on table public.v_deal_room_session to carr_writer;
 grant select on table public.v_deal_room_session to dot_reader;
-grant select on table public.v_deal_room_vendor to carr_reader;
-grant select on table public.v_deal_room_vendor to carr_writer;
-grant select on table public.v_deal_room_vendor to dot_reader;
 grant select on table public.v_decision_entry to carr_exporter;
 grant select on table public.v_decision_entry to carr_reader;
 grant select on table public.v_decision_entry to carr_writer;
@@ -120347,12 +119621,6 @@ grant select on table public.v_subject_timeline to carr_writer;
 grant select on table public.v_subject_timeline to dot_reader;
 grant select on table public.v_today_triage to carr_reader;
 grant select on table public.v_today_triage to dot_reader;
-grant select on table public.v_vendor_assignment_context to carr_reader;
-grant select on table public.v_vendor_assignment_context to carr_writer;
-grant select on table public.v_vendor_assignment_context to dot_reader;
-grant select on table public.v_vendor_duplicate_report to carr_reader;
-grant select on table public.v_vendor_duplicate_report to carr_writer;
-grant select on table public.v_vendor_duplicate_report to dot_reader;
 grant select on table public.v_vendor_level_suggestion to carr_reader;
 grant select on table public.v_vendor_level_suggestion to dot_reader;
 grant select on table public.v_vendor_needs_type to carr_reader;
@@ -120835,6 +120103,10 @@ grant execute on function ops.j102_compatibility_view(p_assignment_id text, p_de
 grant execute on function ops.j102_compatibility_view(p_assignment_id text, p_deal_id text) to carr_jobs;
 grant execute on function ops.j102_compatibility_view(p_assignment_id text, p_deal_id text) to carr_reader;
 grant execute on function ops.j102_compatibility_view(p_assignment_id text, p_deal_id text) to carr_writer;
+grant execute on function ops.j102_engagement_fields_valid(p_state jsonb) to carr_authority;
+grant execute on function ops.j102_engagement_fields_valid(p_state jsonb) to carr_jobs;
+grant execute on function ops.j102_engagement_fields_valid(p_state jsonb) to carr_reader;
+grant execute on function ops.j102_engagement_fields_valid(p_state jsonb) to carr_writer;
 grant execute on function ops.j102_evidence_subject_link(p_evidence_source text, p_evidence_ref text, p_version_no integer, p_content_digest text, p_subject_kind text, p_subject_id text) to carr_authority;
 grant execute on function ops.j102_evidence_subject_link(p_evidence_source text, p_evidence_ref text, p_version_no integer, p_content_digest text, p_subject_kind text, p_subject_id text) to carr_jobs;
 grant execute on function ops.j102_evidence_subject_link(p_evidence_source text, p_evidence_ref text, p_version_no integer, p_content_digest text, p_subject_kind text, p_subject_id text) to carr_reader;
@@ -122653,8 +121925,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0935_retire_jev_gateway.sql	82dd8e9023b31cb5d56eedce2d5029fad1d93318d44ce4e1a996dce1e0210cdf	1970-01-01 00:00:00+00
 0936_deal_alert_items.sql	469f722bb5005547378d43bed510fb1b4edc98c1fc146ea8d50ae423b0275bb3	1970-01-01 00:00:00+00
 0937_retire_deleted_hook_control_projections.sql	dcd518923d1a6a052060f87ae1797e17a7270fb660fc7a208e97b9944234bcaf	1970-01-01 00:00:00+00
-0938_deal_vendor_assignments.sql	f9053aa57b13351da64416e35e49dc38d8d8da0fb118122b2652778bf9eda7eb	1970-01-01 00:00:00+00
-0939_deal_vendor_grant_retirements.sql	6ab6b3dbe76dbb395a8b739eea002aeb2ac4661f2efeefbf53c52b2fd69fd902	1970-01-01 00:00:00+00
+0938_j102_engagement_fields.sql	2f3496d3249138c9860c021510ae611d01324ef48d9d94c51386e8df4edb0629	1970-01-01 00:00:00+00
 \.
 
 

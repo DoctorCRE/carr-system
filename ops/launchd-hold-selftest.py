@@ -163,10 +163,6 @@ class HoldTests(unittest.TestCase):
         body = self.body.replace("<plist", "<!-- carr-launchd-definition-only: unused -->\n<plist", 1)
         self.assertEqual(cac.install_launchd_plist(self.dest.name, str(self.dest), body, False), "loaded")
 
-    def test_fleet_has_no_separate_hold_command_or_baseline_mode(self):
-        self.assertNotIn("launchd-held", (ROOT / "bin/fleet-sync.sh").read_text())
-        self.assertNotIn("CARR_TEST_" + "HOLD_BASELINE", Path(__file__).read_text())
-
     def test_full_install_reconciles_held_plist_once(self):
         config = self.home / "hooks.json"
         config.write_text('{"hooks": {}}')
@@ -350,12 +346,9 @@ class HoldTests(unittest.TestCase):
         self.assertTrue(self.disabled)
         self.assertFalse(self.loaded)
 
-    def test_fleet_sync_logs_hold_and_does_not_enable(self):
+    def test_delayed_reload_respects_hold(self):
+        import json
         patch.stopall()
-        fleet_spec = importlib.util.spec_from_file_location("fleet_hold_fixture", ROOT / "ops/fleet-sync-selftest.py")
-        fleet = importlib.util.module_from_spec(fleet_spec)
-        fleet_spec.loader.exec_module(fleet)
-        clone = fleet.build(str(self.home))
         fake_dir = self.home / "stubs"
         fake_dir.mkdir()
         state = self.home / "state.json"
@@ -377,21 +370,6 @@ else: s['disabled']=False; s['loaded']=True
 p.write_text(json.dumps(s)); sys.exit(rc)
 ''')
         fake.chmod(0o755)
-        installer = Path(clone) / "ops/config-as-code.py"
-        installer.write_text(f'''import importlib.util, sys
-s=importlib.util.spec_from_file_location('real_cac',{str(ROOT / 'ops/config-as-code.py')!r})
-m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
-sys.exit(0 if m.install_launchd_plist({self.dest.name!r},{str(self.dest)!r},{self.body!r},True)=='held' else 1)
-''')
-        result = fleet.run_sync(clone, {"HOME": str(self.home), "PATH": str(fake_dir)+os.pathsep+os.environ["PATH"]})
-        import json
-        actual = json.loads(state.read_text())
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("HELD " + self.label, result.stdout)
-        self.assertTrue(actual["disabled"])
-        self.assertFalse(actual["loaded"])
-        self.assertFalse(any(c[0] in {"enable", "load", "bootstrap", "kickstart"} for c in actual["calls"]))
-
         staged = self.home / "staged.plist"
         staged.write_text(self.body)
         import hashlib

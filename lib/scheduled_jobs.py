@@ -319,7 +319,7 @@ def report(manifest, snapshot, now):
     git = snapshot.get("git", {})
     if git.get("behind", 0):
         emit("canonical", "behind_main", f"canonical checkout is {git['behind']} commits behind origin/main",
-             "repair canonical fleet-sync/fast-forward through bin/fleet-sync.sh and verify HEAD equals origin/main")
+             "fetch origin and update canonical main through native Git without discarding local work; verify HEAD equals origin/main")
     if git.get("ahead", 0):
         emit("canonical", "ahead_of_main", f"canonical checkout has {git['ahead']} commits not on origin/main",
              "move the unpublished canonical commits to a branch through the repository hygiene owner, then verify HEAD equals origin/main")
@@ -327,7 +327,7 @@ def report(manifest, snapshot, now):
         emit("canonical", "wrong_branch", "canonical checkout does not select main", "restore canonical main through the repository hygiene owner without discarding local work")
     if git.get("remote_matches") is False:
         emit("canonical", "remote_ref_stale", "origin/main does not match GitHub main; behind count is only a cached lower bound",
-             "restore fleet-sync's fetch and fast-forward, then verify against remote main")
+             "fetch origin through native Git, then verify against remote main")
     return rows
 
 
