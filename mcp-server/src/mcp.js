@@ -131,9 +131,6 @@ export const PROFILES = {
   "codex-continuity": new Set([
     "codex-checkpoint", "codex-read-recovery",
   ]),
-  "claude-continuity": new Set([
-    "claude-checkpoint", "claude-read-recovery",
-  ]),
 
   // Reads plus the capture verbs that are safe to run unattended: each one is
   // additive, carries an idempotency key, and cannot destroy or re-point an
@@ -435,8 +432,6 @@ export function profileForActor(actor, request) {
   if (new URL(request.url).pathname === "/doc/mcp") return "doc";
   if (actor?.continuity_surface === "codex" && actor?.via === "codex-continuity-token")
     return "codex-continuity";
-  if (actor?.continuity_surface === "claude" && actor?.via === "claude-continuity-token")
-    return "claude-continuity";
   if (actor?.probe) return "probe";
   if (actor?.benchmarkAuthor === true && actor?.via === "review-token") return "benchmark-author";
   if (actor?.benchmarkReviewer === true && actor?.via === "review-token") return "benchmark-reviewer";
@@ -604,8 +599,7 @@ export function authorityDsnForActor(env, runtimeActor) {
 // connection: no transaction, no actor context, and only what carr_reader is
 // granted. A read verb whose SQL is granted to carr_writer/carr_authority only
 // (a SECURITY DEFINER door that raises 42501 for anyone else) must declare
-// writerConnection so it lands on "writer_read_only" instead -- V5-A05's
-// cadence-status missed exactly this and its daily sweep could never succeed.
+// writerConnection so it lands on "writer_read_only" instead.
 // Active supersession keeps retire-rule's credential boundary. Human teach
 // calls carrying a replacement use authority; machine capture stays writer.
 export function requiresAuthorityConnection(tool, actor, args = {}) {

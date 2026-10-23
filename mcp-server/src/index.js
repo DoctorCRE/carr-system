@@ -577,7 +577,6 @@ function continuityActorFor(request, env) {
   return continuityActorForTokenMaps(
     request.headers.get("authorization"),
     env.CODEX_CONTINUITY_TOKENS,
-    env.CLAUDE_CONTINUITY_TOKENS,
   );
 }
 

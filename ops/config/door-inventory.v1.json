@@ -57,12 +57,6 @@
       "evidence": "ops/check-pdf.py docstring (added 30eff6fe)"
     },
     {
-      "path": "ops/delivery-cadence-a05-live-acceptance-check.py",
-      "class": "one_shot",
-      "reason": "Read-only acceptance check of the V5-A05 delivery cadence clauses against production, run once after that PR deployed.",
-      "evidence": "f59d9713 (#1236)"
-    },
-    {
       "path": "ops/doctorcre-sibling-manifest.py",
       "class": "hand_tool",
       "reason": "The controller runs it to list the exact sibling paths a DoctorCRE build seat may read, for that seat's brief.",

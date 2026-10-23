@@ -416,7 +416,7 @@ class MapContentTests(unittest.TestCase):
             self.assertEqual(rt.tier_for_path(path), 3, path)
 
     def test_doctrine_tier2_paths(self):
-        for path in ("mcp-server/src/tour-map-route-state.js", "tools/room-bridge/engineering_dispatch_adapter.py",
+        for path in ("mcp-server/src/tour-map-route-state.js", "tools/room-bridge/dispatch.py",
                      "control-room/contracts/x.v1.json", "dealroom/index.html", "bin/nightly.sh"):
             self.assertEqual(rt.tier_for_path(path), 2, path)
 

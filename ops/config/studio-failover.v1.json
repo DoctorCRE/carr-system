@@ -30,15 +30,6 @@
       "enabled": true
     },
     {
-      "label": "com.carr.delivery-cadence-a05-sweep",
-      "source": "ops/launchd/com.carr.delivery-cadence-a05-sweep.plist",
-      "credentials": [
-        "~/.config/carr/mcp-tokens.env"
-      ],
-      "state": [],
-      "enabled": true
-    },
-    {
       "label": "com.carr.job-watchdog",
       "source": "ops/launchd/com.carr.job-watchdog.plist",
       "credentials": [

@@ -43,7 +43,7 @@
   "carried": {
     "activity_kind": "closed vocabulary, foreign-key target; bounded vocabulary pg_dump",
     "actor": "internal actor identities (joe, dell, system, automation) that events point at",
-    "agent_profile": "A MIGRATION-SEEDED REGISTRY WITH NO RUNTIME WRITER, and the earlier reason here was wrong on the facts. 0284 seeds the named profiles; nothing inserts the table at runtime — mcp-server/src/agent-profiles.js only UPDATEs, and mcp-server/src/bot-brief.js THROWS profile_not_found when a profile is missing, its own hint saying 'new profiles are a migration'. The previous entry claimed that file tolerates an empty set, which it does not. A rebuild without these rows makes the bot brief fail for every named profile. Read before carrying: profile_key, display_name, a charter of role sentences, status — no client, party, deal or event content. Loud rather than silent, unlike the doctrine registry, but the same wrong-premise shape",
+    "agent_profile": "Migration 0284 seeds the named profiles. mcp-server/src/agent-profiles.js updates existing rows and has no runtime insert path. Carry profile_key, display_name, charter, and status so rebuilt environments retain the profile registry; no client, party, deal, or event content is carried.",
     "client_status": "closed vocabulary; client.status is a foreign key to it",
     "client_type": "closed vocabulary, foreign-key target",
     "contact_state": "closed vocabulary, foreign-key target",
