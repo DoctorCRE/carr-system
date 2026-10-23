@@ -36050,9 +36050,15 @@ CREATE FUNCTION ops.refuse_live_approved_control_rewrite() RETURNS trigger
 begin
   if exists (
     select 1 from ops.rule_approval_receipt ar
-     join rule r on r.id=ar.rule_id and r.status='active'
+     join public.rule r on r.id=ar.rule_id and r.status='active'
     where old.control_key=any(ar.requested_control_keys)
   ) then
+    if tg_op='UPDATE'
+       and (to_jsonb(new)-array['implementation_ref','test_ref','verified_at','updated_at'])
+           is not distinct from
+           (to_jsonb(old)-array['implementation_ref','test_ref','verified_at','updated_at']) then
+      return new;
+    end if;
     raise exception 'control % backs an active approved rule and is immutable',old.control_key;
   end if;
   return case when tg_op='DELETE' then old else new end;
@@ -121928,6 +121934,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0938_j102_engagement_fields.sql	2f3496d3249138c9860c021510ae611d01324ef48d9d94c51386e8df4edb0629	1970-01-01 00:00:00+00
 0940_codex_job_delegation_control_refs.sql	9402a4057ee309d9a4959257e9d5a9a4c41451536f57d3def2201f02fd6741ab	1970-01-01 00:00:00+00
 0944_retire_orphan_control_inventory.sql	ab7c35cfc581268b40bab5b29399e315286b24ba1c3c8c86bc0b9c49673def37	1970-01-01 00:00:00+00
+0945_allow_approved_control_evidence_refresh.sql	b051840f87086cdfcfbe21abae004df2f7023907f081851f95c22a7e017f8800	1970-01-01 00:00:00+00
 \.
 
 
