@@ -2,7 +2,7 @@
 """Run an explicit coding task through isolated Flash attempts and tests.
 
 Use one attempt by default or choose --attempts. A passing candidate is applied
-and tested again in the real tree; failed work follows the configured Model Room
+and tested again in the real tree; failed work follows the selected Codex
 escalation mode. The stats command summarizes the local run log.
 
 Exit codes: 0 success, 4 escalated away, 5 no passing candidate, 2 invalid environment.
@@ -54,7 +54,7 @@ def flash_port(url=None):
 def scratch_for(work):
     """The sandboxed run's HOME and TMPDIR live here: a sibling of the tree, never inside it, so what the launcher
     (its CLAUDE_CONFIG_DIR session logs, caches) and the tests (pytest tmp_path) write there can never reach the
-    patch, the committed branch or the diff posted to the room (third review of #1324). Writable to the sandbox,
+    patch, the committed branch or the escalation diff (third review of #1324). Writable to the sandbox,
     removed with the run."""
     return os.path.realpath(work).rstrip(os.sep) + ".scratch"
 
@@ -354,7 +354,7 @@ def make_copy(cwd, dest):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(src, dst, follow_symlinks=False)
     # The project's installed dependencies are linked, not copied: .venv for Python, node_modules so a
-    # `node --test` in the copy resolves the project's packages (the Model Room queue's code tasks use both).
+    # `node --test` in the copy resolves the project's packages (Flash coding tasks use both).
     for dep in (".venv", "node_modules"):
         src = os.path.join(cwd, dep)
         if os.path.isdir(src) and not os.path.lexists(os.path.join(dest, dep)):
@@ -545,19 +545,6 @@ def apply_patch(cwd, patch):
         os.unlink(name)
 
 
-# Joe's decision 2026-09-24: Flash replaces Sonnet for scoped, testable coding, and what it
-# cannot do goes to Sol or Opus through the Model Room (decision 284028a5: no direct model
-# calls). A failed attempt is a code problem -> the Sol fixer desk (writable, no room seat),
-# which edits a throwaway copy of the task folder; flash-run reads that back as a patch,
-# applies it to the real folder and keeps it only if the test passes. A task routed away
-# before any attempt is a design/judgment call -> the Opus desk, in the background.
-# Why not the Sol room seat (codex-desk): it is read-only on purpose, because it answers
-# partner-room turns inside the canonical checkout, which must stay clean.
-# Escalation uses the configured Model Room desks, without model routing.
-with open(os.path.join(REPO, "ops/config/model-routes.v1.json"), encoding="utf-8") as _policy_file:
-    _routes = json.load(_policy_file)["routes"]
-ESCALATION_DESKS = {"code": _routes["code"]["then"]["desk"],
-                    "judgment": _routes["escalate"]["desk"]}
 ESCALATION_FILE_CHARS = 20000
 DIFF_BLOCK = re.compile(r"```(?:diff|patch)\s*\n(.*?)```", re.S)
 
@@ -576,9 +563,14 @@ def _load_path(path, name):
     return module
 
 
-def _room_dispatch(desk, text, cwd=None):
-    room = _load_path(os.path.join(REPO, "tools", "room-bridge", "dispatch.py"), "room_dispatch")
-    return room.dispatch(desk, text, cwd=cwd) if cwd else room.dispatch(desk, text)
+def _codex_exec(text, cwd):
+    with tempfile.TemporaryDirectory(prefix="flash-codex-result-") as directory:
+        result = os.path.join(directory, "result.md")
+        subprocess.run(["codex", "exec", "-C", cwd, "--skip-git-repo-check",
+                        "--dangerously-bypass-hook-trust", "-o", result, text],
+                       check=True, stdout=subprocess.DEVNULL)
+        with open(result, encoding="utf-8") as handle:
+            return handle.read()
 
 
 def _file_section(cwd, paths):
@@ -607,10 +599,8 @@ def _revert(cwd, patch):
 
 
 def escalate(task, cwd, run_id, failure, files, mode, *, test_cmd=None, kind="code",
-             dispatcher=None):
-    """Write the handoff pack; in auto mode send it to the Model Room desk for `kind`.
-
-    Returns {"handoff", "desk", "outcome", "detail"}. Never raises on a desk problem."""
+             executor=None):
+    """Write the handoff pack; auto mode runs Codex in a disposable project copy."""
     text = f"Task:\n{task}\n\nLast failure:\n{(failure or '')[-4000:]}"
     if test_cmd:
         text += f"\n\nThe task is done when this passes: {test_cmd}"
@@ -628,51 +618,45 @@ def escalate(task, cwd, run_id, failure, files, mode, *, test_cmd=None, kind="co
     path = os.path.join(HANDOFF_DIR, f"{run_id}.md")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(text)
-    desk = ESCALATION_DESKS.get(kind, ESCALATION_DESKS["code"])
-    result = {"handoff": path, "desk": desk, "outcome": "handoff_written", "detail": None}
+    result = {"handoff": path, "executor": "codex", "outcome": "handoff_written", "detail": None}
     _say(f"handoff pack: {path}")
     if mode != "auto":
-        _say(f"to escalate: send it to the {desk} Model Room desk (or rerun with --escalate auto)")
+        _say("to escalate: rerun with --escalate auto")
         return result
-    _say(f"escalating to the {desk} Model Room desk")
+    _say("escalating to Codex")
     copy_dir = None
     try:
-        if kind == "code":
-            copy_dir = tempfile.mkdtemp(prefix=f"flash-escalate-{run_id}-")
-            make_copy(cwd, copy_dir)
-        send = dispatcher or _room_dispatch
-        reply = send(desk, text, cwd=copy_dir) if copy_dir else send(desk, text)
-        status = (reply or {}).get("status")
-        answer = (reply or {}).get("result") or ""
+        copy_dir = tempfile.mkdtemp(prefix=f"flash-escalate-{run_id}-")
+        make_copy(cwd, copy_dir)
+        answer = (executor or _codex_exec)(text, copy_dir)
         if answer:
             with open(path[:-3] + ".answer.md", "w", encoding="utf-8") as fh:
                 fh.write(answer)
-        patch = (read_patch(copy_dir) if copy_dir else "") or (
-            extract_diff(answer) if kind == "code" else None)
+        patch = (read_patch(copy_dir) or extract_diff(answer)) if kind == "code" else None
     except Exception as exc:
-        result.update(outcome="dispatch_failed", detail=f"{type(exc).__name__}: {exc}"[:300])
-        _say(f"could not reach {desk}: {result['detail']}")
+        result.update(outcome="execution_failed", detail=f"{type(exc).__name__}: {exc}"[:300])
+        _say(f"could not run Codex: {result['detail']}")
         return result
     finally:
         if copy_dir:
             shutil.rmtree(copy_dir, ignore_errors=True)
             shutil.rmtree(gitdir_for(copy_dir), ignore_errors=True)
     if not patch:
-        result.update(outcome="dispatched", detail=status)
+        result.update(outcome="completed")
         return result
     ok, msg = apply_patch(cwd, patch)
     if not ok:
-        result.update(outcome="desk_patch_did_not_apply", detail=msg[:300])
+        result.update(outcome="codex_patch_did_not_apply", detail=msg[:300])
         return result
     if test_cmd:
         code, out = _sh(test_cmd, cwd, TEST_TIMEOUT)
         if code != 0:
             _revert(cwd, patch)
-            result.update(outcome="desk_patch_failed_reverted", detail=out[-300:])
-            _say(f"{desk}'s change failed the test and was reverted")
+            result.update(outcome="codex_patch_failed_reverted", detail=out[-300:])
+            _say(f"Codex's change failed the test and was reverted")
             return result
-    result.update(outcome="fixed_by_desk", detail=status)
-    _say(f"applied {desk}'s change" + (" and the test passes" if test_cmd else ""))
+    result.update(outcome="fixed_by_codex", detail=None)
+    _say("applied Codex's change" + (" and the test passes" if test_cmd else ""))
     return result
 
 
@@ -688,7 +672,7 @@ def cmd_run(a):
                                      test_cmd=a.test, kind="code")
         row["handoff"] = row["escalation"]["handoff"]
         _append(RUNS_LOG, row)
-        return 0 if row["escalation"]["outcome"] == "fixed_by_desk" else 4
+        return 0 if row["escalation"]["outcome"] == "fixed_by_codex" else 4
 
     sandbox = a.sandbox == "on" or (a.sandbox == "auto" and os.path.exists(SANDBOX_EXEC))
     if a.sandbox == "on" and not os.path.exists(SANDBOX_EXEC):
@@ -746,8 +730,8 @@ def cmd_run(a):
             row["escalation"] = escalate(task, cwd, run_id, failure, [],
                                          a.escalate, test_cmd=a.test)
             row["handoff"] = row["escalation"]["handoff"]
-            if row["escalation"]["outcome"] == "fixed_by_desk":
-                row["outcome"] = "fixed_by_desk"
+            if row["escalation"]["outcome"] == "fixed_by_codex":
+                row["outcome"] = "fixed_by_codex"
                 _append(RUNS_LOG, row)
                 return 0
             _append(RUNS_LOG, row)

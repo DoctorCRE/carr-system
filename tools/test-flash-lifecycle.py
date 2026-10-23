@@ -16,9 +16,7 @@ from unittest.mock import Mock, patch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE / "room-bridge"))
 import flashlib
-import flash_wire
 
 
 def load(path, name):
@@ -64,8 +62,6 @@ class LifecycleTests(unittest.TestCase):
         self.assertIn("flash is switched off", error.getvalue())
         with self.assertRaisesRegex(flashlib.FlashSwitchedOff, "^flash is switched off$"):
             flashlib.ensure_server()
-        with self.assertRaisesRegex(flashlib.FlashSwitchedOff, "^flash is switched off$"):
-            flashlib.ensure_desk(lambda: True)
         for scope in (flashlib.activity_scope, flashlib.request_scope):
             with self.assertRaisesRegex(flashlib.FlashSwitchedOff, "^flash is switched off$"):
                 with scope():
@@ -128,7 +124,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(row["turns"], 0)
         self.assertEqual(json.loads(output.getvalue())["detail"], "flash is switched off")
 
-    def test_log_tracks_detached_desk_inference_without_counting_shutdown_or_probes(self):
+    def test_log_tracks_local_inference_without_counting_shutdown_or_probes(self):
         now = datetime(2026, 10, 5, 23, 0, 0).timestamp()
         log = self.directory / "server.log"
         log.write_text("1005 22:55:00 ds4-server: chat ctx=1..2:1 TOOLS prompt start\n"
@@ -157,32 +153,17 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(elapsed[0], 180)
 
 
-    def test_live_desk_joins_an_active_request_without_waiting_for_exclusive_lock(self):
-        with flashlib.activity_scope(), patch.object(flashlib, "ensure_server"), patch.object(flashlib, "_start") as start:
-            flashlib.ensure_desk(lambda: True)
-        start.assert_not_called()
-
-
-    def test_stop_disables_both_agents_and_stops_the_detached_process(self):
+    def test_stop_disables_only_the_local_server(self):
         launch = Mock(return_value=subprocess.CompletedProcess([], 0, "", ""))
-        with patch.object(flashlib.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as process:
-            flashlib._stop(launch=launch)
-        self.assertEqual([c.args[0] for c in launch.call_args_list], ["disable", "bootout", "disable", "bootout"])
-        self.assertEqual(process.call_args.args[0][-2:], ["stop", "flash"])
+        flashlib._stop(launch=launch)
+        self.assertEqual([c.args for c in launch.call_args_list], [
+            ("disable", f"{flashlib._domain()}/{flashlib.SERVER_LABEL}"),
+            ("bootout", f"{flashlib._domain()}/{flashlib.SERVER_LABEL}")])
 
     def test_ensure_timeout_preserves_collector_offline_observation(self):
         collector = load(HERE / "resource-collector.py", "fixture_collector")
         with patch.object(flashlib, "ensure_server", side_effect=TimeoutError("cold timeout")):
             self.assertEqual(collector.flash_server_available(opener=Mock(side_effect=OSError("offline"))), (False, None))
-
-
-
-    def test_ensure_timeout_preserves_direct_room_timeout(self):
-        with patch.object(flashlib, "ensure_server", side_effect=TimeoutError("cold timeout")):
-            # The captured production transport would be called only after readiness.
-            result = flash_wire.run_turn("fixture", opener=flashlib.urllib.request.urlopen)
-        self.assertEqual(result["status"], "timed_out")
-
 
 if __name__ == "__main__":
     unittest.main()

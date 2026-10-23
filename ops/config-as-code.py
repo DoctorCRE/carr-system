@@ -2023,7 +2023,7 @@ def cmd_install(apply):
     if apply:
         os.makedirs(LAUNCHD_SRC, exist_ok=True)
     for f in sorted(os.listdir(LAUNCHD_REPO)) if os.path.isdir(LAUNCHD_REPO) else []:
-        if f in {"local.ds4-flash-next.plist", "local.flash-desk.plist", "com.carr.flash-idle-stop.plist"}:
+        if f in {"local.ds4-flash-next.plist", "com.carr.flash-idle-stop.plist"}:
             continue
         source = read(launchd_repo_path(f))
         if (launchd_calendar.plist_label(source or "") or f.removesuffix(".plist")) in held_labels:

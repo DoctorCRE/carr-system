@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Flash code desk runs model-driven code (the agent and the tests it writes). This checks the containment that
+"""Flash runs model-driven code (the agent and the tests it writes). This checks the containment that
 makes that safe: the exploit replay the independent review of PR #1324 asked for (a program that reads a home secret
 and reaches the network is REFUSED under the real sandbox), plus the timeout that actually bounds a run even when a
 child escapes its process group.
@@ -82,10 +82,6 @@ def node_can_start_without_opening_other_homebrew_config():
         raise SkipTest("node is absent")
     work = _work()
     env = fr._sandbox_env(os.environ, work)
-    sys.path.insert(0, os.path.join(HERE, "room-bridge"))
-    import flash_wire
-    # The desk imports the runner's profile; exercise that route too.
-    runners = (fr, flash_wire._flash_run_module())
     brew_etc = next((p for p in ("/opt/homebrew/etc", "/usr/local/etc") if os.path.isdir(p)), None)
     assert brew_etc, "no Homebrew config directory for the private sibling fixture"
     with tempfile.NamedTemporaryFile(prefix="flash-private-config-", dir=brew_etc) as sibling:
@@ -96,12 +92,11 @@ def node_can_start_without_opening_other_homebrew_config():
         control = subprocess.run([node, "-e", "require('node:fs').readFileSync(process.argv[1])", sibling.name],
                                  cwd=work, env=env, capture_output=True, text=True, timeout=30)
         assert control.returncode == 0, f"unsandboxed sibling control failed: {control.stderr}"
-        for runner in runners:
-            code, out = runner.bounded_run(runner.sandbox_wrap([node, "-e", "0"], work), work, 30, env=env)
-            assert code == 0, f"node startup failed under {runner.__name__}: {code} {out}"
-            code, out = runner.bounded_run(runner.sandbox_wrap([node, "-e", probe, sibling.name], work),
-                                           work, 30, env=env)
-            assert code == 0, f"sibling config was readable under {runner.__name__}: {code} {out}"
+        code, out = fr.bounded_run(fr.sandbox_wrap([node, "-e", "0"], work), work, 30, env=env)
+        assert code == 0, f"node startup failed under {fr.__name__}: {code} {out}"
+        code, out = fr.bounded_run(fr.sandbox_wrap([node, "-e", probe, sibling.name], work),
+                                  work, 30, env=env)
+        assert code == 0, f"sibling config was readable under {fr.__name__}: {code} {out}"
 
 
 @sandboxed
@@ -138,11 +133,8 @@ def openssl_private_and_certs_files_are_denied_by_every_profile():
     assert spec and spec.loader
     script = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(script)
-    sys.path.insert(0, os.path.join(HERE, "room-bridge"))
-    import flash_wire
     work = _work()
-    profiles = (fr.sandbox_profile(work), flash_wire._flash_run_module().sandbox_profile(work),
-                script.sandbox_profile(work))
+    profiles = (fr.sandbox_profile(work), script.sandbox_profile(work))
     roots = [p for p in ("/opt/homebrew/etc/openssl@3", "/usr/local/etc/openssl@3",
                          "/opt/homebrew/etc/openssl@4", "/usr/local/etc/openssl@4") if os.path.isdir(p)]
     if not roots:
@@ -339,28 +331,6 @@ def attempt_copy_ignores_an_in_tree_git_config_planted_unsandboxed():
     assert "+two" in patch, patch
 
 
-def desk_worktree_git_ignores_a_swapped_git_pointer():
-    # Layer (b) for the desk: a tree whose .git was swapped for a directory with a hook is never read, because the
-    # desk names the worktree's real admin dir (captured before any model code ran).
-    project = _project()
-    tree = os.path.join(_work(), "tree")
-    _git(project, "worktree", "add", "-q", "-b", "flash/queue-t_canary", tree, "HEAD")
-    with open(os.path.join(tree, ".git")) as fh:
-        admin = os.path.realpath(fh.read().strip()[len("gitdir:"):].strip())
-    hook, canary = _canary()
-    os.unlink(os.path.join(tree, ".git"))
-    os.makedirs(os.path.join(tree, ".git"))
-    with open(os.path.join(tree, ".git", "config"), "w") as fh:
-        fh.write(_fsmonitor(hook))
-    with open(os.path.join(tree, "a.txt"), "a") as fh:
-        fh.write("two\n")
-    fr.tgit(admin, tree, "add", "-A")
-    code, diff = fr.tgit(admin, tree, "diff", "--cached")
-    assert not os.path.exists(canary), "desk git ran a hook from a swapped .git in the worktree"
-    assert "+two" in diff, diff
-    _git(project, "worktree", "prune")
-
-
 PLANT = '''
 import os
 results = []
@@ -396,30 +366,6 @@ def sandboxed_agent_cannot_plant_git_config_in_its_attempt_copy():
     patch = fr.read_patch(dest)
     assert not os.path.exists(canary), f"the canary fired after read_patch: {out}"
     assert "+two" in patch, (out, patch)
-
-
-@sandboxed
-def sandboxed_test_cannot_swap_the_worktree_git_pointer():
-    # The reviewer's second path: the final test / re-check (work = the desk's worktree) swaps .git, then the desk's
-    # git runs. Replayed through the real sandbox and the desk's trusted git calls.
-    project = _project()
-    tree = os.path.join(_work(), "tree")
-    _git(project, "worktree", "add", "-q", "-b", "flash/queue-t_canary2", tree, "HEAD")
-    with open(os.path.join(tree, ".git")) as fh:
-        admin = os.path.realpath(fh.read().strip()[len("gitdir:"):].strip())
-    hook, canary = _canary()
-    body = (f"attempt('POINTER_WRITE', lambda: open('.git', 'w').write('gitdir: evil\\n'))\n"
-            f"attempt('POINTER_UNLINK', lambda: os.unlink('.git'))\n"
-            f"attempt('GITDIR_SWAP', lambda: (os.makedirs('.git', exist_ok=True), "
-            f"open('.git/config', 'w').write({_fsmonitor(hook)!r})))\n")
-    code, out = _run(PLANT.format(body=body), tree, port=fr.flash_port())
-    assert "POINTER_WRITE_OK" not in out and "POINTER_UNLINK_OK" not in out and "GITDIR_SWAP_OK" not in out, out
-    fr.tgit(admin, tree, "add", "-A")
-    code, diff = fr.tgit(admin, tree, "diff", "--cached")
-    subprocess.run(["git", "status", "--short"], cwd=tree, capture_output=True, text=True, env=ENV)  # even discovery-mode git
-    assert not os.path.exists(canary), f"the canary fired after the desk's git: {out}"
-    assert "+two" in diff, (out, diff)
-    _git(project, "worktree", "remove", "--force", tree)
 
 
 # ── patch content: only what the model edited (third review of #1324) ────────────────────────────────────────
@@ -516,37 +462,6 @@ def _attempt_patch():
     return fr.read_patch(dest)
 
 
-@sandboxed
-def desk_commit_holds_only_the_model_edit_with_a_real_pytest_tmp_path_suite():
-    sys.path.insert(0, os.path.join(HERE, "room-bridge"))
-    import flash_wire
-    project = _pytest_project()
-    sim = os.path.join(_work(), "sim.py")
-    with open(sim, "w") as fh:
-        fh.write(LAUNCHER_SIM.format())
-    fake = os.path.join(_work(), "fake-flash-run.py")
-    with open(fake, "w") as fh:
-        fh.write(
-            "import importlib.util, os, sys\n"
-            f"spec = importlib.util.spec_from_file_location('fr', {os.path.join(HERE, 'flash-run.py')!r})\n"
-            "fr = importlib.util.module_from_spec(spec); spec.loader.exec_module(fr)\n"
-            "a = sys.argv[1:]; cwd = a[a.index('--cwd') + 1]; test = a[a.index('--test') + 1]\n"
-            f"argv = fr.sandbox_wrap([sys.executable, {sim!r}], cwd, reads=[{sim!r}], port=fr.flash_port())\n"
-            "code, out = fr.bounded_run(argv, cwd, 60, env=fr._sandbox_env(os.environ, cwd))\n"
-            "assert 'SIM_DONE' in out, out\n"
-            "code, out = fr._run_test(test, cwd, 120, sandbox=True, port=fr.flash_port())\n"
-            "print(out); sys.exit(0 if code == 0 else 5)\n")
-    argv = [sys.executable, "-m", "pytest", "-q", "tests"]
-    spec = {"project": project, "test_argv": argv, "test": " ".join(argv)}
-    row = flash_wire._run_flash_code("Fix add", spec, "t_patch01", command=[sys.executable, fake], sandbox=True)
-    assert row["outcome"] == "success", row
-    files = subprocess.run(["git", "show", "--name-only", "--format=", row["branch"]], cwd=project,
-                           capture_output=True, text=True, env=ENV).stdout.split()
-    assert files == ["calc.py"], f"the desk committed more than the model's edit: {files}"
-    for leaked in (".claude-local", "session.jsonl", ".cache", "agent-temp", "scratch.txt", ".pytest_cache"):
-        assert leaked not in row["text"], f"{leaked} reached the diff posted to the room"
-
-
 # ── the timeout actually bounds the run ───────────────────────────────────────────────────────────────────────
 def _alive(pid):
     """True when pid is a live (not zombie) process."""
@@ -604,7 +519,7 @@ def a_two_second_timeout_returns_within_about_three_seconds_and_kills_the_setsid
 
 def a_daemon_left_behind_by_a_normal_exit_is_killed_too():
     # A run that daemonises a setsid child and then exits 0 must not leave it running (it would keep writing into
-    # the tree while the desk's git runs): the run's environment marker finds it after it is reparented.
+    # the tree while git runs): the run's environment marker finds it after it is reparented.
     work = _work()
     path, pidfile = _grandchild_program(work, parent_sleeps=0)
     code, out = fr.bounded_run([sys.executable, path], work, 20)
