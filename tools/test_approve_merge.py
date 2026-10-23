@@ -71,12 +71,6 @@ elif sys.argv[1:3] != ['pr', 'merge']:
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(len(self.calls()), 1)
 
-    def test_missing_queue_refuses_without_github_calls(self):
-        self.env['CARR_WORK_QUEUE_DB'] = str(self.root / 'missing.sqlite3')
-        result = self.run_command('--from-work-queue')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(self.calls(), [])
-
     def test_invalid_approval_arguments_refuse_without_github_calls(self):
         for args in [('example/repo', '12', 'short'), ('example/repo', '-1', SHA), ('--bad', '12', SHA)]:
             with self.subTest(args=args):
@@ -91,29 +85,6 @@ elif sys.argv[1:3] != ['pr', 'merge']:
         self.assertIn('open', result.stderr.lower())
         self.assertEqual(len(self.calls()), 1)
 
-    def test_work_queue_uses_only_merging_pins_and_skips_enabled_prs(self):
-        import sys
-        sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
-        from work_queue import WorkQueue
-        path = self.root / 'work.sqlite3'
-        self.env['CARR_WORK_QUEUE_DB'] = str(path)
-        with WorkQueue(path) as queue:
-            for card, stage in [('ready', 'merging'), ('building', 'review')]:
-                queue.enqueue(card, desk='sol', task='synthetic', actor='test')
-                claim = queue.claim(eligible_desks={'sol'}, actor='test', owner={})
-                queue.finish(card, claim['claim'], {'status': 'completed'}, actor='test')
-                queue.update(card, actor='test', reason='approved head',
-                             prs=[{'repo': 'example/repo', 'number': 12, 'head': SHA}])
-                if stage == 'merging':
-                    queue.transition(card, stage, actor='test', reason='approved')
-        result = self.run_command('--from-work-queue')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len([call for call in self.calls() if call[:2] == ['pr', 'merge']]), 1)
-        self.log.unlink()
-        self.pr['autoMergeRequest'] = {'enabledAt': '2026-01-01T00:00:00Z'}
-        result = self.run_command('--from-work-queue')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual([call[:2] for call in self.calls()], [['pr', 'view']])
 
 
 if __name__ == '__main__':
