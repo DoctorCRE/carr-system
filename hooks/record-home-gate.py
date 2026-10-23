@@ -308,9 +308,9 @@ RULE_VERB = re.compile(r"\b(teach|activate-rule|retire-rule|amend-rule|supersede
                        r"proposed rule|active rule)\b", re.I)
 
 USE_INSTEAD = ("Use a verb: log-decision (a settled call and why), add-loop (an open item), "
-               "record-finding (research/verification), teach (a standing rule), "
-               "update-loop / close-loop. The record layer is the memory; a markdown file "
-               "reaches nobody and no query finds it.")
+               "record-finding (research/verification), update-loop / close-loop. "
+               "Propose standing guidance as an edit to CLAUDE.md, AGENTS.md or a skill "
+               "in a PR; proposals bind nobody until merged.")
 
 
 def log(msg):

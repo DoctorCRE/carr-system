@@ -818,17 +818,23 @@
    "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "4a9188f3": {
-   "moment": "the teach verb, at a partner-correction/decision trigger",
+   "moment": "a proposed guidance-file PR at a partner-correction/decision trigger",
    "routes": [
     {
      "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "teach"
+     "tools": [
+      "Write",
+      "Edit",
+      "MultiEdit"
      ],
-     "bash_patterns": []
+     "verbs": [],
+     "bash_patterns": [
+      "\\bgit\\s+(?:commit|push)\\b",
+      "\\bgh\\s+pr\\s+(?:create|edit|view)\\b"
+     ]
     }
-   ]
+   ],
+   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
   },
   "4c21d86b": {
    "moment": "merge_survivor verb check (confirm-merge)",
@@ -1147,10 +1153,12 @@
      "kind": "trigger",
      "tools": [
       "Agent",
-      "mcp__*__create_scheduled_task"
+      "mcp__*__create_scheduled_task",
+      "Write",
+      "Edit",
+      "MultiEdit"
      ],
      "verbs": [
-      "accept-workflow",
       "advance-workflow-cutover-stage",
       "open-workflow-cutover-plan",
       "record-workflow-caller"
@@ -1159,7 +1167,9 @@
       "\\A(?:(?:\\\\[^\\n]|\\\"(?:\\\\.|[^\\\"\\\\])*\\\"|'[^']*'|[^\\\\'\\\";&|()\\n])*[;&|()\\n])*[ \\t]*(?:['\\\"]?(?:/usr/bin/|/usr/local/bin/|/opt/homebrew/bin/|(?:\\./)?\\.venv/bin/)?python3['\\\"]?\\s+)?['\\\"]?(?:/(?:[^\\s\\'\\\";&|()]+/)?carr-system/|(?:\\./)?)bin/codex-job['\\\"]?(?=[\\s;&|()<>]|$)",
       "\\bgrok\\b",
       "\\bcodex\\s+exec\\b",
-      "\\blaunchctl\\b"
+      "\\blaunchctl\\b",
+      "\\bgit\\s+(?:commit|push)\\b",
+      "\\bgh\\s+pr\\s+(?:create|edit|view)\\b"
      ]
     },
     {
@@ -1168,7 +1178,8 @@
       "*ops/scheduled-tasks/*"
      ]
     }
-   ]
+   ],
+   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
   },
   "5f8c661d": {
    "moment": "vendor introduction work (intro_politics scope)",
@@ -1398,16 +1409,23 @@
    "routes": [
     {
      "kind": "trigger",
-     "tools": [],
+     "tools": [
+      "Write",
+      "Edit",
+      "MultiEdit"
+     ],
      "verbs": [
       "correct-memory",
       "record-defect",
-      "report-problem",
-      "teach"
+      "report-problem"
      ],
-     "bash_patterns": []
+     "bash_patterns": [
+      "\\bgit\\s+(?:commit|push)\\b",
+      "\\bgh\\s+pr\\s+(?:create|edit|view)\\b"
+     ]
     }
-   ]
+   ],
+   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
   },
   "7105955b": {
    "moment": "loop_successor schema (close-loop verb)",
@@ -1728,15 +1746,17 @@
    "routes": [
     {
      "kind": "trigger",
-     "tools": [],
+     "tools": [
+      "Write",
+      "Edit",
+      "MultiEdit"
+     ],
      "verbs": [
       "add-loop",
-      "amend-rule",
       "close-loop",
       "complete-action",
       "log-decision",
       "report-problem",
-      "teach",
       "update-decision",
       "update-loop"
      ],
@@ -1744,7 +1764,9 @@
       "\\bgit\\s+push\\b",
       "\\bgh\\s+pr\\s+(?:create|merge)\\b",
       "\\bgit\\s+commit\\b",
-      "\\bgit\\s+(?:checkout|switch|worktree|branch)\\b"
+      "\\bgit\\s+(?:checkout|switch|worktree|branch)\\b",
+      "\\bgit\\s+(?:commit|push)\\b",
+      "\\bgh\\s+pr\\s+(?:create|edit|view)\\b"
      ]
     },
     {
@@ -1758,7 +1780,8 @@
       "*hooks/*.py"
      ]
     }
-   ]
+   ],
+   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
   },
   "88e9b5eb": {
    "moment": "blocker_decider gate",
@@ -1895,11 +1918,13 @@
       "WebFetch",
       "WebSearch",
       "mcp__*__get_page_text",
-      "mcp__*__navigate"
+      "mcp__*__navigate",
+      "Write",
+      "Edit",
+      "MultiEdit"
      ],
      "verbs": [
       "record-source-observation",
-      "teach",
       "write-doctrine-section"
      ],
      "bash_patterns": [
@@ -1907,10 +1932,13 @@
       "\\bwget\\b",
       "\\byt-dlp\\b",
       "\\bgrok\\b",
-      "\\bpdftotext\\b"
+      "\\bpdftotext\\b",
+      "\\bgit\\s+(?:commit|push)\\b",
+      "\\bgh\\s+pr\\s+(?:create|edit|view)\\b"
      ]
     }
-   ]
+   ],
+   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
   },
   "9530fb1c": {
    "moment": "the moment a session says 'the right fix is X'",
@@ -1941,29 +1969,41 @@
    "routes": [
     {
      "kind": "trigger",
-     "tools": [],
+     "tools": [
+      "Write",
+      "Edit",
+      "MultiEdit"
+     ],
      "verbs": [
       "change-doctrine-sections",
       "new-doctrine-doc",
       "retire-doctrine-section",
       "set-doctrine-refs",
-      "teach",
       "write-doctrine-section"
      ],
-     "bash_patterns": []
+     "bash_patterns": [
+      "\\bgit\\s+(?:commit|push)\\b",
+      "\\bgh\\s+pr\\s+(?:create|edit|view)\\b"
+     ]
     }
-   ]
+   ],
+   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
   },
   "9873a0d2": {
    "moment": "a partner re-explains the same how-to twice",
    "routes": [
     {
      "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "teach"
+     "tools": [
+      "Write",
+      "Edit",
+      "MultiEdit"
      ],
-     "bash_patterns": []
+     "verbs": [],
+     "bash_patterns": [
+      "\\bgit\\s+(?:commit|push)\\b",
+      "\\bgh\\s+pr\\s+(?:create|edit|view)\\b"
+     ]
     },
     {
      "kind": "path_rule",
@@ -1971,7 +2011,8 @@
       "*.md"
      ]
     }
-   ]
+   ],
+   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
   },
   "98e74e7c": {
    "moment": "reviewing a fed link or source",
@@ -2180,17 +2221,23 @@
    ]
   },
   "ab814a26": {
-   "moment": "rule_shape gate (approve-rule)",
+   "moment": "guidance-file PR review and relevant CI checks",
    "routes": [
     {
      "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "approve-rule"
+     "tools": [
+      "Write",
+      "Edit",
+      "MultiEdit"
      ],
-     "bash_patterns": []
+     "verbs": [],
+     "bash_patterns": [
+      "\\bgit\\s+(?:commit|push)\\b",
+      "\\bgh\\s+pr\\s+(?:create|edit|view)\\b"
+     ]
     }
-   ]
+   ],
+   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
   },
   "af7de070": {
    "moment": "a tool call blocked by a permission classifier",
@@ -2488,18 +2535,25 @@
     },
     {
      "kind": "trigger",
-     "tools": [],
+     "tools": [
+      "Write",
+      "Edit",
+      "MultiEdit"
+     ],
      "verbs": [
       "add-deal-note",
       "add-loop",
       "log-decision",
-      "teach",
       "update-loop",
       "write-doctrine-section"
      ],
-     "bash_patterns": []
+     "bash_patterns": [
+      "\\bgit\\s+(?:commit|push)\\b",
+      "\\bgh\\s+pr\\s+(?:create|edit|view)\\b"
+     ]
     }
-   ]
+   ],
+   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
   },
   "c66dc739": {
    "moment": "reading/capturing Joe's mail",
@@ -3173,14 +3227,21 @@
    "routes": [
     {
      "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "correct-memory",
-      "teach"
+     "tools": [
+      "Write",
+      "Edit",
+      "MultiEdit"
      ],
-     "bash_patterns": []
+     "verbs": [
+      "correct-memory"
+     ],
+     "bash_patterns": [
+      "\\bgit\\s+(?:commit|push)\\b",
+      "\\bgh\\s+pr\\s+(?:create|edit|view)\\b"
+     ]
     }
-   ]
+   ],
+   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
   },
   "fc4d7753": {
    "moment": "any turn - evaluating whether to add structure or ideas",
@@ -3226,18 +3287,21 @@
     {
      "kind": "trigger",
      "tools": [
-      "AskUserQuestion"
+      "AskUserQuestion",
+      "Write",
+      "Edit",
+      "MultiEdit"
      ],
      "verbs": [
-      "teach",
-      "amend-rule",
-      "retire-rule",
-      "log-decision",
-      "admit-rule"
+      "log-decision"
      ],
-     "bash_patterns": []
+     "bash_patterns": [
+      "\\bgit\\s+(?:commit|push)\\b",
+      "\\bgh\\s+pr\\s+(?:create|edit|view)\\b"
+     ]
     }
-   ]
+   ],
+   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
   },
   "76fcbed6": {
    "moment": "Joe sends a link, article, repo, video or other source",

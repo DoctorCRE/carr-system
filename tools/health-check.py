@@ -791,8 +791,8 @@ def _live_jobs(snap):
 def _legacy_scheduled_definitions(snap):
     """Enabled definitions whose LEGACY scheduler is still the executor.
 
-    Until ``disable-legacy-schedule`` fires for a key, launchd or the Claude
-    scheduler runs it and the Control Plane ledger holds nothing — so a due
+    Until the native scheduler is disabled and its readback verified, launchd
+    or the Claude scheduler runs it and the Control Plane ledger holds nothing — so a due
     window with no ledger row is the cutover working, not a missed run.  The
     default is fail-closed: a definition that does not declare itself legacy
     is still held to every due window.

@@ -21,6 +21,27 @@ spec.loader.exec_module(module)
 NOW = datetime(2026, 10, 5, 19, 0, 0, tzinfo=timezone.utc)
 
 
+def health_cli(root):
+    bootstrap = """
+import runpy
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+root = Path(sys.argv[1])
+sys.path[:0] = [str(root), str(root / 'tools')]
+from lib.record_call import REFUSED, VerbResult
+
+def offline_record(verb, *args, **kwargs):
+    return VerbResult(verb, REFUSED, {'ok': False, 'error': 'offline_fixture'})
+
+sys.argv = [str(root / 'tools/health-check.py'), *sys.argv[2:]]
+with patch('lib.record_call.call_verb', side_effect=offline_record):
+    runpy.run_path(sys.argv[0], run_name='__main__')
+"""
+    return [sys.executable, "-c", bootstrap, str(root)]
+
+
 class UptimeHealthTests(unittest.TestCase):
     def test_refused_or_malformed_loop_read_reports_error(self):
         replies = ({"ok": False, "refused": True}, {"loop": None}, {"loop": []},
@@ -164,8 +185,8 @@ class UptimeHealthTests(unittest.TestCase):
             for timestamp in (None, 4, [], {}, "2026-10-05T19:00:00Z"):
                 mode.update(timestamp=timestamp, partial=isinstance(timestamp, str))
                 output = destination / "findings.json"
-                result = subprocess.run([
-                    sys.executable, str(root / "tools/health-check.py"), "--section", "uptime",
+                result = subprocess.run(health_cli(root) + [
+                    "--section", "uptime",
                     "--findings-json", str(output),
                 ], env={**os.environ, "CARR_UPTIME_STATUS_URL": f"http://127.0.0.1:{server.server_port}/healthz",
                         "CARR_UPTIME_RESPONSE_STATE": str(state)}, capture_output=True, text=True, timeout=15)
@@ -293,8 +314,8 @@ class UptimeHealthTests(unittest.TestCase):
                 payload["ok"] = healthy
                 payload["failures"] = 0 if healthy else 3
                 output = destination / "findings.json"
-                result = subprocess.run([
-                    sys.executable, str(root / "tools/health-check.py"), "--section", "uptime",
+                result = subprocess.run(health_cli(root) + [
+                    "--section", "uptime",
                     "--findings-json", str(output),
                 ], env={**os.environ, "CARR_UPTIME_STATUS_URL": f"http://127.0.0.1:{server.server_port}/healthz",
                         "CARR_UPTIME_RESPONSE_STATE": str(destination / "response.json")},
@@ -317,8 +338,8 @@ class UptimeHealthTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "findings.json"
-            result = subprocess.run([
-                sys.executable, str(root / "tools/health-check.py"), "--section", "uptime",
+            result = subprocess.run(health_cli(root) + [
+                "--section", "uptime",
                 "--findings-json", str(output),
             ], env={**os.environ, "CARR_UPTIME_STATUS_URL": "http://127.0.0.1:9/healthz",
                     "CARR_UPTIME_RESPONSE_STATE": str(Path(tmp) / "response.json")},
