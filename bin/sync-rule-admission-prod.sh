@@ -15,7 +15,7 @@
 # nearly unpopulated". Only four rules had ever been admitted, all four through
 # the admit-rule verb, one rule at a time.
 #
-# The cause was the same structural one bin/sync-control-plane-prod.sh names for
+# The cause was structural for
 # Phase 2: tools/sync-rule-admission.py, the bulk backfill that compiles
 # ops/config/rule-enforcement-map.json into the admission shape, had no
 # production caller. There was no door, so there was no drift to notice —
@@ -85,7 +85,7 @@ if (( APPLY )); then
   fi
 fi
 
-# Same non-interactive auth and same project pin as bin/migrate-prod.sh.
+# Same non-interactive auth and same project pin as the GitHub production deployment workflow.
 if [ -z "${NEON_API_KEY:-}" ] && [ -f "$HOME/.config/carr/db.env" ]; then
   . "$REPO"/bin/routine-credential-env.sh
   carr_require_sourceable_db_env "sync-rule-admission-prod" || exit $?
@@ -165,7 +165,7 @@ if (( ! APPLY )); then
     stamp "BLOCKED read-only delivery: the delivery tables are absent"
     print ""
     print "the delivery tables are not in this database yet, so there is nothing"
-    print "to audit. Apply migration 0291 (./bin/migrate-prod.sh), then re-run."
+    print "to audit. Apply migration 0291 (./the GitHub production deployment workflow), then re-run."
   else
     stamp "GAP read-only delivery rc=$drc"
     print ""

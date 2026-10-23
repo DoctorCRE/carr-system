@@ -1,8 +1,7 @@
 """lib/transcript_read.py — read a session transcript for a gate WITHOUT letting
 one bad line switch the gate off.
 
-THIS IS A LIBRARY, ON PURPOSE: no shebang and no main guard (see the header of
-ops/typesafe_client.py for why that matters to the sealed source inventory).
+This module is a library with no script entry point.
 
 WHY (bypass hunt on PR #1224, 2026-09-24). Four gates parsed the transcript with
 a list comprehension over json.loads. A session can append to its own

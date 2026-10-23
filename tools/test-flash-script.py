@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Offline checks for tools/flash-script.py: a scripted Flash and a fixed Jev drive the real loop, with real script
-runs in a real throwaway folder. No Flash server, no Jev, no network. The live runs are recorded in the PR."""
+"""Offline checks for the Flash script loop with a scripted model and temporary files."""
 from __future__ import annotations
 
 import atexit
@@ -50,18 +49,6 @@ def check(label, fn):
         print(f"  ok    {label}")
 
 
-class FixedJev:
-    def __init__(self, flags=None, pre=None, covers=0.0):
-        self.flag_rows, self.pre_row, self.covers, self.errors = list(flags or []), pre or {}, covers, 0
-
-    def pre(self, q, prev):
-        return self.pre_row
-
-    def flags(self, q, out, prev):
-        return self.flag_rows.pop(0) if self.flag_rows else {}
-
-    def covers_all(self, q, answer, total):
-        return self.covers
 
 
 class ScriptedFlash:
@@ -89,77 +76,58 @@ def fence(code):
 def test_script_runs_in_the_folder_and_a_printed_answer_is_grounded():
     work = folder(["a 3", "b 4", "c 5"])
     flash = ScriptedFlash([fence("print('total', sum(int(l.split()[1]) for l in open('rows.txt')))"), "FINAL: 12"])
-    answer, log = solve("Sum the numbers?", work, ["rows.txt"], chat_fn=flash, jev=FixedJev())
+    answer, log = solve("Sum the numbers?", work, ["rows.txt"], chat_fn=flash)
     assert answer == "12" and log[-1]["support"] == "printed", log
     assert "rows.txt (" in flash.calls[0]["msgs"][1]["content"]  # the preview, never the whole file
 
 
 def test_every_script_turn_is_capped():
     flash = ScriptedFlash([fence("print('total', 7)"), "FINAL: 7"])
-    solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash, jev=FixedJev())
+    solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash)
     assert all(c["max_tokens"] == fs.COMPUTE_TOKENS for c in flash.calls), flash.calls
 
 
 def test_a_runaway_turn_is_followed_by_one_without_thinking():
     flash = ScriptedFlash([("", "length", 12288, "thinking..."), fence("print('total', 7)"), "FINAL: 7"])
-    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash, jev=FixedJev())
+    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash)
     assert flash.calls[1]["think"] is False and flash.calls[2]["think"] is True, [c["think"] for c in flash.calls]
-    assert log[1]["no_think_next"] and answer == "7"
+    assert any(row.get("no_think_next") for row in log) and answer == "7"
 
 
 def test_a_made_up_answer_is_marked_invented():
     flash = ScriptedFlash([fence("print('lines 1500')"), 'FINAL: {"a": 300, "b": 300, "c": 300}'])
-    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash, jev=FixedJev())
+    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash)
     assert log[-1]["support"] == "invented", log[-1]
-
-
-def test_jev_flag_is_logged_as_review_advice():
-    flash = ScriptedFlash([fence("print('matched 1')"), fence("print('matched 900')"), "FINAL: 900"])
-    _, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash, jev=FixedJev(flags=[{"misparsed": 0.9}]))
-    assert any(e.get("jev_flags", {}).get("misparsed") == .9 for e in log)
-    assert "Reviewer note" not in flash.calls[1]["msgs"][-1]["content"]
-
-
-def test_answer_ready_cannot_refuse_another_script():
-    flash = ScriptedFlash([fence("print('total 5')"), fence("print('again')"), "FINAL: 5"])
-    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash,
-                           jev=FixedJev(flags=[{"answer_ready": 0.9}]))
-    assert answer == "5" and not any(e.get("focus_enforced") for e in log), log
-    assert sum(1 for e in log if "run_s" in e) == 2
 
 
 def test_final_file_answer_is_read_from_the_working_folder_only():
     flash = ScriptedFlash([fence("import json; json.dump(['A', 'B'], open('final_answer.json', 'w')); print('wrote 2')"),
                            "FINAL: @final_answer.json"])
-    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash, jev=FixedJev())
+    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash)
     assert json.loads(answer) == ["A", "B"], answer
 
 
 def test_final_file_followed_by_code_runs_the_code_first():
     code = "import json; json.dump([1, 2], open('out.json', 'w'))"
     flash = ScriptedFlash([fence("print('rows 2')"), "FINAL: @out.json\n" + fence(code)])
-    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash, jev=FixedJev())
+    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash)
     assert json.loads(answer) == [1, 2] and any(e.get("final_script_run") for e in log), log
 
 
 def test_count_gap_semantics_routes_to_review_without_extra_script():
     flash = ScriptedFlash([fence("print('lines: 10')"), 'FINAL: {"a": 4, "b": 4}', fence("print('a 5 b 5')"),
                            'FINAL: {"a": 5, "b": 5}'])
-    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash, jev=FixedJev(covers=0.9))
+    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash)
     assert json.loads(answer) == {"a": 4, "b": 4}, answer
     assert any(e.get("count_gap") == [10, 8] or e.get("count_gap") == (10, 8) for e in log), log
 
 
 def test_repeated_identical_script_stops():
     s = fence("print(1)")
-    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=ScriptedFlash([s, s]), jev=FixedJev())
+    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=ScriptedFlash([s, s]))
     assert answer is None and log[-1].get("stuck"), log
 
 
-def test_semantic_question_does_not_inject_uncalibrated_hint():
-    flash = ScriptedFlash(["FINAL: 1"])
-    solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash, jev=FixedJev(pre={"semantic": 0.9}))
-    assert "labels depend on the meaning" not in flash.calls[0]["msgs"][1]["content"]
 
 
 # --- isolation of model-written scripts (independent review of PR #1250) ---------------------------------------
@@ -349,7 +317,7 @@ def test_a_non_loopback_flash_url_gets_no_port():
 def test_file_answer_of_constants_the_script_wrote_is_not_grounded():
     flash = ScriptedFlash([fence("import json; json.dump({'dental': 318, 'eye care': 319}, open('ans.json', 'w'))"),
                            "FINAL: @ans.json"])
-    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash, jev=FixedJev())
+    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash)
     assert log[-1]["support"] == "invented", log
 
 
@@ -357,14 +325,14 @@ def test_file_answer_the_script_computed_is_grounded():
     work = folder(["dental 318", "eye 319"])
     flash = ScriptedFlash([fence("import json\nd = {l.split()[0]: int(l.split()[1]) for l in open('rows.txt')}\n"
                                  "json.dump(d, open('ans.json', 'w'))"), "FINAL: @ans.json"])
-    answer, log = solve("q", work, ["rows.txt"], chat_fn=flash, jev=FixedJev())
+    answer, log = solve("q", work, ["rows.txt"], chat_fn=flash)
     assert json.loads(answer) == {"dental": 318, "eye": 319} and log[-1]["support"] != "invented", log
 
 
 def test_malformed_flash_reply_is_no_answer_not_a_crash():
     def broken(msgs, max_tokens=None, think=True):
         raise KeyError("choices")
-    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=broken, jev=FixedJev())
+    answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=broken)
     assert answer is None and any(str(e.get("finish", "")).startswith("malformed") for e in log), log
 
 

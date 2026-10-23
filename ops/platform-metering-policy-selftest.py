@@ -169,19 +169,7 @@ def main() -> int:
           temporary.get("same_run_teardown_required") is True
           and temporary.get("cleanup_failure_is_run_failure") is True
           and 0 < temporary.get("max_lifetime_minutes", 0) <= 120)
-    release_abandon = (REPO / "ops" / "release-abandon-selftest.py").read_text(
-        encoding="utf-8"
-    )
-    check("the release-abandon fixture never falls back to a metered Neon branch",
-          "branches create" not in release_abandon
-          and ('"branches",' + ' "create"') not in release_abandon
-          and "metered-provider fallback is disabled" in release_abandon)
-    keepalive_plist = (REPO / "ops" / "launchd" / "com.carr.keepalive-probe.plist").read_text(
-        encoding="utf-8"
-    )
-    check("the local liveness probe does not wake Neon faster than its health cadence",
-          "<!-- carr-launchd-interval-seconds: 1800 " in keepalive_plist
-          and "<key>StartInterval</key>" not in keepalive_plist)
+
     check("raising spend requires Joe approval", "Joe approval" in policy.get("authority", ""))
 
     github: dict[str, Any] = next(

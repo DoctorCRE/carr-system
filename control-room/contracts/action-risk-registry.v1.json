@@ -739,7 +739,7 @@
     "inserts": 0,
     "upserts": 0
    },
-   "does": "The heartbeat's lines: row counts, export freshness (dead-man; stale/last_ok per target), writes_by_dell_24h, norm_owed_open, merge_queue, triage queue"
+   "does": "The heartbeat's lines: row counts, export freshness (dead-man; stale/last_ok per target), writes_by_dell_24h, norm_owed_open, triage queue"
   },
   "investigation-neighborhood": {
    "protection": "read_only",

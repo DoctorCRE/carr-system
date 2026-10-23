@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
@@ -8,7 +8,7 @@ import { runInNewContext } from "node:vm";
 import test from "node:test";
 
 const yaml = createRequire(import.meta.url)("js-yaml");
-const files = ["ci.yml", "db-acceptance.yml", "doc-drift.yml"];
+const files = ["ci.yml", "doc-drift.yml"];
 const read = name => yaml.load(readFileSync(new URL("../../.github/workflows/" + name, import.meta.url), "utf8"));
 // Evaluate the workflows' scalar policy expressions, not a synthetic scheduler.
 // Unknown expressions fail closed; these tests make no claims about runner time.
@@ -51,19 +51,19 @@ for (const file of files) {
     assert.deepEqual(closed.runnable, []);
     for (const action of ["opened", "synchronize", "reopened"]) {
       const current = policy(workflow, context("pull_request", action));
-      assert.equal(current.triggers, file !== "db-acceptance.yml");
-      assert.deepEqual(current.runnable, current.triggers ? current.jobs.filter(name => name !== "shadow-aggregate") : []);
+      assert.equal(current.triggers, true);
+      assert.deepEqual(current.runnable, current.triggers ? current.jobs : []);
     }
   });
   test(`${file}: review transitions start validation and drafts retain cheap jobs`, () => {
     const ready = policy(workflow, context("pull_request", "ready_for_review"));
-    assert.equal(ready.triggers, file !== "db-acceptance.yml");
-    assert.deepEqual(ready.runnable, ready.triggers ? ready.jobs.filter(name => name !== "shadow-aggregate") : []);
+    assert.equal(ready.triggers, true);
+    assert.deepEqual(ready.runnable, ready.triggers ? ready.jobs : []);
     const event = context("pull_request", "converted_to_draft");
     event.event.pull_request.draft = true;
     const draft = policy(workflow, event);
-    assert.equal(draft.triggers, file !== "db-acceptance.yml");
-    assert.deepEqual(draft.runnable, file === "ci.yml" ? ["scope", "classes", "checks"] : file === "doc-drift.yml" ? ["check"] : []);
+    assert.equal(draft.triggers, true);
+    assert.deepEqual(draft.runnable, file === "ci.yml" ? ["scope", "classes", "fallow", "checks"] : file === "doc-drift.yml" ? ["check"] : []);
   });
   test(`${file}: cancellation is scoped to the workflow and PR`, () => {
     const current = policy(workflow, context());
@@ -78,11 +78,11 @@ for (const file of files) {
     assert.notEqual(policy({ ...workflow, name: "Another workflow" }, context()).group, current.group);
     for (const event of ["schedule", "workflow_dispatch"]) {
       const one = policy(workflow, context(event, "", 9, 1)), two = policy(workflow, context(event, "", 9, 2));
-      assert.equal(one.triggers, file !== "db-acceptance.yml" || event === "workflow_dispatch");
+      assert.equal(one.triggers, true);
       assert.equal(one.cancel, false);
       assert.notEqual(one.group, current.group);
       assert.notEqual(one.group, two.group, "pending non-PR verdicts must not replace each other");
-      assert.deepEqual(one.runnable, one.triggers ? one.jobs.filter(name => name !== "shadow-aggregate") : []);
+      assert.deepEqual(one.runnable, one.triggers ? one.jobs : []);
     }
   });
   test(`${file}: unsubscribed push events never count as validation`, () => {
@@ -91,18 +91,6 @@ for (const file of files) {
     assert.deepEqual(push.runnable, []);
   });
 }
-
-test("DB shard aggregate is default-off, collects failed-trial diagnostics, and cannot run on PRs", () => {
-  const db = read("db-acceptance.yml");
-  assert.equal(db.on.workflow_dispatch.inputs.shard_trial.default, false);
-  assert.deepEqual(policy(db, context("workflow_dispatch"), true).runnable, ["acceptance"]);
-  const enabled = { shard_trial: true };
-  assert.deepEqual(policy(db, context("workflow_dispatch"), true, enabled).runnable, ["acceptance", "shadow-aggregate"]);
-  assert.deepEqual(policy(db, context("workflow_dispatch"), false, enabled).runnable, ["shadow-aggregate"]);
-  assert.deepEqual(policy(db, context(), true, enabled).runnable, []);
-  assert.deepEqual(Object.keys(db.on), ["workflow_dispatch"]);
-  assert.throws(() => expression("inputs.unknown", context()), /unsupported expression/);
-});
 
 test("expensive proof jobs survive scope failure but stop when superseded", () => {
   const ci = read("ci.yml");
@@ -144,41 +132,27 @@ test("metadata edits start no validation workflow, so no skipped suite replaces 
 test("strict aggregate runs after failed classes and requires complete successful evidence", () => {
   const ci = read("ci.yml"), gate = ci.jobs.checks;
   assert.equal(gate.name, "ops/ci.sh --strict", "the required context name must be a literal");
-  assert.deepEqual(gate.needs, ["scope", "classes", "migration-fixtures"]);
+  assert.deepEqual(gate.needs, ["scope", "classes", "migration-fixtures", "fallow"]);
   assert.ok(policy(ci, context(), false).runnable.includes("checks"), "always() must override implicit success()");
   const step = gate.steps.find(step => step.name === "Fail unless every class group succeeded");
   assert.match(step.run, /python3 ops\/ci-evidence.py verdict/);
   const fixture = mkdtempSync(join(tmpdir(), "ci-verdict-test-"));
   try {
-    const python = spawnSync("python3", ["-c", "import sys; print(sys.executable)"], { encoding: "utf8" });
-    assert.equal(python.status, 0, python.stderr);
-    // Scope the simulated deadline to the verdict; subprocess keeps its real clock.
-    const interpreter = join(fixture, "python3");
-    writeFileSync(interpreter, `#!${python.stdout.trim()}\n` +
-      "import runpy, sys, types\nscript = runpy.run_path(sys.argv[1])\nclock = [0]\n" +
-      "def sleep(seconds):\n    clock[0] = 235\n" +
-      "script['main'].__globals__['time'] = types.SimpleNamespace(monotonic=lambda: clock[0], sleep=sleep)\n" +
-      "sys.argv = sys.argv[1:]\nraise SystemExit(script['main']())\n");
-    chmodSync(interpreter, 0o755);
-    const jobs = ci.jobs.classes.strategy.matrix.classes.map(group => ({
-      name: "ops/ci.sh --strict --only " + group, status: "completed", conclusion: "success" }));
-    const gh = join(fixture, "gh");
-    for (const evidence of [jobs, jobs.slice(0, 1)]) {
-      writeFileSync(gh, "#!/usr/bin/env node\nconst fs = require('node:fs');\n" +
-        "process.stdout.write(" + JSON.stringify(JSON.stringify([{ jobs: evidence }]) + "\n") +
-        ", () => { fs.closeSync(1); fs.closeSync(2); setTimeout(() => {}, 100); });\n");
-      chmodSync(gh, 0o755);
-      for (const result of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
-        const output = spawnSync("bash", ["-e", "-c", step.run], {
-          cwd: new URL("../../", import.meta.url),
-          env: { PATH: fixture + ":" + process.env.PATH, CLASSES_RESULT: result,
-            DB_FULL: "true", FIXTURES_RESULT: "success",
-            GITHUB_REPOSITORY: "DoctorCRE/carr-system", GITHUB_RUN_ID: "1",
-            GITHUB_RUN_ATTEMPT: "1", GITHUB_STEP_SUMMARY: join(fixture,"summary") },
-          encoding: "utf8", timeout: 5000 });
-        assert.ifError(output.error);
-        assert.equal(output.status === 0, result === "success" && evidence.length === jobs.length, output.stdout + output.stderr);
-        if (result === "success" && evidence.length !== jobs.length) assert.match(output.stdout, /MISSING/);
+    assert.equal(step.env.CI_NEEDS, "${{ toJSON(needs) }}");
+    for (const classes of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
+      for (const fixtures of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
+        for (const fallow of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
+          const output = spawnSync("bash", ["-e", "-c", step.run], {
+            cwd: new URL("../../", import.meta.url),
+            env: { PATH: process.env.PATH, CI_DRAFT: "false",
+              CI_NEEDS: JSON.stringify({ scope: { result: "success", outputs: { full: "true" } },
+                classes: { result: classes }, "migration-fixtures": { result: fixtures },
+                fallow: { result: fallow } }),
+              GITHUB_STEP_SUMMARY: join(fixture, "summary") },
+            encoding: "utf8", timeout: 5000 });
+          assert.ifError(output.error);
+          assert.equal(output.status === 0, classes === "success" && fixtures === "success" && fallow === "success", output.stdout + output.stderr);
+        }
       }
     }
   } finally { rmSync(fixture, { recursive: true, force: true }); }
@@ -192,3 +166,4 @@ test("running Worker canary remains independent from subscribed validation event
     assert.notEqual(policy(read(file), event).group, canary.concurrency.group);
   }
 });
+

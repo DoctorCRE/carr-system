@@ -15,30 +15,19 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import claude_desktop_wire as wire
-import desk_cli
 import desks
 import dispatch
-import queue_dispatch
-import bridge
+import codex_ipc
 
 
 INSTRUCTION = (
-    "Model Room desk instruction: If you need approvals, permissions, or decisions, "
-    "send them to the orchestrator session via send_message in one message, then "
-    "end the turn. Never ask Joe."
+    "Desk instruction: If you need approvals, permissions, or decisions, "
+    "put QUESTION: followed by your question on the first line of your final report, "
+    "then end the turn. Never ask Joe."
 )
 
 
 class DeskPermissionTests(unittest.TestCase):
-    def test_registration_help_does_not_offer_prompting_modes(self):
-        from contextlib import redirect_stdout
-        from io import StringIO
-        output = StringIO()
-        with redirect_stdout(output), self.assertRaises(SystemExit) as done:
-            desk_cli.main(["register", "--help"])
-        self.assertEqual(done.exception.code, 0)
-        self.assertIn("dontAsk", output.getvalue())
-        self.assertNotIn("opt-in", output.getvalue())
 
     def test_background_dispatch_refuses_original_blank_task_before_launch(self):
         sid = "12345678-1234-4123-8123-123456789abc"
@@ -110,18 +99,6 @@ class DeskPermissionTests(unittest.TestCase):
                                             "cwd": "/tmp", "permission_mode": mode}, "Synthetic task", run=run)
                 self.assertEqual(calls, [])
 
-    def test_cli_refuses_manual_with_actionable_error(self):
-        with tempfile.TemporaryDirectory() as root:
-            from contextlib import redirect_stderr
-            from io import StringIO
-            stderr = StringIO()
-            with redirect_stderr(stderr):
-                result = desk_cli.main(["--registry", str(Path(root) / "registry.json"),
-                    "register", "fixture-desk", "--kind", "claude-desktop",
-                    "--model", "fixture-model", "--effort", "high", "--permission-mode", "manual"])
-            self.assertEqual(result, 2)
-            self.assertIn("orchestrator", stderr.getvalue())
-
 
 class DeskFirstTurnTests(unittest.TestCase):
     def test_seeded_start_writes_complete_instruction_to_provider_fifo(self):
@@ -188,67 +165,6 @@ print(json.dumps({**result, "entries": reg.entries()}))
                 self.assertEqual(out.returncode, 0, out.stderr)
                 self.assertEqual(json.loads(out.stdout), {"code": "desk_failed_to_start", "entries": {}})
 
-    def test_unseeded_start_cannot_answer_first_bridge_task_with_bootstrap_ack(self):
-        with tempfile.TemporaryDirectory() as root:
-            state_dir = Path(root) / "state"
-            reg = desks.Registry(Path(root) / "registry.json")
-            readers = []
-            def launch(*_args, **_kwargs):
-                readers.append(os.open(state_dir / "fixture-desk.stdin", os.O_RDONLY | os.O_NONBLOCK))
-                (state_dir / "fixture-desk.log").touch()
-                return SimpleNamespace(pid=4242, poll=lambda: None)
-            try:
-                with patch.object(dispatch.credential_env, "claude_child_env", return_value=({}, None)), \
-                     patch.object(dispatch, "_alive", return_value=True), \
-                     patch.object(desks, "is_live", return_value=True), \
-                     patch.object(dispatch.subprocess, "Popen", side_effect=launch):
-                    dispatch.desk_start("fixture-desk", registry=reg, state_dir=state_dir,
-                                        sock_dir=Path(root) / "socks")
-                state = {"desks": {}}
-                with patch.object(desks, "is_live", return_value=True), \
-                     patch.object(dispatch.inject_mod, "inject_keepalive",
-                                  return_value=SimpleNamespace(close=lambda: None)):
-                    bridge.deliver("fixture-desk", reg.resolve("fixture-desk"), "fixture-seat",
-                                   {"body": "Synthetic first task", "seat": "fixture-orchestrator",
-                                    "seq": 1, "msg_id": "fixture-msg"},
-                                   state=state, registry=reg, results_path=Path(root) / "results.jsonl",
-                                   add_room_turn=lambda **_kw: None, desk_state_dir=state_dir)
-                pending = bridge.state_mod.get_pending(state, "fixture-desk")
-                bootstrap = os.read(readers[0], 65536)
-                results = ([{"type": "result", "result": "Bootstrap acknowledgement"}] if bootstrap else [])
-                results.append({"type": "result", "result": "First task answer"})
-                log = state_dir / "fixture-desk.log"
-                log.write_text("".join(json.dumps(row) + "\n" for row in results))
-                self.assertEqual(bridge.scan_for_result(log, pending["log_offset"]), "First task answer")
-            finally:
-                for fd in readers:
-                    os.close(fd)
-
-    def test_flash_queue_dispatch_keeps_receipt_and_stamped_provenance(self):
-        with tempfile.TemporaryDirectory() as root:
-            data = Path(root) / "numbers.csv"
-            data.write_text("value\n1\n2\n")
-            task = queue_dispatch.QueueDeskExecutor._prompt({
-                "task_id": "t_fixture_queue", "title": "Sum the values",
-                "meta": {"source_seq": 1, "source_msg_id": "fixture-message",
-                         "origin": "fixture:origin", "cap": "repo-write"},
-                "instructions": f"data: {data}\nSum the values.",
-            })
-            reg = desks.Registry(Path(root) / "registry.json")
-            reg.register("fixture-flash", "flash-local")
-            with patch.object(dispatch.flash_wire.flashlib, "is_switched_off", return_value=False), patch.object(dispatch.flash_wire, "_run_flash_script", return_value=(0, {"answer": "3"})):
-                direct = dispatch.flash_wire.run_task(task, roots=[root])
-                with patch.object(dispatch.flash_wire, "data_roots", return_value=[str(Path(root).resolve())]):
-                    row = dispatch.dispatch("fixture-flash", task, registry=reg,
-                                            results_path=Path(root) / "results.jsonl")
-            self.assertEqual(row["status"], "completed", row)
-            self.assertEqual(row["result"], direct["result"])
-            terminal = queue_dispatch.parse_terminal_result(row["result"], "t_fixture_queue")
-            self.assertEqual(terminal["outcome"], "success")
-            prompt = desks.desk_prompt(task)
-            self.assertEqual(dispatch.flash_wire.task_trust(prompt), ("fixture:origin", "repo-write"))
-            self.assertIn(INSTRUCTION, prompt)
-            self.assertEqual(desks.desk_prompt(prompt), prompt)
 
     def test_codex_live_resume_overrides_inherited_approval_policy(self):
         for thread in (None, "fixture-thread"):
@@ -270,43 +186,18 @@ print(json.dumps({**result, "entries": reg.entries()}))
                 self.assertEqual(turn["params"]["approvalPolicy"], "never")
                 self.assertEqual(turn["params"]["input"][0]["text"], INSTRUCTION + "\n\nSynthetic task")
 
-    def test_codex_desktop_turn_is_never_and_includes_instruction(self):
-        from unittest.mock import Mock
-        client = Mock()
-        client.owner.return_value = "fixture-owner"
-        client.request.return_value = {"resultType": "success"}
-        with patch.object(dispatch.codex_ipc, "_open", return_value=client), \
-             patch.object(dispatch.codex_ipc, "thread_owner", return_value="fixture-owner"):
-            dispatch._to_codex({"thread_id": "fixture-thread", "model": "gpt-6.1-sol", "effort": "high"}, "Synthetic task", env={}, live_desktop=True)
-        request = client.request.call_args.args[1]["turnStart"]["request"]
-        self.assertEqual(request["approvalPolicy"], "never")
-        self.assertEqual(request["model"], "gpt-6.1-sol")
-        self.assertEqual(request["effort"], "high")
-        self.assertEqual(request["input"][0]["text"], INSTRUCTION + "\n\nSynthetic task")
 
     def test_non_desk_desktop_messages_keep_their_original_posture(self):
         from unittest.mock import Mock
         client = Mock()
         client.owner.return_value = "fixture-owner"
         client.request.return_value = {"resultType": "success"}
-        with patch.object(dispatch.codex_ipc, "_open", return_value=client):
-            dispatch.codex_ipc.start_turn("fixture-thread", "Synthetic ordinary session message")
+        with patch.object(codex_ipc, "_open", return_value=client):
+            codex_ipc.start_turn("fixture-thread", "Synthetic ordinary session message")
         request = client.request.call_args.args[1]["turnStart"]["request"]
         self.assertNotIn("approvalPolicy", request)
         self.assertEqual(request["input"][0]["text"], "Synthetic ordinary session message")
 
-    def test_desk_never_steers_into_a_turn_with_unverified_permissions(self):
-        from unittest.mock import Mock
-        client = Mock()
-        client.owner.return_value = "fixture-owner"
-        client.request.side_effect = [{"resultType": "error", "error": "turn already in progress"},
-                                      {"resultType": "success"}]
-        with patch.object(dispatch.codex_ipc, "_open", return_value=client), \
-             patch.object(dispatch.codex_ipc, "thread_owner", return_value="fixture-owner"):
-            result = dispatch._to_codex({"thread_id": "fixture-thread", "model": "gpt-6.1-sol", "effort": "high"}, "Synthetic task", env={}, live_desktop=True)
-        self.assertEqual(result["status"], "failed")
-        self.assertIn("orchestrator", result["detail"])
-        self.assertEqual(client.request.call_count, 1)
 
     def test_background_default_and_explicit_modes_include_instruction(self):
         sid = "12345678-1234-4123-8123-123456789abc"

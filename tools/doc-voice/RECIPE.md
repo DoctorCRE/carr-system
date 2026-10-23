@@ -13,11 +13,6 @@ delivery on a locked identity.
   ("take 2"), from the v8 character brief (preserved in
   `CARR AI/DNA/Deal Management/record-layer/fable-order-voice-bakeoff-2026-08-01.md`
   execution log). Every future render clones from this file. Never regenerate it.
-- `doc-master-intro-read.wav` — the approved master read of the self-introduction
-  (Chatterbox clone of the identity, exaggeration 0.40, cfg_weight 0.60, corrected
-  pronunciation text). Raw, pre-mastering.
-- `doc-master-intro-FINAL.wav` — the same read through the frozen mastering chain:
-  what Doc actually sounds like.
 
 ## The mastering chain (Joe's dialed settings, final)
 
@@ -50,13 +45,6 @@ CONFIRMED ON BOTH ENGINES, so it is the chain and not the engine. On the
 Chatterbox path, the same read through the same chain with only out_gain changed:
 -36.2 dB mean before, -23.8 after. Joe approved the fix on both paths the same
 day ("E is best" for ElevenLabs, "approved" for Chatterbox).
-
-`doc-master-intro-FINAL.wav` WAS REGENERATED with the corrected chain, because
-this file is the reference every future render is matched against and it had been
-12.4 dB low — a quiet reference propagates to everything downstream. The original
-is preserved as `doc-master-intro-FINAL.pre-roomfix-2026-08-10.wav`; nothing was
-destroyed. `doc-master-intro-read.wav` (raw, pre-mastering) is untouched and is
-what the regeneration was made from.
 
 ## Speakable forms (grows with every correction from Joe's ear)
 
@@ -109,9 +97,9 @@ what the regeneration was made from.
 
 ## Delivery screening (mandatory on every rendered phrase)
 
-Roll N takes per sentence, score terminal f0 slope
-(see render-doc.py:terminal_slope), reject
-rising finals. Falling, settled endings are Doc's signature (and doctrine law —
+The product renderer in `tools/doc-convo/bin/render_phrase.py` rolls takes
+and scores terminal f0 slope with `terminal_f0_slope` to reject rising finals.
+Falling, settled endings are Doc's signature (and doctrine law —
 no upspeak on statements).
 
 ## Render paths
@@ -141,9 +129,9 @@ no upspeak on statements).
     1.2-second speed gain does not buy back an audible character change.
   WHAT WOULD REOPEN IT: closing the character gap (a re-clone from a different
   corpus slice, or settings that recover the lower, drier read), or a live need
-  where local render speed genuinely blocks the product. Everything built for it
-  stays — the clone, render-doc.py, the mastering chain, the measured latency —
-  so promoting it later is a ruling, not a rebuild.
+  where local render speed genuinely blocks the product. The experiment's results
+  remain recorded here. The unused render and mastering experiments are retired.
+  The product renderer remains in `tools/doc-convo/bin/render_phrase.py`.
 
 - ELEVENLABS DETAIL (identity confirmed 2026-08-10, Joe: "yea thats him"). Voice "Doc",
   an Instant Voice Clone of 3m07s of the RAW corpus. Professional Voice Cloning

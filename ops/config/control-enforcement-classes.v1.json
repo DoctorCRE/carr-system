@@ -8,10 +8,8 @@
     "costar_lane": "deny_gate",
     "deal_guard": "transactional_schema",
     "delegation_names_model_and_effort": "deny_gate",
-    "delegation_tripwire": "deny_gate",
     "draft_export_read": "surfacing",
     "egress_guard": "deny_gate",
-    "executor_tier": "deny_gate",
     "gate_integrity": "stop_gate",
     "github-burst-guard": "deny_gate",
     "index_upkeep": "deny_gate",
@@ -82,22 +80,15 @@
     },
     "source_merge_eligibility": {
       "enforcement_class": "deny_gate",
-      "failure_mode": "controller refuses merge and exposes no merge action",
+      "failure_mode": "runtime refuses authority outside the canonical source-merge projection",
       "implementation": [
-        ".github/workflows/source-merge-controller.yml",
         "mcp-server/src/engineering-runtime.js",
         "mcp-server/src/work-request-intake.js",
-        "mcp-server/src/source-merge-policy.js",
-        "mcp-server/bin/run-source-merge.mjs",
-        "migrations/0470_source_merge_authority_projection.sql",
-        "ops/source-merge-authority-local-pg-gate.py"
+        "migrations/0470_source_merge_authority_projection.sql"
       ],
       "test": [
         "mcp-server/test/engineering-runtime.test.mjs",
-        "mcp-server/test/source-merge-policy.test.mjs",
-        "mcp-server/test/source-merge-migration.test.mjs",
-        "mcp-server/test/work-request-ready-plan.test.mjs",
-        "ops/local-pg-ci-selftest.py"
+        "mcp-server/test/work-request-ready-plan.test.mjs"
       ]
     }
   },

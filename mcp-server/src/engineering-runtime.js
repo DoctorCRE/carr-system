@@ -8,10 +8,9 @@
 
 import { sha256 } from "./sha256.js";
 import { organizationTenantForActor } from "./identity.js";
-import {
-  NO_CEREMONIAL_MERGE_DECISION,
-  NO_CEREMONIAL_MERGE_DECISION_TITLE,
-} from "./source-merge-policy.js";
+const NO_CEREMONIAL_MERGE_DECISION = "decision:4eaae0e1-f3b0-4e5d-af93-c44f39adc687";
+const NO_CEREMONIAL_MERGE_DECISION_TITLE =
+  "Routine authorized green PRs merge without asking Joe for ceremonial approval";
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

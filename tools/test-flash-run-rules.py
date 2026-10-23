@@ -17,7 +17,7 @@ class FlashRules(unittest.TestCase):
         rule={'id':'11111111','statement':'Read the whole change.','scope':{'moment':'Before review'},'personal_to':None}
         for complete in (True,False):
             with patch('lib.rule_scope_lookup.lookup',return_value={'rules':[rule],'complete':complete}) as lookup:
-                rules,note=flash.pick_rules('Review this change',judge=lambda *_:None)
+                rules,note=flash.pick_rules('Review this change')
                 self.assertEqual(rules,[rule])
                 self.assertEqual(note is None,complete)
                 self.assertIn('Review this change',lookup.call_args.args[0]['task'])
@@ -30,17 +30,6 @@ class FlashRules(unittest.TestCase):
                            'unresolved':[{'rule_id':'22222222','reason':gap}] if gap!='missing_scope' else []}
                 stack.enter_context(patch('lib.rule_scope_lookup.lookup',return_value=selection))
                 stack.enter_context(patch.object(flash.flashlib,'is_switched_off',return_value=False))
-                intake=Mock()
-                intake.check_ambiguity.return_value={'verdict':'clear'}
-                intake.route_task.return_value={'verdict':'local'}
-                intake.pick_context.return_value={'paths':[]}
-                notebook=Mock()
-                notebook.recall_mistakes.return_value={'lines':[]}
-                best=Mock()
-                best.select_candidate.return_value={'verdict':'one'}
-                stack.enter_context(patch.object(flash,'_lib',side_effect=lambda name: {'jev_intake':intake,'jev_notebook':notebook,'jev_best_of':best}[name]))
-                stack.enter_context(patch.object(flash,'_tracked_files',return_value=[]))
-                stack.enter_context(patch.object(flash,'_read_examples',return_value=[]))
                 log=stack.enter_context(patch.object(flash,'_append'))
                 say=stack.enter_context(patch.object(flash,'_say'))
                 attempt=stack.enter_context(patch.object(flash,'run_attempt',return_value={
