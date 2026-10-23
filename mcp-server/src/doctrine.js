@@ -104,6 +104,18 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
     return r.rows[0];
   }
 
+  async function lockSections(c, sectionIds, actor) {
+    const ids = [...new Set(sectionIds)].sort();
+    // Every document precedes every section, including cross-document edges.
+    await c.query(
+      `select id from doctrine_document
+        where id in (select document_id from doctrine_section where id = any($1::uuid[]))
+        order by id for update`, [ids]);
+    const sections = new Map();
+    for (const id of ids) sections.set(id, await lockSection(c, id, actor));
+    return sections;
+  }
+
   function versionConflict(c, section) {
     // The machine-readable conflict contract (council P2 acceptance): who wrote
     // last, when, from which session — never a bare "conflict" string.
@@ -490,7 +502,11 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
           scope: { type: "object" } }, required: ["edge_type", "target_section_id"] } } },
         required: ["idempotency_key", "section_id", "base_version"] },
       handler: async (c, actor, args) => withEnvelope(c, actor, "set-doctrine-refs", args, async () => {
-        const sec = await lockSection(c, args.section_id, actor);
+        const targets = (args.edges || [])
+          .filter(edge => ["OVERRIDES", "SUPERSEDES", "EXCEPTION_TO"].includes(edge.edge_type))
+          .map(edge => edge.target_section_id);
+        const sections = await lockSections(c, [args.section_id, ...targets], actor);
+        const sec = sections.get(args.section_id);
         baseVersion(args.base_version);
         if (version(sec.current_version) !== args.base_version)
           throw await versionConflict(c, sec);
@@ -737,15 +753,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         required: ["idempotency_key", "section_ids", "purpose"] },
       handler: async (c, actor, args) => withEnvelope(c, actor, "claim-doctrine-sections", args, async () => {
         const ttl = Math.min(Math.max(args.ttl_seconds || 300, 30), 1800);
-        // Take all document locks in one order before section locks, including
-        // batches whose section order crosses documents in different orders.
-        await c.query(
-          `select id from doctrine_document
-            where id in (select document_id from doctrine_section where id = any($1::uuid[]))
-            order by id for update`, [args.section_ids]);
-        // Authorize the entire batch before claim reads or writes.
-        for (const id of [...new Set(args.section_ids)].sort())
-          await lockSection(c, id, actor);
+        await lockSections(c, args.section_ids, actor);
         const claims = [], denied = [];
         for (const id of args.section_ids) {
           const cur = await c.query(
