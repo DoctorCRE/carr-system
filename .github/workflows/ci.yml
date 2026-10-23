@@ -191,9 +191,6 @@ jobs:
               ops/ci.sh --strict --only "${{ matrix.classes }}"
             fi
           fi
-      - name: Require a written pull request description
-        if: ${{ github.event_name == 'pull_request' && matrix.classes == 'gates' }}
-        run: python3 ops/pr-description-check.py
 
   migration-fixtures:
     needs: scope

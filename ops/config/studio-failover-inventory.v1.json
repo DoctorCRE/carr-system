@@ -1393,5 +1393,7 @@
     "errors": [
       "/Library/LaunchDaemons/com.microsoft.teams.TeamsUpdaterDaemon.plist: unreadable plist"
     ]
-  }
+  },
+  "status": "historical_capture",
+  "purpose": "Frozen machine capture at captured_at and source_sha. Installed, disabled and missing fields describe that capture only; they are not current operational facts."
 }

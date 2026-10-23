@@ -87,7 +87,7 @@ CLEAN = {
         "aaaa0005": {"moment": "duplicate of aaaa0003", "routes": [
             {"kind": "duplicate", "survivor": "aaaa0003"}]},
         "aaaa0006": {"moment": "a pre-use gate", "routes": [
-            {"kind": "gate", "gate": "hooks/weekend-quiet-gate.py"}]},
+            {"kind": "gate", "gate": "hooks/guard-unattended.py"}]},
     },
 }
 
