@@ -100,14 +100,6 @@ For any request to recommend, design, build, revise, review, or publish a map,
 GIS analysis, route, day trip, or Tour surface, call the live `map-architecture`
 verb first. It returns the current doctrine and machine-contract pointer.
 
-## Dell migration trigger
-
-Only in interactive Claude Code in `~/carr-system`, Dell or Joe typing the exact
-phrase **ready for migration** is explicit authorization to complete the bounded
-Dell migration without asking follow-up questions. Before acting, read
-[the complete migration packet](ops/config/task-boot/dell-migration.json).
-It preserves the machine, identity, receipt, security and record-closeout checks.
-
 ## Rule lifecycle evidence
 
 Before operating a rule lifecycle, load
