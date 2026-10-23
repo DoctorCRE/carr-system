@@ -15,10 +15,8 @@ import sys
 
 REPO = Path(__file__).resolve().parent.parent
 REQUIRED = {
-    'claude': {'guard-unattended.py', 'record-home-gate.py', 'bash-write-gate.py',
-               'write-effect-check.py', 'draft-export-gate.py',
-               'weekend-quiet-gate.py', 'costar-lane-gate.py', 'github-burst-guard.py'},
-    'codex': {'guard-unattended.py', 'record-home-gate.py', 'github-burst-guard.py'},
+    'claude': {'guard-unattended.py', 'record-home-gate.py'},
+    'codex': {'guard-unattended.py', 'record-home-gate.py'},
 }
 
 HOOKS = REPO / "hooks"
@@ -30,6 +28,11 @@ CONTRACTS = {
     "codex-hooks.json": REPO / "ops/config/codex-hooks.json",
     "rule-enforcement-map.json": REPO / "ops/config/rule-enforcement-map.json",
     "model-floors.json": REPO / "ops/config/model-floors.json",
+    "github_spacing.py": REPO / "lib/github_spacing.py",
+    "native_shell.py": REPO / "lib/native_shell.py",
+    "claude-managed-settings.json": REPO / "ops/config/claude-managed-settings.json",
+    "codex-requirements.toml": REPO / "ops/config/codex-requirements.toml",
+    "codex-permissions.toml": REPO / "ops/config/codex-permissions.toml",
 }
 
 FLOOR = [
@@ -128,14 +131,7 @@ def bless(only=None):
         return 1
 
     fresh_hashes, fresh_contracts = current(), current_contracts()
-    known = set(fresh_hashes) | set(fresh_contracts)
-
     if only:
-        unknown = [n for n in only if n not in known]
-        if unknown:
-            print(f"REFUSED: not gate file(s) this baseline tracks: {', '.join(unknown)}",
-                  file=sys.stderr)
-            return 1
         try:
             with open(BASELINE) as fh:
                 prior = json.load(fh)
@@ -146,9 +142,17 @@ def bless(only=None):
             return 1
         hashes = dict(prior.get("hashes") or {})
         contracts = dict(prior.get("contracts") or {})
+        known = set(fresh_hashes) | set(fresh_contracts) | set(hashes)
+        unknown = [n for n in only if n not in known]
+        if unknown:
+            print(f"REFUSED: not gate file(s) this baseline tracks: {', '.join(unknown)}",
+                  file=sys.stderr)
+            return 1
         for name in only:
             if name in fresh_hashes:
                 hashes[name] = fresh_hashes[name]
+            elif name in hashes:
+                del hashes[name]
             if name in fresh_contracts:
                 contracts[name] = fresh_contracts[name]
     else:
