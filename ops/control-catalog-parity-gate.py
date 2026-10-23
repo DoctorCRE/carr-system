@@ -3,7 +3,7 @@
 """Rollback-only acceptance gate: the control catalog matches the repository.
 
 WHAT THIS DEFENDS. ops.enforcement_control_catalog decides which controls
-approve-rule will accept as real enforcement. Until 2026-08-22 it was populated
+the enforcement audit recognizes. Until 2026-08-22 it was populated
 by a hand-written migration per control, and the two copies drifted exactly as
 two copies do: the repository's enforcement map declared 59 controls and the
 table held 3, so approving a rule enforced by any of the other 56 required
@@ -18,7 +18,7 @@ applies — and compares it against the database the migration set built.
 WHAT IT REFUSES, and why each half matters:
 
   MISSING       a control the map declares that the table does not carry.
-                approve-rule would refuse a rule the repository believes is
+                the enforcement audit would reject a rule the repository believes is
                 enforced, and the refusal would name nothing useful.
 
   UNDECLARED    a control in the table that the map does not declare. This is
@@ -84,7 +84,7 @@ def main() -> int:
             if missing:
                 return fail(
                     f"{len(missing)} control(s) the map declares are absent from the catalog, so "
-                    f"approve-rule would refuse any rule they enforce: {', '.join(missing)}. "
+                    f"the enforcement audit would reject rules they enforce: {', '.join(missing)}. "
                     "Run ops/sync_control_catalog.py --apply, or ship the generated migration.")
 
             undeclared = sorted(set(actual) - set(expected))

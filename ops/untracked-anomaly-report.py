@@ -4,9 +4,8 @@ checkout that nobody has ruled on. A WEEKLY-REVIEW ARTIFACT. It pages nobody.
 
 R02 PROPOSED (Repo Hygiene Program, WR-000040). NOT INSTALLED.
 
-WHY IT EXISTS. canonical-edit-gate.py's allowance 2 lets any session write a
-brand-new UNTRACKED file anywhere in the canonical checkout, and that allowance
-is kept, deliberately: receipts, run records and out/ are load-bearing, and a
+WHY IT EXISTS. Untracked output remains allowed after the canonical-edit hook
+retirement: receipts, run records and out/ are load-bearing, and a
 gate that refuses them makes its own remedy unusable. But "allowed" was doing
 double duty as "unwatched". On 2026-09-01 the canonical checkout held 40
 untracked-nonignored paths — 30 of them temp roots from a single selftest run

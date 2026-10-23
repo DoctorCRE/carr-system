@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createDealroomHandler, isDealroomRequest } from "../src/dealroom-web.js";
+import { ALLOW_LIST } from "../src/identity.js";
 
 const WRANGLER_PATH = fileURLToPath(new URL("../wrangler.toml", import.meta.url));
 const INDEX_PATH = fileURLToPath(new URL("../src/index.js", import.meta.url));
@@ -355,6 +356,34 @@ test("Deal Room gate admits exactly both partner identities with their existing 
       { slug, display, human: true, via: "dealroom-cookie", client_id: "dealroom-pwa",
         human_slug: null, sponsoring_human_slug: null, sponsor_required: false });
   }
+});
+
+test("MCP operation-bound CSRF header refuses a cookie switch before dispatch", async () => {
+  const email = Object.keys(ALLOW_LIST).find(email => ALLOW_LIST[email] === "joe"), environment = env();
+  let dispatched = 0;
+  const handler = createDealroomHandler({ ...identityOverrides(email),
+    mcpHandler: async () => { dispatched++; return new Response("{}"); },
+  });
+  const first = namedCookie(await login(handler, environment, email), "__Host-dealroom_session");
+  const session = async cookie => (await (await handler.fetch(new Request(`https://${PRODUCTION_HOST}/auth/session`,
+    { headers: { cookie } }), environment, {})).json());
+  const firstRead = await session(first);
+  const second = namedCookie(await login(handler, environment, email), "__Host-dealroom_session");
+  const secondRead = await session(second);
+  assert.notEqual(firstRead.csrf_token, secondRead.csrf_token);
+  const send = (cookie, csrf) => handler.fetch(new Request(`https://${PRODUCTION_HOST}/mcp`, {
+    method: "POST", headers: { cookie, origin: `https://${PRODUCTION_HOST}`, "content-type": "application/json",
+      ...(csrf === undefined ? {} : { "x-carr-csrf": csrf }) },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "set-next-step", arguments: {} } }),
+  }), environment, {});
+  const refused = await send(second, firstRead.csrf_token);
+  assert.equal(refused.status, 403);
+  assert.equal((await refused.json()).reason, "csrf_mismatch");
+  assert.equal(dispatched, 0, "the stale operation cannot acquire the new cookie's actor");
+  assert.equal((await send(first, firstRead.csrf_token)).status, 200);
+  assert.equal((await send(second, secondRead.csrf_token)).status, 200);
+  assert.equal((await send(second, undefined)).status, 200, "legacy clients may omit the opt-in binding header");
+  assert.equal(dispatched, 3);
 });
 
 test("opaque cookie session round-trips, refreshes, expires, and signs out", async () => {

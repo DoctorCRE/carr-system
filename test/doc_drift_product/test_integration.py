@@ -153,8 +153,9 @@ class ProductIntegrationTest(unittest.TestCase):
     def test_no_job_can_write_github_issues(self):
         workflow = yaml.load((ROOT / '.github/workflows/doc-drift.yml').read_text(), Loader=yaml.BaseLoader)
         self.assertEqual(workflow['permissions'], dict(contents='read'))
-        self.assertEqual(list(workflow['jobs']), ['check'])
-        self.assertNotIn('permissions', workflow['jobs']['check'])
+        self.assertEqual(set(workflow['jobs']), {'check', 'verdict'})
+        for job in workflow['jobs'].values():
+            self.assertNotIn('permissions', job)
         self.assertFalse((ROOT / 'scripts/doc-drift/loops.py').exists())
         sources = [ROOT / '.github/workflows/doc-drift.yml', ROOT / 'ops/doc-drift-product.py',
                    *sorted((ROOT / 'scripts/doc-drift').glob('*.py'))]

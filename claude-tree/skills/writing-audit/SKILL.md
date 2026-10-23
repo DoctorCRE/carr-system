@@ -18,7 +18,7 @@ description: >
 
 # Writing Audit — CARR Editing Coach
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Guidance changes:** Propose an edit to the relevant CLAUDE.md, AGENTS.md or skill in a PR, with the trade-off. Proposals bind nobody until merged; Git history preserves attribution.
 
 A review-only editing pass for Joe Bookout's CARR writing. It applies David Ogilvy's 10 writing
 rules (from his 1982 staff memo) filtered through CARR's own established voice rules, and returns

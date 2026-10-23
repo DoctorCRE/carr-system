@@ -190,6 +190,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await fixture(true);
       const yesterday = (await c.query("select (current_date-1)::text as day")).rows[0].day;
       const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: yesterday,
       });
       const update = await TOOLS['add-deal-note'].handler(c, actor, {
@@ -221,6 +222,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await fixture(false);
       const dates = (await c.query("select (current_date-1)::text as past, (current_date+7)::text as future")).rows[0];
       await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: dates.past,
       });
       await TOOLS['set-next-action'].handler(c, actor, {
@@ -236,6 +238,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await fixture(false);
       const dates = (await c.query("select (current_date-1)::text as past, (current_date+7)::text as future")).rows[0];
       const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: dates.past,
       });
       const args = {idempotency_key: randomUUID(), deal: id(4), text: 'Revised terms received',
@@ -259,6 +262,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       const dates = (await c.query("select current_date::text as today, (current_date+7)::text as future, (current_date-1)::text as past")).rows[0];
       for (const day of [dates.today, dates.future]) {
         const step = await TOOLS['set-next-step'].handler(c, actor, {
+          base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
           idempotency_key: randomUUID(), deal: id(4), text: 'Review revised terms', next_date: day,
         });
         await TOOLS['add-deal-note'].handler(c, actor, {
@@ -271,6 +275,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       const dell = {...actor, id: id(7), slug: 'dell'};
       await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'dell','Synthetic Partner Two','human',true)", [dell.id]);
       const independent = await TOOLS['set-next-step'].handler(c, dell, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Independent follow-up', next_date: dates.past,
       });
       await TOOLS['add-deal-note'].handler(c, actor, {
@@ -285,6 +290,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await fixture(false);
       const past = (await c.query("select (current_date-1)::text as day")).rows[0].day;
       await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Complete terms review', next_date: past,
       });
       const current = await TOOLS['read-deal-reconciliation'].handler(c, actor, {deal: id(4)});
@@ -301,6 +307,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await fixture(false);
       const past = (await c.query("select (current_date-1)::text as day")).rows[0].day;
       const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Complete terms review', next_date: past,
       });
       const args = {idempotency_key: randomUUID(), deal: id(4), field: 'phase', value: 'legal', base_event_id: null};
@@ -327,6 +334,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'dell','Synthetic Partner Two','human',true)", [dell.id]);
         await c.query("insert into deal(id,client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,$2,'Other Synthetic Assignment','renewal','research','joe',$3,$3)", [id(9), id(3), actor.id]);
         await TOOLS['set-next-step'].handler(c, actor, {
+          base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
           idempotency_key: randomUUID(), deal: id(4), text: 'Request terms', next_date: dates.past,
         });
         const expired = await accept(id(4), 'joe', dates.past);
@@ -335,7 +343,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         const otherDeal = await accept(id(9), 'joe', dates.past);
         const args = {idempotency_key: randomUUID(), deal: id(4)};
         if (writer === 'add-deal-note') Object.assign(args, {text: 'Terms received', next_step: 'Review revised terms', next_date: dates.future});
-        if (writer === 'set-next-step') Object.assign(args, {text: 'Review revised terms', next_date: dates.future});
+        if (writer === 'set-next-step') Object.assign(args, {base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version, text: 'Review revised terms', next_date: dates.future});
         if (writer === 'set-next-action') Object.assign(args, {ref: id(4), description: 'Review revised terms', due_on: dates.future});
         if (writer === 'patch-deal-field') Object.assign(args, {field: 'phase', value: 'legal', base_event_id: null});
         if (writer === 'update-deal') Object.assign(args, {fields: {phase: 'legal'}, base_version:
@@ -390,6 +398,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             idempotency_key: randomUUID(), deal: id(4), field: 'phase', value: 'legal', base_event_id: null,
           });
         const prior = await TOOLS['set-next-step'].handler(c, actor, {
+          base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
           idempotency_key: randomUUID(), deal: id(4), text: 'Review terms', next_date: past,
         });
         if (operation === 'unchanged patch') await TOOLS['patch-deal-field'].handler(c, actor, {
@@ -419,6 +428,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await fixture(false);
       const dates = (await c.query("select (current_date-1)::text as past, (current_date+7)::text as future")).rows[0];
       await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Review revised terms', next_date: dates.future,
       });
       const expired = await accept(id(4), 'joe', dates.past);
@@ -439,6 +449,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await fixture(false);
       const past = (await c.query("select (current_date-1)::text as day")).rows[0].day;
       const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: past,
       });
       const native = {id: id(8), slug: 'codex', human: false, native_agent_verified: true, sponsoring_human_slug: 'joe'};
@@ -456,6 +467,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await fixture(false);
       const dates = (await c.query("select (current_date-1)::text as past, (current_date+7)::text as future")).rows[0];
       const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Review terms', next_date: dates[reschedule === 'future' ? 'past' : 'future'],
       });
       const board = await TOOLS['deal-room-board'].handler(c, actor, {});
@@ -478,9 +490,11 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       const dell = {...actor, id: id(7), slug: 'dell'};
       await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'dell','Synthetic Partner Two','human',true)", [dell.id]);
       await TOOLS['set-next-step'].handler(c, dell, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Review proposed terms', next_date: dates.future,
       });
       await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Request proposed terms', next_date: dates.past,
       });
       const update = await TOOLS['add-deal-note'].handler(c, actor, {
@@ -498,6 +512,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await fixture(false);
       const past = (await c.query("select (current_date-1)::text as day")).rows[0].day;
       const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Request terms', next_date: past,
       });
       for (const fields of [{next_step: 'Review terms'}, {next_date: '2026-02-30'}, {next_date: past}]) {
@@ -515,6 +530,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await fixture(false);
       await c.query("update client set status='prospect' where id=$1", [id(3)]);
       const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Synthetic retained plan', next_date: '2027-01-01',
       });
       await executeRegisteredTool(c, actor, 'set-prospect-engagement-status', {
@@ -794,7 +810,11 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             invoiced_on: null, closed_on: outcome ? '2026-10-01' : null, lane: 'territory', outcome,
           }], name);
           const prior = structuredClone(result);
-          if (name === 'deal-room-board') { delete prior.closed_deals; delete prior.lost_deals; }
+          if (name === 'deal-room-board') {
+            assert.equal(result.deals[0].base_version, reads['read-deal-reconciliation'].base_version,
+              'the displayed board values and replacement writes share the Deal version');
+            delete prior.closed_deals; delete prior.lost_deals;
+          }
           if (name === 'get-deal-room') {
             assert.equal(prior.schema_version,'deal-timeline.v1');
             assert.equal(prior.lease,null);
@@ -809,7 +829,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
           });
           const oldRows = rowsOf(baseline[name]);
           rowsOf(prior).forEach(row => { for (const field of ['client_status','client_version','prospect_engagement_status']) delete row[field]; });
-          rowsOf(prior).forEach((row, index) => [...invoiceFields, 'next_step_required'].forEach(field => {
+          rowsOf(prior).forEach((row, index) => [...invoiceFields, 'next_step_required', 'base_version'].forEach(field => {
             if (!Object.hasOwn(oldRows[index], field)) delete row[field];
           }));
           assert.deepEqual(prior, baseline[name], `${name}: additive response only`);

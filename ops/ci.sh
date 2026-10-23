@@ -497,7 +497,7 @@ check_pushfloor() {
   fi
 
   if [ -n "$changed" ] && printf '%s\n' "$changed" | grep -Eq \
-      '^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.v[0-9]+\.generated\.js|ops/config/scac-registry-.*\.json)$'; then
+      '^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.current\.generated\.js|ops/config/scac-registry-.*\.json)$'; then
     ran="$ran scac-atlas"
     run_quiet "$LOGDIR/pushfloor-scac-atlas.log" node --test \
       mcp-server/test/atlas-inventory-graph-read.test.mjs \
@@ -509,7 +509,7 @@ check_pushfloor() {
 
   local gate_surface=""
   if [ -n "$changed" ]; then
-    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(hook-script-policy|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
+    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(hook-script-policy|codex-hooks)\.json|ops/[^/]+-selftest\.py)' || true)"
   fi
   if [ -n "$gate_surface" ]; then
     ran="$ran gate-closure"
@@ -519,6 +519,8 @@ check_pushfloor() {
       base="$(basename "$touched_gate" .py)"
       paired="ops/$base-selftest.py"
       if [ -f "$paired" ]; then
+        # Changed selftests run in the next loop, including a changed hook's pair.
+        printf '%s\n' "$gate_surface" | grep -Fxq "$paired" && continue
         run_quiet "$LOGDIR/pushfloor-$base-selftest.log" "$PY" "$paired" \
           || { tail -15 "$LOGDIR/pushfloor-$base-selftest.log" >&2
                floor_fail "$base-selftest" \
@@ -682,9 +684,9 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 
   if [[ "$MIGRATION_PART" != gates* && "$MIGRATION_PART" != acceptance ]]; then
     if ! CARR_RULE_TEST_DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-rule-supersession.log" \
-        node --test mcp-server/test/find-rule-supersedes.test.mjs mcp-server/test/one-step-rule-approval.test.mjs; then
+        node --test mcp-server/test/find-rule-supersedes.test.mjs; then
       tail -30 "$LOGDIR/migration-rule-supersession.log" >&2
-      bad migration "rule lookup, teach supersession or one-step approval database proof failed"
+      bad migration "rule lookup or historical supersession SQL database proof failed"
       return
     fi
 
@@ -800,26 +802,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       return
     fi
 
-    if [ -f mcp-server/test/gate-zero-outcome-role-boundary.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-           run_quiet "$LOGDIR/gate-zero-role-boundary.log" \
-           node --test mcp-server/test/gate-zero-outcome-role-boundary.test.mjs; then
-        tail -30 "$LOGDIR/gate-zero-role-boundary.log" >&2
-        bad migration "the Gate Zero producer seat/connection-role boundary proof failed"
-        return
-      fi
-    fi
-
-    if [ -f mcp-server/test/foundation-assurance-oracle-role-boundary.v5.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_FOUNDATION_ASSURANCE_DB_REQUIRED=1 \
-           run_quiet "$LOGDIR/foundation-assurance-role-boundary.log" \
-           node --test mcp-server/test/foundation-assurance-oracle-role-boundary.v5.test.mjs; then
-        tail -30 "$LOGDIR/foundation-assurance-role-boundary.log" >&2
-        bad migration "the foundation-assurance oracle connection-role boundary proof failed"
-        return
-      fi
-    fi
-
     if [ -f mcp-server/test/program-controller-census-role-boundary.v5.test.mjs ]; then
       if ! DATABASE_URL="$dsn" CARR_PROGRAM_CONTROLLER_DB_REQUIRED=1 \
            run_quiet "$LOGDIR/program-controller-role-boundary.log" \
@@ -840,7 +822,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       fi
     fi
 
-    for proof in doc-conversation notifications session-identity dispatch-spine meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres approve-rule-legacy-adoption-postgres; do
+    for proof in doc-conversation notifications session-identity dispatch-spine meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
       if [ -f "mcp-server/test/$proof.test.mjs" ]; then
         if ! DATABASE_URL="$dsn" \
              CARR_DOC_CONVERSATION_DB_REQUIRED=1 CARR_R03_DB_REQUIRED=1 \
@@ -849,7 +831,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
              CARR_V5_A03_DB_REQUIRED=1 \
              CARR_A02_RULE_COVERAGE_DB_REQUIRED=1 \
              CARR_RW02_DB_REQUIRED=1 \
-             CARR_APPROVE_RULE_ADOPTION_DB_REQUIRED=1 \
              CARR_VENDOR_DIRECTORY_DB_REQUIRED=1 CARR_RELATIONSHIP_DB_REQUIRED=1 \
              run_quiet "$LOGDIR/$proof-db.log" \
              node --test "mcp-server/test/$proof.test.mjs"; then
@@ -965,36 +946,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
            -f mcp-server/test/foundation-assurance-minimum-postgres.sql; then
         tail -30 "$LOGDIR/foundation-assurance-minimum-postgres.log" >&2
         bad migration "the foundation-assurance candidate/evidence atomic binding proof failed"
-        return
-      fi
-    fi
-
-    if [ -f mcp-server/test/gate-zero-outcome-record-race.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-           run_quiet "$LOGDIR/gate-zero-outcome-race.log" \
-           node --test mcp-server/test/gate-zero-outcome-record-race.test.mjs; then
-        tail -30 "$LOGDIR/gate-zero-outcome-race.log" >&2
-        bad migration "the Gate Zero outcome candidate-key race proof failed"
-        return
-      fi
-    fi
-
-    if [ -f mcp-server/test/gate-zero-outcome-digest-tagged.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-           run_quiet "$LOGDIR/gate-zero-digest-tagged.log" \
-           node --test mcp-server/test/gate-zero-outcome-digest-tagged.test.mjs; then
-        tail -30 "$LOGDIR/gate-zero-digest-tagged.log" >&2
-        bad migration "the Gate Zero tagged outcome-digest cross-implementation proof failed"
-        return
-      fi
-    fi
-
-    if [ -f mcp-server/test/gate-zero-candidate-authority-filing.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-           run_quiet "$LOGDIR/gate-zero-candidate-filing.log" \
-           node --test mcp-server/test/gate-zero-candidate-authority-filing.test.mjs; then
-        tail -30 "$LOGDIR/gate-zero-candidate-filing.log" >&2
-        bad migration "the service-candidate and historical Gate Zero provenance proof failed"
         return
       fi
     fi

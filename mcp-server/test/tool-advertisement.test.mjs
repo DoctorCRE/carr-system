@@ -17,7 +17,7 @@ test("ordinary client registrations advertise a compact core with unchanged sche
   assert.ok(result.tools.length <= 40, `startup advertised ${result.tools.length} tools`);
   const names = new Set(result.tools.map(t => t.name));
   for (const name of ["standing-context", "list-verbs", "call-verb", "find", "add-loop", "report-problem",
-    "record-defect", "teach", "activate-rule", "engineering-passport-source", "doctrine-sections", "map-architecture"])
+    "record-defect", "engineering-passport-source", "doctrine-sections", "map-architecture"])
     assert.ok(names.has(name), `${name} must remain directly reachable`);
   for (const tool of result.tools) assert.deepEqual(tool.inputSchema, TOOLS[tool.name].inputSchema);
   const settings = JSON.parse(fs.readFileSync(new URL("../../.claude/settings.json", import.meta.url)));
@@ -101,7 +101,10 @@ test("retired machinery verbs are absent from discovery and refuse execution", a
     "read-context-activation", "render-context-activation", "read-attempt-reliability",
     "claude-checkpoint", "claude-read-recovery", "close-defect", "read-benchmark-manifest",
     "read-model-role", "read-journey-one-clock", "register-action-class-successor",
-    "read-action-class-successors", "read-action-class-gate"]) {
+    "read-action-class-successors", "read-action-class-gate",
+    "teach", "admit-rule", "approve-rule", "activate-rule", "accept-workflow",
+    "disable-legacy-schedule", "activate-guidance-registry", "decide-guidance-import-batch",
+    "deactivate-guidance-registry", "retire-rule", "amend-rule"]) {
     assert.equal(TOOLS[name], undefined, name);
     assert.equal(full.verbs.some(verb => verb.name === name), false, name);
     const direct = await rpc("tools/call", { name, arguments: {} });

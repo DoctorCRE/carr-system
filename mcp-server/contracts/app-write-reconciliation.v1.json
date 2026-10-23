@@ -1,0 +1,42 @@
+{
+  "schema": "doctorcre-app-write-reconciliation.v1",
+  "version": "1.0.0",
+  "room": {
+    "endpoint": "POST /api/room/turn",
+    "required": ["idempotency_key"],
+    "idempotency_key": "UUID retained by the caller for the exact reviewed action, including uncertain retries",
+    "scope": "Server-derived session key and actor slug",
+    "payload_binding": "Durable partner_room_turn row compares room, sponsor, seat, kind, body and origin attribution before replay",
+    "replay": "Original seq, at and message identity; no duplicate append; no time bucket",
+    "key_reuse": "HTTP 409 when the same scoped key names different material"
+  },
+  "mcp_session": {
+    "endpoint": "POST /mcp authenticated by browser cookie",
+    "binding": "S2 callers retain /auth/session.csrf_token with the operation and send x-carr-csrf on every attempt",
+    "enforcement": "If present, the header must match the verified cookie session's synchronizer token; mismatch returns HTTP 403 csrf_mismatch before MCP dispatch",
+    "legacy": "Requests without this header retain their existing behavior; S2 writes must always supply it"
+  },
+  "replacements": {
+    "set-next-step": {
+      "expected": "base_version",
+      "read": "get-deal-room.base_version or deal-room-board.deals[].base_version",
+      "record": "deal",
+      "fields": ["next_step", "next_date"]
+    },
+    "set-market-agent": {
+      "expected": "base_version",
+      "read": "get-deal-room.base_version or deal-room-board.deals[].base_version",
+      "record": "deal",
+      "fields": ["market_agent", "market"]
+    },
+    "set-national-account-owner": {
+      "expected": "base_version",
+      "read": "deal-room-board.accounts[].base_version (client_version)",
+      "record": "client",
+      "fields": ["account_owner"]
+    }
+  },
+  "concurrency": "Version locked and compared inside the writer transaction; mismatch is version_conflict before replacement; no silent rebase",
+  "receipt_recovery": "Same-key serialization and original envelope receipt lookup precede the expected-version check",
+  "consumer_order": "Coordinate consumer and producer updates: the old producer rejects new base_version fields; the new producer safely refuses old consumers missing required versions. S2 session binding requires both the operation-bound consumer header and this producer's header enforcement. No deployment order alone makes an old pair satisfy this contract."
+}

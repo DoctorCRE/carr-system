@@ -234,9 +234,8 @@ test("allowlisted authority verbs pass every partner-authority gate for the unat
   }
 });
 
-test("rule, schedule and deal-fact verbs refuse the unattended actor before database access", async () => {
-  for (const verb of ["retire-rule", "amend-rule", "approve-rule", "bind-rule-context-contract",
-    "disable-legacy-schedule", "record-executed-lease"]) {
+test("rule-context and deal-fact verbs refuse the unattended actor before database access", async () => {
+  for (const verb of ["bind-rule-context-contract", "record-executed-lease"]) {
     const error = await gateError(unattended(), verb);
     assert.ok(error instanceof ToolError, `${verb}: expected a ToolError, got ${error}`);
     assert.equal(error.payload.error, "unattended_runner_authority_not_admitted", verb);
@@ -255,7 +254,7 @@ test("every humanOnly/authorityOnly verb off the allowlist refuses the unattende
 
 test("the allowlist does not narrow the attended local door", async () => {
   const local = agentActorForToken(BEARER, JSON.stringify({ "joe-local": SECRET }), "local-token");
-  for (const verb of ["retire-rule", "close-incident", "record-executed-lease"])
+  for (const verb of ["retire-workflow-cutover-plan", "close-incident", "record-executed-lease"])
     assert.notEqual((await gateError(local, verb))?.payload?.error,
       "unattended_runner_authority_not_admitted", verb);
 });
@@ -294,8 +293,7 @@ test("the unattended profile holds capture, close-loop and the allowlist only", 
   for (const verb of profile)
     if (TOOLS[verb].humanOnly === true || TOOLS[verb].authorityOnly === true)
       assert.ok(UNATTENDED_AUTHORITY_VERBS.includes(verb), `${verb} is authority but off the allowlist`);
-  for (const verb of ["confirm-merge", "retire-rule", "amend-rule", "approve-rule", "teach",
-    "disable-legacy-schedule", "record-executed-lease", "reassign-deal", "update-deal", "add-party"])
+  for (const verb of ["confirm-merge", "record-executed-lease", "reassign-deal", "update-deal", "add-party"])
     assert.equal(allowedIn("unattended", verb, TOOLS[verb]), false, verb);
 });
 
