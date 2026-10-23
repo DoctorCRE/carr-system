@@ -2258,7 +2258,7 @@ function admissionPolicy() {
   assert.equal(CANDIDATE_SQL.indexOf("$policy$", close + "$policy$".length), -1,
     "there is exactly ONE admission map in the file, so there is one thing to check");
   const policy = JSON.parse(CANDIDATE_SQL.slice(open + "$policy$".length, close));
-  const upgrade = readMigration(new URL("../../migrations/0929_j102_engagement_fields.sql", import.meta.url));
+  const upgrade = readMigration(new URL("../../migrations/0938_j102_engagement_fields.sql", import.meta.url));
   const fields = JSON.parse(upgrade.match(/\$engagement_fields\$([\s\S]*?)\$engagement_fields\$/)[1]);
   policy.engagement_fields = fields;
   policy.relationship_states = ["prospect", "client", "client_ended"];

@@ -1154,7 +1154,7 @@ test("step 2 SQL refuses an in-use client_paused state before upgrading", { skip
   const [saved] = await owner("select envelope from ops.j102_subject_current where subject_kind='relationship' and subject_id=$1", [a.rel]);
   const record = { ...saved.envelope.record, state: { ...saved.envelope.record.state, relationship_state: "client_paused" } };
   const envelope = { ...saved.envelope, record, record_digest: digest(record) };
-  const migration = readMigration(new URL("../../migrations/0929_j102_engagement_fields.sql", import.meta.url));
+  const migration = readMigration(new URL("../../migrations/0938_j102_engagement_fields.sql", import.meta.url));
   const guard = migration.slice(0, migration.indexOf("-- Replace the installed literal"));
   const connection = new pg.Client({ connectionString: OWNER_DSN });
   await connection.connect();
