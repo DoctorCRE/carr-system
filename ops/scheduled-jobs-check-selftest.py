@@ -469,7 +469,7 @@ class ManifestTests(unittest.TestCase):
 
     def test_definition_only_jobs_are_not_expected_to_run(self):
         manifest = jobs.native_manifest()
-        for label in ("com.carr.repo-hygiene-janitor",):
+        for label in ("com.carr.resource-collector",):
             job = next(j for j in manifest["jobs"] if j["label"] == label)
             self.assertFalse(job["expected_enabled"])
             self.assertFalse(job["expected_installed"])

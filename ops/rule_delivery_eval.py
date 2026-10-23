@@ -1,16 +1,14 @@
 """Rule-delivery scoring with one store-scope selection interface.
 
 Historical path names remain report columns for paired scoring. Offline replay
-uses independently frozen judgments; live mode injects the admitted typed judge.
+uses independently frozen historical selections and structural predicates.
 No evaluation writes production judgment caches or logs.
 """
 
 import concurrent.futures as cf
-import importlib.util
 import json
 import os
 import re
-import tempfile
 from collections import Counter
 
 CASES_SCHEMA = "rule-delivery-eval-cases/v1"
@@ -32,27 +30,16 @@ MACHINE_STRATA = ("notifications",)
 # The adapters that can deliver doctrine refs (declared, not inferred from a
 # run's output, so a doctrine path failing on every case still scores 0%).
 DOCTRINE_PATHS = ("doctrine_search",)
-EVAL_SESSION = "rule-delivery-eval"
 
 # Files a dry run must never create or modify, relative to <repo>/out.
 GUARDED_OUT_FILES = (
     "rule-trigger-delivery.jsonl", "rule-prompt-delivered.json",
-    "jev-rule-select.jsonl", "jev-rule-select-cache.json", "jev-judge.jsonl",
-    "jev-calls.jsonl", "jev-semantic-cache.json", "jev-judge-cache.sqlite3",
 )
 
 PACK_LAYER = "pack"
 
 
 # ------------------------------------------------------------------ loading
-
-def _load(path, name):
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:  # pragma: no cover - import plumbing
-        raise RuntimeError(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def load_cases(path, split=None):
@@ -150,58 +137,7 @@ def universes(meta, names):
     return {name: table.get(name, everything) for name in names}
 
 
-# ------------------------------------------------------------------ dry-run Jev
-
-class JevProxy:
-    """The typesafe client with every request's call receipt sent to a sink.
-
-    Question builders are the real ones; only ask() is wrapped, so the
-    production selector builds exactly the questions it builds live."""
-
-    def __init__(self, tsc, calls_log):
-        self._tsc = tsc
-        self.calls_log = calls_log
-        self._cache = tempfile.TemporaryDirectory(prefix="carr-rule-eval-")
-        self.noul, self.choice, self.score = tsc.noul, tsc.choice, tsc.score
-
-    def ask(self, state, questions, **kwargs):
-        kwargs.pop("caller", None)
-        kwargs.pop("version", None)
-        kwargs["calls_log"] = self.calls_log
-        from ops import jev_semantic as semantic
-        if kwargs.pop('model', 'jev-1.13.0') != 'jev-1.13.0':
-            raise ValueError('evaluation model must be pinned')
-        return self._tsc.ask(state, questions, caller='rule_delivery_eval',
-                             model='jev-1.13.0', cache_key=semantic.cache_key(
-                                 state, questions, 'rule_delivery_eval', 'stored-moment-eval-v1'),
-                             cache_path=os.path.join(self._cache.name, 'transport.sqlite3'), **kwargs)
-
-
-def _quiet_judge(repo, tag):
-    """A private jev_judge whose record() writes nothing."""
-    module = _load(os.path.join(repo, "ops", "jev_judge.py"), f"jev_judge_quiet_{tag}")
-    module.record = lambda *args, **kwargs: {}
-    return module
-
-
 # ------------------------------------------------------------------ adapters
-
-def _synthetic_turn(case):
-    """Transcript-shaped records for one case: the prompt, then the calls."""
-    user = {"type": "user", "message": {"role": "user", "content": case["prompt"]}}
-    if case["prompt"].lstrip().startswith("<task-notification>"):
-        user["origin"] = {"kind": "task-notification"}
-    records = [user]
-    if case["tool_calls"]:
-        records.append({"type": "assistant", "message": {"role": "assistant", "content": [
-            {"type": "tool_use", "id": f"eval-{i}", "name": call["tool_name"],
-             "input": call.get("tool_input")}
-            for i, call in enumerate(case["tool_calls"])]}})
-    return records
-
-
-def _raise(*_args, **_kwargs):
-    raise RuntimeError("Jev judgment disabled for this adapter")
 
 
 def _run_verb(repo, verb, args):
@@ -238,38 +174,28 @@ def doctrine_search_refs(repo, prompt, limit=10):
             if h.get("section_id") and ids.get(h.get("doc_slug"))}
 
 
-def build_adapters(repo, *, jev="off", client_factory=None, calls_log=os.devnull,
-                   doctrine_search=False):
-    """Adapters for every path. `jev` is "off" (deterministic paths only) or
-    "live" (adds prompt_full). `client_factory(calls_log)`
-    returns the Jev client; default is JevProxy over ops/typesafe_client."""
+def build_adapters(repo, *, doctrine_search=False):
+    """Deterministic and independently frozen rule-delivery paths."""
     import sys
     repo = str(repo)
     if repo not in sys.path:
         sys.path.insert(0, repo)
-    from lib import rule_delivery_preuse as preuse
-    from pathlib import Path
-    repo_path = Path(repo)
     meta = rule_meta(repo)
     layer0 = {rid for rid, row in meta.items() if row["layer"] == "layer0"}
-    pack_layer = {rid for rid, row in meta.items() if row["layer"] == PACK_LAYER}
 
     from ops.rule_scope_replay import FrozenSelection
     from lib.rule_scope_lookup import select_rules
     frozen = FrozenSelection(repo)
 
-    def delivery(case, *, prompt=False, live_judge=None):
+    def delivery(case, *, prompt=False):
         events = ([{'hook_event_name': 'UserPromptSubmit', 'task': case['prompt']}] if prompt else
                   [{'hook_event_name': 'PreToolUse', 'task': case['prompt'], **call} for call in case['tool_calls']])
         rules, unresolved, defects = set(), [], []
         for event in events:
-            if live_judge:
-                result = select_rules(frozen.catalog, event, judge=live_judge)
-            else:
-                try:
-                    result = frozen.select(event)
-                except ValueError:
-                    result = select_rules(frozen.catalog, event)
+            try:
+                result = frozen.select(event)
+            except ValueError:
+                result = select_rules(frozen.catalog, event)
             rules.update(r['id'] for r in result['rules'])
             unresolved.extend(result['unresolved'])
             defects.extend(result['data_defects'])
@@ -286,29 +212,17 @@ def build_adapters(repo, *, jev="off", client_factory=None, calls_log=os.devnull
         return {"rules": set(layer0), "packs": set()}
 
     adapters = [
-        {"name": "prompt_compiled", "select": prompt_compiled, "jev": False},
-        {"name": "jit_pretooluse", "select": layered, "jev": False,
+        {"name": "prompt_compiled", "select": prompt_compiled},
+        {"name": "jit_pretooluse", "select": layered,
          "applies": lambda case: bool(case["tool_calls"])},
-        {"name": "layered_triggers", "select": layered, "jev": False,
+        {"name": "layered_triggers", "select": layered,
          "applies": lambda case: bool(case["tool_calls"])},
-        {"name": "boot_layer0", "select": boot, "jev": False},
+        {"name": "boot_layer0", "select": boot},
     ]
     if doctrine_search:
-        adapters.append({"name": "doctrine_search", "jev": True,
+        adapters.append({"name": "doctrine_search", "concurrent": True,
                          "select": lambda case: {"rules": set(), "packs": None,
                                                  "doctrine": doctrine_search_refs(repo, case["prompt"])}})
-    if jev == "live":
-        if client_factory is None:
-            tsc = _load(os.path.join(repo, "ops", "typesafe_client.py"), "tsc_eval")
-            client_factory = lambda sink: JevProxy(tsc, sink)  # noqa: E731
-        client = client_factory(calls_log)
-
-        def prompt_full(case):
-            return delivery(case, prompt=True, live_judge=client.ask)
-
-        adapters += [{"name": "prompt_full", "select": prompt_full, "jev": True}]
-    elif jev != "off":
-        raise ValueError("jev must be 'off' or 'live'")
     return adapters
 
 
@@ -334,7 +248,7 @@ def run_adapters(cases, adapters, *, workers=1):
                                     "doctrine": set(result.get("doctrine") or ())}, None
             except Exception as exc:  # noqa: BLE001 - recorded, scored as empty
                 return case["id"], {"rules": set(), "packs": set()}, type(exc).__name__
-        if workers > 1 and adapter.get("jev"):
+        if workers > 1 and adapter.get("concurrent"):
             with cf.ThreadPoolExecutor(max_workers=workers) as pool:
                 results = list(pool.map(one, todo))
         else:
@@ -399,7 +313,7 @@ def prf(tp, fp, fn, tp_recall=None):
 def deliveries_from_report(report):
     """Rebuild {path: {case id: {"rules", "packs"}}} from a saved report, so a
     run's deliveries can be re-scored against other labels (a consensus gold
-    set, say) without asking Jev again. System rows are rebuilt by the caller."""
+    set, say) without rerunning selection. System rows are rebuilt by the caller."""
     out = {}
     for case_id, paths in (report.get("per_case") or {}).items():
         for name, row in paths.items():
@@ -556,7 +470,7 @@ def score(cases, deliveries, path_universes, meta, labelled=None, classes=None, 
             # carries deliveries for the other split too.
             "cases_scored": sum(1 for case_id in per_case if case_id in by_id),
             "human": prf(*human),
-            # Jev (verification_selection, 2026-09-26) ranked "share of cases
+            # Historical evaluation ranked "share of cases
             # with any miss" among the acceptance numbers: a case is served
             # only when EVERY rule it owes arrives.
             "cases_fully_served": {"cases_owing": covered[0], "fully_served": covered[1],

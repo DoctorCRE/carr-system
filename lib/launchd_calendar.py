@@ -29,9 +29,8 @@ every N seconds, aligned to the clock:
     asked for, so the rounding stays visible in the file.
 
 WHY A TABLE FOR THE HOURLY MINUTE, not a hash alone and not :00 for everyone.
-Judged with ops/jev_judge.py when this was written (explicit table 0.84, pure
-hash 0.16, all at :00 0.00): a hand-picked table is readable in review and
-guarantees the five hourly jobs never collide, and the hash fallback still gives
+A hand-picked table is readable in review and keeps the five hourly jobs
+from colliding, and the hash fallback still gives
 a new hourly job a stable spread-out minute without anyone remembering to add
 it. The table's minutes are odd and not multiples of five, so an hourly job
 never lands on the same minute as the 120s and 300s jobs' grid, and none of them
@@ -65,8 +64,6 @@ MARKER = "carr-launchd-interval-seconds"
 
 # The hourly jobs, each at its own minute. See the module docstring for why.
 HOURLY_MINUTE: dict[str, int] = {
-    "com.carr.cc-version-sentinel": 19,
-    "com.carr.fleet-sync": 31,
     "com.carr.notes-sweep": 53,
 }
 
@@ -166,7 +163,7 @@ def render_xml(entries: list[dict], indent: str) -> str:
     lines = [f"{indent}<key>StartCalendarInterval</key>", f"{indent}<array>"]
     for entry in entries:
         body = "".join(f"<key>{k}</key><integer>{entry[k]}</integer>"
-                       for k in ("Hour", "Minute") if k in entry)
+                       for k in ("Weekday", "Hour", "Minute") if k in entry)
         lines.append(f"{inner}<dict>{body}</dict>")
     lines.append(f"{indent}</array>")
     return "\n".join(lines) + "\n"

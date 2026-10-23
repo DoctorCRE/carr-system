@@ -53,57 +53,6 @@ class TokenTests(unittest.TestCase):
             self.assertEqual(cf.on_machine('studio', {'operation': 'check'}, runner=forbidden),
                              dict.fromkeys(cf.TOKEN_NAMES, 'unverifiable'))
 
-    def test_nightly_issuer_failed_readback_restores_original(self):
-        self._nightly_issuer_rollback('failed')
-
-    def test_nightly_issuer_interrupt_restores_original(self):
-        self._nightly_issuer_rollback(KeyboardInterrupt())
-
-    def _nightly_issuer_rollback(self, failure):
-        spec = importlib.util.spec_from_file_location('mint_harness', ROOT / 'ops/credential-mint-selftest.py')
-        harness = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = harness
-        spec.loader.exec_module(harness)
-        from lib import cloudflare_tokens as cf, token_store
-        with harness.world(roots=('CLOUDFLARE_TOKEN_ROOT',)) as world:
-            path = token_store.destination(cf.TOKEN_NAMES[0]).path
-            offline = False
-            candidates = []
-            def transport(machine, payload, **kwargs):
-                if machine == 'studio':
-                    candidates.append(payload['value'])
-                    return {payload['name']: cf.install(path, payload['name'], payload['value'])}
-                return {payload['name']: 'unreachable' if offline else 'ok'}
-            with patch.object(cf, 'on_machine', side_effect=transport):
-                with patch.object(cf, 'verify', return_value='ok'):
-                    world.night()
-                original = path.read_bytes()
-                first = world.stored(cf.TOKEN_NAMES[0])
-                offline = True
-                world.clock.now = harness.T0 + harness.timedelta(days=85)
-                with patch.object(cf, 'verify', side_effect=['ok', failure]):
-                    if isinstance(failure, BaseException):
-                        with self.assertRaises(type(failure)):
-                            world.night()
-                    else:
-                        world.night()
-                self.assertEqual(path.read_bytes(), original, 'original_restored')
-                backup = json.loads(Path(str(path) + '.install-backup').read_text())
-                self.assertEqual(backup['original'], original.decode(), 'backup_contains_original')
-                self.assertIn(first, world.http.active['cloudflare'])
-                self.assertTrue(world.saved_state()['credentials']['cloudflare-deploy-token']['install_pending'])
-                candidate = candidates[-1]
-                staged = world.home / '.config/carr/credential-mint-candidates.env'
-                self.assertEqual(staged.stat().st_mode & 0o777, 0o600)
-                self.assertEqual(cf.read_env_file(staged)[cf.TOKEN_NAMES[0]], candidate)
-                offline = False
-                with patch.object(cf, 'verify', return_value='ok'):
-                    world.night()
-                self.assertEqual(candidates[-1], candidate)
-                self.assertEqual(world.stored(cf.TOKEN_NAMES[0]), candidate)
-                self.assertEqual(len(world.http.minted), 2)
-                self.assertNotIn(first, world.http.active['cloudflare'])
-
     def test_postwrite_failure_restores_private_backup(self):
         from lib import cloudflare_tokens as cf
         with tempfile.TemporaryDirectory() as directory:
@@ -189,41 +138,6 @@ cf.install(sys.argv[1], cf.TOKEN_NAMES[0], 'fake-new')
                              {'CLOUDFLARE_API_TOKEN': 'original', 'OTHER': 'new-other-value'})
             self.assertFalse(journal.exists())
 
-    def test_nightly_offline_fleet_retries_before_retirement(self):
-        spec = importlib.util.spec_from_file_location('mint_harness', ROOT / 'ops/credential-mint-selftest.py')
-        harness = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = harness
-        spec.loader.exec_module(harness)
-        from lib import cloudflare_tokens as cf
-        with harness.world(roots=('CLOUDFLARE_TOKEN_ROOT',)) as world:
-            calls = []
-            offline = False
-            def transport(machine, payload, **kwargs):
-                calls.append((machine, payload['value']))
-                if machine == 'studio':
-                    from lib import token_store
-                    with patch.object(cf, 'verify', return_value='ok'):
-                        return {payload['name']: cf.install(token_store.destination(payload['name']).path,
-                                                           payload['name'], payload['value'])}
-                return {payload['name']: 'unreachable' if offline and machine == 'dell' else 'ok'}
-            with patch.object(cf, 'on_machine', side_effect=transport):
-                world.night()
-                first = world.stored('CLOUDFLARE_API_TOKEN')
-                offline = True
-                world.clock.now = harness.T0 + harness.timedelta(days=85)
-                world.night()
-                self.assertIn(first, world.http.active['cloudflare'])
-                entry = world.saved_state()['credentials']['cloudflare-deploy-token']
-                self.assertTrue(entry['install_pending'])
-                self.assertEqual(entry['previous_child_id'], 'cloudflare-id-1')
-                offline = False
-                calls.clear()
-                world.night()
-                self.assertEqual([m for m, _ in calls], list(cf.MACHINES))
-                self.assertEqual(len(world.http.minted), 2)
-                self.assertNotIn(first, world.http.active['cloudflare'])
-                self.assertFalse(world.saved_state()['credentials']['cloudflare-deploy-token']['install_pending'])
-
     def test_install_and_remote_program(self):
         from lib import cloudflare_tokens as cf
         class Handler(BaseHTTPRequestHandler):
@@ -277,21 +191,6 @@ cf.install(sys.argv[1], cf.TOKEN_NAMES[0], 'fake-new')
             server.shutdown()
             server.server_close()
 
-    def test_sync_attempts_every_machine_and_redacts(self):
-        from lib import cloudflare_tokens as cf
-        spec = importlib.util.spec_from_file_location('cloudflare_cli', ROOT / 'tools/cloudflare-tokens.py')
-        cli = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cli)
-        calls = []
-        def transport(machine, payload, **kwargs):
-            calls.append(machine)
-            return {payload['name']: 'unreachable' if machine == 'dell' else 'ok'}
-        output = io.StringIO()
-        with patch.object(cf, 'on_machine', transport), patch('sys.stdin', io.StringIO(json.dumps({cf.TOKEN_NAMES[0]: 'fake-active'}))), contextlib.redirect_stdout(output):
-            self.assertEqual(cli.main(['sync', '--stdin']), 1)
-        self.assertEqual(calls, ['studio', 'macbook', 'dell'])
-        self.assertNotIn('fake-active', output.getvalue())
-        self.assertIn('dell CLOUDFLARE_API_TOKEN unreachable', output.getvalue())
 
     def test_loops_deduplicate_update_and_clear_only_positive_readback(self):
         from lib import cloudflare_tokens as cf

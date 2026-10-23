@@ -7,8 +7,8 @@
 // fails for the wrong reason fails here. Boundaries are tested on both sides:
 // exactly at a bound passes, one second past it fails.
 //
-// The RPO fixtures are shaped exactly like tools/pitr-restore-proof.py prove's
-// output; the adapter tests read the real ops/config/business-calendar.us-federal.json
+// RPO evidence has no active producer.
+// The adapter tests read ops/config/business-calendar.us-federal.json
 // (its digest must equal the module's pin), so the config file is what is
 // tested; the CLI tests run the real bin with the real clock.
 //
@@ -65,7 +65,6 @@ const R_NOW = at("2026-09-24T10:30:00Z");
 const R = (req, clock = R_NOW) => evaluateRestoreExercise(stamp(req, "restore_exercise", clock), clock);
 function stampCells(m, clock) {
   const c = clone(m);
-  if (c.cells?.record_layer_rpo) c.cells.record_layer_rpo = stamp(c.cells.record_layer_rpo, "record_layer_rpo", clock);
   for (const name of ["independent_daily_restorable_copy", "core_rto"]) {
     if (c.cells?.[name]?.restore_exercise) c.cells[name].restore_exercise = stamp(c.cells[name].restore_exercise, "restore_exercise", clock);
   }
@@ -291,7 +290,7 @@ test("item 4 (G4): a receipt counts only as verify-restore's fresh output", () =
   const edited = clone(verified); edited.finished_at = "2026-09-24T10:19:00Z";
   assertRefused(evaluateRestoreExercise(edited, R_NOW), "evidence_not_reverified", "evidence_reverified");
   // Another verifier's stamp, a stamp from the future, and a stale stamp are refused.
-  const other = clone(verified); other.verification.verifier = V5_EVIDENCE_VERIFIERS.record_layer_rpo;
+  const other = clone(verified); other.verification.verifier = V5_EVIDENCE_VERIFIERS.outbound_census;
   assertRefused(evaluateRestoreExercise(other, R_NOW), "evidence_not_reverified", "evidence_reverified");
   const ahead = stamp(receipt(), "restore_exercise", R_NOW, R_NOW.now_ms + 1000);
   assertRefused(evaluateRestoreExercise(ahead, R_NOW), "evidence_not_reverified", "evidence_reverified");
@@ -309,7 +308,6 @@ test("item 4 (G4): a receipt counts only as verify-restore's fresh output", () =
 test("item 5 (G4): the matrix judges each cell's receipt binding at the MATRIX's clock", () => {
   const m = matrix();
   const staleAt = NOW.now_ms - (V5_REVERIFY_MAX_AGE_SECONDS + 1) * 1000;
-  m.cells.record_layer_rpo = stamp(m.cells.record_layer_rpo, "record_layer_rpo", NOW);
   m.cells.independent_daily_restorable_copy.restore_exercise =
     stamp(m.cells.independent_daily_restorable_copy.restore_exercise, "restore_exercise", NOW, staleAt);
   m.cells.core_rto.restore_exercise = stamp(m.cells.core_rto.restore_exercise, "restore_exercise", NOW, staleAt);
@@ -317,51 +315,16 @@ test("item 5 (G4): the matrix judges each cell's receipt binding at the MATRIX's
   assert.deepEqual(r.cells.independent_daily_restorable_copy.failures, ["restore_exercise_not_exact"]);
   assert.equal(r.cells.core_rto.state, "fail");
   assert.equal(r.cells.core_rto.restore_exercise_reason, "evidence_not_reverified");
-  assert.equal(r.cells.record_layer_rpo.state, "pass");
+  assert.equal(r.cells.record_layer_rpo.state, "no_evidence");
 });
 
 // --- item 5: RPO/RTO cells pass independently --------------------------------
 
 const NOW = at("2026-09-24T12:00:00Z");
-const POSITIVE = { id: "0b8f3c7e-1a2b-4c3d-8e9f-0123456789ab", nonce: "a".repeat(32), written_at: "2026-09-24T11:50:00.123456Z" };
-const NEGATIVE = { id: "1c9f4d8f-2b3c-4d4e-9f00-123456789abc", nonce: "b".repeat(32), written_at: "2026-09-24T11:58:05.000000Z" };
-
-// tools/pitr-restore-proof.py prove's evidence: T = 11:58:00; the positive
-// probe written 11:50, the negative 11:58:05; the branch's parent is production
-// at exactly T; production re-read at 11:59.
-function pitrProof() {
-  return {
-    source: "pitr_branch_proof",
-    proof_target_kind: "disposable_branch",
-    project_id: "fixture-project",
-    production_branch_id: "br-production-1",
-    branch_id: "br-pitr-proof-2",
-    requested_parent_timestamp: "2026-09-24T11:58:00Z",
-    branch_parent_id: "br-production-1",
-    // the provider reports the latest timestamped WAL record at or before T, not T itself
-    branch_parent_timestamp: "2026-09-24T11:57:44Z",
-    branch_parent_lsn: "0/1A2B3C4D",
-    positive_probe: clone(POSITIVE),
-    negative_probe: clone(NEGATIVE),
-    positive_on_branch: clone(POSITIVE),
-    negative_present_on_branch: false,
-    branch_core_table_rows: { "public.party": 120, "ops.run": 9 },
-    branch_operations: { create: "op-create-7", delete: "op-delete-9" },
-    history_retention_seconds: 604800,
-    retention_read_at: "2026-09-24T11:58:30Z",
-    production_readback: { positive: clone(POSITIVE), negative: clone(NEGATIVE), read_at: "2026-09-24T11:59:00Z" },
-  };
-}
-
-function rpoOf(mutate, clock = NOW) {
-  const block = pitrProof(); mutate(block);
-  return M({ cells: { record_layer_rpo: block } }, clock).cells.record_layer_rpo;
-}
-
 function matrix() {
   return {
     cells: {
-      record_layer_rpo: pitrProof(),
+      record_layer_rpo: null,
       independent_daily_restorable_copy: {
         newest_copy: {
           custody_domain: "github-actions-artifacts",
@@ -379,14 +342,11 @@ function matrix() {
   };
 }
 
-test("item 5: every cell passes on measured evidence inside the settled floor", () => {
+test("item 5: measured restore cells pass while unavailable RPO keeps the matrix incomplete", () => {
   const m = M(matrix(), NOW);
-  assert.equal(m.decision, "pass");
-  assert.equal(m.observed_at, "2026-09-24T12:00:00.000Z");
-  assert.deepEqual(m.not_passed, []);
-  for (const c of V5_RECOVERY_MATRIX_CELLS) assert.equal(m.cells[c].state, "pass", c);
-  assert.equal(m.cells.record_layer_rpo.measured_seconds, 599);
-  assert.equal(m.cells.record_layer_rpo.proven_restorable_point, POSITIVE.written_at);
+  assert.equal(m.decision, "fail");
+  assert.deepEqual(m.not_passed, ["record_layer_rpo"]);
+  for (const c of V5_RECOVERY_MATRIX_CELLS.filter(c => c !== "record_layer_rpo")) assert.equal(m.cells[c].state, "pass", c);
   assert.equal(m.cells.core_rto.measured_seconds, 1200);
 });
 
@@ -400,107 +360,8 @@ test("item 5 (F1): the clock is the caller's, never the evidence's", () => {
   assert.throws(() => evaluateRecoveryMatrix(matrix(), { now_ms: 1, trusted: true }), e => e.code === "unknown_field");
   // The same evidence judged a day later is stale on every clocked cell.
   const later = M(matrix(), at("2026-09-25T12:00:00Z"));
-  assert.equal(later.cells.record_layer_rpo.state, "fail");
-  assert.ok(later.cells.record_layer_rpo.failures.includes("exposure_exceeds_rpo"));
-  assert.ok(later.cells.record_layer_rpo.failures.includes("production_readback_stale"));
-});
-
-test("item 5 (F2): a copy's bare production instant is not a recovery point", () => {
-  const m = matrix();
-  m.cells.record_layer_rpo = { source: "verified_copy_produced_at", recovery_point_at: "2026-09-24T11:59:00Z" };
-  assert.throws(() => evaluateRecoveryMatrix(m, NOW), e => e.code === "unknown_field" || e.code === "unknown_state");
-  const s = pitrProof(); s.source = "verified_copy_produced_at";
-  assert.throws(() => evaluateRecoveryMatrix({ cells: { record_layer_rpo: stamp(s, "record_layer_rpo", NOW) } }, NOW), e => e.code === "unknown_state");
-});
-
-test("item 5: RPO is measured from the PROVEN positive probe, passes at exactly 15 minutes and fails one second later", () => {
-  // positive written 11:50:00.123456; at 12:05:00.124 it is 900.000544 s old.
-  const exact = rpoOf(() => {}, at("2026-09-24T12:05:00.124Z"));
-  assert.equal(exact.measured_seconds, 900);
-  assert.equal(exact.state, "pass");
-  const over = rpoOf(() => {}, at("2026-09-24T12:05:01.124Z"));
-  assert.equal(over.state, "fail");
-  assert.deepEqual(over.failures, ["exposure_exceeds_rpo"]);
-  // Measured from the write, not from T: a T near now proves nothing newer than the probe.
-  assert.equal(rpoOf(() => {}).measured_seconds, 599);
-});
-
-test("item 5 (F6/Q7): the point-in-time proof fails on each broken link, one at a time", () => {
-  const cases = [
-    [b => { b.positive_on_branch = null; }, "positive_probe_absent_on_branch"],
-    [b => { b.positive_on_branch.nonce = "c".repeat(32); }, "positive_probe_absent_on_branch"],
-    [b => { b.positive_on_branch.written_at = "2026-09-24T11:50:00.123457Z"; }, "positive_probe_absent_on_branch"],
-    [b => { b.positive_on_branch.id = NEGATIVE.id; }, "positive_probe_absent_on_branch"],
-    [b => { b.negative_present_on_branch = true; }, "negative_control_present_on_branch"],
-    [b => { b.positive_probe.written_at = "2026-09-24T11:57:00.000001Z"; b.positive_on_branch.written_at = b.positive_probe.written_at; b.production_readback.positive.written_at = b.positive_probe.written_at; }, "positive_probe_not_before_point"],
-    [b => { b.negative_probe.written_at = "2026-09-24T11:58:04.999999Z"; b.production_readback.negative.written_at = b.negative_probe.written_at; }, "negative_probe_not_after_point"],
-    [b => { b.proof_target_kind = "production"; }, "proof_target_not_disposable"],
-    [b => { b.branch_id = b.production_branch_id; }, "proof_target_is_production"],
-    [b => { b.branch_parent_id = "br-some-other-branch"; }, "branch_parent_not_production"],
-    [b => { b.branch_parent_timestamp = "2026-09-24T11:58:00.000001Z"; }, "branch_parent_timestamp_outside_probe_window"],
-    [b => { b.branch_parent_timestamp = "2026-09-24T11:50:00.123455Z"; }, "branch_parent_timestamp_outside_probe_window"],
-    [b => { b.branch_parent_lsn = ""; }, "branch_parent_lsn_missing"],
-    [b => { b.branch_core_table_rows["public.party"] = 0; }, "core_table_empty_on_branch"],
-    [b => { b.production_readback.positive = null; }, "probe_not_recomputed_from_production"],
-    [b => { b.production_readback.negative.nonce = "d".repeat(32); }, "probe_not_recomputed_from_production"],
-    [b => { b.production_readback.read_at = "2026-09-24T11:44:59Z"; }, "production_readback_stale"],
-    [b => { b.production_readback.read_at = "2026-09-24T12:00:01Z"; }, "production_readback_stale"],
-    [b => { b.branch_operations.create = null; }, "branch_create_not_confirmed"],
-    [b => { b.branch_operations.delete = null; }, "branch_delete_not_confirmed"],
-    [b => { b.history_retention_seconds = 300; }, "retention_does_not_cover_exposure"],
-    [b => { b.retention_read_at = "2026-09-24T11:44:59Z"; }, "retention_readback_stale"],
-    [b => { b.retention_read_at = "2026-09-24T12:00:01Z"; }, "retention_readback_stale"],
-  ];
-  for (const [mutate, failure] of cases) {
-    const c = rpoOf(mutate);
-    assert.equal(c.state, "fail", failure);
-    assert.deepEqual(c.failures, [failure], `${failure}: ${c.failures}`);
-  }
-  // Boundaries that pass: probe exactly 60 s before T, negative exactly 5 s after,
-  // retention exactly the exposure, readbacks exactly 15 minutes old or read at now.
-  assert.equal(rpoOf(b => {
-    for (const p of [b.positive_probe, b.positive_on_branch, b.production_readback.positive]) p.written_at = "2026-09-24T11:57:00.000000Z";
-  }).state, "pass");
-  assert.equal(rpoOf(b => { b.negative_probe.written_at = b.production_readback.negative.written_at = "2026-09-24T11:58:05.000000Z"; }).state, "pass");
-  assert.equal(rpoOf(b => { b.history_retention_seconds = 599; }).state, "pass");
-  assert.equal(rpoOf(b => { b.branch_parent_timestamp = "2026-09-24T11:58:00Z"; }).state, "pass");
-  assert.equal(rpoOf(b => { b.branch_parent_timestamp = POSITIVE.written_at; }).state, "pass");
-  assert.equal(rpoOf(b => { b.production_readback.read_at = "2026-09-24T11:45:00Z"; b.retention_read_at = "2026-09-24T12:00:00Z"; }).state, "pass");
-  // A point in the future of the clock is refused as such.
-  const future = rpoOf(() => {}, at("2026-09-24T11:57:59Z"));
-  assert.ok(future.failures.includes("restorable_point_after_observation"));
-});
-
-test("item 5 (G4): the RPO proof counts only as `pitr-restore-proof.py prove`'s fresh output", () => {
-  const judge = block => evaluateRecoveryMatrix({ cells: { record_layer_rpo: block } }, NOW).cells.record_layer_rpo;
-  const verified = stamp(pitrProof(), "record_layer_rpo", NOW);
-  assert.equal(judge(verified).state, "pass");
-  const edited = clone(verified); edited.branch_operations.delete = "op-delete-10";
-  assert.deepEqual(judge(edited).failures, ["evidence_not_reverified"]);
-  const stale = stamp(pitrProof(), "record_layer_rpo", NOW, NOW.now_ms - (V5_REVERIFY_MAX_AGE_SECONDS + 1) * 1000);
-  assert.deepEqual(judge(stale).failures, ["evidence_not_reverified"]);
-  const other = clone(verified); other.verification.verifier = V5_EVIDENCE_VERIFIERS.outbound_census;
-  assert.deepEqual(judge(other).failures, ["evidence_not_reverified"]);
-  const { verification: _v, ...bare } = verified;
-  assert.throws(() => judge(bare), e => e.code === "missing_field");
-});
-
-test("item 5: the RPO block is closed and typed", () => {
-  const throwsWith = (mutate, code) => assert.throws(() => rpoOf(mutate), e => e.code === code, code);
-  throwsWith(b => { b.rpo_max_seconds = 86400; }, "unknown_field");
-  throwsWith(b => { delete b.negative_probe; }, "missing_field");
-  throwsWith(b => { b.negative_present_on_branch = "no"; }, "invalid_shape");
-  throwsWith(b => { b.branch_deleted_confirmed = true; }, "unknown_field");
-  throwsWith(b => { b.branch_operations = { create: "op-1" }; }, "missing_field");
-  throwsWith(b => { b.branch_operations.delete = 7; }, "invalid_identifier");
-  throwsWith(b => { b.history_retention_seconds = -1; }, "invalid_shape");
-  throwsWith(b => { b.history_retention_seconds = 1.5; }, "invalid_shape");
-  throwsWith(b => { b.branch_core_table_rows = {}; }, "missing_field");
-  throwsWith(b => { b.branch_core_table_rows["ops.run"] = -1; }, "invalid_shape");
-  throwsWith(b => { b.branch_parent_lsn = "latest"; }, "invalid_shape");
-  throwsWith(b => { b.positive_probe.nonce = "short"; }, "invalid_identifier");
-  throwsWith(b => { b.positive_probe.id = "not-a-uuid"; }, "invalid_identifier");
-  throwsWith(b => { b.source = "configured_retention_window"; }, "unknown_state");
+  assert.equal(later.cells.independent_daily_restorable_copy.state, "fail");
+  assert.ok(later.cells.independent_daily_restorable_copy.failures.includes("newest_copy_too_old"));
 });
 
 test("item 5: cells are independent — a missing, null or failing cell changes no other cell", () => {
@@ -509,13 +370,13 @@ test("item 5: cells are independent — a missing, null or failing cell changes 
   const m1 = M(noAdapter, NOW);
   assert.equal(m1.cells.adapter_rto.state, "no_evidence");
   assert.equal(m1.decision, "fail");
-  assert.deepEqual(m1.not_passed, ["adapter_rto"]);
+  assert.deepEqual(m1.not_passed, ["record_layer_rpo", "adapter_rto"]);
   for (const c of ["record_layer_rpo", "independent_daily_restorable_copy", "core_rto"]) assert.deepEqual(m1.cells[c], base.cells[c]);
 
   const nullCore = matrix(); nullCore.cells.core_rto = null;
   assert.equal(M(nullCore, NOW).cells.core_rto.state, "no_evidence");
 
-  const badRpo = matrix(); badRpo.cells.record_layer_rpo.negative_present_on_branch = true;
+  const badRpo = matrix(); badRpo.cells.record_layer_rpo = { source: "pitr_branch_proof" };
   const m2 = M(badRpo, NOW);
   assert.deepEqual(m2.not_passed, ["record_layer_rpo"]);
   for (const c of ["independent_daily_restorable_copy", "core_rto", "adapter_rto"]) assert.deepEqual(m2.cells[c], base.cells[c]);
@@ -639,7 +500,7 @@ test("item 5: one failing adapter fails the cell even beside an indeterminate on
   long.cells.adapter_rto.recoveries.push({ adapter_id: "drive", outage_started_at: "2026-09-19T17:00:00Z", recovered_at: "2026-09-22T09:00:00Z" });
   const m = M(long, NOW);
   assert.equal(m.cells.adapter_rto.state, "indeterminate");
-  assert.deepEqual(m.not_passed, ["adapter_rto"]);
+  assert.deepEqual(m.not_passed, ["record_layer_rpo", "adapter_rto"]);
   assert.equal(m.decision, "fail");
   long.cells.adapter_rto.recoveries.push({ adapter_id: "mail", outage_started_at: "2026-09-20T07:00:00Z", recovered_at: "2026-09-20T06:00:00Z" });
   const mixed = M(long, NOW).cells.adapter_rto;
@@ -857,7 +718,7 @@ test("policy: the digest is sha256 of the canonical bytes and closes exactly the
   assert.equal(pre.core_rto_max_seconds, 14400);
   assert.equal(pre.no_evidence_is_pass, false);
   assert.equal(pre.claims_full_offline_capability, false);
-  assert.deepEqual(pre.recovery_point_sources, ["pitr_branch_proof"]);
+  assert.deepEqual(pre.recovery_point_sources, []);
   assert.equal(pre.clock_source, "caller_clock_option_never_evidence");
   assert.equal(pre.outbound_settle_window_seconds, 900);
   assert.equal(R(clone(receipt())).policy_digest, v5RecoveryMatrixPolicyDigest());
@@ -868,70 +729,26 @@ test("policy: the digest is sha256 of the canonical bytes and closes exactly the
 const CLI = fileURLToPath(new URL("../bin/recovery-matrix-evaluate.mjs", import.meta.url));
 const cli = (args, input) => spawnSync(process.execPath, [CLI, ...args], { input, encoding: "utf8" });
 
-/** A proof whose instants are relative to the real current time, as verify produces it. */
-function liveProof() {
-  const now = Date.now();
-  const iso = (offsetSeconds, micros = false) => {
-    const s = new Date(Math.floor(now / 1000) * 1000 + offsetSeconds * 1000).toISOString();
-    return micros ? s.replace(".000Z", ".000000Z") : s.replace(".000Z", "Z");
-  };
-  const b = pitrProof();
-  b.requested_parent_timestamp = b.branch_parent_timestamp = iso(-120);
-  for (const p of [b.positive_probe, b.positive_on_branch, b.production_readback.positive]) p.written_at = iso(-240, true);
-  for (const p of [b.negative_probe, b.production_readback.negative]) p.written_at = iso(-100, true);
-  b.production_readback.read_at = iso(-10);
-  b.retention_read_at = iso(-30);
-  return stamp(b, "record_layer_rpo", { now_ms: now });
-}
-
-test("CLI rpo: judges stdin evidence at the real current time; a supplied observed_at is refused", () => {
-  const ok = cli(["rpo", "-"], JSON.stringify(liveProof()));
-  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
-  const out = JSON.parse(ok.stdout);
-  assert.equal(out.record_layer_rpo.state, "pass");
-  assert.ok(Math.abs(Date.parse(out.observed_at) - Date.now()) < 60000);
-  assert.ok(out.record_layer_rpo.measured_seconds >= 240 && out.record_layer_rpo.measured_seconds < 300);
-
-  const stamped = { ...liveProof(), observed_at: new Date().toISOString() };
-  const refused = cli(["rpo", "-"], JSON.stringify(stamped));
-  assert.equal(refused.status, 2);
-  assert.match(refused.stderr, /unknown_field/);
-
-  // The fixed-clock fixture, run today, is long stale.
-  const stale = cli(["rpo", "-"], JSON.stringify(stamp(pitrProof(), "record_layer_rpo", { now_ms: Date.now() })));
-  assert.equal(stale.status, 1);
-  assert.ok(JSON.parse(stale.stdout).record_layer_rpo.failures.includes("exposure_exceeds_rpo"));
-});
-
-test("CLI rpo: the clock is read after the evidence, so a slow `verify | evaluate` producer is not judged from the past", async () => {
-  const { spawn } = await import("node:child_process");
-  const child = spawn(process.execPath, [CLI, "rpo", "-"]);
-  let out = "";
-  child.stdout.on("data", d => { out += d; });
-  await new Promise(r => setTimeout(r, 1500));
-  const b = liveProof();
-  // read "just now", 1.5 s after the evaluator started: whole seconds, never ahead of the real clock
-  b.production_readback.read_at = b.retention_read_at = new Date(Math.floor(Date.now() / 1000) * 1000).toISOString().replace(".000Z", "Z");
-  child.stdin.end(JSON.stringify(stamp(b, "record_layer_rpo", { now_ms: Date.now() })));
-  const code = await new Promise(r => child.on("close", r));
-  assert.equal(code, 0, out);
-  assert.deepEqual(JSON.parse(out).record_layer_rpo.failures, []);
+test("CLI rpo reports unavailable evidence with a failing exit status", () => {
+  const result = cli(["rpo", "-"], JSON.stringify({ source: "pitr_branch_proof" }));
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).record_layer_rpo, { state: "no_evidence", reason: "evidence_producer_unavailable" });
 });
 
 test("CLI matrix: supplies the pinned calendar, uses the real clock, refuses observed_at", () => {
   const evidence = {
     cells: {
-      record_layer_rpo: liveProof(),
+      record_layer_rpo: null,
       adapter_rto: { recoveries: [{ adapter_id: "crm", outage_started_at: "2026-09-18T22:00:00Z", recovered_at: "2026-09-21T21:00:00Z" }] },
     },
   };
   const r = cli(["matrix", "-"], JSON.stringify(evidence));
   assert.equal(r.status, 1, r.stderr); // two cells have no evidence
   const out = JSON.parse(r.stdout);
-  assert.equal(out.cells.record_layer_rpo.state, "pass");
+  assert.equal(out.cells.record_layer_rpo.state, "no_evidence");
   assert.equal(out.cells.adapter_rto.state, "pass");
   assert.equal(out.cells.adapter_rto.business_calendar_id, "us-federal-weekdays");
-  assert.deepEqual(out.not_passed, ["independent_daily_restorable_copy", "core_rto"]);
+  assert.deepEqual(out.not_passed, ["record_layer_rpo", "independent_daily_restorable_copy", "core_rto"]);
 
   const stamped = cli(["matrix", "-"], JSON.stringify({ ...evidence, observed_at: "2026-09-24T12:00:00Z" }));
   assert.equal(stamped.status, 2);
@@ -952,4 +769,13 @@ test("CLI: restore, outbound, degraded and policy exit 0/1/2 by verdict", () => 
   assert.equal(cli(["degraded", "edge_unavailable"]).status, 0);
   assert.equal(JSON.parse(cli(["policy"]).stdout).policy_digest, v5RecoveryMatrixPolicyDigest());
   assert.equal(cli(["bogus"]).status, 2);
+});
+
+test("RPO evidence is unavailable after the standalone producer is retired", () => {
+  for (const block of [null, {}, { source: "pitr_branch_proof" }, { history_retention_seconds: 604800 }]) {
+    const result = evaluateRecoveryMatrix({ cells: { record_layer_rpo: block } }, NOW);
+    assert.equal(result.cells.record_layer_rpo.state, "no_evidence");
+    assert.ok(result.not_passed.includes("record_layer_rpo"));
+    if (block !== null) assert.equal(result.cells.record_layer_rpo.reason, "evidence_producer_unavailable");
+  }
 });

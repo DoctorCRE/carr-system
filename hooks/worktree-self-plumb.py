@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """worktree-self-plumb.py — SessionStart self-plumb for a carr-system
 worktree Claude Code (or Codex, or a bare `git worktree add`) created without
-ever calling bin/worktree.sh — plus the orphan-worktree reaper (see below).
+ever calling bin/worktree.sh.
 
 THE LIVE FAILURE THIS CLOSES. A session landed in a worktree created by
 Claude Code's own native isolation (a bare `git worktree add` under
@@ -50,35 +50,19 @@ bin/worktree.sh's own header gives for CREATE PATH FRESHNESS and --sweep:
 the fix has to live on a path every case actually walks, not a path only the
 already-correct case walks.
 
-THE ORPHAN REAPER. The existing --reap door now uses lib/branch_retirement.py
-for its census, ordered classification and actions. --fleet covers the three
-authorized repositories. The watchdog launches it hourly and registers its
-process and exit record. SessionStart only plumbs the invoking worktree.
-
-Live processes, fresh writes, locked paths and uncertain ownership preserve a
-worktree. Retired trees move to _to_delete with a manifest and keep their local
-branch. Only merged remote branches can be deleted, with a pre-push check of
-the advertised tip. A superseded PR closes only after its merged successor is
-read back. Dry runs and action receipts go to out/orch. The shared maintenance
-lock remains out/worktree-reap.lock.
-
 FAIL-SOFT, ALWAYS. A boot-time convenience must never fail or block a
 session: any error anywhere in here is swallowed and the hook prints
 nothing, same discipline as hooks/session-brief.py's own nightly/loose-work
 lines.
 
-Fixtures: ops/worktree-self-plumb-selftest.py (boot policy) and
-ops/branch-janitor-selftest.py (retirement against isolated git state).
+Fixtures: ops/worktree-self-plumb-selftest.py.
 """
-import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from lib.hook_runtime import decision, run, Event
-from lib.cleanup_budget import BudgetExhausted, check, walk
-import time
+from lib.hook_runtime import decision, run
 
 # __file__ resolves through the absolute canonical path this hook is always
 # invoked by ("${HOME}/carr-system/hooks/worktree-self-plumb.py" in
@@ -174,166 +158,6 @@ def canonical_root(repo):
 
 # ── orphan reaper ──────────────────────────────────────────────────────────
 
-def worktree_entries(repo):
-    """`git worktree list --porcelain` as dicts; [] on any failure."""
-    out = run_git(["worktree", "list", "--porcelain"], repo)
-    if out is None:
-        return []
-    entries, cur = [], None
-    for ln in out.splitlines():
-        if ln.startswith("worktree "):
-            if cur:
-                entries.append(cur)
-            cur = {"path": ln[len("worktree "):].strip()}
-        elif cur is None:
-            continue
-        elif ln.startswith("HEAD "):
-            cur["head"] = ln[len("HEAD "):].strip()
-        elif ln.startswith("branch refs/heads/"):
-            cur["branch"] = ln[len("branch refs/heads/"):].strip()
-        elif ln == "bare":
-            cur["bare"] = True
-        elif ln == "detached":
-            cur["detached"] = True
-        elif ln == "locked" or ln.startswith("locked "):
-            cur["locked"] = True
-        elif ln == "prunable" or ln.startswith("prunable "):
-            cur["prunable"] = True
-    if cur:
-        entries.append(cur)
-    return entries
-
-
-def index_gitdir(wt):
-    """The worktree's private gitdir (…/.git/worktrees/<id>), or None."""
-    dotgit = os.path.join(wt, ".git")
-    try:
-        if os.path.isdir(dotgit):
-            return dotgit                      # a main checkout, not a worktree
-        with open(dotgit) as fh:
-            first = fh.read().strip()
-        if not first.startswith("gitdir:"):
-            return None
-        gitdir = first.split(":", 1)[1].strip()
-        if not os.path.isabs(gitdir):
-            gitdir = os.path.normpath(os.path.join(wt, gitdir))
-        return gitdir
-    except Exception:
-        return None
-
-
-def index_age_s(wt):
-    """Seconds since the worktree's .git index moved; None when unknowable.
-
-    The index is the one file every git operation a live session performs
-    keeps warm, and it lives OUTSIDE the working tree — a session cannot
-    fake it old, and reaping cannot be dodged by it. This is the 6h
-    liveness signal the 2026-08-18 sweep used.
-    """
-    gitdir = index_gitdir(wt)
-    if not gitdir:
-        return None
-    try:
-        idx = os.path.join(gitdir, "index")
-        st = os.stat(idx) if os.path.exists(idx) else os.stat(gitdir)
-        return time.time() - st.st_mtime
-    except Exception:
-        return None
-
-
-# A build seat can write files for hours without running a single git
-# command, which leaves .git/index cold while the worktree is very much
-# alive. That is exactly how defect a4abb972 happened: an automated sweep
-# removed a paused build's in-flight evidence because the only liveness
-# signal it had was a file the build never touched. So idleness is judged
-# on BOTH signals and the youngest one wins.
-TREE_SCAN_MAX_ENTRIES = 20000  # past this the tree is too big to judge cheaply
-
-
-def tree_age_s(wt, *, deadline=None):
-    """Seconds since ANY file inside the worktree moved; None when unknowable.
-
-    Complements index_age_s, which only sees git operations. This sees the
-    writes themselves — the signal a build seat actually produces.
-
-    Symlinks are never followed: .venv, out and mcp-server/node_modules are
-    plumbing links into the canonical repo, and walking them would read
-    canonical's activity as this worktree's and keep every worktree forever.
-    A tree too large to scan, or any error, returns None, which classify()
-    reads as "do not judge it" — the keep direction, same as every other
-    uncertain answer here.
-    """
-    newest = 0.0
-    seen = 0
-    skip = {".git", "node_modules", ".venv", "__pycache__"}
-    try:
-        traversal = os.walk(wt, followlinks=False) if deadline is None else walk(wt, deadline)
-        for root, dirs, files in traversal:
-            dirs[:] = [d for d in dirs if d not in skip]
-            for name in files + dirs:
-                check(deadline)
-                seen += 1
-                if seen > TREE_SCAN_MAX_ENTRIES:
-                    return None
-                fp = os.path.join(root, name)
-                try:
-                    st = os.lstat(fp)
-                except OSError:
-                    continue
-                if st.st_mtime > newest:
-                    newest = st.st_mtime
-    except BudgetExhausted:
-        raise
-    except Exception:
-        return None
-    if not newest:
-        return None
-    return time.time() - newest
-
-
-def mark_alive(wt):
-    """Touch this session's own index so the 6h rule reads it as live.
-
-    A RESUMED session can land in a worktree whose index is days old, and
-    nothing guarantees its first git operation beats another boot's reaper.
-    Touching at SessionStart makes the liveness rule true by construction
-    for every session this hook boots.
-    """
-    try:
-        gitdir = index_gitdir(wt)
-        if gitdir:
-            idx = os.path.join(gitdir, "index")
-            os.utime(idx if os.path.exists(idx) else gitdir, None)
-    except Exception:
-        pass
-
-
-def fleet_reaper(root, **kwargs):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-    from branch_retirement import FleetReaper
-    return FleetReaper(root, sys.modules[__name__], **kwargs)
-
-
-def reap_main(argv):
-    def value(flag):
-        return argv[argv.index(flag) + 1] if flag in argv else None
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-    from branch_retirement import health, repository_roots
-    roots = repository_roots()
-    canon = Path(canonical_root(value("--repo") or REPO))
-    if "--fleet" in argv and canon.resolve() != roots["jbookout/carr-system"].resolve():
-        print("fleet retirement requires the canonical CARR repository")
-        return 1
-    if "--health-row" in argv:
-        line, failed = health(canon)
-        print(line)
-        return int(failed)
-    roots = roots if "--fleet" in argv else {"jbookout/carr-system": canon}
-    report = fleet_reaper(canon).run(roots, execute="--dry-run" not in argv,
-                                    skip=[value("--skip")] if value("--skip") else [])
-    print(json.dumps({k: v for k, v in report.items() if k != "rows"}, sort_keys=True))
-    return int(bool(report["errors"]))
-
 
 @decision(failure="raise")
 def decide(payload):
@@ -358,7 +182,6 @@ def decide(payload):
             # carr-system checkout. Whether it is a REGISTERED worktree of THIS
             # canonical tree is still --plumb's own guard to enforce; if it
             # refuses, this hook just prints nothing (see except below).
-            mark_alive(toplevel)
             missing = [name for name in PLUMB_LINKS
                        if not os.path.islink(os.path.join(toplevel, name))
                        and os.path.isdir(os.path.join(canon, name))]
@@ -408,8 +231,6 @@ def main():
                 return 0
         except ImportError:
             pass  # an unavailable optional probe retains ordinary processing
-    if "--reap" in sys.argv[1:]:
-        return reap_main(sys.argv[1:])
     return run(decide, invalid_event={})
 
 

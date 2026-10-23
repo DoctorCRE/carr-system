@@ -4,10 +4,12 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 /* The installer binds these paths into the executable granted Full Disk Access. */
@@ -16,6 +18,9 @@
 #endif
 #ifndef OUTLOOK_WORK_ROOT
 #error OUTLOOK_WORK_ROOT must name the intake output directory
+#endif
+#ifndef OUTLOOK_REPO
+#error OUTLOOK_REPO must name the checkout whose intake job this binary starts
 #endif
 
 static void fail(void) {
@@ -146,8 +151,26 @@ static void copy_sidecars(int profile, int work) {
     close(target);
 }
 
+extern char **environ;
+
+/* launchd starts this granted binary with "--run-intake", so macOS charges the
+   whole job's file access to it (a grant on a child process is ignored). The
+   command is fixed here; the grant never extends to anything else. */
+static int run_intake(void) {
+    char *command[] = {"/bin/zsh", OUTLOOK_REPO "/bin/run-scheduled.sh", "outlook-intake",
+                       "outlook.intake", OUTLOOK_REPO "/.venv/bin/python", "-c",
+                       "from lib.outlook_intake import main; raise SystemExit(main())", NULL};
+    pid_t child;
+    errno = posix_spawn(&child, command[0], NULL, NULL, command, environ);
+    if (errno) fail();
+    int status;
+    while (waitpid(child, &status, 0) < 0)
+        if (errno != EINTR) fail();
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+}
+
 int main(int argc, char **argv) {
-    (void)argv;
+    if (argc == 2 && strcmp(argv[1], "--run-intake") == 0) return run_intake();
     require(argc == 1);
     umask(0077);
     char cwd[PATH_MAX];

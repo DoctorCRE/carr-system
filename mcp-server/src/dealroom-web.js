@@ -21,8 +21,6 @@ import { COMMAND_CENTER_PATH } from "./workspace-command-center.js";
 import { neon } from "@neondatabase/serverless";
 import { readWorkInventoryCensus, WORK_INVENTORY_PATH } from "./work-inventory-census.v5.js";
 import { ATLAS_GRAPH_PATH, readAtlasInventoryGraph } from "./atlas-inventory-graph.v5.js";
-import { PROGRAM_CONTROLLER_PATH, readProgramControllerCensus } from "./program-controller-census.v5.js";
-import { METERING_PATH, readMeteringProjection } from "./cost-ledger-projection.v5.js";
 import {
   BUSINESS_ASSET_PATH, CLIENTS_ROUTE, VENDORS_ROUTE,
   createWorkspaceBusinessReader, isBusinessApiPath,
@@ -902,11 +900,7 @@ async function jevDealReadingResponse(request, env, session, dependencies) {
     });
     const record = await reader(args.deal);
     const read = dependencies.jevDealRead || readDealWithJev;
-    return json(await read(record, { askJev: env.TYPESAFE_API_KEY ? request =>
-      callTool(env, session.actor, "ask-jev", {
-        idempotency_key: crypto.randomUUID(), session_id: `worker-deal-reading-${crypto.randomUUID()}`,
-        purpose: "call", ...request,
-      }, "full", "app_runtime") : undefined }));
+    return json(await read(record, { apiKey: env.TYPESAFE_API_KEY }));
   } catch {
     return json({ error: "DEPENDENCY_UNAVAILABLE" }, 503);
   }
@@ -957,114 +951,6 @@ async function atlasGraphResponse(request, env, session, dependencies) {
       include_retired: url.searchParams.get("include_retired"),
       limit: url.searchParams.get("limit"),
       cursor: url.searchParams.get("cursor"),
-    });
-    if (request.method === "HEAD") return new Response(null, { status: 200, headers: JSON_HEADERS });
-    return json(payload);
-  } catch (error) {
-    const code = ["AUTHORIZATION_REFUSED", "TENANT_SCOPE_REFUSED", "FRESHNESS_UNKNOWN", "DEPENDENCY_UNAVAILABLE", "INTERNAL_ERROR"].includes(error?.code) ? error.code : "INTERNAL_ERROR";
-    const status = code === "AUTHORIZATION_REFUSED" ? 403 : code === "TENANT_SCOPE_REFUSED" ? 404 : code === "FRESHNESS_UNKNOWN" ? 409 : code === "DEPENDENCY_UNAVAILABLE" ? 503 : 500;
-    return json({ error: code }, status);
-  }
-}
-
-// Default metering reader. Same client factory as the census routes above --
-// neon() over DATABASE_URL_READER, wrapped so .query() returns { rows } -- so
-// this route carries no database knowledge of its own and no write credential
-// can reach it. The WRITER path of the cost ledger is not mounted here at all.
-async function defaultMeteringReader(env, actor, correlationId, params = {}) {
-  const sql = neon(env.DATABASE_URL_READER);
-  const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
-  return readMeteringProjection({
-    client, actor, correlationId: correlationId || env.CORRELATION_ID,
-    tree_ref: params.tree_ref, period: params.period,
-  });
-}
-
-/**
- * GET /api/v1/metering -- the WR-000111 producer cost projection.
- *
- * Mounted exactly like the Atlas graph: same feature flag, same typed
- * error-to-status map, same dependency-injected reader. The two query
- * parameters are handed to the reader unparsed -- the reader owns bounding and
- * refusal so the semantics keep ONE definition.
- */
-async function meteringResponse(request, env, session, dependencies) {
-  if (!workspaceCommandCenterEnabled(env)) return json({ error: "not_found" }, 404);
-  const url = new URL(request.url);
-  const allowed = new Set(["tree_ref", "period"]);
-  if ([...url.searchParams.keys()].some((key) => !allowed.has(key))) {
-    return json({ error: "AUTHORIZATION_REFUSED" }, 403);
-  }
-  if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: { allow: "GET, HEAD, OPTIONS", "cache-control": "no-store" } });
-  }
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    return new Response(JSON.stringify({ error: "METHOD_NOT_ALLOWED" }), {
-      status: 405, headers: { ...JSON_HEADERS, allow: "GET, HEAD, OPTIONS" },
-    });
-  }
-  const reader = typeof dependencies.meteringReader === "function"
-    ? dependencies.meteringReader : defaultMeteringReader;
-  try {
-    const payload = await reader(env, session.actor, env.CORRELATION_ID, {
-      tree_ref: url.searchParams.get("tree_ref"),
-      period: url.searchParams.get("period"),
-    });
-    if (request.method === "HEAD") return new Response(null, { status: 200, headers: JSON_HEADERS });
-    return json(payload);
-  } catch (error) {
-    const code = ["AUTHORIZATION_REFUSED", "TENANT_SCOPE_REFUSED", "FRESHNESS_UNKNOWN", "DEPENDENCY_UNAVAILABLE", "INTERNAL_ERROR"].includes(error?.code) ? error.code : "INTERNAL_ERROR";
-    const status = code === "AUTHORIZATION_REFUSED" ? 403 : code === "TENANT_SCOPE_REFUSED" ? 404 : code === "FRESHNESS_UNKNOWN" ? 409 : code === "DEPENDENCY_UNAVAILABLE" ? 503 : 500;
-    return json({ error: code }, status);
-  }
-}
-
-// Default program-controller reader. Same client factory as the two census
-// routes above — neon() over DATABASE_URL_READER, wrapped so .query() returns
-// { rows } — so this route carries no database knowledge of its own and no
-// write credential can reach it.
-async function defaultProgramControllerReader(env, actor, correlationId, params = {}) {
-  const sql = neon(env.DATABASE_URL_READER);
-  const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
-  return readProgramControllerCensus({
-    client, actor, correlationId: correlationId || env.CORRELATION_ID,
-    program_ref: params.program_ref, slice_ref: params.slice_ref, release_ref: params.release_ref,
-  });
-}
-
-/**
- * GET /api/v1/program-controller — the V5-F02 program-controller census.
- *
- * Mounted exactly like the atlas graph: same feature flag, same typed
- * error-to-status map, same dependency-injected reader.
- *
- * THE ADMITTED PARAMETER SET IS EXACTLY THREE, and `auto_release_requested` is
- * deliberately absent. It is a stated invariant in the census reader, not a
- * store and not a caller input, so asking for it here is an unknown parameter
- * and refuses 403 — a gated party may not ask for its own auto release.
- */
-async function programControllerResponse(request, env, session, dependencies) {
-  if (!workspaceCommandCenterEnabled(env)) return json({ error: "not_found" }, 404);
-  const url = new URL(request.url);
-  const allowed = new Set(["program_ref", "slice_ref", "release_ref"]);
-  if ([...url.searchParams.keys()].some((key) => !allowed.has(key))) {
-    return json({ error: "AUTHORIZATION_REFUSED" }, 403);
-  }
-  if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: { allow: "GET, HEAD, OPTIONS", "cache-control": "no-store" } });
-  }
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    return new Response(JSON.stringify({ error: "METHOD_NOT_ALLOWED" }), {
-      status: 405, headers: { ...JSON_HEADERS, allow: "GET, HEAD, OPTIONS" },
-    });
-  }
-  const reader = typeof dependencies.programControllerReader === "function"
-    ? dependencies.programControllerReader : defaultProgramControllerReader;
-  try {
-    const payload = await reader(env, session.actor, env.CORRELATION_ID, {
-      program_ref: url.searchParams.get("program_ref"),
-      slice_ref: url.searchParams.get("slice_ref"),
-      release_ref: url.searchParams.get("release_ref"),
     });
     if (request.method === "HEAD") return new Response(null, { status: 200, headers: JSON_HEADERS });
     return json(payload);
@@ -1188,12 +1074,10 @@ async function handleRequest(request, env, ctx, dependencies) {
       if (url.pathname.startsWith("/api/v1/") && url.pathname !== COMMAND_CENTER_PATH &&
           url.pathname !== JEV_DEAL_READING_PATH &&
           url.pathname !== WORK_INVENTORY_PATH && url.pathname !== ATLAS_GRAPH_PATH &&
-          url.pathname !== PROGRAM_CONTROLLER_PATH && url.pathname !== METERING_PATH &&
           !isBusinessApiPath(url.pathname)) return json({ error: "not_found" }, 404);
       // Home, Clients and Vendors are one workspace surface and share its flag.
       if ((url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
-           url.pathname === ATLAS_GRAPH_PATH || url.pathname === PROGRAM_CONTROLLER_PATH ||
-           url.pathname === METERING_PATH ||
+           url.pathname === ATLAS_GRAPH_PATH ||
            isBusinessApiPath(url.pathname) ||
            BUSINESS_VIEW_PATHS.has(url.pathname) || url.pathname === BUSINESS_ASSET_PATH ||
            APP_DOCUMENT_PATHS.has(url.pathname)) &&
@@ -1217,8 +1101,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       if (!session) {
         if (url.pathname === "/auth/session") return json({ error: "unauthorized", state: "sign_in_required" }, 401);
         if (url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
-            url.pathname === ATLAS_GRAPH_PATH || url.pathname === PROGRAM_CONTROLLER_PATH ||
-            url.pathname === METERING_PATH ||
+            url.pathname === ATLAS_GRAPH_PATH ||
             isBusinessApiPath(url.pathname)) {
           return json({ error: "AUTHENTICATION_REQUIRED" }, 401);
         }
@@ -1267,10 +1150,6 @@ async function handleRequest(request, env, ctx, dependencies) {
         response = await workInventoryResponse(request, env, session, dependencies);
       } else if (url.pathname === ATLAS_GRAPH_PATH) {
         response = await atlasGraphResponse(request, env, session, dependencies);
-      } else if (url.pathname === PROGRAM_CONTROLLER_PATH) {
-        response = await programControllerResponse(request, env, session, dependencies);
-      } else if (url.pathname === METERING_PATH) {
-        response = await meteringResponse(request, env, session, dependencies);
       } else if (isBusinessApiPath(url.pathname)) {
         response = await businessResponse(request, env, session, dependencies);
       } else if (url.pathname.startsWith("/api/v1/")) {

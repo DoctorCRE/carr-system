@@ -349,60 +349,10 @@ with tempfile.TemporaryDirectory(prefix="drive-reader-slice2-") as td:
           "NONCANONICAL Drive projection" in p.stderr and "local projection drill" in p.stderr,
           p.stdout + p.stderr)
 
-    for script in ("tools/check.sh", "tools/smoke.sh"):
-        p = run("zsh", script, "--recovery")
-        check(f"{script} recovery refuses a missing reason", p.returncode == 2 and
-              "nonblank --reason" in p.stderr, p.stdout + p.stderr)
-
-    p = run(str(PY), "tools/report-card.py", "--validate", "--recovery",
-            "--reason", "local projection drill", "--vault", str(vault))
-    check("report card recovery is reasoned and labeled", p.returncode == 0 and
-          "NONCANONICAL Drive projections" in p.stderr, p.stdout + p.stderr)
-
-    cache = tmp / "report-cache"
-    cache.mkdir()
-    (cache / "health.txt").write_text(
-        "Façade check - canonical receipts\n"
-        "  CANONICAL_FINDING fixture - one\n"
-        "Export register - canonical export_run receipts\n"
-        "  OK 1 registered target(s), all receipted inside 26h\n"
-        "  OK stale-sections       0 past review_after\n")
-    (cache / "check.txt").write_text("== Code integrity ==\n")
-    canonical_source = {"mode": "canonical", "contract": "canonical-record-control-v1",
-                        "vault": None}
-    (cache / "evidence-source.json").write_text(json.dumps(
-        {"source": canonical_source, "captured_at": datetime.now().timestamp()}))
-    p = run(str(PY), "tools/report-card.py", "--run", "--skip-evidence",
-            "--evidence-dir", str(cache))
-    check("normal report card executes versioned canonical metrics",
-          p.returncode == 0 and "canonical_health_findings_v1" in p.stdout and
-          "canonical_repo_worktree_drift_v1" in p.stdout, p.stdout + p.stderr)
-    check("normal report card refuses Drive-era metric semantics",
-          "facade_stale_rows" in p.stdout and
-          "code_drift_rows" in p.stdout and
-          "rules_live_agreement" not in p.stdout and
-          p.stdout.count("source_mode=recovery; mixed semantics refused") == 2,
-          p.stdout + p.stderr)
-
-    vault_a = tmp / "vault-a"
-    vault_b = tmp / "vault-b"
-    vault_a.mkdir(); vault_b.mkdir()
-    recovery_source_a = {"mode": "recovery", "contract": "drive-projection-recovery-v1",
-                         "vault": str(vault_a.resolve())}
-    (cache / "evidence-source.json").write_text(json.dumps(
-        {"source": recovery_source_a, "captured_at": datetime.now().timestamp()}))
-    p = run(str(PY), "tools/report-card.py", "--run", "--skip-evidence",
-            "--recovery", "--reason", "fixture", "--vault", str(vault_b),
-            "--evidence-dir", str(cache))
-    check("recovery cache refuses normalized vault A versus vault B",
-          p.returncode == 1 and "does not exactly match required source" in p.stdout and
-          str(vault_a.resolve()) in p.stdout and str(vault_b.resolve()) in p.stdout,
-          p.stdout + p.stderr)
 
 health_src = (ROOT / "tools/health-check.py").read_text()
 registry_src = (ROOT / "tools/registry-audit.py").read_text()
 run_src = (ROOT / "run.sh").read_text()
-smoke_src = (ROOT / "tools/smoke.sh").read_text()
 check("health emits the exact canonical export query",
       "from export_run group by target" in health_src)
 check("health emits the exact Control Plane ledger query",
@@ -411,10 +361,6 @@ check("registry emits the v_export_leads read through record_sources",
       'load_leads("", MODE_RECORDS)' in registry_src)
 check("normal run.sh wrappers do not inject CARR_VAULT into bounded readers",
       'health)       shift; "$PY" "$REPO/tools/health-check.py" "$@"' in run_src and
-      'report-card)  shift; "$PY" "$REPO/tools/report-card.py" "$@"' in run_src and
       'registry_audit(){ shift; "$PY"' in run_src)
-check("normal smoke calls canonical retrieval without a Drive environment",
-      '"$PY" "$REPO/tools/retrieve.py" -n 1' in smoke_src and
-      'CARR_VAULT="$VAULT"' not in smoke_src)
 
 print(f"PASS: drive reader slice 2 ({passed} checks)")

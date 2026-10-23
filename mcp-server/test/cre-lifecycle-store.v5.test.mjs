@@ -2257,7 +2257,18 @@ function admissionPolicy() {
   assert.ok(close > open, "the admission map is closed by its own dollar quote");
   assert.equal(CANDIDATE_SQL.indexOf("$policy$", close + "$policy$".length), -1,
     "there is exactly ONE admission map in the file, so there is one thing to check");
-  return JSON.parse(CANDIDATE_SQL.slice(open + "$policy$".length, close));
+  const policy = JSON.parse(CANDIDATE_SQL.slice(open + "$policy$".length, close));
+  const upgrade = readMigration(new URL("../../migrations/0938_j102_engagement_fields.sql", import.meta.url));
+  const fields = JSON.parse(upgrade.match(/\$engagement_fields\$([\s\S]*?)\$engagement_fields\$/)[1]);
+  policy.engagement_fields = fields;
+  policy.relationship_states = ["prospect", "client", "client_ended"];
+  policy.engagement_states = ["active", "completed", "expired", "terminated"];
+  for (const field of Object.keys(fields)) {
+    policy.transitions["establish-client-and-engagement"].subjects.engagement.creation_shape[field] =
+      { op: "const", value: null };
+    policy.reconciliation.field_class_registry[field] = "lifecycle";
+  }
+  return policy;
 }
 
 function executableSql(source) {

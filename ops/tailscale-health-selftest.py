@@ -288,33 +288,5 @@ owners = [s for s in services if any(e.get("deploy_mechanism") ==
     "ops/launchd/com.carr.tailscale-up.plist" for e in s.get("environments", []))]
 check("live agent has exactly one service catalog owner", len(owners) == 1, owners)
 
-sys.path.insert(0, str(REPO / "ops"))
-db_spec = importlib.util.spec_from_file_location("siep11_gate_ts",
-    REPO / "ops/siep11-mutation-registry-local-pg-gate.py")
-assert db_spec and db_spec.loader
-db_gate = importlib.util.module_from_spec(db_spec)
-db_spec.loader.exec_module(db_gate)
-live = [("old", "production", "ops/launchd/old.plist"),
-        ("new", "production", "ops/launchd/new.plist")]
-for fault in (None, "live_path", "environment", "retired"):
-    actual_services = [(*row, False) for row in live]
-    if fault == "live_path":
-        actual_services[-1] = ("new", "production", "ops/launchd/wrong.plist", False)
-    if fault == "environment":
-        actual_services[-1] = ("new", "local", "ops/launchd/new.plist", False)
-    if fault == "retired":
-        actual_services[-1] = (*live[-1], True)
-    cursor = Mock()
-    cursor.execute.side_effect = [
-        Mock(fetchall=Mock(return_value=actual_services)),
-        Mock(fetchall=Mock(return_value=[])),
-    ]
-    try:
-        db_gate.validate_launchd_catalog(cursor, [], live)
-    except RuntimeError:
-        check(f"DB parity refuses {fault}", fault is not None)
-    else:
-        check("DB parity matches the current service catalog", fault is None)
-
 print(f"tailscale-health-selftest: {'FAIL ' + str(len(FAILS)) if FAILS else 'all passed'}")
 sys.exit(1 if FAILS else 0)

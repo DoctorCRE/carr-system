@@ -77,9 +77,8 @@ sys.exit(7 if mode == 'failure' else 0)
         # Any accidental vendor access in child processes fails this fixture.
         (self.fakebin/'sitecustomize.py').write_text(
             f'import sys; sys.path.insert(0, {str(REPO)!r})\n'
-            'from ops import jev_judge as j\n'
             'def forbidden(*args, **kwargs): raise AssertionError("paid judgment")\n'
-            'j.judge = forbidden\n')
+            'import urllib.request; urllib.request.urlopen = forbidden\n')
         recorder = self.repo / 'run.sh'
         recorder.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -616,8 +615,7 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
         data={'schema':'carr-headless-completion/v1','task_id':'test-task','run_id':'r','outcome':'completed','artifacts':[{'path':str(artifact),'sha256':hashlib.sha256(artifact.read_bytes()).hexdigest()}]}
         receipt.write_text(json.dumps(data))
         prompt=json.dumps({'acceptance_contract':{'criteria':[{'id':'output','kind':'contains','path':str(artifact),'text':'expected'}]}})
-        with patch('ops.jev_judge.judge',side_effect=AssertionError('paid')):
-            self.assertEqual(verify_completion(receipt,'test-task','r',prompt),'completed')
+        self.assertEqual(verify_completion(receipt,'test-task','r',prompt),'completed')
         with self.assertRaises(ValueError):verify_completion(receipt,'test-task','wrong',prompt)
         artifact.write_text('tampered')
         with self.assertRaises(ValueError):verify_completion(receipt,'test-task','r',prompt)

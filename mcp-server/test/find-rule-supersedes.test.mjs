@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { TOOLS, executeRegisteredTool, ToolError } from '../src/tools.js';
-import { requiresAuthorityConnection } from '../src/mcp.js';
 
 const dsn=process.env.CARR_RULE_TEST_DATABASE_URL;
 // Refuse unsafe configuration before any database test can construct a client.
@@ -11,10 +10,6 @@ if (dsn) assert.match(dsn,/^postgres(?:ql)?:\/\/[^@/]*@(?:127\.0\.0\.1|localhost
 const oldId = 'aabbccdd-0000-4000-8000-000000000001';
 const newId = 'aabbccdd-0000-4000-8000-000000000002';
 const machine = { id: '11111111-1111-4111-8111-111111111111', slug: 'codex', human: false };
-const human = { ...machine, slug: 'joe', human: true };
-const teachArgs = (supersedes = oldId) => ({ idempotency_key: randomUUID(),
-  statement: 'Synthetic revised scope', human_quote: 'Synthetic correction',
-  enforcement_home: 'core', ...(supersedes ? { supersedes } : {}) });
 function store(status = 'proposed') {
   const calls = [], replay = new Map();
   return { calls, query: async (sql,p = []) => {
@@ -39,31 +34,6 @@ test('lookup validates empty input and bounds before querying', async () => {
     await assert.rejects(()=>TOOLS['find-rule'].handler(c,machine,args),ToolError);
   assert.equal(c.calls.length,0);
 });
-test('teach atomically requests retirement and replay never retires twice', async () => {
-  const c=store(), args=teachArgs();
-  const first=await TOOLS.teach.handler(c,machine,args);
-  assert.equal(first.status,'proposed');
-  assert.equal(first.supersedes,oldId);
-  assert.equal(first.retirement.reason,`superseded by ${newId}`);
-  assert.match(c.calls.find(x=>x.sql.includes('select id, status')).sql,/for update/);
-  assert.deepEqual(await TOOLS.teach.handler(c,machine,args),{replayed:true,...first});
-  assert.equal(c.calls.filter(x=>x.sql.includes('ops.retire_superseded_rule')).length,1);
-});
-test('machine cannot supersede an active rule, even with a human sponsor', async () => {
-  const c=store('active');
-  await assert.rejects(()=>TOOLS.teach.handler(c,{...machine,sponsoring_human_slug:'joe'},teachArgs()),
-    e=>e instanceof ToolError && e.payload.error==='human_only');
-  assert.equal(c.calls.some(x=>x.sql.includes('insert into rule')),false);
-});
-test('ordinary teach keeps its writer route; human supersession uses retirement authority', async () => {
-  assert.equal(requiresAuthorityConnection(TOOLS.teach,machine,teachArgs()),false);
-  assert.equal(requiresAuthorityConnection(TOOLS.teach,human,teachArgs()),true);
-  assert.equal(requiresAuthorityConnection(TOOLS.teach,human,teachArgs(null)),false);
-  const c=store(); const result=await TOOLS.teach.handler(c,machine,teachArgs(null));
-  assert.equal(result.retirement,null);
-  assert.equal(c.calls.some(x=>x.sql.includes('ops.retire_superseded_rule')),false);
-});
-
 test('real PostgreSQL: a proposed replacement cannot supersede itself',
   {skip:!dsn}, async () => {
   const {Client}=(await import('pg')).default;
@@ -122,32 +92,7 @@ test('real PostgreSQL: updating a committed replacement cannot withdraw its pred
     await c.end();
   }
 });
-test('real PostgreSQL: human supersession executes the full teach envelope under authority',
-  {skip:!dsn}, async () => {
-  const {Client}=(await import('pg')).default;
-  const c=new Client({connectionString:dsn}); await c.connect();
-  try {
-    await c.query('begin');
-    const joe=(await c.query("select id from actor where slug='joe'")).rows[0];
-    const actor={id:joe.id,slug:'joe',human:true};
-    const old=randomUUID();
-    await c.query("select set_config('carr.acting_actor_slug','joe',true)");
-    await c.query("select set_config('carr.verified_human_actor_slug','joe',true)");
-    await c.query('insert into rule(id,statement,taught_by) values($1,$2,$3)',
-      [old,'Synthetic human predecessor',joe.id]);
-    assert.equal(requiresAuthorityConnection(TOOLS.teach,actor,teachArgs(old)),true);
-    await c.query('set local role carr_authority');
-    const args=teachArgs(old);
-    const result=await executeRegisteredTool(c,actor,'teach',args);
-    assert.equal(result.retirement.status,'retired');
-    assert.deepEqual(await executeRegisteredTool(c,actor,'teach',args),{replayed:true,...result});
-    await c.query('reset role');
-    assert.equal((await c.query('select status from rule where id=$1',[old])).rows[0].status,'retired');
-    assert.equal((await c.query('select state from ops.guidance_intake where source_ref=$1',
-      [`rule:${result.rule_id}`])).rows[0].state,'captured');
-  } finally { await c.query('rollback'); await c.end(); }
-});
-test('real PostgreSQL: proposed phrase lookup, literal wildcards, retirement, replay and rollback',
+test('real PostgreSQL: proposed phrase lookup and literal wildcards',
   {skip:!dsn},async () => {
   const {Client}=(await import('pg')).default; const c=new Client({connectionString:dsn}); await c.connect();
   const actorId=randomUUID(), old=randomUUID(), phrase=`Synthetic phrase ${randomUUID()}`;
@@ -173,31 +118,6 @@ test('real PostgreSQL: proposed phrase lookup, literal wildcards, retirement, re
     assert.ok((await TOOLS['find-rule'].handler(c,actor,{text:`${phrase.split(' ').at(-1)} Synthetic`})).rules.some(r=>r.id===old));
     assert.ok((await TOOLS['find-rule'].handler(c,actor,{text:'100%_literal'})).rules.some(r=>r.id===old));
     assert.equal((await TOOLS['find-rule'].handler(c,actor,{text:phrase,status:'active'})).rules.length,0);
-    const args={...teachArgs(old.slice(0,8)),statement:`${phrase} revised`};
-    await c.query('set local role carr_writer');
-    const result=await executeRegisteredTool(c,actor,'teach',args);
-    await c.query('reset role');
-    const prior=(await c.query('select status,version,statement from rule where id=$1',[old])).rows[0];
-    assert.equal(prior.status,'retired'); assert.equal(prior.version,2);
-    const receipt=(await c.query('select reason,superseded_by from ops.rule_retirement_receipt where rule_id=$1',[old])).rows[0];
-    assert.equal(receipt.reason,`superseded by ${result.rule_id}`); assert.equal(receipt.superseded_by,result.rule_id);
-    assert.equal((await c.query('select supersedes,status from rule where id=$1',[result.rule_id])).rows[0].supersedes,old);
-    assert.deepEqual(await TOOLS.teach.handler(c,actor,args),{replayed:true,...result});
-    assert.equal((await TOOLS['find-rule'].handler(c,actor,{text:phrase,status:'retired'})).rules.length,1);
-    const second=randomUUID(), failureKey=randomUUID();
-    await c.query('insert into rule(id,statement,taught_by) values($1,$2,$3)',[second,phrase,actorId]);
-    await c.query(`insert into ops.authority_receipt
-      (idempotency_key,kind,subject_type,subject_id,actor_id,decision,contract_hash,evidence_refs)
-      select $1,kind,subject_type,subject_id,actor_id,decision,contract_hash,evidence_refs
-        from ops.authority_receipt where idempotency_key=$2`,
-      [`retirement:${failureKey}`,`retirement:${args.idempotency_key}`]);
-    await c.query('savepoint failure');
-    await assert.rejects(()=>TOOLS.teach.handler(c,actor,{...teachArgs(second),idempotency_key:failureKey}),
-      e=>e.code==='23505');
-    await c.query('rollback to savepoint failure');
-    assert.equal((await c.query('select status from rule where id=$1',[second])).rows[0].status,'proposed');
-    assert.equal((await c.query('select count(*)::int as n from rule where taught_by=$1',[actorId])).rows[0].n,4);
-    assert.equal((await c.query('select count(*)::int as n from ops.rule_retirement_receipt where rule_id=$1',[second])).rows[0].n,0);
 
   } finally { await c.query('rollback'); await c.end(); }
 });

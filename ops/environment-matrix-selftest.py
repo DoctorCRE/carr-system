@@ -16,10 +16,8 @@ somebody wondering why staging behaves oddly.
 WHY THIS RUNS IN CI RATHER THAN NIGHTLY. It compares two things that both live
 in the repository — the matrix and mcp-server/wrangler.toml plus the project map
 in tools/db-tap.py — so it needs no credential and no network, and ops/ci.sh
-picks it up automatically as a *-selftest.py. The nightly gates
-(p1-environment-gate, p1-rebuild-gate) ask the live environments the questions
-that need live answers. These are the questions a change can be checked against
-before it merges.
+picks it up automatically as a *-selftest.py. These are the questions a change
+can be checked against before it merges.
 
 THE ASSERTIONS.
 
@@ -91,8 +89,8 @@ def main() -> int:
           envs["production"]["worker"].get("name") == wrangler.get("name"),
           f"matrix {envs['production']['worker'].get('name')!r} "
           f"vs wrangler {wrangler.get('name')!r}")
-    check("2b. staging's Worker name matches [env.staging]",
-          envs["staging"]["worker"].get("name") == stg_cfg.get("name"),
+    check("2b. database diagnostics declare no staging Worker",
+          not envs["staging"]["worker"].get("deployed") and not stg_cfg,
           f"matrix {envs['staging']['worker'].get('name')!r} "
           f"vs wrangler {stg_cfg.get('name')!r}")
     check("2c. local and rehearsal declare no Worker",

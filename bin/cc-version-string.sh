@@ -1,15 +1,6 @@
 #!/bin/zsh
-# cc-version-string.sh — the ONE place that reads "what Claude Code version is
-# on this Mac". Extracted from cc-version-sentinel.sh (rule a8c55a47: the
-# sentinel and the cc-update-audit STEP 0 gate were building the identical
-# "cli=<v> app=<v>" string independently; one implementation, two callers).
-#
-# Prints exactly one line: cli=<version-or-none> app=<version-or-none>
-# Always exits 0 — an unreadable component reads as "none"; deciding what
-# "none" means (first run vs. a real read failure) is the CALLER's job, not
-# this script's, because the two callers here answer that question differently.
-#
-# Usage: ./bin/cc-version-string.sh
+# Read the CLI and desktop runtime versions for the cc-update-audit predicate.
+# Prints cli=<version-or-none> app=<version-or-none> and exits 0.
 
 # ABSOLUTE PATH, NOT `claude`. launchd does not run a login shell, so its PATH
 # does not contain /opt/homebrew/bin. Found the only way it could be — by

@@ -46,13 +46,6 @@ RENDER_SOCKET = TOOL / "assets" / ".render.sock"
 RENDER_LOG = TOOL / "assets" / "render-daemon.log"
 BRAIN_MODEL = os.environ.get("DOC_BRAIN_MODEL", "sonnet")
 REPO = TOOLS_ROOT.parent
-ROUTE_MODULE = REPO / "ops" / "jev_model_route.py"
-ROUTE_POLICY = REPO / "ops" / "config" / "model-routes.v1.json"
-ROUTE_LOG = REPO / "out" / "model-routes.jsonl"
-# What Jev is told about a voice turn, beside the utterance itself. Constant on
-# purpose: the hot-context snapshot is large and is deal data, not task shape.
-ROUTE_CONTEXT = ("A spoken question to Dr. CRE, CARR's voice assistant, answered in one short spoken reply "
-                 "from a read-only context snapshot, with no live tools and no files opened.")
 MIN_BYTES = 20_000  # ~0.6s at 16kHz mono s16 — shorter is a misfire, not speech
 
 
@@ -319,165 +312,11 @@ class SentenceStream:
             self.callback(sentence)
 
 
-def jev_router(judge=None) -> Callable[[str], dict]:
-    """The default shadow router: ops/jev_model_route.dispatch() over the one policy file, read fresh per call.
-
-    Loaded lazily, inside the shadow worker, so importing it never costs the voice loop anything. dispatch() runs
-    with log_path=None because its own rows carry the task text; RouteShadow writes the hash-only row instead.
-    Jev being down is dispatch()'s job: it returns the policy's abstain route with jev_error set."""
-    loaded: dict = {}
-
-    def route(text: str) -> dict:
-        if "module" not in loaded:
-            spec = importlib.util.spec_from_file_location("jev_model_route", ROUTE_MODULE)
-            if spec is None or spec.loader is None:
-                raise RuntimeError(f"cannot load {ROUTE_MODULE}")
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            loaded["module"] = module
-        raw = ROUTE_POLICY.read_bytes()
-        policy = json.loads(raw)
-        out = loaded["module"].dispatch(text, ROUTE_CONTEXT, policy=policy, judge=judge, log_path=None)
-        return {**out, "policy_version": policy.get("version"),
-                "policy_sha256": hashlib.sha256(raw).hexdigest()}
-
-    return route
 
 
-class RouteShadow:
-    """Records, per voice turn, the model route Jev WOULD pick. Shadow only: nothing here reaches BrainProcess, so
-    the answering model stays BRAIN_MODEL whatever the stamp says.
-
-    Off the reply path by construction: submit() is one non-blocking put onto a bounded queue, called after the
-    reply has been streamed to speech. One daemon worker routes and writes; a full queue drops the turn and the
-    next row counts the drops. Every failure is swallowed into the row or ignored — never raised to the loop.
-    DOC_ROUTE_SHADOW=0 disables it (read per turn, default on)."""
-
-    QUEUE_MAX = 8
-    CLOSE_TIMEOUT = 0.25
-
-    def __init__(self, router: Callable[[str], dict] | None = None,
-                 log_path: pathlib.Path | None = None) -> None:
-        self.router = router
-        self.log_path = log_path or ROUTE_LOG
-        self.queue: queue.Queue = queue.Queue(maxsize=self.QUEUE_MAX)
-        self.dropped = 0
-        self._worker: threading.Thread | None = None
-        self._start_lock = threading.Lock()
-        self._closed = False
-        self._shutdown_deadline: float | None = None
-
-    @staticmethod
-    def enabled() -> bool:
-        return os.environ.get("DOC_ROUTE_SHADOW", "1").strip() != "0"
-
-    def submit(self, text: str, *, session_id: str | None, brain_returncode: int) -> None:
-        try:
-            if not text or not text.strip() or not self.enabled():
-                return
-            with self._start_lock:
-                if self._closed:
-                    return
-                if self._worker is None or not self._worker.is_alive():
-                    self._worker = threading.Thread(target=self._run, name="doc-route-shadow", daemon=True)
-                    self._worker.start()
-                self.queue.put_nowait({"text": text, "turn_id": uuid.uuid4().hex, "session_id": session_id,
-                                       "brain_returncode": brain_returncode})
-        except queue.Full:
-            self.dropped += 1
-        except Exception:
-            pass
-
-    def drain(self, timeout: float) -> bool:
-        """Wait until every queued turn is written. For tests and orderly shutdown; the loop never calls it."""
-        deadline = time.monotonic() + timeout
-        while self.queue.unfinished_tasks:
-            if time.monotonic() >= deadline:
-                return False
-            time.sleep(0.01)
-        return True
-
-    def _run(self) -> None:
-        while True:
-            job = self.queue.get()
-            try:
-                if job is None or (self._shutdown_deadline is not None and
-                                   time.monotonic() >= self._shutdown_deadline):
-                    return
-                self._record(job)
-            except Exception:
-                pass
-            finally:
-                self.queue.task_done()
-
-    def close(self) -> None:
-        """Give telemetry one short deadline; it must never hold process exit open."""
-        deadline = time.monotonic() + self.CLOSE_TIMEOUT
-        if not self._start_lock.acquire(timeout=self.CLOSE_TIMEOUT):
-            return
-        try:
-            if self._closed:
-                return
-            self._closed = True
-            self._shutdown_deadline = deadline
-            worker = self._worker
-            if worker is None:
-                return
-            try:
-                self.queue.put_nowait(None)
-            except queue.Full:
-                try:
-                    self.queue.get_nowait()
-                    self.queue.task_done()
-                except queue.Empty:
-                    pass
-                self.queue.put_nowait(None)
-        finally:
-            self._start_lock.release()
-        worker.join(timeout=max(0, deadline - time.monotonic()))
-
-    @staticmethod
-    def _error_class(message) -> str | None:
-        """Only the exception class names and an HTTP status: a vendor error body may echo the request, and the
-        request is the utterance (review of #1323)."""
-        if not message:
-            return None
-        names = list(dict.fromkeys(re.findall(r"\b[A-Z][A-Za-z]*(?:Error|Exception|Unavailable|Timeout)\b",
-                                              str(message))))
-        status = re.search(r"\bHTTP (\d{3})\b", str(message))
-        return (": ".join(names) or "error") + (f" HTTP {status.group(1)}" if status else "")
-
-    def _record(self, job: dict) -> None:
-        text = job.pop("text")
-        row = {"at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "kind": "doc-voice",
-               "shadow": True, "turn_id": job["turn_id"], "session_id": job["session_id"],
-               "utterance_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-               "used_model": BRAIN_MODEL, "brain_returncode": job["brain_returncode"],
-               "route": None, "target": None, "would_model": None, "effort": None, "abstained": None,
-               "scores": {}, "jev_error": None, "policy_version": None, "policy_sha256": None, "error": None}
-        dropped, self.dropped = self.dropped, 0
-        if dropped:
-            row["dropped_before"] = dropped
-        try:
-            out = (self.router or jev_router())(text)
-            row.update(route=out.get("route"), target=out.get("target"), would_model=out.get("subagent_model"),
-                       effort=out.get("effort"), abstained=bool(out.get("fallback")),
-                       scores=out.get("scores") or {}, jev_error=self._error_class(out.get("jev_error")),
-                       policy_version=out.get("policy_version"), policy_sha256=out.get("policy_sha256"))
-        except Exception as exc:
-            row["error"] = self._error_class(f"{type(exc).__name__}: {exc}")
-        del text
-        try:
-            self.log_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.log_path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(row) + "\n")
-        except OSError:
-            pass
 
 
 _BRAIN = BrainProcess()
-_SHADOW = RouteShadow()
-atexit.register(_SHADOW.close)
 atexit.register(_BRAIN.close)
 
 
@@ -580,7 +419,6 @@ def ask_brain_streaming(
     if on_complete is not None:
         on_complete(reply)
     # Shadow routing stamp: the reply is already out; this is one non-blocking enqueue.
-    _SHADOW.submit(text, session_id=getattr(_BRAIN, "session_id", None), brain_returncode=brain.returncode)
     return reply, brain
 
 

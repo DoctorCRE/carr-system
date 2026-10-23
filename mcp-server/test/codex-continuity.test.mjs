@@ -649,7 +649,7 @@ test("state list items are closed and required text is documented in the schema"
   assert.equal(correctionSchema.properties.refs.items.minLength, 1);
   assert.equal(correctionSchema.properties.refs.items.pattern, "\\S");
   assert.match("/tmp/canonical-evidence.json", new RegExp(correctionSchema.properties.refs.items.pattern));
-  assert.match("https://github.com/jbookout/carr-system/pull/897", new RegExp(correctionSchema.properties.refs.items.pattern));
+  assert.match("https://github.com/DoctorCRE/carr-system/pull/897", new RegExp(correctionSchema.properties.refs.items.pattern));
   const decisionSchema = checkpoint.inputSchema.properties.state.properties.decisions.items;
   assert.deepEqual(decisionSchema.required, ["text", "why", "refs"]);
   assert.equal(decisionSchema.properties.why.minLength, 1);
@@ -716,7 +716,7 @@ test("Claude and unverified callers are rejected before database use", async () 
 test("Codex OAuth and surface-isolated local transport share the verified owner key", () => {
   const local = agentActorForToken("Bearer local-secret", JSON.stringify({ "joe-local": "local-secret" }), "local-token");
   const continuity = continuityActorForTokenMaps(
-    "Bearer codex-secret", JSON.stringify({ joe: "codex-secret" }), JSON.stringify({ joe: "claude-secret" }));
+    "Bearer codex-secret", JSON.stringify({ joe: "codex-secret" }));
   const oauth = actorFromProps({ slug: "codex", human: false, client_id: "client-1", sponsoring_human_slug: "joe", via: "oauth-google" }, JSON.stringify({ "client-1": "codex" }));
   assert.equal(local.native_agent_verified, true);
   assert.equal(local.sponsoring_human_slug, "joe");

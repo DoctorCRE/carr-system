@@ -1,33 +1,8 @@
 #!/usr/bin/env python3
-"""rule-gold-label.py — dense gold labels for the rule-delivery benchmark.
+"""Build offline rule-delivery fixtures from recorded labels and adjudications.
 
-The procedure (scheme, bands, split, rule classes) is documented in
-ops/rule_gold_label.py; this is its command line. Five steps, each resumable:
-
-    label        Jev first pass: every case against EVERY live rule
-                 (case as state, one noul per rule, ~100 rules a request).
-    second-pass  Jev from the other side on every BORDERLINE pair
-                 (NO_AT < p < YES_AT): the rule as state, the case as the noul.
-    doctrine-catalog / doctrine-search / doctrine-label
-                 The doctrine target (shortlist then label; see the library).
-                 Section refs are opaque store ids, never slugs.
-    borderlines  Write the adjudication worklist: the REVIEW SET (every pair
-                 above the rule's lower bound, and every case carrying the
-                 rule's action signal), with both probabilities.
-    build        Assemble cases.v2.json from the drafted cases, the first-pass
-                 probabilities, the action signals and the adjudications (a
-                 review pair with no written decision, or a decision outside
-                 the review set, is an error), with the seeded 30% test split.
-    spot-check   Pull a stratified sample of labels for a human to check.
-
-    tools/rule-gold-label.py label --cases drafts.jsonl --corpus corpus-live.json \\
-        --probs out/rule-delivery-eval/v2/probs.json
-    tools/rule-gold-label.py build --cases drafts.jsonl --probs ... \\
-        --adjudications adjudications.jsonl --out ops/fixtures/rule-delivery-eval/cases.v2.json
-
-Jev spend: every request's receipt goes to --calls-log (default
-out/rule-delivery-eval/jev-label-calls.jsonl), and each step prints the input
-tokens it used. Nothing here writes a production log or cache.
+Read-only doctrine catalog/search helpers remain available; automatic model
+label and second-pass commands are removed.
 """
 import argparse
 import concurrent.futures as cf
@@ -38,7 +13,6 @@ import random
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_CALLS = os.path.join(REPO, "out", "rule-delivery-eval", "jev-label-calls.jsonl")
 FIXTURE_SCHEMA = "rule-delivery-eval-cases/v2"
 PROVENANCE = ("paraphrased: every prompt is a paraphrased SHAPE of a real turn (local session "
               "history, the drift observer's log, the delivery and selector logs) or of a "
@@ -82,37 +56,6 @@ def _write_json(path, data):
     with open(tmp, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=1, sort_keys=True)
     os.replace(tmp, path)
-
-
-def cmd_label(args, gl, tsc):
-    cases, rules = read_cases(args.cases), read_rules(args.corpus)
-    probs = _read_json(args.probs, {})
-    coverage_path = args.probs + ".coverage.json"
-    coverage = _read_json(coverage_path, {})
-    roster = {r["id"] for r in rules}
-    todo = [c for c in cases if (c["id"] not in probs or
-            set(coverage.get(c["id"], {}).get("judged", [])) != set(probs[c["id"]]) or
-            set(probs[c["id"]]) | set(coverage.get(c["id"], {}).get("unjudged", [])) != roster or
-            coverage.get(c["id"], {}).get("case_binding") != gl.adjudication_case_binding(c) or
-            coverage.get(c["id"], {}).get("roster_binding") != gl.roster_binding(rules))]
-    spent = {"input_tokens": 0, "requests": 0}
-
-    def one(case):
-        return case["id"], gl.label_case(case, rules, tsc, calls_log=args.calls_log)
-    with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
-        for n, (cid, (p, usage)) in enumerate(pool.map(one, todo), 1):
-            probs[cid] = p
-            coverage[cid] = {"judged": sorted(p), "unjudged": sorted(usage.get("unjudged") or []),
-                             "case_binding": gl.adjudication_case_binding(next(c for c in cases if c["id"] == cid)),
-                             "roster_binding": gl.roster_binding(rules)}
-            spent["input_tokens"] += usage["input_tokens"]
-            spent["requests"] += usage["requests"]
-            if n % 10 == 0:
-                _write_json(args.probs, probs)
-                _write_json(coverage_path, coverage)
-    _write_json(args.probs, probs)
-    _write_json(coverage_path, coverage)
-    print(json.dumps({"labelled": len(todo), "cases": len(probs), **spent}))
 
 
 def cmd_doctrine_catalog(args, gl):
@@ -162,65 +105,6 @@ def cmd_doctrine_search(args, gl):
             out[cid] = refs
     _write_json(args.search, out)
     print(json.dumps({"searched": len(todo), "with_hits": sum(1 for v in out.values() if v)}))
-
-
-def cmd_doctrine_label(args, gl, tsc):
-    cases = read_cases(args.cases)
-    catalog = _read_json(args.catalog, [])
-    documents, seen = [], set()
-    for s in catalog:
-        if s["doc"] not in seen:
-            seen.add(s["doc"])
-            documents.append({"id": s["doc"], "title": s.get("doc_title"),
-                              "opening": s.get("text") or ""})
-    search = _read_json(args.search, {})
-    out = _read_json(args.doctrine_probs, {})
-    todo = [c for c in cases if c["id"] not in out]
-    spent = {"input_tokens": 0, "requests": 0}
-
-    def one(case):
-        return case["id"], gl.doctrine_label_case(case, documents, catalog, tsc,
-                                                  calls_log=args.calls_log,
-                                                  search_refs=search.get(case["id"]) or [])
-    with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
-        for n, (cid, (docs, secs, usage)) in enumerate(pool.map(one, todo), 1):
-            out[cid] = {"documents": docs, "sections": secs, "shortlist": usage["shortlist"]}
-            spent["input_tokens"] += usage["input_tokens"]
-            spent["requests"] += usage["requests"]
-            if n % 10 == 0:
-                _write_json(args.doctrine_probs, out)
-    _write_json(args.doctrine_probs, out)
-    print(json.dumps({"labelled": len(todo), **spent}))
-
-
-def cmd_second(args, gl, tsc):
-    cases = {c["id"]: c for c in read_cases(args.cases)}
-    rules = {r["id"]: r for r in read_rules(args.corpus)}
-    probs = _read_json(args.probs, {})
-    second = _read_json(args.second, {})
-    by_rule = {}
-    for cid, rid, _p in gl.borderlines(probs):
-        if cid in cases and rid in rules and rid not in second.get(cid, {}):
-            by_rule.setdefault(rid, []).append(cases[cid])
-    spent = {"input_tokens": 0, "requests": 0}
-
-    def one(item):
-        rid, group = item
-        out = {}
-        for start in range(0, len(group), 40):
-            p, usage = gl.second_pass(rules[rid], group[start:start + 40], tsc,
-                                      calls_log=args.calls_log)
-            out.update(p)
-            spent["input_tokens"] += usage["input_tokens"]
-            spent["requests"] += usage["requests"]
-        return rid, out
-    with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
-        for rid, out in pool.map(one, sorted(by_rule.items())):
-            for cid, p in out.items():
-                second.setdefault(cid, {})[rid] = p
-    _write_json(args.second, second)
-    print(json.dumps({"rules": len(by_rule),
-                      "pairs": sum(len(v) for v in by_rule.values()), **spent}))
 
 
 def cmd_borderlines(args, gl):
@@ -303,8 +187,7 @@ def cmd_build(args, gl):
             "doctrine_judged": sorted(dprobs.get(cid) or {}),
         })
     doc = {"schema": FIXTURE_SCHEMA, "provenance": PROVENANCE,
-           "labelling": {"scheme": "case as state, one Jev noul per live rule "
-                                   "(ops/rule_gold_label.py)",
+           "labelling": {"scheme": "recorded label probabilities with independent adjudication",
                          "question": "strict: does the rule bind the ACTION taken in this "
                                      "turn, so that ignoring it here would violate it "
                                      "(re-labelled 2026-09-27 after a review found the "
@@ -321,7 +204,7 @@ def cmd_build(args, gl):
                                    "(review_low_extended for the listed rules), and every case "
                                    "carrying the rule's action signal, gets a written "
                                    "adjudication that decides; there is no auto-gold. Pairs "
-                                   "outside the review set are not gold. A second Jev pass is "
+                                   "outside the review set are not gold. Additional probability scoring is "
                                    "evidence only (round 3, 2026-09-27, after a review found "
                                    "the 0.35-0.75 band labelled the same situation two ways)",
                          "review_low": gl.REVIEW_LOW,
@@ -341,9 +224,8 @@ def cmd_build(args, gl):
                                      "signal_implies_gold entry makes every case carrying it gold; "
                                      "other entries only put the case in the review set"},
                          "doctrine_band": {"yes_at": gl.YES_AT, "no_at": gl.NO_AT},
-                         "doctrine": "shortlist then label (ops/rule_gold_label.py): Jev noul per "
-                                     "doctrine document, plus search-doctrine hits, then a Jev "
-                                     "noul per shortlisted section; borderline pairs adjudicated "
+                         "doctrine": "recorded shortlist probabilities per doctrine document and "
+                                     "section; borderline pairs adjudicated "
                                      "in writing. Recall of doctrine gold is bounded by the "
                                      "shortlist.",
                          "labelled_on": args.labelled_on},
@@ -367,9 +249,9 @@ def cmd_build(args, gl):
            "cases": cases}
     _write_json(args.out, doc)
     # The first-pass probabilities and the adjudications are committed beside
-    # the fixture, so the gold can be rebuilt and re-examined without Jev.
+    # the fixture, so the gold can be rebuilt and re-examined without model calls.
     labels = {"schema": "rule-delivery-eval-labels/v2",
-              "note": "First-pass Jev probability per case, one entry per rule in `rules` order. "
+              "note": "Recorded probability per case, one entry per rule in `rules` order. "
                       "`doctrine` holds the shortlisted sections' probabilities per case.",
               "rules": rules,
               "cases": {c["id"]: [probs[c["id"]].get(rid) for rid in rules] for c in drafts},
@@ -386,7 +268,7 @@ def cmd_build(args, gl):
                        "reason": row["reason"].strip()}
                 if "case_binding" in row:
                     out["case_binding"] = row["case_binding"]
-                # jev_misfire: the adjudicator overruled a clear Jev score
+                # Preserve the historical adjudicator override marker.
                 # (gold below 0.30, or not gold at 0.75+); the reason says why.
                 if "jev_misfire" in row:
                     out["jev_misfire"] = bool(row["jev_misfire"])
@@ -445,21 +327,12 @@ def main(argv=None):
     common.add_argument("--cases", required=True, help="drafted cases (.jsonl) or a v2 fixture")
     common.add_argument("--corpus", required=True, help="live corpus {rules:[{id, statement}]}")
     common.add_argument("--probs", required=True, help="first-pass probabilities (JSON)")
-    common.add_argument("--calls-log", default=DEFAULT_CALLS)
     common.add_argument("--workers", type=int, default=4)
-    sub.add_parser("label", parents=[common])
-    p = sub.add_parser("second-pass", parents=[common])
-    p.add_argument("--second", required=True)
     p = sub.add_parser("doctrine-catalog", parents=[common])
     p.add_argument("--catalog", required=True, help="output: private section catalog (JSON)")
     p = sub.add_parser("doctrine-search", parents=[common])
     p.add_argument("--search", required=True, help="{case id: [doctrine refs]} (JSON)")
     p.add_argument("--limit", type=int, default=10)
-    p = sub.add_parser("doctrine-label", parents=[common])
-    p.add_argument("--catalog", required=True,
-                   help="[{ref, doc, doc_title, title, text}] for every live section")
-    p.add_argument("--search", required=True)
-    p.add_argument("--doctrine-probs", required=True)
     p = sub.add_parser("borderlines", parents=[common])
     p.add_argument("--second", required=True)
     p.add_argument("--signals", default=os.path.join(
@@ -494,10 +367,6 @@ def main(argv=None):
     gl = _load("rule_gold_label")
     if getattr(args, "seed", None) is None and args.cmd == "build":
         args.seed = gl.DEFAULT_SEED
-    if args.cmd in ("label", "second-pass", "doctrine-label"):
-        tsc = _load("typesafe_client")
-        return {"label": cmd_label, "second-pass": cmd_second,
-                "doctrine-label": cmd_doctrine_label}[args.cmd](args, gl, tsc) or 0
     handler = {"borderlines": cmd_borderlines, "build": cmd_build, "spot-check": cmd_spot,
                "doctrine-search": cmd_doctrine_search,
                "doctrine-catalog": cmd_doctrine_catalog}

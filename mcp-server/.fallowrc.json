@@ -1,0 +1,6 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/v3.35.0/schema.json",
+  "dynamicallyLoaded": [
+    "test/*.test.{js,mjs}"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "missing_script_policy": {
+    "_note": "Missing safety scripts fail closed. Optional telemetry and machine setup scripts warn and skip.",
+    "safety": [
+      "hooks/gate-integrity.py",
+      "hooks/guard-unattended.py",
+      "hooks/lint-gate.py",
+      "hooks/record-home-gate.py",
+      "hooks/rule-pack-preuse-reselection.py",
+      "hooks/scheduled-run-record.py"
+    ],
+    "optional": [
+      "hooks/job-watchdog-digest.py",
+      "hooks/machine-converge.py",
+      "hooks/worktree-self-plumb.py",
+      "hooks/rule-claim-gate.py"
+    ],
+    "safety_stop_failure_limit": 1
+  }
+}

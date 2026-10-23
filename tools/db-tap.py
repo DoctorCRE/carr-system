@@ -100,7 +100,7 @@ def _neon_api_key() -> str:
     schedule, and when it does it does not fail cleanly — it PROMPTS, waits 60
     seconds for a browser nobody is sitting at, and times out. Because this
     function is the one place four different jobs derive a credential, that one
-    expiry silently took down all four: bin/migrate-prod.sh, bin/import-doctrine.sh,
+    expiry silently took down all four: the GitHub production deployment workflow, record imports,
     bin/restore-rehearse.sh (the only proof the encrypted backups can be restored)
     and pipelines/partner_ping.py, the Joe/Dell interrupt channel.
 
@@ -243,7 +243,7 @@ def _staging_file_dsn(role_name: str, branch: str | None, env: dict) -> str:
 # "everything takes forever" even with nothing broken. This cache is IN-PROCESS
 # ONLY and is deliberately never written to disk: the property this file exists
 # to hold is that the credential is derived, used, and never echoed or stored,
-# and an in-memory dict keeps that exactly. bin/outage-drill.py already caches
+# and an in-memory dict keeps that exactly. The former outage drill cached
 # the staging string the same way for the same reason.
 _DSN_CACHE: dict[tuple, str] = {}
 
@@ -295,7 +295,7 @@ def dsn(branch=None, project: str = "production", role_name: str = "neondb_owner
         # verified/final, so the check is the point of the call rather than
         # overhead on the way to a value. Caching it made a credential that had
         # since been demoted to pending keep answering with the value from
-        # before the demotion — ops/staging-database-consumer-selftest.py caught
+        # before the demotion — the credential isolation regressions caught
         # exactly that. It is also a file read with no neonctl spawn behind it,
         # so there is nothing here worth the risk of a stale answer.
         return _staging_file_dsn(role_name, branch, env)

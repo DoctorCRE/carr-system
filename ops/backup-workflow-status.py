@@ -30,7 +30,6 @@ run's own recorded inputs back afterwards.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -40,26 +39,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
-
-REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO))
-
-# IMPORTED UNDER PRIVATE NAMES ON PURPOSE. A plain `from lib.platform_metering
-# import authorize_metered_execution` binds that callable as a PUBLIC attribute
-# of this module, so anyone who imports this file re-reaches the metering gate
-# through it and gets the privileged `admitted` outcome back from their own
-# policy and request objects. The standing authority rule forbids exporting that
-# outcome under ANY name, and a re-export is a name. The underscore keeps both
-# out of this module's public surface; _public_surface_contract in
-# ops/backup-workflow-selftest.py holds the property and fails if either is
-# rebound publicly again.
-from lib.platform_metering import (  # noqa: E402
-    MeteringRefusal as _MeteringRefusal,
-    authorize_metered_execution as _authorize_metered_execution,
-)
-
 
 CHECK_NAME = "Backup artifact"
 REQUIRED_STEPS = ["dump", "encrypt", "upload", "readback"]
@@ -77,7 +57,7 @@ MAX_CHECK_PAGES = 5
 # that read its own expected value from the environment would be no guard.
 CONTROLLED_FAILURE_EVENT = "workflow_dispatch"
 CONTROLLED_FAILURE_ACTOR = "jbookout"
-CONTROLLED_FAILURE_REPOSITORY = "jbookout/carr-system"
+CONTROLLED_FAILURE_REPOSITORY = "DoctorCRE/carr-system"
 CONTROLLED_FAILURE_REF = "refs/heads/main"
 CONTROLLED_FAILURE_REASON = "approved WR54 controlled failure before dump"
 # The one workflow the reviewed dispatch door below can start. A literal for the
@@ -101,12 +81,12 @@ CONTROLLED_FAILURE_EXIT = 9
 # installation can copy byte for byte, and none of them is consulted now.
 # The app stamp IS the provider's attribution of which installation created a
 # row -- necessary, and on its own nowhere near sufficient. Re-verify the pair:
-#   gh api /repos/jbookout/carr-system/commits/<sha>/check-runs \
+#   gh api /repos/DoctorCRE/carr-system/commits/<sha>/check-runs \
 #     --jq '.check_runs[] | select(.name=="Backup artifact") | .app | {id, slug}'
 # IF EITHER LITERAL IS WRONG THE EXCLUSION SIMPLY NEVER FIRES: the seam's own
 # earlier failure then counts as red and a later proof refuses. That is the
 # fail-closed direction on purpose -- a stale producer id costs a refusal, it
-# never admits a spend.
+# never permits dispatch.
 ACTIONS_APP_ID = 15368
 ACTIONS_APP_SLUG = "github-actions"
 # ── the Check the head's POSITIVE evidence has to actually be ───────────────
@@ -114,7 +94,6 @@ ACTIONS_APP_SLUG = "github-actions"
 # requirement. The required check is ops/ci.sh --strict, from the Actions app
 # slug above, and the workflow file that produces it. Those three are restated
 # here as literals rather than read from the policy file at runtime, because
-# this door resolves its own tree (see _paused_policy_tree in the selftest) and
 # a second file to load would be a second thing that can go missing between the
 # guards and the POST. The selftest holds the two spellings equal instead.
 #
@@ -129,7 +108,7 @@ REQUIRED_CHECK_WORKFLOW_FILE = "ci.yml"
 REQUIRED_CHECK_WORKFLOW_PATH = ".github/workflows/" + REQUIRED_CHECK_WORKFLOW_FILE
 # STRICTER THAN NON_FAILING_CHECK_CONCLUSIONS ON PURPOSE. A neutral or skipped
 # required check means the suite did not run, which is the absence of evidence,
-# not evidence of green. Only "success" carries the admission.
+# not evidence of green. Only "success" satisfies the required CI check.
 REQUIRED_CHECK_CONCLUSION = "success"
 # The repository path the provider reports on a workflow run, as opposed to the
 # bare file name the dispatch endpoint takes. ``workflow_run.path`` is GitHub's
@@ -497,8 +476,7 @@ def _parse_proof_request(args: argparse.Namespace) -> tuple[str, str]:
     in-run guards in controlled_failure_guards. They were parsed in two places,
     which is precisely the shape that produces a normalisation divergence -- a
     door that lowercased and an in-run guard that did not would dispatch a head
-    the run then refuses, spending the very minutes the admission exists to
-    protect. One parse, one pair of messages, no room to drift apart.
+    the run then refuses, wasting an Actions run. One parse, one pair of messages, no room to drift apart.
 
     NOT lowercased. The in-run guard refuses an uppercase head rather than
     normalising it, and this helper keeps that refusal rather than softening it
@@ -554,7 +532,7 @@ def _workflow_run_check_suites(
     no run returns an empty set -- which for the exclusion means the seam's own
     earlier failure counts as ordinary red evidence, and for the positive
     evidence means no row can authenticate as the required check. Neither
-    outcome can admit a spend; the cost of being wrong here is always a refusal.
+    outcome permits dispatch; the cost of being wrong here is always a refusal.
     """
     path = (f"/repos/{identity.repository}/actions/workflows/"
             f"{workflow_file}/runs")
@@ -707,16 +685,7 @@ def _is_authentic_required_check(
 
 
 def _require_head_checks_clean(identity: Identity) -> None:
-    """Establish the fact the budget gate asks for, rather than assert it.
-
-    ``local_checks_green`` is a required-true field on the github-actions-remote-ci
-    gate -- the gate's own upstream spelling, unchanged here. A door that hands
-    it a literal True has told the budget gate something it never checked, which
-    makes the admission decorative. The authoritative owner of "how did this
-    commit's checks conclude" is GitHub's own check-run list for the head -- a
-    list this file already reads for a different question, so the door reads it
-    for this one too, and REFUSES rather than returning a verdict anyone could
-    pass around.
+    """Read required CI success from GitHub before dispatching the backup proof.
 
     GREEN IS TWO FACTS, NOT ONE, AND THE SECOND ONE IS WHY THIS WAS REOPENED.
     An earlier revision required only that no row on the head had failed. That
@@ -779,27 +748,8 @@ def _require_head_checks_clean(identity: Identity) -> None:
             f"{identity.head_sha} did not conclude {REQUIRED_CHECK_CONCLUSION}")
 
 
-def _metering_gate_digest(decision: dict[str, Any]) -> str:
-    """An opaque, recomputable digest of the admission the GATE itself issued.
-
-    The receipt has to record which admission this dispatch stands on without
-    restating it in the gate's own verdict vocabulary -- a receipt key an
-    auditor could read as the outcome is a label pretending to be authority.
-    A digest cannot be read that way, and it is not weaker evidence: an auditor
-    recomputes it from the gate's own answer for the same request and compares.
-
-    ``decided_on`` is deliberately outside the digest and reported beside it, so
-    the mark is stable for a given admission rather than changing with the
-    calendar.
-    """
-    return hashlib.sha256(canonical({
-        key: decision.get(key)
-        for key in ("admitted", "authority", "gate", "platform", "policy_schema_version")
-    }).encode("utf-8")).hexdigest()[:16]
-
-
 def _dispatch_controlled_failure(proof_id: str, head: str) -> int:
-    """The reviewed door that asks the budget gate first, then dispatches.
+    """Dispatch the backup failure proof after checking provenance and required CI.
 
     MODULE-PRIVATE, and it takes two already-parsed strings rather than the
     argparse namespace. Its first revision was a public function that read
@@ -817,17 +767,8 @@ def _dispatch_controlled_failure(proof_id: str, head: str) -> int:
     stated here as literals, and a second file restating them would be a second
     place for them to drift.
 
-    WHY IT EXISTS AT ALL. hooks/guard-unattended.py refuses a session-issued
-    `gh workflow run` outright, and it is right to: the command text cannot show
-    whether the spend was admitted. Its own docstring names the sanctioned shape
-    instead -- "reviewed scripts perform their own in-process admission before
-    reaching the vendor" -- which is the last thing this function does before the
-    POST. It is NOT a general dispatcher: the workflow, the ref and the input
-    names are literals, so nothing else can be started through it.
-
-    ORDER MATTERS. The budget admission runs after the local guards and before
-    the POST, so a refused proof never reaches GitHub and an admitted one is
-    never stranded behind a guard that would have refused anyway.
+    The workflow, ref and input names are literals, so this command can only
+    start the backup failure proof.
     """
     # The head the caller approved must still be the head the run will check out.
     # Dispatching against a stale SHA produces a run whose own in-workflow guard
@@ -847,31 +788,6 @@ def _dispatch_controlled_failure(proof_id: str, head: str) -> int:
         raise StatusError("this proof ID is already carried by a Check on this head")
     _require_head_checks_clean(identity)
 
-    policy_path = REPO / "ops/config/platform-metering.v1.json"
-    try:
-        decision = _authorize_metered_execution(
-            json.loads(policy_path.read_text(encoding="utf-8")),
-            "github-actions-remote-ci",
-            # Established immediately above by _require_head_checks_clean,
-            # which refuses unless BOTH halves hold: every check GitHub holds
-            # for this head has concluded and none failed, AND at least one row
-            # the PROVIDER attributes to a ci.yml run on this same head carries
-            # the required check's name and concluded success. Both decisions
-            # turn on the provider-assigned check-suite -- never on a row merely
-            # NAMED like the seam's or like the required check, and never on a
-            # copy of the seam's envelope. Never a literal standing in for a
-            # fact nobody checked.
-            {"candidate_sha": head, "local_checks_green": True},
-        )
-    except (_MeteringRefusal, ValueError, TypeError) as exc:
-        raise StatusError(f"metered execution refused: {exc}") from exc
-    # The gate raises rather than returning a refusal today, so this is belt and
-    # braces -- but the POST is the irreversible half of this function, and it
-    # should read its authority rather than assume the shape of it.
-    if (not isinstance(decision, dict) or decision.get("admitted") is not True
-            or decision.get("gate") != "github-actions-remote-ci"):
-        raise StatusError("metered execution returned no admission for this gate")
-
     api(
         f"/repos/{CONTROLLED_FAILURE_REPOSITORY}/actions/workflows/"
         f"{BACKUP_WORKFLOW_FILE}/dispatches",
@@ -890,9 +806,6 @@ def _dispatch_controlled_failure(proof_id: str, head: str) -> int:
         "ref": branch,
         "head_sha": head,
         "proof_id": proof_id,
-        "metering_gate": decision.get("gate"),
-        "metering_gate_digest": _metering_gate_digest(decision),
-        "metering_decided_on": decision.get("decided_on"),
     }))
     return 0
 

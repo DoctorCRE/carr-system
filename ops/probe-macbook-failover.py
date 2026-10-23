@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 config = json.loads((ROOT / 'ops/config/studio-failover.v1.json').read_text())
 names = ['ops/studio-failover.py', 'ops/git_env.py', 'ops/studio-job-guard.py',
-         'lib/studio_failover.py', 'lib/studio_failover_health.py', 'lib/machine_role.py',
+         'lib/studio_failover.py', 'lib/machine_role.py',
          'ops/config/studio-failover.v1.json', *[j['source'] for j in config['jobs']]]
 buffer = io.BytesIO()
 with tarfile.open(fileobj=buffer, mode='w:gz') as archive:

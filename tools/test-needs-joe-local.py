@@ -16,9 +16,9 @@ spec.loader.exec_module(local)
 
 FILE = """\
 2026-10-02T22:55:43 jbookout/doctorcre-app#131 WAITING ON jbookout/doctorcre-app#129
-2026-10-02T23:08:59 jbookout/carr-system#1244 NEEDS JOE: Restore TypeSafe API credits so the required checks can complete
-2026-10-02T23:22:49 jbookout/carr-system#1477 NEEDS JOE: Replenish the credits
-2026-10-02T23:29:24 jbookout/carr-system#1431 NEEDS JOE: Restore TypeSafe API credits for pre-push
+2026-10-02T23:08:59 DoctorCRE/carr-system#1244 NEEDS JOE: Restore TypeSafe API credits so the required checks can complete
+2026-10-02T23:22:49 DoctorCRE/carr-system#1477 NEEDS JOE: Replenish the credits
+2026-10-02T23:29:24 DoctorCRE/carr-system#1431 NEEDS JOE: Restore TypeSafe API credits for pre-push
 2026-10-03T15:48:26 TABLED (Joe away): Codex and xAI sign-ins on the Studio
 2026-10-03T16:05:18 TABLED: Design Manager slice 3 needs a Codex web environment
 2026-10-04T04:32:20 jbookout/doctorcre-app#146 NEEDS JOE: Approve the new color tokens
@@ -29,8 +29,8 @@ not a line the orchestrator writes
 
 PRS = {
     ("jbookout/doctorcre-app", 131): {"state": "OPEN", "title": "Board lane"},
-    ("jbookout/carr-system", 1244): {"state": "OPEN", "title": "Route typed calls through TypeSafe"},
-    ("jbookout/carr-system", 1477): {"state": "MERGED", "title": "Jev selftest"},
+    ("DoctorCRE/carr-system", 1244): {"state": "OPEN", "title": "Route typed calls through TypeSafe"},
+    ("DoctorCRE/carr-system", 1477): {"state": "MERGED", "title": "Jev selftest"},
     ("jbookout/doctorcre-app", 146): {"state": "OPEN", "title": "Color tokens"},
 }
 
@@ -47,7 +47,7 @@ class NeedsJoeLocalTests(unittest.TestCase):
         self.by_pr = {(item["repo"], item["number"]): item for item in self.items if item["repo"]}
 
     def test_open_needs_joe_pr_is_listed_with_its_title(self):
-        item = self.by_pr[("jbookout/carr-system", 1244)]
+        item = self.by_pr[("DoctorCRE/carr-system", 1244)]
         self.assertEqual(item["kind"], "needs_joe")
         self.assertEqual(item["pr_state"], "OPEN")
         self.assertEqual(item["pr_title"], "Route typed calls through TypeSafe")
@@ -55,13 +55,13 @@ class NeedsJoeLocalTests(unittest.TestCase):
         self.assertEqual(item["at"], "2026-10-02T23:08:59")
 
     def test_closed_pr_clears_its_item(self):
-        self.assertNotIn(("jbookout/carr-system", 1477), self.by_pr)
+        self.assertNotIn(("DoctorCRE/carr-system", 1477), self.by_pr)
 
     def test_a_later_superseded_line_clears_the_pr(self):
         self.assertNotIn(("jbookout/doctorcre-app", 146), self.by_pr)
 
     def test_unreadable_pr_state_keeps_the_item_marked_unknown(self):
-        item = self.by_pr[("jbookout/carr-system", 1431)]
+        item = self.by_pr[("DoctorCRE/carr-system", 1431)]
         self.assertEqual(item["pr_state"], "UNKNOWN")
 
     def test_waiting_lines_pass_through_for_the_verb_to_exclude(self):

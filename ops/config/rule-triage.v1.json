@@ -1,9 +1,9 @@
 {
   "counts": {
     "core": 16,
-    "gate": 29,
+    "gate": 25,
     "gone": 0,
-    "jit": 159
+    "jit": 163
   },
   "fallback_narrowing": {
     "delegation-council": {
@@ -209,11 +209,11 @@
       "jit_trigger_hint": "terminal technical claim"
     },
     {
-      "carrying_control": "weekend_quiet",
-      "home": "gate",
+      "home": "jit",
       "id": "236ca227",
-      "reason": "Already machine-enforced via control 'weekend_quiet' (hooks/weekend-quiet-gate.py); binds before a partner-facing send. Failure mode on violation: PreToolUse deny",
-      "title_gist": "Weekends are off, both humans: Sat/Sun are not workdays for Joe or Dell"
+      "reason": "The former control was retired. Retain this rule as prose guidance; no current machine enforcement is claimed.",
+      "title_gist": "Weekends are off, both humans: Sat/Sun are not workdays for Joe or Dell",
+      "jit_trigger_hint": "Delivered by pack(s) joe-comms"
     },
     {
       "carrying_control": "deal_guard",
@@ -229,11 +229,11 @@
       "title_gist": "THE COMMIT MESSAGE AND THE DIFF MUST AGREE"
     },
     {
-      "carrying_control": "weekly_social_route",
-      "home": "gate",
+      "home": "jit",
       "id": "25fab860",
-      "reason": "Already machine-enforced via control 'weekly_social_route' (lib/control_plane_runner.py, tools/social-batch-candidates.py); binds weekly social cognition proposal validation. Failure mode on violation: weekly proposal is rejected before acceptance",
-      "title_gist": "QUOTE TWEETS BELONG TO THE DAILY X REPLY RUN, NEVER TO THE WEEKLY BATCH"
+      "reason": "The former control was retired. Retain this rule as prose guidance; no current machine enforcement is claimed.",
+      "title_gist": "QUOTE TWEETS BELONG TO THE DAILY X REPLY RUN, NEVER TO THE WEEKLY BATCH",
+      "jit_trigger_hint": "Delivered by pack(s) joe-comms"
     },
     {
       "home": "jit",
@@ -464,10 +464,9 @@
       "title_gist": "Before claiming the record layer cannot do something, read the FULL verb list and match on BEHAVIOR, not on"
     },
     {
-      "carrying_control": "canonical_edit",
       "home": "core",
       "id": "4a53ff82",
-      "reason": "Worktree-per-session is the default; the canonical tree is the integration lane only. The baseline discipline for where a session is even allowed to write code.",
+      "reason": "The former control was retired. Retain this rule as prose guidance; no current machine enforcement is claimed.",
       "title_gist": "WORKTREE-PER-SESSION IS THE DEFAULT; THE CANONICAL TREE IS THE INTEGRATION LANE ONLY"
     },
     {
@@ -604,8 +603,8 @@
     {
       "home": "jit",
       "id": "5d44d3f3",
-      "jit_trigger_hint": "Delivered by pack(s) records-intake \u2014 fires on: Verification backfill: every client, party, and deal already in the system gets the same\u2026",
-      "reason": "Currently only SURFACED (a reminder via 'verification_status' at canonical enrichment and deal-history queue construction, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "jit_trigger_hint": "Delivered by pack(s) records-intake",
+      "reason": "The former control was retired. Retain this rule as prose guidance; no current machine enforcement is claimed.",
       "title_gist": "Verification backfill: every client, party, and deal already in the system gets the same open-source"
     },
     {
@@ -620,11 +619,11 @@
       "title_gist": "When Joe feeds a link, the session incorporates the applicable learnings into the system in the same session"
     },
     {
-      "carrying_control": "control-plane-workflow-manifest",
-      "home": "gate",
+      "home": "jit",
       "id": "5e89c211",
-      "reason": "Already machine-enforced via control 'cognition_token_admission' (ops/config/control-plane-workflows.v1.json, lib/control_plane.py); binds before a cognition workflow is registered or dispatched. Failure mode on violation: control-plane manifest loading and the cognition dispatcher refuse an untyped, unbudgeted, or canonical-write-authorized cognition",
-      "title_gist": "NEVER SPEND A COGNITION TOKEN ON STATE, RECURRENCE, ROUTING, VALIDATION, OR A DECISION ALREADY EXPRESSIBLE AS"
+      "reason": "The former control was retired. Retain this rule as prose guidance; no current machine enforcement is claimed.",
+      "title_gist": "NEVER SPEND A COGNITION TOKEN ON STATE, RECURRENCE, ROUTING, VALIDATION, OR A DECISION ALREADY EXPRESSIBLE AS",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git"
     },
     {
       "detector": {
@@ -721,7 +720,7 @@
       "carrying_control": "delegation_names_model_and_effort",
       "home": "gate",
       "id": "6cfb67f5",
-      "reason": "Already machine-enforced via control 'delegation_names_model_and_effort' (tools/room-bridge/dispatch.py, tools/room-bridge/desks.py); binds at dispatch of a delegated task to another seat. Failure mode on violation: DeskError unnamed_model_or_effort at dispatch, before anything reaches the desk, when a codex-kind desk lacks a named model or rea",
+      "reason": "Codex jobs use bin/codex-job and inherit model and effort from Codex config. Codex validates the configuration; explicit -c overrides pass through unchanged.",
       "title_gist": "CONSTRAINT, binding at the moment a session delegates any task to another seat"
     },
     {
@@ -1575,11 +1574,11 @@
       "title_gist": "Expansion posture: never dismiss useful-but-not-today knowledge \u2014 capture it in its durable home AND propose"
     },
     {
-      "carrying_control": "costar_lane",
-      "home": "gate",
+      "home": "jit",
       "id": "f5d97b4a",
-      "reason": "Already machine-enforced via control 'costar_lane' (hooks/costar-lane-gate.py); binds a Chrome-extension tool call whose target host is costar.com. Failure mode on violation: PreToolUse deny",
-      "title_gist": "CoStar is driven ONLY in the Claude desktop app's own Browser pane"
+      "reason": "The former control was retired. Retain this rule as prose guidance; no current machine enforcement is claimed.",
+      "title_gist": "CoStar is driven ONLY in the Claude desktop app's own Browser pane",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal"
     },
     {
       "home": "jit",

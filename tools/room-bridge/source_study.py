@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""Confined source-study adapter for named Model Room desks.
+"""Run source studies directly through confined native provider CLIs.
 
-Model policy lives in the desk registry. This adapter narrows its authority,
-uses the existing dispatch wire and verifies runtime model evidence. No live
-record credential or caller configuration is made available to the worker.
-Providers may use threads and replacement exec, but cannot fork/spawn helper
-processes. The OS rejects detachment before it can escape job cancellation.
+The study uses Codex's configured model and effort. Provider authentication
+alone reaches the confined process; CARR credentials and tools never do.
 """
 import argparse
 import hashlib
@@ -17,37 +14,20 @@ import shutil
 import subprocess
 import sys
 import tempfile
-
-HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[1]
-
-
-def validate_desk(entry):
-    if (entry.get('name') != 'source-study' or entry.get('kind') != 'codex-session'
-            or not entry.get('family') or not entry.get('effort')
-            or entry.get('sandbox') != 'read-only' or entry.get('add_dirs')):
-        raise ValueError('source-study desk must name a model family/effort and read-only posture without extra directories')
-    return entry
-
+import tomllib
 
 def preflight(phase):
-    from desks import Registry
-    from grok_wire import validate_entry
-    name = 'grok-build' if phase == 'retrieval' else 'source-study'
-    entry = Registry().resolve(name)
     if phase == 'retrieval':
-        if entry.get('kind') != 'grok-cli':
-            raise ValueError('grok-build must be a Grok CLI desk')
-        validate_entry(entry)
+        from grok_wire import MODEL, EFFORT
+        model, effort, name, kind = MODEL, EFFORT, 'grok-build', 'grok-cli'
     else:
-        validate_desk(entry)
-        # Desks name a family; dispatch resolves the model from the Codex catalog
-        # on every job. Pin the resolved model so a catalog change between
-        # preflight and the job is refused rather than silently studied.
-        import codex_models
-        entry = {**entry, 'model': codex_models.resolve_model(entry['family'], os.environ)}
-    # Never resume a thread with another job's inputs, cwd or authority.
-    bound = {key: entry.get(key) for key in ('name', 'kind', 'family', 'model', 'effort', 'sandbox')}
+        home = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex'))
+        config = tomllib.loads((home / 'config.toml').read_text())
+        model, effort = config.get('model'), config.get('model_reasoning_effort')
+        if not isinstance(model, str) or not model.strip() or effort not in ('minimal', 'low', 'medium', 'high', 'xhigh', 'max'):
+            raise ValueError('Codex config must name a model and reasoning effort for a pinned source study')
+        name, kind = 'source-study', 'codex-exec'
+    bound = {'name': name, 'kind': kind, 'model': model, 'effort': effort, 'sandbox': 'read-only'}
     digest = hashlib.sha256(json.dumps(bound, sort_keys=True).encode()).hexdigest()
     return {**bound, 'digest': digest}
 
@@ -63,10 +43,6 @@ def runtime_env(folder, auth_home, ambient, *, provider='codex'):
     # environment tokens and the caller's session history are excluded.
     shutil.copyfile(auth_home / 'auth.json', provider_home / 'auth.json')
     (provider_home / 'auth.json').chmod(0o600)
-    catalog = auth_home / 'models_cache.json'
-    if provider == 'codex' and catalog.is_file():
-        # Non-secret model catalog; dispatch resolves the desk family from it.
-        shutil.copyfile(catalog, provider_home / 'models_cache.json')
     (provider_home / 'config.toml').write_text('' if provider == 'grok' else
         'approval_policy="never"\nsandbox_mode="read-only"\nweb_search="live"\n'
         '[features]\nshell_tool=false\nmulti_agent=false\n')
@@ -135,7 +111,7 @@ def confine(argv, folder):
 
 def observed_model(codex_home, thread_id, entry):
     if not isinstance(thread_id, str) or not thread_id:
-        raise ValueError('Model Room result lacks a thread identity')
+        raise ValueError('Codex result lacks a thread identity')
     matches = []
     for path in (codex_home / 'sessions').rglob('*.jsonl'):
         rows = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()]
@@ -145,10 +121,10 @@ def observed_model(codex_home, thread_id, entry):
         contexts = [row['payload'] for row in rows if row.get('type') == 'turn_context']
         if not contexts or any(c.get('model') != entry['model'] or c.get('effort') != entry['effort']
                                for c in contexts):
-            raise ValueError('Model Room actual model/effort mismatch')
+            raise ValueError('Codex actual model/effort mismatch')
         matches.append({'model': entry['model'], 'effort': entry['effort'], 'thread_id': thread_id})
     if len(matches) != 1:
-        raise ValueError('Model Room actual model evidence missing or ambiguous')
+        raise ValueError('Codex actual model evidence missing or ambiguous')
     return matches[0]
 
 
@@ -158,66 +134,63 @@ def run_job(folder, phase):
 
 
 def _run_job(folder, phase, runtime):
-    from desks import Registry
-    import dispatch
     request = json.loads((folder / 'request.json').read_text(encoding='utf-8'))
     route = preflight(phase)
     if route != request['route']:
-        raise ValueError('Model Room desk changed after preflight')
-    entry = {**route, 'cwd': str(folder), 'thread_id': None}
-    private_registry = folder / 'desks.json'
-    private_registry.write_text(json.dumps({'desks': {route['name']: entry}}))
-    original_home = Path.home()
+        raise ValueError('provider model or effort changed after preflight')
     provider = 'grok' if phase == 'retrieval' else 'codex'
-    auth_home = original_home / '.grok' if provider == 'grok' else Path(os.environ.get('CODEX_HOME', original_home / '.codex'))
+    auth_home = Path.home() / '.grok' if provider == 'grok' else Path(os.environ.get('CODEX_HOME', Path.home() / '.codex'))
     env = runtime_env(runtime, auth_home, os.environ, provider=provider)
-    # The trusted adapter stays outside confinement. Only the existing wire's
-    # provider child is confined; it has no access to transport code or host
-    # credentials. The wire's last-message temp file must also live in the job.
-    original_run = subprocess.run
-    original_env = dict(os.environ)
-    original_tmp = tempfile.tempdir
-    original_timeout = dispatch.CODEX_TIMEOUT_S
 
     def confined_run(command, **kwargs):
         if command[0] not in ('codex', 'grok'):
-            raise ValueError('research wire attempted an unexpected executable')
-        if phase == 'retrieval' and '--sandbox' in command:
-            command = list(command)
-            command[command.index('--sandbox') + 1] = 'read-only'
+            raise ValueError('research attempted an unexpected executable')
         binary = shutil.which(command[0], path=env['PATH'])
         if not binary:
             raise ValueError('research provider executable unavailable')
         kwargs['env'] = env
-        return original_run(confine([binary, *command[1:]], folder), **kwargs)
+        return subprocess.run(confine([binary, *command[1:]], folder), **kwargs)
 
-    try:
-        os.environ.clear()
-        os.environ.update(env)
-        tempfile.tempdir = env['TMPDIR']
-        dispatch.CODEX_TIMEOUT_S = request['timeout']
-        result = dispatch.dispatch(route['name'], request['prompt'], registry=Registry(private_registry),
-                                   results_path=folder / 'dispatch.jsonl', env=env, fresh=True,
-                                   provider_run=confined_run)
-    finally:
-        tempfile.tempdir = original_tmp
-        dispatch.CODEX_TIMEOUT_S = original_timeout
-        os.environ.clear()
-        os.environ.update(original_env)
-    if result.get('desk') != route['name'] or result.get('status') != 'completed' or not result.get('result'):
-        raise ValueError('Model Room result is incomplete or from another desk')
     if phase == 'retrieval':
-        from grok_wire import PROVIDER_MODEL
+        from grok_wire import PROVIDER_MODEL, invoke_cli, run_request
+        result = run_request(request['prompt'], cwd=str(folder), model=route['model'],
+            effort=route['effort'], timeout_seconds=request['timeout'],
+            invoke=lambda prompt, **kw: invoke_cli(prompt, **kw, run=confined_run,
+                                                  model=route['model'], env=env))
         metadata = result.get('provider_metadata', {})
-        if (metadata.get('actual_model') != PROVIDER_MODEL or metadata.get('effort') != route['effort']
+        if (result.get('status') != 'completed' or not result.get('result')
+                or metadata.get('actual_model') != PROVIDER_MODEL or metadata.get('effort') != route['effort']
                 or not metadata.get('request_id') or not metadata.get('session_id')
                 or metadata.get('model_calls', 0) < 1):
             raise ValueError('Grok actual provider metadata missing or mismatched')
         observed = {'model': PROVIDER_MODEL, 'effort': metadata['effort'],
                     'thread_id': metadata['session_id']}
+        answer = result['result']
     else:
-        observed = observed_model(Path(env['CODEX_HOME']), result.get('thread_id'), entry)
-    print(json.dumps({'route': route, 'observed': observed, 'status': 'completed', 'result': result['result']}))
+        output = runtime / 'result.md'
+        process = confined_run(['codex', 'exec', '--dangerously-bypass-hook-trust', '--json',
+            '--sandbox', 'read-only', '--skip-git-repo-check', '-C', str(folder), '-o', str(output),
+            '-m', route['model'], '-c', 'model_reasoning_effort=' + json.dumps(route['effort']),
+            request['prompt']], cwd=str(folder), capture_output=True, text=True,
+            stdin=subprocess.DEVNULL, timeout=request['timeout'])
+        events = []
+        for line in process.stdout.splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+        threads = [event.get('thread_id') for event in events if event.get('type') == 'thread.started']
+        if (process.returncode or len(threads) != 1 or not output.is_file()
+                or not any(event.get('type') == 'turn.completed' for event in events)
+                or any(event.get('type') == 'turn.failed' for event in events)):
+            raise ValueError('Codex source study did not complete')
+        answer = output.read_text()
+        if not answer.strip():
+            raise ValueError('Codex source study returned no report')
+        observed = observed_model(Path(env['CODEX_HOME']), threads[0], route)
+    print(json.dumps({'route': route, 'observed': observed, 'status': 'completed', 'result': answer}))
 
 
 def main():
@@ -234,7 +207,7 @@ def main():
         else:
             parser.error('--job or --preflight is required')
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-        print(f'Model Room refused: {type(error).__name__}; verify named desk, authentication and research confinement', file=sys.stderr)
+        print(f'Source study refused: {type(error).__name__}; verify provider config, authentication and research confinement', file=sys.stderr)
         return 1
     return 0
 

@@ -30,11 +30,6 @@ assert SPEC and SPEC.loader
 adapter = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = adapter
 SPEC.loader.exec_module(adapter)
-CONTROL_SPEC = importlib.util.spec_from_file_location("control_plane", ROOT / "tools" / "control-plane.py")
-assert CONTROL_SPEC and CONTROL_SPEC.loader
-control_plane = importlib.util.module_from_spec(CONTROL_SPEC)
-sys.modules[CONTROL_SPEC.name] = control_plane
-CONTROL_SPEC.loader.exec_module(control_plane)
 
 def signed(rows: list[dict[str, object]], *, key: str, fingerprint: str) -> dict[str, object]:
     unsigned = {
@@ -169,22 +164,6 @@ def main() -> int:
     assert disabled.returncode == 78
     assert "provider and dedicated claim runner are not installed" in disabled.stderr
     assert not disabled.stdout
-
-    receipt = {
-        "contract": "renewal-source-ingress.v1", "schema_version": 1,
-        "provider": "fixture-provider", "key_fingerprint": "a" * 64,
-        "snapshot_id": "00000000-0000-4000-8000-000000000001", "payload_sha256": "b" * 64,
-        "source_observed_at": "2026-08-21T12:00:00Z", "row_count": 1,
-        "source_run_id": "00000000-0000-4000-8000-000000000002",
-    }
-    evidence = {"stdout_tail": "renewal-source: result " + json.dumps(receipt, sort_keys=True, separators=(",", ":"))}
-    assert control_plane._renewal_source_aggregate(evidence) == receipt
-    try:
-        control_plane._renewal_source_aggregate({"stdout_tail": "renewal-source: result {}"})
-    except RuntimeError:
-        pass
-    else:
-        raise AssertionError("untyped renewal source receipt was accepted")
 
     print("renewal source adapter selftest: signed/versioned input and lease-bound seal contract pass")
     return 0

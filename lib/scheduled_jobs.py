@@ -232,7 +232,7 @@ def report(manifest, snapshot, now):
     flash_granted = (isinstance(grant, dict) and type(grant.get("expires_at")) in (int, float)
                      and type(grant.get("issued_at")) in (int, float)
                      and grant["issued_at"] <= now < grant["expires_at"])
-    flash_labels = {"local.ds4-flash-next", "local.flash-desk"}
+    flash_labels = {"local.ds4-flash-next"}
     # launchd keeps an override entry forever after a job is gone; alone it is not an installed job.
     observed = set(snapshot["plists"]) | {k for k in live if k.startswith(prefixes)} | cron.keys()
     for label in sorted(observed - registry.keys()):
@@ -249,6 +249,10 @@ def report(manifest, snapshot, now):
         plist = snapshot["plists"].get(label)
         is_cron = job["scheduler"] == "cron"
         present = label in cron if is_cron else plist is not None
+        if label in flash_labels | {"com.carr.flash-idle-stop"}:
+            expected_installed = expected_installed and (present or flash_granted)
+            if label == "com.carr.flash-idle-stop":
+                enabled = enabled and (present or flash_granted)
         if expected_installed and not present:
             emit(label, "missing_job", "declared job definition is absent", "restore the declared job definition from its repository source and verify registration", owner)
         if is_cron:
@@ -273,7 +277,7 @@ def report(manifest, snapshot, now):
             if label in flash_labels and not flash_granted and (plist is not None or label in live):
                 if (not is_disabled or (plist or {}).get("RunAtLoad") or (plist or {}).get("KeepAlive")):
                     emit(label, "flash_without_grant", "Flash can auto-start without an active human grant",
-                         "run config-as-code install --apply to restore off-by-default plists and disable both labels", owner)
+                         "run config-as-code install-flash-on-demand --apply to restore off-by-default plists and disable both labels", owner)
             if enabled and is_disabled and label not in flash_labels:
                 emit(label, "disabled_but_expected", "launchd disabled override or plist Disabled is set", "restore expected enabled state through the agent owner and verify launchctl print-disabled", owner)
             if enabled and plist and label not in live and label not in flash_labels:
@@ -315,7 +319,7 @@ def report(manifest, snapshot, now):
     git = snapshot.get("git", {})
     if git.get("behind", 0):
         emit("canonical", "behind_main", f"canonical checkout is {git['behind']} commits behind origin/main",
-             "repair canonical fleet-sync/fast-forward through bin/fleet-sync.sh and verify HEAD equals origin/main")
+             "fetch origin and update canonical main through native Git without discarding local work; verify HEAD equals origin/main")
     if git.get("ahead", 0):
         emit("canonical", "ahead_of_main", f"canonical checkout has {git['ahead']} commits not on origin/main",
              "move the unpublished canonical commits to a branch through the repository hygiene owner, then verify HEAD equals origin/main")
@@ -323,7 +327,7 @@ def report(manifest, snapshot, now):
         emit("canonical", "wrong_branch", "canonical checkout does not select main", "restore canonical main through the repository hygiene owner without discarding local work")
     if git.get("remote_matches") is False:
         emit("canonical", "remote_ref_stale", "origin/main does not match GitHub main; behind count is only a cached lower bound",
-             "restore fleet-sync's fetch and fast-forward, then verify against remote main")
+             "fetch origin through native Git, then verify against remote main")
     return rows
 
 
@@ -479,7 +483,7 @@ def native_manifest(source=SOURCE):
             "label": definition["Label"], "scheduler": "launchd",
             "program_arguments": installed_arguments(definition), "interval": interval,
             "required_checkout": "~/carr-system", "expected_enabled": bool(enabled),
-            "expected_installed": bool(enabled) or definition["Label"] in {"local.ds4-flash-next", "local.flash-desk"}, "owner": "orchestrator",
+            "expected_installed": bool(enabled) or definition["Label"] in {"local.ds4-flash-next"}, "owner": "orchestrator",
             "log_path": definition.get("StandardOutPath") or definition.get("StandardErrorPath"),
             "log_paths": [definition.get(k) for k in ("StandardOutPath", "StandardErrorPath")],
             "log_max_age_seconds": None,

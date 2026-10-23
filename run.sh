@@ -55,7 +55,6 @@ registry_audit(){ shift; "$PY" "$REPO/tools/registry-audit.py" "$@"; }
 # They run on the repo venv because they speak to Neon through psycopg.
 review_queue() { shift; "$REPO/.venv/bin/python" "$REPO/pipelines/review_queue.py" "$@"; }
 brief_pack()   { shift; "$REPO/.venv/bin/python" "$REPO/pipelines/brief_pack.py" "$@"; }
-verify_emails(){ python3 "$REPO/tools/verify-emails.py" "$@"; }
 # The restore rehearsal (2026-08-02). Proves backups/*.sql.age can come BACK:
 # throwaway Neon branch, decrypt, load, reconcile row counts, delete the branch.
 # It writes NOTHING to production and needs the age PRIVATE key, which this repo
@@ -79,6 +78,7 @@ key_recovery_test(){ "$REPO/bin/key-recovery-test.sh" "$@"; }
 call_verb()    { shift; python3 "$REPO/tools/call-verb.py" "$@"; }
 
 case "${1:-}" in
+  map)          shift; "$PY" "$REPO/tools/codemap.py" "$@" ;;
   deal-room)    shift; deal_room "$@" ;;
   lead-board)   shift; lead_board "$@" ;;
   lead-promote) shift; lead_promote "$@" ;;
@@ -95,7 +95,6 @@ case "${1:-}" in
   registry-audit) registry_audit "$@" ;;
   review-queue) review_queue "$@" ;;
   brief-pack)   brief_pack "$@" ;;
-  verify-emails) shift; verify_emails "$@" ;;
   restore-rehearse) restore_rehearse "$@" ;;
   key-recovery-test) shift; key_recovery_test "$@" ;;
   call)         call_verb "$@" ;;
@@ -113,16 +112,11 @@ case "${1:-}" in
   # green, receipts in out/health-act.jsonl. Plain `health` stays read-only
   # and prints the audit of red rows that have no open loop.
   health)       shift; "$PY" "$REPO/tools/health-check.py" "$@" ;;
-  # Cloudflare has no native hard spend cap; this is ours. Not scheduled:
-  # run|fast|restore|check-e2e|health|map-services|loop-watch. See tools/cloudflare_spend_guard.py.
-  cloudflare-spend-guard) shift; "$PY" "$REPO/tools/cloudflare_spend_guard.py" "$@" ;;
   costs)        shift; PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import system_costs,sys; sys.exit(system_costs.main(sys.argv[1:]))' "$@" ;;
   config)       shift; python3 "$REPO/ops/config-as-code.py" "$@" ;;
   lint)         shift; python3 "$REPO/tools/writing-lint.py" "$@" ;;
   migrate)      shift; "$REPO/.venv/bin/python" "$REPO/tools/migrate.py" "$@" ;;
   export)       shift; "$REPO/.venv/bin/python" -m exporters.run_exports "$@" ;;
-  check)        shift; "$REPO/tools/check.sh" "$@" ;;
-  smoke)        shift; "$REPO/tools/smoke.sh" "$@" ;;
   # `next` (2026-08-09, loop #297): open loops ordered by how LITTLE is left,
   # which no other surface answers — bell/dated/decision all order by urgency.
   # Read-only over v_loop_proximity (migration 0084). Prints its own coverage
@@ -141,11 +135,6 @@ case "${1:-}" in
   # directory every worktree on this machine shares — and next-migration counts
   # its rows as claims. See tools/reserve-migration.py.
   reserve-migration) shift; python3 "$REPO/tools/reserve-migration.py" "$@" ;;
-  # The report-card rubric (loop #220, DRAFT). One entry point for both paths:
-  # a human runs this, and the monthly audit runs this. Rule a8c55a47 — the
-  # manual path and the automated path that do the same job must be the SAME
-  # code, which under v1 they were not.
-  report-card)  shift; "$PY" "$REPO/tools/report-card.py" "$@" ;;
   # `worktree` (2026-08-10): an isolated checkout in one command. Two sessions
   # collided in the shared tree twice in one morning, and git-writer-gate's own
   # deny message already prescribes the fix — this makes it one step instead of
@@ -154,18 +143,7 @@ case "${1:-}" in
   regen)        shift; "$PY" "$REPO/tools/regen.py" "$@" ;;
   worktree)     shift; "$REPO/bin/worktree.sh" "$@" ;;
   local-db-ci)  shift; "$PY" "$REPO/ops/local-pg-ci.py" "$@" ;;
-  # `pr-board` (2026-10-12): every open pull request with exactly one next
-  # action (MERGE-READY / RESTACK / FIX-CI / STALE / WAIT) and its measured
-  # reason; writes out/pr-board.json. Read-only except --file-loops, which
-  # files one deduplicated loop per owner lane. Never closes, pushes or
-  # comments. A library, not a script: see lib/pr_board.py.
-  pr-board)     shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import pr_board; sys.exit(pr_board.main(sys.argv[1:]))' "$@" ;;
-  # `rule-approvals` (2026-10-12, decision cbe91287): one row per ACTIVE
-  # machine_enforceable rule still blocked for want of an approval receipt —
-  # its control, the catalog's readiness, the GONE flag and the exact
-  # approve-rule JSON. Dry run by default (a read-only db-tap read); --apply
-  # runs approve-rule for the ready rows through `./run.sh call` and appends
-  # each receipt or verbatim refusal to out/rule-approvals.jsonl.
-  rule-approvals) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import rule_approval_worklist as w; sys.exit(w.main(sys.argv[1:]))' "$@" ;;
-  *) echo "usage: run.sh deal-room|lead-board|lead-promote [--count N] [--county X] [--segment X]|renewal-feed|all|corroborate|graph|graph-system|graph-health [--verbose]|section-index [each supports --recovery --reason WHY [--vault PATH]]|space-search <folder>|salesforce-diff [--apply]|registry-audit [--verbose] [--recovery --reason WHY [--vault PATH]]|review-queue [--fixture f.json]|brief-pack [--section all|one-thing|prebriefs|capacity|monday-agenda|renewal-shortlist] [--quiet] [--recovery [--vault PATH]]|verify-emails [--source registry|vendors|roster] [--segment X] [--out f.csv]|retrieve [--recovery [--vault PATH]] <question>|health [--act] [--recovery --reason WHY [--vault PATH]]|cloudflare-spend-guard run/fast/restore/check-e2e/health/map-services/loop-watch|config [check|pull|install] [--apply]|lint <file> [--surface email|social|proposal|web]|restore-rehearse [--preflight] [--verify-only] [--date YYYYMMDD] [--identity PATH] [--keep-branch]|key-recovery-test|migrate [--apply] [--yes]|export [--only <target>] [--bootstrap]|call [--branch <name>] <verb> '<json args>'|call-mode [serve|state|start|stop]|check [--recovery --reason WHY [--vault PATH]]|smoke [--recovery --reason WHY [--vault PATH]]|next [--all] [--domain X]|report-card [--validate|--run] [--skip-evidence] [--recovery --reason WHY [--vault PATH]]|local-db-ci [--class migration|strict] [--port N]|pr-board [--json] [--file-loops] [--no-write] [--no-probe]|rule-approvals [--json] [--apply [--limit N]] [--runtime-root PATH]|regen [--pr N] [--list]|worktree <name> [--from B]|--list|--remove <name|path>"; exit 2 ;;
+  outlook-send) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["send", *sys.argv[1:]]))' "$@" ;;
+  outlook-event) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["event", *sys.argv[1:]]))' "$@" ;;
+  *) echo "usage: run.sh map [--missing]|deal-room|lead-board|lead-promote [--count N] [--county X] [--segment X]|renewal-feed|all|corroborate|graph|graph-system|graph-health [--verbose]|section-index [each supports --recovery --reason WHY [--vault PATH]]|space-search <folder>|salesforce-diff [--apply]|registry-audit [--verbose] [--recovery --reason WHY [--vault PATH]]|review-queue [--fixture f.json]|brief-pack [--section all|one-thing|prebriefs|capacity|monday-agenda|renewal-shortlist] [--quiet] [--recovery [--vault PATH]]|retrieve [--recovery [--vault PATH]] <question>|health [--act] [--recovery --reason WHY [--vault PATH]]|config [check|pull|install] [--apply]|lint <file> [--surface email|social|proposal|web]|restore-rehearse [--preflight] [--verify-only] [--date YYYYMMDD] [--identity PATH] [--keep-branch]|key-recovery-test|migrate [--apply] [--yes]|export [--only <target>] [--bootstrap]|call [--branch <name>] <verb> '<json args>'|call-mode [serve|state|start|stop]|next [--all] [--domain X]|local-db-ci [--class migration|strict] [--port N]|regen [--pr N] [--list]|worktree <name> [--from B]|--list|--remove <name|path>"; exit 2 ;;
 esac

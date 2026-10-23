@@ -38,7 +38,8 @@ class ActionRiskDispositionTests(unittest.TestCase):
 
     def test_baseline_is_exactly_covered_and_set_lead_is_the_only_selected_remediation(self):
         result = self.validate()
-        self.assertEqual(result, {"status": "valid", "selected_slice": "set-lead", "rows": 13})
+        self.assertEqual({k: result[k] for k in ("status", "selected_slice", "rows")},
+                         {"status": "valid", "selected_slice": "set-lead", "rows": 13})
         self.assertEqual(self.artifact["contract"], "carr-action-risk-dispositions")
         self.assertEqual(self.artifact["version"], "1.0.0")
         self.assertEqual(self.artifact["status"], "phase1_guardrails")
@@ -64,6 +65,14 @@ class ActionRiskDispositionTests(unittest.TestCase):
         self.assert_invalid(stale_binding, "registry digest")
         with self.assertRaisesRegex(action_risk_guardrails.DispositionError, "registry digest"):
             self.validate(registry_bytes=b"stale")
+
+    def test_validation_reports_historical_coverage_without_reclassifying_verbs(self):
+        self.assertEqual(self.registry["status"], "historical_phase1_baseline")
+        self.assertEqual(self.registry["provenance"]["last_artifact_change"],
+                         "e1dcf5126b56c0ca762152ca6b7de31d3c3213cb")
+        self.assertEqual(self.validate()["coverage"], "historical_phase1_baseline")
+        self.assertEqual(self.validate()["current_handler_inventory"],
+                         "mcp-server/src/scac-mutation-registry.current.generated.js")
 
     def test_missing_unknown_duplicate_and_unowned_baseline_rows_refuse(self):
         missing = copy.deepcopy(self.artifact)

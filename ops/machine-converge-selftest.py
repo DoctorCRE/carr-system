@@ -38,7 +38,7 @@ SELF_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from git_env import fixture_env, FIXTURE_GIT_CONFIG  # noqa: E402
 sys.path.insert(0, SELF_REPO)
-from lib import launchd_calendar  # noqa: E402
+from lib import launchd_calendar, machine_role  # noqa: E402
 
 # The checkout under test supplies the real hook, the real installer and the
 # real tracked template — a hand-copied template here would let the template
@@ -46,7 +46,6 @@ from lib import launchd_calendar  # noqa: E402
 COPIES = [
     "hooks/machine-converge.py",
     "hooks/grok_invocation.py",
-    "lib/claude_continuity_config.py",
     "lib/machine_prerequisites.py",
     "lib/launchd_calendar.py",
     "lib/machine_role.py",
@@ -54,19 +53,17 @@ COPIES = [
     "lib/launchd_scope.py",
     "ops/config/services.json",
     "lib/launchd_hold.py",
-    "mcp-server/continuity-stdio-proxy.mjs",
-    "ops/claude-continuity-hook.py",
+    "mcp-server/codex-continuity-stdio-proxy.mjs",
     "ops/config-as-code.py",
     "tools/flash_install.py",
     "tools/flashlib.py",
     "ops/launchd/local.ds4-flash-next.plist",
-    "ops/launchd/local.flash-desk.plist",
     "ops/launchd/com.carr.flash-idle-stop.plist",
-    "ops/install-claude-continuity.py",
-    "ops/config/claude-continuity-hooks.json",
     "ops/git_env.py",
     "ops/githooks/pre-push",
     "ops/config/hooks.json",
+    "ops/config/claude-managed-settings.json",
+    "ops/config/codex-requirements.toml",
     "ops/launchd/com.carr.dictation-consent.plist",
 ]
 
@@ -113,12 +110,6 @@ def keep_maintenance_joined(repo):
         git(repo, "config", key, value)
 
 
-def owner_email():
-    with open(os.path.join(SELF_REPO, "ops", "githooks", "pre-push"),
-              encoding="utf-8") as fh:
-        return re.search(r'^OWNER_EMAIL="([^"]+)"', fh.read(), re.M).group(1)
-
-
 def write_exec(path, body):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
@@ -138,6 +129,15 @@ def build_fixture(root, email, actor_slug=None, behind=True, dirty=False,
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(os.path.join(SELF_REPO, rel), dst)
 
+    # Exercise real policy reconciliation without accessing system destinations.
+    installer = Path(repo, "ops/config-as-code.py")
+    source = installer.read_text()
+    entry = '\nif __name__ == "__main__":'
+    assert entry in source
+    destinations = ('\nCLAUDE_MANAGED_SETTINGS = os.path.join(HOME, "managed-claude.json")\n'
+                    'CODEX_REQUIREMENTS = os.path.join(HOME, "codex-requirements.toml")\n')
+    installer.write_text(source.replace(entry, destinations + entry))
+
     # The PR #555 install guard requires this fixture repo to carry the scripts
     # its hooks block names, just as a real checkout does.
     hooks_path = os.path.join(SELF_REPO, "ops", "config", "hooks.json")
@@ -154,8 +154,6 @@ def build_fixture(root, email, actor_slug=None, behind=True, dirty=False,
     write_exec(os.path.join(repo, "bin", "run-scheduled.sh"), "#!/bin/zsh\nexit 0\n")
     write_exec(os.path.join(repo, "tools", "dictation-rig", "bin", "consent-watch.sh"),
                "#!/bin/zsh\nexit 0\n")
-    write_exec(os.path.join(repo, "tools", "room-bridge", "dispatch.py"),
-               "#!/usr/bin/env python3\n")
     with open(os.path.join(repo, "README.md"), "w", encoding="utf-8") as fh:
         fh.write("fixture\n")
 
@@ -301,6 +299,9 @@ def case_secondary_converges(tmp):
             "load" in open(os.path.join(tmp, "launchctl.log")).read(),
         "Claude settings rendered":
             os.path.isfile(os.path.join(home, ".claude", "settings.json")),
+        "managed policies stay inside the fixture HOME":
+            all(Path(home, name).is_file() for name in
+                ("managed-claude.json", "codex-requirements.toml")),
         "no ~/.codex created on a Claude-only machine":
             not os.path.exists(os.path.join(home, ".codex")),
         "brief line reports the apply": "re-applied" in r.stdout,
@@ -308,37 +309,6 @@ def case_secondary_converges(tmp):
     return checks
 
 
-def case_stale_continuity_receipt_self_heals(tmp):
-    """A machine that opted into Claude continuity, then pulled a merge that
-    changed the continuity adapter: its mode receipt no longer matches the
-    contract digest, config-as-code refuses to install ANYTHING, and the whole
-    hook set drifts. 2026-10-10 to 10-12 on the MacBook that was 224 Stop
-    turns crashing on a deleted gate. The hook must re-stamp the receipt with
-    the sanctioned installer and finish the install."""
-    repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell")
-    receipt = os.path.join(home, ".config", "carr", "claude-continuity-mode.json")
-    os.makedirs(os.path.dirname(receipt), exist_ok=True)
-    with open(receipt, "w", encoding="utf-8") as fh:
-        json.dump({"schema_version": 1, "mode": "shadow",
-                   "config_digest": "sha256:" + "0" * 64}, fh)
-    r = run_hook(repo, home, stubs, tmp)
-    with open(receipt, encoding="utf-8") as fh:
-        after = json.load(fh)
-    settings = os.path.join(home, ".claude", "settings.json")
-    installed = json.load(open(settings, encoding="utf-8")) if os.path.isfile(settings) else {}
-    commands = " ".join(
-        hook.get("command", "")
-        for entries in (installed.get("hooks") or {}).values()
-        for entry in entries for hook in entry.get("hooks", []))
-    return {
-        "hook exits 0": r.returncode == 0,
-        "brief line names the re-stamp": "re-stamped mode 'shadow'" in r.stdout,
-        "install completed after the re-stamp": "re-applied" in r.stdout,
-        "receipt keeps the machine's mode": after.get("mode") == "shadow",
-        "receipt digest was refreshed": after.get("config_digest") not in (None, "sha256:" + "0" * 64),
-        "Claude settings rendered": os.path.isfile(settings),
-        "continuity overlay installed with the base hooks": "claude-continuity-hook.py" in commands,
-    }
 
 
 def case_primary_noop(tmp):
@@ -358,7 +328,7 @@ def case_primary_noop(tmp):
 
 def case_owner_fallback_noop(tmp):
     """No local-actor.json: the owner's git identity means primary -> no-op."""
-    repo, home, stubs = build_fixture(tmp, owner_email(), actor_slug=None)
+    repo, home, stubs = build_fixture(tmp, machine_role.OWNER_EMAIL, actor_slug=None)
     before = git(repo, "rev-parse", "HEAD")
     r = run_hook(repo, home, stubs, tmp)
     return {
@@ -397,7 +367,7 @@ def write_role(home, role):
 def case_marker_secondary_converges(tmp):
     """Joe's second Mac: owner email AND joe slug, but marked secondary ->
     it converges like any secondary (the 2026-09-23 Studio move)."""
-    repo, home, stubs = build_fixture(tmp, owner_email(), actor_slug="joe")
+    repo, home, stubs = build_fixture(tmp, machine_role.OWNER_EMAIL, actor_slug="joe")
     write_role(home, "secondary")
     r = run_hook(repo, home, stubs, tmp)
     return {
@@ -421,31 +391,31 @@ def case_marker_primary_noop(tmp):
     }
 
 
-def case_flash_converges(tmp):
+def case_flash_is_explicit(tmp):
     repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell")
     agents = Path(home) / "Library/LaunchAgents"
-    labels = ("local.ds4-flash-next", "local.flash-desk")
+    labels = ("local.ds4-flash-next",)
     for label in labels:
         (agents / (label + ".plist")).write_bytes(plistlib.dumps({
             "Label": label, "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False}}))
+    before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in
+              (agents / (label + ".plist") for label in labels)]
     r = run_hook(repo, home, stubs, tmp)
     log = Path(tmp, "launchctl.log").read_text()
-    bodies = [plistlib.loads((agents / (label + ".plist")).read_bytes()) for label in labels]
+    after = [(p.read_bytes(), p.stat().st_mtime_ns) for p in
+             (agents / (label + ".plist") for label in labels)]
     return {
         "hook finishes": r.returncode == 0 and "re-applied" in r.stdout,
-        "both templates off": all(not b.get("RunAtLoad") and not b.get("KeepAlive") for b in bodies),
-        "both labels disabled": all("disable gui/" in log and label in log for label in labels),
-        "watcher loaded": "bootstrap" in log and "com.carr.flash-idle-stop" in log,
-        "no model started": not any(x in log for x in ("kickstart", "enable gui/")),
+        "existing Flash definitions untouched": before == after,
+        "watcher not installed": not (agents / "com.carr.flash-idle-stop.plist").exists(),
+        "no Flash launchctl calls": not any(label in log for label in (*labels, "com.carr.flash-idle-stop")),
     }
 
 
 def main():
     cases = [
-        ("Flash drift converges to off", case_flash_converges),
+        ("Flash installation requires explicit activation", case_flash_is_explicit),
         ("secondary machine converges", case_secondary_converges),
-        ("stale continuity receipt is re-stamped and the install completes",
-         case_stale_continuity_receipt_self_heals),
         ("primary machine (actor slug) is a no-op", case_primary_noop),
         ("primary machine (owner-email fallback) is a no-op", case_owner_fallback_noop),
         ("dirty tree refuses ff, keeps the edit, still applies", case_dirty_tree_refuses_ff_but_still_applies),

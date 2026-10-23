@@ -126,7 +126,7 @@ def parse_recovery_controls(argv: list[str] | tuple[str, ...], seam: str) -> Rec
 # Exit 69 (EX_UNAVAILABLE) is the repo's "canonical seam missing" code:
 # bin/nightly.sh's step() maps 69 to BLOCKED rather than FAIL, so a vault-only
 # tool that refuses reads as a deliberate refusal in the chain log instead of a
-# broken step. Same code bin/routine-canonical-seam-refusal.sh uses.
+# broken step. The retired shell refusal used this same status.
 SEAM_MISSING_EXIT = 69
 
 

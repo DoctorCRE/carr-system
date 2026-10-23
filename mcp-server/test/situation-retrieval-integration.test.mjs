@@ -180,6 +180,7 @@ test("the visibility resolver still constrains to an active human, in the migrat
 // `active = true`. A scan for `active\s*=` alone would have missed every one.
 test("no read verb filters the actor table on a column carr_reader cannot read", () => {
   const CLASSIFIED = {
+    "deal-items.js": "record-deal-item and backfill-deal-items derive an active partner owner only inside write handlers",
     "capability-program.js": "start-capability-project and siblings — write:true",
     "investigation.js": "ownedOpenRun, reached only by investigation write verbs",
     "tools.js": "set-national-account-owner, resolve-post-call-candidate, deal-room field update — all write:true",

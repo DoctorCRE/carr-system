@@ -11,7 +11,6 @@ const tokenFile = [
   "CARR_HERMES_MCP_TOKEN=hermes-secret",
   "CARR_HERMES_COS_MCP_TOKEN=cos-secret",
   "CARR_CODEX_CONTINUITY_MCP_TOKEN=codex-continuity-secret",
-  "CARR_CLAUDE_CONTINUITY_MCP_TOKEN=claude-continuity-secret",
 ].join("\n");
 
 test("ordinary calls keep the local-machine credential", () => {
@@ -62,24 +61,17 @@ test("client profiles never borrow another profile's credential", () => {
   assert.equal(selectLocalClientCredential(
     {}, "CARR_HERMES_COS_MCP_TOKEN=cos-only\n").token, "");
   assert.deepEqual([...LOCAL_CLIENT_PROFILE_NAMES], [
-    "local", "unattended", "codex-continuity", "claude-continuity", "hermes-projector", "hermes-cos",
+    "local", "unattended", "codex-continuity", "hermes-projector", "hermes-cos",
   ]);
 });
 
-test("native continuity profiles select independent tokens and Worker maps", () => {
+test("Codex continuity selects its isolated token and Worker map", () => {
   const codex = selectLocalClientCredential(
     { CARR_MCP_CLIENT_PROFILE: "codex-continuity" }, tokenFile);
-  const claude = selectLocalClientCredential(
-    { CARR_MCP_CLIENT_PROFILE: "claude-continuity" }, tokenFile);
   assert.deepEqual(
     { token: codex.token, variable: codex.tokenVariable, secret: codex.workerSecret },
     { token: "codex-continuity-secret", variable: "CARR_CODEX_CONTINUITY_MCP_TOKEN",
       secret: "CODEX_CONTINUITY_TOKENS" },
-  );
-  assert.deepEqual(
-    { token: claude.token, variable: claude.tokenVariable, secret: claude.workerSecret },
-    { token: "claude-continuity-secret", variable: "CARR_CLAUDE_CONTINUITY_MCP_TOKEN",
-      secret: "CLAUDE_CONTINUITY_TOKENS" },
   );
   assert.equal(selectLocalClientCredential(
     { CARR_MCP_CLIENT_PROFILE: "codex-continuity" },

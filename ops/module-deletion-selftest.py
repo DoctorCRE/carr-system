@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Check that closed module deletions leave truthful retained contracts."""
-import json
 from pathlib import Path
-import subprocess
 import unittest
 
 
@@ -20,16 +18,7 @@ class ModuleDeletionTests(unittest.TestCase):
                 self.assertFalse((REPO / path).exists(), path)
 
     def test_retained_contracts_do_not_claim_deleted_implementations(self):
-        result = subprocess.run([
-            "node", "--input-type=module", "-e",
-            "import {v5CostVarianceProjection} from './mcp-server/src/cost-variance-replan.v5.js';"
-            "console.log(JSON.stringify([v5CostVarianceProjection()]));",
-        ], cwd=REPO, check=True, capture_output=True, text=True)
-        contracts = json.loads(result.stdout)
-        for contract in contracts:
-            for gap in contract["unimplemented_dependencies"]:
-                self.assertNotRegex(gap, r"model-qualification-kernel|expected-total-cost|adapter boundary")
-        for path in ("rule-applicability", "partner-mail-calendar", "cost-variance-replan"):
+        for path in ("rule-applicability", "partner-mail-calendar"):
             with self.subTest(path=path):
                 self.assertNotRegex(
                     (REPO / f"mcp-server/src/{path}.v5.js").read_text(),
@@ -42,7 +31,6 @@ class ModuleDeletionTests(unittest.TestCase):
         for path in (
             "lib/record_sources.py", "generators/build-deal-room.py",
             "generators/build-lead-board.py", "shared/build-lead-board-template.py",
-            "hooks/draft-export-gate.py", "ops/draft-export-gate-selftest.py",
             "specs/party-graph-ref-fallback.md", "ops/config/rule-routes.v1.json",
         ):
             with self.subTest(path=path):

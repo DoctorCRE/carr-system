@@ -23,150 +23,12 @@ import { authenticatedIdentity, isKnownPartner, authorizationClassForActor, orga
 import { deriveTrustedPrincipalBinding,
   ExactEffectRefusal, SCAC_TRUSTED_PRINCIPAL_READBACK_SQL } from "./scac-exact-effects.js";
 import { scheduleFailureRecord, rpcInternalErrorFailureClass, actorUnresolvedFailureClass, RPC_INTERNAL_ERROR_CODE } from "./trace.js";
-import { providerFor as judgeProviderFor } from "./judge-provider.js";
-import { countPaidJevAttemptsToday, jevAskBinding, prefetchJevAnswer, reserveJevCallAttempt,
-  validateAskJevArgs } from "./jev-call-receipt.js";
 import { parksADecision, classifyLoopText, needsDecider, loopRowText,
          ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.js";
-import { controllerOperationInput, controllerToolList, isEngineeringControllerActor,
-  opaqueControllerResult, operationIdempotencyKey, ENGINEERING_CONTROLLER_EXECUTOR,
-  ENGINEERING_CONTROLLER_WORKER } from "./authenticated-canonical-ownership.js";
-import { withTrustedCanonicalOwnershipContext } from "./engineering-runtime.js";
 
 const JSON_HEADERS = { "content-type": "application/json" };
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
-
-// This route deliberately does not use dispatch()/allowedIn().  Every regular
-// MCP profile inherits read verbs; an ownership controller must inherit none.
-async function controllerBinding(client, actor, name, input) {
-  const operation = name.replace(/^canonical-ownership-/, "");
-  const found = await client.query(
-    `select ops.authenticated_canonical_ownership_controller_binding(
-       $1::uuid,$2::uuid,$3::text,$4::text) as row
-       /* engineering-controller:closed-binding-readback */`,
-    [input.job_id, input.lease_token, ENGINEERING_CONTROLLER_WORKER, operation],
-  );
-  const row = found.rows[0]?.row;
-  if (!row || typeof row !== "object")
-    throw new ToolError({ error: "engineering_controller_binding_unavailable" });
-  const binding = row.binding;
-  if (!binding || binding.executor_actor?.slug !== ENGINEERING_CONTROLLER_EXECUTOR ||
-      binding.envelope_id !== row.envelope_id || !binding.slice_plan ||
-      binding.slice_plan.work_request?.id !== `wr:${row.work_request_id}` ||
-      binding.slice_plan.accepted_plan_revision?.id !== `plan:${row.accepted_plan_id}` ||
-      binding.slice_plan.plan_digest !== binding.plan_digest || actor.slug !== ENGINEERING_CONTROLLER_EXECUTOR)
-    throw new ToolError({ error: "engineering_controller_binding_mismatch" });
-  // The lifecycle definer derives the exact accepted source scope itself.  The
-  // Worker is intentionally not a second source-path projection.
-  return { row, binding };
-}
-
-async function controllerOperation(client, actor, name, input, issuerGeneration) {
-  const resolved = await controllerBinding(client, actor, name, input);
-  const { row, binding } = resolved;
-  const contextBinding = {
-    work_request_id: row.work_request_id, accepted_plan_id: row.accepted_plan_id,
-    envelope_id: row.envelope_id, agent_session_id: row.agent_session_id,
-    attempt: row.attempt, expires_at: row.runtime_expires_at, idempotency_key: input.lease_token,
-    // The request token becomes authority only after the binding query above
-    // proves it equals ops.job.lease_token on this live engineering worker.
-    job_lease_token: input.lease_token,
-  };
-  const result = await withTrustedCanonicalOwnershipContext(client, actor, contextBinding, ToolError, async context => {
-    const stableOperationSubject = name === "canonical-ownership-acquire"
-      ? `${context.binding_id}:${row.attempt}:${input.job_id}`
-      : `${context.binding_id}:${input.prior_operation_key}:${name}`;
-    const operationKey = operationIdempotencyKey(name, stableOperationSubject);
-    let prior = null;
-    if (input.prior_operation_key) {
-      prior = (await client.query(
-        "select ops.read_canonical_ownership_operation($1::uuid) as result /* engineering-controller:ambiguity-readback */",
-        [input.prior_operation_key],
-      )).rows[0]?.result;
-      if (!prior?.ok || prior.lease_id !== input.lease_id ||
-          typeof prior.lease_token !== "string" || !Number.isSafeInteger(Number(prior.fencing_generation)))
-        throw new ToolError({ error: "engineering_controller_prior_operation_unavailable" });
-    }
-    const remainingSeconds = Math.floor((Date.parse(context.expires_at) - Date.now()) / 1000);
-    if (!Number.isSafeInteger(remainingSeconds) || remainingSeconds < 30)
-      throw new ToolError({ error: "engineering_controller_runtime_runway_insufficient" });
-    const lifecycle = name === "canonical-ownership-acquire"
-      ? {
-        operation: "acquire", idempotency_key: operationKey, ttl_seconds: Math.min(900, remainingSeconds),
-      }
-      : name === "canonical-ownership-check"
-        ? { operation: "check", idempotency_key: operationKey, lease_id: input.lease_id,
-          lease_token: prior.lease_token, fencing_generation: Number(prior.fencing_generation) }
-        : name === "canonical-ownership-renew"
-          ? { operation: "renew", idempotency_key: operationKey, lease_id: input.lease_id,
-            lease_token: prior.lease_token, fencing_generation: Number(prior.fencing_generation),
-            ttl_seconds: Math.min(900, remainingSeconds) }
-          : { operation: "release", idempotency_key: operationKey, lease_id: input.lease_id,
-            lease_token: prior.lease_token, fencing_generation: Number(prior.fencing_generation) };
-    const applied = (await client.query(
-      "select ops.canonical_ownership_lifecycle($1::jsonb) as result /* engineering-controller:lifecycle */",
-      [JSON.stringify(lifecycle)],
-    )).rows[0]?.result;
-    // The bounded readback is the ambiguity path: a response loss cannot cause
-    // a second lease operation with freshly chosen authority.
-    const readback = (await client.query(
-      "select ops.read_canonical_ownership_operation($1::uuid) as result /* engineering-controller:operation-readback */",
-      [operationKey],
-    )).rows[0]?.result;
-    const settled = readback?.ok ? readback : applied;
-    return { result: settled, operationKey };
-  });
-  return opaqueControllerResult(name, result.result, result.operationKey, issuerGeneration);
-}
-
-export function ownershipIssuerConnection(env, input) {
-  const mode = env?.CANONICAL_OWNERSHIP_RUNTIME_MODE;
-  if (!new Set(["canary_only", "attended_active"]).has(mode)) return null;
-  if (mode === "canary_only" && env?.CANONICAL_OWNERSHIP_CANARY_JOB_ID !== input.job_id) return null;
-  const generation = input.issuer_generation || Number(env?.CANONICAL_OWNERSHIP_ISSUER_ACTIVE_GENERATION);
-  if (![1, 2].includes(generation)) return null;
-  const connectionString = generation === 1
-    ? env.DATABASE_URL_OWNERSHIP_ISSUER_G1 : env.DATABASE_URL_OWNERSHIP_ISSUER_G2;
-  return connectionString ? { connectionString, generation } : null;
-}
-
-/** The controller's closed MCP surface, called only by index.js's token door. */
-export async function dispatchEngineeringController(request, env, ctx, actor) {
-  if (!isEngineeringControllerActor(actor)) return json({ error: "engineering_controller_auth_refused" }, 401);
-  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-  let rpc;
-  try { rpc = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
-  const reply = result => json({ jsonrpc: "2.0", id: rpc.id, result });
-  if (rpc.method === "initialize") return reply({ protocolVersion: PROTOCOL, capabilities: { tools: {} },
-    serverInfo: { name: "carr-engineering-ownership-controller", version: "1" } });
-  if (rpc.method === "tools/list") return reply({ tools: controllerToolList() });
-  if (rpc.method !== "tools/call") return json({ jsonrpc: "2.0", id: rpc.id, error: { code: -32601, message: "method not found" } });
-  try {
-    const name = rpc.params?.name;
-    const input = controllerOperationInput(name, rpc.params?.arguments);
-    const issuer = ownershipIssuerConnection(env, input);
-    if (!issuer) throw new ToolError({ error: "engineering_controller_issuer_unavailable" });
-    const pool = new Pool({ connectionString: issuer.connectionString });
-    const client = await pool.connect();
-    try {
-      await client.query("begin");
-      await client.query("set local role carr_ownership_issuer /* engineering-controller:issuer-capability */");
-      const result = await controllerOperation(client, actor, name, input, issuer.generation);
-      await client.query("commit");
-      return reply({ content: [{ type: "text", text: JSON.stringify(result) }] });
-    } catch (error) {
-      await client.query("rollback").catch(() => {});
-      throw error;
-    } finally {
-      client.release();
-      ctx?.waitUntil?.(pool.end());
-    }
-  } catch (error) {
-    const payload = error instanceof ToolError ? error.payload : (error.payload || { error: "engineering_controller_operation_failed" });
-    return reply({ isError: true, content: [{ type: "text", text: JSON.stringify(payload) }] });
-  }
-}
 
 const CANONICAL_OWNERSHIP_HOST_VERSION = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,95}$/;
 
@@ -174,7 +36,7 @@ const CANONICAL_OWNERSHIP_HOST_VERSION = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,95}$/;
 // header, RPC parameter, or tool argument.  The ownership adapter refuses when
 // it is absent: a pool connection that cannot name its configured host cannot
 // be trusted to acquire or renew a canonical ownership lease.
-export function canonicalOwnershipExecutionHost(env) {
+function canonicalOwnershipExecutionHost(env) {
   const version = typeof env?.CF_VERSION_METADATA?.id === "string"
     ? env.CF_VERSION_METADATA.id.trim() : "";
   return CANONICAL_OWNERSHIP_HOST_VERSION.test(version)
@@ -268,9 +130,6 @@ export const PROFILES = {
   // only their own record surface even if a caller asks for ?profile=full.
   "codex-continuity": new Set([
     "codex-checkpoint", "codex-read-recovery",
-  ]),
-  "claude-continuity": new Set([
-    "claude-checkpoint", "claude-read-recovery",
   ]),
 
   // Reads plus the capture verbs that are safe to run unattended: each one is
@@ -457,9 +316,7 @@ export const PROFILES = {
   // a runner with partner authority without somebody editing this list.
   //
   // capture's additive set, plus close-loop (Joe's ruling names loop closes),
-  // plus the two V5-A05 cadence doors so the daily sweep can run here as the
-  // system seat (delivery-cadence-a05-tools.js), plus exactly the
-  // partner-authority acts tools.js's UNATTENDED_AUTHORITY_VERBS admits. The
+  // plus the partner-authority acts in tools.js's UNATTENDED_AUTHORITY_VERBS. The
   // authority half is that same exported list, so the profile and the
   // executeRegisteredTool gate cannot disagree. Nothing here merges, re-points
   // ownership, creates a party, touches a rule or schedule, or sends.
@@ -469,7 +326,6 @@ export const PROFILES = {
     "record-signal", "record-branch-evidence", "report-problem", "record-defect",
     "open-incident", "triage-incident",
     "close-loop",
-    "record-cadence-receipt", "raise-delivery-cadence-alert",
     ...UNATTENDED_AUTHORITY_VERBS,
   ]),
 
@@ -537,7 +393,7 @@ const PROFILE_NOTICE = {
     "written and hand it back for a human.</notice>",
   unattended:
     "\n\n<notice>This session runs on the UNATTENDED profile: nobody is watching. You hold " +
-    "reads, the additive capture verbs, close-loop, the cadence doors, and exactly these " +
+    "reads, the additive capture verbs, close-loop, and exactly these " +
     "partner-authority acts on Joe's behalf: " + UNATTENDED_AUTHORITY_VERBS.join(", ") + ". " +
     "Every other write refuses with not_in_profile, and the profile is locked server-side by an " +
     "UNATTENDED_TOKENS bearer, not by ?profile=. Rules, schedules, merges, deal facts and anything " +
@@ -547,7 +403,7 @@ const PROFILE_NOTICE = {
     "plus exactly update-deal (deal_type, segment, city and lane only) and add-premises against " +
     "existing parties only. Its server-issued door cannot be widened by ?profile= or caller fields. " +
     "It may hand a next action to Joe, its verified sponsor, but never Dell; created_by remains the " +
-    "Hermes runtime. Phase, outcome, close/value, identity, merge, teach, authority-only and send " +
+    "Hermes runtime. Phase, outcome, close/value, identity, merge, authority-only and send " +
     "operations remain refused.</notice>",
 };
 
@@ -576,8 +432,6 @@ export function profileForActor(actor, request) {
   if (new URL(request.url).pathname === "/doc/mcp") return "doc";
   if (actor?.continuity_surface === "codex" && actor?.via === "codex-continuity-token")
     return "codex-continuity";
-  if (actor?.continuity_surface === "claude" && actor?.via === "claude-continuity-token")
-    return "claude-continuity";
   if (actor?.probe) return "probe";
   if (actor?.benchmarkAuthor === true && actor?.via === "review-token") return "benchmark-author";
   if (actor?.benchmarkReviewer === true && actor?.via === "review-token") return "benchmark-reviewer";
@@ -619,12 +473,11 @@ export function hermesCosPremisesRefusal(profile, name, args) {
 const CORE_TOOL_NAMES = new Set([
   "standing-context", "list-verbs", "call-verb",
   "report-problem", "record-defect", "add-loop",
-  "teach", "activate-rule",
   "capability-program", "catch-me-up", "find", "loop-board",
   "read-doctrine", "read-loop", "read-room", "search-doctrine",
   "deal-room-board", "get-deal-room", "lead-board", "morning-brief", "today-triage",
   "engineering-passport-source", "doctrine-sections",
-  "ask-jev", "add-room-turn", "map-architecture",
+  "add-room-turn", "map-architecture",
   "applicable-rules", "resolve-doctrine-rules", "doctrine-index",
 ]);
 
@@ -745,15 +598,7 @@ export function authorityDsnForActor(env, runtimeActor) {
 // connection: no transaction, no actor context, and only what carr_reader is
 // granted. A read verb whose SQL is granted to carr_writer/carr_authority only
 // (a SECURITY DEFINER door that raises 42501 for anyone else) must declare
-// writerConnection so it lands on "writer_read_only" instead -- V5-A05's
-// cadence-status missed exactly this and its daily sweep could never succeed.
-// Active supersession keeps retire-rule's credential boundary. Human teach
-// calls carrying a replacement use authority; machine capture stays writer.
-export function requiresAuthorityConnection(tool, actor, args = {}) {
-  return tool.authorityOnly === true ||
-    (tool === TOOLS["teach"] && actor?.human === true && !!args?.supersedes);
-}
-
+// writerConnection so it lands on "writer_read_only" instead.
 export function connectionRouteForTool(tool) {
   if (!tool.write && !tool.writerConnection) return "reader";
   if (tool.authorityOnly) return "authority";
@@ -779,7 +624,7 @@ export async function executeWithTrustedPrincipal(actor, readback, requiredBundl
 
 // Exported for deterministic no-network identity-gate tests. It remains the
 // single normal dispatcher path; callers receive no additional route or grant.
-export async function callTool(env, actor, name, args, profile = "full", judgeWorkClass = "system_work") {
+export async function callTool(env, actor, name, args, profile = "full") {
   const personalScope = personalScopeForActor(actor);
   if (personalScope.status === "error") {
     throw new ToolError({ error: personalScope.error,
@@ -854,7 +699,7 @@ export async function callTool(env, actor, name, args, profile = "full", judgeWo
   if (!allowedIn(profile, name, tool))
     throw new ToolError({ error: "not_in_profile", verb: name, profile,
       hint: "this session is scoped; report what you would have done and let an interactive partner session do it" });
-  if (requiresAuthorityConnection(tool, actor, args) && !authorityDsnForActor(env, actor))
+  if (tool.authorityOnly === true && !authorityDsnForActor(env, actor))
     throw new ToolError({ error: "authority_connection_unavailable",
       hint: "this partner-authority operation requires a verified Joe/Dell principal or sponsored Codex/Claude identity plus the sponsor-scoped authority database binding" });
   // Payload-aware profile guard (2026-08-05). Name-level gating cannot see that
@@ -953,49 +798,13 @@ export async function callTool(env, actor, name, args, profile = "full", judgeWo
 
   // Writes use the routine writer pool except the two authority operations,
   // which receive a separate DB identity and cannot fall back to writer.
-  // A billable Jev call needs a durable attempt before any vendor request.
-  // Cache promotion waits until the receipt transaction commits below.
-  let validatedJevRequest = null;
-  if (tool.jevProxy === true && env?.TYPESAFE_API_KEY) {
-    const jevArgs = args || {};
-    await assertRegisteredToolInput(name, tool, jevArgs);
-    coerceArgsToSchema(tool.inputSchema, jevArgs);
-    const normalized = validateAskJevArgs(jevArgs);
-    validatedJevRequest = { state: normalized.state, model: normalized.model,
-      questions: normalized.questions };
-  }
-  const needsAuthority = requiresAuthorityConnection(tool, actor, args);
+  const needsAuthority = tool.authorityOnly === true;
   const connectionString = needsAuthority ? authorityDsnForActor(env, actor) : env.DATABASE_URL_WRITER;
   const pool = new Pool({ connectionString });
   const client = await pool.connect();
-  let jevPrefetched, jevAsk, jevRequest;
-  let jevKeyLocked = false;
   const writerRead = tool.writerConnection === true && !tool.write;
   let readOk = true, readErrorKind = null;
   try {
-    if (tool.jevProxy === true && (env?.TYPESAFE_API_KEY || judgeProviderFor(judgeWorkClass) === "decisions")) {
-      const jevArgs = args || {};
-      jevRequest = validatedJevRequest;
-      // An envelope replay already has its receipt; do not spend or reserve
-      // another attempt. Serialize the check through commit so concurrent
-      // same-key calls cannot both pay before the envelope replay check.
-      await client.query("select pg_advisory_lock(hashtextextended($1,0))", [jevArgs.idempotency_key]);
-      jevKeyLocked = true;
-      // withEnvelope still checks the full request hash.
-      const prior = await client.query("select 1 from tool_call where idempotency_key=$1", [jevArgs.idempotency_key]);
-      if (!prior.rows.length) {
-        const actorRow = (await client.query("select id from actor where slug=$1", [actor.slug])).rows[0];
-        if (!actorRow?.id)
-          throw new ToolError({ error: "actor_not_provisioned", slug: actor.slug });
-        jevAsk = jevAskBinding(env, fetch, {
-          countPaidAttemptsToday: () => countPaidJevAttemptsToday(client),
-          reserveAttempt: async dailyCap => {
-            return reserveJevCallAttempt(client, { ...actor, id: actorRow.id }, jevArgs, dailyCap);
-          } });
-        jevPrefetched = await prefetchJevAnswer(jevArgs, jevAsk, judgeWorkClass);
-        client.jevPrefetched = jevPrefetched;
-      }
-    }
     await client.query(tool.writerConnection && !tool.write ? "begin read only" : "begin");
     const a = await client.query("select id from actor where slug=$1", [actor.slug]);
     // Guarded 2026-08-03. Unguarded, a missing actor row made this a raw
@@ -1018,8 +827,6 @@ export async function callTool(env, actor, name, args, profile = "full", judgeWo
       needsAuthority ? "carr_authority" : "carr_writer",
       fullActor => executeRegisteredTool(client, fullActor, name, args || {}));
     await client.query("commit");
-    if (jevPrefetched?.ok === true && result?.ok === true)
-      await jevAsk.cacheAfterCommit(jevRequest, jevPrefetched.result);
     return result;
   } catch (e) {
     await client.query("rollback").catch(() => {});
@@ -1063,8 +870,6 @@ export async function callTool(env, actor, name, args, profile = "full", judgeWo
     }
     throw e;
   } finally {
-    if (jevKeyLocked)
-      await client.query("select pg_advisory_unlock(hashtextextended($1,0))", [args.idempotency_key]).catch(() => {});
     client.release();
     // Actor-scoped read doors use a read-only writer transaction. Record their
     // metadata through the same detached audit path as ordinary reader calls;

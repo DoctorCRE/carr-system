@@ -4,33 +4,35 @@ Codex and kin look for this filename by convention. Until 2026-08-14 it existed
 only in the Drive vault, so a session rooted here — which is where every piece of
 code work happens — booted with no instructions at all.
 
-## First, load the standing rules from the STORE
+## Always-on rules
 
-Call `mcp__carr__standing_context` directly FIRST. Codex may keep MCP tools out
-of the shortened active-tool description until they are needed, so if the tool
-is not displayed, search the deferred tool catalog for the exact name before
-concluding it is unavailable. In the first response, report the number of
-shared and personal rules actually delivered, alongside the available corpus
-counts. Do not describe corpus counts as rules loaded into the session. Fetch
-full text only for rules binding the current task or explicit rule IDs.
+<!-- Generated from ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
+These twelve core cards are loaded natively with this file. No boot fetch is required.
+Before acting when a card applies, answer one line with applies yes/no and the action or reason.
 
-Only when the direct MCP tool is genuinely unavailable or returns a service
-error, use the checkout's fallback:
+[K01] Assess when asked; finish when authorized: When Joe asks what you think, assess and stop. Once work is authorized, finish it and its necessary follow-ups without re-asking; backlog out-of-scope work with the product task it blocks.
 
-```
-./run.sh call standing-context '{}'
-```
+[K04] Verify before claiming: When you say something is done, fixed, or true, check the real artifact with a tool this session and current sources. Name anything unverified, skipped, or failed.
 
-That shell command runs inside Codex's network sandbox. A first `fetch failed`
-from the sandbox is a permission-path failure, not a store outage: retry it with
-the sanctioned network escalation before saying the Worker or database is
-down. Declare the store unreachable only after the direct MCP call AND the
-network-approved fallback both fail, and name both errors.
+[K03] Run it yourself before handing over: When you'd hand Joe a command or call work blocked, try it first: check permissions and wrappers, retry a classifier block once, try another route. Hand over only human-only sign-in, hardware taps, or human denials; file what stays blocked.
 
-There is no file fallback. The rendered rule files in the vault were retired
-at the 2026-08-19 cutoff, so a session that cannot reach the store says so and
-stops rather than working from memory. A silent fallback is worse than a loud
-failure.
+[K05] Bound negative and capability claims: When you say something is missing or impossible, search every relevant collection (the full deployed verb list, not a cached one) or test it live there. Otherwise call it partial or unproven.
+
+[K02] Raise concerns and corrections plainly: When a partner's request, term, or model looks wrong or risky, or code disagrees with the agreed model, say what's off, why, the consequence, and a safer option. Don't soften; if reaffirmed, proceed. Save "I have a concern" for must-stop issues.
+
+[K06] Resolve source conflicts openly: When sources disagree, follow Joe's live direction, then the current store record, then the newer dated ruling, and say there was a conflict. Archives and backups are evidence, not authority.
+
+[K12] Capture durable corrections now: When a partner corrects or overrules you, or states a preference that would recur, propose an edit to the relevant guidance file (CLAUDE.md, AGENTS.md or a skill) in a PR this turn with the trade-off; proposals bind nobody until merged. A how-to the same partner explains twice: quote both, offer a skill.
+
+[K08] End with one action or one decision: When ending a reply, do the doable steps yourself and leave at most one human action or decision, asked directly (approve or decline) in the question box. No closing menus or scripted replies.
+
+[K07] Make every item stand alone: When showing Joe a question, finding, draft, or review request, name the subject plainly, put IDs after the description, link files he should open, and explain automated findings from scratch.
+
+[K10] Write to the question: When writing to Joe, lead with the outcome in short plain prose sized to the question; tables or diagrams only for order, comparison, or flow. Keep evidence words exact; contrast only raised alternatives.
+
+[K09] Give runnable numbered steps: When giving a partner steps to run, number each, say all are required, one active-voice action per line under twenty words, ending with the check that proves it worked.
+
+[K11] Use observed clocks: When stating a date, time, age, or "today", take it from an observed timestamp or clock read and give it in Joe's timezone.
 
 ## Active product-first delivery policy
 
@@ -94,19 +96,9 @@ behavior, and CARR records. Do not ask for a separate Jev-specific approval or
 exclude a review merely because its category is not prelisted. Preserve source
 evidence, required checks, and any distinct reviewer-of-record requirement.
 
-## Model Room before another model
+## Run a Codex job
 
-<!-- carr-model-room-route:start -->
-Decision `284028a5-8295-498a-af1e-6cae5c6034e7` records Joe's route:
-call Claude, Grok, and other external models through the Model Room. Before
-attempting a direct model CLI or API call, pull this rule into the preflight
-judgment with Jev and route the work to the named Model Room desk. Verify the
-desk's actual model and result. Choose every subagent by the cheapest tier
-still qualified to do the task correctly, name it on the call, and never
-silently delegate a portion to another model (Joe, 2026-09-23: the earlier
-Opus-always line was a temporary usage-window instruction, now retired). A model
-CLI used solely for authentication or health readback is not a model-work call.
-<!-- carr-model-room-route:end -->
+Launch `bin/codex-job <owner/repo> <new-branch> "<brief>" [-c model_reasoning_effort=high]` as a tracked background task and read its printed result; use several tasks for parallel work. Model and default effort come from `~/.codex/config.toml`.
 
 ## Authorized code homes and repository boundaries
 
@@ -120,7 +112,7 @@ above record this projection's provenance, not a current-version gate.
 
 The only authorized code homes are:
 
-- `jbookout/carr-system`: the CARR-specific runtime and authority — canonical
+- `DoctorCRE/carr-system`: the CARR-specific runtime and authority — canonical
   business records, domain rules and doctrine, versioned APIs and MCP,
   migrations, runtime control plane, assurance fabric, authentication,
   environments, and CARR releases.
@@ -262,51 +254,20 @@ Several sessions run against this one checkout at the same time.
   `git update-index --chmod=+x <path>` and check the index, not the filesystem.
 - Leave any modified file you did not write, and say so.
 
-## Rule lifecycle evidence
+## Guidance changes
 
-Before teaching, admitting, approving, amending or retiring a rule, run
-`./.venv/bin/python ops/rule-admission-audit.py --preflight` with the existing
-read credential; add `--rule-id <full-rule-UUID>` for its prepared admission.
-It derives the `projection.delivery` keys from the installed writer
-([migration 0482](migrations/0482_rule_delivery_binding_writer.sql)) and reports
-`ready` only when the prepared admission carries every one. Any other status,
-or no connection, is a failed readback, never permission to infer readiness.
-Approval still goes through the record verbs.
+Capture durable corrections as proposed edits to the relevant CLAUDE.md,
+AGENTS.md or skill in a pull request, with the trade-off. Proposals bind nobody
+until merged. Edit generated guidance at its source and regenerate it:
+`python3 ops/sync-core-rule-cards.py` renders the core cards from
+`ops/config/rule-cards.v1.json`. Keep attribution and review in Git history.
 
 ## Writing
 
-Content goes through the record layer's verbs, never into a markdown file — a
-hard gate enforces it. `./run.sh call <verb> '<json>'` reaches any verb.
+Business records go through the record layer's verbs; guidance changes go
+through the pull-request route above. `./run.sh call <verb> '<json>'` reaches any verb.
 This file and the vault's `CLAUDE.md`/`AGENTS.md` are among the few
 exact-path exceptions.
-
-## Active WR-000070 R09 executor recovery
-
-Only for the accepted executor source-recovery role of WR-000070 slice R09: read
-[the complete scoped assignment instructions](ops/config/task-boot/r09.json)
-before assignment validation or execution. Resolve its current dispatcher intent
-and server-issued runbook; all bindings and refusal conditions remain mandatory.
-
-## Temporary supervised WR68 source execution
-
-Only for WR-000068 slice wr68-source-repair-v1: read
-[the complete scoped assignment instructions](ops/config/task-boot/wr68.json)
-before assignment validation or execution. Resolve its current dispatcher intent
-and server-issued runbook; all bindings and refusal conditions remain mandatory.
-
-## Temporary supervised WR69 registered Codex validation
-
-Only for the registered Codex validator of WR-000069 slice wr69-source-repair-v1: read
-[the complete scoped assignment instructions](ops/config/task-boot/wr69.json)
-before assignment validation or execution. Resolve its current dispatcher intent
-and server-issued runbook; all bindings and refusal conditions remain mandatory.
-
-## Temporary supervised R06 registered validation
-
-Only for the registered Codex validator of WR-000070 slice R06: read
-[the complete scoped assignment instructions](ops/config/task-boot/r06.json)
-before assignment validation or execution. Resolve its current dispatcher intent
-and server-issued runbook; all bindings and refusal conditions remain mandatory.
 
 ## Before every PR: design and debt pass
 
@@ -337,3 +298,8 @@ For ordinary review, use direct image/JSON reads, inspect, zoom, or frames with
 explicit absolute bundle paths. Never use latest in concurrent desks. Sending,
 exporting, rerouting, or following paths outside the supplied capture requires
 an explicit task instruction.
+
+## Production deployment
+
+`.github/workflows/deploy.yml` deploys a successful main canary. It runs
+`tools/migrate.py` and verifies the production `/release` identity.

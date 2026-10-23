@@ -96,7 +96,7 @@ A gap between it and reality is usually the calendar, not an error. Say "the pla
 **4. Findings go to the DATABASE, not markdown.** Joe's taught rule (2026-08-02). You hold no
 verbs, so this lands on you as an obligation to emit a write block the runner executes. Doctrine
 changes are the exception and go to the playbook, which is the file's own single-writer seat's job,
-proposed through `teach` or a team-board row, never edited by you.
+proposed as an edit to the relevant CLAUDE.md, AGENTS.md or skill in a PR with the trade-off; proposals bind nobody until merged.
 
 **5. Voice is not yours.** You write BRIEFS, not ad copy. Every word a prospect would read comes
 from `write-content` and `Marketing/Social Media/style-contract.md`, and the ad's hooks come from

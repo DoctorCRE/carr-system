@@ -308,9 +308,9 @@ RULE_VERB = re.compile(r"\b(teach|activate-rule|retire-rule|amend-rule|supersede
                        r"proposed rule|active rule)\b", re.I)
 
 USE_INSTEAD = ("Use a verb: log-decision (a settled call and why), add-loop (an open item), "
-               "record-finding (research/verification), teach (a standing rule), "
-               "update-loop / close-loop. The record layer is the memory; a markdown file "
-               "reaches nobody and no query finds it.")
+               "record-finding (research/verification), update-loop / close-loop. "
+               "Propose standing guidance as an edit to CLAUDE.md, AGENTS.md or a skill "
+               "in a PR; proposals bind nobody until merged.")
 
 
 def log(msg):
@@ -344,22 +344,6 @@ def check(tool, ti):
     path = ti.get("file_path") or ti.get("filePath") or ""
     if not path:
         return None
-
-    # The delegation latch is mutable only by delegation-gate.py itself.  A
-    # normal Edit/Write/apply_patch call could otherwise release a task by
-    # changing the same state ledger the gate trusts.  This is deliberately
-    # narrower than the record-home policy: it names exactly the control-plane
-    # files and leaves ordinary out/ artifacts writable.
-    try:
-        control = {
-            os.path.realpath(os.path.join(REPO, "out", "delegation-gate-state.json")),
-            os.path.realpath(os.path.join(REPO, "out", "delegation-gate-state.json.lock")),
-        }
-        real_path = os.path.realpath(os.path.expanduser(path))
-        if real_path in control or os.path.basename(real_path).startswith(".delegation-gate-"):
-            return "delegation control-plane state is maintained only by delegation-gate.py"
-    except Exception:
-        pass
 
     # A0. CORPUS RENDERS — checked FIRST and deliberately ahead of the vault
     # test below, because two of the three corpus roots sit OUTSIDE the vault:

@@ -1,106 +1,8 @@
 {
   "schema_version": 1,
   "timezone": "America/Chicago",
-  "authority": "ops.job_definition and ops.job are canonical; every provider scheduler is an adapter",
-  "cognition_jobs": [
-    {
-      "key": "audit.proposal",
-      "version": 1,
-      "input_schema_version": 1,
-      "output_schema_version": 1,
-        "input_schema": {"type": "object", "required": ["workflow", "evidence_refs", "facts"], "properties": {"workflow": {"type": "string"}, "evidence_refs": {"type": "array"}, "facts": {"type": "object"}}},
-      "output_schema": {"type": "object", "required": ["findings", "proposed_actions"], "properties": {"findings": {"type": "array"}, "proposed_actions": {"type": "array"}}},
-      "budget": {"max_tokens": 12000, "max_cost_usd": 4.0, "timeout_seconds": 900},
-      "provider_routes": ["primary", "secondary"],
-      "cache_ttl_seconds": 3600,
-      "canonical_write_authority": false
-    },
-    {
-      "key": "research.entity-enrichment",
-      "version": 1,
-      "input_schema_version": 1,
-      "output_schema_version": 1,
-      "input_schema": {"type": "object", "required": ["subjects", "source_policy"], "properties": {"subjects": {"type": "array"}, "source_policy": {"type": "object"}}},
-      "output_schema": {"type": "object", "required": ["findings"], "properties": {"findings": {"type": "array"}}},
-      "budget": {"max_tokens": 18000, "max_cost_usd": 6.0, "timeout_seconds": 1800},
-      "provider_routes": ["primary", "secondary"],
-      "cache_ttl_seconds": 604800,
-      "canonical_write_authority": false
-    },
-    {
-      "key": "research.market-fuel",
-      "version": 1,
-      "input_schema_version": 1,
-      "output_schema_version": 1,
-      "input_schema": {"type": "object", "required": ["lanes", "freshness_cutoff"], "properties": {"lanes": {"type": "array"}, "freshness_cutoff": {"type": "string"}}},
-      "output_schema": {"type": "object", "required": ["candidates", "lane_health"], "properties": {"candidates": {"type": "array"}, "lane_health": {"type": "array"}}},
-      "budget": {"max_tokens": 16000, "max_cost_usd": 5.0, "timeout_seconds": 1800},
-      "provider_routes": ["primary", "secondary"],
-      "cache_ttl_seconds": 86400,
-      "canonical_write_authority": false
-    },
-    {
-      "key": "research.content-fuel",
-      "version": 1,
-      "input_schema_version": 1,
-      "output_schema_version": 1,
-      "input_schema": {"type": "object", "required": ["lanes", "freshness_cutoff"], "properties": {"lanes": {"type": "array"}, "freshness_cutoff": {"type": "string"}}},
-      "output_schema": {"type": "object", "required": ["candidates", "lane_health"], "properties": {"candidates": {"type": "array"}, "lane_health": {"type": "array"}}},
-      "budget": {"max_tokens": 16000, "max_cost_usd": 5.0, "timeout_seconds": 1800},
-      "provider_routes": ["primary", "secondary"],
-      "cache_ttl_seconds": 86400,
-      "canonical_write_authority": false
-    },
-    {
-      "key": "social.batch-proposal",
-      "version": 1,
-      "input_schema_version": 1,
-      "output_schema_version": 1,
-      "input_schema": {"type": "object", "required": ["platforms", "source_refs", "voice_version"], "properties": {"platforms": {"type": "array"}, "source_refs": {"type": "array"}, "voice_version": {"type": "integer"}}},
-      "output_schema": {"type": "object", "required": ["drafts"], "properties": {"drafts": {"type": "array"}}},
-      "budget": {"max_tokens": 24000, "max_cost_usd": 8.0, "timeout_seconds": 2400},
-      "provider_routes": ["primary", "secondary"],
-      "proposal_guard": "weekly_social_no_quote_tweets",
-      "cache_ttl_seconds": 0,
-      "canonical_write_authority": false
-    },
-    {
-      "key": "social.engagement-proposal",
-      "version": 1,
-      "input_schema_version": 1,
-      "output_schema_version": 1,
-      "input_schema": {"type": "object", "required": ["platform", "source_posts", "voice_version"], "properties": {"platform": {"type": "string"}, "source_posts": {"type": "array"}, "voice_version": {"type": "integer"}}},
-      "output_schema": {"type": "object", "required": ["drafts"], "properties": {"drafts": {"type": "array"}}},
-      "budget": {"max_tokens": 12000, "max_cost_usd": 4.0, "timeout_seconds": 1200},
-      "provider_routes": ["primary", "secondary"],
-      "cache_ttl_seconds": 0,
-      "canonical_write_authority": false
-    },
-    {
-      "key": "social.metrics-proposal",
-      "version": 1,
-      "input_schema_version": 1,
-      "output_schema_version": 1,
-      "input_schema": {"type": "object", "required": ["platform_exports"], "properties": {"platform_exports": {"type": "array"}}},
-      "output_schema": {"type": "object", "required": ["measurements"], "properties": {"measurements": {"type": "array"}}},
-      "budget": {"max_tokens": 6000, "max_cost_usd": 2.0, "timeout_seconds": 600},
-      "provider_routes": ["primary", "secondary"],
-      "cache_ttl_seconds": 86400,
-      "canonical_write_authority": false
-    },
-    {
-      "key": "idea.resurface-proposal",
-      "version": 1,
-      "input_schema_version": 1,
-      "output_schema_version": 1,
-      "input_schema": {"type": "object", "required": ["ideas", "last_surfaced"], "properties": {"ideas": {"type": "array"}, "last_surfaced": {"type": "object"}}},
-      "output_schema": {"type": "object", "required": ["shortlist"], "properties": {"shortlist": {"type": "array"}}},
-      "budget": {"max_tokens": 5000, "max_cost_usd": 1.5, "timeout_seconds": 600},
-      "provider_routes": ["primary", "secondary"],
-      "cache_ttl_seconds": 2592000,
-      "canonical_write_authority": false
-    }
-  ],
+  "authority": "Native schedulers own recurrence; these contracts support on-demand engineering and native observations",
+  "cognition_jobs": [],
   "workflows": [
     {
       "key": "ai-capability-builder", "version": 1, "enabled": false, "risk": "yellow",
@@ -171,18 +73,6 @@
       "legacy_schedule": {"provider": "none", "status": "disabled", "disable_requires": "no scheduler exists; explicit isolated evidence and activation remain required"}
     },
     {
-      "key": "cc-update-audit", "version": 1, "enabled": true, "risk": "green",
-      "recurrence": {"cron": "45 9 * * 1", "timezone": "America/Chicago", "source": "services registry"},
-      "execution": {"kind": "cognition", "cognition_job": "audit.proposal", "input_builder": "cc-release-diff"},
-      "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "Monday cron 45 9 * * 1 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["release diff", "last audit receipt"], "canonical_reads": ["release sentinel", "ops.job_definition"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["release-note source"], "authority": "typed audit proposal only", "current_completion_signal": "release audit receipt", "replacement_program": "ops.job_definition:cc-update-audit:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
-      "routing": {"key": "facts.all_true", "spec": {"all_of": ["release.version_change_recorded"]}, "description": "version sentinel recorded a version change"},
-      "filtering": {"key": "facts.all_true", "spec": {"all_of": ["release.newer_than_last_accepted_audit"]}, "description": "releases newer than last accepted audit receipt"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "release.every_action_has_source"]}, "description": "nonempty proposal reconciles to typed input and every action cites a release-note source"},
-      "retry": {"max_attempts": 2, "backoff": "exponential", "base_seconds": 300, "cap_seconds": 1800, "timeout_seconds": 1200},
-      "deduplication": {"key_template": "cc-update-audit:{release_range}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "release_audit"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
-    },
-    {
       "key": "contact-enrichment-weekly", "version": 1, "enabled": true, "risk": "green",
       "recurrence": {"cron": "0 9 * * 4", "timezone": "America/Chicago", "source": "services registry"},
       "execution": {"kind": "cognition", "cognition_job": "research.entity-enrichment", "input_builder": "entity-enrichment.next-40"},
@@ -233,30 +123,6 @@
       "legacy_schedule": {"provider": "none", "status": "disabled", "disable_requires": "no scheduler exists; on-demand MCP admission only"}
     },
     {
-      "key": "health-audit-monthly", "version": 1, "enabled": true, "risk": "green",
-      "recurrence": {"cron": "0 9 6-10 * *", "timezone": "America/Chicago", "source": "services registry; ledger gate collapses window"},
-      "execution": {"kind": "cognition", "cognition_job": "audit.proposal", "input_builder": "system-health.monthly-evidence"},
-      "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "monthly window cron 0 9 6-10 * * America/Chicago", "owner": "ops.job dispatcher", "inputs": ["health evidence", "monthly receipt ledger"], "canonical_reads": ["live health", "registry", "artifact evidence"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["health adapters"], "authority": "typed audit proposal only", "current_completion_signal": "health audit receipt", "replacement_program": "ops.job_definition:health-audit-monthly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
-      "routing": {"key": "facts.all_true", "spec": {"all_of": ["health.monthly_receipt_absent"]}, "description": "monthly accepted receipt absent"},
-      "filtering": {"key": "facts.all_true", "spec": {"all_of": ["health.one_run_in_monthly_window"]}, "description": "one run per month inside window"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "health.live_evidence", "health.registry_evidence", "health.artifact_evidence"]}, "description": "nonempty claims reconcile to typed live health, registry and artifact evidence"},
-      "retry": {"max_attempts": 2, "backoff": "linear", "base_seconds": 600, "cap_seconds": 3600, "timeout_seconds": 1800},
-      "deduplication": {"key_template": "health-audit-monthly:{month}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "health_audit"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
-    },
-    {
-      "key": "idea-resurface-monthly", "version": 1, "enabled": true, "risk": "green",
-      "recurrence": {"cron": "0 9 5-11 * *", "timezone": "America/Chicago", "source": "services registry; ledger gate collapses window"},
-      "execution": {"kind": "cognition", "cognition_job": "idea.resurface-proposal", "input_builder": "idea-bank.oldest-unsurfaced"},
-      "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "monthly window cron 0 9 5-11 * * America/Chicago", "owner": "ops.job dispatcher", "inputs": ["idea rows", "last-surfaced ledger"], "canonical_reads": ["canonical idea rows", "ops.job_definition"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["provider adapter"], "authority": "typed idea proposal only", "current_completion_signal": "idea resurface receipt", "replacement_program": "ops.job_definition:idea-resurface-monthly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
-      "routing": {"key": "facts.all_true", "spec": {"all_of": ["idea.monthly_receipt_absent"]}, "description": "monthly accepted receipt absent"},
-      "filtering": {"key": "facts.all_true", "spec": {"all_of": ["idea.oldest_or_least_recently_surfaced"]}, "description": "oldest never/least-recently surfaced ideas"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "idea.shortlist_references_canonical_rows"]}, "description": "nonempty shortlist reconciles to canonical idea rows"},
-      "retry": {"max_attempts": 2, "backoff": "linear", "base_seconds": 600, "cap_seconds": 3600, "timeout_seconds": 900},
-      "deduplication": {"key_template": "idea-resurface-monthly:{month}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "idea_resurface"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
-    },
-    {
       "key": "linkedin-engagement-daily", "version": 1, "enabled": true, "risk": "yellow",
       "recurrence": {"cron": "15 9 * * 1-5", "timezone": "America/Chicago", "source": "tracked definition; exact app cron must reconcile before cutover"},
       "execution": {"kind": "cognition", "cognition_job": "social.engagement-proposal", "input_builder": "linkedin.source-posts"},
@@ -267,18 +133,6 @@
       "retry": {"max_attempts": 1, "backoff": "constant", "base_seconds": 0, "cap_seconds": 0, "timeout_seconds": 1200},
       "deduplication": {"key_template": "linkedin-engagement-daily:{date}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "engagement_drafts"},
       "legacy_schedule": {"provider": "claude-code", "status": "enabled-unreconciled", "disable_requires": "accepted shadow and canary receipts plus exact cron read-back"}
-    },
-    {
-      "key": "loop-drain-weekdays", "version": 1, "enabled": true, "risk": "yellow",
-      "recurrence": {"cron": "0 11 * * 1-5", "timezone": "America/Chicago", "source": "services registry"},
-      "execution": {"kind": "cognition", "cognition_job": "audit.proposal", "input_builder": "loops.next-actionable"},
-      "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "weekday cron 0 11 * * 1-5 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["actionable loops", "data-class grant"], "canonical_reads": ["loop ledger", "ops.job_definition"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["none"], "authority": "proposal-only inside data-class grant", "current_completion_signal": "loop drain receipt", "replacement_program": "ops.job_definition:loop-drain-weekdays:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
-      "routing": {"key": "facts.all_true", "spec": {"all_of": ["loops.system_owned_actionable_exist"]}, "description": "actionable system-owned loops exist"},
-      "filtering": {"key": "facts.all_true", "spec": {"all_of": ["loops.no_human_counterparty_or_event_blocker"]}, "description": "no human-only, counterparty or external-event blocker"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "loops.proposal_has_evidence", "loops.inside_data_class_grant"]}, "description": "nonempty proposal reconciles to typed evidence and stays inside granted data class"},
-      "retry": {"max_attempts": 1, "backoff": "constant", "base_seconds": 0, "cap_seconds": 0, "timeout_seconds": 1800},
-      "deduplication": {"key_template": "loop-drain-weekdays:{date}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "loop_drain"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
       "key": "nightly-record-layer", "version": 3, "enabled": true, "risk": "green",
@@ -314,18 +168,6 @@
       "filtering": {"key": "facts.all_true", "spec": {"all_of": ["npi.territory_predicate", "npi.healthcare_provider_predicate"]}, "description": "territory and healthcare provider predicates in code"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["npi.source_rows", "npi.input_reconciliation", "npi.proposal_dedup"]}, "description": "nonempty proposal-only candidates reconcile exactly to deterministic receipt-filtered NPI inputs; dedup is code-checked"},
       "retry": {"max_attempts": 2, "backoff": "exponential", "base_seconds": 300, "cap_seconds": 1800, "timeout_seconds": 2400},
       "deduplication": {"key_template": "npi-sweep-weekly:{source_release}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "npi_delta"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
-    },
-    {
-      "key": "playbook-review-monthly", "version": 1, "enabled": true, "risk": "yellow",
-      "recurrence": {"cron": "0 9 15-21 * *", "timezone": "America/Chicago", "source": "services registry; ledger gate collapses window"},
-      "execution": {"kind": "cognition", "cognition_job": "audit.proposal", "input_builder": "doctrine.review-due"},
-      "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "monthly window cron 0 9 15-21 * * America/Chicago", "owner": "ops.job dispatcher", "inputs": ["review ledger", "sweep receipt"], "canonical_reads": ["policy-bearing doctrine sections", "failure evidence"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["record-layer adapter"], "authority": "doctrine proposal only", "current_completion_signal": "playbook review receipt", "replacement_program": "ops.job_definition:playbook-review-monthly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
-      "routing": {"key": "facts.all_true", "spec": {"all_of": ["playbook.monthly_receipt_absent", "playbook.sweep_receipt_present"]}, "description": "monthly accepted receipt absent and sweep receipt present"},
-      "filtering": {"key": "facts.all_true", "spec": {"all_of": ["playbook.due_policy_sections", "playbook.measured_failure_evidence"]}, "description": "due policy-bearing sections and measured failure evidence"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "playbook.changes_proposal_only_until_gated"]}, "description": "nonempty doctrine changes reconcile to evidence and remain proposals until deterministic gates pass"},
-      "retry": {"max_attempts": 2, "backoff": "linear", "base_seconds": 600, "cap_seconds": 3600, "timeout_seconds": 2400},
-      "deduplication": {"key_template": "playbook-review-monthly:{month}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "playbook_review"},
       "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
@@ -374,18 +216,6 @@
       "filtering": {"key": "facts.all_true", "spec": {"all_of": ["metrics.owned_accounts", "metrics.placements_in_window"]}, "description": "owned accounts and placements in measurement window"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "metrics.numeric_types", "metrics.placement_ids", "metrics.source_timestamps"]}, "description": "nonempty measurements reconcile to typed placements, numeric types and source timestamps"},
       "retry": {"max_attempts": 2, "backoff": "exponential", "base_seconds": 300, "cap_seconds": 1800, "timeout_seconds": 1800},
       "deduplication": {"key_template": "social-metrics-pull-weekly:{week}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "social_metrics"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
-    },
-    {
-      "key": "system-sweep-monthly", "version": 1, "enabled": true, "risk": "yellow",
-      "recurrence": {"cron": "30 8 15-21 * *", "timezone": "America/Chicago", "source": "services registry; ledger gate collapses window"},
-      "execution": {"kind": "cognition", "cognition_job": "audit.proposal", "input_builder": "system.prune-candidates"},
-      "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "monthly window cron 30 8 15-21 * * America/Chicago", "owner": "ops.job dispatcher", "inputs": ["prune candidates", "monthly receipt ledger"], "canonical_reads": ["artifact measurements", "ops.job_definition"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["artifact inventory adapters"], "authority": "recoverable human-gated proposal only", "current_completion_signal": "system sweep receipt", "replacement_program": "ops.job_definition:system-sweep-monthly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
-      "routing": {"key": "facts.all_true", "spec": {"all_of": ["system_sweep.monthly_receipt_absent"]}, "description": "monthly accepted receipt absent"},
-      "filtering": {"key": "facts.all_true", "spec": {"all_of": ["system_sweep.measured_stale_duplicate_or_oversized"]}, "description": "measured stale, duplicate or oversized candidates only"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "system_sweep.every_destructive_proposal_recoverable", "system_sweep.every_destructive_proposal_human_gated"]}, "description": "nonempty proposal reconciles to measurements; every destructive action is recoverable and human-gated"},
-      "retry": {"max_attempts": 2, "backoff": "linear", "base_seconds": 600, "cap_seconds": 3600, "timeout_seconds": 2400},
-      "deduplication": {"key_template": "system-sweep-monthly:{month}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "system_sweep"},
       "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
