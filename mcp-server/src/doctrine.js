@@ -89,6 +89,11 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
   }
 
   async function lockSection(c, sectionId, actor) {
+    // Match content writes' document-before-section order. Taking the section
+    // first could deadlock a refs/claim call against a content writer.
+    await c.query(
+      `select d.id from doctrine_document d join doctrine_section s on s.document_id = d.id
+        where s.id = $1 for update of d`, [sectionId]);
     const r = await c.query(
       `select s.*, d.content_class, d.visibility, d.owner_actor_id, d.slug as doc_slug
          from doctrine_section s join doctrine_document d on d.id = s.document_id
@@ -732,6 +737,12 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         required: ["idempotency_key", "section_ids", "purpose"] },
       handler: async (c, actor, args) => withEnvelope(c, actor, "claim-doctrine-sections", args, async () => {
         const ttl = Math.min(Math.max(args.ttl_seconds || 300, 30), 1800);
+        // Take all document locks in one order before section locks, including
+        // batches whose section order crosses documents in different orders.
+        await c.query(
+          `select id from doctrine_document
+            where id in (select document_id from doctrine_section where id = any($1::uuid[]))
+            order by id for update`, [args.section_ids]);
         // Authorize the entire batch before claim reads or writes.
         for (const id of [...new Set(args.section_ids)].sort())
           await lockSection(c, id, actor);
