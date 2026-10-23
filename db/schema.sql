@@ -39381,269 +39381,7 @@ end $_$;
 CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
     LANGUAGE sql IMMUTABLE
     SET search_path TO 'pg_catalog'
-    AS $_$ SELECT $current_grants${
-  "registry_version": "scac-mutation-registry.v118",
-  "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
-  "secdef_execute": [
-    {
-      "config": [
-        "search_path=ops, public, pg_temp"
-      ],
-      "grantee": "carr_authority",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text)",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text):carr_authority:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, pg_temp"
-      ],
-      "grantee": "carr_authority",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text)",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text):carr_authority:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, public, pg_temp"
-      ],
-      "grantee": "carr_writer",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, pg_temp"
-      ],
-      "grantee": "carr_authority",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb)",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb):carr_authority:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, pg_temp"
-      ],
-      "grantee": "carr_writer",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.write_feature_switch(p_action text, p_args jsonb)",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.write_feature_switch(p_action text, p_args jsonb):carr_writer:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    }
-  ],
-  "retired_secdef_execute": [
-    {
-      "config": [
-        "search_path=ops, public, pg_temp"
-      ],
-      "grantee": "carr_authority",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text)",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text):carr_authority:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, pg_temp"
-      ],
-      "grantee": "carr_writer",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.classify_sourced_work_request_build(p_work_request text, p_base_version integer, p_scope_summary text, p_dependency_refs jsonb, p_caps jsonb)",
-      "volatility": "s",
-      "ingress_key": "db-function-acl:ops.classify_sourced_work_request_build(p_work_request text, p_base_version integer, p_scope_summary text, p_dependency_refs jsonb, p_caps jsonb):carr_writer:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, pg_temp"
-      ],
-      "grantee": "public",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.heavy_build_ready_plan_gate()",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.heavy_build_ready_plan_gate():public:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, pg_temp"
-      ],
-      "grantee": "carr_reader",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.jev_call_receipt_integrity()",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_reader:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, pg_temp"
-      ],
-      "grantee": "carr_writer",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.jev_call_receipt_integrity()",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_writer:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, public, pg_temp"
-      ],
-      "grantee": "carr_writer",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, pg_temp"
-      ],
-      "grantee": "carr_reader",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_reader:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, pg_temp"
-      ],
-      "grantee": "carr_writer",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_writer:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, pg_temp"
-      ],
-      "grantee": "carr_writer",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text)",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text):carr_writer:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, pg_temp"
-      ],
-      "grantee": "carr_writer",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.record_sourced_heavy_build_admission(p_plan_id uuid, p_work_request text, p_base_version integer, p_classifier_reasons jsonb, p_contract jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.record_sourced_heavy_build_admission(p_plan_id uuid, p_work_request text, p_base_version integer, p_classifier_reasons jsonb, p_contract jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, pg_temp"
-      ],
-      "grantee": "carr_writer",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.review_sourced_heavy_build_plan(p_work_request text, p_plan_hash text, p_admission_hash text, p_reviewer_actor_id uuid, p_verdict text, p_reviewer_session_ref text, p_review_summary text, p_evidence_refs jsonb, p_gaps jsonb, p_idempotency_key uuid)",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.review_sourced_heavy_build_plan(p_work_request text, p_plan_hash text, p_admission_hash text, p_reviewer_actor_id uuid, p_verdict text, p_reviewer_session_ref text, p_review_summary text, p_evidence_refs jsonb, p_gaps jsonb, p_idempotency_key uuid):carr_writer:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, ops, pg_temp"
-      ],
-      "grantee": "carr_writer",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text)",
-      "volatility": "s",
-      "ingress_key": "db-function-acl:ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text):carr_writer:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    }
-  ]
-}$current_grants$::jsonb $_$;
+    AS $$SELECT '{"relation_dml": [{"grantee": "carr_writer", "relation": "public.deal_vendor_assignment", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "public.deal_vendor_assignment", "grantable": false, "privilege": "update", "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:update", "ingress_kind": "db_relation_acl", "relation_kind": "r"}], "secdef_execute": [{"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text)", "volatility": "v", "ingress_key": "db-function-acl:ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text)", "volatility": "v", "ingress_key": "db-function-acl:ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb)", "volatility": "v", "ingress_key": "db-function-acl:ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.write_feature_switch(p_action text, p_args jsonb)", "volatility": "v", "ingress_key": "db-function-acl:ops.write_feature_switch(p_action text, p_args jsonb):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}], "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d", "registry_version": "scac-mutation-registry.v118", "runtime_dml_grants": {"count": 338, "digest": "sha256:1d16268baa3cd3bf925281f2c8d2ae29b2bf5abd31e098fe0155cf346213fa8b"}, "retired_secdef_execute": [{"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text)", "volatility": "v", "ingress_key": "db-function-acl:ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.classify_sourced_work_request_build(p_work_request text, p_base_version integer, p_scope_summary text, p_dependency_refs jsonb, p_caps jsonb)", "volatility": "s", "ingress_key": "db-function-acl:ops.classify_sourced_work_request_build(p_work_request text, p_base_version integer, p_scope_summary text, p_dependency_refs jsonb, p_caps jsonb):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "public", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.heavy_build_ready_plan_gate()", "volatility": "v", "ingress_key": "db-function-acl:ops.heavy_build_ready_plan_gate():public:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.jev_call_receipt_integrity()", "volatility": "v", "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.jev_call_receipt_integrity()", "volatility": "v", "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)", "volatility": "v", "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)", "volatility": "v", "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_sourced_heavy_build_admission(p_plan_id uuid, p_work_request text, p_base_version integer, p_classifier_reasons jsonb, p_contract jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_sourced_heavy_build_admission(p_plan_id uuid, p_work_request text, p_base_version integer, p_classifier_reasons jsonb, p_contract jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.review_sourced_heavy_build_plan(p_work_request text, p_plan_hash text, p_admission_hash text, p_reviewer_actor_id uuid, p_verdict text, p_reviewer_session_ref text, p_review_summary text, p_evidence_refs jsonb, p_gaps jsonb, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.review_sourced_heavy_build_plan(p_work_request text, p_plan_hash text, p_admission_hash text, p_reviewer_actor_id uuid, p_verdict text, p_reviewer_session_ref text, p_review_summary text, p_evidence_refs jsonb, p_gaps jsonb, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text)", "volatility": "s", "ingress_key": "db-function-acl:ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}]}'::jsonb$$;
 
 
 --
@@ -41139,7 +40877,14 @@ begin
   if registered_count<>jsonb_array_length(current_grants->'secdef_execute') then return false; end if;
   if observed_count<>1267 or observed_digest<>'sha256:587e762e80c6691d4a07c5b35e48a259c7b8bdf885d8595ffd0c14928c657efa' then return false; end if;
   with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper), runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper), capabilities as (select n.nspname,c.relname,c.relkind,c.relowner,acl.grantee,acl.privilege_type,acl.is_grantable from pg_class c join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) acl where n.nspname not in ('pg_catalog','information_schema') and c.relkind in ('r','p','v','m','f')), observed as (select 'db-relation-acl:'||nspname||'.'||relname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type) ingress_key,jsonb_build_object('ingress_key','db-relation-acl:'||nspname||'.'||relname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type),'ingress_kind','db_relation_acl','relation',nspname||'.'||relname,'relation_kind',relkind,'grantee',coalesce(r.rolname,'public'),'privilege',lower(privilege_type),'grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE') and grantee<>relowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
-  select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
+  select count(*) filter (where row not in (select value from jsonb_array_elements(current_grants->'relation_dml'))),
+    'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(
+      jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C")
+        filter (where row not in (select value from jsonb_array_elements(current_grants->'relation_dml'))),
+      '[]'::jsonb)),'UTF8'),'sha256'),'hex'),
+    count(*) filter (where row in (select value from jsonb_array_elements(current_grants->'relation_dml')))
+    into observed_count,observed_digest,registered_count from observed;
+  if registered_count<>jsonb_array_length(current_grants->'relation_dml') then return false; end if;
   if observed_count<>321 or observed_digest<>'sha256:2ece3984f1389d78749dd3055ecf72516f02f97e33d260192e66daff062292e0' then return false; end if;
   with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper), runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper), capabilities as (select n.nspname,c.relname,c.relkind,c.relowner,a.attname,acl.grantee,acl.privilege_type,acl.is_grantable from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(a.attacl) acl where a.attnum>0 and not a.attisdropped and a.attacl is not null and cardinality(a.attacl)>0 and n.nspname not in ('pg_catalog','information_schema') and c.relkind in ('r','p','v','m','f')), observed as (select 'db-column-acl:'||nspname||'.'||relname||'.'||attname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type) ingress_key,jsonb_build_object('ingress_key','db-column-acl:'||nspname||'.'||relname||'.'||attname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type),'ingress_kind','db_column_acl','relation',nspname||'.'||relname,'relation_kind',relkind,'column',attname,'grantee',coalesce(r.rolname,'public'),'privilege',lower(privilege_type),'grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where privilege_type in ('INSERT','UPDATE') and grantee<>relowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
   select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
@@ -59663,8 +59408,8 @@ begin
   select * into registry from ops.scac_mutation_registry_version
     where registry_version=latest.registry_version;
   grant_state:=case when registry.registry_version='scac-mutation-registry.v118' and
-    (grant_snapshot->>'entry_count')::integer=336 and
-    grant_snapshot->>'grant_digest'='sha256:cd7e5cff7db2ff2d98fb626c15d0109af9af9de91927b7b32e53a2d7147e9ee6'
+    (grant_snapshot->>'entry_count')::integer=338 and
+    grant_snapshot->>'grant_digest'='sha256:1d16268baa3cd3bf925281f2c8d2ae29b2bf5abd31e098fe0155cf346213fa8b'
     then 'current' else 'drifted_or_unbound' end;
   with recursive connected(oid) as (
     select oid from pg_roles where rolname in ('carr_writer','carr_jobs','carr_authority')
@@ -83873,6 +83618,24 @@ COMMENT ON TABLE public.deal_type_ref IS 'Deal transaction types (amendment 1). 
 
 
 --
+-- Name: deal_vendor_assignment; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.deal_vendor_assignment (
+    deal_id uuid NOT NULL,
+    party_id uuid NOT NULL,
+    role text NOT NULL,
+    company_party_id uuid NOT NULL,
+    contact_party_id uuid NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    note text,
+    updated_by uuid NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT deal_vendor_assignment_role_check CHECK ((role = ANY (ARRAY['lender'::text, 'contractor'::text, 'architect'::text, 'attorney'::text, 'title'::text, 'inspector'::text, 'landlord_rep'::text])))
+);
+
+
+--
 -- Name: defect; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -85275,6 +85038,7 @@ CREATE TABLE public.party (
     contact_state_set_by uuid,
     contact_state_set_at timestamp with time zone,
     cell text,
+    vendor_assignment_version integer DEFAULT 1 NOT NULL,
     CONSTRAINT party_kind_check CHECK ((kind = ANY (ARRAY['person'::text, 'org'::text])))
 );
 
@@ -88831,6 +88595,27 @@ SELECT
 
 
 --
+-- Name: v_deal_room_vendor; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_deal_room_vendor AS
+ SELECT a.deal_id,
+    a.party_id,
+    a.role,
+    jsonb_build_object('id', company.id, 'name', company.name) AS company,
+    jsonb_build_object('id', contact.id, 'name', contact.name, 'email', contact.email, 'phone', contact.phone) AS contact,
+    a.note,
+    (to_jsonb(a.updated_at) #>> '{}'::text[]) AS updated_at
+   FROM (((public.deal_vendor_assignment a
+     JOIN public.party p ON (((p.id = a.party_id) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL))))
+     JOIN public.party company ON (((company.id = a.company_party_id) AND (company.merged_into IS NULL) AND (company.deleted_at IS NULL))))
+     JOIN public.party contact ON (((contact.id = a.contact_party_id) AND (contact.merged_into IS NULL) AND (contact.deleted_at IS NULL))))
+  WHERE (a.active AND (EXISTS ( SELECT 1
+           FROM public.vendor v
+          WHERE ((v.party_id = a.party_id) AND (v.merged_into IS NULL)))));
+
+
+--
 -- Name: v_defect; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -91032,6 +90817,78 @@ UNION ALL
     e.subject_type
    FROM (public.event e
      JOIN public.actor act ON ((act.id = e.actor_id)));
+
+
+--
+-- Name: v_vendor_assignment_context; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_vendor_assignment_context AS
+ SELECT v.id,
+    v.vendor_ref AS ref,
+    v.version AS base_version,
+    p.vendor_assignment_version AS assignment_version,
+    v.party_id,
+        CASE
+            WHEN (company.id IS NOT NULL) THEN jsonb_build_object('id', company.id, 'name', company.name)
+            ELSE NULL::jsonb
+        END AS company,
+    COALESCE(( SELECT jsonb_agg(jsonb_build_object('id', contact.id, 'name', contact.name) ORDER BY contact.name, contact.id) AS jsonb_agg
+           FROM public.party contact
+          WHERE ((contact.kind = 'person'::text) AND (contact.merged_into IS NULL) AND (contact.deleted_at IS NULL) AND (((p.kind = 'person'::text) AND (contact.id = p.id)) OR ((p.kind = 'org'::text) AND (contact.org_id = p.id))))), '[]'::jsonb) AS contacts
+   FROM ((public.vendor v
+     JOIN public.party p ON ((p.id = v.party_id)))
+     LEFT JOIN public.party company ON (((company.id =
+        CASE
+            WHEN (p.kind = 'org'::text) THEN p.id
+            ELSE p.org_id
+        END) AND (company.kind = 'org'::text) AND (company.merged_into IS NULL) AND (company.deleted_at IS NULL))))
+  WHERE ((v.merged_into IS NULL) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL));
+
+
+--
+-- Name: v_vendor_duplicate_report; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_vendor_duplicate_report AS
+ WITH live AS (
+         SELECT v.id,
+            v.party_id,
+            p.org_id,
+            NULLIF(lower(btrim(p.email)), ''::text) AS email,
+            NULLIF(lower(regexp_replace(btrim(p.name), '\s+'::text, ' '::text, 'g'::text)), ''::text) AS name
+           FROM (public.vendor v
+             JOIN public.party p ON ((p.id = v.party_id)))
+          WHERE ((v.merged_into IS NULL) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL))
+        ), same_party AS (
+         SELECT count(*) AS n
+           FROM live
+          GROUP BY live.party_id
+         HAVING (count(*) > 1)
+        ), email_match AS (
+         SELECT live.email
+           FROM live
+          WHERE (live.email IS NOT NULL)
+          GROUP BY live.email
+         HAVING (count(DISTINCT live.party_id) > 1)
+        ), name_company_match AS (
+         SELECT live.name,
+            live.org_id
+           FROM live
+          WHERE ((live.name IS NOT NULL) AND (live.org_id IS NOT NULL))
+          GROUP BY live.name, live.org_id
+         HAVING (count(DISTINCT live.party_id) > 1)
+        )
+ SELECT ( SELECT (count(*))::integer AS count
+           FROM live) AS live_vendor_rows,
+    ( SELECT (count(*))::integer AS count
+           FROM same_party) AS same_party_groups,
+    ( SELECT (COALESCE(sum((same_party.n - 1)), (0)::numeric))::integer AS "coalesce"
+           FROM same_party) AS extra_vendor_rows,
+    ( SELECT (count(*))::integer AS count
+           FROM email_match) AS email_match_groups,
+    ( SELECT (count(*))::integer AS count
+           FROM name_company_match) AS name_company_match_groups;
 
 
 --
@@ -98925,6 +98782,14 @@ ALTER TABLE ONLY public.deal_type_ref
 
 
 --
+-- Name: deal_vendor_assignment deal_vendor_assignment_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_pkey PRIMARY KEY (deal_id, party_id, role);
+
+
+--
 -- Name: defect defect_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -101246,6 +101111,13 @@ CREATE INDEX deal_review_item_deal_idx ON public.deal_review_item USING btree (d
 --
 
 CREATE UNIQUE INDEX deal_review_one_open_per_actor_workspace ON public.deal_review_session USING btree (started_by, workspace_kind, COALESCE(account_client_id, '00000000-0000-0000-0000-000000000000'::uuid)) WHERE (status = 'open'::text);
+
+
+--
+-- Name: deal_vendor_assignment_active_contact; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX deal_vendor_assignment_active_contact ON public.deal_vendor_assignment USING btree (deal_id, role, contact_party_id) WHERE active;
 
 
 --
@@ -107362,6 +107234,13 @@ CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDAT
 
 
 --
+-- Name: deal_vendor_assignment scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDATE ON public.deal_vendor_assignment FOR EACH ROW EXECUTE FUNCTION ops.scac_reference_monitor_guard();
+
+
+--
 -- Name: defect scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -108269,6 +108148,13 @@ CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.d
 --
 
 CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.deal_review_session FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
+
+
+--
+-- Name: deal_vendor_assignment scac_reference_monitor_guard_truncate; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.deal_vendor_assignment FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
 
 
 --
@@ -114738,6 +114624,46 @@ ALTER TABLE ONLY public.deal
 
 
 --
+-- Name: deal_vendor_assignment deal_vendor_assignment_company_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_company_party_id_fkey FOREIGN KEY (company_party_id) REFERENCES public.party(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_contact_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_contact_party_id_fkey FOREIGN KEY (contact_party_id) REFERENCES public.party(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_deal_id_fkey FOREIGN KEY (deal_id) REFERENCES public.deal(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_party_id_fkey FOREIGN KEY (party_id) REFERENCES public.party(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.actor(id);
+
+
+--
 -- Name: defect defect_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -119031,6 +118957,8 @@ grant select on table public.deal_review_item to dot_reader;
 grant insert, select, update on table public.deal_review_session to carr_writer;
 grant select on table public.deal_review_session to dot_reader;
 grant select on table public.deal_type_ref to dot_reader;
+grant insert, select, update on table public.deal_vendor_assignment to carr_writer;
+grant select on table public.deal_vendor_assignment to dot_reader;
 grant select on table public.defect to carr_exporter;
 grant select on table public.defect to carr_reader;
 grant insert, select on table public.defect to carr_writer;
@@ -119425,6 +119353,9 @@ grant select on table public.v_deal_room_presence to dot_reader;
 grant select on table public.v_deal_room_session to carr_reader;
 grant select on table public.v_deal_room_session to carr_writer;
 grant select on table public.v_deal_room_session to dot_reader;
+grant select on table public.v_deal_room_vendor to carr_reader;
+grant select on table public.v_deal_room_vendor to carr_writer;
+grant select on table public.v_deal_room_vendor to dot_reader;
 grant select on table public.v_decision_entry to carr_exporter;
 grant select on table public.v_decision_entry to carr_reader;
 grant select on table public.v_decision_entry to carr_writer;
@@ -119621,6 +119552,12 @@ grant select on table public.v_subject_timeline to carr_writer;
 grant select on table public.v_subject_timeline to dot_reader;
 grant select on table public.v_today_triage to carr_reader;
 grant select on table public.v_today_triage to dot_reader;
+grant select on table public.v_vendor_assignment_context to carr_reader;
+grant select on table public.v_vendor_assignment_context to carr_writer;
+grant select on table public.v_vendor_assignment_context to dot_reader;
+grant select on table public.v_vendor_duplicate_report to carr_reader;
+grant select on table public.v_vendor_duplicate_report to carr_writer;
+grant select on table public.v_vendor_duplicate_report to dot_reader;
 grant select on table public.v_vendor_level_suggestion to carr_reader;
 grant select on table public.v_vendor_level_suggestion to dot_reader;
 grant select on table public.v_vendor_needs_type to carr_reader;
@@ -121928,6 +121865,8 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0938_j102_engagement_fields.sql	2f3496d3249138c9860c021510ae611d01324ef48d9d94c51386e8df4edb0629	1970-01-01 00:00:00+00
 0940_codex_job_delegation_control_refs.sql	9402a4057ee309d9a4959257e9d5a9a4c41451536f57d3def2201f02fd6741ab	1970-01-01 00:00:00+00
 0944_retire_orphan_control_inventory.sql	ab7c35cfc581268b40bab5b29399e315286b24ba1c3c8c86bc0b9c49673def37	1970-01-01 00:00:00+00
+0945_deal_vendor_assignments.sql	f9053aa57b13351da64416e35e49dc38d8d8da0fb118122b2652778bf9eda7eb	1970-01-01 00:00:00+00
+0946_deal_vendor_grant_retirements.sql	6ab6b3dbe76dbb395a8b739eea002aeb2ac4661f2efeefbf53c52b2fd69fd902	1970-01-01 00:00:00+00
 \.
 
 

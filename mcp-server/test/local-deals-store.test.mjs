@@ -1,3 +1,4 @@
+import { readMigration } from './migration-source.testhelper.mjs';
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';
@@ -70,13 +71,19 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       begin create role carr_writer; exception when duplicate_object then null; end;
     end $$;`);
     // Use the committed table definitions and caller views, without production data.
-    for (const name of ['actor', 'party', 'client', 'deal', 'deal_phase', 'deal_participant', 'next_action', 'deal_note', 'national_account_owner', 'deal_market_assignment', 'deal_review_item', 'deal_review_session', 'event', 'tool_call', 'deal_conflict', 'critical_date', 'lease', 'activity', 'premises', 'negotiation_round', 'document', 'commission', 'capture_post_call_action', 'capture_post_call_candidate', 'building', 'space', 'premises_space', 'lead', 'lead_stage', 'lead_lane', 'lead_stage_move', 'record_flag']) {
+    for (const name of ['actor', 'party', 'vendor', 'client', 'deal', 'deal_phase', 'deal_participant', 'next_action', 'deal_note', 'national_account_owner', 'deal_market_assignment', 'deal_review_item', 'deal_review_session', 'event', 'tool_call', 'deal_conflict', 'critical_date', 'lease', 'activity', 'premises', 'negotiation_round', 'document', 'commission', 'capture_post_call_action', 'capture_post_call_candidate', 'building', 'space', 'premises_space', 'lead', 'lead_stage', 'lead_lane', 'lead_stage_move', 'record_flag']) {
       const table = schema.match(new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\\n\\);`))?.[0];
       assert.ok(table, name);
       await c.query(table);
+      if (name === "party") await c.query("alter table party drop column if exists vendor_assignment_version");
     }
+    for (const table of ['actor','party','deal']) await c.query(`alter table ${table} add primary key(id)`);
+    await c.query(readMigration('0945_deal_vendor_assignments.sql').split('-- Current catalog reseal')[0]);
+    const touch = schema.match(/CREATE FUNCTION public\.trg_touch_row\(\) RETURNS trigger[\s\S]*?end \$\$;/)?.[0];
+    assert.ok(touch);
+    await c.query(touch);
+    await c.query('create trigger vendor_touch before update on vendor for each row execute function trg_touch_row()');
     await restoreEventIdentity(c, schema);
-    await c.query(schema.match(/CREATE FUNCTION public\.trg_touch_row\(\)[\s\S]*?\$\$;/)[0]);
     await c.query('create trigger client_touch before update on client for each row execute function trg_touch_row()');
     await c.query('create trigger lead_touch before update on lead for each row execute function trg_touch_row()');
     await c.query('create sequence ref_lead_seq start 900000');
@@ -93,7 +100,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query("grant select on doctrine_section to carr_reader,carr_writer");
     await c.query(readFileSync(path.join(root, 'migrations/0916_deal_phase_start_dates.sql'), 'utf8'));
     await c.query(readFileSync(path.join(root, 'migrations/0923_deal_status_next_step.sql'), 'utf8'));
-    await c.query("create view v_ref_index as select 'deal'::text subject_type, id subject_id from deal union all select 'lead', id from lead;");
+    await c.query("create view v_ref_index as select 'deal'::text subject_type, id subject_id from deal union all select 'vendor',id from vendor union all select 'lead', id from lead;");
     await c.query("grant select on v_ref_index to carr_reader");
     await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'joe','Synthetic Partner','human',true)", [actor.id]);
     for (const [slug, sort] of [['research', 1], ['negotiation', 2], ['legal', 3], ['closed', 4]]) {
@@ -546,6 +553,248 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.ok(room.thread.some(n => n.id === prior.next_step_id));
     }));
 
+    const assignmentFixture = async () => {
+      await fixture(false);
+      await c.query("insert into party(id,kind,name,created_by,updated_by) values($1,'org','Synthetic Bank',$2,$2)", [id(20), actor.id]);
+      await c.query("insert into party(id,kind,name,org_id,created_by,updated_by) values($1,'person','Synthetic Banker',$2,$3,$3)", [id(21), id(20), actor.id]);
+      await c.query("insert into vendor(id,party_id,category,created_by,updated_by) values($1,$2,'banker',$3,$3),($4,$2,'banker',$3,$3)", [id(22),id(21),actor.id,id(23)]);
+      return {deal_id:id(4),role:'lender',company_party_id:id(20),contact_party_id:id(21)};
+    };
+    await t.test('quoted activity retains human provenance on each vendor assignment event', async () => transaction(async () => {
+      const {deal_id,...entry} = await assignmentFixture();
+      const quote = 'Synthetic partner says this banker is the lender';
+      const key = randomUUID();
+      await TOOLS['log-activity'].handler(c,actor,{ref:deal_id,kind:'call',summary:'Synthetic sourced assignment',human_quote:quote,idempotency_key:key,
+        vendor_assignments:[{...entry,vendor_id:id(22),base_version:1,assignment_base_version:1,note:'Keep this note'},
+          {...entry,role:'attorney',vendor_id:id(23),base_version:1,assignment_base_version:1}]});
+      const events = (await c.query('select field,cause,human_quote,idempotency_key,via,client_id from event where idempotency_key=$1 order by mutation_order',[key])).rows;
+      assert.equal(events.filter(e=>e.field==='vendor_assignment').length,2);
+      assert.equal(events.length,3, 'two role assertions and their activity share the same source');
+      for (const event of events) {
+        assert.equal(event.cause,'human_stated');
+        assert.equal(event.human_quote,quote);
+        assert.equal(event.via,actor.via);
+        assert.equal(event.client_id,actor.client_id);
+      }
+    }));
+
+    await t.test('invoiced deal detail retains vendor cards and agrees with the closed board', async () => transaction(async () => {
+      const {deal_id,...entry} = await assignmentFixture();
+      await TOOLS['update-vendor'].handler(c,actor,{vendor:id(22),base_version:1,assignment_base_version:1,idempotency_key:randomUUID(),fields:{deal_assignments:[{...entry,deal_id}]}});
+      const before = await TOOLS['get-deal-room'].handler(c,actor,{deal:deal_id});
+      assert.equal(before.vendors.length,1);
+      await c.query("update deal set phase='closed',outcome='won',closed_on=current_date,invoiced_on=current_date where id=$1",[deal_id]);
+      const detail = await TOOLS['get-deal-room'].handler(c,actor,{deal:deal_id});
+      assert.deepEqual(detail.vendors,before.vendors);
+      const board = await TOOLS['deal-room-board'].handler(c,actor,{});
+      assert.deepEqual(board.closed_deals.find(d=>d.id===deal_id).vendors,detail.vendors);
+      await c.query('update deal_vendor_assignment set active=false where deal_id=$1',[deal_id]);
+      const empty = await TOOLS['get-deal-room'].handler(c,actor,{deal:deal_id});
+      assert.deepEqual(empty.vendors,[]);
+    }));
+
+    await t.test('retired company assignment permits explicit contact reassignment while active duplicates refuse', async () => transaction(async () => {
+      const entry = await assignmentFixture();
+      await c.query("insert into vendor(id,party_id,category,created_by,updated_by) values($1,$2,'banker',$3,$3)", [id(24),id(20),actor.id]);
+      const update = (vendor,base_version,assignment_base_version,active=true) => TOOLS['update-vendor'].handler(c,actor,{
+        vendor,base_version,assignment_base_version,idempotency_key:randomUUID(),fields:{deal_assignments:[{...entry,active}]},
+      });
+      await update(id(24),1,1);
+      await c.query('savepoint active_duplicate');
+      await assert.rejects(update(id(22),1,1),e=>e.code==='23505');
+      await c.query('rollback to savepoint active_duplicate');
+      await update(id(24),2,2,false);
+      await update(id(22),1,1);
+      const cards = (await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)})).vendors;
+      assert.equal(cards.length,1);
+      assert.equal(cards[0].party_id,id(21));
+      assert.equal((await c.query('select active from deal_vendor_assignment where party_id=$1',[id(20)])).rows[0].active,false);
+    }));
+
+    for (const scenario of ['duplicate vendor calls','company and contact vendor writes']) {
+      await t.test(`concurrent ${scenario} finish without a database deadlock`, {timeout:10000}, async () => {
+        const entry = await assignmentFixture();
+        await c.query("insert into vendor(id,party_id,category,created_by,updated_by) values($1,$2,'banker',$3,$3)", [id(24),id(20),actor.id]);
+        const peers = [new pg.Client(connection),new pg.Client(connection)];
+        let release;
+        const paused = new Promise(resolve => { release=resolve; });
+        let reached;
+        const ready = new Promise(resolve => { reached=resolve; });
+        try {
+          await Promise.all(peers.map(peer=>peer.connect()));
+          for (const peer of peers) await peer.query("begin; set local deadlock_timeout='50ms'; set local statement_timeout='5s'");
+          const query = peers[0].query.bind(peers[0]);
+          let held = false;
+          peers[0].query = async (sql,values) => {
+            const result = await query(sql,values);
+            const pause = scenario==='duplicate vendor calls' ? /for update/i : /for update of p|select id from public.party/i;
+            if (!held && pause.test(sql)) { held=true; reached(); await paused; }
+            return result;
+          };
+          const run = async (peer,index) => {
+            try {
+              let result;
+              if (scenario==='duplicate vendor calls') {
+                const {deal_id,...fields} = entry;
+                result = await TOOLS['log-activity'].handler(peer,actor,{ref:deal_id,kind:'call',summary:'Synthetic concurrent assignment',idempotency_key:randomUUID(),
+                  vendor_assignments:[22+index,23-index].map((n,i)=>({...fields,role:i?'attorney':'lender',vendor_id:id(n),base_version:1,assignment_base_version:1}))});
+              } else {
+                result = await TOOLS['update-vendor'].handler(peer,actor,{vendor:id(index?22:24),base_version:1,assignment_base_version:1,idempotency_key:randomUUID(),
+                  fields:{deal_assignments:[{...entry,role:index?'attorney':'lender'}]}});
+              }
+              await peer.query('commit');
+              return result;
+            } catch (error) { await peer.query('rollback'); return {error}; }
+          };
+          const first = run(peers[0],0);
+          await ready;
+          const second = run(peers[1],1);
+          let blocked=false;
+          for (let attempt=0;attempt<200;attempt++) {
+            blocked=(await c.query('select cardinality(pg_blocking_pids($1))>0 blocked',[peers[1].processID])).rows[0].blocked;
+            if(blocked) break;
+            await new Promise(resolve=>setTimeout(resolve,5));
+          }
+          release();
+          const results = await Promise.all([first,second]);
+          assert.equal(blocked,true,'second writer reaches the contested database locks');
+          assert.ok(results.some(result=>result.ok),'one concurrent writer succeeds');
+          for (const result of results) if(result.error) assert.equal(result.error.payload?.error,'version_conflict',result.error.code || result.error.message);
+        } finally {
+          release?.();
+          await Promise.all(peers.map(peer=>peer.end()));
+          await c.query('truncate deal_vendor_assignment,activity,event,tool_call,vendor,deal,client,party');
+        }
+      });
+    }
+
+    await t.test('stale duplicate vendor rows cannot overwrite shared party assignments', async () => transaction(async () => {
+      const entry = await assignmentFixture();
+      const update = (vendor, note) => TOOLS['update-vendor'].handler(c,actor,{
+        vendor,base_version:1,assignment_base_version:1,idempotency_key:randomUUID(),fields:{deal_assignments:[{...entry,note}]},
+      });
+      await update(id(22),'New assignment');
+      await c.query('savepoint stale_duplicate');
+      await assert.rejects(update(id(23),'Stale overwrite'),e=>e.payload?.error==='version_conflict');
+      await c.query('rollback to savepoint stale_duplicate');
+      const context = await TOOLS['vendor-assignment-context'].handler(c,actor,{vendor:id(23)});
+      assert.equal(context.vendor.assignment_version,2);
+      assert.equal((await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)})).vendors[0].note,'New assignment');
+    }));
+
+    await t.test('one call assigns multiple roles using one observed vendor and party version', async () => transaction(async () => {
+      const {deal_id,...entry} = await assignmentFixture();
+      const call = {ref:deal_id,kind:'call',summary:'Synthetic multiple roles',idempotency_key:randomUUID(),vendor_assignments:
+        ['lender','attorney'].map(role=>({...entry,role,vendor_id:id(22),base_version:1,assignment_base_version:1}))};
+      const result = await TOOLS['log-activity'].handler(c,actor,call);
+      assert.equal(result.vendor_assignments.length,2);
+      const context = await TOOLS['vendor-assignment-context'].handler(c,actor,{vendor:id(22)});
+      assert.equal(context.vendor.base_version,2);
+      assert.equal(context.vendor.assignment_version,2);
+      assert.deepEqual((await TOOLS['get-deal-room'].handler(c,actor,{deal:deal_id})).vendors.map(v=>v.role),['attorney','lender']);
+      assert.equal((await TOOLS['log-activity'].handler(c,actor,call)).replayed,true);
+    }));
+
+    await t.test('duplicate vendor rows share one version in a call and cannot repeat the same party role', async () => transaction(async () => {
+      const {deal_id,...entry} = await assignmentFixture();
+      const call = roles => ({ref:deal_id,kind:'call',summary:'Synthetic duplicate rows',idempotency_key:randomUUID(),vendor_assignments:
+        roles.map((role,index)=>({...entry,role,vendor_id:id(22+index),base_version:1,assignment_base_version:1}))});
+      await c.query('savepoint repeated_role');
+      await assert.rejects(TOOLS['log-activity'].handler(c,actor,call(['lender','lender'])),e=>e.payload?.error==='deal_assignment_invalid');
+      await c.query('rollback to savepoint repeated_role');
+      await TOOLS['log-activity'].handler(c,actor,call(['lender','attorney']));
+      for (const vendor of [id(22),id(23)]) {
+        const context = (await TOOLS['vendor-assignment-context'].handler(c,actor,{vendor})).vendor;
+        assert.equal(context.base_version,2);
+        assert.equal(context.assignment_version,2);
+      }
+    }));
+
+    await t.test('assignment roles reject generic professional and accept the seven specific responsibilities', async () => transaction(async () => {
+      const entry = await assignmentFixture();
+      const request = role => ({vendor:id(22),base_version:1,assignment_base_version:1,idempotency_key:randomUUID(),fields:{deal_assignments:[{...entry,role}]}});
+      await assert.rejects(TOOLS['update-vendor'].handler(c,actor,request('professional')),e=>e.payload?.error==='deal_assignment_invalid');
+      for (const role of ['lender','contractor','architect','attorney','title','inspector','landlord_rep']) {
+        await c.query('savepoint specific_role');
+        assert.equal((await TOOLS['update-vendor'].handler(c,actor,request(role))).ok,true);
+        await c.query('rollback to savepoint specific_role');
+      }
+    }));
+
+    await t.test('vendor assignments survive duplicate vendor rows and show role, company and contact on both deal reads', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("insert into party(id,kind,name,created_by,updated_by) values($1,'org','Synthetic Bank',$2,$2)", [id(20), actor.id]);
+      await c.query("insert into party(id,kind,name,org_id,email,created_by,updated_by) values($1,'person','Synthetic Banker',$2,'banker@example.invalid',$3,$3)", [id(21), id(20), actor.id]);
+      await c.query("insert into vendor(id,party_id,category,vendor_ref,created_by,updated_by) values($1,$2,'banker','V-DEMO-1',$3,$3),($4,$2,'banker','V-DEMO-2',$3,$3)", [id(22), id(21), actor.id, id(23)]);
+      const context = await TOOLS['vendor-assignment-context'].handler(c,actor,{vendor:id(22)});
+      assert.equal(context.vendor.base_version,1);
+      assert.equal(context.vendor.company.id,id(20));
+      assert.equal(context.vendor.contacts[0].id,id(21));
+      const assignment = { deal_id: id(4), role: 'lender', company_party_id: id(20), contact_party_id: id(21) };
+      await TOOLS['update-vendor'].handler(c, actor, {vendor:id(22),base_version:1,assignment_base_version:1,idempotency_key:randomUUID(),fields:{deal_assignments:[assignment]}});
+      const detail = await TOOLS['get-deal-room'].handler(c, actor, {deal:id(4)});
+      assert.equal(detail.vendors.length,1);
+      assert.equal(detail.vendors[0].role,'lender');
+      assert.deepEqual(detail.vendors[0].company,{id:id(20),name:'Synthetic Bank'});
+      assert.deepEqual(detail.vendors[0].contact,{id:id(21),name:'Synthetic Banker',email:'banker@example.invalid',phone:null});
+      const board = await TOOLS['deal-room-board'].handler(c, actor, {});
+      assert.deepEqual(board.deals[0].vendors,detail.vendors);
+      const call = {ref:id(4),kind:'call',summary:'Synthetic financing update',idempotency_key:randomUUID(),
+        vendor_assignments:[{vendor_id:id(23),base_version:1,assignment_base_version:2,role:'lender',company_party_id:id(20),contact_party_id:id(21),note:'Application received'}]};
+      const result = await TOOLS['log-activity'].handler(c,actor,call);
+      assert.equal(result.vendor_assignments.length,1);
+      assert.equal((await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)})).vendors[0].note,'Application received');
+      assert.equal((await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)})).events.find(e=>e.field==='vendor_assignment' && e.new_value?.vendor_assignment?.note==='Application received')?.verb,'log-activity');
+      assert.equal((await TOOLS['log-activity'].handler(c,actor,call)).replayed,true);
+      const request = (fields,base_version=2) => ({vendor:id(22),base_version,assignment_base_version:base_version+1,idempotency_key:randomUUID(),fields});
+      for (const change of [{role:'vendor'},{role:'worked'},{role:'other'},{role:'Lender'},{deal_id:'vague deal'},
+        {contact_party_id:id(20)},{company_party_id:id(2)},{active:'yes'},{unexpected:'value'}]) {
+        await c.query('savepoint invalid_assignment');
+        await assert.rejects(TOOLS['update-vendor'].handler(c,actor,request({deal_assignments:[{...assignment,...change}]})),e=>e.payload?.error==='deal_assignment_invalid');
+        await c.query('rollback to savepoint invalid_assignment');
+      }
+      await c.query('update party set org_id=null where id=$1',[id(21)]);
+      const retire = request({deal_assignments:[{...assignment,active:false}]});
+      await TOOLS['update-vendor'].handler(c,actor,retire);
+      assert.deepEqual((await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)})).vendors,[]);
+      await c.query('update party set org_id=$1 where id=$2',[id(20),id(21)]);
+      await TOOLS['update-vendor'].handler(c,actor,request({deal_assignments:[assignment]},3));
+      await c.query('savepoint atomic_call');
+      await assert.rejects(TOOLS['log-activity'].handler(c,actor,{...call,idempotency_key:randomUUID(),vendor_assignments:[
+        {...call.vendor_assignments[0],vendor_id:id(22),base_version:4,assignment_base_version:5,note:'Must roll back'},
+        {...call.vendor_assignments[0],base_version:2,assignment_base_version:5,contact_party_id:id(20)},
+      ]}),e=>e.payload?.error==='deal_assignment_invalid');
+      await c.query('rollback to savepoint atomic_call');
+      const afterFailedCall = await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)});
+      assert.equal(afterFailedCall.vendors[0].note,'Application received');
+      assert.equal(afterFailedCall.activities.length,1);
+      await c.query('savepoint stale_call');
+      await assert.rejects(TOOLS['log-activity'].handler(c,actor,{...call,idempotency_key:randomUUID()}),e=>e.payload?.error==='version_conflict');
+      await c.query('rollback to savepoint stale_call');
+      assert.equal((await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)})).events.filter(e=>e.field==='vendor_assignment').length,4);
+      await c.query('update vendor set merged_into=$1 where id=$2',[id(22),id(23)]);
+      assert.equal((await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)})).vendors.length,1,'retiring a duplicate vendor row preserves the party assignment');
+      await c.query('update vendor set merged_into=null where id=$1',[id(23)]);
+      await c.query('set local role carr_reader');
+      assert.deepEqual(await TOOLS['vendor-duplicate-report'].handler(c,actor,{}),{
+        dry_run:true,counts:{live_vendor_rows:2,same_party_groups:1,extra_vendor_rows:1,email_match_groups:0,name_company_match_groups:0},
+      });
+      await c.query('reset role');
+      await c.query("insert into party(id,kind,name,org_id,email,created_by,updated_by) values($1,'person','Synthetic Banker',$2,' BANKER@example.invalid ',$3,$3)",[id(24),id(20),actor.id]);
+      await c.query("insert into vendor(id,party_id,category,created_by,updated_by) values($1,$2,'banker',$3,$3)",[id(25),id(24),actor.id]);
+      await c.query('set local role carr_reader');
+      const report = await TOOLS['vendor-duplicate-report'].handler(c,actor,{});
+      assert.deepEqual(report.counts,{live_vendor_rows:3,same_party_groups:1,extra_vendor_rows:1,email_match_groups:1,name_company_match_groups:1});
+      await c.query('reset role');
+      for (const retirement of ['update vendor set merged_into=$1 where id=$2','update party set merged_into=$1 where id=$2','update party set deleted_at=now() where $1::uuid is not null and id=$2']) {
+        await c.query('savepoint retired');
+        await c.query(retirement,retirement.startsWith('update vendor')?[id(22),id(25)]:[id(21),id(24)]);
+        await c.query('set local role carr_reader');
+        assert.deepEqual((await TOOLS['vendor-duplicate-report'].handler(c,actor,{})).counts,{live_vendor_rows:2,same_party_groups:1,extra_vendor_rows:1,email_match_groups:0,name_company_match_groups:0});
+        await c.query('rollback to savepoint retired');
+      }
+    }));
+
     await t.test('migration preserves every existing board prospect and audits the active backfill', async () => transaction(async () => {
       await fixture(true);
       await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'system','Synthetic System','system',true)",[id(99)]);
@@ -829,7 +1078,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
           });
           const oldRows = rowsOf(baseline[name]);
           rowsOf(prior).forEach(row => { for (const field of ['client_status','client_version','prospect_engagement_status']) delete row[field]; });
-          rowsOf(prior).forEach((row, index) => [...invoiceFields, 'next_step_required', 'base_version'].forEach(field => {
+          rowsOf(prior).forEach((row, index) => [...invoiceFields, 'vendors', 'next_step_required', 'base_version'].forEach(field => {
             if (!Object.hasOwn(oldRows[index], field)) delete row[field];
           }));
           assert.deepEqual(prior, baseline[name], `${name}: additive response only`);
