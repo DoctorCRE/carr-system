@@ -75,7 +75,7 @@ def heredoc_body(cmd):
                       cmd or "", re.S | re.M)
     return match.group(3) if match else ""
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 try:                                    # telemetry only — never load-bearing
     import hook_meter
     LOG = hook_meter.guard_log_path(REPO)

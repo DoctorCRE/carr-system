@@ -15,6 +15,19 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class ShellSafety(unittest.TestCase):
+    def test_repo_symlink_keeps_the_same_guard_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            alias = Path(tmp) / 'repo-link'
+            alias.symlink_to(REPO, target_is_directory=True)
+            result = subprocess.run(
+                [sys.executable, str(alias / 'hooks/guard-unattended.py')],
+                input=json.dumps({'tool_name': 'Bash', 'cwd': str(REPO),
+                                  'tool_input': {'command': 'git add -A'}}),
+                text=True, capture_output=True, timeout=10,
+                env={**os.environ, 'CARR_HOOK_FIXTURE': '1',
+                     'CARR_HOOK_GUARD_LOG': str(Path(tmp) / 'guard.log')})
+        self.assertEqual(result.returncode, 2, result.stderr)
+
     def verdict(self, command, expected, tool='Bash'):
         value = {'command': command}
         if tool == 'exec_command':
