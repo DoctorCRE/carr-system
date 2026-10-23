@@ -3,16 +3,20 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "ops"))
+from git_env import fixture_env
 
 
 class CodexJobTests(unittest.TestCase):
     def setUp(self):
+        self.env = fixture_env()
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
@@ -41,15 +45,12 @@ print('Codex progress')
 sys.exit(int(os.environ.get('CODEX_EXIT', '0')))
 ''')
         cli.chmod(0o755)
-        self.env = {**os.environ, 'PATH': str(self.root) + os.pathsep + os.environ['PATH'],
+        self.env = {**self.env, 'PATH': str(self.root) + os.pathsep + os.environ['PATH'],
                     'OBSERVED': str(self.root / 'observed.json'), 'TYPESAFE_API_KEY': ''}
-        for key in list(self.env):
-            if key.startswith('GIT_'):
-                self.env.pop(key)
 
     def git(self, *args):
         return subprocess.run(['git', '-C', str(self.origin), *args], check=True,
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, env=self.env)
 
     def run_job(self, *extra):
         return subprocess.run([str(ROOT / 'bin/codex-job'), str(self.origin), 'test/count',
