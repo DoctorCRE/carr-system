@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib import outlook_send as send_mod
+from lib import outlook_approval as approval
 from lib import outlook_ui as ui
 from lib.outlook_send import EventRow, Ports, SentRow, Snapshot, State
 
@@ -204,6 +205,9 @@ class Harness:
         self.front_idle = 600
         self.frontmost = lambda: self.previous
         self.carr_calls: list[tuple[str, dict]] = []
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with patch.object(approval.os, 'geteuid', return_value=0), patch.object(approval, '_trusted'):
+            self.authority = approval.Authority(out.parent / 'authority')
         self.ports = Ports(open_form=lambda item: send_mod.open_form(item, ui.Waits(settle_seconds=0,
                                                                                    poll_seconds=0,
                                                                                    new_window_seconds=0)),
@@ -224,16 +228,33 @@ class Harness:
             return {'parties': [{'name': 'client-001', 'ref': 'C-1', 'merged': False}]}
         return {'ok': True}
 
-    def send(self, key='key-1', record=None, send_requested=True, **overrides):
+    def issue(self, item, key, expires=None, instruction=None):
+        binding = {'account': ACCOUNT, 'kind': send_mod._kind(item),
+                   'fields': send_mod.fields(item), 'operation_key': key}
+        with patch.object(approval, '_trusted'), patch.object(approval.time, 'time', self.clock.now):
+            return self.authority.issue(binding, expires or self.clock.now() + 900, instruction)
+
+    def consume(self, receipt, binding):
+        with patch.object(approval, '_trusted'), patch.object(approval.time, 'time', self.clock.now):
+            try:
+                return self.authority.consume(receipt, binding)
+            except (OSError, ValueError, KeyError):
+                raise approval.Refused() from None
+
+    def send(self, key='key-1', record=None, send_requested=True, approval_id='fixture', **overrides):
         spec = {**MAIL, **overrides}
+        if approval_id == 'fixture' and key.strip():
+            approval_id = self.issue(send_mod.Mail(tuple(spec['to']), tuple(spec['cc']), tuple(spec['bcc']),
+                                                  spec['subject'], spec['body']), key)
         with patch.object(send_mod, 'account', lambda: ACCOUNT), patch.object(ui, 'cua', self.transport or self.fake), patch.object(ui, 'outlook_pid', lambda: 42), \
                 patch.object(send_mod, '_mailto_handler', lambda: self.handler), \
                 patch.object(send_mod, '_open_url', self.fake.open_url), \
                 patch.object(send_mod, '_idle_seconds', lambda: self.front_idle), patch.object(send_mod, '_frontmost', lambda: self.frontmost()), \
                 patch.object(send_mod, '_activate', lambda bundle: self.fake.calls.append(('activate', bundle))), \
-                patch.object(send_mod.time, 'sleep', lambda s: None):
+                patch.object(send_mod.time, 'sleep', lambda s: None), \
+                patch.object(send_mod.time, 'time', self.clock.now), patch.object(approval, 'consume', self.consume):
             return send_mod.send(spec['to'], spec['cc'], spec['bcc'], spec['subject'], spec['body'],
-                                 idempotency_key=key, record=record, ports=self.ports,
+                                 idempotency_key=key, record=record, ports=self.ports, approval_id=approval_id,
                                  **({} if send_requested is None else {'send_requested': send_requested}))
 
 
@@ -242,13 +263,17 @@ EVENT = dict(subject='event-001', start=datetime(2030, 1, 2, 15, tzinfo=timezone
              attendees=['person-a@example.test'])
 
 
-def event(h, key='event-key', send_requested=True, **overrides):
+def event(h, key='event-key', send_requested=True, approval_id='fixture', **overrides):
+    spec = {**EVENT, **overrides}
+    if approval_id == 'fixture':
+        approval_id = h.issue(send_mod.Event(**{**spec, 'attendees': tuple(spec['attendees'])}), key)
     with patch.object(send_mod, 'account', lambda: ACCOUNT), patch.object(ui, 'cua', h.fake), \
             patch.object(ui, 'outlook_pid', lambda: 42), patch.object(send_mod.time, 'sleep', lambda _: None), \
             patch.object(send_mod, '_idle_seconds', lambda: 600), patch.object(send_mod, '_frontmost', lambda: 'com.example.editor'), \
-            patch.object(send_mod, '_activate', lambda _: None):
-        return send_mod.create_event(**{**EVENT, **overrides}, idempotency_key=key,
-                                     record='client-001', ports=h.ports,
+            patch.object(send_mod, '_activate', lambda _: None), \
+            patch.object(send_mod.time, 'time', h.clock.now), patch.object(approval, 'consume', h.consume):
+        return send_mod.create_event(**spec, idempotency_key=key,
+                                     record='client-001', ports=h.ports, approval_id=approval_id,
                                      **({} if send_requested is None else {'send_requested': send_requested}))
 
 
@@ -266,17 +291,165 @@ class SendTests(unittest.TestCase):
 
     def test_flag_only_mail_never_presses_send(self):
         h = Harness(self.out)
-        result = h.send()
+        result = h.send(approval_id=None)
         self.assertEqual(h.fake.presses(), 0)
         self.assertEqual(result.state, State.REFUSED)
         self.assertEqual(result.reason, 'approval_required')
 
     def test_flag_only_invitation_never_presses_save(self):
         h = Harness(self.out)
-        result = event(h)
+        result = event(h, approval_id=None)
         self.assertEqual(h.fake.presses(), 0)
         self.assertEqual(result.state, State.REFUSED)
         self.assertEqual(result.reason, 'approval_required')
+
+    def test_edited_body_voids_approval(self):
+        h = Harness(self.out)
+        receipt = h.issue(send_mod.Mail(tuple(MAIL['to']), tuple(MAIL['cc']), tuple(MAIL['bcc']),
+                                      MAIL['subject'], MAIL['body']), 'key-1')
+        result = h.send(body='Edited body.', approval_id=receipt)
+        self.assertEqual(h.fake.presses(), 0)
+        self.assertEqual(result.reason, 'approval_refused')
+
+    def test_every_mail_field_and_recipient_role_is_bound(self):
+        changes = [{'to': [ACCOUNT], 'cc': MAIL['to']}, {'cc': []}, {'bcc': []},
+                   {'subject': 'subject-001 '}, {'body': MAIL['body'] + '\n'}]
+        for i, change in enumerate(changes):
+            with self.subTest(change=change):
+                h = Harness(self.out / str(i))
+                receipt = h.issue(send_mod.Mail(tuple(MAIL['to']), tuple(MAIL['cc']), tuple(MAIL['bcc']),
+                                              MAIL['subject'], MAIL['body']), 'key-1')
+                self.assertEqual(h.send(approval_id=receipt, **change).state, State.REFUSED)
+                self.assertEqual(h.fake.presses(), 0)
+
+    def test_complete_invitation_is_bound(self):
+        changes = [{'subject': 'changed'}, {'start': EVENT['start'] + timedelta(minutes=1)},
+                   {'end': EVENT['end'] + timedelta(minutes=1)}, {'location': 'Room 2'},
+                   {'body': 'changed'}, {'attendees': [ACCOUNT]}]
+        for i, change in enumerate(changes):
+            with self.subTest(change=change):
+                h = Harness(self.out / str(i))
+                receipt = h.issue(send_mod.Event(**{**EVENT, 'attendees': tuple(EVENT['attendees'])}), 'event-key')
+                self.assertEqual(event(h, approval_id=receipt, **change).state, State.REFUSED)
+                self.assertEqual(h.fake.presses(), 0)
+
+    def test_approval_from_another_account_is_refused(self):
+        h = Harness(self.out)
+        binding = {'account': 'other@example.test', 'kind': 'send', 'fields': send_mod.fields(
+                   send_mod.Mail(tuple(MAIL['to']), tuple(MAIL['cc']), tuple(MAIL['bcc']),
+                                 MAIL['subject'], MAIL['body'])), 'operation_key': 'key-1'}
+        with patch.object(approval.time, 'time', h.clock.now):
+            receipt = h.authority.issue(binding, NOW + 60)
+        self.assertEqual(h.send(approval_id=receipt).state, State.REFUSED)
+        self.assertEqual(h.fake.presses(), 0)
+
+    def test_expired_receipt_is_refused_for_mail_and_events(self):
+        for kind in ('send', 'event'):
+            with self.subTest(kind=kind):
+                h = Harness(self.out / kind)
+                item = (send_mod.Mail(tuple(MAIL['to']), tuple(MAIL['cc']), tuple(MAIL['bcc']),
+                                     MAIL['subject'], MAIL['body']) if kind == 'send' else send_mod.Event(**EVENT))
+                key = 'key-1' if kind == 'send' else 'event-key'
+                receipt = h.issue(item, key, NOW + 1)
+                h.clock.t += 1
+                result = h.send(approval_id=receipt) if kind == 'send' else event(h, approval_id=receipt)
+                self.assertEqual(result.state, State.REFUSED)
+                self.assertEqual(h.fake.presses(), 0)
+
+    def test_receipt_replay_is_refused_after_sender_state_is_reset(self):
+        h = Harness(self.out / 'first')
+        receipt = h.issue(send_mod.Mail(tuple(MAIL['to']), tuple(MAIL['cc']), tuple(MAIL['bcc']),
+                                      MAIL['subject'], MAIL['body']), 'key-1')
+        self.assertEqual(h.send(approval_id=receipt).state, State.DONE)
+        restarted = Harness(self.out / 'second')
+        result = restarted.send(approval_id=receipt)
+        self.assertEqual(result.state, State.REFUSED)
+        self.assertEqual(restarted.fake.presses(), 0)
+
+    def test_approval_expires_during_foreground_fallback(self):
+        h = Harness(self.out)
+        h.ports.now = lambda: NOW
+        receipt = h.issue(send_mod.Mail(tuple(MAIL['to']), tuple(MAIL['cc']), tuple(MAIL['bcc']),
+                                      MAIL['subject'], MAIL['body']), 'key-1', NOW + 1)
+        original = h.fake.__call__
+
+        def expire(tool, args):
+            result = original(tool, args)
+            if tool == 'bring_to_front':
+                h.clock.t += 1
+            return result
+
+        h.transport = expire
+        self.assertEqual(h.send(approval_id=receipt).reason, 'approval_expired')
+        self.assertEqual(h.fake.presses(), 0)
+        self.assertIn(('activate', h.previous), h.fake.calls)
+
+    def test_fields_changed_during_fallback_never_dispatch(self):
+        h = Harness(self.out)
+        original = h.fake.__call__
+
+        def edit(tool, args):
+            result = original(tool, args)
+            if tool == 'bring_to_front':
+                h.fake.forms[args['window_id']]['body'] = 'Unapproved edit'
+            return result
+
+        h.transport = edit
+        self.assertEqual(h.send().reason, 'approval_fields_changed')
+        self.assertEqual(h.fake.presses(), 0)
+
+    def test_unavailable_authority_never_presses(self):
+        h = Harness(self.out)
+        h.consume = lambda *_: (_ for _ in ()).throw(approval.Refused())
+        self.assertEqual(h.send().state, State.REFUSED)
+        self.assertEqual(h.fake.presses(), 0)
+
+    def test_named_standing_instruction_can_authorize_exact_dispatch(self):
+        h = Harness(self.out)
+        item = send_mod.Mail(tuple(MAIL['to']), tuple(MAIL['cc']), tuple(MAIL['bcc']), MAIL['subject'], MAIL['body'])
+        binding = {'account': ACCOUNT, 'kind': 'send', 'fields': send_mod.fields(item), 'operation_key': 'key-1'}
+        with patch.object(approval.time, 'time', h.clock.now):
+            instruction = h.authority.register(binding, 'decision:11111111-2222-4333-8444-555555555555',
+                                               'Synthetic exact follow-up', NOW + 3600)
+        receipt = h.issue(item, 'key-1', instruction=instruction)
+        self.assertEqual(h.send(approval_id=receipt).state, State.DONE)
+        self.assertEqual(h.fake.presses(), 1)
+
+    def test_final_field_check_and_press_share_the_current_ax_snapshot(self):
+        h = Harness(self.out)
+        h.fake.background = True
+        original = h.fake.__call__
+        generation = 0
+
+        def snapshots(tool, args):
+            nonlocal generation
+            if tool == 'click':
+                token, observed = args['element_token'].rsplit(':', 1)
+                if int(observed) != generation:
+                    return {'status': 'refused', 'refusal': {'code': 'stale_snapshot'}}
+                args = {**args, 'element_token': token}
+            result = original(tool, args)
+            if tool == 'get_window_state':
+                generation += 1
+                for element in result['elements']:
+                    if 'element_token' in element:
+                        element['element_token'] += f':{generation}'
+            return result
+
+        h.transport = snapshots
+        self.assertEqual(h.send().state, State.DONE)
+        self.assertEqual(h.fake.presses(), 1)
+
+    def test_low_level_press_cannot_use_a_caller_supplied_verifier(self):
+        h = Harness(self.out)
+        h.fake.background = True
+        h.fake.open_url(send_mod.mailto(send_mod.Mail(tuple(MAIL['to']), tuple(MAIL['cc']), tuple(MAIL['bcc']),
+                                                   MAIL['subject'], MAIL['body'])))
+        window = send_mod.ComposeWindow(42, 100, ui.Waits(settle_seconds=0))
+        with patch.object(send_mod, 'account', lambda: ACCOUNT), patch.object(ui, 'cua', h.fake):
+            with self.assertRaises((TypeError, approval.Refused, send_mod.DispatchRefused)):
+                window.press(lambda _: None)
+        self.assertEqual(h.fake.presses(), 0)
 
     def test_default_call_prepares_a_draft_without_pressing_send(self):
         h = Harness(self.out)

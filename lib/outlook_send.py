@@ -1,8 +1,8 @@
 """Prepare one Outlook mail or calendar draft, or dispatch it when Joe asked.
 
-A default call leaves a field-verified draft open. Explicit send intent permits
-one Send or Save after suppression, the ten-item daily limit, duplicate checks
-and idle checks. A local delivery latch prevents ambiguous effects from being
+A default call leaves a field-verified draft open. Dispatch requires a trusted
+one-use approval, suppression, the ten-item daily limit, duplicate checks and
+idle checks. A local delivery latch prevents ambiguous effects from being
 repeated. Successful delivery is confirmed against Sent Items or the calendar
 before logging an activity. Diagnostics contain no addresses, subjects or bodies.
 """
@@ -28,6 +28,7 @@ from urllib.parse import quote
 import uuid
 
 from lib import outlook_ui as ui
+from lib import outlook_approval as approval
 from zoneinfo import ZoneInfo
 
 ACCOUNT_CONFIG = Path.home() / '.config/carr/outlook-account'
@@ -130,7 +131,7 @@ class Form(Protocol):
 
     def read(self) -> dict[str, str]: ...
     def discard(self) -> None: ...
-    def press(self) -> str: ...
+    def press(self, binding: dict, approval_id: str | None) -> str: ...
     def closed(self) -> bool: ...
 
 
@@ -155,6 +156,10 @@ class UiFailure(Exception):
 
 class UserActive(UiFailure):
     """Foreground fallback stopped before dispatch because input resumed."""
+
+
+class DispatchRefused(UiFailure):
+    """Approval or field binding failed immediately before a UI action."""
 
 
 def _transport_failure(exc: Exception) -> UiFailure:
@@ -276,10 +281,12 @@ def _kind(item: Mail | Event) -> str:
 
 
 def _write_transport(item: Mail | Event, key: str, ports: Ports, record: str | None = None,
-                     *, send_requested: bool = False) -> Result:
+                     *, send_requested: bool = False, approval_id: str | None = None) -> Result:
     """Send one mail or save one event, at most once per key and per mailbox match."""
     if not isinstance(key, str) or not key.strip():
         raise ValueError('idempotency_key is required')
+    if send_requested and not approval_id:
+        return Result(State.REFUSED, 'approval_required')
     out = ports.out
     out.mkdir(parents=True, exist_ok=True)
     os.chmod(out, 0o700)
@@ -289,7 +296,7 @@ def _write_transport(item: Mail | Event, key: str, ports: Ports, record: str | N
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             return Result(State.FAILED, 'another_write_running')
-        result = _write(item, key, ports, Ledger(out / LEDGER), send_requested)
+        result = _write(item, key, ports, Ledger(out / LEDGER), send_requested, approval_id)
     if result.state is State.DONE:
         result = replace(result, logged=_log_matches(item, key, record, ports))
         if 'log_failed' in result.logged:
@@ -297,7 +304,9 @@ def _write_transport(item: Mail | Event, key: str, ports: Ports, record: str | N
     return result
 
 
-def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requested: bool) -> Result:
+def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requested: bool,
+           approval_id: str | None) -> Result:
+    expected_account = account()
     if send_requested and (ledger.states(key) or ledger.contains_item(fingerprint(item),
             ports.now() - DUPLICATE_WINDOW if isinstance(item, Mail) else 0)):
         return Result(State.DUPLICATE_KEY, 'key_already_pressed')
@@ -337,7 +346,10 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
     ledger.append(key, kind, 'pressing', print_, ports.now())
     pressed_at = ports.now()
     try:
-        mode = form.press()
+        mode = form.press({'account': expected_account, 'kind': kind,
+                           'fields': fields(item), 'operation_key': key}, approval_id)
+    except DispatchRefused as exc:
+        return _discard(form, Result(State.REFUSED, str(exc)))
     except UserActive:
         return _discard(form, Result(State.NOT_IDLE, 'user_active'))
     except (UiFailure, ui.CuaError, OSError, subprocess.SubprocessError) as exc:
@@ -536,6 +548,9 @@ class Window:
             raise UiFailure('ax_window_unresolved')
         return [e for e in state.get('elements') or [] if e.get('role') not in MENU_ROLES]
 
+    def read(self, elements: list[dict] | None = None) -> dict[str, str]:
+        raise UiFailure('window_not_a_form')
+
     def closed(self) -> bool:
         try:
             return all(w['window_id'] != self.window_id for w in _cua('list_windows', {'pid': self.pid})
@@ -563,9 +578,25 @@ class Window:
         except (ui.CuaError, UiFailure):
             pass
 
-    def press(self) -> str:
+    def press(self, binding: dict, approval_id: str | None) -> str:
         """One accepted press. Only an explicit pre-dispatch refusal allows front fallback."""
-        target = self._button(self.elements(), self.commit_label)
+        try:
+            expires_at = approval.consume(approval_id, binding)
+        except approval.Refused:
+            raise DispatchRefused('approval_refused') from None
+
+        def authorize(elements: list[dict]) -> None:
+            if account() != binding['account'] or self.read(elements) != binding['fields']:
+                raise DispatchRefused('approval_fields_changed')
+            idle = _idle_seconds()
+            if idle is None or idle < IDLE_SECONDS:
+                raise UserActive('user_active')
+            if time.time() >= expires_at:
+                raise DispatchRefused('approval_expired')
+
+        elements = self.elements()
+        target = self._button(elements, self.commit_label)
+        authorize(elements)
         try:
             result = ui.cua('click', {'pid': self.pid, 'element_token': target['element_token']})
         except (ui.CuaError, OSError, subprocess.SubprocessError) as exc:
@@ -587,11 +618,13 @@ class Window:
         try:
             _cua('bring_to_front', {'pid': self.pid, 'window_id': self.window_id})
             time.sleep(self.waits.settle_seconds)
+            elements = self.elements()
             if not isinstance(self, ComposeWindow):
-                target = self._button(self.elements(), self.commit_label)
+                target = self._button(elements, self.commit_label)
             idle = _idle_seconds()
             if idle is None or idle < IDLE_SECONDS:
                 raise UserActive('user_active')
+            authorize(elements)
             if isinstance(self, ComposeWindow):
                 _cua('invoke_menu', {'pid': self.pid, 'window_id': self.window_id, 'path': ['Draft', 'Send']})
             else:
@@ -642,8 +675,8 @@ class ComposeWindow(Window):
             if key in ('to', 'cc', 'bcc') and value:
                 _cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'tab'})
 
-    def read(self) -> dict[str, str]:
-        elements = self.elements()
+    def read(self, elements: list[dict] | None = None) -> dict[str, str]:
+        elements = self.elements() if elements is None else elements
         title = next((e.get('label') or '' for e in elements if e.get('role') == 'AXWindow'), '')
         if not title.endswith(f' • {account()}'):
             raise UiFailure('wrong_account')
@@ -681,8 +714,8 @@ class EventWindow(Window):
             if self._field(self.elements(), key).get('value', '') != value:
                 raise UiFailure('event_field_mismatch:' + key)
 
-    def read(self) -> dict[str, str]:
-        elements = self.elements()
+    def read(self, elements: list[dict] | None = None) -> dict[str, str]:
+        elements = self.elements() if elements is None else elements
         title = next((e.get('label', '') for e in elements if e.get('role') == 'AXWindow'), '')
         if not title.endswith(f' • {account()}'):
             raise UiFailure('wrong_account')
@@ -821,7 +854,7 @@ def default_ports(repo: Path | None = None) -> Ports:
 # ---- public interface --------------------------------------------------------
 
 def send(to, cc, bcc, subject: str, body: str, *, idempotency_key: str, record: str | None = None,
-         ports: Ports | None = None, send_requested: bool = False) -> Result:
+         ports: Ports | None = None, send_requested: bool = False, approval_id: str | None = None) -> Result:
     """Prepare one email; send it only when Joe requested this item."""
     mail = Mail(_addresses(to), _addresses(cc), _addresses(bcc), subject, body)
     if not mail.to or not subject.strip():
@@ -829,12 +862,13 @@ def send(to, cc, bcc, subject: str, body: str, *, idempotency_key: str, record: 
     if type(send_requested) is not bool:
         raise ValueError('send_requested must be a boolean')
     return _write_transport(mail, idempotency_key, ports or default_ports(), record,
-                            send_requested=send_requested)
+                            send_requested=send_requested, approval_id=approval_id)
 
 
 def create_event(subject: str, start: datetime, end: datetime, location: str, body: str,
                  attendees=(), *, idempotency_key: str, record: str | None = None,
-                 ports: Ports | None = None, send_requested: bool = False) -> Result:
+                 ports: Ports | None = None, send_requested: bool = False,
+                 approval_id: str | None = None) -> Result:
     """Prepare one event; an explicitly requested save sends its invitations."""
     if start.tzinfo is None or end.tzinfo is None or end <= start or not subject.strip():
         raise ValueError('an event needs a subject and a timezone-aware start before its end')
@@ -842,7 +876,7 @@ def create_event(subject: str, start: datetime, end: datetime, location: str, bo
     if type(send_requested) is not bool:
         raise ValueError('send_requested must be a boolean')
     return _write_transport(event, idempotency_key, ports or default_ports(), record,
-                            send_requested=send_requested)
+                            send_requested=send_requested, approval_id=approval_id)
 
 
 EXIT = {State.DRAFT: 0, State.DONE: 0, State.ACTIVITY_LOG_FAILED: 4, State.NOT_IDLE: 75, State.PRESSED_UNCONFIRMED: 3, State.WINDOW_NOT_CLOSED: 3}
@@ -855,7 +889,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog='run.sh outlook-send')
     parser.add_argument('kind', choices=('send', 'event'))
     parser.add_argument('--json', required=True, type=Path)
-    parser.add_argument('--send', action='store_true', help="send or save only when Joe asked for this item; default is draft")
+    parser.add_argument('--send', action='store_true', help='request dispatch with a trusted approval; default is draft')
     args = parser.parse_args(argv)
     info = args.json.lstat()
     if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.getuid():
@@ -863,13 +897,15 @@ def main(argv: list[str]) -> int:
         return 1
     spec = json.loads(args.json.read_text())
     key, record = spec.pop('idempotency_key'), spec.pop('record', None)
+    approval_id = spec.pop('approval_id', None)
     if args.kind == 'send':
         result = send(spec.get('to', ()), spec.get('cc', ()), spec.get('bcc', ()), spec['subject'],
-                      spec.get('body', ''), idempotency_key=key, record=record, send_requested=args.send)
+                      spec.get('body', ''), idempotency_key=key, record=record, send_requested=args.send,
+                      approval_id=approval_id)
     else:
         result = create_event(spec['subject'], datetime.fromisoformat(spec['start']),
                               datetime.fromisoformat(spec['end']), spec.get('location', ''),
                               spec.get('body', ''), spec.get('attendees', ()), idempotency_key=key, record=record,
-                              send_requested=args.send)
+                              send_requested=args.send, approval_id=approval_id)
     print(result.line(args.kind))
     return EXIT.get(result.state, 1)
