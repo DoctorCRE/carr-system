@@ -10,7 +10,7 @@ inline assertions, printed as ok/FAIL, isolated fixtures. Two tiers:
 
   TIER 1 (always runs, no DB, no credential). Pure-function checks against
   lib/scheduled_run.py using fabricated transcript fixtures written to temp
-  files, plus subprocess checks of the REAL hook and the REAL CLI with a
+  files, plus subprocess checks of the REAL hook with a
   DELIBERATELY UNREACHABLE DATABASE_URL — so "tolerates a missing DB
   credential by failing loud but not corrupting the run" is proven without
   ever touching a real database, staging or production.
@@ -18,7 +18,7 @@ inline assertions, printed as ok/FAIL, isolated fixtures. Two tiers:
   TIER 2 (only when DATABASE_URL is already set in the environment — i.e. run
   through `tools/db-tap.py --project staging run ops/scheduled-run-record-
   selftest.py`, never bare). Registers a throwaway probe service, records one
-  run through the real CLI, reads it back from ops.run, and DELETES it
+  run through the recording library, reads it back from ops.run, and DELETES it
   explicitly before exiting — psycopg autocommit is what ops-record.py's own
   connections use (see tools/ops-record.py connect()), so there is no
   transaction to roll back; explicit cleanup is the isolation instead.
@@ -26,7 +26,7 @@ inline assertions, printed as ok/FAIL, isolated fixtures. Two tiers:
   This tier never runs against production, and since 2026-08-18 that is CHECKED:
   tools/staging_jobs_dsn.py proves the DSN addresses the isolated staging
   endpoint before minting the ephemeral carr_jobs identity the recorder now
-  requires, and the CLI subprocess runs with that credential and no broader one.
+  requires, and the library subprocess runs with that credential and no broader one.
   The old wording — "it only activates when DATABASE_URL is present, and that is
   what db-tap --project staging sets" — described a convention, and PR #288 is
   what proved a convention was not enough.
@@ -64,7 +64,6 @@ OPS_RECORD = load_module_from_path("scheduled_run_record_ops_record",
 DEAD_DSN = "postgresql://carr_jobs:probe@127.0.0.1:1/nonexistent"
 
 HOOK = os.path.join(REPO, "hooks", "scheduled-run-record.py")
-CLI = os.path.join(REPO, "bin", "record-scheduled-run.py")
 PYTHON = os.path.join(REPO, ".venv", "bin", "python")
 PY = PYTHON if os.path.exists(PYTHON) else sys.executable
 
@@ -276,16 +275,6 @@ def main() -> int:
                          "transcript_path": "/dev/null"})
     check("a non-Stop event is ignored", rc == 0 and out.strip() == "")
 
-    # ── the manual CLI is the SAME code path (rule a8c55a47) ─────────────
-    print("\n5. bin/record-scheduled-run.py is the same code as the hook")
-    p = fixture_succeeded(sid="cli-check-" + uuid.uuid4().hex[:8], task="radar-weekly")
-    proc = subprocess.run([PY, CLI, "from-transcript", "--transcript", p],
-                           capture_output=True, text=True, timeout=30,
-                           env=unreachable_db_env())
-    check("the manual CLI identifies the same task the hook would",
-          "task=radar-weekly" in proc.stdout)
-    os.unlink(p)
-
     print(f"\nTIER 1: {len(PASSES)} passed, {len(FAILURES)} failed")
 
     # ── TIER 2 — only with a real (staging) DATABASE_URL already set ────
@@ -323,13 +312,7 @@ def run_tier2() -> None:
     probe_key = "sched-probe-" + uuid.uuid4().hex[:8]
     corr = uuid.uuid4()
 
-    # THE CLI STOPPED READING DATABASE_URL. Since PR #288 the recorder under
-    # bin/record-scheduled-run.py is connect("routine"), so handing it this
-    # environment recorded against PRODUCTION rather than against staging (see
-    # unreachable_db_env above for what that cost). Mint the identity it now
-    # requires; tools/staging_jobs_dsn.py refuses unless the DSN really does
-    # address the isolated staging endpoint, which turns "this tier never runs
-    # against production" from a convention into a check.
+    # The recorder uses the routine identity. Mint only an isolated staging identity.
     staging_jobs = load_module_from_path(
         "staging_jobs_dsn", os.path.join(REPO, "tools", "staging_jobs_dsn.py"))
     try:
@@ -363,13 +346,15 @@ def run_tier2() -> None:
                    values (%s, 'production', 604800, 172800)""",
                 (service_id,))
 
-            # Record through the REAL CLI — the same code the hook calls.
+            # Exercise the same public recording function as the hook.
             p = fixture_gate_denied(task=probe_key)
             proc = subprocess.run(
-                [PY, CLI, "from-transcript", "--transcript", p, "--correlation", str(corr)],
-                capture_output=True, text=True, timeout=30, env=dict(routine))
+                [PY, "-c", "import sys; from lib.scheduled_run import record_from_transcript; "
+                 "result = record_from_transcript(sys.argv[1], correlation=sys.argv[2]); "
+                 "print(result['stderr']); sys.exit(0 if result['recorded'] else 1)", p, str(corr)],
+                capture_output=True, text=True, timeout=30, env=dict(routine), cwd=REPO)
             os.unlink(p)
-            check("tier 2: the CLI recorded successfully against DATABASE_URL",
+            check("tier 2: the recording library succeeded against isolated staging",
                   proc.returncode == 0, proc.stderr[-500:])
 
             cur.execute(

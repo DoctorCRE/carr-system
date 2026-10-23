@@ -249,12 +249,6 @@
       "evidence": "evals/model-routing/make_report.py main() consumes evaluation fixtures and writes report artifacts."
     },
     {
-      "path": "bin/github-app-key-intake.sh",
-      "class": "hand_tool",
-      "reason": "Manual GitHub App key intake remains owned by the credential/release lane outside this library reset.",
-      "evidence": "lib/github_app_config.py documents the retained manual intake script; this declaration grants no new credential access."
-    },
-    {
       "path": "tools/reconcile.py",
       "class": "hand_tool",
       "reason": "Manual workbook reconciliation utility remains outside the library and evaluation reset scope.",
