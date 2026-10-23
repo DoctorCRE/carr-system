@@ -256,6 +256,8 @@ class SendTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.out = Path(self.tmp.name) / 'out'
+        self.dialog = self.enterContext(patch.object(send_mod.subprocess, 'run',
+            return_value=subprocess.CompletedProcess(['osascript'], 0, 'true\n', '')))
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -271,6 +273,16 @@ class SendTests(unittest.TestCase):
         self.assertEqual(h.fake.presses(), 0)
         self.assertEqual(len(h.fake.forms), 1)
         self.assertEqual(self.ledger(), [])
+
+    def test_cancel_confirmation_leaves_draft_without_dispatch(self):
+        self.dialog.return_value.stdout = 'false\n'
+        h = Harness(self.out)
+        result = h.send()
+        self.assertEqual(result.state, State.DRAFT)
+        self.assertEqual(h.fake.presses(), 0)
+        self.assertEqual(len(h.fake.forms), 1)
+        self.assertEqual(self.ledger(), [])
+        self.assertFalse(any(verb == 'log-activity' for verb, _ in h.carr_calls))
 
 
     def test_eleventh_requested_send_is_refused_by_daily_cap(self):
