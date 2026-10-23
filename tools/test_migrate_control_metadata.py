@@ -11,7 +11,7 @@ import migrate
 
 ROOT = Path(__file__).resolve().parents[1]
 BLOCKED = '0940_codex_job_delegation_control_refs.sql'
-REPAIR = '0945_allow_approved_control_evidence_refresh.sql'
+REPAIR = '0947_allow_approved_control_evidence_refresh.sql'
 CONTROL = 'delegation_names_model_and_effort'
 
 spec = importlib.util.spec_from_file_location('control_metadata_shadow', ROOT / 'ops/migration-shadow.py')
