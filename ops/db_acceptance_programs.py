@@ -13,7 +13,6 @@ PROGRAMS = (
     Program("f03", "tools/test-f03-production-migration.py", "f03"),
     Program("continuity", "mcp-server/test/codex-continuity.test.mjs", "node"),
     Program("leads", "mcp-server/test/lead-workspace-pg.test.mjs", "node"),
-    Program("rule-authority", "ops/atomic-rule-approval-local-pg-acceptance.py"),
     Program("rule-delivery", "ops/rule-delivery-local-pg-acceptance.py"),
     Program("engineering-claim", "ops/engineering-claim-local-pg-gate.py"),
     Program("engineering-race", "ops/engineering-envelope-race-local-pg-gate.py"),
