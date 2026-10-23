@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT))
 from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
 
 spec = importlib.util.spec_from_file_location('local_pg', ROOT / 'ops/local-pg-ci.py')
+assert spec is not None and spec.loader is not None
 local_pg = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = local_pg
 spec.loader.exec_module(local_pg)
