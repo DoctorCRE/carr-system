@@ -96,15 +96,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "activate-context-bundle": {
-    "ingress_key": "mcp-tool:activate-context-bundle",
-    "source_locator": "mcp-server/src/evidence-activation.js",
-    "schema_digest": "1151498ffffac722ec673015f5aa6307e19f440186e0f41fd854f2258790a977",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
   "activate-guidance-registry": {
     "ingress_key": "mcp-tool:activate-guidance-registry",
     "source_locator": "mcp-server/src/tools.js",
@@ -510,24 +501,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "bot-brief": {
-    "ingress_key": "mcp-tool:bot-brief",
-    "source_locator": "mcp-server/src/bot-brief.js",
-    "schema_digest": "f28adec69fe75d06c8f3a28f2ff20e33ca9420ffc67f34669786e2b24e180d00",
-    "write": false,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "cadence-status": {
-    "ingress_key": "mcp-tool:cadence-status",
-    "source_locator": "mcp-server/src/delivery-cadence-a05-tools.js",
-    "schema_digest": "b19fb40dfe8a4872ce504f14f429bb528e7991bbe9b897b7d85a0751ca01c55a",
-    "write": false,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
   "call-verb": {
     "ingress_key": "mcp-tool:call-verb",
     "source_locator": "mcp-server/src/tools.js",
@@ -642,33 +615,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:claim-meeting-processing",
     "source_locator": "mcp-server/src/meeting-mode.js",
     "schema_digest": "c44909adba57ff5631f6ef9118a593ff30a8a1f2e49f85cca4385e0ba41dcb72",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "claude-checkpoint": {
-    "ingress_key": "mcp-tool:claude-checkpoint",
-    "source_locator": "mcp-server/src/claude-continuity.js",
-    "schema_digest": "439d6cfd88eb6adf3a911e36b2fdedc520a60308ec5bdb861ed0e775a3b7ca2b",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "claude-read-recovery": {
-    "ingress_key": "mcp-tool:claude-read-recovery",
-    "source_locator": "mcp-server/src/claude-continuity.js",
-    "schema_digest": "3f976dcc45618fb4a789ff48451b2675ff6c4ee47895bd6ef9349eac9eb91fa4",
-    "write": false,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "close-defect": {
-    "ingress_key": "mcp-tool:close-defect",
-    "source_locator": "mcp-server/src/defect-resolution.js",
-    "schema_digest": "0f98977d33b175854eca3554096368de4b2c9340ed42289d18a15550df0dfee3",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -1882,33 +1828,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "raise-delivery-cadence-alert": {
-    "ingress_key": "mcp-tool:raise-delivery-cadence-alert",
-    "source_locator": "mcp-server/src/delivery-cadence-a05-tools.js",
-    "schema_digest": "681dfa013302809455ce15ed672d611171c4ed8c3a7843378a9b336bf774c4a0",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "read-action-class-gate": {
-    "ingress_key": "mcp-tool:read-action-class-gate",
-    "source_locator": "mcp-server/src/action-class-successor-registry.v5.js",
-    "schema_digest": "fdd6943d6e126a4672f985692a7dfac5ce6bc9f22e723968b26ea95dd3d27fc5",
-    "write": false,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "read-action-class-successors": {
-    "ingress_key": "mcp-tool:read-action-class-successors",
-    "source_locator": "mcp-server/src/action-class-successor-registry.v5.js",
-    "schema_digest": "6fa4902b3d4bb51959d045e712f00036038e34d79f478a2246d313148217d414",
-    "write": false,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
   "read-action-context": {
     "ingress_key": "mcp-tool:read-action-context",
     "source_locator": "mcp-server/src/rule-context-runtime.v5.js",
@@ -1927,37 +1846,10 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "read-attempt-reliability": {
-    "ingress_key": "mcp-tool:read-attempt-reliability",
-    "source_locator": "mcp-server/src/evidence-activation.js",
-    "schema_digest": "cdcf5cd01f81494cbdf9e823d285b1319c6391b1af9b164452467a203c4dc2ee",
-    "write": false,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "read-benchmark-manifest": {
-    "ingress_key": "mcp-tool:read-benchmark-manifest",
-    "source_locator": "mcp-server/src/benchmark-acceptance-store.v5.js",
-    "schema_digest": "aa91b2cd00c1c3876fe4d7895006a59e1d34f44458ed3cd511fa0ff9bd56c291",
-    "write": false,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
   "read-board-answers": {
     "ingress_key": "mcp-tool:read-board-answers",
     "source_locator": "mcp-server/src/board-answers.js",
     "schema_digest": "91e298ac2dd0586ded466af4c10c4d810116cdc191a812e52f4a81dd6b65bfd4",
-    "write": false,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "read-context-activation": {
-    "ingress_key": "mcp-tool:read-context-activation",
-    "source_locator": "mcp-server/src/evidence-activation.js",
-    "schema_digest": "ee8fd63d7a00dc905f27cc661716944b7969f9c82267619d69e1a2b22ed50653",
     "write": false,
     "human_only": false,
     "authority_only": false,
@@ -2035,15 +1927,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "read-execution-environment-providers": {
-    "ingress_key": "mcp-tool:read-execution-environment-providers",
-    "source_locator": "mcp-server/src/evidence-activation.js",
-    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
-    "write": false,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
   "read-global-boundaries": {
     "ingress_key": "mcp-tool:read-global-boundaries",
     "source_locator": "mcp-server/src/global-boundaries-door.v5.js",
@@ -2071,15 +1954,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "read-journey-one-clock": {
-    "ingress_key": "mcp-tool:read-journey-one-clock",
-    "source_locator": "mcp-server/src/journey-one-clock-door.v5.js",
-    "schema_digest": "f7d18e756c81fa01dd509972af317a6c782c3337ad5923a7c0287cb5e68a33c5",
-    "write": false,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
   "read-loop": {
     "ingress_key": "mcp-tool:read-loop",
     "source_locator": "mcp-server/src/tools.js",
@@ -2093,15 +1967,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-meeting",
     "source_locator": "mcp-server/src/meeting-mode.js",
     "schema_digest": "e5aafd9450b309bb413a396b41b78f2dcadbe0dc95d918ea0edc176e02c29d65",
-    "write": false,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "read-model-role": {
-    "ingress_key": "mcp-tool:read-model-role",
-    "source_locator": "mcp-server/src/model-role-store.v5.js",
-    "schema_digest": "f101417be7b1fd65fff7a9baf7a0473e939d3a2c30b0b1b17ceae7c9522e83ba",
     "write": false,
     "human_only": false,
     "authority_only": false,
@@ -2345,15 +2210,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:record-branch-evidence",
     "source_locator": "mcp-server/src/investigation.js",
     "schema_digest": "1762afdc7a503a5c18c2b54278e6d1f5b78ff41d640a1f6bc4b2a14dc20f6c5e",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "record-cadence-receipt": {
-    "ingress_key": "mcp-tool:record-cadence-receipt",
-    "source_locator": "mcp-server/src/delivery-cadence-a05-tools.js",
-    "schema_digest": "29d5a63dbb5c1e1e639426dd6e229889d17a899ceb3f1e6bba98c6c8e619974e",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -2710,15 +2566,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "register-action-class-successor": {
-    "ingress_key": "mcp-tool:register-action-class-successor",
-    "source_locator": "mcp-server/src/action-class-successor-registry.v5.js",
-    "schema_digest": "bf33e5d2df083847db7cce0544fcced23b2404249328b96585a14db676129822",
-    "write": true,
-    "human_only": true,
-    "authority_only": false,
-    "delegates_to": []
-  },
   "register-derivative-source-link": {
     "ingress_key": "mcp-tool:register-derivative-source-link",
     "source_locator": "mcp-server/src/record-source-authority-store.v5.js",
@@ -2805,15 +2652,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/doc-conversation.js",
     "schema_digest": "b28a3f61fed0fe4c06200832be31bc217a89b867f8d65e45cb770108e0033f41",
     "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "render-context-activation": {
-    "ingress_key": "mcp-tool:render-context-activation",
-    "source_locator": "mcp-server/src/evidence-activation.js",
-    "schema_digest": "ee8fd63d7a00dc905f27cc661716944b7969f9c82267619d69e1a2b22ed50653",
-    "write": false,
     "human_only": false,
     "authority_only": false,
     "delegates_to": []

@@ -119,19 +119,12 @@ case "${1:-}" in
   lint)         shift; python3 "$REPO/tools/writing-lint.py" "$@" ;;
   migrate)      shift; "$REPO/.venv/bin/python" "$REPO/tools/migrate.py" "$@" ;;
   export)       shift; "$REPO/.venv/bin/python" -m exporters.run_exports "$@" ;;
-  check)        shift; "$REPO/tools/check.sh" "$@" ;;
-  smoke)        shift; "$REPO/tools/smoke.sh" "$@" ;;
   # `next` (2026-08-09, loop #297): open loops ordered by how LITTLE is left,
   # which no other surface answers — bell/dated/decision all order by urgency.
   # Read-only over v_loop_proximity (migration 0084). Prints its own coverage
   # first, because most of the backlog predates the blocker gate and a ranking
   # that hid that would look authoritative and be noise.
   next)         shift; "$REPO/.venv/bin/python" "$REPO/tools/db-tap.py" run "$REPO/tools/closest-first.py" "$@" ;;
-  # The report-card rubric (loop #220, DRAFT). One entry point for both paths:
-  # a human runs this, and the monthly audit runs this. Rule a8c55a47 — the
-  # manual path and the automated path that do the same job must be the SAME
-  # code, which under v1 they were not.
-  report-card)  shift; "$PY" "$REPO/tools/report-card.py" "$@" ;;
   # `worktree` (2026-08-10): an isolated checkout in one command. Two sessions
   # collided in the shared tree twice in one morning, and git-writer-gate's own
   # deny message already prescribes the fix — this makes it one step instead of
@@ -148,5 +141,5 @@ case "${1:-}" in
   rule-approvals) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import rule_approval_worklist as w; sys.exit(w.main(sys.argv[1:]))' "$@" ;;
   outlook-send) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["send", *sys.argv[1:]]))' "$@" ;;
   outlook-event) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["event", *sys.argv[1:]]))' "$@" ;;
-  *) echo "usage: run.sh deal-room|lead-board|lead-promote [--count N] [--county X] [--segment X]|renewal-feed|all|corroborate|graph|graph-system|graph-health [--verbose]|section-index [each supports --recovery --reason WHY [--vault PATH]]|space-search <folder>|salesforce-diff [--apply]|registry-audit [--verbose] [--recovery --reason WHY [--vault PATH]]|review-queue [--fixture f.json]|brief-pack [--section all|one-thing|prebriefs|capacity|monday-agenda|renewal-shortlist] [--quiet] [--recovery [--vault PATH]]|retrieve [--recovery [--vault PATH]] <question>|health [--act] [--recovery --reason WHY [--vault PATH]]|cloudflare-spend-guard run/fast/restore/check-e2e/health/map-services/loop-watch|config [check|pull|install] [--apply]|lint <file> [--surface email|social|proposal|web]|restore-rehearse [--preflight] [--verify-only] [--date YYYYMMDD] [--identity PATH] [--keep-branch]|key-recovery-test|migrate [--apply] [--yes]|export [--only <target>] [--bootstrap]|call [--branch <name>] <verb> '<json args>'|call-mode [serve|state|start|stop]|check [--recovery --reason WHY [--vault PATH]]|smoke [--recovery --reason WHY [--vault PATH]]|next [--all] [--domain X]|report-card [--validate|--run] [--skip-evidence] [--recovery --reason WHY [--vault PATH]]|local-db-ci [--class migration|strict] [--port N]|rule-approvals [--json] [--apply [--limit N]] [--runtime-root PATH]|worktree <name> [--from B]|--list|--remove <name|path>"; exit 2 ;;
+  *) echo "usage: run.sh deal-room|lead-board|lead-promote [--count N] [--county X] [--segment X]|renewal-feed|all|corroborate|graph|graph-system|graph-health [--verbose]|section-index [each supports --recovery --reason WHY [--vault PATH]]|space-search <folder>|salesforce-diff [--apply]|registry-audit [--verbose] [--recovery --reason WHY [--vault PATH]]|review-queue [--fixture f.json]|brief-pack [--section all|one-thing|prebriefs|capacity|monday-agenda|renewal-shortlist] [--quiet] [--recovery [--vault PATH]]|retrieve [--recovery [--vault PATH]] <question>|health [--act] [--recovery --reason WHY [--vault PATH]]|cloudflare-spend-guard run/fast/restore/check-e2e/health/map-services/loop-watch|config [check|pull|install] [--apply]|lint <file> [--surface email|social|proposal|web]|restore-rehearse [--preflight] [--verify-only] [--date YYYYMMDD] [--identity PATH] [--keep-branch]|key-recovery-test|migrate [--apply] [--yes]|export [--only <target>] [--bootstrap]|call [--branch <name>] <verb> '<json args>'|call-mode [serve|state|start|stop]|next [--all] [--domain X]|local-db-ci [--class migration|strict] [--port N]|rule-approvals [--json] [--apply [--limit N]] [--runtime-root PATH]|worktree <name> [--from B]|--list|--remove <name|path>"; exit 2 ;;
 esac

@@ -48,11 +48,10 @@ const actorFromProps = (props, bindings = null) =>
 const fieldsOf = actor => (actor === null ? null : Object.fromEntries(Object.entries(actor)));
 
 
-test("continuity bearer maps derive one exact surface and sponsor", () => {
+test("Codex continuity bearer map derives one exact sponsor", () => {
   const codex = continuityActorForTokenMaps(
     "Bearer codex-secret",
     JSON.stringify({ joe: "codex-secret" }),
-    JSON.stringify({ joe: "claude-secret" }),
   );
   assert.deepEqual(fieldsOf(codex), {
     slug: "codex", display: "Codex", human: false, agent: true,
@@ -60,25 +59,16 @@ test("continuity bearer maps derive one exact surface and sponsor", () => {
     sponsoring_human_slug: "joe", human_slug: "joe", sponsor_required: false,
     native_agent_verified: true, continuity_surface: "codex",
   });
-
-  const claude = continuityActorForTokenMaps(
-    "Bearer claude-secret",
-    JSON.stringify({ joe: "codex-secret" }),
-    JSON.stringify({ dell: "claude-secret" }),
-  );
-  assert.equal(claude.slug, "claude");
-  assert.equal(claude.sponsoring_human_slug, "dell");
-  assert.equal(claude.continuity_surface, "claude");
 });
 
-test("continuity bearer maps refuse shared, cross-map duplicate, and malformed credentials", () => {
+test("Codex continuity bearer map refuses unknown, duplicate-sponsor, and malformed credentials", () => {
   assert.equal(continuityActorForTokenMaps(
-    "Bearer joe-local", '{"joe":"codex-secret"}', '{"joe":"claude-secret"}'), null);
+    "Bearer joe-local", '{"joe":"codex-secret"}'), null);
   assert.equal(continuityActorForTokenMaps(
-    "Bearer repeated", '{"joe":"repeated"}', '{"joe":"repeated"}'), null);
+    "Bearer repeated", '{"joe":"repeated","dell":"repeated"}'), null);
   assert.equal(continuityActorForTokenMaps(
-    "Bearer secret", '{"mallory":"secret"}', '{}'), null);
-  assert.equal(continuityActorForTokenMaps("Bearer secret", '[]', '{}'), null);
+    "Bearer secret", '{"mallory":"secret"}'), null);
+  assert.equal(continuityActorForTokenMaps("Bearer secret", '[]'), null);
 });
 
 // ---------- slugForEmail: unchanged behavior, regression-guarded ----------

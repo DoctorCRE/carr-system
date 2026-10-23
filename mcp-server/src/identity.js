@@ -372,42 +372,25 @@ export function agentActorForToken(authorizationHeader, agentTokensRaw, viaLabel
            ...(native_agent_verified ? { native_agent_verified: true } : {}) }, agentTokensRaw);
 }
 
-/**
- * Match a bearer against the two isolated continuity secret maps.
- *
- * Each map is sponsor -> token. The authenticated sponsor and selected map
- * jointly determine the runtime actor and continuity surface; no tool input,
- * client profile name, model id, or request parameter participates. A token
- * present in both maps is ambiguous and refuses instead of inheriting check
- * order as authority.
- */
-export function continuityActorForTokenMaps(
-  authorizationHeader, codexTokensRaw, claudeTokensRaw,
-) {
+/** Match a bearer to one known sponsor in the isolated Codex continuity map. */
+export function continuityActorForTokenMaps(authorizationHeader, codexTokensRaw) {
   const token = String(authorizationHeader || "").replace(/^Bearer\s+/i, "");
   if (!token) return null;
-  const candidates = [];
-  for (const [surface, raw] of [
-    ["codex", codexTokensRaw], ["claude", claudeTokensRaw],
-  ]) {
-    let tokens;
-    try { tokens = JSON.parse(raw || "{}"); }
-    catch { continue; }
-    if (!tokens || typeof tokens !== "object" || Array.isArray(tokens)) continue;
-    const sponsors = Object.keys(tokens).filter(
-      sponsor => isKnownPartner(sponsor) && tokens[sponsor] && tokens[sponsor] === token,
-    );
-    if (sponsors.length === 1) candidates.push({ surface, sponsor: sponsors[0], raw });
-    else if (sponsors.length > 1) return null;
-  }
-  if (candidates.length !== 1) return null;
-  const { surface, sponsor, raw } = candidates[0];
+  let tokens;
+  try { tokens = JSON.parse(codexTokensRaw || "{}"); }
+  catch { return null; }
+  if (!tokens || typeof tokens !== "object" || Array.isArray(tokens)) return null;
+  const sponsors = Object.keys(tokens).filter(
+    sponsor => isKnownPartner(sponsor) && tokens[sponsor] && tokens[sponsor] === token,
+  );
+  if (sponsors.length !== 1) return null;
+  const sponsor = sponsors[0];
   return authenticateConnection({
-    slug: surface, display: DISPLAY[surface], human: false, agent: true,
-    via: `${surface}-continuity-token`, client_id: null,
+    slug: "codex", display: DISPLAY.codex, human: false, agent: true,
+    via: "codex-continuity-token", client_id: null,
     sponsoring_human_slug: sponsor, human_slug: sponsor, sponsor_required: false,
-    native_agent_verified: true, continuity_surface: surface,
-  }, raw);
+    native_agent_verified: true, continuity_surface: "codex",
+  }, codexTokensRaw);
 }
 
 /**
@@ -765,7 +748,7 @@ function serverEnvironmentSecret(name) {
 const SERVER_CREDENTIAL_NAMES = Object.freeze([
   "REVIEW_TOKENS", "AGENT_TOKENS", "LOCAL_TOKENS",
   "HERMES_TOKENS", "HERMES_TOKENS_EXTRA", "HERMES_COS_TOKENS",
-  "CODEX_CONTINUITY_TOKENS", "CLAUDE_CONTINUITY_TOKENS",
+  "CODEX_CONTINUITY_TOKENS",
   "UNATTENDED_TOKENS",
   "GOOGLE_CLIENT_SECRET",
 ]);

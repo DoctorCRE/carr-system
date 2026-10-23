@@ -240,7 +240,6 @@ test("Q092: the brokerage side stays a legal structural value on record-counter 
 test("Q141: the door's admin verbs map only to retained system-authority actions", () => {
   assert.deepEqual(Object.keys(V5_DOOR_SYSTEM_AUTHORITY_VERBS).sort(), [
     "accept-workflow", "approve-rule", "disable-legacy-schedule", "retire-rule",
-    "set-current-model-role-revision",
   ]);
   for (const entry of Object.values(V5_DOOR_SYSTEM_AUTHORITY_VERBS)) {
     assert.equal(V5_ACTIONS[entry.action].authority_class, "system_authority");
@@ -251,7 +250,7 @@ test("Q141: the door's admin verbs map only to retained system-authority actions
 });
 
 test("Q141: an admin verb refuses Dell, Dell's agents and every non-partner seat; Joe and his agents pass", () => {
-  for (const verb of ["approve-rule", "retire-rule", "disable-legacy-schedule", "set-current-model-role-revision"]) {
+  for (const verb of ["approve-rule", "retire-rule", "disable-legacy-schedule"]) {
     for (const actor of [JOE, JOE_CLAUDE, JOE_LOCAL]) {
       const verdict = door({ verb, actor });
       assert.equal(verdict.boundary_refused, false, `${verb} ${actor.slug}`);
@@ -454,7 +453,7 @@ test("the read projection carries the policy, the eight decisions, every matrix 
   assert.equal(projection.door.mode, "shadow");
   assert.equal(projection.accepts_anything, false);
   assert.deepEqual(projection.matrices.role, v5RoleMatrix());
-  assert.equal(projection.door.system_authority_verbs.length, 5);
+  assert.equal(projection.door.system_authority_verbs.length, 4);
 });
 
 test("read-global-boundaries is a read verb that refuses a stale expected digest by name", async () => {
