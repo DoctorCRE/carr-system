@@ -77,7 +77,7 @@ def checked(command, env, label, timeout=1200):
 
 
 def production_dsn():
-    # This is migrate-prod.sh's existing status credential route. Capture the
+    # This is the production deployment workflow's existing status credential route. Capture the
     # helper's output in memory; never invoke migrate.py's writeful dry run.
     script = '''set -eu
 if [ -z "${NEON_API_KEY:-}" ] && [ -f "$HOME/.config/carr/db.env" ]; then

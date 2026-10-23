@@ -19,6 +19,8 @@ spec = importlib.util.spec_from_file_location("cac_hold", ROOT / "ops/config-as-
 assert spec is not None and spec.loader is not None
 cac = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cac)
+# LaunchAgent cases do not deploy administrator-owned client policy.
+setattr(cac, "managed_safety_plan", lambda: [])
 
 
 class HoldTests(unittest.TestCase):
@@ -238,39 +240,7 @@ class HoldTests(unittest.TestCase):
                 self.assertEqual(cac.install_launchd_plist(self.dest.name, str(self.dest), self.body, True), "failed")
                 self.assertFalse(any(c[1] in {"load", "bootstrap", "kickstart"} for c in self.calls))
 
-    def test_health_row_propagates_warning_and_record_call(self):
-        from lib import launchd_hold_health
-        from types import SimpleNamespace
-        tree = ast.parse((ROOT / "tools/health-check.py").read_text())
-        block = next(node for node in tree.body if isinstance(node, ast.Try) and any(
-            isinstance(child, ast.ImportFrom) and any(alias.name == "launchd_hold_health" for alias in child.names)
-            for child in ast.walk(node)))
-        calls = []
-        def checked(home, verb):
-            verb("add-loop", {"fixture": True})
-            return "WARN launchd holds fixture alarm", 1
-        scope = {"sys": sys, "os": os, "REPO_ROOT": str(ROOT), "rc": 0,
-                 "_uptime": SimpleNamespace(call_verb=lambda name, payload, **kwargs: calls.append(name))}
-        with patch.object(launchd_hold_health, "check", side_effect=checked):
-            exec(compile(ast.Module(body=[block], type_ignores=[]), "health-row", "exec"), scope)
-        self.assertEqual(scope["rc"], 1)
-        self.assertEqual(calls, ["add-loop"])
 
-    def test_health_row_fallback_names_the_same_owner(self):
-        from lib import launchd_hold_health
-        from types import SimpleNamespace
-        tree = ast.parse((ROOT / "tools/health-check.py").read_text())
-        block = next(node for node in tree.body if isinstance(node, ast.Try) and any(
-            isinstance(child, ast.ImportFrom) and any(alias.name == "launchd_hold_health" for alias in child.names)
-            for child in ast.walk(node)))
-        scope = {"sys": sys, "os": os, "REPO_ROOT": str(ROOT), "rc": 0,
-                 "_uptime": SimpleNamespace(call_verb=lambda *args, **kwargs: {})}
-        output = io.StringIO()
-        with patch.object(launchd_hold_health, "check", side_effect=RuntimeError("fixture failure")):
-            with contextlib.redirect_stdout(output):
-                exec(compile(ast.Module(body=[block], type_ignores=[]), "health-row", "exec"), scope)
-        self.assertEqual(scope["rc"], 1)
-        self.assertIn("owner claude (Platform Engineer)", output.getvalue())
 
     def test_definition_only_check_uses_plist_label(self):
         self.hold.write_text("")

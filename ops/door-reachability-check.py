@@ -129,7 +129,7 @@ SKILL_FORM = re.compile(r"(?<![\w-])(skills/|/|`|\*\*)([\w-]+)(`|\*\*)?")
 
 def imported_modules(text: str) -> set[str]:
     """Module names a Python file imports, at any length: `from lib.pgrow import
-    fetch_one` and `from lib import dot_relay` are unambiguous where a bare
+    fetch_one` and `from lib import record_call` are unambiguous where a bare
     five-letter word in prose is not."""
     found: set[str] = set()
     for frm, names, plain in PY_IMPORT.findall(text):

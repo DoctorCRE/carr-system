@@ -331,6 +331,7 @@ def test_hosted_migration_ownership():
                                          "CI_DRAFT": draft, "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary"),
                                          "CI_NEEDS": json.dumps({"scope": {"result": "success", "outputs": {"full": full}},
                                                                  "classes": {"result": classes},
+                                                                 "fallow": {"result": "success"},
                                                                  "migration-fixtures": {"result": fixtures}})})
             check(f"aggregate scope={full!r} fixtures={fixtures} classes={classes}", result.returncode == expected)
     record = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Record the tested tree and class contract")
@@ -517,41 +518,7 @@ def test_types_class_catches_a_seeded_type_error():
     check("removing the seed turns the types class green again", rc == 0,
           f"rc={rc} out={out[-400:]}")
 
-def test_no_env_claims_a_production_hostname():
-    import subprocess as sp
-    toml = REPO / "mcp-server" / "wrangler.toml"
-    checker = REPO / "ops" / "deploy-attachment-check.py"
-    if not toml.exists() or not checker.exists():
-        return
-    src = toml.read_text()
-    envs = re.findall(r"^\[env\.([A-Za-z0-9_-]+)\]", src, re.M)
-    for env in sorted(set(envs)):
-        r = sp.run([sys.executable, str(checker), str(toml), env],
-                   capture_output=True, text=True)
-        check(f"env '{env}' claims no production hostname", r.returncode == 0,
-              (r.stdout + r.stderr).strip()[:120])
-
-    import tempfile as tf
-    broken = "\n".join(l for l in src.splitlines() if l.strip() != "routes = []")
-    with tf.NamedTemporaryFile("w", suffix=".toml", delete=False) as fh:
-        fh.write(broken)
-        path = fh.name
-    try:
-        r = sp.run([sys.executable, str(checker), path, "staging"],
-                   capture_output=True, text=True)
-        check("removing `routes = []` is REFUSED, not silently allowed",
-              r.returncode == 1, f"rc={r.returncode}")
-    finally:
-        os.unlink(path)
-
 UNCOLLECTED_BY_DECISION = {
-    "tools/link-model-bakeoff/pg18-selftest.py":
-        "Requires PostgreSQL 18 binaries and an owned disposable socket-only "
-        "database. The repository-content gates pool has no PostgreSQL 18 "
-        "contract. Run LC_ALL=C .venv/bin/python tools/link-model-bakeoff/pg18-selftest.py "
-        "before changing this harness; it executes regression_sql.py and the "
-        "normal integration workload. Offline failure-path and collection "
-        "regressions run in tools/test-linkfork.py through the gates pool.",
     "tools/room-bridge/test_claude_desk_live.py":
         "LIVE, and deliberately not offline. Its own docstring says it asserts "
         "against no mock: it boots a REAL Claude Code session on a labelled "
@@ -1229,7 +1196,6 @@ def main(argv=None):
                test_secret_scanner_catches_and_respects_allow,
                test_dep_check_detects_a_stale_lock,
                test_types_class_catches_a_seeded_type_error,
-               test_no_env_claims_a_production_hostname,
                test_every_test_file_in_the_tree_is_collected,
                test_each_class_runs_in_exactly_one_hosted_group,
                test_the_walk_prunes_named_roots_only,

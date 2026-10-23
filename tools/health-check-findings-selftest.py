@@ -78,7 +78,7 @@ LIVE HEALTH CHECK:
 
      A business-count finding (e.g. rule_enforcement's "98 active rule
      gaps") is deliberately NOT hard_error=True — see the regression-diff
-     test in ops/release-pipeline-selftest.py's HealthGate class, which
+     test in the health report selftests's HealthGate class, which
      pins that a count DECREASE must not fail a release. hard_error is
      reserved for a section that could not be read at all, or a structural integrity failure rather than an improvable business
      metric — see ALWAYS_HARD_ERROR_KEYS below.
@@ -130,7 +130,7 @@ STRUCTURAL_KEYS = {
     "credential_health", "unrecorded_failure", "tailscale",
     "verb_usage",
 }
-ALWAYS_HARD_ERROR_KEYS = STRUCTURAL_KEYS | {"scheduled_jobs_evidence_unavailable", "studio_failover_evidence"}
+ALWAYS_HARD_ERROR_KEYS = STRUCTURAL_KEYS | {"scheduled_jobs_evidence_unavailable"}
 
 
 def _find_function(name: str) -> ast.FunctionDef:
@@ -665,7 +665,6 @@ class CanonicalHealthTests(unittest.TestCase):
         ns = _load_finding_and_red_functions()
         mod = ast.Module(body=[_find_function("_canonical_health")], type_ignores=[])
         ns.update(os=os, re=re, sys=sys, time=time, REPO_ROOT=str(HEALTH_CHECK_PATH.parent.parent),
-                  _studio_failover_row=lambda: {'status': 'ok', 'line': 'OK fixture Studio failover'},
                   _uptime=Mock(row=Mock(return_value=("OK production uptime fixture", False))),
                   CANONICAL_SECTION="credentials", CANONICAL_FIXTURE=None, timedelta=timedelta,
                   _HEALTH_COMPLETION_MARKER="HEALTH_COMPLETE", importlib=__import__("importlib"),
@@ -753,24 +752,6 @@ class CanonicalHealthTests(unittest.TestCase):
         self.assertEqual([row["key"] for row in ns["_FINDINGS"]], ["grok_session"])
 
 
-    def test_sends_section_reports_its_own_row_and_breach(self):
-        import contextlib, io
-        for row, breach, hard, rc in (("OK system sends fixture", False, False, 0),
-                                      ("WARN system sends fixture · held claims 1", True, False, 1),
-                                      ("UNKNOWN system sends fixture", True, True, 1)):
-            with self.subTest(row=row):
-                ns = self.namespace()
-
-                def unrelated_snapshot():
-                    raise AssertionError("sends-only health read the canonical snapshot")
-
-                ns.update(CANONICAL_SECTION="sends", _canonical_snapshot=unrelated_snapshot,
-                          _system_sends_row=lambda row=row, breach=breach, hard=hard: (row, breach, hard))
-                with contextlib.redirect_stdout(io.StringIO()) as out:
-                    self.assertEqual(ns["_canonical_health"](), rc)
-                self.assertIn(row, out.getvalue())
-                self.assertEqual([(f["key"], f["subject"], f["hard_error"]) for f in ns["_FINDINGS"]],
-                                 [("system_sends", "system-sender", hard)] if breach else [])
 
     def all_namespace(self):
         from unittest.mock import Mock
@@ -781,10 +762,8 @@ class CanonicalHealthTests(unittest.TestCase):
                   _seat_health_rows=lambda: ["PASS seat fixture"],
                   _canonical_now=lambda snap: datetime.now(timezone.utc),
                   _canonical_contradiction_alarm=lambda: 0,
-                  _canonical_workflow_truth=lambda: None, _canonical_assurance_health=lambda: None,
                   _tailscale_row=lambda: ("OK fixture node", False),
                   _cloudflare_spend_row=lambda: ("OK fixture cloudflare spend", False, False),
-                  _system_sends_row=lambda: ("OK system sends fixture", False, False),
                   _host_liveness_rows=lambda: [("OK fixture host", False, "fixture")],
                   _build_duration_row=lambda: ("OK fixture build duration", 0),
                   _health_sub=Mock(classify_loose_status=Mock(return_value={
@@ -853,6 +832,11 @@ class ActModeContract(unittest.TestCase):
         exec(compile(ast.Module(body=[_find_function("_reader_args")], type_ignores=[]),
                      str(HEALTH_CHECK_PATH), "exec"), ns)
         return ns["_reader_args"]
+
+    def test_retired_sends_section_is_refused(self):
+        with self.assertRaises(SystemExit) as refused:
+            self.reader_args()(["--section", "sends"])
+        self.assertIn("--section must be", str(refused.exception))
 
     def test_act_refuses_a_partial_report(self):
         """A partial run cannot prove a row green, so --act must never run on
@@ -1091,7 +1075,7 @@ class RcAssignedOnlyViaRed(unittest.TestCase):
     def test_business_count_keys_are_not_hard_error(self):
         # The other half of the same contract: a count that can legitimately
         # improve (98 -> 97 rule gaps) must never be hard_error, or the
-        # release gate in ops/release-pipeline.py would fail every release
+        # release gate in the retired local executor would fail every release
         # with any standing count, defeating the whole point of the gate.
         fn = _find_function("_canonical_health")
         alarm = _find_function("_canonical_contradiction_alarm")
@@ -1290,7 +1274,7 @@ class CompletionMarkerAlwaysPrints(unittest.TestCase):
     completion-marker print entirely, even though it had already recorded a
     real, fully-explained `canonical_health_refused` hard_error finding. A
     read that catches and names its own failure is COMPLETE, not
-    unavailable — without the marker, ops/release-pipeline.py's
+    unavailable — without the marker, the retired local executor's
     read_health_findings() would read it as an incomplete baseline and hold
     forever, never reaching the hard_error verdict it already has. This
     proves, statically, that every `return` out of `_canonical_health`
