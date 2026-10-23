@@ -95,7 +95,7 @@ if mode == 'write':
     for command in (['git', 'add', 'fixed.py'], ['git', 'commit', '-m', 'Hermes fix'],
                     ['git', 'push', 'origin', 'HEAD'], ['gh', 'pr', 'create', '--title', 'Hermes fix', '--body', 'Tested']):
         subprocess.run(command, check=True, capture_output=True)
-print('Fixed and tested.')
+print('Fixed and tested.' + (' [invocation](invocation.json) [PR](pr-call)' if mode == 'write' else ''))
 ''')
         hermes.chmod(0o755)
         catalog = self.bin / 'curl'
@@ -411,13 +411,14 @@ print(json.dumps({'paidRecommendedModels': [
         with patch.object(dispatch.codex_checkout, 'CANONICAL_REPO', canonical), \
              patch.object(dispatch.codex_checkout, 'CHECKOUT_ROOT', self.root):
             row = self.send(checkout='new:hermes-fix', writes=['fixed.py'])
-        repo = Path(row['checkout_path'])
         self.assertEqual(row['status'], 'completed')
-        self.assertEqual(git('log', '-1', '--format=%s', cwd=repo), 'Hermes fix')
-        self.assertEqual(git('rev-parse', 'hermes-fix', cwd=origin), git('rev-parse', 'HEAD', cwd=repo))
-        self.assertTrue((repo / 'pr-call').read_text().startswith('pr create'))
+        self.assertFalse(Path(row['checkout_workspace']).exists())
+        self.assertEqual(git('log', '-1', '--format=%s', 'hermes-fix', cwd=origin), 'Hermes fix')
+        self.assertIn('fixed = True', git('show', 'hermes-fix:fixed.py', cwd=origin))
+        evidence = {Path(path).name: Path(path) for path in row['checkout_cleanup']['evidence']}
+        self.assertTrue(evidence['pr-call'].read_text().startswith('pr create'))
         self.assertFalse((canonical / 'fixed.py').exists())
-        argv = json.loads((repo / 'invocation.json').read_text())
+        argv = json.loads(evidence['invocation.json'].read_text())
         self.assertIn('--allowance-usd', argv)
 
     def test_cli_registers_and_documents_the_desk(self):
