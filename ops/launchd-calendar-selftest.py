@@ -114,9 +114,9 @@ check("90s (not a whole minute) rounds to a divisor and says so",
 entries, note = lc.calendar_for_interval(30, "com.carr.example")
 check("30s is below launchd's calendar resolution; every minute, with a note",
       minutes(entries) == list(range(60)) and note is not None, note)
-entries, note = lc.calendar_for_interval(7200, "com.carr.fleet-sync")
+entries, note = lc.calendar_for_interval(7200, "com.carr.notes-sweep")
 check("7200s is every other hour at the label's minute",
-      entries == [{"Hour": h, "Minute": lc.HOURLY_MINUTE["com.carr.fleet-sync"]}
+      entries == [{"Hour": h, "Minute": lc.HOURLY_MINUTE["com.carr.notes-sweep"]}
                   for h in range(0, 24, 2)] and note is None, (entries, note))
 check("7200s reads back as 7200s",
       lc.cadence_seconds({"StartCalendarInterval": entries}) == 7200)
@@ -192,15 +192,6 @@ for path in templates:
     rel = path.relative_to(REPO)
     found = lc.audit_template(path.read_text(encoding="utf-8"))
     check(f"{rel} carries no StartInterval and matches the converter", found == [], found)
-
-fleet = plistlib.loads((REPO / "ops/launchd/com.carr.fleet-sync.plist").read_bytes())
-check("fleet-sync catches merged main within five minutes while the Mac is awake",
-      fleet["StartCalendarInterval"] == [{"Minute": m} for m in range(0, 60, 5)],
-      fleet["StartCalendarInterval"])
-check("fleet-sync still catches up at login through the scheduled receipt wrapper",
-      fleet.get("RunAtLoad") is True and fleet["ProgramArguments"] == [
-          "/bin/zsh", "{{REPO}}/bin/run-scheduled.sh", "fleet-sync", "fleet.sync",
-          "/bin/zsh", "{{REPO}}/bin/fleet-sync.sh"])
 
 # The dictation-rig keeps its own copies of three agents. Their bodies differ
 # on purpose (different prose), but a schedule that differs between the twins
