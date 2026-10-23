@@ -217,6 +217,19 @@ check_gates() {
   local failures="" count=0 skiplist="" gates_timed_out=0 gate_index=0
   export CARR_HOOK_FIXTURE=1
 
+  # Flip this warning to a failure after the machinery purge finishes.
+  local codemap_rc=0 codemap_count
+  "$PY" tools/codemap.py --missing >"$LOGDIR/codemap-missing.log" \
+    2>"$LOGDIR/codemap-error.log" || codemap_rc=$?
+  if [ "$codemap_rc" -le 1 ]; then
+    codemap_count="$(wc -l < "$LOGDIR/codemap-missing.log" | tr -d '[:space:]')"
+    printf '        WARN codemap: %s scripts lack opening descriptions (warning only during machinery purge)\n' "$codemap_count"
+    cat "$LOGDIR/codemap-missing.log"
+  else
+    printf '        WARN codemap: missing-description count unavailable (tool exited %s; warning only)\n' "$codemap_rc"
+    cat "$LOGDIR/codemap-error.log" >&2
+  fi
+
   # rustup installs the pinned toolchain before concurrent HxStore builds.
   if [ -f vendor/hxprobe/Cargo.toml ]; then
     if ! run_quiet "$LOGDIR/hxprobe-prepare.log" bash -c 'cd vendor/hxprobe && cargo build --locked'; then
@@ -484,7 +497,7 @@ check_pushfloor() {
   fi
 
   if [ -n "$changed" ] && printf '%s\n' "$changed" | grep -Eq \
-      '^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.v[0-9]+\.generated\.js|ops/config/scac-registry-.*\.json)$'; then
+      '^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.current\.generated\.js|ops/config/scac-registry-.*\.json)$'; then
     ran="$ran scac-atlas"
     run_quiet "$LOGDIR/pushfloor-scac-atlas.log" node --test \
       mcp-server/test/atlas-inventory-graph-read.test.mjs \
@@ -506,6 +519,8 @@ check_pushfloor() {
       base="$(basename "$touched_gate" .py)"
       paired="ops/$base-selftest.py"
       if [ -f "$paired" ]; then
+        # Changed selftests run in the next loop, including a changed hook's pair.
+        printf '%s\n' "$gate_surface" | grep -Fxq "$paired" && continue
         run_quiet "$LOGDIR/pushfloor-$base-selftest.log" "$PY" "$paired" \
           || { tail -15 "$LOGDIR/pushfloor-$base-selftest.log" >&2
                floor_fail "$base-selftest" \
@@ -669,9 +684,9 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 
   if [[ "$MIGRATION_PART" != gates* && "$MIGRATION_PART" != acceptance ]]; then
     if ! CARR_RULE_TEST_DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-rule-supersession.log" \
-        node --test mcp-server/test/find-rule-supersedes.test.mjs mcp-server/test/one-step-rule-approval.test.mjs; then
+        node --test mcp-server/test/find-rule-supersedes.test.mjs; then
       tail -30 "$LOGDIR/migration-rule-supersession.log" >&2
-      bad migration "rule lookup, teach supersession or one-step approval database proof failed"
+      bad migration "rule lookup or historical supersession SQL database proof failed"
       return
     fi
 
@@ -827,7 +842,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       fi
     fi
 
-    for proof in doc-conversation notifications session-identity dispatch-spine meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres approve-rule-legacy-adoption-postgres; do
+    for proof in doc-conversation notifications session-identity dispatch-spine meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
       if [ -f "mcp-server/test/$proof.test.mjs" ]; then
         if ! DATABASE_URL="$dsn" \
              CARR_DOC_CONVERSATION_DB_REQUIRED=1 CARR_R03_DB_REQUIRED=1 \
@@ -836,7 +851,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
              CARR_V5_A03_DB_REQUIRED=1 \
              CARR_A02_RULE_COVERAGE_DB_REQUIRED=1 \
              CARR_RW02_DB_REQUIRED=1 \
-             CARR_APPROVE_RULE_ADOPTION_DB_REQUIRED=1 \
              CARR_VENDOR_DIRECTORY_DB_REQUIRED=1 CARR_RELATIONSHIP_DB_REQUIRED=1 \
              run_quiet "$LOGDIR/$proof-db.log" \
              node --test "mcp-server/test/$proof.test.mjs"; then
@@ -1077,7 +1091,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 }
 
 check_binding() {
-  local problems="" machine_drift=""
+  local problems=""
   if [ -f mcp-server/wrangler.toml ]; then
     run_quiet "$LOGDIR/binding-wrangler.log" node -e '
       const fs=require("fs"), t=fs.readFileSync("mcp-server/wrangler.toml","utf8");
@@ -1095,30 +1109,10 @@ check_binding() {
   else
     printf '        \033[33mskip\033[0m  worker-boot-check — wrangler not installed (run npm install in mcp-server/)\n' >&2
   fi
-  if [ -f "$HOME/.claude/settings.json" ]; then
-    if ! run_quiet "$LOGDIR/binding-config.log" "$PY" ops/config-as-code.py; then
-      local cfg_changed cfg_owned
-      cfg_changed="$(git diff --name-only origin/main...HEAD 2>/dev/null || true)"
-      tail -15 "$LOGDIR/binding-config.log" >&2
-      cfg_owned="$("$PY" ops/config_drift_ownership.py $cfg_changed \
-        < "$LOGDIR/binding-config.log" 2>/dev/null || true)"
-      if [ -n "$cfg_owned" ]; then
-        problems="$problems config-as-code"
-        printf '        this branch touches the drifting declaration(s), so they are yours:\n%s\n' "$cfg_owned" >&2
-      else
-        machine_drift="yes"
-        printf '        \033[33mnot fatal here\033[0m  config-as-code drift is on the MACHINE and this branch touches\n' >&2
-        printf '        none of the drifting declarations above. Reported, not vetoed —\n' >&2
-        printf '        run `ops/config-as-code.py pull` on a branch that owns the change.\n' >&2
-      fi
-    fi
-  fi
   if [ -n "$problems" ]; then
     bad binding "drift:$problems"
-  elif [ -n "$machine_drift" ]; then
-    ok binding "worker config declared; MACHINE config-as-code drift reported above, not owned by this branch"
   else
-    ok binding "worker config declared; installed wiring matches repo"
+    ok binding "worker config declared; worker boot checked when wrangler is installed"
   fi
 }
 

@@ -115,10 +115,9 @@ def scenario_registry_and_ledger(cur, ctx) -> None:
             "secdef_execute": validate_current_catalog(cur)["categories"]["secdef_execute"],
             "relation_dml": current_projection["relation_dml"],
             "column_dml": current_projection["column_dml"],
-            # Digest repinned for #1880 (notes-sweep-hourly v4, canary removed).
             "job_definitions": {
-                "count": 26,
-                "digest": "sha256:72672ed8f706c5ffad85f66053f6ceca8ead4360745379194bef1effa18f88ac",
+                "count": 20,
+                "digest": "sha256:6423ce99a3ca592d4a83e361be3ce0e3da2c58e646d14c70bbe88a3fb3095192",
             },
         },
         "combined": catalog["combined"],

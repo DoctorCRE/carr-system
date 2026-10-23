@@ -27,64 +27,6 @@ const recordingClient = () => {
   };
 };
 
-test("shadow at the seam: Dell's approve-rule is recorded as refused and still reaches the handler", async () => {
-  assert.equal(V5_BOUNDARY_DOOR_MODE, "shadow");
-  resetDoorObservationForTest();
-  const warned = [];
-  const original = console.warn;
-  console.warn = line => warned.push(line);
-  try {
-    await assert.rejects(executeRegisteredTool(recordingClient(), DELL, "approve-rule", {
-      idempotency_key: "00000000-0000-4000-8000-000000000001", rule_id: "00000000-0000-4000-8000-000000000002",
-      policy_kind: "machine_enforceable", control_keys: [], reason: "seam test",
-    }), error => {
-      // The refusal a caller sees today is the database's (reached via the
-      // handler), never the door's: shadow does not block.
-      assert.notEqual(error?.payload?.error, "v5_boundary_refused");
-      return true;
-    });
-  } finally {
-    console.warn = original;
-  }
-  const snapshot = doorObservationSnapshot();
-  assert.equal(snapshot.evaluated, 1);
-  assert.equal(snapshot.boundary_refused, 1);
-  assert.equal(snapshot.enforced, 0);
-  assert.equal(snapshot.by_reason["actor_authority:system_authority_reserved_to_joe"], 1);
-  const line = warned.map(l => JSON.parse(l)).find(l => l.event === "v5_boundary_door");
-  assert.equal(line.verb, "approve-rule");
-  assert.ok(!warned.join("").includes("seam test"), "argument values never reach the log");
-});
-
-// #1268 review, surviving mutant 1: a seam that took its mode (or context)
-// from the caller's arguments. accept-workflow legitimately carries a `mode`
-// argument ("canary"), so a seam reading args.mode would hand the door an
-// unregistered mode: the dispatch would show up as a door_error instead of a
-// recorded refusal. And a caller must never be able to pick "enforce" or
-// "shadow" for itself.
-test("the seam's mode and context are the server's, never the caller's arguments", async () => {
-  resetDoorObservationForTest();
-  const original = console.warn;
-  console.warn = () => {};
-  const args = {
-    idempotency_key: "00000000-0000-4000-8000-000000000003", workflow_key: "wf",
-    mode: "canary", receipt_ref: "r1",
-  };
-  const before = JSON.stringify(args);
-  try {
-    await assert.rejects(executeRegisteredTool(recordingClient(), DELL, "accept-workflow", args),
-      error => error?.payload?.error !== "v5_boundary_refused");
-  } finally {
-    console.warn = original;
-  }
-  const snapshot = doorObservationSnapshot();
-  assert.equal(snapshot.door_errors, 0, "the door was handed the server's mode, not args.mode");
-  assert.equal(snapshot.boundary_refused, 1);
-  assert.equal(snapshot.by_reason["actor_authority:system_authority_reserved_to_joe"], 1);
-  assert.equal(snapshot.recent_refused[0].mode, "shadow");
-  // Surviving mutant 2, at the seam: the door leaves the arguments exactly as sent.
-  assert.equal(JSON.stringify(args), before);
-});
 
 test("the seam call sits after coercion and before the handler, and maps an enforce refusal by name", () => {
   const source = readFileSync(new URL("../src/tools.js", import.meta.url), "utf8");

@@ -2,7 +2,6 @@
 // lifecycle. Project definitions and mutable state live in Postgres. This module
 // owns the server-enforced transition and independent-verification boundary.
 
-export const COMPLETION_KINDS = Object.freeze(["built", "extended", "adopted", "declined"]);
 export const DEFAULT_PROGRAM = "carr-ai-engineering-suite-v1";
 
 const textPresent = value => typeof value === "string" && value.trim().length > 0;

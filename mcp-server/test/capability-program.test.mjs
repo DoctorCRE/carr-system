@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 
 import { TOOLS, executeRegisteredTool, ToolError as RegistryToolError } from "../src/tools.js";
 import {
-  COMPLETION_KINDS,
   capabilityProgramTools,
   nextProjectState,
 } from "../src/capability-program.js";

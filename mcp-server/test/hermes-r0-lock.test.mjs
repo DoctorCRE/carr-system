@@ -103,6 +103,14 @@ test("dispatch forces the hermes profile and ignores ?profile=", () => {
   }
 });
 
+test("Hermes business writes stay within capture except server-bound dispatch linkage", () => {
+  for (const verb of PROFILES.hermes) {
+    if (verb === "record-dispatch-link") continue;
+    assert.ok(PROFILES.capture.has(verb), verb);
+  }
+  assert.equal(allowedIn("hermes", "record-dispatch-link", WRITE), true);
+});
+
 test("the investigation verbs stay out of the hermes set", () => {
   // An investigation is a chain of reasoning a human is steering. A runtime
   // dropping evidence into one mid-flight changes what the adjudicator sees.
@@ -171,6 +179,11 @@ test("the granted additive verbs are allowed", () => {
                       "record-finding", "record-defect"]) {
     assert.equal(allowedIn("hermes", verb, WRITE), true, `${verb} should be callable`);
   }
+});
+
+test("raw room writing and the retired projector door remain unavailable", () => {
+  assert.equal(allowedIn("hermes", "add-room-turn", WRITE), false);
+  assert.equal(allowedIn("hermes", "project-room-queue", WRITE), false);
 });
 
 test("close-loop is excluded even though add-loop is granted", () => {

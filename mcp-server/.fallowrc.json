@@ -1,5 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/v3.35.0/schema.json",
+  "circularDependencies": {
+    "ignoreLazyImports": true
+  },
   "dynamicallyLoaded": [
     "test/*.test.{js,mjs}"
   ]

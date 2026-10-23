@@ -102,11 +102,6 @@ test("the internal CoS marker cannot be caller-set and human/authority invariant
     "new-client", "new-lead", "new-vendor", "prepare-document", "send-message"]) {
     assert.equal(allowedIn("hermes-cos", verb, WRITE), false, `${verb} must stay refused`);
   }
-  // humanOnly LABEL RETIRED (WR-000019 slice S1, 2026-08-27): dead since
-  // executeRegisteredTool stopped reading it 2026-08-26 (decision dc57f62d);
-  // this slice drops the stale declaration from tools.js. The refusals above
-  // are the real gate (profile allowlist), unaffected by the label's removal.
-  assert.equal(TOOLS["teach"].humanOnly, undefined);
 });
 
 test("set-next-action publishes partner assignment and runtime provenance in its owner guidance", () => {

@@ -148,6 +148,22 @@
         "workflow-cutover-board",
         "write-work-shape"
       ]
+    },
+    {
+      "reference": "Joe approved machinery reset; audit-mcp.md section 4 slice 7 and audit-review.md conditions (2026-10-22)",
+      "verbs": [
+        "accept-workflow",
+        "activate-guidance-registry",
+        "activate-rule",
+        "admit-rule",
+        "amend-rule",
+        "approve-rule",
+        "deactivate-guidance-registry",
+        "decide-guidance-import-batch",
+        "disable-legacy-schedule",
+        "retire-rule",
+        "teach"
+      ]
     }
   ]
 }
