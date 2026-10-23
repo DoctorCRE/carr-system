@@ -586,7 +586,7 @@ export const V5_J102_RELATIONSHIP_STATES = deepFreeze([
 
 export const V5_J102_ENGAGEMENT_STATES = deepFreeze(["active", "completed", "expired", "terminated"]);
 
-export const V5_J102_GOVERNING_STATES = deepFreeze(["FL", "AL"]);
+const V5_J102_GOVERNING_STATES = deepFreeze(["FL", "AL"]);
 
 export const V5_J102_ENGAGEMENT_FIELDS = deepFreeze({
   effective_date: "date", executed_at: "instant", term_end: "date",
