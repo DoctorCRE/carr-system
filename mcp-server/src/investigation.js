@@ -2,6 +2,7 @@
 // Deterministic jobs establish signals; one owner controls hypotheses and
 // adjudication; workers can contribute only scoped evidence packets.
 
+import { publicError } from "./public-errors.js";
 import { personalScopeForActor } from "./identity.js";
 
 function canonicalJson(value) {
@@ -105,7 +106,7 @@ export function investigationTools({ withEnvelope, writeEvent, ToolError }) {
   // of the verb's own work.
   const R03_SEVERITY = Object.freeze({ critical: "failure", warning: "action_required" });
 
-  async function mintNotificationGuarded(c, params) {
+  async function mintNotificationGuarded(c, actor, params) {
     await c.query("savepoint carr_r03_mint");
     try {
       const minted = await c.query(
@@ -121,8 +122,9 @@ export function investigationTools({ withEnvelope, writeEvent, ToolError }) {
       // ONLY the mint.
       await c.query("rollback to savepoint carr_r03_mint");
       await c.query("release savepoint carr_r03_mint");
+      const failure = publicError(error, { env: { CORRELATION_ID: actor.correlation_id } });
       return { ok: true, minted: false, reason_id: "notification_mint_unavailable",
-        detail: String(error?.message || error).slice(0, 160) };
+        correlation_id: failure.correlation_id };
     }
   }
 
@@ -242,7 +244,7 @@ export function investigationTools({ withEnvelope, writeEvent, ToolError }) {
           // informational value, which is the second half of R03-NO-PROGRESS-SPAM.
           notification = { ok: true, minted: false, reason_id: "severity_not_notifiable" };
         } else if (scope.status === "personal") {
-          notification = await mintNotificationGuarded(c, {
+          notification = await mintNotificationGuarded(c, actor, {
             event_source: "signal_event",
             event_ref: row.id,
             subject_type: row.subject_type,

@@ -7,6 +7,7 @@ const PUBLIC_ERRORS = new Map([
   ["version_conflict", "Re-read the record and ask the human before retrying."],
   ["needs_confirm", "Ask the human to confirm before resubmitting with confirm:true."],
   ["not_found", "The requested record was not found."],
+  ["needs_disambiguation", "Choose an exact record reference from the candidates before retrying."],
   ["loop_not_open", "Re-read the loop before choosing another action."],
   ["unauthorized", "Authentication is required."],
   ["invalid_field_value", "Check the named fields against the tool's documented input."],
@@ -35,6 +36,29 @@ const PUBLIC_ERRORS = new Map([
   ["database_refused_the_statement", "The operation could not be completed. Quote the correlation_id when reporting it."],
 ]);
 
+const CANDIDATE_SHAPES = [
+  ["loop_id", "kind", "section", "renders_into"],
+  ["party_id", "party_name", "party_city", "party_state"],
+  ["id", "address", "city"],
+  ["name", "phase", "client_ref"],
+  ["name", "ref", "kind", "city"],
+  ["ref", "name"],
+  ["name"],
+];
+
+function publicCandidates(candidates, shapes = CANDIDATE_SHAPES) {
+  if (!Array.isArray(candidates)) return [];
+  return candidates.flatMap(candidate => {
+    if (!candidate || typeof candidate !== "object") return [];
+    const fields = shapes.find(shape => shape.every(field => Object.hasOwn(candidate, field)));
+    if (!fields) return [];
+    const result = Object.fromEntries(fields
+      .filter(field => candidate[field] === null || typeof candidate[field] === "string")
+      .map(field => [field, candidate[field]]));
+    return Object.keys(result).length ? [result] : [];
+  });
+}
+
 function inputFields(schema, names = new Set()) {
   for (const [name, child] of Object.entries(schema?.properties || {})) {
     names.add(name);
@@ -62,7 +86,8 @@ function diagnostics(error) {
 }
 
 /** The sole projection for caught MCP/HTTP failures. Full diagnostics stay in
- * server logs. Only schema-declared input field names may cross this seam. */
+ * server logs. Validation fields come from the input schema; disambiguation
+ * choices use curated record shapes. */
 export function publicError(error, { env, inputSchema, fallback = "unhandled_verb_failure" } = {}) {
   const correlationId = isValidCorrelationId(env?.CORRELATION_ID)
     ? env.CORRELATION_ID.trim().toLowerCase() : crypto.randomUUID();
@@ -72,6 +97,11 @@ export function publicError(error, { env, inputSchema, fallback = "unhandled_ver
   const code = PUBLIC_ERRORS.has(payload?.error) ? payload.error : fallback;
   const result = { error: code, correlation_id: correlationId,
     hint: PUBLIC_ERRORS.get(code) || "The operation failed. Quote the correlation_id when reporting it." };
+  if (code === "needs_disambiguation") {
+    result.candidates = publicCandidates(payload?.candidates);
+    if (Array.isArray(payload?.retired_aliases))
+      result.retired_aliases = publicCandidates(payload.retired_aliases, [["ref", "name"]]);
+  }
   if (code === "version_conflict" && Number.isSafeInteger(payload?.current_version) && payload.current_version >= 0)
     result.current_version = payload.current_version;
   if (["invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields"].includes(code)) {

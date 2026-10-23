@@ -369,3 +369,32 @@ test("a wire that cannot be reached fails as a wire outage, not as a broken page
   assert.equal(response.status, 503);
   assert.equal((await response.json()).error, "wire_unavailable");
 });
+
+for (const [route, dependency, error] of [
+  ['turns', 'roomReadFn', 'wire_unavailable'],
+  ['latest', 'roomLatestFn', 'wire_unavailable'],
+  ['queue', 'queueReadFn', 'queue_unavailable'],
+  ['turn', 'roomWriteFn', 'wire_unavailable'],
+]) test(`room ${route} hides caught diagnostics with correlated logs`, async t => {
+  const diagnostic = 'SELECT private_table; constraint private_constraint; synthetic-private-row';
+  const correlationId = 'd170d000-0000-4000-8000-000000000032';
+  const logs = [];
+  t.mock.method(console, 'error', line => logs.push(JSON.parse(line)));
+  const { handler } = handlerWith({ [dependency]: async () => { throw new Error(diagnostic); } });
+  const environment = { ...env(), CORRELATION_ID: correlationId };
+  const cookie = await signedIn(handler, environment);
+  const { handler: reader } = handlerWith();
+  const bootstrap = await (await reader.fetch(new Request(`${ORIGIN}/api/room/turns`,
+    { headers: { cookie } }), environment, {})).json();
+  const response = await handler.fetch(new Request(`${ORIGIN}/api/room/${route}`, route === 'turn'
+    ? { method: 'POST', headers: postHeaders(cookie, bootstrap.csrf_token),
+      body: JSON.stringify({ body: 'Synthetic turn', idempotency_key: REQUEST_KEY }) }
+    : { headers: { cookie } }), environment, {});
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.error, error);
+  assert.equal(body.correlation_id, correlationId);
+  if (route === 'queue') assert.equal(body.live, false);
+  assert.doesNotMatch(JSON.stringify(body), /stack|SELECT|private_table|private_constraint|synthetic-private-row/i);
+  assert.ok(logs.some(log => log.correlation_id === correlationId && log.diagnostic.stack.includes(diagnostic)));
+});

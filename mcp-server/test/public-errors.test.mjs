@@ -102,3 +102,95 @@ test("a writer database failure is translated and its original stack is logged",
   assert.doesNotMatch(JSON.stringify(body), /stack|SELECT|private_table|private_constraint|synthetic-private-row/i);
   assert.ok(logs.some(log => log.correlation_id === correlationId && log.diagnostic.cause.stack === original.stack));
 });
+
+test('record-signal commits the signal with a safe notification recovery result', async t => {
+  const { executeRegisteredTool } = await import('../src/tools.js');
+  const logs = [], queries = [];
+  t.mock.method(console, 'error', line => logs.push(JSON.parse(line)));
+  const signal = { id: '50000000-0000-4000-8000-000000000001', producer: 'synthetic',
+    signal_key: 'synthetic', signal_kind: 'threshold', subject_type: 'deal', subject_ref: 'fixture',
+    metric_name: 'count', observed_value: 2, threshold_value: 1, severity: 'critical' };
+  const db = { async query(text) {
+    const sql = text.replace(/\s+/g, ' ').trim();
+    queries.push(sql);
+    if (sql.startsWith('select request_hash')) return { rows: [] };
+    if (sql.includes('to_regclass')) return { rows: [{ signals: true, runs: true, routes: true }] };
+    if (sql.startsWith('insert into signal_event')) return { rows: [signal] };
+    if (sql.startsWith('select ops.mint_notification')) throw new Error(privateText);
+    if (/^(savepoint|release savepoint|rollback to savepoint|insert into event|insert into tool_call)/.test(sql))
+      return { rows: [] };
+    throw new Error(`Unhandled synthetic query: ${sql}`);
+  } };
+  const result = await executeRegisteredTool(db, { id: '10000000-0000-4000-8000-000000000001',
+    slug: 'joe', human: true, correlation_id: correlationId }, 'record-signal', {
+    ...Object.fromEntries(Object.entries(signal).filter(([key]) => key !== 'id')),
+    comparison: 'gt', detected_at: '2026-10-23T12:00:00Z', evidence_refs: ['synthetic:fixture'],
+    idempotency_key: 'synthetic-signal',
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.signal, signal);
+  assert.deepEqual(result.notification, { ok: true, minted: false,
+    reason_id: 'notification_mint_unavailable', correlation_id: correlationId });
+  assert.ok(queries.includes('rollback to savepoint carr_r03_mint'));
+  assert.ok(queries.includes('release savepoint carr_r03_mint'));
+  assert.ok(queries.some(sql => sql.startsWith('insert into tool_call')), 'successful signal receipt is retained');
+  assert.doesNotMatch(JSON.stringify(result), /stack|SELECT|private_table|private_constraint|synthetic-private-row/i);
+  assert.ok(logs.some(log => log.correlation_id === correlationId && log.diagnostic.stack.includes(privateText)));
+});
+
+for (const delegated of [false, true]) {
+  for (const [variant, rows, expected] of [
+    ['deal', [{ display_name: 'Synthetic A', status: 'research', client_ref: 'C-1' },
+      { display_name: 'Synthetic B', status: 'tour', client_ref: 'C-2' }],
+      [{ name: 'Synthetic A', phase: 'research', client_ref: 'C-1' },
+        { name: 'Synthetic B', phase: 'tour', client_ref: 'C-2' }]],
+    ['party', [{ display_name: 'Synthetic A', ref: 'C-1', subject_type: 'client', city: 'Fixture' },
+      { display_name: 'Synthetic B', ref: 'C-2', subject_type: 'client', city: null }],
+      [{ name: 'Synthetic A', ref: 'C-1', kind: 'client', city: 'Fixture' },
+        { name: 'Synthetic B', ref: 'C-2', kind: 'client', city: null }]],
+  ]) test(`${delegated ? 'delegated' : 'direct'} MCP ambiguous ${variant} lookup retains safe choices`, async t => {
+    const { neonConfig } = await import('@neondatabase/serverless');
+    t.mock.method(console, 'error', () => {});
+    const previous = neonConfig.fetchFunction;
+    t.after(() => { neonConfig.fetchFunction = previous; });
+    neonConfig.fetchFunction = async (_url, options) => {
+      const { query } = JSON.parse(options.body);
+      const selected = variant === 'party' && query.includes("subject_type='deal'") ? [] : rows;
+      const names = Object.keys(rows[0]);
+      return Response.json({ fields: names.map(name => ({ name, dataTypeID: 25 })),
+        rows: selected.map(row => names.map(name => row[name])), rowCount: selected.length,
+        command: 'SELECT', rowAsArray: true });
+    };
+    const request = new Request('https://synthetic.example/mcp', { method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: delegated
+        ? { name: 'call-verb', arguments: { verb: 'get-deal-room', args: { deal: 'Synthetic' } } }
+        : { name: 'get-deal-room', arguments: { deal: 'Synthetic' } } }),
+    });
+    const body = await (await dispatch(request, { CORRELATION_ID: correlationId,
+      DATABASE_URL_READER: 'postgres://synthetic:synthetic@synthetic.invalid/fixture' }, {},
+    { slug: 'joe', human: true })).json();
+    assert.equal(body.result.isError, true);
+    const payload = JSON.parse(body.result.content[0].text);
+    assert.equal(payload.error, 'needs_disambiguation');
+    assert.deepEqual(payload.candidates, expected);
+    assert.equal(payload.correlation_id, correlationId);
+  });
+}
+
+for (const candidate of [
+  { loop_id: 'synthetic-loop', kind: 'open_loop', section: 'hot', renders_into: 'loops.md' },
+  { party_id: 'synthetic-party', party_name: 'Synthetic', party_city: 'Fixture', party_state: 'AL' },
+  { id: 'synthetic-building', address: '1 Fixture', city: 'Fixture' },
+  { name: 'Synthetic' }, { ref: 'P-1', name: 'Synthetic' },
+]) test(`disambiguation curates the ${Object.keys(candidate).join('/')} candidate shape`, async t => {
+  const { publicError } = await import('../src/public-errors.js');
+  t.mock.method(console, 'error', () => {});
+  const payload = publicError(new ToolError({ error: 'needs_disambiguation',
+    candidates: [{ ...candidate, detail: privateText, stack: privateText, nested: { cause: privateText } }],
+    retired_aliases: [{ ref: 'P-2', name: 'Retired synthetic', detail: privateText }],
+    hint: privateText, detail: privateText }), { env: { CORRELATION_ID: correlationId } });
+  assert.equal(payload.error, 'needs_disambiguation');
+  assert.deepEqual(payload.candidates, [candidate]);
+  assert.deepEqual(payload.retired_aliases, [{ ref: 'P-2', name: 'Retired synthetic' }]);
+  assert.doesNotMatch(JSON.stringify(payload), /stack|SELECT|private_table|private_constraint|synthetic-private-row/i);
+});

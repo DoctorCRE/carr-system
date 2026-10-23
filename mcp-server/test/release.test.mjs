@@ -171,9 +171,9 @@ test("buildRelease: a database failure degrades schema and doctrine_generation t
   assert.equal(out.ok, true);
   assert.equal(out.schema.highest_applied_migration, null);
   assert.equal(out.schema.applied_count, null);
-  assert.match(out.schema.reason, /database unreachable/);
+  assert.equal(out.schema.error, "database_unavailable");
   assert.equal(out.doctrine_generation.value, null);
-  assert.match(out.doctrine_generation.reason, /database unreachable/);
+  assert.equal(out.doctrine_generation.error, "database_unavailable");
   // git_sha and verb_count have no database dependency and must survive a
   // database outage untouched.
   assert.deepEqual(out.git_sha, { value: "b".repeat(40), reason: null });
@@ -196,7 +196,8 @@ test("buildRelease: independent database readbacks overlap and fail independentl
   const out = await buildRelease({ env: { GIT_SHA: "b".repeat(40) },
     sql, verbCount: 50, now: FIXED_NOW });
   assert.equal(maxActive, 2, "schema and doctrine reads must start before either settles");
-  assert.match(out.schema.reason, /schema read unavailable/);
+  assert.equal(out.schema.error, "database_unavailable");
+  assert.doesNotMatch(out.schema.reason, /schema read unavailable/);
   assert.deepEqual(out.doctrine_generation, { value: 42, reason: null },
     "one failed readback must not erase the independent successful field");
 });
@@ -381,7 +382,7 @@ test("buildRelease: command_contract has no database dependency and survives an 
 
   assert.equal(out.ok, true);
   assert.deepEqual(out.command_contract, mutationManifestIdentity());
-  assert.match(out.schema.reason, /database unreachable/);
+  assert.equal(out.schema.error, "database_unavailable");
 });
 
 test("buildRelease: response is JSON-safe (no undefined, no function, round-trips clean)", async () => {

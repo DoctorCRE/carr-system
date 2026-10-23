@@ -48,3 +48,24 @@ for (const route of ["health", "ingest", "pipeline", "capture"]) {
     assert.ok(logs.some(log => log.correlation_id === correlationId && JSON.stringify(log).includes(diagnostic)));
   });
 }
+
+test('release keeps unavailable readbacks safe and correlated', async t => {
+  const { buildRelease } = await import('../src/release.js');
+  const logs = [];
+  t.mock.method(console, 'error', line => logs.push(JSON.parse(line)));
+  const body = await buildRelease({ env: { CORRELATION_ID: correlationId },
+    sql: async () => { throw failure(); }, verbCount: 1 });
+  assert.equal(body.ok, true);
+  assert.equal(body.schema.highest_applied_migration, null);
+  assert.equal(body.schema.applied_count, null);
+  assert.equal(body.schema.ledger_sha256, null);
+  assert.equal(body.doctrine_generation.value, null);
+  for (const readback of [body.schema, body.doctrine_generation]) {
+    assert.equal(readback.correlation_id, correlationId);
+    assert.equal(readback.error, 'database_unavailable');
+    assert.equal(readback.reason, 'Database readback is unavailable.');
+  }
+  assert.doesNotMatch(JSON.stringify(body), /stack|SELECT|private_table|private_constraint|synthetic-private-row/i);
+  assert.equal(logs.filter(log => log.correlation_id === correlationId &&
+    log.diagnostic.stack.includes(diagnostic)).length, 2);
+});
