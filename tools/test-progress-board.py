@@ -138,6 +138,7 @@ class BoardCase(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
+        self.enterContext(patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root)}))
         self.enterContext(patch.object(BOARD.repo_lib("machine_role"), "read_marker", return_value="primary"))
         self.enterContext(patch.object(tempfile, "tempdir", str(self.root)))
         self.enterContext(patch.dict(os.environ, {"CARR_WORK_QUEUE_DB": str(self.root / "queue.sqlite3")}))
@@ -1435,10 +1436,11 @@ class PublishAndAnswers(BoardCase):
              patch.object(BOARD, "build_all_repos", broken), \
              patch.object(BOARD, "publish_needs_joe_local"), \
              patch("sys.stderr", new_callable=io.StringIO) as err:
-            BOARD.command_render(args)
+            with self.assertRaisesRegex(RuntimeError, "gh unavailable"):
+                BOARD.command_render(args)
         self.assertEqual(events, [("render", "carr-v5", True), ("publish", "carr-v5"), ("poll", "carr-v5"),
                                   ("publish", "all-repos")])
-        self.assertIn("gh unavailable", err.getvalue())
+        self.assertIn("phase=portfolio outcome=failed", err.getvalue())
 
 
 class SharedBoardRoot(unittest.TestCase):

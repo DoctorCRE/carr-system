@@ -21,6 +21,7 @@ import importlib.util
 import json
 import os
 import re
+import signal
 import subprocess
 import time
 import sys
@@ -31,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 from http.client import HTTPException
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, Iterator
+from typing import NamedTuple, Any, Callable, Iterator
 from urllib.request import Request, urlopen
 
 
@@ -2007,17 +2008,133 @@ def mutate(project: str, change: Callable[[dict[str, Any]], bool | None]) -> boo
     return True
 
 
+STAGE_TIMEOUT_SECONDS = 120
+RECORD_TIMEOUT_SECONDS = 30
+
+
+class PublicationStage(NamedTuple):
+    board: str
+    phase: str
+    deadline: float
+
+
+_current_publication_stage: PublicationStage | None = None
+
+
+class _StageExpired(BaseException):
+    pass
+
+
+class PublicationTimeout(RuntimeError):
+    pass
+
+
+@contextlib.contextmanager
+def publication_stage(project: str, phase: str) -> Iterator[PublicationStage]:
+    """Bound synchronous scheduled work, including locks and external calls."""
+    global _current_publication_stage
+    previous = _current_publication_stage
+    if previous is not None or signal.getitimer(signal.ITIMER_REAL)[0]:
+        raise RuntimeError("publication stages require an unoccupied main-thread timer")
+    started = time.monotonic()
+    stage = PublicationStage(project, phase, started + STAGE_TIMEOUT_SECONDS)
+    prior_handler = signal.getsignal(signal.SIGALRM)
+    def expire(signum, frame):
+        raise _StageExpired()
+    signal.signal(signal.SIGALRM, expire)
+    _current_publication_stage = stage
+    signal.setitimer(signal.ITIMER_REAL, STAGE_TIMEOUT_SECONDS)
+    try:
+        yield stage
+    except _StageExpired:
+        raise PublicationTimeout(f"board={project} phase={phase} timed_out elapsed={time.monotonic() - started:.3f}s") from None
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, prior_handler)
+        _current_publication_stage = previous
+
+
+def record_publication_stage(project: str, phase: str, outcome: str, elapsed: float) -> None:
+    path = board_dir() / f"{safe_project(project)}-{phase}-publication.json"
+    previous = read_json_file(path) if path.exists() else {}
+    checked = stamp()
+    status = {"board": project, "phase": phase, "checked_at": checked,
+              "last_verified_at": checked if outcome == "succeeded" else previous.get("last_verified_at"),
+              "stale": outcome != "succeeded", "outcome": outcome, "elapsed_seconds": round(elapsed, 3)}
+    atomic_write(path, json.dumps(status, sort_keys=True) + "\n")
+
+
+def run_publication_stage(project: str, phase: str, action: Callable[[], Any]) -> Exception | None:
+    started = time.monotonic()
+    error = None
+    outcome = "failed"
+    try:
+        with publication_stage(project, phase):
+            record_publication_stage(project, phase, "running", 0)
+            action()
+        outcome = "succeeded"
+    except SystemExit:
+        error = RuntimeError(f"board={project} phase={phase} exited before completion")
+    except Exception as exc:
+        error = exc
+        if isinstance(exc, PublicationTimeout):
+            outcome = "timed_out"
+    elapsed = time.monotonic() - started
+    try:
+        record_publication_stage(project, phase, outcome, elapsed)
+    except Exception as exc:
+        error = error or exc
+        outcome = "failed"
+    log(f"board={project} phase={phase} outcome={outcome} elapsed={elapsed:.3f}s stale={outcome != 'succeeded'}")
+    return error
+
+
 def call_verb(verb: str, args: dict[str, Any]) -> dict[str, Any]:
     """Use the existing noninteractive local-token route; no model is involved.
     Anything short of an explicit ok:true reply raises."""
     record_call = repo_lib("record_call")
-    result = record_call.call_verb(verb, args, timeout=30)
-    payload = result.reply
-    if not result.ok and result.kind != record_call.REFUSED:
-        raise RuntimeError(result.describe())
-    if not isinstance(payload, dict) or payload.get("ok") is not True:
-        raise RuntimeError(f"{verb} refused: {payload.get('error', 'unknown result') if isinstance(payload, dict) else 'invalid result'}")
-    return payload
+    stage = _current_publication_stage
+    started = time.monotonic()
+    context = f"board={stage.board} phase={stage.phase}" if stage else f"board={safe_project(args.get('board_id') or 'unscheduled')} phase=record"
+    for attempt in range(2):
+        timeout = RECORD_TIMEOUT_SECONDS
+        if stage is not None:
+            timeout = min(timeout, stage.deadline - time.monotonic())
+            if timeout <= 0:
+                raise _StageExpired()
+        result = record_call.call_verb(verb, args, timeout=timeout)
+        if result.kind == record_call.TRANSIENT and args.get("idempotency_key") and verb in {
+                "publish-board-snapshot", "ask-board-question", "revise-board-question"}:
+            disposition = reconcile_board_write(verb, args)
+            if disposition == "committed":
+                return {"ok": True, "reconciled": True}
+            if disposition == "unchanged" and attempt == 0:
+                continue
+        payload = result.reply
+        if not result.ok:
+            raise RuntimeError(f"{verb} {result.kind} {context} elapsed={time.monotonic() - started:.3f}s")
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            raise RuntimeError(f"{verb} invalid_reply {context} elapsed={time.monotonic() - started:.3f}s")
+        return payload
+    raise AssertionError("record attempt did not resolve")
+
+
+def reconcile_board_write(verb: str, args: dict[str, Any]) -> str:
+    """An unreadable or changed version never authorizes another write."""
+    observed = call_verb("read-progress-board", {"board_id": args["board_id"]})
+    base = int(args["base_version"])
+    if verb == "publish-board-snapshot":
+        remote = observed.get("snapshot")
+        version = int(remote["version"]) if remote else 0
+        if version == base + 1 and as_published(remote) == args["snapshot"]:
+            return "committed"
+    else:
+        remote = next((q for q in observed.get("questions", []) if q["question_id"] == args["question_id"]), None)
+        version = int(remote["revision"]) if remote else 0
+        fields = ("prompt", "choices", "allow_free_text", "default_answer", "asker_ref")
+        if version == base + 1 and all(remote.get(key) == args.get(key) for key in fields):
+            return "committed"
+    return "unchanged" if version == base else "conflict"
 
 
 def stable_key(verb: str, args: dict[str, Any]) -> str:
@@ -2760,56 +2877,41 @@ def command_render(args: argparse.Namespace) -> None:
         if args.publish:
             publish_board(ALL_REPOS_BOARD)
         return
-    render(args.project, discover=True)
     if args.project != LAUNCHD_BOARD:
+        render(args.project, discover=True)
         if args.publish:
             publish_board(args.project)
         return
-    # Refresh source facts before publish_board projects the Orchestrator view.
-    # Legacy publication failures must not strand the canonical portfolio.
-    portfolio_available = True
-    try:
-        build_all_repos()
-    except RuntimeError as exc:
-        log(f"all-repos rebuild failed, publishing last known state: {exc}")
-        portfolio_available = state_path(ALL_REPOS_BOARD).exists()
     stages = [
+        ("source", lambda: render(args.project, discover=True)),
+        ("portfolio", build_all_repos),
         ("publication", lambda: publish_board(args.project)),
         ("answers", lambda: poll_board_answers(args.project)),
         ("needs-joe", publish_needs_joe_local),
+        ("all-repos", lambda: publish_board(ALL_REPOS_BOARD)),
     ]
-    if portfolio_available:
-        stages.append(("all-repos", lambda: publish_board(ALL_REPOS_BOARD)))
     first_error = None
     for phase, action in stages:
-        try:
-            action()
-        except Exception as exc:
-            log(f"{args.project} {phase} failed: {exc}")
-            if first_error is None:
-                first_error = exc
+        error = run_publication_stage(args.project, phase, action)
+        first_error = first_error or error
     if first_error is not None:
         raise first_error
 
 
 def publish_needs_joe_local() -> None:
     """Publish the machine-local half of governance-queue's needs_joe list.
-    A failure is logged and left for the verb to report: it marks the page
-    stale after two hours, so a dead publisher shows on Joe's list itself."""
+    The scheduled aggregate records failures. The remote page retains its
+    last verified publication and becomes stale after two hours."""
     def pr_state(repo: str, number: int) -> dict[str, Any]:
         info, error = fetch_prs([(repo, number)])[repo, number]
         if info is None or error:
             raise RuntimeError(error or "PR not read")
         return info
-    try:
-        import needs_joe_local
+    import needs_joe_local
 
-        count = needs_joe_local.publish(call_verb, stable_key, pr_state,
-                                        needs_joe_local.read_source(), stamp())
-        log(f"needs-joe local page published with {count} item(s)")
-    except Exception as exc:
-        log(f"needs-joe local page not published: {exc}")
-        raise
+    count = needs_joe_local.publish(call_verb, stable_key, pr_state,
+                                    needs_joe_local.read_source(), stamp())
+    log(f"needs-joe local page published with {count} item(s)")
 
 
 def command_poll(args: argparse.Namespace) -> None:
