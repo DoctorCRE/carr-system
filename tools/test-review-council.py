@@ -26,7 +26,7 @@ Seven groups, in order:
      approval-bypass flag), output parsing against a captured real envelope
      shape, per-backend token isolation, and per-reviewer independence (one
      backend forced to fail never blocks another's own outcome)
-  7. security lens triggering with Git failures and known paths, offline
+  7. every code review includes the security lens, offline
 
 NO LIVE CALL TO THE WORKER OR TO ANY REVIEWER CLI ANYWHERE IN THIS FILE.
 Nothing here deploys, installs, commits, or reaches the Worker or an LLM
@@ -660,37 +660,22 @@ def test_grok_lane():
 
 
 def test_security_lens_trigger():
-    print("\n[7] security lens trigger")
-    commit_sha = "abc1234"
-    failures = [
-        ("git nonzero", subprocess.CompletedProcess([], 1, "", "unknown commit")),
-        ("git timeout", subprocess.TimeoutExpired(cmd="git", timeout=30)),
-        ("git exception", OSError("git unavailable")),
-    ]
-    for label, outcome in failures:
-        kwargs = {"side_effect": outcome} if isinstance(outcome, Exception) else {"return_value": outcome}
-        with mock.patch.object(rcr.subprocess, "run", **kwargs), mock.patch.object(rcr, "log") as logger:
-            lens = rcr.security_lens_if_triggered(commit_sha)
-        check(f"security lens armed: {label}", lens == rcr.SECURITY_LENS)
-        check(f"security lens failure logged honestly: {label}",
-              logger.call_count == 1 and "ARMED conservatively" in logger.call_args.args[0])
-
-    known_paths = [
-        ("no paths", "\n", None),
-        ("known low tier", "docs/example.md\n", None),
-        ("known high tier", "mcp-server/src/auth.js\n", rcr.SECURITY_LENS),
-    ]
-    for label, stdout, expected in known_paths:
-        with mock.patch.object(rcr.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, "")):
-            check(f"security lens: {label}", rcr.security_lens_if_triggered(commit_sha) == expected)
-
-    with mock.patch.object(rcr.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "docs/example.md\n", "")), \
-            mock.patch.object(rcr, "_review_tiers", side_effect=OSError("map unreadable")), \
-            mock.patch.object(rcr, "log") as logger:
-        lens = rcr.security_lens_if_triggered(commit_sha)
-    check("security lens armed: unreadable map", lens == rcr.SECURITY_LENS)
-    check("security lens unreadable map logged honestly",
-          logger.call_count == 1 and "ARMED conservatively" in logger.call_args.args[0])
+    print("\n[7] code review security lens")
+    for path in ("docs/example.md", "mcp-server/src/auth.js"):
+        req = sample_request()
+        req["evidence"]["files"] = [path]
+        with tempfile.TemporaryDirectory() as tmp:
+            request = Path(tmp) / "request.json"
+            request.write_text(json.dumps(req))
+            with mock.patch.object(rcr, "worktree_add", return_value=Path(tmp)), \
+                    mock.patch.object(rcr, "worktree_remove"), \
+                    mock.patch.object(rcr, "write_status_sidecar"), \
+                    mock.patch.object(rcr, "log"), \
+                    mock.patch.object(rcr.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, path + "\n", "")), \
+                    mock.patch.object(rcr, "run_one_reviewer", return_value={"status": "ok"}) as reviewer:
+                rc = rcr.process_request(request)
+            check(f"code review completes with security lens: {path}",
+                  rc == rcr.EX_OK and rcr.SECURITY_LENS in reviewer.call_args.args[2])
 
 
 def main():

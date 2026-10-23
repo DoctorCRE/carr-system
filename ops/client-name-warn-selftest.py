@@ -158,8 +158,7 @@ with tempfile.TemporaryDirectory(prefix="client-name-warn-hook-") as tmp:
     hr = root / "hookrepo"
     (hr / "ops" / "githooks").mkdir(parents=True)
     for rel in ("ops/githooks/pre-push", "ops/githooks/client-name-warn.py",
-                "ops/pr-size-check.py", "lib/review_tiers.py",
-                "ops/config/review-tiers.v1.json"):
+                "ops/pr-size-check.py"):
         (hr / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(HERE.parent / rel, hr / rel)
     # The hook's leak guard is stubbed: it needs a corpus and a gitleaks download.
