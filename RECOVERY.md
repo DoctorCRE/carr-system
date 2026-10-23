@@ -90,9 +90,9 @@ only history that exists. There is no vendor safety net behind them.
    Do not hand-roll a decrypt. A guard blocks it, and the reason is that a raw
    decrypt leaves production data in cleartext on disk; the sanctioned path
    shreds the plaintext on every exit including interrupt.
-4. **Re-point the Worker** at the recovered database and redeploy:
-   the GitHub production deployment workflow. Apply any migrations the dump predates with
-   `bin/migrate-prod.sh`.
+4. **Apply pending migrations** using the recovered database's configured
+   migration runner, `./run.sh migrate --apply --yes`, before re-pointing the
+   Worker at that database through the GitHub production deployment workflow.
 
 ---
 
