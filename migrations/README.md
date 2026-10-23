@@ -49,7 +49,7 @@ filename/checksum ledger with the source. A regression in either side fails CI.
   an exact checked-in filename; it cannot skip an earlier pending dependency
   or hand-pick files out of order.
 - **0001 mirrors the vault schema file.** `0001_init.sql` is the applied copy
-  of `record-layer/schema-draft-2026-07-30.sql` (v2). Until first apply, keep
+  of the vault's original schema draft (v2). Until first apply, keep
   them identical — after first apply, the vault file freezes as the design
   record and changes land here as new migrations.
 - **Every new migration declares its risk in its header** (the comment lines

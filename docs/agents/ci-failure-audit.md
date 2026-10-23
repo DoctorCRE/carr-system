@@ -125,15 +125,13 @@ The following work remains outside the assigned write paths:
   no longer identify current source files to repair.
 - DoctorCRE's ten full-main schedule failures all report `source_changed`.
   Some acknowledge zero tests and others acknowledge completed tests. The exact
-  offending generated path is not logged. Repair requires
-  `jbookout/doctorcre-app`'s `scripts/full-main.mjs` and
-  `test/full-main.test.mjs` tests, which are
-  outside this desk's write scope. Scheduled full-main remains red until fixed.
+  offending generated path is not logged. Repair belongs in DoctorCRE's full-main script and tests in
+  `jbookout/doctorcre-app`, outside this desk's write scope. Scheduled full-main remains red until fixed.
 - Eleven early DoctorCRE privacy runs exit 2, a setup/input refusal whose old
   diagnostic prints only the scanner filename. The current workflow supplies
   the corpus secret. Diagnosing a recurrence requires the scanner's error-code
-  handling in `jbookout/doctorcre-app`'s
-  `scripts/privacy/client-data-check.mjs`, outside this scope.
+  handling in DoctorCRE's privacy scanner in `jbookout/doctorcre-app`,
+  outside this scope.
 - All 546 Authorized source merge controller runs were skipped, 515 from CI
   completions and 31 from schedules. They consumed no runner job. That controller
   and its contract test were subsequently retired.
