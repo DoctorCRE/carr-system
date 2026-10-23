@@ -235,7 +235,7 @@ jobs:
         # codename is read from the runner's own /etc/os-release rather
         # than hardcoded so this keeps working if/when ubuntu-latest moves
         # to a newer LTS. zsh: bin/backup-dump.sh's shebang, same reason
-        # ci.yml installs it for bin/review-council-runner.sh. age: Ubuntu's
+        # ci.yml installs it for bin/run-scheduled.sh. age: Ubuntu's
         # own universe repo carries it; no PGDG dependency for that one.
         run: |
           sudo apt-get update -qq

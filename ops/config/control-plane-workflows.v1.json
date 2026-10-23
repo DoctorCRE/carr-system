@@ -183,18 +183,6 @@
       "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
-      "key": "nightly-record-layer", "version": 3, "enabled": true, "risk": "green",
-      "recurrence": {"cron": "0 2 * * *", "timezone": "America/Chicago", "source": "launchd and tracked definition"},
-      "execution": {"kind": "deterministic", "entrypoint": "bin/nightly.sh", "args": [], "shadow_args": ["--preflight"], "canary": {"enabled": true, "isolation_guard": "nightly-record-layer.availability-matcher.canary.v1", "args": ["--canary"]}},
-      "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "daily cron 0 2 * * * America/Chicago", "owner": "ops.job dispatcher", "inputs": ["local date", "nightly chain definition", "main-ledger availability snapshot"], "canonical_reads": ["versioned chain configuration", "availability", "space_search", "ops.job_definition"], "canonical_writes": ["nightly availability canary receipts", "ops.job_receipt"], "external_dependencies": ["launchd adapter"], "authority": "deterministic availability-matcher canary only", "current_completion_signal": "lease-bound Nightly canary receipt", "replacement_program": "ops.job_definition:nightly-record-layer:v3", "acceptance": "accepted shadow and lease-bound isolated availability-matcher canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
-      "routing": {"key": "facts.all_true", "spec": {"all_of": ["nightly.one_instance_per_local_date"]}, "description": "one nightly instance per local date"},
-      "filtering": {"key": "facts.all_true", "spec": {"all_of": ["command.registered_args_selected"]}, "description": "the exact registered mode-specific nightly command is selected"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["command.exit_zero", "command.workflow_marker_valid"]}, "description": "the nightly command exits zero with its mode-specific validated chain marker; canary runs only the isolated availability-matcher subchain"},
-      "retry": {"max_attempts": 2, "backoff": "exponential", "base_seconds": 300, "cap_seconds": 1800, "timeout_seconds": 10800},
-      "deduplication": {"key_template": "nightly-record-layer:{date}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["command.receipt_persisted", "command.execution_evidence_reconciles"]}, "description": "immutable command receipt read back with exact nightly execution evidence; canary includes a lease-bound availability snapshot receipt", "receipt_kind": "nightly_chain"},
-      "legacy_schedule": {"provider": "launchd", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
-    },
-    {
       "key": "notes-sweep-hourly", "version": 4, "enabled": true, "risk": "green",
       "recurrence": {"cron": "0 8-18 * * 1-5", "timezone": "America/Chicago", "source": "duplicate Claude task and launchd paths"},
       "execution": {"kind": "deterministic", "entrypoint": "bin/notes-sweep-post.sh", "args": ["--scheduled"], "shadow_args": ["--dry-run"], "canary": {"enabled": false, "args": [], "auto_promote_live": false, "reason": "the Notes canary sender tier was retired; accepted shadow alone satisfies the live ladder for a canary-less workflow, so the automatic tick is pinned at shadow and live ingestion is a person-made schedule --mode live"}},
