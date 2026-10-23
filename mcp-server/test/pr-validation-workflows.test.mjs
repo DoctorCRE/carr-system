@@ -55,7 +55,7 @@ for (const file of files) {
       assert.deepEqual(current.runnable, current.triggers ? current.jobs : []);
     }
   });
-  test(`${file}: review transitions start validation and drafts retain cheap jobs`, () => {
+  test(`${file}: review transitions start full validation and drafts run only the sentinel`, () => {
     const ready = policy(workflow, context("pull_request", "ready_for_review"));
     assert.equal(ready.triggers, true);
     assert.deepEqual(ready.runnable, ready.triggers ? ready.jobs : []);
@@ -63,7 +63,7 @@ for (const file of files) {
     event.event.pull_request.draft = true;
     const draft = policy(workflow, event);
     assert.equal(draft.triggers, true);
-    assert.deepEqual(draft.runnable, file === "ci.yml" ? ["scope", "classes", "fallow", "checks"] : file === "doc-drift.yml" ? ["check"] : []);
+    assert.deepEqual(draft.runnable, file === "ci.yml" ? ["checks"] : ["verdict"]);
   });
   test(`${file}: cancellation is scoped to the workflow and PR`, () => {
     const current = policy(workflow, context());
@@ -94,7 +94,7 @@ for (const file of files) {
 
 test("expensive proof jobs survive scope failure but stop when superseded", () => {
   const ci = read("ci.yml");
-  assert.deepEqual(policy(ci, context(), false).runnable, ["classes", "migration-fixtures", "checks"]);
+  assert.deepEqual(policy(ci, context(), false).runnable, Object.keys(ci.jobs));
   assert.deepEqual(policy(ci, context(), true, { shard_trial: false }, true).runnable, ["checks"]);
 });
 
