@@ -599,10 +599,6 @@ export function authorityDsnForActor(env, runtimeActor) {
 // granted. A read verb whose SQL is granted to carr_writer/carr_authority only
 // (a SECURITY DEFINER door that raises 42501 for anyone else) must declare
 // writerConnection so it lands on "writer_read_only" instead.
-export function requiresAuthorityConnection(tool) {
-  return tool.authorityOnly === true;
-}
-
 export function connectionRouteForTool(tool) {
   if (!tool.write && !tool.writerConnection) return "reader";
   if (tool.authorityOnly) return "authority";
@@ -703,7 +699,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
   if (!allowedIn(profile, name, tool))
     throw new ToolError({ error: "not_in_profile", verb: name, profile,
       hint: "this session is scoped; report what you would have done and let an interactive partner session do it" });
-  if (requiresAuthorityConnection(tool) && !authorityDsnForActor(env, actor))
+  if (tool.authorityOnly === true && !authorityDsnForActor(env, actor))
     throw new ToolError({ error: "authority_connection_unavailable",
       hint: "this partner-authority operation requires a verified Joe/Dell principal or sponsored Codex/Claude identity plus the sponsor-scoped authority database binding" });
   // Payload-aware profile guard (2026-08-05). Name-level gating cannot see that
@@ -802,7 +798,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
 
   // Writes use the routine writer pool except the two authority operations,
   // which receive a separate DB identity and cannot fall back to writer.
-  const needsAuthority = requiresAuthorityConnection(tool);
+  const needsAuthority = tool.authorityOnly === true;
   const connectionString = needsAuthority ? authorityDsnForActor(env, actor) : env.DATABASE_URL_WRITER;
   const pool = new Pool({ connectionString });
   const client = await pool.connect();

@@ -26,7 +26,6 @@ const probe = `
       'node:assert/strict': moduleFor({ default: assert }),
       'node:crypto': moduleFor({ randomUUID }),
       '../src/tools.js': moduleFor({ TOOLS: {}, executeRegisteredTool() {}, ToolError: Error }),
-      '../src/mcp.js': moduleFor({ requiresAuthorityConnection() {} }),
     };
     const pg = moduleFor({ default: { Client: class {
       constructor() { result.constructed++; }
