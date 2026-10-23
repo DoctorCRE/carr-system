@@ -103,7 +103,7 @@ Read and follow [the required PR policy](AGENTS.md#before-every-pr-design-and-de
 
 ## Agent skills
 
-Use `tools/approve-merge.sh <owner/repo> <pr> <approved_sha>` for GitHub native auto-merge, `tools/open-prs.sh` for open PRs across jbookout repos, and `tools/room-bridge/briefs/{builder,staging-score}.md` for dispatch briefs.
+Use `gh pr merge --auto --squash <pr>` for GitHub native auto-merge, `gh pr list` for open PRs, and `tools/room-bridge/briefs/{builder,staging-score}.md` for dispatch briefs.
 
 ### Issue tracker
 
