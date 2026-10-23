@@ -59,8 +59,18 @@ jobs:
           python -m pip install -r requirements.lock
           npm --prefix mcp-server ci --no-audit
           npm --prefix practice-plugin ci --no-audit
+      - name: Identify the runner image for the zsh archive
+        id: zsh-image
+        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
+      - name: Restore zsh package archives
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ runner.temp }}/zsh-debs/*.deb
+          key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh') }}
       - name: Install zsh
+        timeout-minutes: 12
         env:
+          ZSH_RETRY_BACKOFF: "5"
           ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
         run: ops/ci-zsh.sh
       - name: Prove changed tests distinguish the base and head code

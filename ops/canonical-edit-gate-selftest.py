@@ -323,15 +323,8 @@ def main():
         # A FAILURE HERE IS GOOD NEWS THAT NEEDS FOLLOW-UP: it means the matcher
         # was widened, so delete the "NotebookEdit is not covered" paragraph
         # from the gate's COVERAGE section, update the matrix, and flip this row.
-        delivered, label, err = delivered_tools(args.hooks_json)
-        if err:
-            # "Cannot tell" must NOT read as "NotebookEdit absent". Fail loudly.
-            check("notebookedit-absent-from-every-wiring-matcher", True, False,
-                  f"could not determine the wiring: {err}")
-        else:
-            check("notebookedit-absent-from-every-wiring-matcher", True,
-                  "NotebookEdit" not in delivered,
-                  f"delivered via {label}: {delivered}")
+        groups, err = wiring_groups(args.hooks_json)
+        check("retired-runtime-registration-absent", True, not groups and not err)
 
         # DISPOSITION 3, the removal itself: the env var must no longer buy a
         # tracked-file edit. This is the row that fails if the hatch comes back.
@@ -401,7 +394,7 @@ def main():
             {"Write", "Edit", "MultiEdit"} <= set(tools) for _, tools in groups)
         if err:
             print(f"    (could not read {args.hooks_json}: {err})")
-        check("registration-wired", True, wired,
+        check("registration-unwired", False, wired,
               "a PreToolUse Write|Edit|MultiEdit group names canonical-edit-gate.py")
 
     passed = sum(1 for r in RESULTS if r["ok"])

@@ -519,13 +519,6 @@ def test_types_class_catches_a_seeded_type_error():
           f"rc={rc} out={out[-400:]}")
 
 UNCOLLECTED_BY_DECISION = {
-    "tools/link-model-bakeoff/pg18-selftest.py":
-        "Requires PostgreSQL 18 binaries and an owned disposable socket-only "
-        "database. The repository-content gates pool has no PostgreSQL 18 "
-        "contract. Run LC_ALL=C .venv/bin/python tools/link-model-bakeoff/pg18-selftest.py "
-        "before changing this harness; it executes regression_sql.py and the "
-        "normal integration workload. Offline failure-path and collection "
-        "regressions run in tools/test-linkfork.py through the gates pool.",
     "tools/room-bridge/test_claude_desk_live.py":
         "LIVE, and deliberately not offline. Its own docstring says it asserts "
         "against no mock: it boots a REAL Claude Code session on a labelled "
@@ -934,6 +927,11 @@ def test_hosted_zsh_setup_does_not_refresh_working_indexes():
     # permits five seconds to kill its process group. Backoff occurs after
     # attempts one and two only.
     check("hosted zsh setup uses the shared installer", setup["run"] == "ops/ci-zsh.sh")
+    test_first_setup = next(st for st in wf["jobs"]["test-first"]["steps"]
+                            if st.get("name") == "Install zsh")
+    check("test-first supplies the shared zsh retry settings and deadline",
+          all(test_first_setup.get(k) == setup[k]
+              for k in ("run", "env", "timeout-minutes")))
     installer_source = (REPO / "ops/ci-zsh.sh").read_text()
     backoff = int(setup["env"]["ZSH_RETRY_BACKOFF"])
     attempts = len(re.search(r"for attempt in ([0-9 ]+); do", installer_source).group(1).split())
@@ -952,6 +950,12 @@ def test_hosted_zsh_setup_does_not_refresh_working_indexes():
           cache["uses"] == "actions/cache@5a3ec84eff668545956fd18022155c47e93e2684"
           and cache["with"]["path"] == setup["env"]["ZSH_ARCHIVE_DIR"] + "/*.deb"
           and wf["jobs"]["classes"]["runs-on"] == "ubuntu-24.04")
+    for name in ("Identify the runner image for the zsh archive", "Restore zsh package archives"):
+        shared_step = next(st for st in wf["jobs"]["classes"]["steps"] if st.get("name") == name)
+        test_first_step = next((st for st in wf["jobs"]["test-first"]["steps"]
+                                if st.get("name") == name), {})
+        check(f"test-first shares {name}",
+              {k: v for k, v in shared_step.items() if k != "if"} == test_first_step)
     canary = _hosted_workflow("main-canary.yml")["jobs"]["classes"]["steps"]
     canary_setup = next(st for st in canary if st.get("name") == "Install zsh")
     check("PR and canary execute the same bounded zsh installer",

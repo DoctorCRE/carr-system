@@ -28,71 +28,6 @@
           "type": "command",
           "command": "if [ ! -f \"{{REPO}}/hooks/record-home-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/record-home-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/record-home-gate.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/record-home-gate.py",
           "timeout": 10
-        },
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/one-repo-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/one-repo-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/one-repo-gate.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/one-repo-gate.py",
-          "timeout": 10
-        },
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/canonical-edit-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/canonical-edit-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/canonical-edit-gate.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/canonical-edit-gate.py",
-          "timeout": 15
-        }
-      ]
-    },
-    {
-      "matcher": "Bash",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/bash-write-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/bash-write-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/bash-write-gate.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/bash-write-gate.py",
-          "timeout": 15
-        },
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/write-effect-check.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/write-effect-check.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/write-effect-check.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/write-effect-check.py",
-          "timeout": 10
-        },
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/draft-export-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/draft-export-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/draft-export-gate.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/draft-export-gate.py",
-          "timeout": 10
-        },
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/github-burst-guard.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/github-burst-guard.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/github-burst-guard.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/github-burst-guard.py",
-          "timeout": 5
-        }
-      ]
-    },
-    {
-      "matcher": "Bash|mcp__claude-in-chrome__.*",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/model-floor-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/model-floor-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/model-floor-gate.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/model-floor-gate.py",
-          "timeout": 10
-        }
-      ]
-    },
-    {
-      "matcher": "mcp__claude-in-chrome__.*",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/costar-lane-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/costar-lane-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/costar-lane-gate.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/costar-lane-gate.py",
-          "timeout": 10
-        }
-      ]
-    },
-    {
-      "matcher": "PushNotification|mcp__.*__(send_message|create_draft|update_draft)",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/weekend-quiet-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/weekend-quiet-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/weekend-quiet-gate.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/weekend-quiet-gate.py",
-          "timeout": 10
         }
       ]
     }
@@ -107,35 +42,9 @@
           "timeout": 40
         }
       ]
-    },
-    {
-      "matcher": "Bash",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/write-effect-check.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/write-effect-check.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/write-effect-check.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/write-effect-check.py",
-          "timeout": 15
-        },
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/github-burst-guard.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/github-burst-guard.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/github-burst-guard.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/github-burst-guard.py",
-          "timeout": 5
-        }
-      ]
     }
   ],
-  "PostToolUseFailure": [
-    {
-      "matcher": "Bash",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/github-burst-guard.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/github-burst-guard.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/github-burst-guard.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/github-burst-guard.py",
-          "timeout": 5
-        }
-      ]
-    }
-  ],
+  "PostToolUseFailure": [],
   "Stop": [
     {
       "hooks": [
