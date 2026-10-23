@@ -26,14 +26,15 @@ class ResearchDeskTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.folder = Path(self.temp.name).resolve()
 
-    def test_route_requires_named_model_effort_and_no_added_authority(self):
-        entry = {'name': 'source-study', 'kind': 'codex-session', 'family': 'sol',
-                 'effort': 'high', 'sandbox': 'read-only'}
-        self.assertEqual(self.room.validate_desk(entry), entry)
-        for change in ({'family': None}, {'effort': None}, {'sandbox': 'danger-full-access'},
-                       {'kind': 'claude-session'}, {'add_dirs': ['/']}, {'name': 'unreviewed'}):
-            with self.subTest(change=change), self.assertRaises(ValueError):
-                self.room.validate_desk({**entry, **change})
+    def test_preflight_uses_platform_config_without_a_registry(self):
+        config = self.folder / 'codex'
+        config.mkdir()
+        (config / 'config.toml').write_text('model="fixture-model"\nmodel_reasoning_effort="high"\n')
+        with patch.dict(os.environ, {'CODEX_HOME': str(config)}):
+            row = self.room.preflight('study')
+        self.assertEqual(row['model'], 'fixture-model')
+        self.assertEqual(row['effort'], 'high')
+        self.assertEqual(row['sandbox'], 'read-only')
 
     @unittest.skipUnless(shutil.which('sandbox-exec') and shutil.which('codex'), 'installed macOS Codex health probe')
     def test_installed_codex_starts_without_forking_its_npm_launcher(self):
@@ -44,18 +45,6 @@ class ResearchDeskTests(unittest.TestCase):
                               stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn('codex', proc.stdout.lower())
-
-    def test_streaming_cannot_bypass_provider_confinement(self):
-        sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
-        import dispatch
-        from desks import DeskError
-        class Registry:
-            def resolve(self, name):
-                return {'kind': 'codex-session', 'model': 'fixture-model', 'effort': 'high'}
-        with patch.object(dispatch, '_run_headless_process', side_effect=AssertionError('unconfined runner')):
-            with self.assertRaises(DeskError):
-                dispatch.dispatch('source-study', 'fixture', registry=Registry(),
-                                  stream_output=True, provider_run=lambda *_: None)
 
     def test_model_readback_is_bound_to_result_thread(self):
         sessions = self.folder / 'sessions'
@@ -185,7 +174,7 @@ class ResearchDeskTests(unittest.TestCase):
         self.provider_detach_attempt('cancellation')
 
     @unittest.skipUnless(shutil.which('sandbox-exec'), 'macOS confinement probe')
-    def test_real_room_dispatch_with_fake_provider_binds_model_and_result(self):
+    def test_direct_codex_with_fake_provider_binds_model_and_result(self):
         job = self.folder / 'job'
         (job / 'bin').mkdir(parents=True)
         provider = job / 'bin/codex'
@@ -193,7 +182,7 @@ class ResearchDeskTests(unittest.TestCase):
 import json, os, sys
 from pathlib import Path
 args = sys.argv[1:]
-assert args[args.index('-s') + 1] == 'read-only'
+assert args[args.index('--sandbox') + 1] == 'read-only'
 assert 'DATABASE_URL' not in os.environ and 'CARR_TOKEN' not in os.environ
 config = (Path(os.environ['CODEX_HOME']) / 'config.toml').read_text()
 assert 'mcp_servers' not in config and 'shell_tool=false' in config
@@ -210,11 +199,8 @@ print(json.dumps({'type': 'turn.completed'}))
         auth = self.folder / 'auth'
         auth.mkdir()
         (auth / 'auth.json').write_text('{"provider_auth":"synthetic"}')
-        (auth / 'models_cache.json').write_text(json.dumps({'models': [{'slug': 'gpt-9.9-sol'}]}))
-        registry = self.folder / 'registry.json'
-        registry.write_text(json.dumps({'desks': {'source-study': {
-            'kind': 'codex-session', 'family': 'sol', 'effort': 'high', 'sandbox': 'read-only'}}}))
-        env = dict(os.environ, CARR_HERMES_DESKS=str(registry), CODEX_HOME=str(auth),
+        (auth / 'config.toml').write_text('model="gpt-9.9-sol"\nmodel_reasoning_effort="high"\n')
+        env = dict(os.environ, CODEX_HOME=str(auth),
                    DATABASE_URL='synthetic-dsn', CARR_TOKEN='synthetic-token',
                    PATH=str(job / 'bin') + os.pathsep + os.environ['PATH'])
         command = [sys.executable, str(ROOT / 'tools/room-bridge/source_study.py')]
@@ -229,7 +215,7 @@ print(json.dumps({'type': 'turn.completed'}))
         self.assertFalse(list(job.rglob('auth.json')), 'provider credentials must not persist after dispatch')
 
     @unittest.skipUnless(shutil.which('sandbox-exec'), 'macOS confinement probe')
-    def test_grok_room_wire_uses_confinement_and_provider_readback(self):
+    def test_direct_grok_uses_confinement_and_provider_readback(self):
         job = self.folder / 'job'
         (job / 'bin').mkdir(parents=True)
         outside = self.folder / 'host-secret'
@@ -248,10 +234,7 @@ print(json.dumps({'type': 'turn.completed'}))
         ambient = self.folder / 'ambient'
         (ambient / '.grok').mkdir(parents=True)
         (ambient / '.grok/auth.json').write_text('{"provider_auth":"synthetic"}')
-        registry = self.folder / 'registry.json'
-        registry.write_text(json.dumps({'desks': {'grok-build': {
-            'kind': 'grok-cli', 'model': 'grok-4.7', 'effort': 'high', 'sandbox': 'read-only'}}}))
-        env = dict(os.environ, HOME=str(ambient), CARR_HERMES_DESKS=str(registry),
+        env = dict(os.environ, HOME=str(ambient),
                    PATH=str(job / 'bin') + os.pathsep + os.environ['PATH'])
         command = [sys.executable, str(ROOT / 'tools/room-bridge/source_study.py'), '--phase', 'retrieval']
         route = subprocess.run([*command, '--preflight'], env=env, capture_output=True, text=True, check=True)

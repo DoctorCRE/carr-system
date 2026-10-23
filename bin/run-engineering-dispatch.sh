@@ -1,7 +1,5 @@
 #!/bin/zsh
-# Invoke the Engineering Passport controller from the existing room-bridge
-# wake.  It is not a scheduler: jobs enter only via MCP admission and this
-# command claims only the fixed engineering definition.
+# Invoke the admitted Engineering Passport controller with native Codex.
 
 set -eu
 
@@ -12,8 +10,7 @@ CONTROLLER_ENV_FILE="${CARR_ENGINEERING_CONTROLLER_ENV_FILE:-$HOME/.config/carr/
 NOT_HOST_MARKER="${CARR_ENGINEERING_CONTROLLER_NOT_HOST_MARKER:-$HOME/.config/carr/engineering-controller.not-this-host}"
 
 # One Mac holds the controller bearer: the Worker's ENGINEERING_CONTROLLER_TOKENS
-# map accepts exactly one token.  Every Mac's room bridge still wakes this
-# command, so a Mac that is deliberately NOT the controller host says so with
+# map accepts exactly one token. Other Macs identify the controller host with
 # this marker (its contents name where the controller runs) and answers with an
 # explicit no-claim readback instead of failing every cycle.  Without the
 # marker, a missing credential still fails loudly; with both, the machine
@@ -53,15 +50,12 @@ load_controller_config() {
   [[ -n "${CARR_ENGINEERING_WORKER_URL:-}" && -n "${CARR_ENGINEERING_CONTROLLER_TOKEN:-}" ]] || return 78
 }
 
-# Resolve the tracked, fixed implementation and dedicated desk before any
+# Resolve the tracked, fixed implementation and native executable before any
 # credential is loaded.  Neither an ambient PATH nor a CARR_* override can
 # choose code or a target that will later receive the jobs capability.
 [[ -x "$NODE" ]] || { print -ru2 -- "engineering-dispatch: fixed Node 22 executable is required"; exit 78; }
 [[ -x "$PYTHON" ]] || { print -ru2 -- "engineering-dispatch: repository Python is required"; exit 78; }
-# The bridge consumes stdout as one exact JSON controller readback. The
-# preflight's successful desk description would create a second JSON document
-# and make the bridge reject a healthy response as malformed. Refusals still
-# reach stderr and retain the pre-credential fail-closed boundary.
+# Keep stdout as the controller's single JSON readback.
 "$PYTHON" "$REPO/tools/room-bridge/engineering_dispatch_adapter.py" --preflight >/dev/null
 
 load_controller_config || { print -ru2 -- "engineering-dispatch: isolated Worker controller configuration is required"; exit 78; }
