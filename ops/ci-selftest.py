@@ -945,12 +945,14 @@ def test_hosted_draft_lifecycle():
         with tempfile.TemporaryDirectory() as directory:
             # No source change between these events. A ready success cannot
             # turn the following draft or cancelled ready run into success.
-            for draft, action in ((True, "opened"), (False, "ready_for_review"),
-                                  (True, "converted_to_draft"), (False, "ready_for_review"),
-                                  (False, "reopened"), (False, "synchronize")):
-                ctx = context(draft=draft, action=action)
+            for draft, action, sha in (
+                    (True, "opened", "a" * 40), (False, "ready_for_review", "a" * 40),
+                    (True, "converted_to_draft", "a" * 40), (False, "ready_for_review", "a" * 40),
+                    (False, "reopened", "a" * 40), (False, "synchronize", "a" * 40),
+                    (False, "synchronize", "b" * 40)):
+                ctx = context(draft=draft, action=action, sha=sha)
                 groups.append(evaluate(wf["concurrency"]["group"], ctx))
-                check(f"{filename}: {action} draft={draft} schedules correct lanes at same SHA",
+                check(f"{filename}: {action} draft={draft} SHA={sha[:7]} schedules correct lanes",
                       all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == (not draft)
                           for name in lanes))
                 result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=REPO,
