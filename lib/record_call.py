@@ -117,7 +117,7 @@ def call_verb(verb: str, args: Mapping[str, Any], *, timeout: float | None = 120
                 return VerbResult(verb, REFUSED, detail=line(stderr))
             return VerbResult(verb, REFUSED, reply=payload, detail=line(json.dumps(payload)))
         kind = TRANSIENT if _TRANSIENT.search(stderr) else FAILED
-        cause = next((row for row in stderr.splitlines() if _TRANSIENT.search(row)), stderr or stdout)
+        cause = next((row for row in stderr.splitlines() if _TRANSIENT.search(row) or row.startswith("no MCP token for client profile ")), stderr or stdout)
         return VerbResult(verb, kind, detail=line(cause) or f"exit {proc.returncode}")
 
     body = _json(stdout)

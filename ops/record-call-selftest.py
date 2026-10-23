@@ -48,6 +48,13 @@ def reply(obj: object) -> str:
     return json.dumps(obj, indent=2) + "\n"
 
 
+# Missing unattended authentication must survive the CLI's explanatory suffix.
+auth_failure = ('no MCP token for client profile unattended — set CARR_MCP_UNATTENDED_TOKEN\n'
+                'This is the default path failing VISIBLY, per design — it does not fall back.\n')
+r = call_verb("loop-board", {}, runner=Runner(1, "", auth_failure))
+check("missing profile authentication reports its cause instead of the guidance suffix",
+      r.kind == FAILED and "no MCP token for client profile unattended" in r.detail, r)
+
 # ── outcomes ──────────────────────────────────────────────────────────────
 
 r = call_verb("read-loop", {"id": 1}, runner=Runner(0, reply({"id": 1, "status": "open"})))

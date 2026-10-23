@@ -813,26 +813,6 @@
       ]
     },
     {
-      "key": "expert-reply-watch",
-      "name": "Expert reply watch",
-      "purpose": "Weekly read-only mining of tracked X accounts replies into queued log-capture records, with URL deduplication and a dated local run ledger.",
-      "family": "Local Mac edge",
-      "criticality": "medium",
-      "owner_actor": "joe",
-      "repo_path": "tools/expert_reply_watch.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.expert-reply-watch.plist",
-          "runs_on": "primary",
-          "expected_cadence_seconds": 604800,
-          "cadence_grace_seconds": 86400,
-          "notes": "Monday 06:00 local. Primary only; Grok stdout proposals pass deterministic validation. CLI failure records one defect and exits nonzero. No X writes."
-        }
-      ]
-    },
-    {
       "key": "lead-signals-weekly",
       "name": "Weekly NPPES signal preparation",
       "purpose": "Classified NPPES proposals pending Joe/Dell verdicts; npi-sweep-weekly retains research, recommendations and ranked Hot output.",
@@ -890,10 +870,6 @@
     }
   ],
   "dependencies": [
-    {
-      "service": "expert-reply-watch",
-      "depends_on": "neon-record-layer"
-    },
     {
       "service": "carr-mcp",
       "depends_on": "neon-record-layer"
