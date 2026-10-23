@@ -2893,7 +2893,7 @@ try:
                 print(f"  {'OK' if _j['remaining'] == 0 else '→︎'} migration-coverage   "
                       f"{_j['remaining']} corpus files not yet in a verified batch "
                       f"({_docs} docs, generation {_gen}) · on breach: run the next bounded "
-                      f"batch through bin/import-doctrine.sh")
+                      f"batch through the authenticated record verbs")
 except Exception as e:
     print(f"  ⚠︎ doctrine store check failed ({type(e).__name__}: {e})")
     rc = 1
