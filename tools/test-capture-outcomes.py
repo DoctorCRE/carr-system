@@ -44,7 +44,8 @@ class CaptureOutcomesTests(unittest.TestCase):
         self.assertFalse((self.session / "ingested.json").exists())
 
     def test_poll_auth_refusal_and_bad_reply_fail_without_releasing_files(self) -> None:
-        for reply in ((401, {}), (503, {}), (200, {})):
+        replies: tuple[tuple[int, dict[str, object]], ...] = ((401, {}), (503, {}), (200, {}))
+        for reply in replies:
             with self.subTest(reply=reply), patch.object(bridge, "http_request", return_value=reply):
                 self.assertNotEqual(bridge.poll_cmd(self.cfg, self.session), 0)
                 self.assertFalse((self.session / "ingested.json").exists())
