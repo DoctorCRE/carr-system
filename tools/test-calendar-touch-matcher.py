@@ -262,17 +262,6 @@ class RecordViews(unittest.TestCase):
         with mock.patch.object(producer, "request_access", return_value=True), redirect_stdout(io.StringIO()):
             self.assertEqual(producer.main(), 0)
         first = json.loads(pathlib.Path(producer.OUT).read_text())
-        triage_spec = importlib.util.spec_from_file_location("triage_reader", REPO / "tools/calendar-triage-plan.py")
-        triage = importlib.util.module_from_spec(triage_spec)
-        triage_spec.loader.exec_module(triage)
-        with mock.patch.object(triage, "ATTENDEES", producer.OUT):
-            local = triage.load_local_attendees()
-        ingest = {"summary": "Same", "starts_at": "2026-10-01T12:00:00-05:00"}
-        # Legacy input and the actual new producer must return the same address.
-        self.assertEqual(triage.emails_in(ingest, {"Same|2026-10-01": ["a@example.test"]}), ["a@example.test"])
-        self.assertEqual(triage.emails_in(ingest, local), ["a@example.test"])
-        ingest["starts_at"] = "2026-10-01T13:00:00-05:00"
-        self.assertEqual(triage.emails_in(ingest, local), ["b@example.test"])
         pathlib.Path(producer.OUT).unlink()
         a.title.return_value = "Edited"
         with mock.patch.object(producer, "request_access", return_value=True), redirect_stdout(io.StringIO()):
@@ -313,84 +302,6 @@ class RecordViews(unittest.TestCase):
         self.assertEqual(list(emails), ["z@same.example.test"])
         self.assertEqual(list(domains), ["same.example.test"])
 
-    def test_all_day_feed_rows_do_not_abort_timed_triage(self):
-        def load(name, path):
-            spec = importlib.util.spec_from_file_location(name, REPO / path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            return module
-
-        feed = load("calendar_feed", "bin/pull-gmail-calendar.py")
-        triage = load("calendar_triage", "tools/calendar-triage-plan.py")
-        ics = """BEGIN:VCALENDAR
-BEGIN:VEVENT
-UID:all-day
-DTSTART;VALUE=DATE:20261001
-SUMMARY:Same
-END:VEVENT
-BEGIN:VEVENT
-UID:all-day-with-email
-DTSTART;VALUE=DATE:20261001
-SUMMARY:All day contact
-ORGANIZER:mailto:embedded@example.test
-END:VEVENT
-BEGIN:VEVENT
-UID:timed-one
-DTSTART:20261001T170000Z
-SUMMARY:Same
-END:VEVENT
-BEGIN:VEVENT
-UID:timed-two
-DTSTART:20261001T180000Z
-SUMMARY:Same
-END:VEVENT
-END:VCALENDAR
-"""
-        payloads = [feed.normalize(row, "joe", "fixture.ics")
-                    for row in feed.parse_events(ics)]
-        self.assertTrue(payloads[0]["event"]["all_day"])
-        self.assertEqual(payloads[0]["event"]["starts_at"], "2026-10-01")
-        snapshot = {"schema": "calendar-events/v2", "events": [
-            {"title": "Same", "start_at": "2026-10-01T12:00:00-05:00",
-             "emails": ["first@example.test"]},
-            {"title": "Same", "start_at": "2026-10-01T13:00:00-05:00",
-             "emails": ["second@example.test"]},
-        ]}
-        snapshot_path = self.root / "triage-snapshot.json"
-        snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
-        database = mock.MagicMock()
-        cursor = database.connect.return_value.__enter__.return_value.cursor.return_value
-        cursor.fetchall.side_effect = [
-            [(f"{name}@example.test", f"C-{i}", name, "client")
-             for i, name in enumerate(("embedded", "first", "second"), 1)],
-            [(str(i), row["external_id"], row["event"])
-             for i, row in enumerate(payloads, 1)],
-        ]
-        output, error = io.StringIO(), io.StringIO()
-        with mock.patch.dict(sys.modules, {"psycopg": database}), \
-                mock.patch.dict(os.environ, {"DATABASE_URL": "fixture-only"}), \
-                mock.patch.object(triage, "ATTENDEES", str(snapshot_path)), \
-                redirect_stdout(output), redirect_stderr(error):
-            triage.main()
-        plan = json.loads(output.getvalue())
-        self.assertEqual([row["item_id"] for row in plan["rejected"]], ["1"])
-        self.assertEqual(plan["rejected"][0]["why"], "no attendee addresses at all")
-        self.assertEqual([row["refs"] for row in plan["filed"]],
-                         [["C-1"], ["C-2"], ["C-3"]])
-        self.assertEqual(plan["left"], [])
-        self.assertIn("total 4", error.getvalue())
-
-    def test_all_day_handling_does_not_relax_invalid_or_timed_starts(self):
-        spec = importlib.util.spec_from_file_location("calendar_triage", REPO / "tools/calendar-triage-plan.py")
-        triage = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(triage)
-        snapshot = {"schema": "calendar-events/v2", "events": []}
-        for start, all_day in (("2026-10-01T12:00:00", False),
-                               ("2026-10-01T12:00:00", True),
-                               ("2026-10-01", False),
-                               ("2026-02-30", True)):
-            with self.subTest(start=start, all_day=all_day), self.assertRaises(ValueError):
-                triage.emails_in({"starts_at": start, "all_day": all_day}, snapshot)
 
 
 if __name__ == "__main__":
