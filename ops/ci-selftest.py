@@ -1001,7 +1001,7 @@ def test_hosted_draft_lifecycle():
                                     text=True, capture_output=True, timeout=10)
             check(f"{filename}: cancellation after successful lanes cannot green the verdict",
                   bool(guard) and evaluate(guard["if"], ctx) and result.returncode != 0
-                  and verdict['steps'].index(guard) < verdict['steps'].index(step))
+                  and verdict['steps'].index(guard) == len(verdict['steps']) - 1)
         if filename == "ci.yml":
             matrix = jobs["classes"]["strategy"]["matrix"]
             check("ready matrix exclusions are static and cannot trim classes on draft state",
