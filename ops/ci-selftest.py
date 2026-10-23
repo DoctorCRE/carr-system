@@ -957,6 +957,12 @@ def test_hosted_zsh_setup_does_not_refresh_working_indexes():
           cache["uses"] == "actions/cache@5a3ec84eff668545956fd18022155c47e93e2684"
           and cache["with"]["path"] == setup["env"]["ZSH_ARCHIVE_DIR"] + "/*.deb"
           and wf["jobs"]["classes"]["runs-on"] == "ubuntu-24.04")
+    for name in ("Identify the runner image for the zsh archive", "Restore zsh package archives"):
+        shared_step = next(st for st in wf["jobs"]["classes"]["steps"] if st.get("name") == name)
+        test_first_step = next((st for st in wf["jobs"]["test-first"]["steps"]
+                                if st.get("name") == name), {})
+        check(f"test-first shares {name}",
+              {k: v for k, v in shared_step.items() if k != "if"} == test_first_step)
     canary = _hosted_workflow("main-canary.yml")["jobs"]["classes"]["steps"]
     canary_setup = next(st for st in canary if st.get("name") == "Install zsh")
     check("PR and canary execute the same bounded zsh installer",
