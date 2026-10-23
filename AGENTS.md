@@ -271,34 +271,6 @@ hard gate enforces it. `./run.sh call <verb> '<json>'` reaches any verb.
 This file and the vault's `CLAUDE.md`/`AGENTS.md` are among the few
 exact-path exceptions.
 
-## Active WR-000070 R09 executor recovery
-
-Only for the accepted executor source-recovery role of WR-000070 slice R09: read
-[the complete scoped assignment instructions](ops/config/task-boot/r09.json)
-before assignment validation or execution. Resolve its current dispatcher intent
-and server-issued runbook; all bindings and refusal conditions remain mandatory.
-
-## Temporary supervised WR68 source execution
-
-Only for WR-000068 slice wr68-source-repair-v1: read
-[the complete scoped assignment instructions](ops/config/task-boot/wr68.json)
-before assignment validation or execution. Resolve its current dispatcher intent
-and server-issued runbook; all bindings and refusal conditions remain mandatory.
-
-## Temporary supervised WR69 registered Codex validation
-
-Only for the registered Codex validator of WR-000069 slice wr69-source-repair-v1: read
-[the complete scoped assignment instructions](ops/config/task-boot/wr69.json)
-before assignment validation or execution. Resolve its current dispatcher intent
-and server-issued runbook; all bindings and refusal conditions remain mandatory.
-
-## Temporary supervised R06 registered validation
-
-Only for the registered Codex validator of WR-000070 slice R06: read
-[the complete scoped assignment instructions](ops/config/task-boot/r06.json)
-before assignment validation or execution. Resolve its current dispatcher intent
-and server-issued runbook; all bindings and refusal conditions remain mandatory.
-
 ## Before every PR: design and debt pass
 
 Before opening or updating any pull request, apply both skills to the diff:

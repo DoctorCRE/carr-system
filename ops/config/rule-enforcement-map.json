@@ -405,7 +405,7 @@
         "bin/codex-job"
       ],
       "test": [
-        "tools/test_codex_job.py"
+        "tools/test-codex-job.py"
       ]
     },
     "draft_export_read": {
