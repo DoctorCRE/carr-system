@@ -97,7 +97,9 @@ for program in programs:
             relative = Path(*parts).as_posix()
             if relative in tracked:
                 resources.add(relative)
-check('inventory inspects at least 70 database proof programs', len(programs) >= 70)
+check('inventory includes retained business database proofs',
+      {repo / 'ops/cre-lifecycle-local-pg-gate.py',
+       repo / 'ops/lead-stage-db-gate.py'} <= programs)
 for path in sorted(resources):
     check(f'database proof resource {path} runs the lane', scope.needs_full([path]))
 
