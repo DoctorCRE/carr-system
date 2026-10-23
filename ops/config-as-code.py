@@ -1713,8 +1713,8 @@ def install_launchd_plist(filename, dest, body, body_matches, *, timeout=15):
 def cmd_install_progress_board(apply=False, repo=None):
     """Migrate the existing board agent to the repository wrapper, then read
     launchd's arguments back. This does not create a new schedule or label.
-    Runtime and state belong to the canonical main checkout maintained by
-    bin/fleet-sync.sh. --repo may name that checkout explicitly, but cannot
+    Runtime and state belong to the canonical main checkout.
+    --repo may name that checkout explicitly, but cannot
     select a feature tree even for pre-merge verification.
     """
     label = "local.carr-progress-board"
