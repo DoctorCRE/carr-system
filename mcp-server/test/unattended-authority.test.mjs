@@ -25,7 +25,6 @@ import {
 } from "../src/identity.js";
 import { partnerAuthoritySlugForActor } from "../src/partner-authority.js";
 import { PROFILES, allowedIn, authorityDsnForActor, profileForActor, readCallInsertSQL } from "../src/mcp.js";
-import { a05SeatForActor } from "../src/delivery-cadence-a05-tools.js";
 import { LOCAL_CLIENT_PROFILE_NAMES, selectLocalClientCredential } from "../local-client-auth.mjs";
 import { mcpInventory } from "../../ops/scac-mutation-inventory.mjs";
 
@@ -281,7 +280,7 @@ test("the unattended actor is locked to the unattended profile whatever ?profile
   assert.equal(profileForActor(local, new Request("https://api.example.test/mcp")), "full");
 });
 
-test("the unattended profile holds capture, close-loop, the cadence doors and the allowlist only", () => {
+test("the unattended profile holds capture, close-loop and the allowlist only", () => {
   const profile = PROFILES.unattended;
   assert.ok(profile instanceof Set);
   for (const verb of profile) {
@@ -290,7 +289,7 @@ test("the unattended profile holds capture, close-loop, the cadence doors and th
     assert.equal(allowedIn("unattended", verb, TOOLS[verb]), true, verb);
   }
   for (const verb of UNATTENDED_AUTHORITY_VERBS) assert.ok(profile.has(verb), verb);
-  for (const verb of ["close-loop", "record-cadence-receipt", "raise-delivery-cadence-alert"])
+  for (const verb of ["close-loop"])
     assert.ok(profile.has(verb), verb);
   for (const verb of profile)
     if (TOOLS[verb].humanOnly === true || TOOLS[verb].authorityOnly === true)
@@ -298,16 +297,6 @@ test("the unattended profile holds capture, close-loop, the cadence doors and th
   for (const verb of ["confirm-merge", "retire-rule", "amend-rule", "approve-rule", "teach",
     "disable-legacy-schedule", "record-executed-lease", "reassign-deal", "update-deal", "add-party"])
     assert.equal(allowedIn("unattended", verb, TOOLS[verb]), false, verb);
-});
-
-// ---------- the V5-A05 seat ----------
-
-test("the unattended runner holds the V5-A05 system seat, as the attended local door does", () => {
-  assert.equal(a05SeatForActor(unattended()), "system");
-  const local = agentActorForToken(BEARER, JSON.stringify({ "joe-local": SECRET }), "local-token");
-  assert.equal(a05SeatForActor(local), "system");
-  assert.equal(a05SeatForActor({ ...unattended(), native_agent_verified: false }), "other");
-  assert.equal(a05SeatForActor({ ...unattended(), via: "unattended-tokens" }), "other");
 });
 
 // ---------- the unattended client profile ----------

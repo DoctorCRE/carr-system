@@ -31,16 +31,16 @@ function cost(stats) {
     estimated_instruction_tokens: Math.ceil(stats.instruction_chars / 4) };
 }
 const codexNames = ["codex-checkpoint", "codex-read-recovery"];
-async function continuityCost(codex) {
+async function continuityCost() {
   const fixtureDir = fileURLToPath(new URL("../out/_to_delete/advertisement-measurement/", import.meta.url));
   fs.mkdirSync(fixtureDir, { recursive: true });
-  const tokenFile = path.join(fixtureDir, `${codex ? "codex" : "claude"}.env`);
-  fs.writeFileSync(tokenFile, `CARR_${codex ? "CODEX" : "CLAUDE"}_CONTINUITY_MCP_TOKEN=synthetic-fixture\n`, { mode: 0o600 });
+  const tokenFile = path.join(fixtureDir, "codex.env");
+  fs.writeFileSync(tokenFile, "CARR_CODEX_CONTINUITY_MCP_TOKEN=synthetic-fixture\n", { mode: 0o600 });
   const server = http.createServer(async (request, response) => {
     let body = "";
     for await (const chunk of request) body += chunk;
-    const actor = { slug: "synthetic", via: `${codex ? "codex" : "claude"}-continuity-token`,
-      continuity_surface: codex ? "codex" : "claude" };
+    const actor = { slug: "synthetic", via: "codex-continuity-token",
+      continuity_surface: "codex" };
     const result = await dispatch(new Request("https://synthetic.example/mcp", { method: "POST", body }), {}, {}, actor);
     response.writeHead(result.status, { "content-type": "application/json" });
     response.end(await result.text());
@@ -50,9 +50,7 @@ async function continuityCost(codex) {
     const env = { ...process.env, CARR_MCP_ENV: tokenFile,
       CARR_MCP_URL: `http://127.0.0.1:${server.address().port}/mcp` };
     delete env.CARR_CODEX_CONTINUITY_MCP_TOKEN;
-    delete env.CARR_CLAUDE_CONTINUITY_MCP_TOKEN;
-    const child = spawn(process.execPath, [fileURLToPath(new URL("./continuity-stdio-proxy.mjs", import.meta.url)),
-      ...(codex ? ["--codex"] : [])], { env, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [fileURLToPath(new URL("./codex-continuity-stdio-proxy.mjs", import.meta.url))], { env, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     child.stdout.on("data", chunk => { stdout += chunk; });
     child.stderr.resume();
@@ -64,16 +62,14 @@ async function continuityCost(codex) {
     if (code !== 0) throw new Error("continuity advertisement measurement failed");
     const [initialized, listed] = stdout.trim().split("\n").map(JSON.parse);
     if (!initialized.result || !listed.result) throw new Error("continuity advertisement measurement refused");
-    const expected = codex ? codexNames : ["claude-checkpoint", "claude-read-recovery", "claude-record-event"];
-    if (JSON.stringify(listed.result.tools.map(t => t.name).sort()) !== JSON.stringify([...expected].sort()))
+    if (JSON.stringify(listed.result.tools.map(t => t.name).sort()) !== JSON.stringify([...codexNames].sort()))
       throw new Error("continuity advertisement changed; inspect the measured surface before comparing costs");
     return summary(listed.result.tools, initialized.result.instructions);
   } finally {
     server.close();
   }
 }
-const claudeContinuity = await continuityCost(false);
-const codexContinuity = await continuityCost(true);
+const codexContinuity = await continuityCost();
 const beforeCodex = { ...before, tool_count: before.tool_count - codexNames.length,
   tool_json_chars: before.tool_json_chars - before.tools.filter(t => codexNames.includes(t.name)).reduce((n, t) => n + t.chars + 1, 0),
   tool_name_json_chars: JSON.stringify(before.tools.filter(t => !codexNames.includes(t.name)).map(t => t.name)).length };
@@ -81,9 +77,9 @@ const rows = [];
 for (const client of ["Claude desktop", "Claude CLI", "Codex"]) {
   for (const server of client === "Codex" ? ["carr", "carr-records"] : ["carr", "CARR Record Layer"])
     rows.push({ client, server, before: cost(client === "Codex" ? beforeCodex : before), after: cost(after) });
-  const continuity = client === "Codex" ? codexContinuity : claudeContinuity;
-  rows.push({ client, server: client === "Codex" ? "carr-codex-continuity" : "carr-continuity",
-    before: cost(continuity), after: cost(continuity) });
+  if (client === "Codex")
+    rows.push({ client, server: "carr-codex-continuity",
+      before: cost(codexContinuity), after: cost(codexContinuity) });
 }
 console.log(JSON.stringify({ schema: "carr-tool-advertisement-measurement/v1", baseline_source: before.source_sha,
   method: "Compact JSON characters / 4, rounded up per registration. Names and schemas are alternatives, not additive. Instructions are separate. These are transport estimates, not billed tokens or measured native startup context.",

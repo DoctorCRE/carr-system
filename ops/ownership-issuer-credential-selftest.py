@@ -19,8 +19,6 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 PLANNER = ROOT / "bin" / "provision-canonical-ownership-runtime.mjs"
-DISPATCH_SH = ROOT / "bin" / "run-engineering-dispatch.sh"
-DISPATCH_MJS = ROOT / "mcp-server" / "bin" / "run-engineering-dispatch.mjs"
 WRANGLER = ROOT / "mcp-server" / "wrangler.toml"
 SENTINEL = "WR126-SENTINEL-DO-NOT-PRINT"
 
@@ -111,28 +109,6 @@ def main() -> int:
                               cwd=ROOT, text=True, capture_output=True, check=False)
         check("live provisioning is refused", live.returncode == 78)
         check("live refusal does not echo sentinel", SENTINEL not in live.stdout + live.stderr)
-
-        dispatch_shell = DISPATCH_SH.read_text(encoding="utf-8")
-        dispatch_mjs = DISPATCH_MJS.read_text(encoding="utf-8")
-        check("dispatcher allows only jobs plus controller credentials",
-              "env -i" in dispatch_shell and "CARR_DB_JOBS_URL" in dispatch_shell and
-              "CARR_ENGINEERING_CONTROLLER_TOKEN" in dispatch_shell)
-        check("dispatcher does not name issuer credentials",
-              "DATABASE_URL_OWNERSHIP_ISSUER" not in dispatch_shell and
-              "DATABASE_URL_OWNERSHIP_ISSUER" not in dispatch_mjs and
-              "CARR_SESSION_ISSUER" not in dispatch_shell and
-              "CARR_SESSION_ISSUER" not in dispatch_mjs)
-        dry_dispatch = subprocess.run(["node", str(DISPATCH_MJS), "--dry-run"],
-                                      cwd=ROOT, text=True, capture_output=True, check=False)
-        check("dispatcher dry-run passes", dry_dispatch.returncode == 0, dry_dispatch.stderr)
-        dispatch_readback = json.loads(dry_dispatch.stdout)
-        check("dispatcher dry-run has no issuer credential",
-              dispatch_readback["issuer_credential"] is None)
-        check("dispatcher dry-run has no child credentials",
-              dispatch_readback["child_credentials"] == [])
-        check("dispatcher chains opaque operation refs",
-              "args.operation_ref = operationRef" in dispatch_mjs and
-              "lease.operation_ref" in dispatch_mjs)
 
         wrangler = WRANGLER.read_text(encoding="utf-8")
         check("production runtime remains disabled",

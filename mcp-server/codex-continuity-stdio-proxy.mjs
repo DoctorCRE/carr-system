@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Minimal Claude-facing MCP proxy for the Claude checkpoint and recovery verbs.
-// The bearer stays in the existing 0600 token file and never enters Claude's
+// Codex-only MCP proxy for checkpoint and recovery.
+// The bearer stays in the existing 0600 token file and never enters the client's
 // JSON configuration, argv, transcript, or tracked source.
 import fs from "node:fs";
 import os from "node:os";
@@ -9,14 +9,10 @@ import readline from "node:readline";
 
 import { selectLocalClientCredential, tokenFileSecurityIssue } from "./local-client-auth.mjs";
 
-// Codex is opt-in; the existing Claude invocation and three-tool contract stay intact.
-const CODEX = process.argv.includes("--codex");
-const { REFERENCE_MANIFEST_LIMIT, SEMANTIC_STATE_LIMIT, splitReferenceManifest } = CODEX
-  ? await import("./continuity-reference-manifest.mjs")
-  : {};
-const PROFILE = CODEX ? "codex-continuity" : "claude-continuity";
-const ALLOWED = new Set(CODEX ? ["codex-checkpoint", "codex-read-recovery"] :
-  ["claude-checkpoint", "claude-read-recovery"]);
+import { REFERENCE_MANIFEST_LIMIT, SEMANTIC_STATE_LIMIT, splitReferenceManifest } from "./continuity-reference-manifest.mjs";
+
+const PROFILE = "codex-continuity";
+const ALLOWED = new Set(["codex-checkpoint", "codex-read-recovery"]);
 const TOKEN_FILE = process.env.CARR_MCP_ENV || path.join(os.homedir(), ".config/carr/mcp-tokens.env");
 const URL = process.env.CARR_MCP_URL || "https://api.doctorcre.com/mcp";
 const MAX_MESSAGE_BYTES = 2_000_000;
@@ -52,15 +48,15 @@ function checkpointPreflight(state) {
 
 async function forward(message, token) {
   if (message.method === "tools/call" && !ALLOWED.has(message.params?.name))
-    return { jsonrpc: "2.0", id: message.id, error: { code: -32601, message: CODEX ? "not_in_codex_continuity_profile" : "not_in_claude_continuity_profile" } };
-  if (CODEX && message.method === "tools/call" && message.params?.name === "codex-checkpoint") {
+    return { jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "not_in_codex_continuity_profile" } };
+  if (message.method === "tools/call" && message.params?.name === "codex-checkpoint") {
     const rejection = checkpointPreflight(message.params.arguments?.state ?? {});
     if (rejection)
       return { jsonrpc: "2.0", id: message.id, error: { code: -32602, message: rejection } };
   }
   const response = await fetch(URL, {
     method: "POST",
-    ...(CODEX ? { signal: AbortSignal.timeout(30_000) } : {}),
+    signal: AbortSignal.timeout(30_000),
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
     body: JSON.stringify(message),
   });
@@ -68,10 +64,9 @@ async function forward(message, token) {
   if (message.id === undefined) return null;
   const result = await response.json();
   if (message.method === "initialize" && result?.result) {
-    result.result.serverInfo = { name: CODEX ? "carr-codex-continuity" : "carr-continuity", version: "1" };
+    result.result.serverInfo = { name: "carr-codex-continuity", version: "1" };
     result.result.instructions =
-      (CODEX ? "Codex continuity only: record semantic checkpoints with codex-checkpoint using the " :
-        "Claude continuity only: record semantic milestones with claude-checkpoint using the ") +
+      "Codex continuity only: record semantic checkpoints with codex-checkpoint using the " +
       "native activation binding and compare-and-swap expected_version. Never infer completion " +
       "from telemetry and never replay pending external effects.";
   }
@@ -95,6 +90,6 @@ for await (const line of input) {
       process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id,
         error: { code: -32603, message: "continuity_proxy_failure" } }) + "\n");
     else
-      process.stderr.write("carr-continuity proxy: refused malformed or oversized input\n");
+      process.stderr.write("carr-codex-continuity proxy: refused malformed or oversized input\n");
   }
 }

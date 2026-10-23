@@ -130,8 +130,7 @@ def compare(root):
         'nightly-record-layer': ['db.env', 'tokens.env', 'healthchecks.env', 'age-key.txt'],
         'nightly-exports-daytime-retry': ['db.env', 'tokens.env'],
         'partner-ping': ['db.env'],
-        'job-watchdog': ['db.env', 'mcp-tokens.env'], 'cutover-watch': ['mcp-tokens.env'],
-        'delivery-cadence-a05-sweep': ['mcp-tokens.env']}
+        'job-watchdog': ['db.env', 'mcp-tokens.env'], 'cutover-watch': ['mcp-tokens.env']}
     states = {'partner-ping': ['~/.config/carr/partner-ping.json'],
               'local.carr-progress-board': ['~/carr-system/out/boards'],
               'nightly-record-layer': ['~/carr-system/out/backups']}
