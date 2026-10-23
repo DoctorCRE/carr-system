@@ -867,26 +867,6 @@
           "notes": "Canonical checkout and out/boards are preserved. Only the active host publishes. Source declaration only; no service import or activation performed."
         }
       ]
-    },
-    {
-      "key": "job-cleaner",
-      "name": "Finished job checkout cleanup",
-      "purpose": "Daily worktree prune and safe retirement of pushed finished job clones older than two days. Keeps dirty, unpushed, live and uncertain work. Stages removals during the first week.",
-      "family": "Local Mac edge",
-      "criticality": "medium",
-      "owner_actor": "orchestrator",
-      "repo_path": "ops/job_cleanup.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.job-cleaner.plist",
-          "runs_on": "every",
-          "expected_cadence_seconds": 86400,
-          "cadence_grace_seconds": 86400,
-          "notes": "Runs at 03:17 local time. Lists every retained checkout and its reason in out/job-cleaner.log. No branch deletion."
-        }
-      ]
     }
   ],
   "dependencies": [

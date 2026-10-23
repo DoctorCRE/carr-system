@@ -14,7 +14,6 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
 
 import execution_contract as contract  # noqa: E402
-import dispatch  # noqa: E402
 import evaluation_kernel  # noqa: E402
 import spatial_surface  # noqa: E402
 

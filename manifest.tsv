@@ -39,7 +39,6 @@ shared/build-lead-board-template.py	DNA/Team/build-lead-board.py
 shared/fill-engine/extract_pvl_onepager.py	DNA/Deal Management/fill-engine/extract_pvl_onepager.py
 shared/fill-engine/fill_deal_template.py	DNA/Deal Management/fill-engine/fill_deal_template.py
 # bin/launch-automation-chrome.sh DELETED 2026-07-25 (orphaned Firefly launcher; the lane was demoted Jul 18 and its companion firefly_receiver.py never lived here). Vault copy retired to _to_delete/.
-bin/fetch-calendar.sh	Automation/local-tasks/fetch-calendar.sh
 # build-section-index.py is repo-only (no vault copy; the vault holds its OUTPUT in Automation/section-index.tsv)
 # lib/registry.py and tools/registry-audit.py are repo-only (2026-07-27). PLACEMENT TEST:
 #   registry.py is the sanctioned WRITE api for lead-registry.xlsx and registry-audit.py is its

@@ -1,4 +1,4 @@
-"""Install the idle watcher and demand launcher without starting either Flash agent."""
+"""Install the idle watcher without starting the Flash server."""
 import os
 import plistlib
 import re
@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import flashlib
 
 
-LABELS = ("local.ds4-flash-next", "local.flash-desk")
+LABELS = ("local.ds4-flash-next",)
 WATCHER = "com.carr.flash-idle-stop"
 
 
@@ -46,14 +46,6 @@ def install(repo, home, *, launch=subprocess.run):
                 result = launch(["launchctl", "bootout", f"{domain}/{label}"], capture_output=True, timeout=15)
                 if result.returncode not in (0, 3, 113):
                     raise RuntimeError(f"could not stop {label}")
-        if not granted:
-            launch([sys.executable, str(repo / "tools/room-bridge/dispatch.py"), "stop", "flash"],
-                   check=True, capture_output=True, timeout=30, env={**os.environ, "HOME": str(home)})
-    launcher = home / ".local/bin/flash-desk-start"
-    launcher.parent.mkdir(parents=True, exist_ok=True)
-    write_changed(launcher, f'#!/bin/zsh\nexec "{repo}/bin/flash-desk-start" "$@"\n'.encode())
-    if launcher.stat().st_mode & 0o777 != 0o755:
-        launcher.chmod(0o755)
     source = repo / f"ops/launchd/{WATCHER}.plist"
     target = agents / f"{WATCHER}.plist"
     body = source.read_text().replace("{{REPO}}", str(repo))
@@ -94,7 +86,7 @@ def check(home, *, launch=subprocess.run):
 def configure(repo, *, apply=False):
     repo = Path(repo).resolve()
     if not apply:
-        print("Would install the 5-minute idle watcher, demand desk launcher, and disable login startup.")
+        print("Would install the 5-minute idle watcher and disable server login startup.")
         return 0
     common = Path(subprocess.check_output(["git", "rev-parse", "--git-common-dir"], cwd=repo, text=True).strip())
     common = (repo / common).resolve()
@@ -102,5 +94,5 @@ def configure(repo, *, apply=False):
     if common.parent != repo or branch != "main":
         raise SystemExit("Install from canonical main after merge so launchd retains a stable source path.")
     install(repo, Path.home())
-    print("Installed Flash on demand; server and desk were not enabled or started.")
+    print("Installed Flash on demand; server was not enabled or started.")
     return 0
