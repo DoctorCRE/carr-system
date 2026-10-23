@@ -33,12 +33,6 @@
       "evidence": "ops/accept-doctorcre-bundle.sh header (added 7c75c878, #853)"
     },
     {
-      "path": "ops/atomic-rule-approval-authority-probe.py",
-      "class": "one_shot",
-      "reason": "Disposable-local rollback proof that enforced-only human rule approval is atomic, run once when that approval path landed.",
-      "evidence": "905dd380 (Make rule approval atomically enforced)"
-    },
-    {
       "path": "ops/check-pdf.py",
       "class": "hand_tool",
       "reason": "A session runs it on a finished PDF before handing it to a partner, per Dell's 2026-08-27 instruction to check every document.",
@@ -201,16 +195,16 @@
       "evidence": "evals/context-hooks/make_report.py main() binds its baseline and writes the evaluation report."
     },
     {
-      "path": "evals/model-routing/make_report.py",
-      "class": "hand_tool",
-      "reason": "Manually renders the model-routing evaluation report; it is not a runtime or scheduled entrypoint.",
-      "evidence": "evals/model-routing/make_report.py main() consumes evaluation fixtures and writes report artifacts."
-    },
-    {
       "path": "bin/github-app-key-intake.sh",
       "class": "hand_tool",
       "reason": "Manual GitHub App key intake remains owned by the credential/release lane outside this library reset.",
       "evidence": "lib/github_app_config.py documents the retained manual intake script; this declaration grants no new credential access."
+    },
+    {
+      "path": "hooks/turn_origin.py",
+      "class": "inert",
+      "reason": "Retained transcript-origin classifier has no executable caller after PR #2195 retires weekend-quiet-gate.py. It remains hash-protected with the retained hook inventory.",
+      "evidence": "WR-000284 post-purge door inventory; PR #2195 deletes the last caller hooks/weekend-quiet-gate.py. The fixed retirement scope retains this hash-protected classifier as inert."
     }
   ]
 }

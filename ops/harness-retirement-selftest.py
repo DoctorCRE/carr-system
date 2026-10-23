@@ -50,6 +50,21 @@ class HarnessRetirement(unittest.TestCase):
         self.assertNotIn('delegation_guidance', controls)
         self.assertNotIn('delegation_tripwire', controls)
         self.assertNotIn('executor_tier', controls)
+        retired = {'canonical_edit', 'costar_lane', 'weekend_quiet',
+                   'control-plane-workflow-manifest', 'draft_export_read',
+                   'github-burst-guard', 'model_floor', 'one_repo',
+                   'verification_status', 'weekly_social_route'}
+        self.assertFalse(retired & controls.keys())
+        self.assertFalse([row for row in controls.values()
+                          if 'declared but not tracked' in row['not_installed_reason']])
+        self.assertTrue(controls['record_home']['installed'])
+
+    def test_current_drive_inventory_names_existing_sources(self):
+        registry = json.loads((ROOT / 'ops/config/drive-dependencies.v1.json').read_text())
+        for entry in registry['entries']:
+            for source in entry['sources']:
+                with self.subTest(entry=entry['id'], source=source):
+                    self.assertTrue(any(ROOT.glob(source)), source)
 
     def test_native_instructions_deliver_every_core_card(self):
         cards = json.loads((ROOT / 'ops/config/rule-cards.v1.json').read_text())['cards']

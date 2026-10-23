@@ -329,7 +329,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if (verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if (["set-next-step", "set-market-agent", "set-national-account-owner"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
@@ -3534,7 +3534,7 @@ export const TOOLS = {
       // never been edited simply has no key — which the client must read as "no
       // base", never as a base of null-meaning-anything.
       const deals = await c.query(
-        `select b.id, b.name, b.type, b.phase, b.owner, b.attention,
+        `select b.id, b.name, b.type, b.phase, b.owner, b.attention, r.base_version,
                 to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step,
                 '${DEAL_ITEMS_SCHEMA}'::text as item_schema_version,
                 coalesce((select jsonb_agg(jsonb_build_object('id',i.id,'title',i.item_title,
@@ -3565,6 +3565,7 @@ export const TOOLS = {
                            order by e.field, e.recorded_at desc, e.id desc) latest
                 ), '{}'::jsonb) as field_base
            from v_deal_room_board b
+           join v_deal_reconciliation_read r on r.id=b.id
            join v_client_engagement_status ce on ce.client_id=b.client_id
           where ($1 = 'all' or b.workspace_kind = $1)
             and ($2::uuid is null or b.account_client_id = $2::uuid)
@@ -3587,7 +3588,7 @@ export const TOOLS = {
           /* dealroom:closed-deals */`,
         [workspace, args.account_client_id || null]);
       const accounts = await c.query(
-        `select a.account_client_id, a.account_client_ref, a.account_name, a.account_owner,
+        `select a.account_client_id, a.account_client_ref, a.account_name, a.account_owner, ce.client_version as base_version,
                 a.open_deals, a.attention_deals, a.overdue_deals, a.stale_deals,
                 to_jsonb(a.last_review_at)#>>'{}' as last_review_at, a.parked_deals,
                 ce.client_status, ce.client_version, ce.prospect_engagement_status
@@ -6395,7 +6396,7 @@ export const TOOLS = {
   },
 
   "find-rule": {
-    description: "Find proposed, active, or retired rules by their words when the id is unknown. Matches a literal substring or all whitespace-separated words, case-insensitively. Returns bounded statement previews and full ids for amend-rule or retire-rule. Read-only; status defaults to any.",
+    description: "Find proposed, active, or retired rules by their words when the id is unknown. Matches a literal substring or all whitespace-separated words, case-insensitively. Returns bounded statement previews and full ids. Propose corrections or withdrawals as edits to CLAUDE.md, AGENTS.md or a skill in a PR; proposals bind nobody until merged. Read-only; status defaults to any.",
     inputSchema: { type: "object", properties: {
       text: { type: "string", minLength: 1 },
       status: { type: "string", enum: ["proposed", "active", "retired", "any"], default: "any" },
@@ -6428,269 +6429,6 @@ export const TOOLS = {
     },
   },
 
-  "teach": {
-    write: true,
-    description: "Write a rule from the human's own words (status: proposed — after exact enforcement is built and verified, approve-rule atomically activates the enforced policy; under decision cbe91287 (Joe, 2026-10-12) that approval is a technical-check act the rule-approval worklist performs after a ready rule-admission preflight, with the partner's recorded quote as its authority, not a live human tap). Capture the verbatim quote. Personal-scope rules (voice, format) set personal_to. WHEN TO CALL IT — the test is 'would the system have to ask this again?', NOT whether the partner phrased it as 'always X' or 'never Y'. Standing lessons arrive as ordinary sentences: a modeling ruling ('cadence studio is one national account'), a correction to a fact in the record, a choice between options you offered with the reasoning attached, a rejection of a draft. Capture on the spot, never at 'session close' — the same event-not-session-close rule protocol 27b already settles. Pass supersedes when this rule replaces an earlier one; the old rule is retired with an immutable receipt in the same transaction. Superseding an ACTIVE rule requires a human caller and the same authority connection as retire-rule. ENFORCEMENT-FIRST BIRTH (WR-000019 slice S10): every teach REQUIRES enforcement_home, one of 'gate' (a deny/stop control will carry it — name carrying_control), 'jit' (delivered just-in-time by pack/moment), 'core' (always-loaded), or 'judgment_advisory' (no mechanical control ever will — say why_no_machine in one line). This is a refusal, not a default: a rule captured with nobody having said where it will live is exactly how guidance debt piled up before this slice, and a silent default would be indistinguishable from a considered choice. THIS IS CLERICAL WORK, NOT SELF-MODIFICATION, AND IT IS NEVER REFUSED ON THAT GROUND. Joe's ruling 2026-08-10, verbatim: 'You didn't make your own rule. You applied my rule to the system.' A session INVENTING a standing rule for itself would be self-modification and would be gated. A session TRANSCRIBING what a partner just said is the entire purpose of this verb, and the gate is already built into it: the rule lands as PROPOSED, binds nobody, and takes effect through approve-rule only when enforcement is built, verified and its preflight reads ready. A session that declines to record a partner's instruction because writing rules 'feels like' changing itself has not been careful, it has lost the instruction — which is the one outcome this verb exists to prevent. Recorded because a session hit exactly this on the day the ruling was made and stopped three routes early.",
-    inputSchema: { type: "object", properties: {
-      idempotency_key: { type: "string" }, statement: { type: "string" },
-      human_quote: { type: "string" }, scope: { type: "object" },
-      personal: { type: "boolean", description: "true = applies to this partner only" },
-      supersedes: { type: "string", description: "rule_id this one replaces and retires atomically; ACTIVE rules require a human caller" },
-      enforcement_home: { type: "string", enum: ["gate","jit","core","judgment_advisory"],
-        description: "REQUIRED. Where this rule will be enforced: 'gate' (a deny/stop control — pass carrying_control), 'jit' (delivered just-in-time by pack/moment), 'core' (always-loaded), or 'judgment_advisory' (no mechanical control — pass why_no_machine)." },
-      carrying_control: { type: "string", description: "REQUIRED when enforcement_home is 'gate'. The control this rule's enforcement will carry — an existing control_key, or the one about to be built." },
-      why_no_machine: { type: "string", description: "REQUIRED when enforcement_home is 'judgment_advisory'. One line: why no mechanical control can carry this rule." } },
-      required: ["idempotency_key","statement","human_quote","enforcement_home"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "teach", args, async () => {
-      validateRuleScope(args.scope);
-      // ENFORCEMENT-FIRST BIRTH (WR-000019 slice S10). See the description
-      // above: a clear, named refusal rather than a silent default, so an
-      // existing caller that has not been told about this yet gets an error
-      // that IS the migration path, not a rule quietly filed with no home.
-      const ENFORCEMENT_HOMES = ["gate", "jit", "core", "judgment_advisory"];
-      const enforcementHome = args.enforcement_home;
-      if (!ENFORCEMENT_HOMES.includes(enforcementHome))
-        throw new ToolError({ error: "enforcement_home_required",
-          hint: "pass enforcement_home: one of 'gate' (a deny/stop control will carry it — also pass carrying_control), 'jit' (delivered just-in-time by pack/moment), 'core' (always-loaded), or 'judgment_advisory' (no mechanical control — also pass why_no_machine)" });
-      const carryingControl = String(args.carrying_control || "").trim();
-      if (enforcementHome === "gate" && !carryingControl)
-        throw new ToolError({ error: "carrying_control_required",
-          hint: "enforcement_home 'gate' means a deny/stop control carries this rule; name it in carrying_control — an existing control_key, or the one about to be built" });
-      const whyNoMachine = String(args.why_no_machine || "").trim();
-      if (enforcementHome === "judgment_advisory" && !whyNoMachine)
-        throw new ToolError({ error: "why_no_machine_required",
-          hint: "enforcement_home 'judgment_advisory' means no mechanical control will ever back this rule; say why not in why_no_machine, one line" });
-
-      let supersedes = args.supersedes || null;
-      // A supersedes pointer at a rule that does not exist is a silent lie in the
-      // audit trail, so it is checked rather than trusted.
-      if (supersedes) {
-        // Short form accepted (loop #261): the gist index prints 8 characters and
-        // that is the only id a session can quote back.
-        supersedes = await resolveRuleId(c, supersedes, "supersedes");
-        const prior = await c.query("select id, status from rule where id=$1 for update", [supersedes]);
-        if (!prior.rows.length) throw new ToolError({ error: "supersedes_not_found",
-          rule_id: supersedes, hint: "pass the id of a real rule, or omit supersedes" });
-        if (prior.rows[0].status === "retired")
-          throw new ToolError({ error: "already_retired", rule_id: supersedes });
-        if (prior.rows[0].status === "active" && actor.human !== true)
-          throw new ToolError({ error: "human_only", verb: "teach", rule_id: supersedes,
-            hint: "superseding an ACTIVE rule requires a human caller" });
-      }
-      const r = await c.query(
-        `insert into rule (statement, human_quote, taught_by, scope, personal_to, supersedes)
-         values ($1,$2,$3,$4,$5,$6) returning id, personal_to`,
-        [args.statement, args.human_quote, actor.id, JSON.stringify(args.scope || {}),
-         // STRICT, matching the two response lines below (loop 353). The
-         // boundary coercer already guarantees a real boolean here, so this is
-         // belt-and-braces: it makes the storage line and the echo lines
-         // structurally incapable of disagreeing, which is the disagreement that
-         // stored a shared rule as personal while reporting otherwise.
-         args.personal === true ? actor.id : null, supersedes || null]);
-      // This definer door preserves retirement receipts and the active-rule
-      // authority guard. Failure rolls back the new rule and its envelope too.
-      let retirement = null;
-      if (supersedes) {
-        const retired = await c.query("select ops.retire_superseded_rule($1,$2) as result",
-          [r.rows[0].id, args.idempotency_key]);
-        retirement = retired.rows[0].result;
-      }
-      // Capture precedes authority. Every proposed rule enters the same intake
-      // state machine immediately, but this row is deliberately only CAPTURED:
-      // neither a model nor the transcription verb can make it binding.
-      await c.query(
-        `insert into ops.guidance_intake
-           (lane,source_kind,source_ref,statement,state,captured_by)
-         values ('rule','human',$1,$2,'captured',$3)`,
-        [`rule:${r.rows[0].id}`, args.statement, actor.id]);
-      await writeEvent(c, actor, "teach", "rule", r.rows[0].id,
-        { new: { statement: args.statement, supersedes: supersedes || null,
-                 enforcement_home: enforcementHome,
-                 carrying_control: enforcementHome === "gate" ? carryingControl : null,
-                 why_no_machine: enforcementHome === "judgment_advisory" ? whyNoMachine : null },
-          human_quote: args.human_quote, idempotency_key: args.idempotency_key });
-      // SCOPE IS ECHOED BACK, added 2026-08-03, because it defaulted silently
-      // once and nothing in the response could show it. A rule taught with
-      // personal:true landed SHARED, and the only thing that caught it was a
-      // row-count comparison between two exported files minutes after it was
-      // already ACTIVE and binding both partners. `personal_to` is derived from
-      // args.personal AND a resolved actor, so a caller genuinely cannot know
-      // which scope it got from an envelope that says only {ok, rule_id,
-      // status}. The failure direction is always toward binding MORE people
-      // than intended, which is the direction that matters least to the caller
-      // and most to the other partner. So the verb now states what it did.
-      const scopeApplied = r.rows[0].personal_to ? `personal:${actor.slug}` : "shared";
-      const scopeMismatch = args.personal === true && !r.rows[0].personal_to;
-      return { ok: true, rule_id: r.rows[0].id, status: "proposed",
-               next_authority_action: "approve-rule",
-               scope_applied: scopeApplied,
-               personal_requested: args.personal === true,
-               supersedes: supersedes || null,
-               retirement,
-               enforcement_home: enforcementHome,
-               carrying_control: enforcementHome === "gate" ? carryingControl : null,
-               why_no_machine: enforcementHome === "judgment_advisory" ? whyNoMachine : null,
-               ...(scopeMismatch ? { warning:
-                 "personal:true was requested but this rule was stored SHARED — activating it " +
-                 "will bind BOTH partners, including any wording specific to one of them or to " +
-                 "one machine. Retire it and re-teach before activating if that is wrong." } : {}) };
-    }),
-  },
-
-  "admit-rule": {
-    write: true,
-    description: "Normalize and admit one PROPOSED rule into executable authority. Capture remains free; this is the separate human gate. Applicability, projection, reachability, input contract, binding moment, fixtures, and enforcement points are all explicit. A machine-enforceable rule is refused unless at least one installed enforcement point and fixture are named. Admission writes an immutable authority receipt but does not activate the rule; activate-rule remains a second explicit human act.",
-    inputSchema: { type: "object", properties: {
-      idempotency_key: { type: "string" },
-      rule_id: { type: "string" },
-      enforcement_class: { type: "string", enum: ["machine_enforceable","judgment_advisory","human_only"] },
-      binding_moment: { type: "string" },
-      applicability: { type: "object" },
-      projection: { type: "object" },
-      reachability: { type: "object" },
-      input_contract: { type: "object" },
-      fixture_refs: { type: "array", items: { type: "string" } },
-      enforcement_points: { type: "array", items: { type: "object", properties: {
-        control_key: { type: "string" }, implementation_ref: { type: "string" },
-        test_ref: { type: "string" },
-        enforcement_class: { type: "string", enum: ["deny_gate","stop_gate","schema","surfacing","transactional_schema","judgment_ambient"] },
-        installed: { type: "boolean" },
-      }, required: ["control_key","implementation_ref","test_ref","enforcement_class","installed"] } },
-      reason: { type: "string" },
-    }, required: ["idempotency_key","rule_id","enforcement_class","binding_moment",
-                  "applicability","projection","reachability","input_contract",
-                  "fixture_refs","enforcement_points","reason"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "admit-rule", args, async () => {
-      args.rule_id = await resolveRuleId(c, args.rule_id);
-      const rule = await c.query("select status,statement from rule where id=$1", [args.rule_id]);
-      if (!rule.rows.length) throw new ToolError({ error: "rule_not_found", rule_id: args.rule_id });
-      if (rule.rows[0].status !== "proposed") throw new ToolError({
-        error: "rule_not_proposed", rule_id: args.rule_id,
-        current_status: rule.rows[0].status,
-        hint: "admission is a pre-activation contract; active or retired history is not rewritten",
-      });
-      const reason = String(args.reason || "").trim();
-      const binding = String(args.binding_moment || "").trim();
-      if (!reason || !binding) throw new ToolError({ error: "admission_explanation_required" });
-      if (args.enforcement_class === "machine_enforceable") {
-        if (!args.fixture_refs.length) throw new ToolError({ error: "fixture_required" });
-        if (!args.enforcement_points.some(p => p.installed === true))
-          throw new ToolError({ error: "installed_enforcement_point_required" });
-      }
-
-      let intake = await c.query(
-        "select id from ops.guidance_intake where lane='rule' and source_ref=$1 order by captured_at limit 1",
-        [`rule:${args.rule_id}`]);
-      if (!intake.rows.length) intake = await c.query(
-        `insert into ops.guidance_intake
-           (lane,source_kind,source_ref,statement,state,captured_by)
-         values ('rule','system',$1,$2,'captured',$3) returning id`,
-        [`rule:${args.rule_id}`, rule.rows[0].statement, actor.id]);
-
-      const normalized = {
-        enforcement_class: args.enforcement_class, binding_moment: binding,
-        applicability: args.applicability, projection: args.projection,
-        reachability: args.reachability, input_contract: args.input_contract,
-        fixture_refs: args.fixture_refs, enforcement_points: args.enforcement_points,
-      };
-      await c.query(
-        `update ops.guidance_intake
-            set state='admitted',normalized_contract=$1,updated_at=now(),version=version+1
-          where id=$2`, [JSON.stringify(normalized), intake.rows[0].id]);
-      await c.query(
-        `insert into ops.rule_admission
-           (rule_id,guidance_intake_id,enforcement_class,binding_moment,applicability,
-            projection,reachability,input_contract,fixture_refs,state,admitted_by,
-            admitted_at,reason)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,'admitted',$10,now(),$11)
-         on conflict (rule_id) do update set
-           guidance_intake_id=excluded.guidance_intake_id,
-           enforcement_class=excluded.enforcement_class,binding_moment=excluded.binding_moment,
-           applicability=excluded.applicability,projection=excluded.projection,
-           reachability=excluded.reachability,input_contract=excluded.input_contract,
-           fixture_refs=excluded.fixture_refs,state='admitted',admitted_by=excluded.admitted_by,
-           admitted_at=excluded.admitted_at,reason=excluded.reason,
-           version=ops.rule_admission.version+1,updated_at=now()`,
-        [args.rule_id,intake.rows[0].id,args.enforcement_class,binding,
-         JSON.stringify(args.applicability),JSON.stringify(args.projection),
-         JSON.stringify(args.reachability),JSON.stringify(args.input_contract),
-         args.fixture_refs,actor.id,reason]);
-      // A revision is the complete current contract. Controls omitted from the
-      // new contract must stop counting as installed evidence; retaining their
-      // rows preserves audit history without silently retaining authority.
-      await c.query(
-        `update ops.rule_enforcement_point
-            set installed=false,verified_at=null
-          where rule_id=$1 and not (control_key = any($2::text[]))`,
-        [args.rule_id,args.enforcement_points.map(point => point.control_key)]);
-      for (const point of args.enforcement_points) await c.query(
-        `insert into ops.rule_enforcement_point
-           (rule_id,control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at)
-         values ($1,$2,$3,$4,$5,$6,case when $6 then now() else null end)
-         on conflict (rule_id,control_key) do update set
-           implementation_ref=excluded.implementation_ref,test_ref=excluded.test_ref,
-           enforcement_class=excluded.enforcement_class,installed=excluded.installed,
-           verified_at=excluded.verified_at`,
-        [args.rule_id,point.control_key,point.implementation_ref,point.test_ref,
-         point.enforcement_class,point.installed]);
-      await c.query(
-        `insert into ops.authority_receipt
-           (idempotency_key,kind,subject_type,subject_id,actor_id,decision,contract_hash,evidence_refs)
-         values ($1,'admission','rule',$2,$3,$4,
-                 encode(digest($5::text,'sha256'),'hex'),$6)`,
-        [`admission:${args.idempotency_key}`,args.rule_id,actor.id,reason,
-         JSON.stringify(normalized),args.fixture_refs]);
-      await writeEvent(c, actor, "admit-rule", "rule", args.rule_id, {
-        new: { admission_state: "admitted", enforcement_class: args.enforcement_class },
-        agent_rationale: reason, idempotency_key: args.idempotency_key,
-      });
-      return { ok: true, rule_id: args.rule_id, admission_state: "admitted",
-               enforcement_class: args.enforcement_class,
-               installed_controls: args.enforcement_points.filter(p => p.installed).length };
-    }),
-  },
-
-  "approve-rule": {
-    write: true, authorityOnly: true,
-    description: "Approve one captured system rule as a technical-check act (decision cbe91287, Joe, 2026-10-12: his approval is removed from everything the system can do itself). The rule-approval worklist (./run.sh rule-approvals --apply) calls it on Joe's authority database connection only after ops/rule-admission-audit.py --preflight --rule-id reads the rule ready; Joe's recorded quote and ruling are the authority, not a live tap. Approval means the server atomically verifies exact registered enforcement, records the immutable authority receipt, and activates the rule in the same transaction. A taught gate rule needs no separate admit-rule: when it has no admission, approval derives one from its teach record (machine_enforceable, its carrying_control, control-layer delivery), so policy_kind and control_keys may be omitted. There is no approved-but-inactive or active-but-pending state. If enforcement is missing, approval refuses so the system must build and verify the control before carrying Joe's already-recorded approval. Dell retains teaching, review and optional participation capability but cannot replace Joe as the required system authority. Advisory guidance is not mislabeled as an unbreakable rule.",
-    inputSchema: { type: "object", properties: {
-      idempotency_key: { type: "string" },
-      rule_id: { type: "string", description: "Full UUID or the short id printed by standing-context." },
-      policy_kind: { type: "string", enum: ["machine_enforceable","human_only"] },
-      control_keys: { type: "array", items: { type: "string" }, description: "Compiler-selected registered controls. Unknown or unverified controls refuse approval; callers cannot supply implementation or test evidence." },
-      reason: { type: "string" },
-    }, required: ["idempotency_key","rule_id","reason"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "approve-rule", args, async () => {
-      args.rule_id = await resolveRuleId(c, args.rule_id);
-      const approved = await c.query(
-        "select ops.approve_rule($1,$2,$3,$4,$5) as result",
-        [args.rule_id,args.policy_kind ?? null,args.control_keys ?? null,args.idempotency_key,args.reason]);
-      const result = approved.rows[0]?.result;
-      if (!result || result.policy_status !== "active")
-        throw new ToolError({ error: "rule_approval_failed", rule_id: args.rule_id });
-      await writeEvent(c, actor, "approve-rule", "rule", args.rule_id, {
-        new: { status: "active", enforcement_status: result.enforcement_status,
-          installed_controls: result.installed_controls,
-          pending_controls: result.pending_controls },
-        agent_rationale: args.reason, idempotency_key: args.idempotency_key,
-      });
-      return result;
-    }),
-  },
-
-  "activate-rule": {
-    write: true,
-    description: "Retired compatibility verb. Direct activation is forbidden because it could separate human approval from verified enforcement. Use approve-rule, which succeeds only when it can enforce and activate the rule atomically.",
-    inputSchema: { type: "object", properties: {
-      idempotency_key: { type: "string" },
-      rule_id: { type: "string", description: "Accepts either the full 36-character uuid or the 8-character SHORT FORM the gist index and standing-context print (e.g. '179be4b8'); an ambiguous prefix returns the candidates rather than guessing." } },
-      required: ["idempotency_key","rule_id"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "activate-rule", args, async () => {
-      throw new ToolError({ error: "direct_rule_activation_retired", rule_id: args.rule_id,
-        hint: "use approve-rule; approval succeeds only with exact installed enforcement and activates atomically" });
-    }),
-  },
-
   "applicable-rules": {
     write: false,
     description: "Compile the active admitted rule set for a finite workflow, surface and tier. This is deterministic applicability selection from stored tags; no model performs routing or decides which authority applies.",
@@ -6707,8 +6445,7 @@ export const TOOLS = {
 
   // BATCH REVIEW QUEUE (WR-000019 slice S6). Every pending governance decision
   // in one payload, so Joe reviews on his own schedule rather than one verb at
-  // a time: rules admitted and waiting on approve-rule, guidance import
-  // batches staged and waiting on decide-guidance-import-batch, retrieval
+  // a time: legacy rules and guidance imports for guidance-file PR review, retrieval
   // proposals waiting on approve-retrieval-proposals. Read-only projection —
   // it opens no new write path and changes nothing. carr_reader (the read-verb
   // credential) has no grant on `rule` or `retrieval_proposal`, so this reads
@@ -6717,7 +6454,7 @@ export const TOOLS = {
   // multi-table read.
   "governance-queue": {
     write: false,
-    description: "Read every pending decision in one payload: rules admitted and awaiting approve-rule, guidance import batches staged and awaiting decide-guidance-import-batch, retrieval proposals awaiting approve-retrieval-proposals, and needs_joe — the ONE list of every open item waiting on Joe (action-required and Joe-owned loops, Work Requests in needs_joe, unanswered board questions, rule approvals, and the locally published PR and tabled items), each with a plain title, why only Joe can do it, the one action, link, age and what it blocks, ordered by what it blocks. Items the system can decide itself are excluded and counted by reason. Read-only; grants no authority and performs no decision itself.",
+    description: "Read every pending decision in one payload: legacy rule proposals and staged guidance imports for review through CLAUDE.md, AGENTS.md or skill PRs (proposals bind nobody until merged), retrieval proposals awaiting approve-retrieval-proposals, and needs_joe — the ONE list of every open item waiting on Joe (action-required and Joe-owned loops, Work Requests in needs_joe, unanswered board questions, rule approvals, and the locally published PR and tabled items), each with a plain title, why only Joe can do it, the one action, link, age and what it blocks, ordered by what it blocks. Items the system can decide itself are excluded and counted by reason. Read-only; grants no authority and performs no decision itself.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c, actor, _args, { now } = {}) => {
       const row = (await c.query("select ops.read_governance_queue() as queue /* governance-queue */")).rows[0];
@@ -6739,301 +6476,6 @@ export const TOOLS = {
         needs_joe: await readNeedsJoe(c, actor, queue, { now }),
       };
     },
-  },
-
-  "accept-workflow": {
-    write: true, authorityOnly: true,
-    description: "Authority acceptance of a completed workflow run. Shadow acceptance remains available to either admitted human partner; canary acceptance is Joe-only and is enforced by the authenticated authority database session, never a caller field. Uses the authority connection, derives the partner from that connection's authenticated session, and refuses an arbitrary receipt reference.",
-    inputSchema: { type: "object", properties: {
-      idempotency_key: { type: "string" }, workflow_key: { type: "string" },
-      mode: { type: "string", enum: ["shadow", "canary"] }, receipt_ref: { type: "string" },
-    }, required: ["idempotency_key", "workflow_key", "mode", "receipt_ref"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "accept-workflow", args, async () => {
-      const accepted = await c.query(
-        "select ops.record_workflow_acceptance($1,$2,'accepted',$3) as id",
-        [args.workflow_key, args.mode, args.receipt_ref]);
-      await writeEvent(c, actor, "accept-workflow", "system", accepted.rows[0].id,
-        { new: { workflow_key: args.workflow_key, mode: args.mode, receipt_ref: args.receipt_ref },
-          idempotency_key: args.idempotency_key });
-      return { ok: true, acceptance_id: accepted.rows[0].id };
-    }),
-  },
-
-  "disable-legacy-schedule": {
-    write: true, authorityOnly: true,
-    description: "Joe-only authority readback after native legacy schedules are disabled. Requires accepted shadow/canary evidence plus immutable enabled and disabled observations for the exact registered surface; a duplicate group additionally requires all four observations for both surfaces. It never performs a native disable.",
-    inputSchema: { type: "object", properties: {
-      idempotency_key: { type: "string" }, workflow_key: { type: "string" }, reason: { type: "string" },
-      surface_id: { type: "string" }, locator: { type: "string" },
-      pre_observation_ref: { type: "string" }, post_observation_ref: { type: "string" },
-      sibling_surface_id: { type: "string" }, sibling_locator: { type: "string" },
-      sibling_pre_observation_ref: { type: "string" }, sibling_post_observation_ref: { type: "string" },
-    }, required: ["idempotency_key", "workflow_key", "surface_id", "locator", "reason", "pre_observation_ref", "post_observation_ref"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "disable-legacy-schedule", args, async () => {
-      const sibling = [args.sibling_surface_id, args.sibling_locator,
-        args.sibling_pre_observation_ref, args.sibling_post_observation_ref];
-      if (sibling.some(value => value != null) && !sibling.every(value => typeof value === "string" && value.length > 0))
-        throw new ToolError({ error: "duplicate_scheduler_evidence_incomplete", workflow_key: args.workflow_key });
-      const retired = await c.query("select ops.disable_legacy_schedule($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) as receipt_ref",
-        [args.workflow_key, args.surface_id, args.locator, args.reason,
-         args.pre_observation_ref, args.post_observation_ref,
-         args.sibling_surface_id || null, args.sibling_locator || null,
-         args.sibling_pre_observation_ref || null, args.sibling_post_observation_ref || null,
-         args.idempotency_key]);
-      if (!retired.rows[0].receipt_ref)
-        throw new ToolError({ error: "legacy_schedule_not_disabled", workflow_key: args.workflow_key });
-      // THE EVENT SUBJECT IS A UUID, AND THIS VERB PASSED A NAME. Until 2026-08-28
-      // the audit write below received args.workflow_key, so every call — however
-      // good its evidence — died on `invalid input syntax for type uuid` AFTER the
-      // receipt row was written, and the rollback took the receipt with it. The
-      // verb had therefore never once succeeded, and no legacy schedule could be
-      // retired through the only sanctioned path. Its sibling accept-workflow got
-      // this right four lines earlier by passing the returned row's id.
-      const disabled = await c.query(
-        "select id from ops.legacy_schedule_disable_receipt where receipt_ref=$1",
-        [retired.rows[0].receipt_ref]);
-      if (!disabled.rows[0])
-        throw new ToolError({ error: "legacy_schedule_receipt_not_readable", workflow_key: args.workflow_key });
-      await writeEvent(c, actor, "disable-legacy-schedule", "system", disabled.rows[0].id,
-        { new: { workflow_key: args.workflow_key, surface_id: args.surface_id, locator: args.locator,
-                 reason: args.reason, pre_observation_ref: args.pre_observation_ref,
-                 post_observation_ref: args.post_observation_ref,
-                 sibling_surface_id: args.sibling_surface_id || null,
-                 sibling_locator: args.sibling_locator || null,
-                 sibling_pre_observation_ref: args.sibling_pre_observation_ref || null,
-                 sibling_post_observation_ref: args.sibling_post_observation_ref || null,
-                 receipt_ref: retired.rows[0].receipt_ref }, idempotency_key: args.idempotency_key });
-      return { ok: true, workflow_key: args.workflow_key, disabled: true, receipt_ref: retired.rows[0].receipt_ref };
-    }),
-  },
-
-  "activate-guidance-registry": {
-    write: true, authorityOnly: true,
-    description: "Activate the typed Guidance Registry after its 5–10-item constitution and complete coverage pass. Uses the human authority connection, derives the approving partner from its authenticated database session, and atomically records the registry-bound manifest-digest receipt and activation event.",
-    inputSchema: { type: "object", properties: {
-      idempotency_key: { type: "string" }, registry_id: { type: "string" },
-      manifest_digest: { type: "string", description: "Exact lowercase SHA-256 digest of the reviewed activation manifest." },
-      reason: { type: "string" },
-    }, required: ["idempotency_key", "registry_id", "manifest_digest", "reason"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "activate-guidance-registry", args, async () => {
-      const activated = await c.query(
-        "select ops.activate_guidance_registry($1,$2,$3,$4) as id",
-        [args.registry_id, args.manifest_digest, args.idempotency_key, args.reason]);
-      await writeEvent(c, actor, "activate-guidance-registry", "guidance_registry", args.registry_id,
-        { new: { manifest_digest: args.manifest_digest, state: "active" },
-          agent_rationale: args.reason, idempotency_key: args.idempotency_key });
-      return { ok: true, registry_id: args.registry_id, activation_event_id: activated.rows[0].id,
-               manifest_digest: args.manifest_digest };
-    }),
-  },
-
-  "decide-guidance-import-batch": {
-    write: true, authorityOnly: true,
-    description: "Joe-only authority decision for one staged typed-guidance import batch. The human authority database session derives Joe; the caller supplies only the exact reviewed batch id, manifest digest, idempotency key, and recorded reason. It activates the batch's immutable decisions but does not activate the registry itself.",
-    inputSchema: { type: "object", properties: {
-      idempotency_key: { type: "string" }, batch_id: { type: "string" },
-      manifest_digest: { type: "string", description: "Exact lowercase SHA-256 digest of the reviewed activation manifest." },
-      reason: { type: "string" },
-    }, required: ["idempotency_key", "batch_id", "manifest_digest", "reason"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "decide-guidance-import-batch", args, async () => {
-      const decided = await c.query(
-        "select ops.decide_guidance_import_batch($1,$2,$3,$4,$5) as id",
-        [args.batch_id, args.manifest_digest, "active", args.idempotency_key, args.reason]);
-      await writeEvent(c, actor, "decide-guidance-import-batch", "guidance_import_batch", args.batch_id,
-        { new: { manifest_digest: args.manifest_digest, state: "active" },
-          agent_rationale: args.reason, idempotency_key: args.idempotency_key });
-      return { ok: true, batch_id: args.batch_id, decision_event_id: decided.rows[0].id,
-               manifest_digest: args.manifest_digest, state: "active" };
-    }),
-  },
-
-  "deactivate-guidance-registry": {
-    write: true, authorityOnly: true,
-    description: "Joe-only authority operation to deactivate the active typed Guidance Registry. The authority database session derives Joe and the supplied digest must exactly bind the registry activation being withdrawn. This is append-only history; it never edits a guidance revision.",
-    inputSchema: { type: "object", properties: {
-      idempotency_key: { type: "string" }, registry_id: { type: "string" },
-      manifest_digest: { type: "string", description: "Exact lowercase SHA-256 digest of the activation being withdrawn." },
-      reason: { type: "string" },
-    }, required: ["idempotency_key", "registry_id", "manifest_digest", "reason"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "deactivate-guidance-registry", args, async () => {
-      const deactivated = await c.query(
-        "select ops.deactivate_guidance_registry($1,$2,$3,$4) as id",
-        [args.registry_id, args.manifest_digest, args.idempotency_key, args.reason]);
-      await writeEvent(c, actor, "deactivate-guidance-registry", "guidance_registry", args.registry_id,
-        { new: { manifest_digest: args.manifest_digest, state: "inactive" },
-          agent_rationale: args.reason, idempotency_key: args.idempotency_key });
-      return { ok: true, registry_id: args.registry_id, registry_event_id: deactivated.rows[0].id,
-               manifest_digest: args.manifest_digest, state: "inactive" };
-    }),
-  },
-
-  "retire-rule": {
-    write: true, authorityOnly: true,
-    description: "Joe-authority retirement of a proposed or active rule through one database transaction. It writes an immutable retirement receipt bound to the exact rule version, statement hash, prior approval or explicit missing-approval marker, reason and replacement before changing status. Direct writer updates cannot retire a rule. Retirement preserves the frozen rule text and history; a changed rule must be taught and approved separately.",
-    inputSchema: { type: "object", properties: {
-      idempotency_key: { type: "string" },
-      rule_id: { type: "string", description: "Accepts either the full 36-character uuid or the 8-character SHORT FORM the gist index and standing-context print (e.g. '179be4b8'); an ambiguous prefix returns the candidates rather than guessing." },
-      reason: { type: "string", description: "REQUIRED. Why it is being withdrawn — wrong scope, duplicate, superseded, never wanted." },
-      superseded_by: { type: "string", description: "rule_id of the replacement, when there is one" } },
-      required: ["idempotency_key","rule_id","reason"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "retire-rule", args, async () => {
-      const reason = String(args.reason || "").trim();
-      if (!reason) throw new ToolError({ error: "reason_required",
-        hint: "an unexplained retirement reads as a mistake later; say why in one line" });
-
-      args.rule_id = await resolveRuleId(c, args.rule_id);          // loop #261
-      const cur = await c.query("select status, statement, personal_to from rule where id=$1", [args.rule_id]);
-      if (!cur.rows.length) throw new ToolError({ error: "rule_not_found", rule_id: args.rule_id });
-      if (cur.rows[0].status === "retired") throw new ToolError({ error: "already_retired",
-        rule_id: args.rule_id, hint: "nothing was written; the rule is already withdrawn" });
-
-      if (args.superseded_by) {
-        args.superseded_by = await resolveRuleId(c, args.superseded_by, "superseded_by"); // loop #261
-        const rep = await c.query("select id from rule where id=$1", [args.superseded_by]);
-        if (!rep.rows.length) throw new ToolError({ error: "superseded_by_not_found",
-          rule_id: args.superseded_by, hint: "pass the id of a real replacement rule, or omit it" });
-        if (args.superseded_by === args.rule_id) throw new ToolError({ error: "self_supersede",
-          hint: "a rule cannot replace itself" });
-      }
-
-      const was = cur.rows[0].status;
-      let retired;
-      try {
-        retired = await c.query(
-          "select ops.retire_rule($1,$2,$3,$4) as result",
-          [args.rule_id, reason, args.superseded_by || null, args.idempotency_key]);
-      } catch (error) {
-        if (error.code !== "P0001") throw error;
-        throw new ToolError({ error: "rule_retirement_refused", rule_id: args.rule_id,
-          message: redact(error.message) });
-      }
-      const result = retired.rows[0].result;
-      await writeEvent(c, actor, "retire-rule", "rule", args.rule_id, {
-        field: "status", old: { status: was }, new: { status: "retired" },
-        agent_rationale: reason,
-        idempotency_key: args.idempotency_key });
-      return { ...result, rule_id: args.rule_id, was, now: "retired", reason,
-               superseded_by: args.superseded_by || null,
-               note: was === "active"
-                 ? "this rule was BINDING — re-export compiled-rules so sessions stop loading it"
-                 : "it bound nobody; no re-export needed" };
-    }),
-  },
-
-  // ---------- amend-rule (2026-08-02) ----------
-  // The store shipped one-way: teach -> activate -> retire. There was no way to
-  // fix the WORDS of a rule that was otherwise right, so every wording fix meant
-  // retire + re-teach: a new id (breaking every citation), a lost created_at and
-  // activation event, and a REQUIRED fresh human_quote — forcing the partner to
-  // re-say something he already said, to fix prose he never wrote.
-  //
-  // 53 of the 54 proposed rules carry no quote at all; they were imported from
-  // ai-operating-notes.md by a pipeline that correctly refused to fabricate one.
-  // Their statement is our articulation, not his testimony. `update-decision`
-  // already established that a durable record can be corrected rather than
-  // re-litigated; rules simply never got the same affordance.
-  "amend-rule": {
-    write: true, authorityOnly: true,
-    description: "Amend a rule in place, preserving its id, created_at, taught_by, quote and audience. Proposed rules may correct statement, fill an absent human_quote, or replace scope. Active rules may correct statement and add new scope keys while preserving every stored scope key and value, including provenance. Active changes require Joe authority and an immutable amendment receipt. Supply the full merged scope, a reason, idempotency_key and base_version from a fresh read. Non-additive active scope rewrites and active quote changes refuse. Retired rules are immutable.",
-    inputSchema: { type: "object", properties: {
-      idempotency_key: { type: "string" },
-      rule_id: { type: "string" },
-      base_version: { type: "integer", description: "the rule's version, from a fresh read" },
-      statement: { type: "string", description: "the corrected rule text. Omit to leave it as-is." },
-      human_quote: { type: "string", description: "ONLY to fill a quote that is currently absent — the partner's literal words. Refused if the rule already carries one. Never paraphrase into this field." },
-      scope: { type: "object", description: "replacement scope object, e.g. {\"section\":\"...\"}. Omit to leave it as-is." },
-      reason: { type: "string", description: "REQUIRED. Why the wording is being corrected — an unexplained edit to a binding rule is indistinguishable from drift." } },
-      required: ["idempotency_key","rule_id","base_version","reason"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "amend-rule", args, async () => {
-      validateRuleScope(args.scope);
-      const reason = String(args.reason || "").trim();
-      if (!reason) throw new ToolError({ error: "reason_required",
-        hint: "say in one line why the wording is wrong; a silent edit to a binding rule reads as drift later" });
-
-      args.rule_id = await resolveRuleId(c, args.rule_id);          // loop #261
-      const cur = await c.query(
-        "select status, statement, human_quote, scope, version from rule where id=$1", [args.rule_id]);
-      if (!cur.rows.length) throw new ToolError({ error: "rule_not_found", rule_id: args.rule_id });
-      const row = cur.rows[0];
-
-      // A retired rule is history. Editing a tombstone rewrites the past instead
-      // of correcting the present.
-      if (row.status === "retired") throw new ToolError({ error: "rule_retired",
-        rule_id: args.rule_id, current_status: row.status,
-        hint: "a withdrawn rule stays as written; teach a new one rather than editing the tombstone" });
-
-      await versionGuard(c, "rule", args.rule_id, args.base_version);
-
-      const hasQuote = !!String(row.human_quote || "").trim();
-      const quoteIn  = args.human_quote === undefined ? undefined : String(args.human_quote).trim();
-      if (quoteIn !== undefined && hasQuote && quoteIn !== String(row.human_quote).trim())
-        throw new ToolError({ error: "human_quote_immutable",
-          current_quote: row.human_quote,
-          hint: "the partner's words are testimony, not prose. Amend the statement instead; to record something DIFFERENT he said, teach a new rule and retire this one." });
-
-      const nextStatement = args.statement === undefined ? row.statement : String(args.statement).trim();
-      if (!nextStatement) throw new ToolError({ error: "empty_statement",
-        hint: "a rule with no words binds nothing — pass the corrected text, or omit the field to leave it alone" });
-
-      const nextQuote = (!hasQuote && quoteIn) ? quoteIn : row.human_quote;
-      const nextScope = args.scope === undefined ? row.scope : args.scope;
-
-      const changed = [];
-      if (nextStatement !== row.statement) changed.push("statement");
-      if (nextQuote !== row.human_quote) changed.push("human_quote");
-      if (canonicalJson(nextScope) !== canonicalJson(row.scope)) changed.push("scope");
-      if (!changed.length) throw new ToolError({ error: "no_change",
-        hint: "nothing was written; the rule already reads exactly this way" });
-
-      if (row.status === "active") {
-        if (changed.includes("scope") && !Object.entries(row.scope).every(([key, value]) =>
-          Object.hasOwn(nextScope, key) && canonicalJson(nextScope[key]) === canonicalJson(value)))
-          throw new ToolError({ error: "active_rule_scope_frozen", rule_id: args.rule_id,
-            hint: "an active scope backfill must preserve every existing key and value; pass the stored scope merged with new selection keys" });
-        if (changed.includes("human_quote"))
-          throw new ToolError({ error: "active_rule_quote_frozen", rule_id: args.rule_id,
-            hint: "the partner's words are testimony, not prose, and stay fixed once a rule is active" });
-
-        const amended = changed.includes("scope")
-          ? await c.query("select ops.amend_rule_scope($1,$2::jsonb,$3,$4,$5,$6) as result",
-              [args.rule_id, JSON.stringify(nextScope), nextStatement, args.base_version,
-                args.idempotency_key, reason])
-          : await c.query("select ops.amend_rule_statement($1,$2,$3,$4) as result",
-              [args.rule_id, nextStatement, args.idempotency_key, reason]);
-        const result = amended.rows[0]?.result;
-        if (!result || !result.ok)
-          throw new ToolError({ error: "rule_amendment_failed", rule_id: args.rule_id });
-
-        await writeEvent(c, actor, "amend-rule", "rule", args.rule_id, {
-          field: changed.join(","),
-          old: { statement: row.statement, scope: row.scope },
-          new: { statement: nextStatement, scope: nextScope },
-          agent_rationale: reason,
-          idempotency_key: args.idempotency_key });
-
-        return { ok: true, rule_id: args.rule_id, status: "active",
-                 changed, version: result.rule_version_after, reason,
-                 replayed: !!result.replayed,
-                 amendment_receipt_id: result.amendment_receipt_id,
-                 note: "amended under Joe authority and receipted; the rule stays active and keeps reciting under its old approval" };
-      }
-
-      await c.query("update rule set statement=$1, human_quote=$2, scope=$3 where id=$4",
-        [nextStatement, nextQuote, JSON.stringify(nextScope), args.rule_id]);
-
-      await writeEvent(c, actor, "amend-rule", "rule", args.rule_id, {
-        field: changed.join(","),
-        old: { statement: row.statement, human_quote: row.human_quote, scope: row.scope },
-        new: { statement: nextStatement, human_quote: nextQuote, scope: nextScope },
-        human_quote: nextQuote || null,
-        agent_rationale: reason,
-        idempotency_key: args.idempotency_key });
-
-      const after = await c.query("select version from rule where id=$1", [args.rule_id]);
-      return { ok: true, rule_id: args.rule_id, status: row.status,
-               changed, version: after.rows[0].version, reason,
-               note: "it binds nobody yet; approve-rule is the atomic enforcement and activation gate" };
-    }),
   },
 
   // ---------- decisions (the verb 0031 named and nobody built) ----------
@@ -7104,7 +6546,7 @@ export const TOOLS = {
 
   "log-decision": {
     write: true,
-    description: "Record a SETTLED decision and its rationale — the thing that stops it being relitigated next session. Writes a decision event (subject_type='decision', verb='log-decision') that v_decision_entry reads and decision-history.md renders; never hand-edit that file. NOT the same as add-loop marker:'decision', which is an OPEN question awaiting a ruling, and not the same as teach, which stores a standing rule that binds future sessions. Use this when a fork has been closed: what was decided, why, what lost. human_quote is Joe's or Dell's literal words when he said them — omit it and the entry is flagged quote_absent rather than paraphrase being passed off as a quote. PASS `about` WHENEVER THE RULING CONCERNS ONE RECORD: a decision without it is filed in decision-history and reachable from nothing, which is how 363 rulings ended up invisible to catch-me-up on the very deals they governed. PRICE IT WHEN THE RULING CHANGES HOW THE SYSTEM WORKS: cost_delta and quality_delta record what a build cost and what it bought, together or not at all, because a build with no before-and-after number can never be shown to have worked, only asserted to have. If the after-measure does not exist yet, log it unpriced and add both halves later with update-decision.",
+    description: "Record a SETTLED decision and its rationale — the thing that stops it being relitigated next session. Writes a decision event (subject_type='decision', verb='log-decision') that v_decision_entry reads and decision-history.md renders; never hand-edit that file. NOT the same as add-loop marker:'decision', which is an OPEN question awaiting a ruling, and standing guidance belongs in CLAUDE.md, AGENTS.md or a skill through a PR; proposals bind nobody until merged. Use this when a fork has been closed: what was decided, why, what lost. human_quote is Joe's or Dell's literal words when he said them — omit it and the entry is flagged quote_absent rather than paraphrase being passed off as a quote. PASS `about` WHENEVER THE RULING CONCERNS ONE RECORD: a decision without it is filed in decision-history and reachable from nothing, which is how 363 rulings ended up invisible to catch-me-up on the very deals they governed. PRICE IT WHEN THE RULING CHANGES HOW THE SYSTEM WORKS: cost_delta and quality_delta record what a build cost and what it bought, together or not at all, because a build with no before-and-after number can never be shown to have worked, only asserted to have. If the after-measure does not exist yet, log it unpriced and add both halves later with update-decision.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       title: { type: "string", description: "the decision itself, in one line, stated as settled" },
@@ -8326,7 +7768,7 @@ export const TOOLS = {
 
   "score-campaign": {
     write: true,
-    description: "Close a campaign with a VERDICT against the criterion it was opened with — the act that turns a pile of metrics into an answer. Separate from open-campaign on purpose (the same reason retire-rule is separate from activate-rule): a verdict is a judgment, it needs arguments opening must never accept, and it must be impossible to reach by accident while editing a date. THE REFUSAL THAT MATTERS: it will not accept 'worked' or 'did_not_work' over ZERO measured placements, and it asks for confirm below the coverage floor in system_config (marketing.scoring_min_coverage_pct). 73 of 89 placements in this system have never been measured, including all 42 on X, so a verdict formed over them would be a guess wearing a number. 'inconclusive' is always available and is the HONEST answer when the measurement never happened — use it rather than reaching for confirm. Snapshots the coverage into coverage_at_scoring so nobody can later re-read a thin verdict as a thick one. Requires base_version from a fresh read. Refuses a campaign that is already scored: changing a recorded verdict is a new fact, not an edit, and Joe rules on it.",
+    description: "Close a campaign with a VERDICT against the criterion it was opened with — the act that turns a pile of metrics into an answer. Separate from open-campaign on purpose (a verdict needs its own explicit action): a verdict is a judgment, it needs arguments opening must never accept, and it must be impossible to reach by accident while editing a date. THE REFUSAL THAT MATTERS: it will not accept 'worked' or 'did_not_work' over ZERO measured placements, and it asks for confirm below the coverage floor in system_config (marketing.scoring_min_coverage_pct). 73 of 89 placements in this system have never been measured, including all 42 on X, so a verdict formed over them would be a guess wearing a number. 'inconclusive' is always available and is the HONEST answer when the measurement never happened — use it rather than reaching for confirm. Snapshots the coverage into coverage_at_scoring so nobody can later re-read a thin verdict as a thick one. Requires base_version from a fresh read. Refuses a campaign that is already scored: changing a recorded verdict is a new fact, not an edit, and Joe rules on it.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       campaign: { type: "string", description: "campaign name (exact) or uuid" },
@@ -9472,16 +8914,20 @@ registerTools({
 
   "set-next-step": {
     write: true,
-    description: "Append a new current next step. The prior step remains unchanged as attributed history; newest next_step wins.",
+    description: "Replace the current next step and date using base_version from a fresh get-deal-room read. Conflicts require rereading and human review; retries retain the original key and version. The prior step remains attributed history.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, deal: { type: "string" }, text: { type: "string" },
+      base_version: { type: "integer" },
       next_date: { anyOf: [{ type: "string" }, { type: "null" }] },
-    }, required: ["idempotency_key", "deal", "text"] },
+    }, required: ["idempotency_key", "deal", "text", "base_version"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "set-next-step", args, async () => {
       const s = await resolveSubject(c, args.deal);
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
       if (typeof args.text !== "string" || !args.text.trim()) throw new ToolError({ error: "text_required" });
       assertDealRoomField("next_date", args.next_date ?? null, ToolError);
+      await lockDealField(c, s.id, "next_date");
+      await lockDealField(c, s.id, "next_step");
+      await versionGuard(c, "deal", s.id, args.base_version);
       await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-step");
       return appendDealNextStep(c, actor, s.id, args.text.trim(), args.next_date ?? null, args.idempotency_key);
     }),
@@ -9586,10 +9032,13 @@ registerTools({
       idempotency_key: { type: "string" }, deal: { type: "string" },
       agent_name: { type: "string" }, agent_party_id: { type: "string" },
       market: { type: "string" }, source: { type: "string" },
-    }, required: ["idempotency_key","deal","agent_name","source"] },
+      base_version: { type: "integer", description: "Deal version from a fresh get-deal-room read" },
+    }, required: ["idempotency_key","deal","agent_name","source","base_version"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "set-market-agent", args, async () => {
       const s = await resolveSubject(c, args.deal);
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
+      await lockDealField(c, s.id, "market_agent");
+      await versionGuard(c, "deal", s.id, args.base_version);
       const account = await c.query("select account_client_id from v_deal_room_board where id=$1", [s.id]);
       if (!account.rows[0]?.account_client_id)
         throw new ToolError({ error: "not_a_national_account_deal" });
@@ -9602,6 +9051,7 @@ registerTools({
            source=excluded.source,set_by=excluded.set_by,set_at=now()`,
         [s.id, args.agent_name.trim(), args.agent_party_id || null,
          args.market || null, args.source, actor.id]);
+      await c.query("update deal set updated_by=$2 where id=$1", [s.id, actor.id]);
       await writeEvent(c, actor, "set-market-agent", "deal", s.id, {
         field: "market_agent", old, new: { market_agent: args.agent_name.trim(), market: args.market || null },
         idempotency_key: args.idempotency_key });
@@ -9615,10 +9065,12 @@ registerTools({
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, account_client_id: { type: "string" },
       owner: { type: "string", enum: ["joe","dell"] },
-    }, required: ["idempotency_key","account_client_id","owner"] },
+      base_version: { type: "integer", description: "Account base_version from a fresh deal-room-board read" },
+    }, required: ["idempotency_key","account_client_id","owner","base_version"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "set-national-account-owner", args, async () => {
       const account = await c.query("select id from client where id=$1 and client_type='national_account'", [args.account_client_id]);
       if (!account.rows.length) throw new ToolError({ error: "not_a_national_account" });
+      await versionGuard(c, "client", args.account_client_id, args.base_version);
       const owner = (await c.query("select id from actor where slug=$1 and active", [args.owner])).rows[0];
       if (!owner) throw new ToolError({ error: "unknown_owner" });
       await c.query(
@@ -9626,6 +9078,10 @@ registerTools({
          values ($1,$2,$3) on conflict (account_client_id) do update
          set owner_actor_id=excluded.owner_actor_id,set_by=excluded.set_by,set_at=now()`,
         [args.account_client_id, owner.id, actor.id]);
+      await c.query("update client set updated_by=$2 where id=$1", [args.account_client_id, actor.id]);
+      await writeEvent(c, actor, "set-national-account-owner", "client", args.account_client_id, {
+        field: "account_owner", new: { owner: args.owner }, idempotency_key: args.idempotency_key,
+      });
       return { ok: true, account_client_id: args.account_client_id, owner: args.owner };
     }),
   },
@@ -9828,6 +9284,9 @@ registerTools({
       if (candidate.kind === 'next_step') {
         const subject = await resolveSubject(c, candidate.payload.deal);
         await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [subject.id]);
+        await lockDealField(c, subject.id, "next_date");
+        await lockDealField(c, subject.id, "next_step");
+        innerArgs.base_version = (await c.query("select version from deal where id=$1 for update", [subject.id])).rows[0]?.version;
       }
       const result = await executeRegisteredTool(c, actor, verb, innerArgs);
       if (!result || result.ok === false) throw new ToolError(result || { error: "inner_write_failed" });
@@ -10327,7 +9786,7 @@ const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealFiel
 registerTools(invoices.tools,"invoice-automation");
 registerTools(leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoices }), "lead-automation");
 // DoctorCRE V5-R02: workflow cutover, caller migration and retirement
-// readiness. Composes accept-workflow / disable-legacy-schedule rather than
+// readiness. Reads historical acceptance and native retirement evidence rather than
 // duplicating their evidence; retire-workflow-cutover-plan is authority-only.
 // See src/workflow-cutover.v5.js.
 registerTools(workflowCutoverTools({ withEnvelope, ToolError }), "workflow-cutover");

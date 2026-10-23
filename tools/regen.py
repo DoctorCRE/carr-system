@@ -26,6 +26,8 @@ from migration_source import migration_names
 
 ROOT = Path(__file__).resolve().parents[1]
 GENERATORS = (
+    ('core rule cards', ('CLAUDE.md', 'AGENTS.md'),
+     (sys.executable, 'ops/sync-core-rule-cards.py')),
     ('core rules', ('mcp-server/src/core-rule-ids.js',),
      (sys.executable, 'ops/sync-core-rule-ids.py')),
     ('mutation registry source contracts', ('mcp-server/src/scac-mutation-registry.current.generated.js',),

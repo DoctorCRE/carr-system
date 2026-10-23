@@ -422,82 +422,6 @@
       ]
     },
     {
-      "key": "health-audit-monthly",
-      "name": "Monthly system health audit",
-      "purpose": "Re-scores the 12-category report card and appends a trend column.",
-      "family": "Studio edge",
-      "criticality": "medium",
-      "owner_actor": "joe",
-      "repo_path": "/Users/booko/.claude/scheduled-tasks/health-audit-monthly/SKILL.md",
-      "runtime": "claude-code-scheduled-task",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "Claude Code scheduled task (native), cron 0 9 6-10 * * (fires daily in-window; the task's own ledger gate runs it once per month)",
-          "expected_cadence_seconds": 2592000,
-          "cadence_grace_seconds": 518400,
-          "notes": "Re-registered on the Studio 2026-09-26; verification pending: the first proof run stalled on a tool-approval prompt (session local_33c8a931-dd0d-403b-b9b8-e9d18466e12e, still 'running', no readback yet). 90-day audit follow-up: no ops.run row in 90 days, and this id never appears in any historical MacBook scheduled-tasks.json this audit examined -- registered on the Studio for the first time, not re-registered. Registry (control-plane-workflows.v1.json) has always marked it enabled with a live cadence, and services.json already tracked its cadence/grace, so the gap looks like a registration that never completed rather than a deliberate pause. Family changed from Local Mac edge to Studio edge."
-        }
-      ]
-    },
-    {
-      "key": "idea-resurface-monthly",
-      "name": "Monthly idea-bank resurface",
-      "purpose": "Resurfaces idea-bank entries worth another look.",
-      "family": "Studio edge",
-      "criticality": "low",
-      "owner_actor": "joe",
-      "repo_path": "/Users/booko/.claude/scheduled-tasks/idea-resurface-monthly/SKILL.md",
-      "runtime": "claude-code-scheduled-task",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "Claude Code scheduled task (native), cron 0 9 5-11 * * (fires daily in-window; the task's own ledger gate runs it once per month)",
-          "expected_cadence_seconds": 2592000,
-          "cadence_grace_seconds": 518400,
-          "notes": "Re-registered on the Studio 2026-09-26; verification pending: the first proof run stalled on a tool-approval prompt (session local_e6e64335-a092-462d-9a70-e2511f75e0a4, still 'running', no readback yet). 90-day audit follow-up: no ops.run row in 90 days, and this id never appears in any historical MacBook scheduled-tasks.json this audit examined -- registered on the Studio for the first time, not re-registered. Registry (control-plane-workflows.v1.json) has always marked it enabled with a live cadence, and services.json already tracked its cadence/grace, so the gap looks like a registration that never completed rather than a deliberate pause. Family changed from Local Mac edge to Studio edge."
-        }
-      ]
-    },
-    {
-      "key": "system-sweep-monthly",
-      "name": "Monthly size/prune sweep",
-      "purpose": "Prunes bloat ahead of the playbook review.",
-      "family": "Studio edge",
-      "criticality": "low",
-      "owner_actor": "joe",
-      "repo_path": "/Users/booko/.claude/scheduled-tasks/system-sweep-monthly/SKILL.md",
-      "runtime": "claude-code-scheduled-task",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "Claude Code scheduled task (native), cron 30 8 15-21 * * (fires daily in-window; the task's own ledger gate runs it once per month)",
-          "expected_cadence_seconds": 2592000,
-          "cadence_grace_seconds": 518400,
-          "notes": "Re-registered on the Studio 2026-09-26; verification pending: the first proof run stalled on a tool-approval prompt (session local_09173937-4d4e-4c52-bcb8-2d07c2cb1985, still 'running', no readback yet). 90-day audit follow-up: the MacBook's own scheduled-tasks.json showed this disabled since 2026-08-21 (its last real run), independently of and earlier than the 2026-09-23 hub-move incident and not part of the 2026-08-23 usage-crunch pause list (reenable-paused-schedules-0826 names 7 tasks and this is not one). No documented deliberate-retirement decision found for it; registry keeps it enabled with a live cadence. Re-registered on the Studio from the tracked ops/scheduled-tasks/system-sweep-monthly.SKILL.md contract. Family changed from Local Mac edge to Studio edge."
-        }
-      ]
-    },
-    {
-      "key": "playbook-review-monthly",
-      "name": "Monthly playbook review",
-      "purpose": "Reviews the playbooks after the size sweep.",
-      "family": "Studio edge",
-      "criticality": "low",
-      "owner_actor": "joe",
-      "repo_path": "/Users/booko/.claude/scheduled-tasks/playbook-review-monthly/SKILL.md",
-      "runtime": "claude-code-scheduled-task",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "Claude Code scheduled task (native), cron 0 9 15-21 * * (fires daily in-window; the task's own ledger gate runs it once per month)",
-          "expected_cadence_seconds": 2592000,
-          "cadence_grace_seconds": 518400,
-          "notes": "Re-registered on the Studio 2026-09-26; verification pending: the first proof run stalled on a tool-approval prompt (session local_dab62ffc-bb07-4313-bf5e-52b50edb0926, still 'running', no readback yet). 90-day audit follow-up: same finding as its sibling system-sweep-monthly -- the MacBook's own scheduled-tasks.json showed this disabled since 2026-08-21, independently of and earlier than the 2026-09-23 hub-move incident and not part of the 2026-08-23 usage-crunch pause list (reenable-paused-schedules-0826 names 7 tasks and this is not one). No documented deliberate-retirement decision found; registry keeps it enabled with a live cadence. Re-registered on the Studio from the tracked ops/scheduled-tasks/playbook-review-monthly.SKILL.md contract. Family changed from Local Mac edge to Studio edge."
-        }
-      ]
-    },
-    {
       "key": "contact-enrichment-weekly",
       "name": "Weekly contact enrichment slice",
       "purpose": "Open-source contact enrichment, 40 records/run until the book is covered.",
@@ -549,43 +473,6 @@
           "deploy_mechanism": "Claude Code scheduled task (native), cron 40 7 * * 2 (runs bin/restore-rehearse.sh)",
           "expected_cadence_seconds": 604800,
           "cadence_grace_seconds": 172800
-        }
-      ]
-    },
-    {
-      "key": "cc-update-audit",
-      "name": "Weekly Claude Code update audit",
-      "purpose": "On a Claude Code version change, audits what the release changes for CARR.",
-      "family": "Local Mac edge",
-      "criticality": "low",
-      "owner_actor": "joe",
-      "repo_path": "/Users/booko/.claude/scheduled-tasks/cc-update-audit/SKILL.md",
-      "runtime": "claude-code-scheduled-task",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "Claude Code scheduled task (native), cron 45 9 * * 1",
-          "expected_cadence_seconds": 604800,
-          "cadence_grace_seconds": 172800
-        }
-      ]
-    },
-    {
-      "key": "loop-drain-weekdays",
-      "name": "Weekday loop drain",
-      "purpose": "Works the claude-owned loop queue and closes loops by doing the work.",
-      "family": "Studio edge",
-      "criticality": "medium",
-      "owner_actor": "joe",
-      "repo_path": "/Users/booko/.claude/scheduled-tasks/loop-drain-weekdays/SKILL.md",
-      "runtime": "claude-code-scheduled-task",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "Claude Code scheduled task (native), cron 0 11 * * 1-5",
-          "expected_cadence_seconds": 86400,
-          "cadence_grace_seconds": 172800,
-          "notes": "Weekdays only; the grace spans the weekend stand-down, same as local-briefs. Re-registered on the Studio 2026-09-26; verification pending: the first proof run stalled on a tool-approval prompt (session local_b7bf275a-0bd8-4587-b746-16ac0f8840ac, still 'running', 63 messages, no readback yet). Cause: an in-progress MacBook->Studio hub move on 2026-09-23 copied this task's SKILL.md onto the Studio (one of 22 folders copied that day) but never registered it with create_scheduled_task, while the MacBook copy was deleted; the MacBook's own scheduled-tasks.json kept the stale enabled row pointing at the now-missing file. Family changed from Local Mac edge to Studio edge: the Studio is the host now, MacBook is a thin client over SSH."
         }
       ]
     },
@@ -891,22 +778,6 @@
       "depends_on": "neon-record-layer"
     },
     {
-      "service": "health-audit-monthly",
-      "depends_on": "neon-record-layer"
-    },
-    {
-      "service": "idea-resurface-monthly",
-      "depends_on": "neon-record-layer"
-    },
-    {
-      "service": "system-sweep-monthly",
-      "depends_on": "neon-record-layer"
-    },
-    {
-      "service": "playbook-review-monthly",
-      "depends_on": "neon-record-layer"
-    },
-    {
       "service": "contact-enrichment-weekly",
       "depends_on": "neon-record-layer"
     },
@@ -916,14 +787,6 @@
     },
     {
       "service": "restore-rehearse-weekly",
-      "depends_on": "neon-record-layer"
-    },
-    {
-      "service": "cc-update-audit",
-      "depends_on": "neon-record-layer"
-    },
-    {
-      "service": "loop-drain-weekdays",
       "depends_on": "neon-record-layer"
     },
     {

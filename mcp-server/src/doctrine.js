@@ -1443,16 +1443,16 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
           } } : {}),
           ...(proposedRules.length ? { awaiting_activation: {
             count: proposedRules.length,
-            say: `${proposedRules.length} rule(s) are written and waiting on a yes — they bind nobody until activated`,
+            say: `${proposedRules.length} legacy rule proposal(s) remain for review — propose guidance-file edits in a PR; they bind nobody until merged`,
             rules: proposedRules.map(r => ({
               id: String(r.id).slice(0, 8),
               gist: gist(r.statement),
               scope: r.personal_to ? `${r.personal_to}-personal` : "shared",
               taught_by: r.taught_by,
               proposed_on: r.created_at ? String(r.created_at).slice(0, 10) : null })),
-            hint: "read the full text with rule_ids, then approve-rule or retire-rule. "
-                + "Surfacing these is loop #149: a rule nobody knows is proposed is a "
-                + "rule nobody can approve.",
+            hint: "read the full text with rule_ids, then propose the correction or withdrawal "
+                + "in the relevant CLAUDE.md, AGENTS.md or skill through a PR. "
+                + "Proposals bind nobody until merged; these legacy rows remain read-only.",
           } } : {}),
           action_required: actionReq,
           doctrine: { generation: Number(gen.generation),
