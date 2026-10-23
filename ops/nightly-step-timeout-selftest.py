@@ -33,7 +33,7 @@ class NightlyTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             rows = (root / "out/attempts").read_text().splitlines()
             self.assertTrue(any("nightly.encrypted-backup" in row for row in rows))
-            self.assertTrue(any("nightly.credential-health" in row for row in rows))
+            self.assertFalse(any("nightly.credential-" in row for row in rows))
             self.assertTrue(any("nightly.cadence-engine" in row for row in rows))
             self.assertTrue(all("bin/with-timeout.py" in row for row in rows))
             self.assertFalse((root / "out/nightly-runs").exists())
@@ -129,7 +129,7 @@ class HealthcheckTests(unittest.TestCase):
                             if "example.test/chain" in row or "example.test/worker" in row))
 
     def test_failed_job_alarms_chain_and_later_jobs_still_run(self):
-        result = self.run_script("nightly.sh", CARR_TEST_FAIL_STEP="nightly.credential-health")
+        result = self.run_script("nightly.sh", CARR_TEST_FAIL_STEP="nightly.recovery-point")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("step nightly.verb-probe", self.calls())
         self.assertEqual(self.ping_urls(), ["https://example.test/backup",
