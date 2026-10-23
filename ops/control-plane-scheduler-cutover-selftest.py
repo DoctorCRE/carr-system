@@ -96,8 +96,8 @@ def prepared() -> tuple[dict, dict]:
 
 def provider_receipt(state: str, ref: str, at: str) -> dict:
     return {"kind": "provider_scheduler_observation_receipt", "receipt_ref": ref,
-            "surface_id": "cc-update-audit.claude-code.v1", "workflow_key": "cc-update-audit",
-            "workflow_version": 1, "locator": "cc-update-audit", "scheduler_state": state,
+            "surface_id": "radar-weekly.claude-code.v1", "workflow_key": "radar-weekly",
+            "workflow_version": 1, "locator": "radar-weekly", "scheduler_state": state,
             "observed_at": at, "provider_revision": hashlib.sha256(("revision:" + ref).encode()).hexdigest(),
             "source_fingerprint": hashlib.sha256(("source:" + ref).encode()).hexdigest(),
             "device_principal_bound": True, "immutable": True}
@@ -117,7 +117,7 @@ def cc_receipt_verifier(ref: str) -> dict | None:
     mode = {"cc:shadow": "shadow", "cc:canary": "canary"}.get(ref)
     if mode is None:
         return None
-    return {"kind": "workflow_acceptance_receipt", "receipt_ref": ref, "workflow_key": "cc-update-audit",
+    return {"kind": "workflow_acceptance_receipt", "receipt_ref": ref, "workflow_key": "radar-weekly",
             "workflow_version": 1, "mode": mode, "status": "accepted", "immutable": True}
 
 
@@ -126,17 +126,17 @@ def cc_approval_verifier(ref: str) -> dict | None:
         return None
     return {"kind": "human_authority_receipt", "receipt_ref": ref, "immutable": True,
             "authority_subject": "joe", "action": "disable-legacy-schedule",
-            "subject": {"workflow_key": "cc-update-audit", "workflow_version": 1,
-                        "surface_id": "cc-update-audit.claude-code.v1", "locator": "cc-update-audit"},
+            "subject": {"workflow_key": "radar-weekly", "workflow_version": 1,
+                        "surface_id": "radar-weekly.claude-code.v1", "locator": "radar-weekly"},
             "observation_refs": {"pre": "provider:enabled", "post": "provider:disabled", "sibling": None}}
 
 
 def main() -> int:
     check("registry validates and inventories every non-disabled legacy workflow",
           validate_registry(REGISTRY, manifest=MANIFEST) == [])
-    check("registry names all 19 non-disabled workflows and both Notes surfaces",
-          len({item["workflow_key"] for item in REGISTRY["surfaces"]}) == 19
-          and len(REGISTRY["surfaces"]) == 20)
+    check("registry names all 13 non-disabled workflows and both Notes surfaces",
+          len({item["workflow_key"] for item in REGISTRY["surfaces"]}) == 13
+          and len(REGISTRY["surfaces"]) == 14)
     incomplete_inventory = deepcopy(REGISTRY)
     incomplete_inventory["surfaces"] = [item for item in incomplete_inventory["surfaces"]
                                           if item["workflow_key"] != "radar-weekly"]
@@ -165,10 +165,10 @@ def main() -> int:
         surface("nightly-record-layer.launchd.v1"), launchd_receipt("disabled", "launchd:disabled", LATER_TEXT))
     check("launchd cutover uses an immutable device-bound native receipt",
           enabled["sources"]["launchd_receipt_read"] is True)
-    provider_surface = surface("cc-update-audit.claude-code.v1")
+    provider_surface = surface("radar-weekly.claude-code.v1")
     provider_enabled = observe_claude_scheduler_receipt(
         provider_surface, provider_receipt("enabled", "provider:enabled", NOW_TEXT))
-    provider_replacement = {"workflow_key": "cc-update-audit", "workflow_version": 1, "healthy": True,
+    provider_replacement = {"workflow_key": "radar-weekly", "workflow_version": 1, "healthy": True,
                             "accepted_receipt_refs": ["cc:shadow", "cc:canary"]}
     provider_prepare = prepare_disable(
         REGISTRY, surface_id=provider_surface["surface_id"], observation=provider_enabled,
