@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ci: runs-outside-ci — invoked by ops/local-pg-ci.py after the A2 ownership gate
+# ci: runs-outside-ci — SQL and fixture helpers used by Dot authorization and producer role-boundary tests
 # doctrine: runbook
 """Disposable-Postgres acceptance for immutable A3a assurance persistence."""
 
