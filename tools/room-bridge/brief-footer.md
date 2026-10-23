@@ -1,4 +1,4 @@
-Follow the Required skills block appended by dispatch.py send. Size first: tiny -> build now; one session -> grill-with-docs; bigger -> wayfinder. PR body must include a "Skills used:" line.
+Follow the Skills line and Required skills block supplied by bin/codex-job. Size first: tiny -> build now; one session -> grill-with-docs; bigger -> wayfinder. PR body must include a "Skills used:" line.
 
 Pre-approved: decide test seams, interfaces and design forks yourself; nobody is available to confirm, so never pause for confirmation or message /root/orchestrator. Put every decision in the PR body and your final reply.
 

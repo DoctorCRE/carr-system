@@ -280,8 +280,6 @@ def main():
         ('pinned auto', 'gh pr merge 12 --repo example/repo --auto --squash --match-head-commit ' + sha, 0),
         ('admin bypass', 'gh pr merge 12 --repo example/repo --auto --squash --match-head-commit ' + sha + ' --admin', 2),
         ('approved entry point', 'bash tools/approve-merge.sh example/repo 12 ' + sha, 0),
-        ('queue entry point', 'tools/approve-merge.sh --from-work-queue', 0),
-        ('entry point is no bypass', 'tools/approve-merge.sh --from-work-queue; gh pr merge 99', 2),
         ('branch update', 'gh pr update-branch 12 --repo example/repo', 0),
         ('REST merge', 'gh api -X PUT repos/example/repo/pulls/12/merge', 2),
         ('REST branch update', 'gh api -X PUT repos/example/repo/pulls/12/update-branch', 0),

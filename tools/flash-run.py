@@ -568,7 +568,7 @@ def _codex_exec(text, cwd):
         result = os.path.join(directory, "result.md")
         subprocess.run(["codex", "exec", "-C", cwd, "--skip-git-repo-check",
                         "--dangerously-bypass-hook-trust", "-o", result, text],
-                       check=True, stdout=subprocess.DEVNULL)
+                       check=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         with open(result, encoding="utf-8") as handle:
             return handle.read()
 

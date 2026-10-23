@@ -100,7 +100,7 @@ async def _score(brief, skills, client_factory):
 
 
 def prepare(brief: str, repo: Path, *, home: Path | None = None, client_factory=None):
-    """Return the enriched brief and only picked names/probabilities for the card."""
+    """Prepend the Skills line and append the selected local instructions."""
     import asyncio
     import os
 
@@ -141,4 +141,5 @@ def prepare(brief: str, repo: Path, *, home: Path | None = None, client_factory=
     for name, baseline_skill in zip(BASELINE, baseline):
         if baseline_skill is None:
             blocks.append(f'Baseline skill unavailable: {name}.')
-    return brief + '\n\n' + '\n\n'.join(blocks), picks
+    return ('Skills: ' + ', '.join(str(p['name']) for p in picks) + '\n\n'
+            + brief + '\n\n' + '\n\n'.join(blocks)), picks

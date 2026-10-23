@@ -1,4 +1,0 @@
-# Optional API desk runtime. Python 3.10+. Installs the bundled Claude CLI.
-# Security review and operator contract: claude_api_wire.py module documentation.
---only-binary=claude-agent-sdk
-claude-agent-sdk==0.2.168

@@ -11,8 +11,7 @@ peer could be gone for days with every Tailscale row green.
 This module reads `Tailscale status --json` once and answers, for every host in
 ops/config/seat-hosts.v1.json: online, offline since <LastSeen>, or unknown.
 One health row per host; a seat whose host is offline reads SKIP instead of a
-FAIL that blames its wrapper (ops/seat_health.health_rows), and dispatch refuses
-to send work to it (tools/room-bridge/seat_gate.py).
+FAIL that blames its wrapper (ops/seat_health.health_rows).
 
 UNKNOWN IS NOT OFFLINE. No Tailscale app, a stopped or logged-out backend, an
 unreadable status, or a host absent from the peer list all yield "unknown":

@@ -1,4 +1,4 @@
-ROLE: one-source application study for CARR's healthcare commercial real estate brokerage system and the DoctorCRE application. The named Model Room desk owns model and effort selection. Study exactly ONE source: the URL whose retrieval is in the file named below.
+ROLE: one-source application study for CARR's healthcare commercial real estate brokerage system and the DoctorCRE application. The native provider CLI selects the model and effort. Study exactly ONE source: the URL whose retrieval is in the file named below.
 
 RULES, all required:
 1. Your report goes to the orchestrator, the Claude session that launched you, never to Joe.
