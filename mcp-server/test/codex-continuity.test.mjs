@@ -716,7 +716,7 @@ test("Claude and unverified callers are rejected before database use", async () 
 test("Codex OAuth and surface-isolated local transport share the verified owner key", () => {
   const local = agentActorForToken("Bearer local-secret", JSON.stringify({ "joe-local": "local-secret" }), "local-token");
   const continuity = continuityActorForTokenMaps(
-    "Bearer codex-secret", JSON.stringify({ joe: "codex-secret" }), JSON.stringify({ joe: "claude-secret" }));
+    "Bearer codex-secret", JSON.stringify({ joe: "codex-secret" }));
   const oauth = actorFromProps({ slug: "codex", human: false, client_id: "client-1", sponsoring_human_slug: "joe", via: "oauth-google" }, JSON.stringify({ "client-1": "codex" }));
   assert.equal(local.native_agent_verified, true);
   assert.equal(local.sponsoring_human_slug, "joe");

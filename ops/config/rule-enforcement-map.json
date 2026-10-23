@@ -400,13 +400,12 @@
       ]
     },
     "delegation_names_model_and_effort": {
-      "failure_mode": "DeskError unnamed_model_or_effort at dispatch, before anything reaches the desk, when a codex-kind desk lacks a named model or reasoning effort",
+      "failure_mode": "Codex validates the configured model and effort; bin/codex-job inherits config defaults and passes explicit overrides",
       "implementation": [
-        "tools/room-bridge/dispatch.py",
-        "tools/room-bridge/desks.py"
+        "bin/codex-job"
       ],
       "test": [
-        "ops/room-bridge-selftest.py"
+        "tools/test-codex-job.py"
       ]
     },
     "draft_export_read": {

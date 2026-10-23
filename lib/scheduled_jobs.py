@@ -232,7 +232,7 @@ def report(manifest, snapshot, now):
     flash_granted = (isinstance(grant, dict) and type(grant.get("expires_at")) in (int, float)
                      and type(grant.get("issued_at")) in (int, float)
                      and grant["issued_at"] <= now < grant["expires_at"])
-    flash_labels = {"local.ds4-flash-next", "local.flash-desk"}
+    flash_labels = {"local.ds4-flash-next"}
     # launchd keeps an override entry forever after a job is gone; alone it is not an installed job.
     observed = set(snapshot["plists"]) | {k for k in live if k.startswith(prefixes)} | cron.keys()
     for label in sorted(observed - registry.keys()):
@@ -483,7 +483,7 @@ def native_manifest(source=SOURCE):
             "label": definition["Label"], "scheduler": "launchd",
             "program_arguments": installed_arguments(definition), "interval": interval,
             "required_checkout": "~/carr-system", "expected_enabled": bool(enabled),
-            "expected_installed": bool(enabled) or definition["Label"] in {"local.ds4-flash-next", "local.flash-desk"}, "owner": "orchestrator",
+            "expected_installed": bool(enabled) or definition["Label"] in {"local.ds4-flash-next"}, "owner": "orchestrator",
             "log_path": definition.get("StandardOutPath") or definition.get("StandardErrorPath"),
             "log_paths": [definition.get(k) for k in ("StandardOutPath", "StandardErrorPath")],
             "log_max_age_seconds": None,

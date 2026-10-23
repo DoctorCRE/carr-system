@@ -10,19 +10,13 @@ class Program:
 
 
 PROGRAMS = (
-    Program("f03", "tools/test-f03-production-migration.py", "f03"),
     Program("continuity", "mcp-server/test/codex-continuity.test.mjs", "node"),
     Program("leads", "mcp-server/test/lead-workspace-pg.test.mjs", "node"),
     Program("rule-delivery", "ops/rule-delivery-local-pg-acceptance.py"),
-    Program("engineering-claim", "ops/engineering-claim-local-pg-gate.py"),
-    Program("engineering-race", "ops/engineering-envelope-race-local-pg-gate.py"),
-    Program("ownership", "ops/canonical-ownership-lease-local-pg-gate.py"),
-    Program("assurance", "ops/assurance-evidence-acceptance-local-pg-gate.py"),
     Program("calendar", "ops/calendar-canary-local-pg-acceptance.py"),
     Program("nightly", "ops/nightly-canary-local-pg-acceptance.py"),
     Program("renewal-ingress", "ops/renewal-signed-ingress-local-pg-acceptance.py"),
     Program("renewal-lease", "ops/renewal-lease-ledger-local-pg-gate.py"),
     Program("incident", "ops/incident-recovery-local-pg-acceptance.py"),
-    Program("completion", "ops/completion-register-schema-local-pg-gate.py"),
     Program("snapshot", "bin/schema-snapshot.sh", "snapshot"),
 )

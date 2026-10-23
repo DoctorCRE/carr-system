@@ -94,32 +94,6 @@
       }
     },
     {
-      "label": "com.carr.delivery-cadence-a05-sweep",
-      "path": "~/Library/LaunchAgents/com.carr.delivery-cadence-a05-sweep.plist",
-      "executables": [
-        "/bin/zsh"
-      ],
-      "dependencies": [
-        "~/carr-system/bin/run-scheduled.sh",
-        "~/carr-system/.venv/bin/python",
-        "~/carr-system/ops/delivery-cadence-a05-sweep.py"
-      ],
-      "disabled": false,
-      "environment_names": [
-        "CARR_REPO",
-        "PATH"
-      ],
-      "schedule_source": "~/Library/LaunchAgents/com.carr.delivery-cadence-a05-sweep.plist",
-      "classification": "leader-job",
-      "macbook_installed": false,
-      "macbook_missing": [],
-      "schedule_expectation": {
-        "scheduler": "launchd",
-        "expected_enabled": false,
-        "expected_installed": false
-      }
-    },
-    {
       "label": "com.carr.fix-train",
       "path": "~/Library/LaunchAgents/com.carr.fix-train.plist",
       "executables": [
@@ -375,23 +349,6 @@
       "macbook_missing": [
         "~/src/ds4-main/ds4-server",
         "~/.ds4/server-kv"
-      ],
-      "schedule_expectation": null
-    },
-    {
-      "label": "local.flash-desk",
-      "path": "~/Library/LaunchAgents/local.flash-desk.plist",
-      "executables": [
-        "~/.local/bin/flash-desk-start"
-      ],
-      "dependencies": [],
-      "disabled": false,
-      "environment_names": [],
-      "schedule_source": "~/Library/LaunchAgents/local.flash-desk.plist",
-      "classification": "leader-job",
-      "macbook_installed": false,
-      "macbook_missing": [
-        "~/.local/bin/flash-desk-start"
       ],
       "schedule_expectation": null
     }

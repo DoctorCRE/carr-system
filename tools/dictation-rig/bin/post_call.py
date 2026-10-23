@@ -43,7 +43,7 @@ LLAMA_PORT = 8598
 OUTLOOK_URL_LIMIT = 1900
 
 # Flash Next (launchd label local.ds4-flash-next) shares its loopback endpoint
-# with the Model Room flash desk. flashlib requires a human grant and protects
+# with other local Flash clients. flashlib requires a human grant and protects
 # requests from idle shutdown. Requests may queue behind other callers.
 # It is a much stronger model than the bundled
 # 1.5B llama.cpp model and, unlike it, reliably produces a usable review pack
