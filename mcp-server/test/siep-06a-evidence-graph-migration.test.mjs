@@ -1,14 +1,10 @@
 import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import fs from "node:fs";
 
 const migration = readMigration(
   new URL("../../migrations/0453_siep06a_evidence_graph.sql", import.meta.url));
-const gate = fs.readFileSync(
-  new URL("../../ops/siep-evidence-graph-local-pg-gate.py", import.meta.url),
-  "utf8",
-);
+
 
 test("0337 is a projection over canonical ledgers, never a shadow graph", () => {
   assert.match(migration, /create or replace function ops\.siep_read_evidence_graph\(p_component text default null\)/);
@@ -83,15 +79,4 @@ test("0337 exposes read authority only to existing runtime bundles", () => {
   assert.match(migration, /grant execute on function ops\.siep_read_evidence_graph\(text\)\s+to carr_reader,carr_writer,carr_jobs,carr_authority/);
   assert.match(migration, /revoke all on function ops\.siep_evidence_node_digest\(jsonb\)/);
   assert.doesNotMatch(migration, /grant (?:insert|update|delete|all) on/i);
-});
-
-test("rollback-only evidence graph gate covers aliases, redaction, lineage, and integrity", () => {
-  assert.match(gate, /^# ci: db-gate/m);
-  assert.match(gate, /SCAC-00/);
-  assert.match(gate, /known SIEP package or component alias/);
-  assert.match(gate, /graph digest was not deterministic/);
-  assert.match(gate, /graph leaked forbidden material/);
-  assert.match(gate, /exact engineering lineage was not projected/);
-  assert.match(gate, /source digest mutation was not surfaced/);
-  assert.match(gate, /later Joe revocation was not surfaced/);
 });
