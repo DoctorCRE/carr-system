@@ -33,6 +33,7 @@ class CopyTest(unittest.TestCase):
         subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                         f'-DOUTLOOK_PROFILE={json.dumps(str(self.profile))}',
                         f'-DOUTLOOK_WORK_ROOT={json.dumps(str(self.out))}',
+                        f'-DOUTLOOK_REPO={json.dumps(str(self.root))}',
                         str(ROOT / 'tools/outlook-intake-copy.c'), '-o', str(self.helper)],
                        check=True, capture_output=True)
 
