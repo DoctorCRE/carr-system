@@ -4024,7 +4024,7 @@ export const TOOLS = {
             await versionGuard(c,'vendor',vendorId,base_version);
             versions.set(vendorId,base_version);
           }
-          assignments.push(...await writeDealAssignments(c,actor,vendorId,[{...entry,deal_id:s.id}],writeEvent,args.idempotency_key,'log-activity',assignment_base_version,states));
+          assignments.push(...await writeDealAssignments(c,actor,vendorId,[{...entry,deal_id:s.id}],writeEvent,args.idempotency_key,'log-activity',assignment_base_version,{states,human_quote:args.human_quote}));
         }
         for (const vendorId of versions.keys())
           await c.query('update vendor set updated_by=$1 where id=$2',[actor.id,vendorId]);
@@ -8709,6 +8709,7 @@ registerTools({
           where b.id=$1`, [s.id]);
       if (!deal.rows.length) deal = await c.query(
         `select b.id, b.name, b.phase, b.lead_owner as owner, b.deal_type as type,
+                ${dealVendorCards("b")} as vendors,
                 b.client_ref, b.client_name, b.client_id, a.account_client_id,
                 case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on,

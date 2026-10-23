@@ -26,7 +26,7 @@ export async function lockDealAssignments(c, assignments) {
   await c.query('select id from public.vendor where id=any($1::uuid[]) order by id for update',[vendors]);
 }
 
-export async function writeDealAssignments(c, actor, vendorId, entries, recordEvent, key, verb, baseVersion, states = new Map()) {
+export async function writeDealAssignments(c, actor, vendorId, entries, recordEvent, key, verb, baseVersion, {states = new Map(), human_quote} = {}) {
   const refuse = () => { throw new ToolError({error:'deal_assignment_invalid'}); };
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!Array.isArray(entries) || !entries.length || entries.length > 30) refuse();
@@ -74,7 +74,7 @@ export async function writeDealAssignments(c, actor, vendorId, entries, recordEv
       note=excluded.note,updated_by=excluded.updated_by,updated_at=clock_timestamp()`,
     [entry.deal_id,vendor.party_id,entry.role,entry.company_party_id,entry.contact_party_id,entry.active ?? true,entry.note ?? before?.note ?? null,actor.id]);
     await recordEvent(c,actor,verb,'deal',entry.deal_id,{field:'vendor_assignment',old:{vendor_assignment:before},
-      new:{vendor_assignment:{...entry,party_id:vendor.party_id,active:entry.active ?? true}},idempotency_key:key});
+      new:{vendor_assignment:{...entry,party_id:vendor.party_id,active:entry.active ?? true}},human_quote,idempotency_key:key});
     changes.push({deal_id:entry.deal_id,role:entry.role,active:entry.active ?? true});
   }
   return changes;
