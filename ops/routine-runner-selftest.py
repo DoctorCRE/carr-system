@@ -107,6 +107,23 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(runtime.main(), 1)
             self.assertEqual(held, [True])
 
+    def test_failure_reporting_logs_redacted_cause_and_keeps_job_failed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            secret = 'synthetic-private-value'
+            with patch.object(runtime, 'ROOT', root), patch.object(sys, 'argv', ['routine', 'lead-signals-weekly']), \
+                 patch.dict(os.environ, {'CARR_MCP_UNATTENDED_TOKEN': secret}), \
+                 patch.object(runtime, 'execute', side_effect=ValueError('fixture provider failure')), \
+                 patch.object(runtime.Context, 'failure', side_effect=RuntimeError(
+                     'loop-board failed: no MCP token for client profile unattended; ' + secret)), \
+                 patch('sys.stderr', new_callable=io.StringIO) as stderr:
+                self.assertEqual(runtime.main(), 1)
+            output = stderr.getvalue()
+            self.assertIn('FAIL ValueError: fixture provider failure', output)
+            self.assertIn('no MCP token for client profile unattended', output)
+            self.assertNotIn(secret, output)
+            self.assertIn('[REDACTED]', output)
+
     def test_previous_period_resumes_before_new_period(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

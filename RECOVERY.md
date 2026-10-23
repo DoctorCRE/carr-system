@@ -31,23 +31,9 @@ Nothing important is only on the Mac. Confirmed 2026-08-14:
 
 ### If the R2 archive holds a bad object
 
-`lib/r2_archive.py` can only ever ADD. When a truncated dump is promoted and
-uploaded, the archive ends up with two objects both claiming to be that day's
-backup and no way to remove either — which is exactly what happened on
-2026-08-07. The remedy is:
-
-    bin/r2-forget.py --prefix backups/<sha256-prefix>/          # list only
-    bin/r2-forget.py --prefix backups/<sha256-prefix>/ --yes    # delete
-
-Selection is by key prefix, never a glob and never "the newest N", so the blast
-radius is visible in the command itself. Nothing is deleted without `--yes`; the
-listing run IS the confirmation step. Backup keys are content-addressed, so a
-single corrupt upload is named precisely without touching the good object beside
-it. It removes the ledger row with the object, so the two cannot disagree.
-
-Pointer added 2026-08-22 (open loop 503, item 4): the tool had zero callers and
-was named in no document, so the only remedy for this failure was undiscoverable
-on the day it would be needed.
+Use Cloudflare R2 object management to inspect the exact content-addressed
+backup key. Preserve good backups and review any archive-ledger discrepancy
+through the authenticated record layer before changing stored evidence.
 
 The two dump paths are independently produced rather than copied — different
 checksums, verified. They share no failure point.
@@ -104,9 +90,9 @@ only history that exists. There is no vendor safety net behind them.
    Do not hand-roll a decrypt. A guard blocks it, and the reason is that a raw
    decrypt leaves production data in cleartext on disk; the sanctioned path
    shreds the plaintext on every exit including interrupt.
-4. **Re-point the Worker** at the recovered database and redeploy:
-   the GitHub production deployment workflow. Apply any migrations the dump predates with
-   `bin/migrate-prod.sh`.
+4. **Apply pending migrations** using the recovered database's configured
+   migration runner, `./run.sh migrate --apply --yes`, before re-pointing the
+   Worker at that database through the GitHub production deployment workflow.
 
 ---
 

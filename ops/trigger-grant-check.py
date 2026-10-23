@@ -69,7 +69,7 @@ import re
 import subprocess
 import sys
 
-# The postgres CLIENT lookup, shared with ops/p1-rebuild-gate.py. Loading by path
+# The postgres CLIENT lookup uses tools/db-tap.py. Loading by path
 # is how every ops gate reaches tools/db-tap.py, whose hyphenated filename cannot
 # be imported normally.
 _REPO = pathlib.Path(__file__).resolve().parent.parent
