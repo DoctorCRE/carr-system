@@ -410,10 +410,8 @@
       "id": "projection-render-tools",
       "class": "projection",
       "sources": [
-        "tools/apply-graph-colors.py",
         "tools/check.sh",
         "tools/smoke.sh",
-        "tools/stamp-doctrine-ownership.py",
         "ops/renders-verify.py",
         "ops/vault-drift-watch.py",
         "ops/vault-duplicate-sweep.py",
@@ -447,8 +445,6 @@
         "pipelines/import_source_captures.py",
         "pipelines/import_wave1.py",
         "pipelines/doctrine_inventory.py",
-        "tools/reconcile.py",
-        "bin/cutoff-doctrine.sh",
         "bin/migrate-dell.sh"
       ],
       "path_pattern": "{{VAULT}}/**",

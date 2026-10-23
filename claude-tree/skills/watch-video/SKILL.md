@@ -13,7 +13,7 @@ description: >
 
 # Watch Video — vetted CARR adaptation (July 6, 2026)
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Guidance changes:** Propose an edit to the relevant CLAUDE.md, AGENTS.md or skill in a PR, with the trade-off. Proposals bind nobody until merged; Git history preserves attribution.
 
 Concept from github.com/bradautomates/claude-video, reimplemented as pure instructions so no
 third-party scripts run on Joe's machine. Claude Code drives yt-dlp and ffmpeg directly.
@@ -52,7 +52,7 @@ Joe can jump to it.
 and before anything is written anywhere permanent, summarize what the source contains and ask Joe
 whether it applies system-wide or belongs somewhere more specific (own section/business model,
 one prospect, personal tier, or nowhere).** Ask Joe whether findings belong anywhere permanent before writing: tactics worth repeating →
-the `add-loop` verb with kind `idea` (`00_Context/idea-bank.md` is a GENERATED render of those rows — never edit it), or, when the tactic is a standing rule meant to bind future sessions, the `teach` verb with Joe's verbatim words, which stays PROPOSED until he activates it (his yes required); post patterns →
+the `add-loop` verb with kind `idea` (`00_Context/idea-bank.md` is a GENERATED render of those rows — never edit it), or, when the tactic is a standing rule meant to bind future sessions, a proposed edit to the relevant guidance file or skill in a PR with Joe's verbatim words and the trade-off; proposals bind nobody until merged; post patterns →
 content-inspiration-bank Section 1 with the transferable pattern named; market data points →
 substance bank (dated, sourced). Then delete the temp dir.
 

@@ -65,7 +65,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 CHECK = REPO / "ops" / "trigger-grant-check.py"
 
-# The postgres CLIENT lookup, shared with ops/p1-rebuild-gate.py. Loading by path
+# The postgres CLIENT lookup uses tools/db-tap.py. Loading by path
 # is how every ops gate reaches tools/db-tap.py, whose hyphenated filename cannot
 # be imported normally.
 _spec = importlib.util.spec_from_file_location("db_tap", REPO / "tools" / "db-tap.py")

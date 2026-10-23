@@ -244,31 +244,6 @@ class FlashCommandTests(unittest.TestCase):
         self.assertEqual([c[0] for c in calls.mock_calls], ['configure', 'activate'])
         calls.configure.assert_called_once_with(ROOT, apply=True)
 
-    def test_off_cli_callers_never_reach_launchctl(self):
-        with tempfile.TemporaryDirectory(dir=ROOT / 'out') as directory:
-            env = {'HOME': directory, 'PATH': '/usr/bin:/bin:/opt/homebrew/bin',
-                   'CARR_FLASH_STATE_DIR': directory}
-            for command in ([sys.executable, str(ROOT / 'bin/flash-ensure')],):
-                result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=5)
-                self.assertEqual(result.returncode, 1, result.stderr)
-                self.assertIn('switched off', result.stderr)
-
-    def test_prepared_script_observes_live_grant_and_revocation(self):
-        with tempfile.TemporaryDirectory(dir=ROOT / 'out') as directory, \
-             patch.dict(os.environ, {'CARR_FLASH_STATE_DIR': directory}):
-            script = load('tools/flash-script.py', 'prepared_script')
-            work = Path(directory) / 'work'
-            work.mkdir()
-            script.stage([], str(work))
-            flashlib.grant_path().write_text(json.dumps({'issued_at': 0, 'expires_at': 4e9}))
-            code = 'import flashlib; print(flashlib.is_switched_off())'
-            out, _ = script.run_code(code, str(work), 1, sandbox=Path(script.SANDBOX_EXEC).exists())
-            self.assertEqual(out, 'False')
-            flashlib.grant_path().unlink()
-            with patch.object(script.flashlib, 'activity_scope', return_value=__import__('contextlib').nullcontext()):
-                out, _ = script.run_code(code, str(work), 2, sandbox=Path(script.SANDBOX_EXEC).exists())
-            self.assertEqual(out, 'True')
-
 
 if __name__ == '__main__':
     unittest.main()

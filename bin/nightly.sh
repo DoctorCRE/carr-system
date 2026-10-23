@@ -87,8 +87,6 @@ fi
 step "encrypted backup" env CARR_DB_BACKUP_URL="$CARR_DB_BACKUP_URL" ./bin/backup-dump.sh
 step "backup ping" env HC_BACKUP_RC="$LAST_STEP_RC" ./bin/hc-ping.sh
 step "recovery point" ./.venv/bin/python ops/recovery-point.py
-step "credential mint" ./.venv/bin/python ops/credential-mint.py
-step "credential health" ./.venv/bin/python ops/credential-health.py --nightly
 step "cadence engine" ./.venv/bin/python pipelines/cadence_engine.py --apply
 step "availability matcher" ./.venv/bin/python pipelines/availability_matcher.py
 step "fetch allowlist" ./.venv/bin/python ops/fetch-allowlist.py
