@@ -534,25 +534,8 @@ def find_grok_binary() -> tuple[Optional[str], list[str]]:
 # 4. the review-contract prompt (ONE versioned string, every reviewer)
 # ---------------------------------------------------------------------------
 
-# Which paths arm the lens is decided by the one review-tier map
-# (ops/config/review-tiers.v1.json, engineering-workflow-sop section 15), read
-# through lib/review_tiers.py: a commit whose highest tier reaches
-# SECURITY_LENS_TIER (tier 2) touches the trust surface. The map holds every
-# prefix this file used to list (mcp-server/src/, mcp-server/wrangler.toml,
-# hooks/, migrations/, bin/) at tier 2 or above.
-def _review_tiers():
-    import importlib.util  # local: this edit stays inside the lens trigger
-    spec = importlib.util.spec_from_file_location(
-        "review_tiers", str(REPO / "lib" / "review_tiers.py"))
-    if spec is None or spec.loader is None:
-        raise ImportError("lib/review_tiers.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 SECURITY_LENS = (
-    "SECURITY (auto-armed: this commit touches auth, grants, hooks, or "
+    "SECURITY (every code review, including auth, grants, hooks, and "
     "migrations) — evaluate as an attacker and as an auditor: does any change "
     "widen a token door, a capability profile, or a role grant beyond its "
     "stated intent; can any new code path be reached without the auth it "
@@ -563,38 +546,6 @@ SECURITY_LENS = (
     "messages; and does anything here weaken an existing enforcement the rest "
     "of the system relies on."
 )
-
-
-def security_lens_if_triggered(commit_sha: str) -> Optional[str]:
-    """Return the security lens for sensitive paths or unknown changed paths.
-    Known paths below the security tier and empty diffs return None."""
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(REPO), "diff-tree", "--no-commit-id",
-             "--name-only", "-r", commit_sha],
-            capture_output=True, text=True, timeout=30)
-        if out.returncode != 0:
-            log(f"security-lens trigger check failed (git rc={out.returncode}); "
-                "security lens ARMED conservatively")
-            return SECURITY_LENS
-        changed = [l.strip() for l in out.stdout.splitlines() if l.strip()]
-        if not changed:
-            return None
-        # A map that cannot be imported, read or validated ARMS the lens: an
-        # unreadable map must never lower review. The fault is logged and the
-        # review keeps running.
-        try:
-            tiers = _review_tiers()
-            armed = tiers.tier_for_paths(changed) >= tiers.SECURITY_LENS_TIER
-        except Exception as e:  # noqa: BLE001 — fail toward more review
-            log(f"review-tier map unreadable ({type(e).__name__}: {str(e)[:200]}); "
-                "security lens ARMED conservatively")
-            return SECURITY_LENS
-        return SECURITY_LENS if armed else None
-    except Exception as e:  # noqa: BLE001 — fail toward more review
-        log(f"security-lens trigger check errored ({type(e).__name__}); "
-            "security lens ARMED conservatively")
-        return SECURITY_LENS
 
 
 def render_contract_prompt(req: dict) -> str:
@@ -1220,17 +1171,8 @@ def process_request(request_path: Path) -> int:
             # exactly like the code path's sandboxing (no write access assumed).
             cwd = REPO
 
-        # THE SECURITY LENS (Joe, 2026-08-06: "Also make the security lens").
-        # Auto-appended — never at the request author's discretion — whenever the
-        # commit touches the system's enforcement or trust surface. The trigger
-        # exists because loop #163 (the egress guard covering only Bash) was found
-        # BY ACCIDENT; a lens finds that class by assignment. Fails open with a
-        # log line: a git error must never block a review that would otherwise run.
         if req["kind"] == "code":
-            lens = security_lens_if_triggered(req["evidence"]["commit_sha"])
-            if lens:
-                req["lenses"] = list(req.get("lenses") or []) + [lens]
-                log(f"security lens armed for request={request_id} (sensitive paths touched)")
+            req["lenses"] = list(req.get("lenses") or []) + [SECURITY_LENS]
 
         prompt = render_contract_prompt(req)
 

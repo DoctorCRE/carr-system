@@ -52,7 +52,7 @@ CLI login works; they use the claude.ai "CARR Record Layer" connector instead.
 On that notice, check the connector (session_connectors_status) and
 `claude mcp get carr`. If both are connected, say nothing about signing in. Tell
 Joe once, naming which, only if one is down. Never remove the `carr` server:
-the allowlist, gates and Model Room dispatcher depend on its name.
+the allowlist, gates and Codex job launcher depend on its name.
 
 ## A capture-verb denial has a fallback door
 
@@ -75,15 +75,7 @@ the classifier declined; that is working around a denial rather than filing it.
 Measured from the Orchestrator.macbook transcript (37 hours, 11 compactions,
 224 Stop turns). Each item is the fix, not the story.
 
-1. **Dispatch (`tools/room-bridge/dispatch.py send`)**: launch with the Bash tool's
-   `run_in_background`, never `nohup … &!`, `( … &)` or `perl -e 'alarm'` (exit
-   142). There are no shared-file claims and no `reconcile` subcommand (#1811):
-   a writing job holds only its checkout's `room-writer.lock`, which the next
-   writer clears by itself once the recorded executor is gone. A job that ended
-   with `termination_confirmed: false` blocks only that checkout, and only while
-   its process group (pgid in `<gitdir>/room-writer.lock`) is still alive: kill
-   that group if it is. `--checkout` jobs each get a fresh clone, so they never
-   block one another.
+1. Launch `bin/codex-job <owner/repo> <new-branch> "<brief>" [-c model_reasoning_effort=high]` with the Bash tool's `run_in_background` and read its printed result. Start several tracked tasks for parallel work. Model and default effort come from `~/.codex/config.toml`.
 2. **The progress board is one per checkout**, resolved from the main working
    tree; a worktree no longer needs its own `init`.
 3. **A Stop gate that holds the turn open is answered with the delta only**, and
@@ -111,7 +103,7 @@ Read and follow [the required PR policy](AGENTS.md#before-every-pr-design-and-de
 
 ## Agent skills
 
-Use `tools/approve-merge.sh <owner/repo> <pr> <approved_sha>` for GitHub native auto-merge, `tools/open-prs.sh` for open PRs across jbookout repos, and `tools/room-bridge/briefs/{builder,staging-score}.md` for dispatch briefs.
+Use `gh pr merge --auto --squash <pr>` for GitHub native auto-merge, `gh pr list` for open PRs, and `tools/room-bridge/briefs/{builder,staging-score}.md` for dispatch briefs.
 
 ### Issue tracker
 

@@ -1,0 +1,17 @@
+retained_path	caller_evidence	reason
+tools/room-bridge/engineering_dispatch_adapter.py	mcp-server/bin/run-engineering-dispatch.mjs:17; bin/run-engineering-dispatch.sh:59	Product Engineering Passport execution; now native Codex with source/scope checks
+tools/room-bridge/source_study.py	bin/study_sources.py:24	Public-source study product flow; native confined provider CLIs
+tools/room-bridge/grok_wire.py	bin/grok_run.py:11; bin/study_sources.py:26	Public Grok retrieval; desk-only entrypoints removed
+tools/room-bridge/assurance_slice_compiler.py	ops/dependency-update-repin.py:12; ops/assurance-evidence-acceptance-local-pg-gate.py:411	Assurance contract compilation
+tools/room-bridge/engineering_passport.py	tools/room-bridge/assurance_slice_compiler.py:15	Product Engineering Passport contract validation
+tools/room-bridge/execution_contract.py	tools/room-bridge/assurance_slice_compiler.py:16; ops/evidence-activation-db-gate.py:31	Provider-neutral product execution contracts
+tools/room-bridge/execution_environment.py	tools/room-bridge/execution_contract.py:269	Product environment binding validation
+tools/room-bridge/activation_reliability.py	tools/room-bridge/execution_contract.py:311; tools/room-bridge/execution_contract.py:337	Product receipt reliability validation
+tools/room-bridge/policy_learning.py	control-room/contracts/activation-reliability-extension.v1.schema.json:1; tools/room-bridge/evaluation_kernel.py:14	External contract validator and independent evaluation tooling
+tools/room-bridge/design_kernel.py	tools/room-bridge/evaluation_kernel.py:13; tools/room-bridge/browser_visual_gate_capture.py:32	Independent design contract tooling; no desk dependency
+tools/room-bridge/evaluation_kernel.py	tools/room-bridge/test_execution_contract_unit.py:17; tools/test-design-kernel.py:15	Independent product contract/evaluation tooling; no desk dependency
+tools/room-bridge/spatial_surface.py	tools/room-bridge/test_execution_contract_unit.py:18	Independent spatial contract tooling; no desk dependency
+tools/room-bridge/visual_recipe_gallery.py	tools/test-visual-recipe-gallery.py:15	Standalone product visual-recipe CLI and its contract tests; no desk dependency
+tools/room-bridge/visual_recipe_library.py	tools/room-bridge/visual_recipe_gallery.py:9	Product visual recipe validation shared by standalone gallery
+tools/room-bridge/browser_visual_gate_capture.py	tools/test-browser-visual-gate-capture.py:18	Standalone browser evidence capture CLI and contract tests; no desk dependency
+tools/room-bridge/test-browser-cdp.mjs	tools/room-bridge/browser_visual_gate_capture.py:316; mcp-server/test/salesforce-list-capture-browser.test.mjs:50; mcp-server/test/test-browser-cdp.test.mjs:8	Browser capture subprocess required by product evidence tooling and regression tests

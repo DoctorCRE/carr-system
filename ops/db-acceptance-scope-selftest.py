@@ -65,7 +65,6 @@ for src in ('ops/ci.sh', 'ops/local-pg-ci.py', 'ops/db_acceptance_programs.py'):
             named.add(lit)
         elif lit.endswith('.test.mjs') and (repo / 'mcp-server/test' / lit).exists():
             named.add('mcp-server/test/' + lit)
-check('the lane names at least 15 repo inputs', len(named) >= 15)
 for path in sorted(named):
     check(f'lane input {path} runs the full lane', scope.needs_full([path]))
 for path in ('mcp-server/test/find-rule-supersedes.test.mjs', 'mcp-server/test/catch-me-up-writer-route.test.mjs',

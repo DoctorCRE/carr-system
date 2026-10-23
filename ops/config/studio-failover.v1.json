@@ -30,15 +30,6 @@
       "enabled": true
     },
     {
-      "label": "com.carr.delivery-cadence-a05-sweep",
-      "source": "ops/launchd/com.carr.delivery-cadence-a05-sweep.plist",
-      "credentials": [
-        "~/.config/carr/mcp-tokens.env"
-      ],
-      "state": [],
-      "enabled": true
-    },
-    {
       "label": "com.carr.job-watchdog",
       "source": "ops/launchd/com.carr.job-watchdog.plist",
       "credentials": [
@@ -109,13 +100,6 @@
     {
       "label": "local.ds4-flash-next",
       "source": "ops/launchd/local.ds4-flash-next.plist",
-      "credentials": [],
-      "state": [],
-      "enabled": false
-    },
-    {
-      "label": "local.flash-desk",
-      "source": "ops/launchd/local.flash-desk.plist",
       "credentials": [],
       "state": [],
       "enabled": false

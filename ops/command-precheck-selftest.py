@@ -149,16 +149,6 @@ class SpendsNothingUnnecessarilyTests(AttendedFixture):
         self.assertEqual(called, [])
 
 
-class ModelRoomRouteTests(AttendedFixture):
-    def test_rule_is_available_from_another_checkout(self):
-        with tempfile.TemporaryDirectory() as other_checkout:
-            self.assertIn("Model Room", hook.model_room_rule(other_checkout))
-
-
-
-
-
-
 class DeterministicCheckTests(AttendedFixture):
     def test_missing_path_warns_and_existing_path_does_not(self):
         with tempfile.TemporaryDirectory() as root:

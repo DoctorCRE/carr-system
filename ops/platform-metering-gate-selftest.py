@@ -201,7 +201,6 @@ def main() -> int:
 
     branch_sources = {
         "bin/restore-rehearse.sh",
-        "tools/pitr-restore-proof.py",
     }
     # A create through the provider's REST API (POST .../branches) is a branch
     # create exactly as much as a neonctl call is, so it is discovered too.

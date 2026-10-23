@@ -142,8 +142,10 @@ def main():
         if not args.dry_run:
             try:
                 ctx.failure(detail)
-            except Exception:
-                print('routine failure-loop write unavailable; inspect private journal and recorded job failure', file=sys.stderr)
+            except Exception as reporting_error:
+                cause = redact_text(f'{type(reporting_error).__name__}: {reporting_error}',
+                                    known_secrets=sensitive_env_values(os.environ))[:500]
+                print(f'routine failure-loop write unavailable: {cause}; inspect private journal and recorded job failure', file=sys.stderr)
         return 1
 
     if args.dry_run:

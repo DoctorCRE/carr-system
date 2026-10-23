@@ -13,9 +13,8 @@ chain wedged inside `exports (6 targets -> OneDrive)`. The direct child was
 `/bin/zsh ./run.sh export`; the process actually stuck on a half-closed Postgres
 socket was its python grandchild. Killing the direct child would have left the
 grandchild holding the socket, so the child is put in a NEW SESSION and the
-whole group is signalled at once. tools/room-bridge/dispatch.py already uses
-this shape (start_new_session plus killpg); this is the same pattern, not a
-second way of doing it.
+whole group is signalled at once. The watchdog can therefore stop the entire
+owned command. Codex jobs do not use this timeout wrapper.
 
 WHY A NEW SESSION IS THE SAFE CHOICE RATHER THAN THE RISKY ONE. Signalling a
 group is the sharp edge of this file: aim at the caller's group and the watchdog

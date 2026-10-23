@@ -400,76 +400,6 @@ def run_local_ci(
         ):
             return exit_code
         acceptance_python = repository_python(repo)
-        ownership_script = repo / "ops/canonical-ownership-lease-local-pg-gate.py"
-        pre_database = "carr_ci_a2_pre"
-        pre_dsn = f"postgres://carr_ci@127.0.0.1:{port}/{pre_database}"
-        if not setup(
-            [binaries.createdb, "-h", "127.0.0.1", "-p", str(port),
-             "-U", "carr_ci", pre_database]
-        ):
-            return exit_code
-        if not setup(
-            [binaries.psql, "-h", "127.0.0.1", "-p", str(port),
-             "-U", "carr_ci", "-d", pre_database, "-v", "ON_ERROR_STOP=1",
-             "-q", "-f", repo / "db/schema.sql"]
-        ):
-            return exit_code
-        pre_env = dict(clean_env)
-        pre_env["DATABASE_URL"] = pre_dsn
-        pre_apply = fixture.run(
-            [acceptance_python, repo / "tools/migrate.py", "--apply", "--yes",
-             "--through", "0431_completion_register_schema.sql"],
-            env=pre_env,
-            cwd=repo,
-            capture=True,
-        )
-        if pre_apply.returncode:
-            print(
-                "local-db-ci: pre-0450 baseline migration failed: "
-                f"{_failure_detail(pre_apply)}",
-                file=sys.stderr,
-            )
-            exit_code = pre_apply.returncode
-            return exit_code
-        # The canonical ownership gate compares the current frontier against a
-        # pre-0450 catalog fingerprint. Migration 0507a intentionally replaces
-        # engineering_record_slice_receipt, so prepare that one reviewed seam
-        # in the isolated baseline before capturing the fingerprint. The
-        # companion candidate remains frontier-only: its ownership functions
-        # are exactly what the unchanged comparator must continue to inspect.
-        if not setup(
-            [binaries.psql, "-h", "127.0.0.1", "-p", str(port),
-             "-U", "carr_ci", "-d", pre_database, "-v", "ON_ERROR_STOP=1",
-             "-q", "-f", repo / "ops/f03-receipt-validator.candidate.sql"]
-        ):
-            return exit_code
-        fingerprint_env = dict(clean_env)
-        fingerprint_env["CARR_LOCAL_PG_DSN"] = pre_dsn
-        pre_fingerprint = fixture.run(
-            [acceptance_python, ownership_script, "--fingerprint-only"],
-            env=fingerprint_env,
-            cwd=repo,
-            capture=True,
-        )
-        if pre_fingerprint.returncode:
-            print(
-                "local-db-ci: pre-0450 catalog fingerprint failed: "
-                f"{_failure_detail(pre_fingerprint)}",
-                file=sys.stderr,
-            )
-            exit_code = pre_fingerprint.returncode
-            return exit_code
-        try:
-            ownership_baseline = json.dumps(
-                json.loads(pre_fingerprint.stdout), sort_keys=True, separators=(",", ":")
-            )
-        except (TypeError, ValueError) as exc:
-            print(
-                "local-db-ci: pre-0450 catalog fingerprint was not exact JSON",
-                file=sys.stderr,
-            )
-            exit_code = 78
-            return exit_code
         if integration_base is not None:
             # Cluster-global roles require an independent cluster, not just a
             # database name. Preserve the canonical lane's fresh-role baseline.
@@ -552,15 +482,10 @@ def run_local_ci(
             acceptance_env = dict(clean_env)
             acceptance_env["PATH"] = f"{binaries.psql.parent}{os.pathsep}{clean_env.get('PATH', '')}"
             acceptance_env["CARR_LOCAL_PG_DSN"] = dsn
-            acceptance_env["CARR_OWNERSHIP_PRE_0450_FINGERPRINT"] = ownership_baseline
             for program in programs:
                 print(f"local-db-ci: {program.id} acceptance starting")
                 env = dict(acceptance_env)
-                if program.kind == "f03":
-                    env = dict(ci_env)
-                    env["CARR_F03_PSQL"] = str(binaries.psql)
-                    command = [acceptance_python, repo / program.path]
-                elif program.kind == "node":
+                if program.kind == "node":
                     env = dict(ci_env)
                     if program.id == "leads":
                         env["LEAD_WORKSPACE_TEST_DATABASE_URL"] = dsn

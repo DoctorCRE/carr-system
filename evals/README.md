@@ -15,5 +15,7 @@ Steering evals (`/claude-api build-eval`, then `/claude-api hillclimb`):
 - Candidates, new runs and reports are generated output; they are gitignored.
   Promote a candidate to the new baseline only when the comparison shows an improvement.
 
-Other reset jobs own the retained context-hook scorer
-(`context-hooks/score.py`) and model-routing scorer (`model-routing/score.py`).
+Other reset jobs own the retained context-hook scorer (`context-hooks/score.py`).
+
+For agent runs, keep network access explicit and start a fresh session when enabling it.
+Use the provider's native sandbox and network controls.

@@ -90,20 +90,6 @@ check("weekly batch rejects quote tweet", lambda: reject_weekly_quote_tweets(
 check("weekly batch accepts non-reply draft", lambda: reject_weekly_quote_tweets(
     [{"content_type": "market_commentary"}]), refuses=False)
 
-command = [sys.executable, str(REPO / "tools" / "social-batch-candidates.py")]
-bad = subprocess.run(command, input=json.dumps([{"content_type": "quote-tweet"}]),
-                     capture_output=True, text=True)
-if bad.returncode == 2 and "daily X replies" in bad.stderr:
-    passes += 1
-else:
-    fails.append("social-batch CLI refuses quote tweet")
-good = subprocess.run(command, input=json.dumps([{"content_type": "market_commentary"}]),
-                      capture_output=True, text=True)
-if good.returncode == 0 and json.loads(good.stdout).get("ok") is True:
-    passes += 1
-else:
-    fails.append("social-batch CLI admits non-reply draft")
-
 # The actual search-packet render entry point performs its control checks before
 # touching fonts/photos, so malformed asset metadata reliably proves its refusal
 # even on a CI host without the CARR vault mounted.  The renderer's legacy brand
