@@ -10,7 +10,7 @@ carr_jobs path below is the original tool's logic, kept intact — the interacti
 prompt still works exactly as it did.
 
 WHY IT EXISTS IN THIS FORM. On 2026-08-14 a session diagnosing a silent failure
-in bin/migrate-prod.sh ran it under `zsh -x`. The trace expanded the line that
+in the GitHub production deployment workflow ran it under `zsh -x`. The trace expanded the line that
 sources ~/.config/carr/db.env and printed all three secrets in full: the local
 exporter DSN, the nightly jobs DSN, and NEON_API_KEY — the last of which is not
 scoped to one database and does not expire. Rotation was the remedy, and doing
@@ -51,7 +51,7 @@ byte-identical.
 
 ORDER OF OPERATIONS FOR THE API KEY, and it matters: mint, verify the new key
 works, write it to db.env, and only then revoke the old one. Revoking first
-would take out every unattended path at once — bin/migrate-prod.sh,
+would take out every unattended path at once — the GitHub production deployment workflow,
 bin/import-doctrine.sh, bin/restore-rehearse.sh and the partner ping all derive
 their connection through neonctl — with no way back.
 
@@ -389,12 +389,12 @@ def shell_quote(value: str) -> str:
     file read by two parsers has two contracts, and fixing one breaks the other
     unless you check (73381d78). Python
     readers split on '=' and strip quotes, so they do not care. zsh SOURCES this
-    file — bin/migrate-prod.sh, bin/nightly.sh and every other shell job do
+    file — the GitHub production deployment workflow, bin/nightly.sh and every other shell job do
     `set -a; . db.env` — and an unquoted '&' in a DSN is a background operator,
     not a character.
 
     The first version of this tool wrote the value bare. Every Python check
-    passed, both roles connected, and bin/migrate-prod.sh died with
+    passed, both roles connected, and the GitHub production deployment workflow died with
     "db.env:3: parse error near `&`" — the jobs DSN carries
     &channel_binding=require. Caught only because a completion gate demanded a
     fresh run of the shell path rather than a restatement of the Python one.
@@ -421,7 +421,7 @@ def shell_parse_failure(path: str) -> str | None:
     CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL reached db.env unquoted from outside
     this tool. Its `&channel_binding=require` is a background operator to zsh, so
     the source line died on a parse error and took ALL FIVE keys in the file with
-    it. bin/migrate-prod.sh — the one sanctioned door to production migrations —
+    it. the GitHub production deployment workflow — the one sanctioned door to production migrations —
     was closed from then until 2026-08-26 for every caller that did not already
     have NEON_API_KEY exported, and the error text named neither the file's role
     nor the script, so it read as a broken script. A guard that only trusts this

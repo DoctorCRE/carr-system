@@ -1,6 +1,6 @@
 // Build stamp names shared by release metadata and candidate fixtures.
 
-/** The name of every build stamp bin/deploy-worker.sh writes. Closed. */
+/** The name of every build stamp the GitHub production deployment workflow writes. Closed. */
 export const BUILD_STAMP_NAMES = Object.freeze({
   gitSha: "GIT_SHA",
   candidateManifest: "CANDIDATE_MANIFEST",

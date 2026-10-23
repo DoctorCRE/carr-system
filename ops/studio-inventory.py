@@ -129,11 +129,10 @@ def compare(root):
     credentials = {
         'nightly-record-layer': ['db.env', 'tokens.env', 'healthchecks.env', 'age-key.txt'],
         'nightly-exports-daytime-retry': ['db.env', 'tokens.env'],
-        'partner-ping': ['db.env'], 'release-pipeline': ['db.env', 'tokens.env'],
+        'partner-ping': ['db.env'],
         'job-watchdog': ['db.env', 'mcp-tokens.env'], 'cutover-watch': ['mcp-tokens.env'],
         'delivery-cadence-a05-sweep': ['mcp-tokens.env']}
     states = {'partner-ping': ['~/.config/carr/partner-ping.json'],
-              'release-pipeline': ['~/carr-system/out/release-pipeline'],
               'local.carr-progress-board': ['~/carr-system/out/boards'],
               'nightly-record-layer': ['~/carr-system/out/backups']}
     jobs = []

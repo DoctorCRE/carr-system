@@ -88,6 +88,21 @@ class PickerTests(unittest.TestCase):
             self.assertIn(str((self.repo / '.claude/skills' / pick['name'] / 'SKILL.md').resolve()), brief)
         self.assertIn('## Required skills', brief)
 
+    def test_env_file_fallback_reaches_sdk_without_changing_process_environment(self):
+        env_file = self.home / '.config/carr/typesafe.env'
+        env_file.parent.mkdir(parents=True)
+        env_file.write_text('TYPESAFE_API_KEY=fixture-file-key\nUNRELATED=fixture-only\n')
+        env_file.chmod(0o600)
+        with patch.dict(os.environ, {}, clear=True), \
+             patch('typesafe_sdk.AsyncTypeSafeClient', return_value=self.client({'skill-0': .95})()) as sdk:
+            brief, picks = self.prepare()
+            self.assertNotIn('TYPESAFE_API_KEY', os.environ)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(sdk.call_args.kwargs['api_key'], 'fixture-file-key')
+        self.assertIn({'name': 'skill-0', 'probability': .95}, picks)
+        self.assertNotIn('fixture-file-key', brief)
+        self.assertNotIn('picker skipped:', brief)
+
     def test_missing_key_sends_baseline_without_call(self):
         with patch.dict(os.environ, {}, clear=True):
             brief, picks = self.prepare(client_factory=self.client())

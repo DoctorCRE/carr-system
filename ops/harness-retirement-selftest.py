@@ -21,13 +21,13 @@ class HarnessRetirement(unittest.TestCase):
                     self.assertFalse(script in raw, script)
         claude = (ROOT / 'ops/config/hooks.json').read_text()
         codex = (ROOT / 'ops/config/codex-hooks.json').read_text()
-        for script in ('guard-unattended.py', 'record-home-gate.py', 'github-burst-guard.py',
+        for script in ('guard-unattended.py', 'record-home-gate.py',
                        'rule-pack-preuse-reselection.py', 'gate-integrity.py'):
             self.assertIn(script, claude)
             self.assertIn(script, codex)
         for script in ('canonical-edit-gate.py', 'weekend-quiet-gate.py',
-                       'costar-lane-gate.py', 'model-floor-gate.py'):
-            self.assertIn(script, claude)
+                       'costar-lane-gate.py', 'model-floor-gate.py', 'github-burst-guard.py'):
+            self.assertNotIn(script, claude)
         self.assertIn('Bash(git push --force:*)', (ROOT / '.claude/settings.json').read_text())
 
     def test_config_sync_removes_old_codex_continuity_hooks_and_preserves_other_projects(self):

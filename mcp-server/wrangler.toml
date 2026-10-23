@@ -20,50 +20,8 @@
 #                         of another authenticates as the wrong identity. The
 #                         family is therefore published in ONE atomic bulk call
 #                         and read back, never one `wrangler secret put` at a
-#                         time. STAGING is provisioned as the third LoginProfile
-#                         in tools/provision-staging-app-writer.py, which
-#                         publishes all three DSNs in exactly that one atomic
-#                         bulk cutover and reads the bound names back before the
-#                         password commits.
-#                         PRODUCTION is JOE'S OWN ACT and no tool in this
-#                         repository performs it: that provisioner refuses the
-#                         Production project by design, and no session holds the
-#                         Cloudflare token or the Production owner credential.
-#                         It is RELEASE ACT (9) of PLAN-a5059eb52474-v3 -- AFTER
-#                         PR #1013 and PR #1014 have merged (acts 6 and 8) and
-#                         before the third Worker promotion (act 12).
-#                         RECORDED DEVIATION FROM THE PLAN'S NUMBERING, ruled at
-#                         execution 2026-09-13: the plan lists act (9) BEFORE the
-#                         apply at act (10), and that order cannot be run --
-#                         migration 0502 is what CREATES
-#                         carr_gate_zero_producer, so before the apply there is
-#                         no role to set a password on and (9)(a)'s own first
-#                         proof would find no pg_authid row at all. The
-#                         executable order is (8) merge, (10) apply 0502 and 0503
-#                         as one group, (9) Joe provisions and publishes, then
-#                         (11) the schema refresh, (12) the promotion, (13) the
-#                         live run. Every reason the plan gives for (9)'s
-#                         position survives it: what (9) must precede is the
-#                         PROMOTION, never the apply. The plan is immutable and
-#                         unedited; the deviation is recorded at execution in the
-#                         outcome feedback, and migration 0502's own header and
-#                         PR #1014's body carry this same statement.
-#                         Joe sets the role's password per
-#                         the Neon Database SOP, section
-#                         `01-connections-and-roles`, proving from pg_authid that
-#                         the role is still passwordless first and leaving that
-#                         transaction uncommitted; then publishes the whole
-#                         DATABASE_URL* family to the production Worker in one
-#                         `wrangler secret bulk` call with the payload on stdin,
-#                         reads the bound names back with `wrangler secret list
-#                         --format json`, and verifies from the CONSUMER rather
-#                         than from an exit code, per the Cloudflare Edge SOP,
-#                         section `02-secrets-and-tokens` -- the same atomic
-#                         bulk-plus-readback shape the staging provisioner uses.
-#                         Only then does the password commit. A Worker promoted
-#                         before this secret exists refuses every write and names
-#                         required_secret.
-#   INGEST_TOKENS       — JSON map { "<source>": "<token>" } for the ingest socket
+#                         time. Production role credentials remain managed by
+#                         the operator outside this deployment workflow.
 #   PROBE_TOKENS        — JSON map { "<slug>": "<token>" } for the smoke suite ONLY
 #                         (loop #192, 2026-08-06). Authenticates as one locked-
 #                         profile machine actor ('smoke-probe'); checked in
@@ -205,22 +163,7 @@ type = "Data"
 globs = ["**/*.ttf"]
 fallthrough = true
 
-# WHICH DEPLOYMENT IS ANSWERING. Added 2026-08-14, after the routes incident
-# below: for about two minutes api.doctorcre.com was served by carr-mcp-staging
-# and /release — the endpoint that exists to answer "what is production
-# running?" — could not say so. Its only symptom was doctrine_generation null,
-# which reads as a DATABASE fault on production, not as "you are talking to a
-# different Worker". Every other field was plausible or outright identical:
-# git_sha is the same commit in both environments, and schema is identical BY
-# CONSTRUCTION, because staging's database is built from db/schema.sql, which
-# carries production's committed schema_migrations ledger.
-#
-# `vars` IS INHERITABLE, exactly like `routes`. An env-level [env.X.vars] table
-# REPLACES this one wholesale rather than merging into it, so any var added here
-# later must also be added to [env.staging.vars] or staging silently loses it.
-# That is the same inheritance surprise documented at length below; it is written
-# here too because the next person to add a var will be reading this block, not
-# that one.
+# /release reports the production identity stamped by the deployment workflow.
 [vars]
 CARR_ENV = "production"
 APP_HOST = "app.doctorcre.com"
@@ -281,90 +224,3 @@ binding = "carr_documents"
 bucket_name = "carr-documents"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGING (2026-08-13). Gate G1 requires an environment PROVEN unable to reach
-# Production data or credentials. The database half is a separate Neon project
-# (carr-staging, resolved by name in tools/db-tap.py); this is the Worker half.
-#
-# EVERY BINDING BELOW IS ITS OWN. Nothing is shared with the block above — not
-# the KV namespace, not the domains, not one secret. `wrangler deploy --env
-# staging` deploys a SEPARATE Worker named carr-mcp-staging; the production
-# Worker is untouched by it. A staging environment that shares any one of these
-# is not a staging environment, it is production with a different label.
-#
-# NO CUSTOM DOMAINS, DELIBERATELY. Staging answers on workers.dev only. Putting
-# it on staging-api.doctorcre.com would mean a DNS record one typo away from the
-# production hostnames and a certificate on the same zone; workers.dev costs
-# nothing, needs no DNS, and is unmistakably not production at a glance.
-#
-# NO R2 BUCKET. The production carr_documents binding is declared but referenced
-# nowhere in src/ (checked). Staging gets one when the code actually uses it —
-# an unused binding is a surface to keep isolated for no benefit.
-#
-# SECRETS ARE SET BY bin/staging-secrets.sh, which generates fresh values and
-# pipes them straight into `wrangler secret put`. They are never copies of
-# production's, because a leaked staging token must never open production, and
-# they are never printed — see that script's header.
-[env.staging]
-name = "carr-mcp-staging"
-main = "src/index.js"
-compatibility_date = "2026-07-01"
-compatibility_flags = ["global_fetch_strictly_public", "nodejs_compat"]
-workers_dev = true
-
-# `routes = []` IS LOAD-BEARING AND CAUSED A PRODUCTION INCIDENT BY ITS ABSENCE.
-# 2026-08-13 00:27 UTC: this block was first written without it, on the
-# assumption that declaring no routes meant inheriting none. Wrangler treats
-# `routes` as an INHERITABLE key, so the staging Worker inherited all three
-# production custom domains and took them over on deploy — api.doctorcre.com,
-# api.practicecre.com, app.doctorcre.com and dealroom.doctorcre.com all began answering from
-# carr-mcp-staging, which is bound to the EMPTY staging database. /release on
-# api.doctorcre.com returned doctrine_generation null, "doctrine_meta has no row
-# with id=1", for about two minutes until production was redeployed and
-# reclaimed them.
-#
-# An empty list OVERRIDES the inherited value; omitting the key inherits it. The
-# difference between those two is a live outage, so it is written down here
-# rather than left to whoever reads the wrangler docs next. Never delete this
-# line to "tidy up" — its emptiness is the whole point.
-routes = []
-
-# Staging says so out loud, on every /release call. See the [vars] note in the
-# production block: this table REPLACES the top-level one rather than merging,
-# so a var added there must be repeated here.
-[env.staging.vars]
-CARR_ENV = "staging"
-APP_HOST = "carr-mcp-staging.joe-bookout-carr-us.workers.dev"
-# The independent DoctorCRE staging Worker reaches this Worker only through a
-# private service binding. This exact host keeps OAuth redirects, host-only
-# sessions, CSRF, tenant checks, and authorization inside CARR.
-DOCTORCRE_APP_HOST = "doctorcre-app-staging.joe-bookout-carr-us.workers.dev"
-CARR_MCP_ALLOWED_ORIGINS = '["https://carr-mcp-staging.joe-bookout-carr-us.workers.dev","https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev"]'
-DEALROOM_PROGRAM6_ACTIONS_ENABLED = "true"
-WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true"
-CONTINUITY_SURFACE_ENFORCEMENT = "required"
-CANONICAL_OWNERSHIP_RUNTIME_MODE = "disabled"
-CANONICAL_OWNERSHIP_ISSUER_ACTIVE_GENERATION = "none"
-CANONICAL_OWNERSHIP_CANARY_JOB_ID = "none"
-
-# Environment configuration is explicit: staging's separate Worker needs the
-# same runtime version-identity binding and must not depend on inheritance.
-[env.staging.version_metadata]
-binding = "CF_VERSION_METADATA"
-
-[env.staging.assets]
-directory = "../out/doctorcre-artifacts/current"
-binding = "ASSETS"
-run_worker_first = true
-
-# Its OWN OAuth store. Sharing production's namespace would mean a staging grant
-# is a production grant — the single worst way to fail this gate.
-[[env.staging.kv_namespaces]]
-binding = "OAUTH_KV"
-id = "faa513fd07ec45d88abc5949f323aec5"
-
-[[env.staging.durable_objects.bindings]]
-name = "OAUTH_CONSENT_STATE"
-class_name = "OAuthConsentState"
-
-[env.staging.observability]
-enabled = true

@@ -20,7 +20,7 @@
 //                          shipped because it is read from the shipped code.
 //   git_sha              — the ONE field with no runtime source: a Worker
 //                          cannot read git at request time. Stamped in at
-//                          deploy time as env.GIT_SHA (bin/deploy-worker.sh:
+//                          deploy time as env.GIT_SHA (the GitHub production deployment workflow:
 //                          `wrangler deploy --var GIT_SHA:<sha>`), and read
 //                          through build-stamp.js's `stampedGitSha` — the one
 //                          read, shared with the Gate Zero producer, which binds
@@ -184,7 +184,7 @@ export async function buildRelease({ env, sql, verbCount, now = () => new Date()
     worker_version: workerVersion,
     git_sha: sha
       ? { value: sha, reason: null }
-      : { value: null, reason: "not stamped: deployed outside bin/deploy-worker.sh" },
+      : { value: null, reason: "not stamped: deployed outside the GitHub production deployment workflow" },
     schema: {
       highest_applied_migration: schema.highest_applied_migration,
       applied_count: schema.applied_count,

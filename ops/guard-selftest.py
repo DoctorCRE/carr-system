@@ -771,18 +771,13 @@ case("a quoted newline is part of an unsafe deletion target",
      bash("rm -f /private/tmp/claude-501/scratch/file 'unsafe\nfile'"), DENY)
 case("direct Cloudflare deploy is metering-refused", bash("npx wrangler deploy"), DENY)
 case("direct Cloudflare version upload is metering-refused", bash("wrangler versions upload"), DENY)
-case("sanctioned Worker release wrapper is allowed", bash("./bin/deploy-worker.sh --check"), ALLOW)
 case("direct Neon branch create is metering-refused",
      bash("neonctl branches create --project-id p --name x"), DENY)
 case("reviewed Neon rebuild wrapper is allowed", bash("python3 ops/p1-rebuild-gate.py"), ALLOW)
 case("direct GitHub workflow dispatch is metering-refused",
      bash("gh workflow run ci.yml"), DENY)
-case("direct GitHub job rerun is metering-refused",
-     bash("gh run rerun 123 --job 456"), DENY)
-case("budget-checked CI job rerun wrapper is allowed",
-     bash("./ops/ci-rerun.sh 123 --job 456"), ALLOW)
-case("CI wrapper does not authorize a chained direct rerun",
-     bash("./ops/ci-rerun.sh 123 --job 456; gh run rerun 123"), DENY)
+case("plain GitHub job rerun is allowed",
+     bash("gh run rerun 123 --failed"), ALLOW)
 case("prose describing a metered dispatch remains inert",
      bash('gh pr create --body "npx wrangler deploy is refused"'), ALLOW)
 
@@ -881,7 +876,8 @@ case("newfs is refused", bash(f"newfs_hfs {_DISK}"), DENY)
 case("repartitioning a disk is refused", bash(f"diskutil partitionDisk {_DISK} 1 GPT"), DENY)
 
 case("a plus-refspec force push is refused", bash("git push origin +main:main"), DENY)
-case("an ordinary push is still allowed", bash("git push origin main"), ALLOW)
+case("a direct main push uses the PR delivery path", bash("git push origin main"), DENY)
+case("an ordinary branch push is still allowed", bash("git push origin review-fix"), ALLOW)
 
 # ── Rebasing your OWN branch in place, which the blanket block made impossible ──
 #

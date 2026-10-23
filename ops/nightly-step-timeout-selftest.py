@@ -124,14 +124,14 @@ class HealthcheckTests(unittest.TestCase):
                                           "https://example.test/chain",
                                           "https://example.test/worker"])
         rows = self.calls()
-        final_job = rows.index("step nightly.pr-board")
+        final_job = rows.index("step nightly.verb-probe")
         self.assertTrue(all(index > final_job for index, row in enumerate(rows)
                             if "example.test/chain" in row or "example.test/worker" in row))
 
     def test_failed_job_alarms_chain_and_later_jobs_still_run(self):
         result = self.run_script("nightly.sh", CARR_TEST_FAIL_STEP="nightly.credential-health")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("step nightly.pr-board", self.calls())
+        self.assertIn("step nightly.verb-probe", self.calls())
         self.assertEqual(self.ping_urls(), ["https://example.test/backup",
                                           "https://example.test/chain/fail",
                                           "https://example.test/worker"])
@@ -145,7 +145,7 @@ class HealthcheckTests(unittest.TestCase):
     def test_backup_failure_alarms_backup_and_chain(self):
         result = self.run_script("nightly.sh", CARR_TEST_FAIL_STEP="nightly.encrypted-backup")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("step nightly.pr-board", self.calls())
+        self.assertIn("step nightly.verb-probe", self.calls())
         self.assertEqual(self.ping_urls(), ["https://example.test/backup/fail",
                                           "https://example.test/chain/fail",
                                           "https://example.test/worker"])
@@ -153,7 +153,7 @@ class HealthcheckTests(unittest.TestCase):
     def test_ping_delivery_failure_keeps_nightly_jobs_running(self):
         result = self.run_script("nightly.sh", CARR_TEST_PING_RC="7")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("step nightly.pr-board", self.calls())
+        self.assertIn("step nightly.verb-probe", self.calls())
         self.assertEqual(self.ping_urls(), ["https://example.test/backup",
                                           "https://example.test/chain/fail",
                                           "https://example.test/worker"])
