@@ -15,13 +15,8 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/zsh</string>
-    <string>{{REPO}}/bin/run-scheduled.sh</string>
-    <string>outlook-intake</string>
-    <string>outlook.intake</string>
-    <string>{{REPO}}/.venv/bin/python</string>
-    <string>-c</string>
-    <string>from lib.outlook_intake import main; raise SystemExit(main())</string>
+    <string>{{HOME}}/carr-local/bin/outlook-intake-copy</string>
+    <string>--run-intake</string>
   </array>
   <key>WorkingDirectory</key><string>{{REPO}}</string>
   <key>Umask</key><integer>63</integer>

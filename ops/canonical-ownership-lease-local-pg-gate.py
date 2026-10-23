@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ci: runs-outside-ci — invoked by ops/local-pg-ci.py after canonical CI so committed concurrency fixtures cannot contaminate other DB gates
+# ci: runs-outside-ci — fixture dependency of the assurance producer role-boundary tests
 # doctrine: runbook
 """Disposable-Postgres proof for the dark canonical ownership lease kernel."""
 

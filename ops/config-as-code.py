@@ -1,51 +1,10 @@
 #!/usr/bin/env python3
-"""config-as-code.py — the machine config belongs in the repo, same as the code.
+"""Render the repository's hooks, native safety policies, and machine configuration.
 
-WHY (Joe, 2026-08-03: "shouldnt all code be in the repo? .json is code").
-
-He is right, and the exposure was worse than the one file he was pointing at.
-Measured that night:
-
-    ~/.claude/settings.json      1 on disk,  0 in the repo   <- fires all 5 hooks
-    launchd plists               2 on disk,  0 in the repo   <- incl. the hourly
-                                                                rule refresh
-    scheduled tasks             15 on disk,  4 in the repo
-
-So the five hook SCRIPTS were version-controlled and the thing that makes them
-run was not. That is the two-homes disease the whole system is built to avoid:
-the same night, hooks/SETTINGS-BLOCK.md was found to have silently drifted — it
-documented two hooks and the live file had four. A document DESCRIBING config
-drifts. Config in the repo does not.
-
-WHAT THIS DOES NOT DO, and the reason is not squeamishness. It does not put
-`~/.claude/settings.json` in the repo wholesale. That file also carries 77
-permission entries and notification prefs that are Joe's, machine-shaped, and
-churn weekly — committing them would create a second home for something Claude
-Code only ever reads from ~/.claude/, and a baseline would go stale exactly the
-way SETTINGS-BLOCK.md did. Only the CARR-OWNED `hooks` block is tracked, and
-`install` merges it back leaving every other key untouched.
-
-THE PATTERN IS THE ONE THE SYSTEM ALREADY USES: source in the repo, render on
-the machine. settings.json becomes a render, the same way clients-active.md is.
-
-PORTABILITY IS THE POINT, NOT A BONUS. Repo copies store {{HOME}}, {{REPO}} and
-{{VAULT}} instead of /Users/booko. That is what lets the same source install on
-Dell's machine — and 54 of the 70 active rules are SHARED scope, binding him
-exactly as they bind Joe, with zero mechanical enforcement on his side today.
-
-    ops/config-as-code.py check      # drift report; exit 1 if any. THE DEFAULT.
-    ops/config-as-code.py pull       # machine -> repo (capture what is live)
-    ops/config-as-code.py install    # repo -> machine (deploy; needs --apply)
-    ops/config-as-code.py reinstall-launchd-calendar [--apply] [--kickstart]
-    ops/config-as-code.py install-codex-continuity-mcp --apply
-    ops/config-as-code.py verify-codex-continuity-mcp
-    ops/config-as-code.py install-progress-board [--repo CANONICAL] --apply
-    ops/config-as-code.py install-flash-on-demand [--apply]
-    ops/config-as-code.py verify-progress-board [--repo CANONICAL]
-    ops/config-as-code.py check-launchd-main-paths
-
-`check` is what belongs in run.sh health: it answers "is the live config still
-the config we think we have", which is the question nobody could answer tonight.
+`check` reports drift. `install` previews changes; `install --apply` deploys from
+canonical main. Native safety restrictions merge into administrator-owned Claude
+managed settings and Codex requirements before client hook registrations change.
+Unrelated client and organization settings remain owned by their existing source.
 """
 
 import copy
@@ -205,6 +164,60 @@ CODEX_APP_SERVER_OUTPUT_LIMIT = 4 * 1024 * 1024
 CODEX_PERMISSIONS_REPO = os.path.join(REPO, "ops", "config", "codex-permissions.toml")
 CODEX_PERMISSIONS_BEGIN = "# >>> CARR managed permissions >>>"
 CODEX_PERMISSIONS_END = "# <<< CARR managed permissions <<<"
+CLAUDE_MANAGED_SETTINGS = (
+    "/Library/Application Support/ClaudeCode/managed-settings.json"
+    if sys.platform == 'darwin' else '/etc/claude-code/managed-settings.json')
+CODEX_REQUIREMENTS = '/etc/codex/requirements.toml'
+
+
+def managed_safety_plan():
+    """Merge fixed restrictions into native managed policy, preserving other owners."""
+    import tomlkit
+    sources = Path(REPO) / 'ops/config'
+    claude_source = sources / 'claude-managed-settings.json'
+    codex_source = sources / 'codex-requirements.toml'
+    claude = json.loads(read(CLAUDE_MANAGED_SETTINGS) or '{}')
+    desired = json.loads(claude_source.read_text())
+    deny = claude.setdefault('permissions', {}).setdefault('deny', [])
+    deny.extend(rule for rule in desired['permissions']['deny'] if rule not in deny)
+    codex = tomlkit.parse(read(CODEX_REQUIREMENTS) or '')
+    desired_codex = tomlkit.parse(codex_source.read_text())
+    rules = codex.setdefault('rules', {}).setdefault('prefix_rules', [])
+    rules.extend(rule for rule in desired_codex['rules']['prefix_rules'] if rule not in rules)
+    return [(CLAUDE_MANAGED_SETTINGS, json.dumps(claude, indent=2) + '\n'),
+            (CODEX_REQUIREMENTS, tomlkit.dumps(codex))]
+
+
+def managed_safety_writable(plan):
+    """Refuse an unavailable system policy destination before removing any hook."""
+    for name, body in plan:
+        if read(name) == body:
+            continue
+        path = Path(name)
+        while not path.exists():
+            path = path.parent
+        if not os.access(path, os.W_OK):
+            print(f'ERROR: managed safety policy needs a writable administrator-owned destination: {name}')
+            return False
+    return True
+
+
+def install_managed_safety(plan, *, apply):
+    """Render only owned policy fields in dry runs; never print unrelated settings."""
+    import tomllib
+    for name, body in plan:
+        sources = Path(REPO) / 'ops/config'
+        if name == CLAUDE_MANAGED_SETTINGS:
+            view = json.loads((sources / 'claude-managed-settings.json').read_text())
+        else:
+            parsed = tomllib.loads((sources / 'codex-requirements.toml').read_text())
+            view = {'rules': parsed['rules']}
+        print(f"  {'write' if apply else 'would write'} managed safety policy: {name}")
+        print(json.dumps(view, indent=2))
+        if apply and read(name) != body:
+            Path(name).parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write(name, body)
+    return 0
 
 # Longest first: REPO and VAULT both sit under HOME, so substituting HOME first
 # would leave "{{HOME}}/carr-system" and the REPO token would never match.
@@ -767,7 +780,7 @@ def codex_app_server_request(method, params):
     command = [os.environ.get("CARR_CODEX_CLI", "codex"), "app-server", "--stdio"]
     messages = [
         {"method": "initialize", "id": 1, "params": {
-            "clientInfo": {"name": "carr-continuity-installer", "version": "1.0.0"},
+            "clientInfo": {"name": "carr-codex-continuity-installer", "version": "1.0.0"},
             "capabilities": {"experimentalApi": True},
         }},
         {"method": "initialized", "params": {}},
@@ -880,7 +893,7 @@ def _write_codex_config_edits(edits, expected_version):
 
 
 def cmd_install_codex_continuity_mcp(apply=False):
-    """Install the existing adapter in explicit Codex mode with scoped permissions."""
+    """Install the Codex-only adapter with scoped permissions."""
     import copy
     import hashlib
     import shutil
@@ -889,7 +902,7 @@ def cmd_install_codex_continuity_mcp(apply=False):
     DEST = Path.home() / '.config/carr/codex-continuity'
     SERVER = 'carr-codex-continuity'
     TOOLS = ['codex-checkpoint', 'codex-read-recovery']
-    FILES = ['continuity-stdio-proxy.mjs', 'continuity-reference-manifest.mjs',
+    FILES = ['codex-continuity-stdio-proxy.mjs', 'continuity-reference-manifest.mjs',
              'local-client-auth.mjs']
     node = shutil.which('node')
     if not node:
@@ -897,7 +910,7 @@ def cmd_install_codex_continuity_mcp(apply=False):
     before = _codex_user_config_layer()
     expected = copy.deepcopy(before['config'])
     servers = expected.setdefault('mcp_servers', {})
-    servers[SERVER] = {'command': node, 'args': [str(DEST / FILES[0]), '--codex'],
+    servers[SERVER] = {'command': node, 'args': [str(DEST / FILES[0])],
                        'enabled_tools': TOOLS,
                        'tools': {name: {'approval_mode': 'approve'} for name in TOOLS}}
     # Remove the two broken duplicate routes in Codex only. All other tools and
@@ -1700,8 +1713,8 @@ def install_launchd_plist(filename, dest, body, body_matches, *, timeout=15):
 def cmd_install_progress_board(apply=False, repo=None):
     """Migrate the existing board agent to the repository wrapper, then read
     launchd's arguments back. This does not create a new schedule or label.
-    Runtime and state belong to the canonical main checkout maintained by
-    bin/fleet-sync.sh. --repo may name that checkout explicitly, but cannot
+    Runtime and state belong to the canonical main checkout.
+    --repo may name that checkout explicitly, but cannot
     select a feature tree even for pre-merge verification.
     """
     label = "local.carr-progress-board"
@@ -1881,6 +1894,13 @@ def git_hooks_path_report() -> str:
 def cmd_install(apply):
     """repo -> machine. The half that makes a second machine possible."""
     try:
+        safety_plan = managed_safety_plan()
+    except (OSError, ValueError, TypeError) as exc:
+        print(f'ERROR: cannot render managed safety policy: {exc}')
+        return 1
+    if apply and not managed_safety_writable(safety_plan):
+        return 1
+    try:
         held_labels = launchd_hold.reconcile_off(HOME, apply, definition_labels=definition_only_labels(LAUNCHD_REPO))
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         print(f"  HOLD REFUSED: {exc}")
@@ -2023,7 +2043,7 @@ def cmd_install(apply):
     if apply:
         os.makedirs(LAUNCHD_SRC, exist_ok=True)
     for f in sorted(os.listdir(LAUNCHD_REPO)) if os.path.isdir(LAUNCHD_REPO) else []:
-        if f in {"local.ds4-flash-next.plist", "local.flash-desk.plist", "com.carr.flash-idle-stop.plist"}:
+        if f in {"local.ds4-flash-next.plist", "com.carr.flash-idle-stop.plist"}:
             continue
         source = read(launchd_repo_path(f))
         if (launchd_calendar.plist_label(source or "") or f.removesuffix(".plist")) in held_labels:
@@ -2117,6 +2137,7 @@ def cmd_install(apply):
                   "(core.hooksPath untouched — `check` reports the observed value)")
 
     if not apply:
+        install_managed_safety(safety_plan, apply=False)
         print("\nDRY RUN — nothing written. Re-run with --apply.")
         return 0
 
@@ -2150,6 +2171,7 @@ def cmd_install(apply):
             shutil.move(source_dir, destination)
 
     written_backups = []
+    install_managed_safety(safety_plan, apply=True)
     if raw != json.dumps(cfg, indent=2) + "\n":
         os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
         backup = SETTINGS + ".bak-config-as-code"

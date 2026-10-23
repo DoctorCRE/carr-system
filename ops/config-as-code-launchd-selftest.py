@@ -27,6 +27,8 @@ spec = importlib.util.spec_from_file_location(
 assert spec and spec.loader
 mod: Any = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
+# LaunchAgent fixtures must never target administrator-owned client policy.
+mod.managed_safety_plan = lambda: []
 
 
 def plist(label: str, program: str = "/usr/bin/true") -> str:

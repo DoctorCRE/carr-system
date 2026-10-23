@@ -42,6 +42,19 @@ class SafetyHooks(unittest.TestCase):
 
 
 class BaselineIntegrity(unittest.TestCase):
+    def test_scoped_bless_removes_only_the_named_deleted_script(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            baseline = root / 'baseline.json'
+            baseline.write_text(json.dumps({'hashes': {'retired.py': 'old', 'other.py': 'keep'},
+                                            'contracts': {}}))
+            with patch.multiple(gate, REPO=root, HOOKS=root, BASELINE=baseline,
+                                GATED=[], CONTRACTS={}), \
+                    patch.object(gate, 'dirty_gate_files', return_value=['retired.py']), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(gate.bless(['retired.py']), 0)
+                self.assertEqual(json.loads(baseline.read_text())['hashes'], {'other.py': 'keep'})
+
     def test_blessed_content_detects_changes_missing_and_unblessed_gates(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -1,4 +1,4 @@
-"""Give a verified synthetic staging journey one overdue local next step."""
+"""Give a verified synthetic staging journey one overdue stored checklist item."""
 import argparse
 import importlib.util
 import json
@@ -8,6 +8,17 @@ import subprocess
 import sys
 
 PRODUCER_COMMIT = '517ecc12c0480d859dd1f4cb270f2a283a853065'
+
+
+def bind_home_rows(journey):
+    original = journey.owned_rows
+
+    def owned_rows(run):
+        ids = journey.identities(run)
+        return [('public.next_action', "subject_type='deal' and subject_id=%s and source_ref=%s",
+                 (ids['deal'], f'fixtures/staging-home/{run}'))] + original(run)
+
+    journey.owned_rows = owned_rows
 
 
 def prepare(journey, conn, run):
@@ -20,6 +31,14 @@ def prepare(journey, conn, run):
             cur.execute("update public.deal set next_date=date '2000-01-01' where id=%s", (ids['deal'],))
             cur.execute("update public.deal_note set kind='next_step' where id=%s and deal_id=%s",
                         (ids['note_b'], ids['deal']))
+            cur.execute("""insert into public.next_action(subject_type,subject_id,owner_id,due_on,description,
+                          created_by,updated_by,item_title,item_bullets,source_ref)
+                select 'deal',%s,id,date '2000-01-01','Review synthetic update',id,id,
+                       'Review synthetic update','[{"kind":"promised","text":"Review the synthetic update."}]'::jsonb,%s
+                  from public.actor where slug='joe' and active
+                on conflict (subject_id,source_ref,item_title)
+                  where subject_type='deal' and item_title is not null do nothing""",
+                        (ids['deal'], f'fixtures/staging-home/{run}'))
         conn.commit()
     except BaseException:
         conn.rollback()
@@ -40,6 +59,7 @@ def main():
     spec = importlib.util.spec_from_file_location('journey', root / 'tools/staging-journey-fixtures.py')
     journey = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(journey)
+    bind_home_rows(journey)
     journey.identities(args.run)
     owner = journey.staging_owner()
     with journey.psycopg.connect(owner.value, connect_timeout=10) as conn:

@@ -328,46 +328,6 @@
       ]
     },
     {
-      "key": "delivery-cadence-a05-sweep",
-      "name": "V5-A05 delivery-cadence sweep",
-      "purpose": "Reads cadence-status for the bounded v1 subject (engineering_program/doctorcre-v5) and, only on a detected 14-day miss, raises the replan-on-miss escalation through raise-delivery-cadence-alert. Daily 07:00. See ops/delivery-cadence-a05-sweep.py.",
-      "family": "Local Mac edge",
-      "criticality": "low",
-      "owner_actor": "joe",
-      "repo_path": "ops/delivery-cadence-a05-sweep.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.delivery-cadence-a05-sweep.plist",
-          "runs_on": "primary",
-          "expected_cadence_seconds": 86400,
-          "cadence_grace_seconds": 172800,
-          "notes": "Daily, 07:00 local, before the working day. Grace spans a missed day plus buffer to the following run, matching timebomb-audit's own weekend-spanning reasoning."
-        }
-      ]
-    },
-    {
-      "key": "fleet-sync",
-      "name": "Canonical checkout and configuration fleet sync",
-      "purpose": "Fast-forwards each Mac's canonical main checkout only when the fail-closed local-state proof accepts it, then re-renders repository-owned configuration.",
-      "family": "Local Mac edge",
-      "criticality": "high",
-      "owner_actor": "joe",
-      "repo_path": "bin/fleet-sync.sh",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.fleet-sync.plist",
-          "runs_on": "every",
-          "expected_cadence_seconds": 3600,
-          "cadence_grace_seconds": 3600,
-          "notes": "Fires hourly (StartCalendarInterval at :31, lib/launchd_calendar.py) and again at RunAtLoad (login/wake), changed 2026-09-23 from four fixed daily fires so a Mac asleep or unused for a stretch catches up immediately instead of reading up to twelve hours stale. Cadence is 3600s; 3600s grace covers launch delay and the local spool's next-flush delay, matching the grace already used by this repo's other hourly local jobs (e.g. notes-sweep). The plist routes through bin/run-scheduled.sh as service fleet-sync with run key fleet.sync, and now also fast-forwards the sibling checkouts declared in ops/config/fleet-sync-siblings.json (doctorcre-app, software-factory) under the same fail-closed contract; a sibling's own outcome is reported but never affects this service's own run status. This declaration makes the job representable; it does not claim the LaunchAgent is installed or loaded, or that ops.service has been synced."
-        }
-      ]
-    },
-    {
       "key": "recordings-purge",
       "name": "Recording retention purge",
       "purpose": "Deletes call recordings past their retention window.",
@@ -907,26 +867,6 @@
           "notes": "Canonical checkout and out/boards are preserved. Only the active host publishes. Source declaration only; no service import or activation performed."
         }
       ]
-    },
-    {
-      "key": "job-cleaner",
-      "name": "Finished job checkout cleanup",
-      "purpose": "Daily worktree prune and safe retirement of pushed finished job clones older than two days. Keeps dirty, unpushed, live and uncertain work. Stages removals during the first week.",
-      "family": "Local Mac edge",
-      "criticality": "medium",
-      "owner_actor": "orchestrator",
-      "repo_path": "ops/job_cleanup.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.job-cleaner.plist",
-          "runs_on": "every",
-          "expected_cadence_seconds": 86400,
-          "cadence_grace_seconds": 86400,
-          "notes": "Runs at 03:17 local time. Lists every retained checkout and its reason in out/job-cleaner.log. No branch deletion."
-        }
-      ]
     }
   ],
   "dependencies": [
@@ -961,11 +901,6 @@
     {
       "service": "capture-poll",
       "depends_on": "neon-record-layer"
-    },
-    {
-      "service": "fleet-sync",
-      "depends_on": "neon-record-layer",
-      "note": "The checkout sync is local and fail-closed; its generic ops.run receipt is projected through the record layer by the existing run-scheduled spool path."
     },
     {
       "service": "npi-sweep-weekly",

@@ -15,10 +15,6 @@ export CARR_CI_PYTHON="$PY"
 CI_SELFTEST_TIMEOUT_SECONDS=120
 CI_TIMEOUT_HELPER="$REPO/bin/with-timeout.py"
 
-if [ "${1:-}" = "--test-first" ]; then
-  exec "$PY" "$REPO/ops/ci-test-first.py" --base "${2:-}" --head "${3:-}"
-fi
-
 if [ "${1:-}" = "--doc-drift" ]; then
   shift
   exec "${CARR_DOC_DRIFT_PYTHON:-$PY}" "$REPO/scripts/doc-drift/ci.py" "$@"
@@ -745,14 +741,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       fi
     done
 
-    if ! run_quiet "$LOGDIR/model-role-store-postgres.log" \
-         "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-         -f mcp-server/test/model-role-store-postgres.sql; then
-      tail -30 "$LOGDIR/model-role-store-postgres.log" >&2
-      bad migration "Model Room role-store PostgreSQL acceptance failed"
-      return
-    fi
-
     if ! run_quiet "$LOGDIR/governed-correspondence-store-postgres.log" \
          "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
          -f mcp-server/test/governed-correspondence-store-postgres.sql; then
@@ -798,13 +786,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       bad migration "Codex continuity PostgreSQL acceptance failed"
       return
     fi
-    if ! run_quiet "$LOGDIR/claude-continuity-postgres.log" \
-         "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-         -f mcp-server/test/claude-continuity-postgres.sql; then
-      tail -30 "$LOGDIR/claude-continuity-postgres.log" >&2
-      bad migration "Claude continuity PostgreSQL acceptance failed"
-      return
-    fi
 
     if [ -f mcp-server/test/gate-zero-outcome-role-boundary.test.mjs ]; then
       if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
@@ -846,13 +827,12 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       fi
     fi
 
-    for proof in cost-ledger-projection.v5 doc-conversation notifications session-identity dispatch-spine meeting-mode delivery-cadence-a05-tools amend-closed-loop-postgres action-class-successor-registry-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres approve-rule-legacy-adoption-postgres; do
+    for proof in doc-conversation notifications session-identity dispatch-spine meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres approve-rule-legacy-adoption-postgres; do
       if [ -f "mcp-server/test/$proof.test.mjs" ]; then
-        if ! DATABASE_URL="$dsn" CARR_COST_LEDGER_DB_REQUIRED=1 \
+        if ! DATABASE_URL="$dsn" \
              CARR_DOC_CONVERSATION_DB_REQUIRED=1 CARR_R03_DB_REQUIRED=1 \
              CARR_SESSION_IDENTITY_DB_REQUIRED=1 CARR_DISPATCH_SPINE_DB_REQUIRED=1 \
              CARR_MEETING_MODE_DB_REQUIRED=1 CARR_AMEND_CLOSED_LOOP_DB_REQUIRED=1 \
-             CARR_ACTION_CLASS_SUCCESSOR_DB_REQUIRED=1 \
              CARR_V5_A03_DB_REQUIRED=1 \
              CARR_A02_RULE_COVERAGE_DB_REQUIRED=1 \
              CARR_RW02_DB_REQUIRED=1 \
@@ -866,16 +846,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
         fi
       fi
     done
-
-    if [ -f mcp-server/test/producer-cost-ledger-postgres.sql ]; then
-      if ! run_quiet "$LOGDIR/producer-cost-ledger-postgres.log" \
-           "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-           -f mcp-server/test/producer-cost-ledger-postgres.sql; then
-        tail -30 "$LOGDIR/producer-cost-ledger-postgres.log" >&2
-        bad migration "the producer cost ledger admission and grant proof failed"
-        return
-      fi
-    fi
 
     if [ -f mcp-server/test/doc-conversation-postgres.sql ]; then
       if ! run_quiet "$LOGDIR/doc-conversation-postgres.log" \

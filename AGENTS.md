@@ -95,20 +95,9 @@ behavior, and CARR records. Do not ask for a separate Jev-specific approval or
 exclude a review merely because its category is not prelisted. Preserve source
 evidence, required checks, and any distinct reviewer-of-record requirement.
 
-## Dispatch before another model
+## Run a Codex job
 
-<!-- carr-model-room-route:start -->
-Decision `284028a5-8295-498a-af1e-6cae5c6034e7` records the external-model
-routing policy. Launch Claude, Grok, and other external model work through
-`tools/room-bridge/dispatch.py send`. The former Model Room conversation
-transport is removed. Desk jobs and their results use the dispatch queue.
-Choose the cheapest tier still qualified to do the task correctly, name it
-on the call, and verify the desk's actual model and result. Never silently
-delegate to another model. The Opus-always line was a temporary usage-window
-instruction, now retired. A model CLI used solely for authentication or health
-readback is not a model-work call.
-Set `model:` in each agent definition and name the executor in every task brief.
-<!-- carr-model-room-route:end -->
+Launch `bin/codex-job <owner/repo> <new-branch> "<brief>" [-c model_reasoning_effort=high]` as a tracked background task and read its printed result; use several tasks for parallel work. Model and default effort come from `~/.codex/config.toml`.
 
 ## Authorized code homes and repository boundaries
 
@@ -281,34 +270,6 @@ Content goes through the record layer's verbs, never into a markdown file — a
 hard gate enforces it. `./run.sh call <verb> '<json>'` reaches any verb.
 This file and the vault's `CLAUDE.md`/`AGENTS.md` are among the few
 exact-path exceptions.
-
-## Active WR-000070 R09 executor recovery
-
-Only for the accepted executor source-recovery role of WR-000070 slice R09: read
-[the complete scoped assignment instructions](ops/config/task-boot/r09.json)
-before assignment validation or execution. Resolve its current dispatcher intent
-and server-issued runbook; all bindings and refusal conditions remain mandatory.
-
-## Temporary supervised WR68 source execution
-
-Only for WR-000068 slice wr68-source-repair-v1: read
-[the complete scoped assignment instructions](ops/config/task-boot/wr68.json)
-before assignment validation or execution. Resolve its current dispatcher intent
-and server-issued runbook; all bindings and refusal conditions remain mandatory.
-
-## Temporary supervised WR69 registered Codex validation
-
-Only for the registered Codex validator of WR-000069 slice wr69-source-repair-v1: read
-[the complete scoped assignment instructions](ops/config/task-boot/wr69.json)
-before assignment validation or execution. Resolve its current dispatcher intent
-and server-issued runbook; all bindings and refusal conditions remain mandatory.
-
-## Temporary supervised R06 registered validation
-
-Only for the registered Codex validator of WR-000070 slice R06: read
-[the complete scoped assignment instructions](ops/config/task-boot/r06.json)
-before assignment validation or execution. Resolve its current dispatcher intent
-and server-issued runbook; all bindings and refusal conditions remain mandatory.
 
 ## Before every PR: design and debt pass
 

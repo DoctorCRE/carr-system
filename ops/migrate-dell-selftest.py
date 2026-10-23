@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Static contract test for Dell's zero-interaction Claude migration packet."""
+"""Static contract test for Dell's migration script and installer."""
 
 from __future__ import annotations
 
 import os
-import json
 import re
 import subprocess
 import sys
@@ -13,19 +12,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "bin" / "migrate-dell.sh"
-CLAUDE = ROOT / "CLAUDE.md"
 CONFIG_AS_CODE = ROOT / "ops" / "config-as-code.py"
 
 script = SCRIPT.read_text(encoding="utf-8")
-claude_boot = CLAUDE.read_text(encoding="utf-8")
-packet = json.loads((ROOT / "ops/config/task-boot/dell-migration.json").read_text())
-assert "ops/config/task-boot/dell-migration.json" in claude_boot
-claude = packet["instructions"]
 config_as_code = CONFIG_AS_CODE.read_text(encoding="utf-8")
-combined = script + "\n" + claude
 flat_script = re.sub(r"\s+", " ", script)
-flat_claude = re.sub(r"\s+", " ", claude)
-flat_combined = re.sub(r"\s+", " ", combined)
 failures: list[str] = []
 
 
@@ -44,25 +35,9 @@ require("migration shell parses", syntax.returncode == 0)
 require("migration script is executable", os.access(SCRIPT, os.X_OK))
 
 require(
-    "exact phrase is a Claude takeover trigger",
-    "ready for migration" in flat_claude.lower()
-    and "explicit authorization" in flat_claude
-    and "without asking follow-up questions" in flat_claude,
-)
-require(
-    "Claude runs the one bounded command itself",
-    "./bin/migrate-dell.sh --apply </dev/null" in claude
-    and "Do not hand the\n   command back to the human" in claude,
-)
-require(
-    "failure cannot close migration records",
-    "A nonzero exit is a visible blocker" in claude
-    and "Do not close any migration record after a failed run" in claude,
-)
-require(
     "success requires the exact machine receipt status",
-    combined.count("machine_migrated_pending_record_closeout") >= 3
-    and "dell-migration-receipt.json" in combined
+    "machine_migrated_pending_record_closeout" in script
+    and "dell-migration-receipt.json" in script
     and '"exit_code"' in script
     and '"source_commit"' in script
     and '"record_closeout"' in script,
@@ -111,7 +86,7 @@ require(
 )
 require(
     "record closeout is exact",
-    all(token in combined for token in (
+    all(token in script for token in (
         "fa0e6c92-8bc7-4e42-9970-0402914d6a19",
         "deb4357e-801f-49f6-bc6c-4c884e3e1f7c",
         '"required_after_success": ["A15", "A17"]',
@@ -120,29 +95,25 @@ require(
 )
 require(
     "live Dell identity and render parity are mandatory",
-    "server-derived sponsor is Dell" in flat_combined
-    and "dell-personal" in flat_combined
-    and "counts match the current generated" in flat_combined,
+    "dell-personal" in flat_script
+    and "counts match the current generated" in flat_script,
 )
 require(
     "caller cannot select partner tenant or capability",
-    "Do not pass a partner, tenant, or capability selector" in flat_script
-    and "Never choose a partner, tenant, or capability through a caller-supplied argument" in flat_claude,
+    "Do not pass a partner, tenant, or capability selector" in flat_script,
 )
 require(
     "fallback remains supported through cutoff",
-    "2026-08-21 cutoff" in flat_combined
+    "2026-08-21 cutoff" in flat_script
     and "does not retire them early" in flat_script,
 )
 require(
     "connector reconnect is not guessed",
-    "Do not disconnect or reconnect" in flat_script
-    and "Never reconnect merely as a guess" in flat_claude,
+    "Do not disconnect or reconnect" in flat_script,
 )
 require(
     "Claude security is not widened",
-    "does not waive Claude Code's own tool security, widen permissions" in claude
-    and "all other settings keys preserved" in script,
+    "all other settings keys preserved" in script,
 )
 
 active_lines = [
@@ -171,12 +142,6 @@ require(
     and "HOME=\"$TMP/home\"" in script
     and "python3 ops/config-as-code.py install" in script
     and "Claude-only config install dry run" in script,
-)
-require(
-    "Dell's missing Codex client is an explicit supported state",
-    "Dell's launch machine is Claude-only" in flat_claude
-    and "complete absence of `~/.codex` is an expected supported state" in flat_claude
-    and "partial Codex state fails visibly" in flat_claude,
 )
 require(
     "fresh Claude settings are created rather than contradicted",
@@ -218,4 +183,4 @@ if failures:
     print(f"\nFAILURES: {', '.join(failures)}")
     sys.exit(1)
 
-print("\nmigrate-dell selftest: all takeover, safety, receipt, and closeout checks passed")
+print("\nmigrate-dell selftest: all script, safety, receipt, and installer checks passed")

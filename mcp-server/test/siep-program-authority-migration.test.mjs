@@ -1,13 +1,11 @@
 import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import fs from "node:fs";
 
 const migration = readMigration(
   new URL("../../migrations/0324_siep_program_authority.sql", import.meta.url));
 const controllerMigration = readMigration(
   new URL("../../migrations/0335_engineering_controller_currentness.sql", import.meta.url));
-const dbGate = fs.readFileSync(new URL("../../ops/siep-program-local-pg-gate.py", import.meta.url), "utf8");
 const migrationNames = listMigrationNames()
   .filter((name) => name.endsWith(".sql"))
   .sort();
@@ -155,27 +153,4 @@ test("0335 makes reviewer and SIEP Engineering stamps database-owned and replay-
   assert.match(controllerMigration, /siep_bind_evidence_job_unchecked_0324[\s\S]*?historical or superseded SIEP Engineering evidence binding is not 0335 verified/i);
   assert.match(controllerMigration, /reviewer\.slug='joe' and reviewer\.active/i);
   assert.match(controllerMigration, /order by actor\.id for share/i);
-  assert.match(dbGate, /caller-controlled/);
-  assert.match(dbGate, /historical or superseded SIEP Engineering evidence binding is not 0335 verified/);
-  assert.match(dbGate, /valid SIEP evidence binding was not stamped by the database/);
-});
-
-test("the rollback-only DB gate owns exact-set and adversarial behavior", () => {
-  assert.match(dbGate, /^# ci: db-gate/m);
-  assert.match(dbGate, /actual_packages != PACKAGES/);
-  assert.match(dbGate, /actual_aliases != ALIASES/);
-  assert.match(dbGate, /actual_edges != EDGES/);
-  assert.match(dbGate, /len\(EDGES\) != 88/);
-  assert.match(dbGate, /raw carr_writer update reached a SIEP Work Request/);
-  assert.match(dbGate, /lane-lock replay was not a safe no-op/);
-  assert.match(dbGate, /command receipt persisted a raw lease token/);
-  assert.match(dbGate, /session:stolen/);
-  assert.match(dbGate, /session:expired-takeover/);
-  assert.match(dbGate, /safe:forged:flag/);
-  assert.match(dbGate, /safe:stale:source/);
-  assert.match(dbGate, /safe:generic:source/);
-  assert.match(dbGate, /fresh typed Joe approval did not become current/);
-  assert.match(dbGate, /later typed Joe revocation did not supersede approval/);
-  assert.match(dbGate, /safe:siep00:relabel/);
-  assert.match(dbGate, /terminal authority made a premature success claim/);
 });

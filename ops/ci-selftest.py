@@ -519,28 +519,6 @@ def test_types_class_catches_a_seeded_type_error():
           f"rc={rc} out={out[-400:]}")
 
 UNCOLLECTED_BY_DECISION = {
-    "tools/link-model-bakeoff/pg18-selftest.py":
-        "Requires PostgreSQL 18 binaries and an owned disposable socket-only "
-        "database. The repository-content gates pool has no PostgreSQL 18 "
-        "contract. Run LC_ALL=C .venv/bin/python tools/link-model-bakeoff/pg18-selftest.py "
-        "before changing this harness; it executes regression_sql.py and the "
-        "normal integration workload. Offline failure-path and collection "
-        "regressions run in tools/test-linkfork.py through the gates pool.",
-    "tools/room-bridge/test_claude_desk_live.py":
-        "LIVE, and deliberately not offline. Its own docstring says it asserts "
-        "against no mock: it boots a REAL Claude Code session on a labelled "
-        "socket and dispatches a task into it. That spends model quota and "
-        "needs a working desk on the machine, so a merge gate is the wrong "
-        "caller — a hosted runner would either hang or pass for the wrong "
-        "reason. Run it by hand when the dispatch path changes.",
-    "tools/room-bridge/test_codex_live_live.py":
-        "LIVE, and it costs money. It boots a real Codex app-server and drives "
-        "two dispatches through it; the docstring states it 'costs a small "
-        "amount of Codex credit'. Measured here 2026-09-10: run offline with "
-        "no server reachable it does not fail, it HANGS, and it was still "
-        "hanging when the 13 other room-bridge suites had finished. A suite "
-        "that hangs in a pooled gate burns the per-suite timeout and aborts "
-        "the remaining gate selftests behind it. Run it by hand.",
     "docs/frontier-finding/breakglass_selftest.py":
         "Needs a disposable local PostgreSQL cluster, which it stands up "
         "itself (WR-000046 Artifact C harness). The gates class is repository "

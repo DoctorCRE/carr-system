@@ -57,12 +57,6 @@
       "evidence": "ops/check-pdf.py docstring (added 30eff6fe)"
     },
     {
-      "path": "ops/delivery-cadence-a05-live-acceptance-check.py",
-      "class": "one_shot",
-      "reason": "Read-only acceptance check of the V5-A05 delivery cadence clauses against production, run once after that PR deployed.",
-      "evidence": "f59d9713 (#1236)"
-    },
-    {
       "path": "ops/doctorcre-sibling-manifest.py",
       "class": "hand_tool",
       "reason": "The controller runs it to list the exact sibling paths a DoctorCRE build seat may read, for that seat's brief.",
@@ -193,18 +187,6 @@
       "class": "hand_tool",
       "reason": "The orchestrator runs it under supervision to install the WO-4 capture-bridge LaunchAgents on the dictation rig.",
       "evidence": "tools/dictation-rig/bin/install-capture-bridge.sh header (added 21442140)"
-    },
-    {
-      "path": "tools/doc-voice/master-bracket.py",
-      "class": "hand_tool",
-      "reason": "Joe runs it to A/B the mastering chain by ear against a new TTS engine, one stage at a time.",
-      "evidence": "tools/doc-voice/master-bracket.py docstring (added 09ff7d27)"
-    },
-    {
-      "path": "tools/doc-voice/render-doc.py",
-      "class": "hand_tool",
-      "reason": "Joe runs it to render a line in Doc's voice, roll several takes and keep the one that lands.",
-      "evidence": "tools/doc-voice/render-doc.py docstring (added cb72e9d4)"
     },
     {
       "path": "tools/prove-order40-windowing.py",

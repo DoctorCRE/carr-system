@@ -75,7 +75,7 @@ def shell_operands(tokens):
     return words, outputs
 
 # A heredoc opener: <<EOF, <<-EOF, <<'EOF', <<"EOF".
-_HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+_HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_-]*)\1")
 
 # The flags that carry PROSE, and whose quoted argument is therefore data.
 #

@@ -15,7 +15,7 @@ psycopg[binary]>=3.2   # record layer: tools/migrate.py + (build day) the MCP se
 python-docx>=1.2   # fill-engine/fill_document.py + pipelines/prepare_document.py: writes the .docx
 lxml>=6.0          # fill-engine/fill_document.py scrub_docx's XML pass; imported directly, so its
                    # own line rather than relying on arriving transitively through python-docx
-numpy>=2.0         # tools/doc-voice/render-doc.py terminal-slope scoring, on the ROOT venv
+numpy>=2.0         # tools/doc-convo/bin/render_phrase.py terminal-f0 scoring
 pytest>=9.0        # tools/test-doctrine-mirror.py; a test dependency is still a dependency
 
 # UNDECLARED WHEN IT ARRIVED, and found by importing it rather than by any gate.

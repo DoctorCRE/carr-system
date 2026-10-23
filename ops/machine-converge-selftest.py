@@ -53,16 +53,17 @@ COPIES = [
     "lib/launchd_scope.py",
     "ops/config/services.json",
     "lib/launchd_hold.py",
-    "mcp-server/continuity-stdio-proxy.mjs",
+    "mcp-server/codex-continuity-stdio-proxy.mjs",
     "ops/config-as-code.py",
     "tools/flash_install.py",
     "tools/flashlib.py",
     "ops/launchd/local.ds4-flash-next.plist",
-    "ops/launchd/local.flash-desk.plist",
     "ops/launchd/com.carr.flash-idle-stop.plist",
     "ops/git_env.py",
     "ops/githooks/pre-push",
     "ops/config/hooks.json",
+    "ops/config/claude-managed-settings.json",
+    "ops/config/codex-requirements.toml",
     "ops/launchd/com.carr.dictation-consent.plist",
 ]
 
@@ -128,6 +129,15 @@ def build_fixture(root, email, actor_slug=None, behind=True, dirty=False,
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(os.path.join(SELF_REPO, rel), dst)
 
+    # Exercise real policy reconciliation without accessing system destinations.
+    installer = Path(repo, "ops/config-as-code.py")
+    source = installer.read_text()
+    entry = '\nif __name__ == "__main__":'
+    assert entry in source
+    destinations = ('\nCLAUDE_MANAGED_SETTINGS = os.path.join(HOME, "managed-claude.json")\n'
+                    'CODEX_REQUIREMENTS = os.path.join(HOME, "codex-requirements.toml")\n')
+    installer.write_text(source.replace(entry, destinations + entry))
+
     # The PR #555 install guard requires this fixture repo to carry the scripts
     # its hooks block names, just as a real checkout does.
     hooks_path = os.path.join(SELF_REPO, "ops", "config", "hooks.json")
@@ -144,8 +154,6 @@ def build_fixture(root, email, actor_slug=None, behind=True, dirty=False,
     write_exec(os.path.join(repo, "bin", "run-scheduled.sh"), "#!/bin/zsh\nexit 0\n")
     write_exec(os.path.join(repo, "tools", "dictation-rig", "bin", "consent-watch.sh"),
                "#!/bin/zsh\nexit 0\n")
-    write_exec(os.path.join(repo, "tools", "room-bridge", "dispatch.py"),
-               "#!/usr/bin/env python3\n")
     with open(os.path.join(repo, "README.md"), "w", encoding="utf-8") as fh:
         fh.write("fixture\n")
 
@@ -291,6 +299,9 @@ def case_secondary_converges(tmp):
             "load" in open(os.path.join(tmp, "launchctl.log")).read(),
         "Claude settings rendered":
             os.path.isfile(os.path.join(home, ".claude", "settings.json")),
+        "managed policies stay inside the fixture HOME":
+            all(Path(home, name).is_file() for name in
+                ("managed-claude.json", "codex-requirements.toml")),
         "no ~/.codex created on a Claude-only machine":
             not os.path.exists(os.path.join(home, ".codex")),
         "brief line reports the apply": "re-applied" in r.stdout,
@@ -383,7 +394,7 @@ def case_marker_primary_noop(tmp):
 def case_flash_is_explicit(tmp):
     repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell")
     agents = Path(home) / "Library/LaunchAgents"
-    labels = ("local.ds4-flash-next", "local.flash-desk")
+    labels = ("local.ds4-flash-next",)
     for label in labels:
         (agents / (label + ".plist")).write_bytes(plistlib.dumps({
             "Label": label, "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False}}))

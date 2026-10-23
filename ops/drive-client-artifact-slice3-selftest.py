@@ -32,7 +32,6 @@ with tempfile.TemporaryDirectory(prefix="drive-client-artifact-slice3-") as td:
         "dso-match": (str(PY), "pipelines/dso-match.py"),
         "map-radar-lanes": (str(PY), "pipelines/map_radar_lanes.py", "--all"),
         "prepare-document": (str(PY), "pipelines/prepare_document.py", "-"),
-        "verify-emails": (str(PY), "tools/verify-emails.py", "--source", "registry"),
     }
     for label, command in cases.items():
         proc = run(*command, env=env)
@@ -60,10 +59,5 @@ with tempfile.TemporaryDirectory(prefix="drive-client-artifact-slice3-") as td:
     assert marker.read_text() == "unchanged", "front-door: wrote poisoned vault"
     assert front_door.read_bytes() == before, "front-door: deterministic generation changed its checked-in artifact"
 
-    proc = run(str(PY), "tools/verify-emails.py", "--source", "registry",
-               "--recovery", "--reason", "fixture recovery", "--vault", str(poison), env=env)
-    assert proc.returncode == 0 and "RECOVERY MODE - NONCANONICAL Drive projection" in proc.stderr, (
-        f"recovery was not visibly noncanonical: {proc.stdout}{proc.stderr}")
-    assert marker.read_text() == "unchanged", "recovery verifier unexpectedly wrote Drive"
 
 print("drive client artifact slice3 selftest: record-native Front Door and Drive boundaries passed")
