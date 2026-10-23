@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Bootstrap shared workflow contracts. This command never schedules or runs jobs.
 
-On-demand engineering claims and native scheduler observations still reference
-these contracts. Recurrence is owned by the native schedulers.
+On-demand engineering claims still reference these contracts.
+Recurrence is owned by the native schedulers.
 """
 from __future__ import annotations
 import argparse
@@ -14,11 +14,8 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from lib.control_plane_scheduler_cutover import (CutoverRefusal, scheduler_launchd_rows,
-    scheduler_provider_rows, scheduler_surface_rows)
 
 MANIFEST_PATH = REPO / 'ops/config/control-plane-workflows.v1.json'
-SCHEDULER_CUTOVER_REGISTRY_PATH = REPO / 'ops/config/control-plane-scheduler-cutover.v1.json'
 
 
 def load_manifest() -> dict[str, Any]:
@@ -31,94 +28,6 @@ def connect():
     if not dsn:
         raise SystemExit('DATABASE_URL is required')
     return psycopg.connect(dsn)
-
-
-def load_scheduler_cutover_registry() -> dict[str, Any]:
-    data = json.loads(SCHEDULER_CUTOVER_REGISTRY_PATH.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise SystemExit("scheduler cutover registry must be an object")
-    return data
-
-
-def sync_scheduler_surface_registry(cur: Any, *, manifest: dict[str, Any], registry: dict[str, Any]) -> int:
-    """Reconcile the canonical scheduler surface projection after definition sync.
-
-    This runs inside the same authority transaction as ``ops.job_definition``
-    synchronization.  Validation completes before the first registry write;
-    hence an incomplete evolution cannot prune a previously usable surface.
-    """
-    try:
-        rows = scheduler_surface_rows(registry, manifest=manifest)
-    except CutoverRefusal as exc:
-        raise RuntimeError(str(exc)) from exc
-    # Provider contracts depend on the full parent workflow/version tuple.
-    # Remove the mutable current projection before a same-surface version
-    # evolution, then rebuild it below. Historical observation receipts retain
-    # their immutable subject fields and become ineligible through the
-    # resolver's current-contract equality join rather than being deleted or
-    # reinterpreted. They intentionally do not FK to this mutable projection,
-    # so retiring a legacy surface cannot erase or strand its history.
-    cur.execute("delete from ops.legacy_schedule_provider_contract")
-    cur.execute("delete from ops.legacy_schedule_launchd_contract")
-    for workflow_key, workflow_version, surface_id, locator, scheduler_kind, duplicate_group in rows:
-        cur.execute(
-            """insert into ops.legacy_schedule_surface_registry
-                 (workflow_key,workflow_version,surface_id,locator,scheduler_kind,duplicate_group)
-               values (%s,%s,%s,%s,%s,%s)
-               on conflict (surface_id) do update set
-                 workflow_key=excluded.workflow_key,workflow_version=excluded.workflow_version,
-                 locator=excluded.locator,scheduler_kind=excluded.scheduler_kind,
-                 duplicate_group=excluded.duplicate_group""",
-            (workflow_key, workflow_version, surface_id, locator, scheduler_kind, duplicate_group),
-        )
-    cur.execute(
-        "delete from ops.legacy_schedule_surface_registry where not (surface_id = any(%s))",
-        ([row[2] for row in rows],),
-    )
-    provider_rows = scheduler_provider_rows(registry, manifest=manifest, repo=REPO)
-    for (workflow_key, workflow_version, surface_id, locator, cron_expression,
-         timezone_name, definition_relpath, definition_sha256) in provider_rows:
-        cur.execute(
-            """insert into ops.legacy_schedule_provider_contract
-                 (surface_id,workflow_key,workflow_version,locator,cron_expression,timezone,
-                  definition_relpath,definition_sha256)
-               values (%s,%s,%s,%s,%s,%s,%s,%s)
-               on conflict (surface_id) do update set
-                 workflow_key=excluded.workflow_key,workflow_version=excluded.workflow_version,
-                 locator=excluded.locator,cron_expression=excluded.cron_expression,
-                 timezone=excluded.timezone,definition_relpath=excluded.definition_relpath,
-                 definition_sha256=excluded.definition_sha256""",
-            (surface_id, workflow_key, workflow_version, locator, cron_expression,
-             timezone_name, definition_relpath, definition_sha256),
-        )
-    cur.execute(
-        "delete from ops.legacy_schedule_provider_contract where not (surface_id = any(%s))",
-        ([row[2] for row in provider_rows],),
-    )
-    launchd_rows = scheduler_launchd_rows(registry, manifest=manifest, repo=REPO)
-    for (workflow_key, workflow_version, surface_id, locator, repo_plist_relpath,
-         installed_plist_name, program_arguments_json, plist_sha256, schedule_sha256,
-         timezone_name) in launchd_rows:
-        cur.execute(
-            """insert into ops.legacy_schedule_launchd_contract
-                 (surface_id,workflow_key,workflow_version,locator,repo_plist_relpath,
-                  installed_plist_name,program_arguments,plist_sha256,schedule_sha256,timezone)
-               values (%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s)
-               on conflict (surface_id) do update set
-                 workflow_key=excluded.workflow_key,workflow_version=excluded.workflow_version,
-                 locator=excluded.locator,repo_plist_relpath=excluded.repo_plist_relpath,
-                 installed_plist_name=excluded.installed_plist_name,
-                 program_arguments=excluded.program_arguments,plist_sha256=excluded.plist_sha256,
-                 schedule_sha256=excluded.schedule_sha256,timezone=excluded.timezone""",
-            (surface_id, workflow_key, workflow_version, locator, repo_plist_relpath,
-             installed_plist_name, program_arguments_json, plist_sha256, schedule_sha256,
-             timezone_name),
-        )
-    cur.execute(
-        "delete from ops.legacy_schedule_launchd_contract where not (surface_id = any(%s))",
-        ([row[2] for row in launchd_rows],),
-    )
-    return len(rows)
 
 
 def sync_registry(manifest: dict[str, Any]) -> dict[str, int]:
@@ -205,12 +114,8 @@ def sync_registry(manifest: dict[str, Any]) -> dict[str, int]:
                  json.dumps(workflow["filtering"]),json.dumps(workflow["validation"]),
                  json.dumps(workflow["retry"]),json.dumps(workflow["deduplication"]),
                  json.dumps(workflow["completion"]),json.dumps(workflow["legacy_schedule"])))
-        # Migration 0176 creates an empty, FK-bound registry.  Populate it
-        # only after every manifest job definition exists, in this transaction.
-        scheduler_surfaces = sync_scheduler_surface_registry(
-            cur, manifest=manifest, registry=load_scheduler_cutover_registry())
         conn.commit()
-    return {"workflows": len(manifest["workflows"]), "scheduler_surfaces": scheduler_surfaces}
+    return {"workflows": len(manifest["workflows"])}
 
 
 def main() -> int:
