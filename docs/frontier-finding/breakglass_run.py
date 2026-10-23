@@ -9,21 +9,8 @@ LOAD-BEARING controls are procedural and human: per-use approval against a
 recorded WR-000046 note, clone rehearsal, production readback, and the
 forward-fix commitment. This driver only ADDS a three-sided assertion on top.
 
-INVOCATION (exactly as F01 condition (d) and the execution path describe it):
-
-    CARR_BREAK_GLASS=1 .venv/bin/python tools/db-tap.py --reason "<WR note ref>" \\
-        run tools/run-breakglass.py -- \\
-        --approved <run>.sql --receipt <receipt>.json
-
-(tools/run-breakglass.py is the tracked, reviewed launcher registered as a
-break-glass-class entrypoint by the WR-000048 registry re-pin; this module
-stays import-only and is reached through the launcher's main().)
-
-db-tap's `run` mode execs this file with DATABASE_URL already set in the
-child environment and no DSN ever on a command line. This script also runs
-STANDALONE with DATABASE_URL set directly in the environment — that is how
-the test harness (breakglass_selftest.py) drives it against a local disposable
-Postgres, and how a rehearsal or restore run against a clone is executed.
+The historical launcher is retired. This import-only receipt instrument is
+retained for its disposable-Postgres selftest, not as a production command.
 
 THE APPROVED FILE (`--approved <run>.sql`) is a SELF-CONTAINED RUN BUNDLE
 produced by gen_breakglass_run.py: one manifest line (canonical JSON) plus the

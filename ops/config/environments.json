@@ -31,7 +31,7 @@
         "kind": "neon-branch",
         "parent_project": "carr-staging",
         "lifetime": "created per run, deleted in the same run's teardown",
-        "note": "Branches of STAGING for reconstruction (ops/p1-rebuild-gate.py). bin/restore-rehearse.sh branches PRODUCTION deliberately and by a different route, because proving a backup restores requires production's own data; that script carries its own guards and deletes its branch."
+        "note": "Branches of STAGING for disposable diagnostics. bin/restore-rehearse.sh branches PRODUCTION deliberately and by a different route, because proving a backup restores requires production's own data; that script carries its own guards and deletes its branch."
       },
       "worker": {
         "deployed": false

@@ -21,7 +21,7 @@ def partner(name: str) -> dict:
     return {
         "read": {"status": "accepted", "actor": name, "verb": "standing-context", "evidence_ref": f"record:{name}:read"},
         "write": {"status": "accepted", "actor": name, "verb": "add-loop", "evidence_ref": f"record:{name}:write", "readback_ref": f"loop:{name}"},
-        "teach": {"status": "accepted", "actor": name, "verb": "teach", "resulting_rule_status": "proposed", "evidence_ref": f"record:{name}:teach"},
+        "guidance": {"status": "accepted", "actor": name, "path": "AGENTS.md", "proposal_status": "proposed", "pull_request_ref": "https://github.com/DoctorCRE/carr-system/pull/1", "evidence_ref": f"record:{name}:guidance"},
         "call_mode": {"status": "accepted", "local_partner": name, "device_id": f"{name}-mac", "weekly_labels": {"mic": name.title(), "system": other}, "evidence_ref": f"record:{name}:call"},
         "device": {"status": "accepted", "device_id": f"{name}-mac", "capture_write_readback_ref": f"capture:{name}", "database_owner_credential_used": False, "evidence_ref": f"record:{name}:device"},
     }
@@ -59,7 +59,7 @@ def check(label, mutation, expected_status=None, refuses=False):
 
 check("complete prerequisites wait for Joe approval", lambda x: None, "READY_FOR_JOE_APPROVAL")
 check("wrong sponsor is refused", lambda x: x["partners"]["dell"]["read"].update(actor="joe"), refuses=True)
-check("teach cannot be automatic authority", lambda x: x["partners"]["joe"]["teach"].update(resulting_rule_status="active"), refuses=True)
+check("guidance cannot be automatic authority", lambda x: x["partners"]["joe"]["guidance"].update(proposal_status="active"), refuses=True)
 check("call labels prove the other partner", lambda x: x["partners"]["dell"]["call_mode"].update(weekly_labels={"mic": "Dell", "system": "Other participant"}), refuses=True)
 check("device ids must line up", lambda x: x["partners"]["joe"]["device"].update(device_id="other"), refuses=True)
 check("device owner credentials are forbidden", lambda x: x["partners"]["joe"]["device"].update(database_owner_credential_used=True), refuses=True)

@@ -10,10 +10,10 @@
 // at stage=read_legacy; `advance-workflow-cutover-stage` moves it forward
 // exactly one step at a time through recovery_ready, requiring fresh
 // accepted `ops.workflow_acceptance` evidence (the same store
-// `accept-workflow` writes to) at shadow_compare/single_write_authority/
+// historical acceptance evidence uses) at shadow_compare/single_write_authority/
 // cutover; `retire-workflow-cutover-plan` is the ONLY door to stage=retired,
 // Joe-only, and requires an existing `ops.legacy_schedule_disable_receipt`
-// row -- i.e. an already-performed `disable-legacy-schedule` call. It never
+// row containing historical native-scheduler retirement evidence. It never
 // disables a native scheduler itself.
 //
 // Q153 (recovered): stale-plan supersession -- `open-workflow-cutover-plan`
@@ -225,7 +225,7 @@ export function workflowCutoverTools({ withEnvelope, ToolError }) {
 
     "advance-workflow-cutover-stage": {
       write: true, authorityOnly: true,
-      description: "Q116, partner authority only: advance an active cutover plan exactly one step forward through read_legacy -> build_projection -> shadow_compare -> single_write_authority -> cutover -> monitor -> recovery_ready. Refuses to skip a stage, refuses a plan that is not active, and refuses shadow_compare/single_write_authority/cutover without an evidence_ref pointing at an already-accepted ops.workflow_acceptance row (the same store accept-workflow writes) for the exact workflow identity -- 'shadow parity and single-writer checks pass' is verified against that row, not asserted. Cannot reach stage=retired; see retire-workflow-cutover-plan.",
+      description: "Q116, partner authority only: advance an active cutover plan exactly one step forward through read_legacy -> build_projection -> shadow_compare -> single_write_authority -> cutover -> monitor -> recovery_ready. Refuses to skip a stage, refuses a plan that is not active, and refuses shadow_compare/single_write_authority/cutover without an evidence_ref pointing at an already-accepted ops.workflow_acceptance row (historical acceptance evidence) for the exact workflow identity -- 'shadow parity and single-writer checks pass' is verified against that row, not asserted. Cannot reach stage=retired; see retire-workflow-cutover-plan.",
       inputSchema: {
         type: "object", additionalProperties: false,
         properties: {
@@ -256,7 +256,7 @@ export function workflowCutoverTools({ withEnvelope, ToolError }) {
 
     "retire-workflow-cutover-plan": {
       write: true, authorityOnly: true,
-      description: "Q116 last step, partner authority only: the ONLY door to stage=retired. Requires the plan already at stage=recovery_ready and an existing ops.legacy_schedule_disable_receipt row (from a prior, already-performed disable-legacy-schedule call) for the same workflow identity and every registered legacy surface. Never performs a native disable itself. The store derives the workflow-truth census itself (Q157) and refuses retirement while it is unavailable -- which is every call until the census store lands.",
+      description: "Q116 last step, partner authority only: the ONLY door to stage=retired. Requires the plan already at stage=recovery_ready and an existing ops.legacy_schedule_disable_receipt row (historical native-scheduler retirement evidence) for the same workflow identity and every registered legacy surface. Never performs a native disable itself. The store derives the workflow-truth census itself (Q157) and refuses retirement while it is unavailable -- which is every call until the census store lands.",
       inputSchema: {
         type: "object", additionalProperties: false,
         properties: {
