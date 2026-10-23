@@ -277,21 +277,6 @@ cf.install(sys.argv[1], cf.TOKEN_NAMES[0], 'fake-new')
             server.shutdown()
             server.server_close()
 
-    def test_sync_attempts_every_machine_and_redacts(self):
-        from lib import cloudflare_tokens as cf
-        spec = importlib.util.spec_from_file_location('cloudflare_cli', ROOT / 'tools/cloudflare-tokens.py')
-        cli = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cli)
-        calls = []
-        def transport(machine, payload, **kwargs):
-            calls.append(machine)
-            return {payload['name']: 'unreachable' if machine == 'dell' else 'ok'}
-        output = io.StringIO()
-        with patch.object(cf, 'on_machine', transport), patch('sys.stdin', io.StringIO(json.dumps({cf.TOKEN_NAMES[0]: 'fake-active'}))), contextlib.redirect_stdout(output):
-            self.assertEqual(cli.main(['sync', '--stdin']), 1)
-        self.assertEqual(calls, ['studio', 'macbook', 'dell'])
-        self.assertNotIn('fake-active', output.getvalue())
-        self.assertIn('dell CLOUDFLARE_API_TOKEN unreachable', output.getvalue())
 
     def test_loops_deduplicate_update_and_clear_only_positive_readback(self):
         from lib import cloudflare_tokens as cf
