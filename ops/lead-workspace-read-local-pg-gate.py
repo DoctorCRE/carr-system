@@ -60,7 +60,7 @@ with postgres_fixture_group(), DisposablePostgres('lead-read-proof-', bins / 'pg
     def rows(name):
         return json.loads(sql(f"select coalesce(jsonb_agg(to_jsonb(w) order by id),'[]') from {name} w"))
     before = rows('before_workspace')
-    migration = ROOT / 'migrations/0938_lead_workspace_set_reads.sql'
+    migration = ROOT / 'migrations/0939_lead_workspace_set_reads.sql'
     if migration.exists():
         sql(migration.read_text())
     after = rows('v_lead_workspace')

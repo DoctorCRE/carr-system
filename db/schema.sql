@@ -89906,6 +89906,25 @@ CREATE VIEW public.v_lead_stage_transition AS
 --
 
 CREATE VIEW public.v_lead_workspace_lifecycle AS
+ WITH live_clients AS MATERIALIZED (
+         SELECT cl.id,
+            cl.party_id
+           FROM (public.client cl
+             JOIN public.party cp_1 ON ((cp_1.id = cl.party_id)))
+          WHERE ((cl.merged_into IS NULL) AND (cp_1.merged_into IS NULL) AND (cp_1.deleted_at IS NULL))
+        ), client_parties AS (
+         SELECT DISTINCT live_clients.party_id
+           FROM live_clients
+        ), linked_leads AS MATERIALIZED (
+         SELECT DISTINCT bridge_1.lead_id
+           FROM (public.v_lead_client_link bridge_1
+             JOIN live_clients cl ON ((cl.id = bridge_1.client_id)))
+          WHERE (NOT bridge_1.either_merged)
+        ), deal_clients AS (
+         SELECT DISTINCT deal.client_id
+           FROM public.deal
+          WHERE (deal.client_id IS NOT NULL)
+        )
  SELECT l.id,
     l.party_id,
     l.client_id,
@@ -89916,20 +89935,14 @@ CREATE VIEW public.v_lead_workspace_lifecycle AS
     p.contact_state,
     (l.suppressed OR (l.stage = 'do_not_contact'::text) OR (p.contact_state = 'do_not_contact'::text)) AS do_not_contact,
     (NOT (l.suppressed OR (l.stage = 'do_not_contact'::text) OR (p.contact_state = 'do_not_contact'::text))) AS contact_eligible,
-    (EXISTS ( SELECT 1
-           FROM (public.client cl
-             JOIN public.party cp ON ((cp.id = cl.party_id)))
-          WHERE ((cl.party_id = p.id) AND (cl.merged_into IS NULL) AND (cp.merged_into IS NULL) AND (cp.deleted_at IS NULL)))) AS is_client,
-    (EXISTS ( SELECT 1
-           FROM ((public.v_lead_client_link bridge
-             JOIN public.client cl ON ((cl.id = bridge.client_id)))
-             JOIN public.party cp ON ((cp.id = cl.party_id)))
-          WHERE ((bridge.lead_id = l.id) AND (NOT bridge.either_merged) AND (cl.merged_into IS NULL) AND (cp.merged_into IS NULL) AND (cp.deleted_at IS NULL)))) AS linked_client,
-    (EXISTS ( SELECT 1
-           FROM public.deal d
-          WHERE (d.client_id = l.client_id))) AS is_deal
-   FROM (public.lead l
-     JOIN public.party p ON ((p.id = l.party_id)));
+    (cp.party_id IS NOT NULL) AS is_client,
+    (bridge.lead_id IS NOT NULL) AS linked_client,
+    (d.client_id IS NOT NULL) AS is_deal
+   FROM ((((public.lead l
+     JOIN public.party p ON ((p.id = l.party_id)))
+     LEFT JOIN client_parties cp ON ((cp.party_id = p.id)))
+     LEFT JOIN linked_leads bridge ON ((bridge.lead_id = l.id)))
+     LEFT JOIN deal_clients d ON ((d.client_id = l.client_id)));
 
 
 --
@@ -89937,6 +89950,26 @@ CREATE VIEW public.v_lead_workspace_lifecycle AS
 --
 
 CREATE VIEW public.v_lead_workspace AS
+ WITH live_clients AS MATERIALIZED (
+         SELECT cl.id,
+            cp.id AS party_id,
+            cp.name,
+            lower(TRIM(BOTH FROM cp.name)) AS normalized_name
+           FROM (public.client cl
+             JOIN public.party cp ON ((cp.id = cl.party_id)))
+          WHERE ((cl.merged_into IS NULL) AND (cp.merged_into IS NULL) AND (cp.deleted_at IS NULL))
+        ), possible_clients AS MATERIALIZED (
+         SELECT p_1.id AS party_id,
+            jsonb_agg(jsonb_build_object('client_id', cl.id, 'name', cl.name) ORDER BY cl.id) AS items
+           FROM (public.party p_1
+             JOIN live_clients cl ON (((cl.normalized_name = lower(TRIM(BOTH FROM p_1.name))) AND (cl.party_id <> p_1.id))))
+          GROUP BY p_1.id
+        ), last_moves AS MATERIALIZED (
+         SELECT DISTINCT ON (e.lead_id) e.lead_id,
+            jsonb_build_object('event_id', e.event_id, 'idempotency_key', e.idempotency_key, 'from', e.prior_stage, 'to', e.stage, 'occurred_at', e.occurred_at, 'automatic', e.automatic, 'reason', e.reason, 'evidence_date', (e.stage_review ->> 'evidence_date'::text), 'undone', (e.stage_review ->> 'undo_event_id'::text)) AS item
+           FROM public.v_lead_stage_transition e
+          ORDER BY e.lead_id, e.mutation_order DESC
+        )
  SELECT b.id,
     b.registry_ref,
     b.name,
@@ -89982,15 +90015,8 @@ CREATE VIEW public.v_lead_workspace AS
      JOIN public.lead l ON ((l.id = b.id)))
      JOIN public.party p ON ((p.id = life.party_id)))
      LEFT JOIN public.party org ON ((org.id = p.org_id)))
-     LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('client_id', cl.id, 'name', cp.name) ORDER BY cl.id) AS items
-           FROM (public.client cl
-             JOIN public.party cp ON ((cp.id = cl.party_id)))
-          WHERE ((lower(TRIM(BOTH FROM cp.name)) = lower(TRIM(BOTH FROM p.name))) AND (cp.id <> p.id) AND (cl.merged_into IS NULL) AND (cp.merged_into IS NULL) AND (cp.deleted_at IS NULL))) matches ON (true))
-     LEFT JOIN LATERAL ( SELECT jsonb_build_object('event_id', e.event_id, 'idempotency_key', e.idempotency_key, 'from', e.prior_stage, 'to', e.stage, 'occurred_at', e.occurred_at, 'automatic', e.automatic, 'reason', e.reason, 'evidence_date', (e.stage_review ->> 'evidence_date'::text), 'undone', (e.stage_review ->> 'undo_event_id'::text)) AS item
-           FROM public.v_lead_stage_transition e
-          WHERE (e.lead_id = b.id)
-          ORDER BY e.mutation_order DESC
-         LIMIT 1) last_move ON (true))
+     LEFT JOIN possible_clients matches ON ((matches.party_id = p.id)))
+     LEFT JOIN last_moves last_move ON ((last_move.lead_id = b.id)))
   WHERE ((NOT life.suppressed) AND life.live_party);
 
 
@@ -121926,6 +121952,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0936_deal_alert_items.sql	469f722bb5005547378d43bed510fb1b4edc98c1fc146ea8d50ae423b0275bb3	1970-01-01 00:00:00+00
 0937_retire_deleted_hook_control_projections.sql	dcd518923d1a6a052060f87ae1797e17a7270fb660fc7a208e97b9944234bcaf	1970-01-01 00:00:00+00
 0938_j102_engagement_fields.sql	2f3496d3249138c9860c021510ae611d01324ef48d9d94c51386e8df4edb0629	1970-01-01 00:00:00+00
+0939_lead_workspace_set_reads.sql	687e444a25754aa975adcbcf45b92b5ab6f763a5c7c1a20a3b571aca4e10e28e	1970-01-01 00:00:00+00
 \.
 
 
