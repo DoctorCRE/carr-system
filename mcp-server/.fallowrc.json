@@ -2,5 +2,13 @@
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/v3.35.0/schema.json",
   "dynamicallyLoaded": [
     "test/*.test.{js,mjs}"
+  ],
+  "ignoreExports": [
+    {
+      "file": "test/fixtures/doctorcre-brief-a753e121/*",
+      "exports": [
+        "*"
+      ]
+    }
   ]
 }
