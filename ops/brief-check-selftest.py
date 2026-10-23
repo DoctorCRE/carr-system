@@ -111,13 +111,6 @@ class ParseRequirements(unittest.TestCase):
         self.assertEqual(len(items), 4)
         self.assertTrue(items[3]["text"].startswith("Worktree:"))
 
-    def test_markdown_heading_forms(self):
-        self.assertEqual(len(bc.parse_requirements(brief("gatefix.md"))), 5)
-        steps = bc.parse_requirements(brief("jevlint.md"))
-        # The three numbered items under "The constraint you must design around"
-        # are context, not the "Steps (all required)" list.
-        self.assertEqual(len(steps), 6)
-        self.assertTrue(steps[0]["text"].startswith("Pin jevlint"))
 
     def test_brief_without_a_required_list_is_an_error(self):
         with self.assertRaises(bc.BriefError):
@@ -175,30 +168,8 @@ class Verdicts(unittest.TestCase):
                           local_reference=lambda p: p.startswith("out/"))
         self.assertNotEqual(report["requirements"][3]["verdict"], "not met")
 
-    def test_gitignored_inputs_and_either_home_are_not_missing_deliverables(self):
-        # jevlint item 2 reads rules from out/orch/matt/*.md (gitignored inputs);
-        # item 4 asks for "a script (tools/ or ops/)" and the PR used ops/.
-        report = bc.check(brief("jevlint.md"), pr(1545), exists_in_base=in_base(),
-                          local_reference=lambda p: p.startswith("out/"))
-        self.assertNotEqual(report["requirements"][1]["verdict"], "not met")
-        self.assertNotEqual(report["requirements"][3]["verdict"], "not met", report["requirements"][3]["evidence"])
-        self.assertTrue(any("diff: `ops/`" in e for e in report["requirements"][3]["evidence"]))
 
-    def test_list_shaped_body_ask_names_each_missing_part(self):
-        # #1545's body covers what the rule catches and what was declined, but
-        # carries no eval table and no calls-per-PR number.
-        report = bc.check(brief("jevlint.md"), pr(1545), exists_in_base=in_base())
-        item = report["requirements"][5]
-        self.assertEqual(item["verdict"], "needs judgment")
-        missing = next(e for e in item["evidence"] if e.startswith("PR body has nothing on:"))
-        self.assertIn("eval table", missing)
-        self.assertIn("calls-per-pr measurement", missing)
-        self.assertNotIn("catche", missing)
-        self.assertNotIn("declined", missing)
 
-    def test_tests_first_step_of_jevlint(self):
-        report = bc.check(brief("jevlint.md"), pr(1545), exists_in_base=in_base())
-        self.assertEqual(report["requirements"][4]["verdict"], "needs judgment")
 
     def test_diff_evidence_links_pin_the_inspected_head(self):
         report = bc.check(brief("gatefix.md"), pr(1544), exists_in_base=in_base("hooks/escalation-gate.py"))
@@ -296,32 +267,6 @@ class Posting(unittest.TestCase):
             bc.guarded(["pr", "merge", "7"])
 
 
-class JevResidue(unittest.TestCase):
-    def test_only_needs_judgment_items_are_asked_and_the_answer_is_labelled(self):
-        report = bc.check(brief("gatefix.md"), pr(1544), exists_in_base=in_base("hooks/escalation-gate.py"))
-        seen = {}
-
-        def judge(subject, questions, **kw):
-            seen["subject"], seen["questions"], seen["kw"] = subject, questions, kw
-            return {"answers": {q: {"type": "noul", "noul": 0.9} for q in questions}}
-
-        bc.add_jev(report, judge=judge, noul=lambda text: {"type": "noul", "instructions": text})
-        self.assertEqual(sorted(seen["questions"]), ["r1", "r2", "r3", "r4", "r5"])
-        self.assertEqual(seen["kw"].get("caller"), "brief_check")
-        self.assertEqual(verdicts(report), ["needs judgment"] * 5)
-        self.assertIn("Jev (advisory", report["requirements"][0]["jev"])
-        self.assertRegex(report["requirements"][2]["jev"], r"^Jev \(advisory, needs-judgment residue\): ")
-        self.assertIn("Jev (advisory", bc.render_comment(report))
-
-    def test_jev_failure_is_said_not_hidden(self):
-        report = bc.check(brief("gatefix.md"), pr(1544), exists_in_base=in_base("hooks/escalation-gate.py"))
-
-        def judge(subject, questions, **kw):
-            raise RuntimeError("HTTP 402")
-
-        bc.add_jev(report, judge=judge, noul=lambda text: text)
-        self.assertRegex(report["requirements"][2]["jev"], r"Jev unavailable")
-        self.assertEqual(report["requirements"][2]["verdict"], "needs judgment")
 
 
 class BlockingReview(unittest.TestCase):
@@ -475,13 +420,6 @@ class BlockingReview(unittest.TestCase):
         data["statusCheckRollup"] = [{"name": "ops/ci.sh --strict --only secret", "status": "COMPLETED", "conclusion": "SUCCESS"}]
         self.assertEqual(verdicts(self.report("Run ops/ci.sh --strict", data)), ["needs judgment"])
 
-    def test_09_hash_conflict_does_not_call_jev(self):
-        data = pr(1544)
-        data["body"] = bc.stamp_line("brief.md", "0" * 64)
-        report = self.report("Explain the architecture", data)
-        with patch.object(bc, "_jev") as loader:
-            bc.add_jev(report)
-        loader.assert_not_called()
 
     def test_15_other_authors_marker_is_not_updated(self):
         transport = PublicationGh(self.public_report())
@@ -501,24 +439,10 @@ class BlockingReview(unittest.TestCase):
         with patch.object(bc.subprocess, "run", side_effect=subprocess.TimeoutExpired("gh", 30)):
             with self.assertRaises(bc.BriefError):
                 bc.run_gh(["pr", "view", "7"])
-        with patch.object(bc, "_jev", side_effect=ImportError("missing optional module")):
-            report = self.report("Explain the architecture")
-            bc.add_jev(report)
-        self.assertIn("Jev unavailable", report["requirements"][0]["jev"])
         with patch.object(bc, "run_gh", return_value=json.dumps(pr(1544))):
             with self.assertRaises(bc.BriefError):
                 bc.main(["o/r", "7", "--brief", "/nonexistent/brief.md"])
 
-    def test_18_jev_shared_policy_and_observation(self):
-        report = self.report("Explain the architecture")
-        observations = []
-        shared = bc._jev_policy()
-        with patch.object(shared, "record", side_effect=lambda *args, **kw: observations.append((args, kw))), patch.object(bc, "_jev_policy", return_value=shared):
-            bc.add_jev(report, judge=lambda *a, **kw: {"answers": {"r1": {"type": "noul", "noul": 0.9}}}, noul=lambda text: text)
-        self.assertEqual(len(observations), 1)
-        self.assertEqual(observations[0][1]["family"], "brief_requirement")
-        self.assertEqual(observations[0][1]["downstream_action"], "advisory_only")
-        self.assertIn(report["head"], observations[0][0][1])
 
 
 class PublicationGh:

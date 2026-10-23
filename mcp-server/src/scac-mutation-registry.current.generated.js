@@ -456,15 +456,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "ask-jev": {
-    "ingress_key": "mcp-tool:ask-jev",
-    "source_locator": "mcp-server/src/jev-call-receipt.js",
-    "schema_digest": "72316d849a660ee914e582dc912cb17451f15a4895d75be8f7084ff56fbaff1b",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
   "assign-profile": {
     "ingress_key": "mcp-tool:assign-profile",
     "source_locator": "mcp-server/src/agent-profiles.js",
@@ -478,6 +469,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:attach-to-campaign",
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "bd3dfef9b4017175eb9ee2f8e10744db6d164325701e80539a798ae020edd375",
+    "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "backfill-deal-items": {
+    "ingress_key": "mcp-tool:backfill-deal-items",
+    "source_locator": "mcp-server/src/deal-items.js",
+    "schema_digest": "951a874c8854706a552b3080ed6c371efc6956c400e10757c317d618fe617791",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -750,6 +750,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:complete-capability-project",
     "source_locator": "mcp-server/src/capability-program.js",
     "schema_digest": "c1a61eb9b52ffbee896116225cec5817ab13163ce4e2a7353947d3707b526a58",
+    "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "complete-deal-item": {
+    "ingress_key": "mcp-tool:complete-deal-item",
+    "source_locator": "mcp-server/src/deal-items.js",
+    "schema_digest": "afab113d866bf2081d0599cdff0eba72209372e77ac0c1573cacf1c4aae91926",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -1221,6 +1230,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:initialize-prospect-relationship",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
     "schema_digest": "8b8cd2a0bd94b6951e688c02de3b3a62a77057c7b5ecb63c07ea94268945f313",
+    "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "instruct-deal-item": {
+    "ingress_key": "mcp-tool:instruct-deal-item",
+    "source_locator": "mcp-server/src/deal-items.js",
+    "schema_digest": "eb212d3b90bab7fae46ce103f966ac8a290531a0fa731f4d765164e09cfd973a",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -2035,24 +2053,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "read-jev-call-receipt-integrity": {
-    "ingress_key": "mcp-tool:read-jev-call-receipt-integrity",
-    "source_locator": "mcp-server/src/jev-call-receipt.js",
-    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
-    "write": false,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "read-jev-call-receipts": {
-    "ingress_key": "mcp-tool:read-jev-call-receipts",
-    "source_locator": "mcp-server/src/jev-call-receipt.js",
-    "schema_digest": "6407c957412323f9934e0f5af5c75e01ebfa97bb3adbd679f4dabab6bff78eba",
-    "write": false,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
   "read-journey-one-clock": {
     "ingress_key": "mcp-tool:read-journey-one-clock",
     "source_locator": "mcp-server/src/journey-one-clock-door.v5.js",
@@ -2408,6 +2408,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:record-deal-invoice",
     "source_locator": "mcp-server/src/invoice-automation.js",
     "schema_digest": "31ec07b95f6e58554e3cdfd13f3498671a2ede155a53c84a759954948589f8b6",
+    "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "record-deal-item": {
+    "ingress_key": "mcp-tool:record-deal-item",
+    "source_locator": "mcp-server/src/deal-items.js",
+    "schema_digest": "3adafb91a5d32c51e7386ca06582b49fb074888c19eceb1e5a11415e98f75ae5",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -3575,6 +3584,36 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
     },
     {
       "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.jev_call_receipt_integrity()",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.jev_call_receipt_integrity()",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
         "search_path=pg_catalog, ops, public, pg_temp"
       ],
       "grantee": "carr_writer",
@@ -3584,6 +3623,51 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text):carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

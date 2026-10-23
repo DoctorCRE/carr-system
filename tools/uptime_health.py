@@ -10,7 +10,17 @@ from pathlib import Path
 from datetime import datetime, timezone
 from urllib.error import HTTPError
 from urllib.request import urlopen
-from jev_outage_health import call_verb
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib import record_call
+
+def call_verb(name, payload):
+    """A loop verb's reply, or {"ok": False} for anything but an ok outcome;
+    `refused` marks a definite no from the record layer (nothing written)."""
+    result = record_call.call_verb(name, payload, timeout=35)
+    if result.ok and isinstance(result.reply, dict):
+        return result.reply
+    return {"ok": False, "refused": result.kind == record_call.REFUSED}
+
 
 MONITOR_SOURCE = "uptime-monitor:availability:v1"
 

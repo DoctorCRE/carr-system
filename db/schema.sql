@@ -27124,132 +27124,6 @@ CREATE FUNCTION ops.j1_minimum_subject_environment() RETURNS text
 
 
 --
--- Name: jev_call_receipt_append_only(); Type: FUNCTION; Schema: ops; Owner: -
---
-
-CREATE FUNCTION ops.jev_call_receipt_append_only() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path TO 'pg_catalog', 'ops'
-    AS $$
-begin
-  raise exception 'ops.jev_call_receipt is append-only (% refused)', tg_op;
-end;
-$$;
-
-
---
--- Name: jev_call_receipt_integrity(); Type: FUNCTION; Schema: ops; Owner: -
---
-
-CREATE FUNCTION ops.jev_call_receipt_integrity() RETURNS jsonb
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'pg_temp'
-    AS $_$
-declare
-  v_total bigint;
-  v_orphans bigint;
-  v_orphan_ids jsonb;
-  v_triggers jsonb;
-  v_enabled boolean;
-  v_day date;
-  v_calls bigint;
-  v_tokens bigint;
-  v_unknown bigint;
-  v_pending bigint;
-  v_abandoned bigint;
-  v_now timestamptz := clock_timestamp();
-  v_abandon_after_seconds integer := 3600;
-begin
-  select count(*) into v_total from ops.jev_call_receipt;
-  with orphan as (
-    select r.receipt_id, r.recorded_at
-      from ops.jev_call_receipt r
-     where not exists (
-       select 1 from public.tool_call t
-        where t.verb in ('ask-jev', 'ask-jev-attempt')
-          and t.idempotency_key = r.idempotency_key
-          and t.verb = case when r.model_answered = 'jev-attempt-pending'
-                            then 'ask-jev-attempt' else 'ask-jev' end
-          and t.actor_id = r.actor_id
-          and t.response->>'receipt_id' = r.receipt_id::text)
-  )
-  select count(*),
-         coalesce((select jsonb_agg(o2.receipt_id order by o2.recorded_at desc, o2.receipt_id)
-                     from (select * from orphan order by recorded_at desc, receipt_id limit 20) o2), '[]'::jsonb)
-    into v_orphans, v_orphan_ids
-    from orphan;
-  with expected(name) as (
-    values ('jev_call_receipt_append_only'), ('jev_call_receipt_no_truncate')
-  )
-  select jsonb_agg(jsonb_build_object(
-           'name', e.name,
-           'tgenabled', t.tgenabled::text,
-           'enabled', coalesce(t.tgenabled in ('O','A'), false)) order by e.name),
-         bool_and(coalesce(t.tgenabled in ('O','A'), false))
-    into v_triggers, v_enabled
-    from expected e
-    left join pg_catalog.pg_trigger t
-      on t.tgname = e.name
-     and t.tgrelid = 'ops.jev_call_receipt'::regclass
-     and not t.tgisinternal;
-
-  v_day := (v_now at time zone 'UTC')::date;
-  select count(*) filter (where r.usage is not null),
-         coalesce(sum(case when r.usage->>'input_tokens' ~ '^[0-9]{1,15}$'
-                           then (r.usage->>'input_tokens')::bigint else 0 end), 0),
-         count(*) filter (where (r.usage is null and r.model_answered <> 'jev-attempt-pending'
-                                   and coalesce(t.response->>'cache_hit', 'false') <> 'true')
-                            or (r.usage is not null and
-                                coalesce(r.usage->>'input_tokens', '') !~ '^[0-9]{1,15}$'))
-    into v_calls, v_tokens, v_unknown
-    from ops.jev_call_receipt r
-    left join public.tool_call t
-      on t.verb in ('ask-jev', 'ask-jev-attempt')
-     and t.idempotency_key = r.idempotency_key
-     and t.verb = case when r.model_answered = 'jev-attempt-pending'
-                       then 'ask-jev-attempt' else 'ask-jev' end
-     and t.actor_id = r.actor_id
-     and t.response->>'receipt_id' = r.receipt_id::text
-   where r.recorded_at >= v_day::timestamp at time zone 'UTC'
-     and r.recorded_at < (v_day + 1)::timestamp at time zone 'UTC';
-
-  -- Upstream requests are bounded to seconds. After one hour an unsettled
-  -- reservation is abandoned, not an indefinitely pending billable call.
-  -- Keep the append-only evidence; a later settlement excludes it as before.
-  select count(*) filter (where a.recorded_at >= v_now - make_interval(secs => v_abandon_after_seconds)),
-         count(*) filter (where a.recorded_at < v_now - make_interval(secs => v_abandon_after_seconds))
-    into v_pending, v_abandoned from ops.jev_call_receipt a
-   where a.model_answered = 'jev-attempt-pending'
-     and not exists (
-       select 1 from public.tool_call t
-        where t.idempotency_key = a.idempotency_key
-          and t.verb = 'ask-jev-attempt' and t.actor_id = a.actor_id
-          and t.response->>'receipt_id' = a.receipt_id::text
-          and t.response->>'cache_hit' = 'true');
-
-  return jsonb_build_object(
-    'receipts_total', v_total,
-    'receipts_without_tool_call', jsonb_build_object('count', v_orphans, 'receipt_ids', v_orphan_ids),
-    'trigger_enabled', v_enabled,
-    'triggers', v_triggers,
-    'daily_usage', jsonb_build_object('utc_day', v_day, 'calls', v_calls,
-                                     'input_tokens', v_tokens, 'unknown', v_unknown + v_pending,
-                                     'pending_attempts', v_pending,
-                                     'abandoned_attempts', v_abandoned,
-                                     'abandon_after_seconds', v_abandon_after_seconds),
-    'checked_at', to_jsonb(clock_timestamp()));
-end;
-$_$;
-
-
---
--- Name: FUNCTION jev_call_receipt_integrity(); Type: COMMENT; Schema: ops; Owner: -
---
-
-COMMENT ON FUNCTION ops.jev_call_receipt_integrity() IS 'Integrity and daily usage audit for append-only Worker Jev receipts, including pending billable attempts, cache-hit exclusion and missing-usage count.';
-
-
---
 -- Name: legacy_rule_admission_note(uuid, text, timestamp with time zone); Type: FUNCTION; Schema: ops; Owner: -
 --
 
@@ -32631,77 +32505,6 @@ $$;
 
 
 --
--- Name: read_jev_call_receipts(text, timestamp with time zone, integer, text); Type: FUNCTION; Schema: ops; Owner: -
---
-
-CREATE FUNCTION ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text) RETURNS jsonb
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'pg_temp'
-    AS $$
-declare
-  v_actor uuid;
-  v_since timestamptz;
-  v_rows jsonb;
-  v_count int;
-begin
-  if p_session is null or char_length(p_session) not between 1 and 200 then
-    raise exception 'jev_session_id_invalid';
-  end if;
-  if p_lim is null or p_lim not between 1 and 500 then
-    raise exception 'jev_limit_invalid';
-  end if;
-  select a.id into v_actor from public.actor a where a.slug = p_actor_slug;
-  if v_actor is null then
-    raise exception 'jev_call_receipt_actor_unresolved';
-  end if;
-  v_since := coalesce(p_since, clock_timestamp() - interval '24 hours');
-  select coalesce(jsonb_agg(jsonb_build_object(
-           'receipt_id', credited.receipt_id,
-           'recorded_at', credited.recorded_at,
-           'purpose', credited.purpose,
-           'question_ids', to_jsonb(credited.question_ids),
-           'facets', to_jsonb(credited.facets),
-           'model', credited.model_answered,
-           'state_sha256', credited.state_sha256,
-           'prompt_sha256', credited.prompt_sha256,
-           'answers', case when credited.purpose = 'build_advisory' then credited.answers else null end
-         ) order by credited.recorded_at, credited.receipt_id), '[]'::jsonb),
-         count(*)
-    into v_rows, v_count
-    from (
-      select r.*
-        from ops.jev_call_receipt r
-        join public.tool_call t
-          on t.idempotency_key = r.idempotency_key
-         and t.verb = 'ask-jev'
-         and t.actor_id = r.actor_id
-         and t.response->>'receipt_id' = r.receipt_id::text
-       where r.session_id = p_session
-         and r.actor_id = v_actor
-         and r.recorded_at >= v_since
-       order by r.recorded_at, r.receipt_id
-       limit p_lim + 1
-    ) credited;
-  if v_count > p_lim then
-    v_rows := v_rows - p_lim;
-  end if;
-  return jsonb_build_object(
-    'server_now', to_jsonb(clock_timestamp()),
-    'since', to_jsonb(v_since),
-    'truncated', v_count > p_lim,
-    'receipts', v_rows);
-end;
-$$;
-
-
---
--- Name: FUNCTION read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text); Type: COMMENT; Schema: ops; Owner: -
---
-
-COMMENT ON FUNCTION ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text) IS 'Read door for ops.jev_call_receipt: the calling actor''s credited receipts (matching ask-jev tool_call row) for one session from p_since, oldest first, at most p_lim with a truncated flag, answers only for build_advisory, plus the server clock.';
-
-
---
 -- Name: read_resource_dashboard(); Type: FUNCTION; Schema: ops; Owner: -
 --
 
@@ -35228,84 +35031,6 @@ begin
   returning id into event_id;
   return event_id;
 end $$;
-
-
---
--- Name: record_jev_call_receipt(text, text, text[], text[], text, text, text, text, text, text, jsonb, jsonb, uuid, text, text); Type: FUNCTION; Schema: ops; Owner: -
---
-
-CREATE FUNCTION ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text) RETURNS TABLE(receipt_id uuid, recorded_at timestamp with time zone, replayed boolean)
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'pg_temp'
-    AS $$
-declare
-  v_existing ops.jev_call_receipt%rowtype;
-  v_row ops.jev_call_receipt%rowtype;
-  v_acting text;
-begin
-  if p_idempotency_key is null or btrim(p_idempotency_key) = '' then
-    raise exception 'idempotency_key_required';
-  end if;
-  -- The actor is the Worker's server-authenticated actor. It must be a real
-  -- actor row, id and slug together, and -- when the writer transaction has
-  -- set the acting-actor context (mcp.js setWriterActorContext) -- the same
-  -- actor that context names.
-  if p_actor_id is null or p_actor_slug is null or not exists (
-       select 1 from public.actor a where a.id = p_actor_id and a.slug = p_actor_slug) then
-    raise exception 'jev_call_receipt_actor_unresolved';
-  end if;
-  v_acting := nullif(current_setting('carr.acting_actor_slug', true), '');
-  if v_acting is not null and v_acting <> p_actor_slug then
-    raise exception 'jev_call_receipt_actor_mismatch';
-  end if;
-  if p_session_id is null or char_length(p_session_id) not between 1 and 200 then
-    raise exception 'jev_session_id_invalid';
-  end if;
-  if p_purpose is null or p_purpose not in ('call','build_advisory') then
-    raise exception 'jev_purpose_invalid';
-  end if;
-  if (p_purpose = 'build_advisory') <> (p_prompt_sha256 is not null) then
-    raise exception 'jev_call_receipt_prompt_sha256_iff_build_advisory';
-  end if;
-
-  -- The Worker holds an advisory lock on the key for the whole transaction
-  -- (withEnvelope), so a same-key replay reaches here only when the envelope
-  -- ledger and this table disagree. Identical content replays; anything else
-  -- is key reuse.
-  select * into v_existing from ops.jev_call_receipt r where r.idempotency_key = p_idempotency_key;
-  if found then
-    if v_existing.session_id is distinct from p_session_id
-       or v_existing.purpose is distinct from p_purpose
-       or v_existing.state_sha256 is distinct from p_state_sha256
-       or v_existing.questions_sha256 is distinct from p_questions_sha256
-       or v_existing.actor_id is distinct from p_actor_id then
-      raise exception 'jev_call_receipt_key_reuse';
-    end if;
-    return query select v_existing.receipt_id, v_existing.recorded_at, true;
-    return;
-  end if;
-
-  insert into ops.jev_call_receipt (
-    session_id, purpose, question_ids, facets, model_requested, model_answered,
-    state_sha256, questions_sha256, answers_sha256, prompt_sha256, answers, usage,
-    actor_id, actor_slug, idempotency_key
-  ) values (
-    p_session_id, p_purpose, p_question_ids, coalesce(p_facets, '{}'::text[]),
-    p_model_requested, p_model_answered, p_state_sha256, p_questions_sha256,
-    p_answers_sha256, p_prompt_sha256, p_answers, p_usage, p_actor_id, p_actor_slug,
-    p_idempotency_key
-  ) returning * into v_row;
-
-  return query select v_row.receipt_id, v_row.recorded_at, false;
-end;
-$$;
-
-
---
--- Name: FUNCTION record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text); Type: COMMENT; Schema: ops; Owner: -
---
-
-COMMENT ON FUNCTION ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text) IS 'Write door for ops.jev_call_receipt: append one receipt of a Jev call the Worker made, for the server-derived actor. recorded_at is the server clock. Idempotent on p_idempotency_key; no update or delete path exists.';
 
 
 --
@@ -40583,6 +40308,36 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
     },
     {
       "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.jev_call_receipt_integrity()",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.jev_call_receipt_integrity()",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
         "search_path=pg_catalog, ops, public, pg_temp"
       ],
       "grantee": "carr_writer",
@@ -40592,6 +40347,51 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
       "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text):carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
@@ -76033,53 +75833,6 @@ COMMENT ON TABLE ops.j1_minimum_inventory IS 'The admitted-minimum input invento
 
 
 --
--- Name: jev_call_receipt; Type: TABLE; Schema: ops; Owner: -
---
-
-CREATE TABLE ops.jev_call_receipt (
-    receipt_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    recorded_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
-    session_id text NOT NULL,
-    purpose text NOT NULL,
-    question_ids text[] NOT NULL,
-    facets text[] DEFAULT '{}'::text[] NOT NULL,
-    model_requested text NOT NULL,
-    model_answered text NOT NULL,
-    state_sha256 text NOT NULL,
-    questions_sha256 text NOT NULL,
-    answers_sha256 text NOT NULL,
-    prompt_sha256 text,
-    answers jsonb NOT NULL,
-    usage jsonb,
-    actor_id uuid NOT NULL,
-    actor_slug text NOT NULL,
-    idempotency_key text NOT NULL,
-    CONSTRAINT jev_call_receipt_actor_slug_check CHECK ((btrim(actor_slug) <> ''::text)),
-    CONSTRAINT jev_call_receipt_answers_check CHECK ((jsonb_typeof(answers) = 'object'::text)),
-    CONSTRAINT jev_call_receipt_answers_sha256_check CHECK ((answers_sha256 ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT jev_call_receipt_facets_check CHECK (((facets <@ ARRAY['architecture_or_design'::text, 'semantic_creation'::text, 'diagnosis'::text, 'verification_selection'::text, 'evidence_matching'::text, 'next_action_priority'::text]) AND (array_position(facets, NULL::text) IS NULL))),
-    CONSTRAINT jev_call_receipt_idempotency_key_check CHECK ((btrim(idempotency_key) <> ''::text)),
-    CONSTRAINT jev_call_receipt_model_answered_check CHECK ((btrim(model_answered) <> ''::text)),
-    CONSTRAINT jev_call_receipt_model_requested_check CHECK ((btrim(model_requested) <> ''::text)),
-    CONSTRAINT jev_call_receipt_prompt_iff_build_advisory CHECK (((purpose = 'build_advisory'::text) = (prompt_sha256 IS NOT NULL))),
-    CONSTRAINT jev_call_receipt_prompt_sha256_check CHECK ((prompt_sha256 ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT jev_call_receipt_purpose_check CHECK ((purpose = ANY (ARRAY['call'::text, 'build_advisory'::text]))),
-    CONSTRAINT jev_call_receipt_question_ids_check CHECK (((cardinality(question_ids) >= 1) AND (cardinality(question_ids) <= 64) AND (array_position(question_ids, NULL::text) IS NULL))),
-    CONSTRAINT jev_call_receipt_questions_sha256_check CHECK ((questions_sha256 ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT jev_call_receipt_session_id_check CHECK (((char_length(session_id) >= 1) AND (char_length(session_id) <= 200))),
-    CONSTRAINT jev_call_receipt_state_sha256_check CHECK ((state_sha256 ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT jev_call_receipt_usage_check CHECK (((usage IS NULL) OR (jsonb_typeof(usage) = 'object'::text)))
-);
-
-
---
--- Name: TABLE jev_call_receipt; Type: COMMENT; Schema: ops; Owner: -
---
-
-COMMENT ON TABLE ops.jev_call_receipt IS 'Append-only receipt of each Jev (TypeSafe) call the Worker made through ask-jev. recorded_at is the server clock; actor_id/actor_slug are the server-derived actor. Ids, digests and probabilities only; no state text. Tampering by the owner is detectable (tool_call cross-check, integrity audit), not prevented.';
-
-
---
 -- Name: job_attempt; Type: TABLE; Schema: ops; Owner: -
 --
 
@@ -84104,9 +83857,13 @@ CREATE TABLE public.capture_post_call_action (
     status text DEFAULT 'open'::text NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     completed_at timestamp with time zone,
+    item_title text,
+    item_bullets jsonb DEFAULT '[]'::jsonb NOT NULL,
+    source_ref text,
     CONSTRAINT capture_post_call_action_check CHECK ((((status = 'done'::text) AND (completed_at IS NOT NULL)) OR ((status = ANY (ARRAY['open'::text, 'dropped'::text])) AND (completed_at IS NULL)))),
     CONSTRAINT capture_post_call_action_description_check CHECK ((btrim(description) <> ''::text)),
-    CONSTRAINT capture_post_call_action_status_check CHECK ((status = ANY (ARRAY['open'::text, 'done'::text, 'dropped'::text])))
+    CONSTRAINT capture_post_call_action_status_check CHECK ((status = ANY (ARRAY['open'::text, 'done'::text, 'dropped'::text]))),
+    CONSTRAINT capture_post_call_item_shape CHECK (((item_title IS NULL) OR (((cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) >= 2) AND (cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) <= 4)) AND (source_ref IS NOT NULL) AND (btrim(source_ref) <> ''::text) AND (jsonb_typeof(item_bullets) = 'array'::text))))
 );
 
 
@@ -86146,6 +85903,10 @@ CREATE TABLE public.next_action (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by uuid,
     hold_until date,
+    item_title text,
+    item_bullets jsonb DEFAULT '[]'::jsonb NOT NULL,
+    source_ref text,
+    CONSTRAINT next_action_item_shape CHECK (((item_title IS NULL) OR ((subject_type = 'deal'::text) AND ((cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) >= 2) AND (cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) <= 4)) AND (source_ref IS NOT NULL) AND (btrim(source_ref) <> ''::text) AND (jsonb_typeof(item_bullets) = 'array'::text)))),
     CONSTRAINT next_action_status_check CHECK ((status = ANY (ARRAY['open'::text, 'done'::text, 'dropped'::text]))),
     CONSTRAINT next_action_subject_type_check CHECK ((subject_type = ANY (ARRAY['deal'::text, 'client'::text, 'lead'::text, 'vendor'::text])))
 );
@@ -89490,7 +89251,7 @@ CREATE VIEW public.v_deal_room_board AS
     d.next_date,
     COALESCE(( SELECT n.description
            FROM public.next_action n
-          WHERE ((n.subject_type = 'deal'::text) AND (n.subject_id = d.id) AND (n.status = 'open'::text))
+          WHERE ((n.subject_type = 'deal'::text) AND (n.subject_id = d.id) AND (n.status = 'open'::text) AND (n.item_title IS NULL))
           ORDER BY n.updated_at DESC, n.id DESC
          LIMIT 1), ( SELECT n.text
            FROM public.deal_note n
@@ -89578,7 +89339,11 @@ CREATE VIEW public.v_deal_room_action AS
     n.due_on,
     n.status,
     n.updated_at,
-    n.hold_until
+    n.hold_until,
+    n.item_title,
+    n.item_bullets,
+    n.source_ref,
+    n.created_at AS created_order
    FROM (public.next_action n
      JOIN public.actor a ON ((a.id = n.owner_id)))
   WHERE (n.subject_type = 'deal'::text)
@@ -89590,7 +89355,11 @@ UNION ALL
     pca.due_on,
     pca.status,
     pca.updated_at,
-    NULL::date AS hold_until
+    NULL::date AS hold_until,
+    pca.item_title,
+    pca.item_bullets,
+    pca.source_ref,
+    pca.accepted_at AS created_order
    FROM (public.capture_post_call_action pca
      JOIN public.actor a ON ((a.id = pca.owner_id)));
 
@@ -94785,22 +94554,6 @@ ALTER TABLE ONLY ops.j1_minimum_inventory
 
 ALTER TABLE ONLY ops.j1_minimum_inventory
     ADD CONSTRAINT j1_minimum_inventory_pkey PRIMARY KEY (id);
-
-
---
--- Name: jev_call_receipt jev_call_receipt_idempotency_key_key; Type: CONSTRAINT; Schema: ops; Owner: -
---
-
-ALTER TABLE ONLY ops.jev_call_receipt
-    ADD CONSTRAINT jev_call_receipt_idempotency_key_key UNIQUE (idempotency_key);
-
-
---
--- Name: jev_call_receipt jev_call_receipt_pkey; Type: CONSTRAINT; Schema: ops; Owner: -
---
-
-ALTER TABLE ONLY ops.jev_call_receipt
-    ADD CONSTRAINT jev_call_receipt_pkey PRIMARY KEY (receipt_id);
 
 
 --
@@ -101649,13 +101402,6 @@ CREATE UNIQUE INDEX j1_minimum_admission_one_opening ON ops.j1_minimum_admission
 
 
 --
--- Name: jev_call_receipt_session_recorded_at_idx; Type: INDEX; Schema: ops; Owner: -
---
-
-CREATE INDEX jev_call_receipt_session_recorded_at_idx ON ops.jev_call_receipt USING btree (session_id, recorded_at);
-
-
---
 -- Name: job_dispatch_idx; Type: INDEX; Schema: ops; Owner: -
 --
 
@@ -102243,6 +101989,13 @@ CREATE INDEX deal_conflict_open_idx ON public.deal_conflict USING btree (deal_id
 
 
 --
+-- Name: deal_item_source_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX deal_item_source_unique ON public.next_action USING btree (subject_id, source_ref, item_title) WHERE ((subject_type = 'deal'::text) AND (item_title IS NOT NULL));
+
+
+--
 -- Name: deal_note_thread_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -102610,7 +102363,7 @@ CREATE INDEX negotiation_claim_type_idx ON public.negotiation_claim USING btree 
 -- Name: one_open_next_action_per_owner; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX one_open_next_action_per_owner ON public.next_action USING btree (subject_type, subject_id, owner_id) WHERE (status = 'open'::text);
+CREATE UNIQUE INDEX one_open_next_action_per_owner ON public.next_action USING btree (subject_type, subject_id, owner_id) WHERE ((status = 'open'::text) AND (item_title IS NULL));
 
 
 --
@@ -102884,20 +102637,6 @@ CREATE INDEX source_capture_session_trgm ON public.source_capture USING gin (ses
 --
 
 CREATE INDEX tool_call_correlation_idx ON public.tool_call USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: tool_call_jev_receipt_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX tool_call_jev_receipt_idx ON public.tool_call USING btree (verb) WHERE (verb = ANY (ARRAY['ask-jev'::text, 'ask-jev-attempt'::text]));
-
-
---
--- Name: tool_call_jev_settlement_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX tool_call_jev_settlement_idx ON public.tool_call USING btree (idempotency_key, actor_id, ((response ->> 'receipt_id'::text))) WHERE ((verb = 'ask-jev-attempt'::text) AND ((response ->> 'cache_hit'::text) = 'true'::text));
 
 
 --
@@ -104755,20 +104494,6 @@ CREATE TRIGGER j1_minimum_inventory_append_only BEFORE DELETE OR UPDATE ON ops.j
 --
 
 CREATE TRIGGER j1_minimum_inventory_no_truncate BEFORE TRUNCATE ON ops.j1_minimum_inventory FOR EACH STATEMENT EXECUTE FUNCTION ops.j1_minimum_rows_immutable();
-
-
---
--- Name: jev_call_receipt jev_call_receipt_append_only; Type: TRIGGER; Schema: ops; Owner: -
---
-
-CREATE TRIGGER jev_call_receipt_append_only BEFORE DELETE OR UPDATE ON ops.jev_call_receipt FOR EACH ROW EXECUTE FUNCTION ops.jev_call_receipt_append_only();
-
-
---
--- Name: jev_call_receipt jev_call_receipt_no_truncate; Type: TRIGGER; Schema: ops; Owner: -
---
-
-CREATE TRIGGER jev_call_receipt_no_truncate BEFORE TRUNCATE ON ops.jev_call_receipt FOR EACH STATEMENT EXECUTE FUNCTION ops.jev_call_receipt_append_only();
 
 
 --
@@ -111921,14 +111646,6 @@ ALTER TABLE ONLY ops.j1_minimum_inventory
 
 
 --
--- Name: jev_call_receipt jev_call_receipt_actor_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: -
---
-
-ALTER TABLE ONLY ops.jev_call_receipt
-    ADD CONSTRAINT jev_call_receipt_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES public.actor(id);
-
-
---
 -- Name: job_attempt job_attempt_job_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: -
 --
 
@@ -117892,8 +117609,6 @@ revoke all on function ops.j1_minimum_receipt_fields() from public;
 revoke all on function ops.j1_minimum_receipt_schema() from public;
 revoke all on function ops.j1_minimum_record_layer_cannot_prove() from public;
 revoke all on function ops.j1_minimum_subject_environment() from public;
-revoke all on function ops.jev_call_receipt_append_only() from public;
-revoke all on function ops.jev_call_receipt_integrity() from public;
 revoke all on function ops.list_doc_conversations(p_cursor text, p_limit integer, p_include_archived boolean) from public;
 revoke all on function ops.list_doc_suggestions(p_conversation uuid, p_include_parked boolean) from public;
 revoke all on function ops.list_shipped_releases(p_since timestamp with time zone) from public;
@@ -117995,7 +117710,6 @@ revoke all on function ops.read_canonical_ownership_operation(p_idempotency_key 
 revoke all on function ops.read_context_activation(p_work_request text, p_binding_id text) from public;
 revoke all on function ops.read_doc_outcome_cards_successor(p_cursor text, p_limit integer) from public;
 revoke all on function ops.read_execution_environment_providers() from public;
-revoke all on function ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text) from public;
 revoke all on function ops.read_resource_dashboard() from public;
 revoke all on function ops.read_slice_completion(p_slice_id text) from public;
 revoke all on function ops.read_slice_done_state(p_slice_id text) from public;
@@ -118036,7 +117750,6 @@ revoke all on function ops.record_device_evidence(p_job_id uuid, p_builder_key t
 revoke all on function ops.record_dispatch_link(p_turn_msg_id uuid, p_session_id text, p_work_request_id uuid, p_dispatch_ref uuid) from public;
 revoke all on function ops.record_executed_lease(p_deal text, p_base_version integer, p_executed_on date, p_commencement_on date, p_expiration_on date, p_term_months integer, p_evidence_kind text, p_evidence_ref text, p_source text) from public;
 revoke all on function ops.record_guidance_decision(p_revision_id uuid, p_state text, p_idempotency_key text, p_reason text) from public;
-revoke all on function ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text) from public;
 revoke all on function ops.record_launchd_scheduler_observation(p_surface_id text, p_label text, p_timezone text, p_enabled boolean, p_plist_sha256 text, p_schedule_sha256 text, p_launchctl_revision text, p_source_fingerprint text, p_observed_at timestamp with time zone, p_idempotency_key text) from public;
 revoke all on function ops.record_meeting_action_outcome(p_meeting uuid, p_action_number integer, p_client_instance text, p_idempotency_key uuid) from public;
 revoke all on function ops.record_nightly_availability_canary_receipt(p_job_id uuid, p_lease uuid, p_source_snapshot_id uuid, p_output_digest text, p_match_count integer) from public;
@@ -119397,7 +119110,6 @@ grant select on table ops.j1_minimum_inventory to carr_authority;
 grant select on table ops.j1_minimum_inventory to carr_reader;
 grant select on table ops.j1_minimum_inventory to carr_writer;
 grant select on table ops.j1_minimum_inventory to dot_reader;
-grant select on table ops.jev_call_receipt to dot_reader;
 grant select on table ops.job to carr_jobs;
 grant select on table ops.job to carr_reader;
 grant select on table ops.job to carr_writer;
@@ -121411,8 +121123,6 @@ grant execute on function ops.j1_minimum_record_layer_cannot_prove() to carr_wri
 grant execute on function ops.j1_minimum_subject_environment() to carr_authority;
 grant execute on function ops.j1_minimum_subject_environment() to carr_reader;
 grant execute on function ops.j1_minimum_subject_environment() to carr_writer;
-grant execute on function ops.jev_call_receipt_integrity() to carr_reader;
-grant execute on function ops.jev_call_receipt_integrity() to carr_writer;
 grant execute on function ops.list_doc_conversations(p_cursor text, p_limit integer, p_include_archived boolean) to carr_authority;
 grant execute on function ops.list_doc_conversations(p_cursor text, p_limit integer, p_include_archived boolean) to carr_writer;
 grant execute on function ops.list_doc_suggestions(p_conversation uuid, p_include_parked boolean) to carr_authority;
@@ -121636,8 +121346,6 @@ grant execute on function ops.read_execution_environment_providers() to carr_wri
 grant execute on function ops.read_governance_queue() to carr_authority;
 grant execute on function ops.read_governance_queue() to carr_reader;
 grant execute on function ops.read_governance_queue() to carr_writer;
-grant execute on function ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text) to carr_reader;
-grant execute on function ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text) to carr_writer;
 grant execute on function ops.read_resource_dashboard() to carr_reader;
 grant execute on function ops.read_slice_completion(p_slice_id text) to carr_reader;
 grant execute on function ops.read_slice_done_state(p_slice_id text) to carr_reader;
@@ -121689,7 +121397,6 @@ grant execute on function ops.record_dispatch_link(p_turn_msg_id uuid, p_session
 grant execute on function ops.record_dispatch_link(p_turn_msg_id uuid, p_session_id text, p_work_request_id uuid, p_dispatch_ref uuid) to carr_writer;
 grant execute on function ops.record_executed_lease(p_deal text, p_base_version integer, p_executed_on date, p_commencement_on date, p_expiration_on date, p_term_months integer, p_evidence_kind text, p_evidence_ref text, p_source text) to carr_authority;
 grant execute on function ops.record_guidance_decision(p_revision_id uuid, p_state text, p_idempotency_key text, p_reason text) to carr_authority;
-grant execute on function ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text) to carr_writer;
 grant execute on function ops.record_launchd_scheduler_observation(p_surface_id text, p_label text, p_timezone text, p_enabled boolean, p_plist_sha256 text, p_schedule_sha256 text, p_launchctl_revision text, p_source_fingerprint text, p_observed_at timestamp with time zone, p_idempotency_key text) to carr_device_evidence;
 grant execute on function ops.record_meeting_action_outcome(p_meeting uuid, p_action_number integer, p_client_instance text, p_idempotency_key uuid) to carr_writer;
 grant execute on function ops.record_nightly_availability_canary_receipt(p_job_id uuid, p_lease uuid, p_source_snapshot_id uuid, p_output_digest text, p_match_count integer) to carr_jobs;
@@ -123006,6 +122713,8 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0932_retire_dead_background_jobs.sql	2920a630039f908deba5fa0d04ec959f180f7fd069b0a908a6d160279d24a2dd	1970-01-01 00:00:00+00
 0933_source_merge_projection_control_refs.sql	8e7a69d8ca622e59de97b8cdee76186694bbe88b99c4c26195c21340e7d14f85	1970-01-01 00:00:00+00
 0934_retire_generic_scheduler_control_projections.sql	20e15e33b237e887a29577876821d622972d0bfc4fb9f4d372c5a72503c70c92	1970-01-01 00:00:00+00
+0935_retire_jev_gateway.sql	82dd8e9023b31cb5d56eedce2d5029fad1d93318d44ce4e1a996dce1e0210cdf	1970-01-01 00:00:00+00
+0936_deal_alert_items.sql	469f722bb5005547378d43bed510fb1b4edc98c1fc146ea8d50ae423b0275bb3	1970-01-01 00:00:00+00
 \.
 
 

@@ -43,30 +43,6 @@ def brain_case(scratch: Path) -> None:
     print("failure 17 returned promptly and brain lock released", flush=True)
 
 
-def shadow_case(scratch: Path) -> None:
-    sys.path.insert(0, str(BIN))
-    import convo_core
-
-    entered = threading.Event()
-
-    def blocked_router(text):
-        entered.set()
-        threading.Event().wait(60)
-        return {}
-
-    shadow = convo_core._SHADOW
-    shadow.router = blocked_router
-    shadow.log_path = scratch / "shadow.jsonl"
-    shadow.submit("occupied", session_id=None, brain_returncode=0)
-    assert entered.wait(1)
-    for _ in range(shadow.QUEUE_MAX):
-        shadow.submit("queued", session_id=None, brain_returncode=0)
-    started = time.monotonic()
-    shadow.close()
-    assert time.monotonic() - started < 1
-    shadow.close()
-    shadow.submit("after close", session_id=None, brain_returncode=0)
-    print("occupied shadow and full queue closed within deadline", flush=True)
 
 
 class ShutdownTests(unittest.TestCase):
@@ -102,14 +78,10 @@ class ShutdownTests(unittest.TestCase):
     def test_inherited_stderr_does_not_block_failure_or_next_turn(self) -> None:
         self.run_case("--brain", "brain lock released")
 
-    def test_occupied_shadow_and_full_queue_cannot_block_exit(self) -> None:
-        self.run_case("--shadow", "full queue closed within deadline")
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--brain":
         brain_case(Path(sys.argv[2]))
-    elif len(sys.argv) > 1 and sys.argv[1] == "--shadow":
-        shadow_case(Path(sys.argv[2]))
     else:
         unittest.main()

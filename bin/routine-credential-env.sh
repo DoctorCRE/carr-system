@@ -73,7 +73,7 @@ carr_load_routine_db_env() {
 # on a parse error and took all five keys in the file with it.  Under `set -eu`
 # that aborts the caller at rc=126 before it can log anything.  All a session saw
 # was `.../db.env:10: parse error near `&'` — text that names neither the script
-# it killed nor what that file is for, so bin/migrate-prod.sh, the one sanctioned
+# it killed nor what that file is for, so the GitHub production deployment workflow, the one sanctioned
 # door to production migrations, read as a broken script.
 #
 # It read as INTERMITTENT too: every one of those callers guards the source on

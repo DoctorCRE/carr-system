@@ -24,9 +24,8 @@ letter or digit becomes "-") is CARR's when, and only when, it is one of:
 A Codex session is CARR's when the working directory recorded in its own
 session-metadata line is the canonical checkout, the vault, or inside one.
 
-This module is a library: no shebang and no module-run guard, for the reason
-ops/jev_judge.py gives (either would make it a registered script entrypoint in
-the sealed source inventory). Nothing here touches the filesystem at import.
+This module is a library with no script entry point.
+Nothing here touches the filesystem at import.
 """
 
 from __future__ import annotations

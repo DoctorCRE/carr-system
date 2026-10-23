@@ -6,7 +6,6 @@ import re
 from pathlib import Path
 import subprocess
 import sys
-import time
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
@@ -203,7 +202,7 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
     return context(text, event)
 
 
-def process(payload, *, runner=subprocess.run, judge=None, dedupe=True):
+def process(payload, *, runner=subprocess.run, dedupe=True):
     event = payload.get('hook_event_name')
     if event not in {'PreToolUse', 'UserPromptSubmit', 'Stop'}:
         return None
@@ -223,8 +222,7 @@ def process(payload, *, runner=subprocess.run, judge=None, dedupe=True):
                    'tool_name': payload.get('tool_name', ''), 'tool_input': payload.get('tool_input', {})}
         if payload.get('last_assistant_message'):
             current['response'] = payload['last_assistant_message']
-        selection = lookup(current, runner=runner,
-                           judge=judge)
+        selection = lookup(current, runner=runner)
         if not valid_local_identity(selection['identity']):
             return refused(event)
         return delivery_receipt(payload, selection, task, dedupe=dedupe)

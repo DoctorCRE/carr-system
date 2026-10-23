@@ -20,15 +20,14 @@ from progress_board_test_support import exercise_fields
 
 
 class CostSnapshotTests(unittest.TestCase):
-    def test_board_includes_validated_provider_days_and_jev_call_sites(self):
+    def test_board_includes_validated_provider_days(self):
         now = datetime(2026, 10, 5, 12, tzinfo=timezone.utc)
         value = {"schema": "carr-system-costs.v1", "observed_at": "2026-10-05T11:00:00Z",
                  "month": "2026-10", "through": "2026-10-04", "state": "ready",
-                 "providers": [{"provider": "jev", "label": "Jev", "plan": "Per call", "state": "ready", "reason": None,
+                 "providers": [{"provider": "github", "label": "GitHub", "plan": "Usage", "state": "ready", "reason": None,
                                 "mtd_usd": 2.5, "projection_usd": 19.375, "budget_usd": 50,
-                                "daily": [{"day": "2026-10-04", "usd": 2.5, "drivers": {"hook:route": 2.5}}],
-                                "call_sites": {"hook:route": 2.5}}],
-                 "months": [{"month": "2026-10", "usd": 2.5, "providers": {"jev": 2.5}}],
+                                "daily": [{"day": "2026-10-04", "usd": 2.5, "drivers": {"Actions": 2.5}}]}],
+                 "months": [{"month": "2026-10", "usd": 2.5, "providers": {"github": 2.5}}],
                  "alerts": [], "action": "Finance Ops: inspect provider and driver; verify next day; auto-clear after thresholds pass.",
                  "billing_response": {"card_number": "never-return-fixture"}}
         with tempfile.TemporaryDirectory() as directory:
@@ -39,7 +38,6 @@ class CostSnapshotTests(unittest.TestCase):
                 costs = board.board_snapshot({"project": "system-costs", "tasks": {}})["costs"]
             self.assertEqual(costs["state"], "ready")
             self.assertEqual(costs["providers"][0]["daily"][0]["usd"], 2.5)
-            self.assertEqual(costs["providers"][0]["call_sites"], {"hook:route": 2.5})
             self.assertEqual(costs["months"][0]["usd"], 2.5)
             self.assertNotIn("never-return-fixture", json.dumps(costs))
             value["state"] = "partial"

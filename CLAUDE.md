@@ -94,11 +94,6 @@ Measured from the Orchestrator.macbook transcript (37 hours, 11 compactions,
 Read current canonical migration/release state before naming frontier/blocker.
 Dated incidents/WRs are history; source/CI grants no live authority.
 
-## Steering evals
-
-Surfaces in `evals/surfaces.json`: `/claude-api build-eval`, then
-`/claude-api hillclimb`; ship per `evals/README.md`.
-
 ## Map work has one mandatory front door
 
 For any request to recommend, design, build, revise, review, or publish a map,
@@ -137,3 +132,8 @@ The five triage roles map to Work Request states and `review-and-triage` classes
 ### Domain docs
 
 Single-context; the glossary and decisions live in the doctrine store and decision log, not repo files. See `docs/agents/domain.md`.
+
+## Production deployment
+
+`.github/workflows/deploy.yml` deploys a successful main canary. It runs
+`tools/migrate.py` and verifies the production `/release` identity.

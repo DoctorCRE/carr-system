@@ -114,7 +114,7 @@ from ops.job_definition order by key collate "C",version
 # inside the CARR namespace and never crosses into a login role, a superuser,
 # neondb_owner, or a neon_*/pg_* platform role: those are provisioned per
 # deployment (login/per-human roles) or by the provider (the
-# EXPECTED_PROVIDER_REACHABLE_ROLES bundle in tools/cleanup-staging-app-writer.py)
+# provider-managed role bundle)
 # and are not part of what the migrations define.  A CARR role reaching a
 # superuser/write-all bundle is NOT dropped silently — ESCALATION_SQL below is a
 # separate, environment-independent assertion that catches exactly that, so
