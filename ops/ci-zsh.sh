@@ -98,7 +98,7 @@ for attempt in 1 2 3; do
       || echo "index refresh failed; retrying the download" >&2
   fi
   if [ "${attempt}" -lt 3 ]; then
-    sleep "$((attempt * ZSH_RETRY_BACKOFF))"
+    sleep "$((attempt * ${ZSH_RETRY_BACKOFF:-5}))"
   fi
 done
 if [ "${fetched}" -ne 1 ]; then
