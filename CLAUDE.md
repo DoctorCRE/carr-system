@@ -137,3 +137,8 @@ The five triage roles map to Work Request states and `review-and-triage` classes
 ### Domain docs
 
 Single-context; the glossary and decisions live in the doctrine store and decision log, not repo files. See `docs/agents/domain.md`.
+
+## Production deployment
+
+`.github/workflows/deploy.yml` deploys a successful main canary. It runs
+`tools/migrate.py` and verifies the production `/release` identity.

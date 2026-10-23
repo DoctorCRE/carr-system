@@ -237,18 +237,6 @@
       "evidence": "f163962f (ORDER 40, rehearsed)"
     },
     {
-      "path": "tools/staging-ledger-repair-0315.py",
-      "class": "one_shot",
-      "reason": "Replayed the skipped 0315 migration on staging once and recorded its truthful ledger row.",
-      "evidence": "24509804 (merged 5477e842, #666)"
-    },
-    {
-      "path": "tools/staging-siep-0324-replay.py",
-      "class": "one_shot",
-      "reason": "Replayed the skipped SIEP migration 0324 on staging once and recorded its truthful ledger row.",
-      "evidence": "54d1372c (merged 513d159a, #693)"
-    },
-    {
       "path": "tools/stamp-doctrine-ownership.py",
       "class": "one_shot",
       "reason": "Applied ORDER 38's doctrine-ownership stamp to ORDER 30 phase 2's file set; the stamped markdown is retired.",

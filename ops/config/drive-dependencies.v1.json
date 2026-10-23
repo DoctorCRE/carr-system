@@ -470,7 +470,6 @@
         "pipelines/import_loops.py",
         "pipelines/import_source_captures.py",
         "pipelines/import_wave1.py",
-        "pipelines/staging_retrieval_doctrine_seed.py",
         "pipelines/doctrine_inventory.py",
         "tools/reconcile.py",
         "bin/cutoff-doctrine.sh",

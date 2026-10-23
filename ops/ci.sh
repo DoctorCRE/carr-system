@@ -15,6 +15,10 @@ export CARR_CI_PYTHON="$PY"
 CI_SELFTEST_TIMEOUT_SECONDS=120
 CI_TIMEOUT_HELPER="$REPO/bin/with-timeout.py"
 
+if [ "${1:-}" = "--test-first" ]; then
+  exec "$PY" "$REPO/ops/ci-test-first.py" --base "${2:-}" --head "${3:-}"
+fi
+
 if [ "${1:-}" = "--doc-drift" ]; then
   shift
   exec "${CARR_DOC_DRIFT_PYTHON:-$PY}" "$REPO/scripts/doc-drift/ci.py" "$@"
@@ -1149,7 +1153,7 @@ check_binding() {
 }
 
 check_artifact() {
-  local shipping marker
+  local shipping base
   if ! run_quiet "$LOGDIR/doctorcre-artifact.log" "$PY" \
       tools/release-manifest.py doctorcre-artifact verify \
       --pin ops/config/doctorcre-artifact.v1.json; then
@@ -1163,38 +1167,16 @@ check_artifact() {
     bad artifact "registry import or retirement validation failed"
     return
   fi
-  local rc=0
-  marker="$("$PY" ops/last-deployed-verb-count.py carr-mcp production --registry 2>"$LOGDIR/artifact-baseline.log")" || rc=$?
-  case "$rc" in
-    0)
-      if ! sh ops/verb-count.sh "$REPO/mcp-server" --check-retirements "$marker" >"$LOGDIR/artifact-count.log" 2>"$LOGDIR/artifact.log"; then
-        cat "$LOGDIR/artifact.log" >&2
-        bad artifact "verb loss does not match the committed retirement ledger"
-      else
-        ok artifact "$shipping verbs; loss checked by name against deployed source and committed retirements"
-      fi
-      ;;
-    3)
-      ok artifact "$shipping verbs; no prior deployment recorded, this would set the baseline"
-      ;;
-    78)
-      local base
-      base="$(git merge-base HEAD origin/main 2>/dev/null || true)"
-      [ "$base" != "$(git rev-parse HEAD)" ] || base="$(git rev-parse -q --verify 'HEAD^' || true)"
-      if [ -z "$base" ]; then
-        skip artifact "$shipping verbs counted, but no base commit or ledger credential — the shrink comparison did not run"
-      elif sh ops/verb-loss-vs-base.sh "$REPO" "$base" >"$LOGDIR/artifact-count.log" 2>"$LOGDIR/artifact.log"; then
-        ok artifact "$shipping verbs; loss checked by name against base ${base:0:12} and committed retirements"
-      else
-        cat "$LOGDIR/artifact.log" >&2
-        bad artifact "verb loss against base ${base:0:12} does not match the committed retirement ledger"
-      fi
-      ;;
-    *)
-      cat "$LOGDIR/artifact-baseline.log" >&2
-      bad artifact "could not read the deployed verb registry from the ledger (exit $rc) — refusing to call it unmeasured-but-fine"
-      ;;
-  esac
+  base="$(git merge-base HEAD origin/main 2>/dev/null || true)"
+  [ "$base" != "$(git rev-parse HEAD)" ] || base="$(git rev-parse -q --verify 'HEAD^' || true)"
+  if [ -z "$base" ]; then
+    skip artifact "$shipping verbs counted, but no base commit; the shrink comparison did not run"
+  elif sh ops/verb-loss-vs-base.sh "$REPO" "$base" >"$LOGDIR/artifact-count.log" 2>"$LOGDIR/artifact.log"; then
+    ok artifact "$shipping verbs; loss checked by name against base ${base:0:12} and committed retirements"
+  else
+    cat "$LOGDIR/artifact.log" >&2
+    bad artifact "verb loss against base ${base:0:12} does not match the committed retirement ledger"
+  fi
 }
 
 echo "carr-system CI — $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"

@@ -40,9 +40,7 @@ ACTIVE_STATES = {"starting", "running", "working", "idle"}
 COMPLETED_STATES = {"completed", "done"}
 FAILED_STATES = {"failed", "stopped", "killed"}
 NEEDS_INPUT_STATES = {"needs_input", "needs-input", "blocked"}
-CARR_MCP_URL = json.loads(
-    (Path(__file__).resolve().parents[2] / "ops/config/release-pipeline.v1.json").read_text()
-)["worker"]["live_url"] + "/mcp"
+CARR_MCP_URL = "https://api.doctorcre.com/mcp"
 # --bare skips inherited customizations and OAuth/keychain auth. A missing
 # explicit auth source must fail rather than retry with inherited settings.
 TOOL_POSTURES = {
