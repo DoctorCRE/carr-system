@@ -23,7 +23,7 @@ function costFixture() {
     alerts: [], action: "Finance Ops: inspect provider and driver; verify the next complete day; auto-clear when thresholds pass." };
 }
 
-function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null } = {}) {
+function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, localUpdatedAt = new Date().toISOString() } = {}) {
   const queries = [];
   return {
     queries,
@@ -59,13 +59,13 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
       if (sql.includes("from board_snapshot") && params[2] === "system-costs")
         return { rows: costs === null ? [] : [{ snapshot_json: { costs } }] };
       if (sql.includes("ops.v5_a05_assurance_cadence_batch")) return { rows: [{ batch: [] }] };
-      if (sql.includes("read_governance_queue")) return { rows: [{ queue: { pending_rule_approvals: [
+      if (sql.includes("read_governance_queue")) return { rows: [{ queue: governanceQueue || { pending_rule_approvals: [
         { rule_id: "rule-1", statement: "Name the deal in every question box.", admitted_at: "2026-10-01T00:00:00Z" },
       ] } }] };
       if (sql.includes("from ops.work_request")) return { rows: [] };
       if (sql.includes("from board_question")) return { rows: [] };
       if (sql.includes("from board_snapshot")) return { rows: [
-        { snapshot_json: { schema: "needs-joe-local.v1", items: [] }, updated_at: new Date().toISOString() },
+        { snapshot_json: { schema: "needs-joe-local.v1", items: [] }, updated_at: localUpdatedAt },
       ] };
       throw new Error(`unexpected query: ${sql}`);
     },
@@ -196,6 +196,102 @@ test("a needs-Joe list with a failed source and no items is unavailable, never e
   const result = await executeRegisteredTool(client({ unavailable: "read_governance_queue" }), JOE, "morning-brief", {});
   assert.equal(result.sections.needs_joe.state, "unavailable");
   assert.equal(result.state, "unavailable");
+});
+
+test("a surviving Needs Joe decision does not hide a failed source", async () => {
+  const result = await executeRegisteredTool(client({ unavailable: "from ops.work_request" }), JOE, "morning-brief", {});
+  assert.equal(result.sections.needs_joe.items.length, 1);
+  assert.equal(result.sections.needs_joe.sources.work_requests.state, "unavailable");
+  assert.equal(result.sections.needs_joe.state, "partial");
+  assert.equal(result.state, "partial");
+  assert.doesNotMatch(JSON.stringify(result), /fixture source unavailable/);
+});
+
+test("an empty partial Needs Joe list remains unavailable and names the failed source", async () => {
+  const result = await executeRegisteredTool(client({
+    unavailable: "from ops.work_request", governanceQueue: {},
+  }), JOE, "morning-brief", {});
+  assert.equal(result.sections.needs_joe.state, "unavailable");
+  assert.deepEqual(result.sections.needs_joe.items, []);
+  assert.equal(result.sections.needs_joe.sources.work_requests.state, "unavailable");
+  assert.equal(result.state, "unavailable");
+  assert.doesNotMatch(JSON.stringify(result), /fixture source unavailable/);
+});
+
+test("stale local Needs Joe evidence stays partial in the section and coverage", async () => {
+  const result = await executeRegisteredTool(client({
+    localUpdatedAt: new Date(Date.now() - 3 * 3600000).toISOString(),
+  }), JOE, "morning-brief", {});
+  assert.equal(result.sections.needs_joe.state, "partial");
+  assert.equal(result.state, "partial");
+  assert.deepEqual(result.coverage.required_sections[0].incomplete_sources, [{ key: "local", state: "stale" }]);
+});
+
+test("coverage names every required section and counts returned work beyond priority cards", async () => {
+  const result = await executeRegisteredTool(client({ accounts: [
+    { account_name: "Example Account", account_owner: "joe" },
+  ] }), JOE, "morning-brief", {});
+  assert.equal(result.coverage.schema, "morning-brief-coverage.v1");
+  assert.equal(result.coverage.count_scope, "returned_rows_only");
+  assert.deepEqual(result.coverage.required_sections.map(({ key }) => key), [
+    "needs_joe", "today", "claim_card", "deals", "loops", "renewals", "assurance_cadence", "costs",
+  ]);
+  const entries = Object.fromEntries(result.coverage.required_sections.map(entry => [entry.key, entry]));
+  assert.equal(entries.needs_joe.state, "ready");
+  assert.equal(entries.needs_joe.counts.items, 1);
+  assert.equal(entries.deals.counts.accounts, 1);
+  assert.equal(entries.costs.counts.providers, 1);
+  assert.equal(entries.assurance_cadence.state, "empty");
+  assert.equal(entries.assurance_cadence.counts.items, 0);
+  for (const entry of result.coverage.required_sections) {
+    const section = entry.path.split("/").slice(1).reduce((value, key) => value[key], result);
+    assert.equal(section, result.sections[entry.key], "coverage points to the returned full section");
+  }
+  const dell = await executeRegisteredTool(client(), DELL, "morning-brief", {});
+  assert.equal(dell.coverage.required_sections.some(({ key }) => key === "needs_joe"), false);
+});
+
+test("an account-only deal section is ready rather than empty", async () => {
+  const result = await executeRegisteredTool(client({ dealRows: [], accounts: [
+    { account_name: "Example Account", account_owner: "joe" },
+  ] }), JOE, "morning-brief", {});
+  assert.equal(result.sections.deals.state, "ready");
+  const entry = result.coverage.required_sections.find(({ key }) => key === "deals");
+  assert.equal(entry.state, "ready");
+  assert.deepEqual(entry.counts, { items: 0, accounts: 1 });
+});
+
+test("coverage discloses partial and unavailable sections without claiming zero work", async () => {
+  const c = client({ unavailable: "from ops.work_request", renewalState: "stale" });
+  const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
+  const entries = Object.fromEntries(result.coverage.required_sections.map(entry => [entry.key, entry]));
+  assert.equal(entries.needs_joe.state, "partial");
+  assert.deepEqual(entries.needs_joe.incomplete_sources, [{ key: "work_requests", state: "unavailable" }]);
+  assert.equal(entries.renewals.state, "unavailable");
+  assert.equal(entries.renewals.counts.items, null);
+  assert.equal(result.state, "unavailable");
+  assert.doesNotMatch(JSON.stringify(result), /fixture source unavailable/);
+});
+
+test("every shared triage kind carries its own subject when Joe's deal map excludes Dell's deal", async () => {
+  const todayRows = [
+    { item_kind: "next_action", id: "action-1", owner: "dell", subject_type: "client", subject_id: "client-1", subject_ref: "client:demo", subject_name: "Demo Practice", what: "Call Demo Practice", due_on: "2026-10-23" },
+    { item_kind: "post_call_action", id: "post-call-1", owner: "dell", subject_type: "deal", subject_id: "deal-1", subject_ref: "deal:demo", subject_name: "Demo Lease", what: "Confirm the tour", due_on: "2026-10-23" },
+    { item_kind: "critical_date", id: "date-1", owner: null, subject_type: "deal", subject_id: "deal-1", subject_ref: "deal:demo", subject_name: "Demo Lease", what: "Notice deadline", due_on: "2026-11-01" },
+    { item_kind: "ingest", id: "inbox-1", owner: null, subject_type: "inbox", subject_id: "inbox-1", subject_ref: null, subject_name: null, what: "Demo item awaiting triage", due_on: "2026-10-23" },
+  ];
+  const result = await executeRegisteredTool(client({ todayRows, dealRows: [
+    { id: "deal-1", name: "Private Dell Deal", owner: "dell" },
+  ] }), JOE, "morning-brief", {});
+  assert.deepEqual(result.sections.deals.items, []);
+  assert.deepEqual(result.sections.today.items, todayRows.map(row => ({ ...row, owner_partner: row.owner })));
+  assert.deepEqual(result.sections.today.item_kinds, [
+    { kind: "next_action", label: "Next actions", count: 1 },
+    { kind: "post_call_action", label: "Post-call actions", count: 1 },
+    { kind: "critical_date", label: "Critical dates including upcoming deadlines", count: 1 },
+    { kind: "ingest", label: "Inbox awaiting triage", count: 1 },
+  ]);
+  assert.doesNotMatch(JSON.stringify(result), /Private Dell Deal/);
 });
 
 test("morning-brief refuses an unsponsored runtime rather than selecting a shared or caller-supplied brain", async () => {
