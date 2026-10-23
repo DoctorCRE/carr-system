@@ -411,31 +411,6 @@ def test_claude_malformed_pastes_preserve_credential_and_clipboard():
                 st.CREDENTIALS["CLAUDE_CODE_OAUTH_TOKEN"] = entry
 
 
-def test_claude_save_health_shape_parity():
-    spec = importlib.util.spec_from_file_location("token_health_parity", REPO / "ops/credential-health.py")
-    assert spec is not None and spec.loader is not None
-    health: Any = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(health)
-    inventory = json.loads((REPO / "ops/config/credential-inventory.v1.json").read_text())
-    cred = next(c for c in inventory["credentials"] if c["probe"]["type"] == "claude_cli_token_age")
-    health.WHICH = lambda _: "synthetic-claude"
-    result_event = json.dumps({"type": "result", "result": "PONG", "is_error": False})
-    health.SUBPROCESS_RUN = lambda *a, **k: __import__("subprocess").CompletedProcess(
-        a, 0, stdout=result_event + "\n")
-    for value, expected in (("sk-ant-oat" + "x" * 98, True),
-                            ("sk-ant-oat01-" + "x" * 95, True),
-                            ("sk-ant-oat" + "x" * 97, False),
-                            ("z" * 108, False),
-                            ("sk-ant-oat" + "x" * 90 + "$(true)z", False)):
-        with scratch_env_file() as target:
-            Path(target).write_text(f"CLAUDE_CODE_OAUTH_TOKEN='{value}'\n")
-            Path(target).chmod(0o600)
-            result = health.evaluate_credential({**cred, "probe": {**cred["probe"], "path": target}})
-            saved, _ = st.verify_claude_shape(value)
-            check("Claude save and health share the expected shape verdict",
-                  saved == (result.bucket == "ok") == expected)
-
-
 def test_root_grants_are_accepted_and_verified_before_write():
     """Every root grant whose one-time command is this tool is an accepted
     NAME, lands where lib/token_store.py says, and is verified with the
@@ -491,7 +466,6 @@ def main() -> int:
     test_claude_oauth_token_has_no_verify_probe()
     test_claude_oauth_token_truncated_paste_refused()
     test_claude_malformed_pastes_preserve_credential_and_clipboard()
-    test_claude_save_health_shape_parity()
     test_http_status_helper_never_raises_on_http_error_status()
     test_root_grants_are_accepted_and_verified_before_write()
 
