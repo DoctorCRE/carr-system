@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import MagicMock
 
 spec = importlib.util.spec_from_file_location('home_fixture', pathlib.Path(__file__).with_name('staging-home-fixture.py'))
+assert spec is not None and spec.loader is not None
 home = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(home)
 
