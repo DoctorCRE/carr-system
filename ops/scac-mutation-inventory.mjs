@@ -134,7 +134,7 @@ export function nonMcpInventory() {
     implementation_state: "inventoried_not_atomically_mediated", classification_authorizing: false,
   }));
   const scripts = discoverScriptEntrypoints().map(source_locator => {
-    const breakGlass = new Set(["tools/db-tap.py", "tools/call-verb.py", "tools/run-breakglass.py"]).has(source_locator);
+    const breakGlass = new Set(["tools/db-tap.py", "tools/call-verb.py"]).has(source_locator);
     const genericDelegator = new Set(["run.sh", "mcp-server/local-verb.mjs"]).has(source_locator);
     const externalAdmin = !breakGlass && /(?:deploy|migrate|provision|rotate-credential|cleanup|cutoff|install-|sync-.*prod)/.test(source_locator);
     const ingress_kind = breakGlass ? "break_glass" : externalAdmin ? "external_admin" : "script_entrypoint";
