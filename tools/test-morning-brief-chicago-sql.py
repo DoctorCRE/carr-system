@@ -29,7 +29,7 @@ SOURCES = {
     'v_renewal_decision_queue': '0279_carr_lease_renewal_provider.sql',
     'v_renewal_decision_queue_status': '0279_carr_lease_renewal_provider.sql',
 }
-MIGRATION = ROOT / 'migrations/0941_morning_brief_chicago_calendar.sql'
+MIGRATION = ROOT / 'migrations/0945_morning_brief_chicago_calendar.sql'
 
 SCHEMA = """
 create role carr_reader;
