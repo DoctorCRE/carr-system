@@ -260,6 +260,13 @@ def claim_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         return Outcome.UNAVAILABLE
     started_at = started_at.strip()
 
+    try:
+        datetime.fromisoformat(announced_at.replace("Z", "+00:00"))
+        datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    except ValueError:
+        log_line(f"ERROR claim invalid prerequisite timestamp session={name}")
+        return Outcome.UNAVAILABLE
+
     request_path = session_dir / ".capture-request.json"
     body = read_json(request_path)
     if request_path.exists() and (body is None or not body.get("nonce")):
