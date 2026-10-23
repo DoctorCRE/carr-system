@@ -183,12 +183,12 @@ check(
 check("Leads PostgreSQL regressions run after continuity", events[6][-1].endswith("mcp-server/test/lead-workspace-pg.test.mjs"))
 check("Leads PostgreSQL regressions receive the disposable DSN", child_envs[6].get("LEAD_WORKSPACE_TEST_DATABASE_URL") == "postgres://carr_ci@127.0.0.1:55432/carr_ci")
 check(
-    "atomic Joe lifecycle runs after canonical CI",
-    events[7][-1].endswith("ops/atomic-rule-approval-local-pg-acceptance.py"),
+    "retired rule-authority acceptance is not dispatched",
+    not any(event[-1].endswith("atomic-rule-approval-local-pg-acceptance.py") for event in events),
 )
 check(
-    "atomic rule-delivery cutover runs after authority acceptance",
-    events[8][-1].endswith("ops/rule-delivery-local-pg-acceptance.py"),
+    "atomic rule-delivery cutover runs after leads acceptance",
+    events[7][-1].endswith("ops/rule-delivery-local-pg-acceptance.py"),
 )
 snapshot_event = next(
     index for index, event in enumerate(events)
@@ -203,7 +203,7 @@ check(
     child_envs[snapshot_event].get("PATH", "").split(os.pathsep)[0] == "/fake",
 )
 check(
-    "authority acceptance receives only the local disposable DSN",
+    "rule-delivery acceptance receives only the local disposable DSN",
     child_envs[7].get("CARR_LOCAL_PG_DSN")
     == "postgres://carr_ci@127.0.0.1:55432/carr_ci"
     and "CARR_CI_DATABASE_URL" not in child_envs[7],
@@ -267,12 +267,12 @@ continuity_event = next(
 )
 check("strict lane runs the Codex continuity real-PostgreSQL proof", continuity_event == 5)
 check(
-    "strict lane also proves atomic Joe lifecycle",
-    events[7][-1].endswith("ops/atomic-rule-approval-local-pg-acceptance.py"),
+    "retired rule-authority acceptance is not dispatched",
+    not any(event[-1].endswith("atomic-rule-approval-local-pg-acceptance.py") for event in events),
 )
 check(
     "strict lane also proves atomic rule-delivery cutover",
-    events[8][-1].endswith("ops/rule-delivery-local-pg-acceptance.py"),
+    events[7][-1].endswith("ops/rule-delivery-local-pg-acceptance.py"),
 )
 
 missing_gate = mod.run_required_local_gate(
@@ -358,8 +358,8 @@ with (
                               runner=FailingRunner())
 check("CI failure is preserved", result == 7)
 check(
-    "authority acceptance never runs after CI failure",
-    not any(event[-1].endswith("atomic-rule-approval-local-pg-acceptance.py") for event in events),
+    "rule-delivery acceptance never runs after CI failure",
+    not any(event[-1].endswith("rule-delivery-local-pg-acceptance.py") for event in events),
 )
 check("failure still stops server", events[-1][0] == "/fake/pg_ctl" and events[-1][-1] == "stop")
 check("failure still removes cluster", remove_failure.call_count == 1)
@@ -380,8 +380,8 @@ with (
         )
 check("continuity integration failure is preserved", result == 9)
 check(
-    "authority acceptance never runs after continuity integration failure",
-    not any(event[-1].endswith("atomic-rule-approval-local-pg-acceptance.py") for event in events),
+    "rule-delivery acceptance never runs after continuity integration failure",
+    not any(event[-1].endswith("rule-delivery-local-pg-acceptance.py") for event in events),
 )
 check(
     "continuity integration failure is surfaced",
