@@ -1496,6 +1496,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "mail-contact-policy": {
+    "ingress_key": "mcp-tool:mail-contact-policy",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "fc629c9fc7f3ffa1be28f07e59a120c58132d48d93b0027a4ed9b4007c04b8ff",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "map-architecture": {
     "ingress_key": "mcp-tool:map-architecture",
     "source_locator": "mcp-server/src/doctrine.js",

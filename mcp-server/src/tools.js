@@ -3621,6 +3621,31 @@ export const TOOLS = {
         order by confidence desc, created_at, id`)).rows }),
   },
 
+  "mail-contact-policy": {
+    write: false,
+    description: "Read existing party do-not-contact and lead suppression instructions for exact email addresses. Returns one blocked boolean per normalized address, including unknown addresses. This is suppression evidence only, never permission to send. No contact details or reasons leave the record layer.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      emails: { type: "array", minItems: 1, maxItems: 50, items: { type: "string" } },
+    }, required: ["emails"] },
+    handler: async (c, _actor, args) => {
+      if (!Array.isArray(args.emails) || !args.emails.length || args.emails.length > 50 ||
+          args.emails.some(email => typeof email !== "string" || !/^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/.test(email.trim())))
+        throw new ToolError({ error: "invalid_mail_recipients" });
+      const emails = [...new Set(args.emails.map(email => email.trim().toLowerCase()))].sort();
+      const recipients = (await c.query(`
+        select wanted.email, exists (
+          select 1 from party p
+          where lower(btrim(p.email)) = wanted.email
+            and (p.contact_state = 'do_not_contact' or exists (
+              select 1 from lead l where l.party_id = p.id
+                and (l.suppressed or l.stage = 'do_not_contact')
+            ))
+        ) as blocked
+        from unnest($1::text[]) as wanted(email) order by wanted.email`, [emails])).rows;
+      return { recipients };
+    },
+  },
+
   "get-call-context": {
     write: false,
     description: "Read the exact active Call Mode context for an explicit list of deal UUIDs. It never searches by name: an unknown, closed, or parked UUID refuses the whole request. Current participant party refs, names, emails, and roles are returned only for the requested deals.",
