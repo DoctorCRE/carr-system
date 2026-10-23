@@ -1851,8 +1851,8 @@ def direct_metered_dispatch(cmd):
          "direct Cloudflare release bypasses the GitHub deployment workflow"),
         (re.compile(r"\bneonctl\b[^\n;&|]*\bbranches\s+create\b", re.I),
          "direct Neon branch create bypasses neon-disposable-branch admission"),
-        (re.compile(r"\bgh\s+(?:workflow\s+run|run\s+rerun)\b", re.I),
-         "direct GitHub Actions dispatch bypasses the remote-CI budget gate (job retry: ops/ci-rerun.sh RUN_ID --job JOB_ID)"),
+        (re.compile(r"\bgh\s+workflow\s+run\b", re.I),
+         "direct GitHub Actions dispatch bypasses the remote-CI budget gate"),
     )
     # Match executable positions. Arguments to printf, grep, and a brief writer
     # are data even when they contain an entire CLI command.

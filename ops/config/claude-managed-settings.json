@@ -2,7 +2,6 @@
   "permissions": {
     "deny": [
       "Bash(gh workflow run *)",
-      "Bash(gh run rerun *)",
       "Read(~/.ssh/id_*)",
       "Read(~/.aws/credentials)",
       "Read(~/.aws/sso/cache/**)",

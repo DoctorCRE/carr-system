@@ -776,12 +776,8 @@ case("direct Neon branch create is metering-refused",
 case("reviewed Neon rebuild wrapper is allowed", bash("python3 ops/p1-rebuild-gate.py"), ALLOW)
 case("direct GitHub workflow dispatch is metering-refused",
      bash("gh workflow run ci.yml"), DENY)
-case("direct GitHub job rerun is metering-refused",
-     bash("gh run rerun 123 --job 456"), DENY)
-case("budget-checked CI job rerun wrapper is allowed",
-     bash("./ops/ci-rerun.sh 123 --job 456"), ALLOW)
-case("CI wrapper does not authorize a chained direct rerun",
-     bash("./ops/ci-rerun.sh 123 --job 456; gh run rerun 123"), DENY)
+case("plain GitHub job rerun is allowed",
+     bash("gh run rerun 123 --failed"), ALLOW)
 case("prose describing a metered dispatch remains inert",
      bash('gh pr create --body "npx wrangler deploy is refused"'), ALLOW)
 

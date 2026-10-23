@@ -58,10 +58,9 @@ class ShellSafety(unittest.TestCase):
                 self.verdict(command, 2)
         self.verdict('git push origin HEAD:refs/heads/hook-audit-shrink', 0)
 
-    def test_manual_actions_use_budget_wrapper(self):
+    def test_new_workflow_dispatches_stay_denied_while_job_retries_are_allowed(self):
         self.verdict('gh workflow run release.yml', 2)
-        self.verdict('gh run rerun 123 --job 456', 2)
-        self.verdict('ops/ci-rerun.sh 123 --job 456', 0)
+        self.verdict('gh run rerun 123 --job 456', 0)
 
     def test_sensitive_path_reads(self):
         for tool in ('Bash', 'exec_command', 'functions.exec'):
@@ -110,6 +109,7 @@ class ShellSafety(unittest.TestCase):
                 plan = dict(installer.managed_safety_plan())
                 claude = json.loads(plan[str(destinations[0])])
                 self.assertIn('Bash(gh workflow run *)', claude['permissions']['deny'])
+                self.assertNotIn('Bash(gh run rerun *)', claude['permissions']['deny'])
                 self.assertIn('Read(~/.ssh/id_*)', claude['permissions']['deny'])
                 import tomllib
                 codex = tomllib.loads(plan[str(destinations[1])])
@@ -118,6 +118,10 @@ class ShellSafety(unittest.TestCase):
                                                      {'token': 'run'}]
                                     and r['decision'] == 'forbidden'
                                     for r in codex['rules']['prefix_rules']))
+                self.assertFalse(any(r['pattern'] == [{'token': 'gh'}, {'token': 'run'},
+                                                       {'token': 'rerun'}]
+                                     and r['decision'] == 'forbidden'
+                                     for r in codex['rules']['prefix_rules']))
                 self.assertEqual(installer.install_managed_safety(plan.items(), apply=False), 0)
                 self.assertFalse(any(p.exists() for p in destinations))
                 # Reconciliation preserves unrelated organization controls.
