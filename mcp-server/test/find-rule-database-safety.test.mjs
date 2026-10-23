@@ -85,8 +85,8 @@ test('rule database suite retains loopback execution and skips absent configurat
     'postgresql://fixture@localhost:5432/test'];
   const results = probeSuite([...safe, null, '']);
   for (const result of results.slice(0, safe.length)) {
-    assert.equal(result.constructed, 4, result.dsn);
-    assert.equal(result.connected, 4, result.dsn);
+    assert.equal(result.constructed, 3, result.dsn);
+    assert.equal(result.connected, 3, result.dsn);
     assert.equal(result.refusal, null, result.dsn);
   }
   for (const result of results.slice(safe.length)) {

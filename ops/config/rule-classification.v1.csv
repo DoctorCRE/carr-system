@@ -53,7 +53,7 @@ id,layer,class,moment
 49533583,pack,b,reading Joe's calendar or mail
 49c627cc,layer0,a,claiming the record layer or verbs cannot do something
 4a53ff82,control,d,"canonical_edit gate, first write to tracked canonical files"
-4a9188f3,pack,b,"the teach verb, at a partner-correction/decision trigger"
+4a9188f3,pack,b,"a proposed guidance-file PR at a partner-correction/decision trigger"
 4c21d86b,control,d,merge_survivor verb check (confirm-merge)
 4dd44fd7,control,d,update-document-status verb (outbound_format split)
 4e104d4c,control,d,"completion_evidence gate, new-verb deployment claim"
@@ -127,7 +127,7 @@ a8c55a47,pack,b,"writing a command into a doc, SOP, or instruction"
 a8f159ad,pack,b,building or reviewing a structured CARR surface
 a9ecd5b4,control,d,completion_evidence stop_gate - check-result reporting
 a9fc3f0e,pack,c,running research or a fact-check
-ab814a26,control,d,rule_shape gate (approve-rule)
+ab814a26,control,d,guidance-file PR review and relevant CI checks
 ac0a6579,pack,c,building or reviewing access for a client share-site page
 af7de070,layer0,b,a tool call blocked by a permission classifier
 b01edd26,control,b,committing any source or doc file

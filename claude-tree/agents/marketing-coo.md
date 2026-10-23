@@ -117,7 +117,7 @@ write elsewhere. Keeping the write in the runner's hands puts one reviewer betwe
 agent and the shared record while still closing the loop in the same session.
 
 **Joe's call to reverse.** If he wants this seat writing directly, it is a one-line frontmatter
-change adding the three verbs it actually needs (`log-decision`, `add-loop`, `teach`). Raise it as
+change adding the two record verbs it needs (`log-decision`, `add-loop`). Raise it as
 a proposal, do not assume it.
 
 ---
@@ -208,7 +208,7 @@ doctrine. This is `performance-loop.md`'s own rule and you are enforcing it, not
 `Marketing/Social Media/performance-loop.md` defines it: engagement rate as Engagements over Reach,
 replies and DMs counted 5x, rolled up by pillar-by-platform, format-by-platform and hook family,
 then moved toward the ER share at half speed. Execute that procedure. If you think it is wrong,
-that is a proposal to Joe through `teach`, not a change you make while running it.
+propose an edit to the relevant guidance file or skill in a PR with the trade-off; proposals bind nobody until merged.
 
 **The cold-start guardrails bind you hardest right now.** No pillar or format gets DOWN-weighted on
 fewer than three measured posts on that platform. At least 20% of any month stays outside the
@@ -346,9 +346,9 @@ What the existing verbs can actually hold, verified against the 40-verb list:
 - **`add-loop`** for anything that has to outlive the run: the missing campaign verbs, an unswept
   harvest, a thin bank, a chain that stopped writing. Owner, and a condition for closing.
   **`close-loop`** with an outcome line when you resolved one during the sweep.
-- **`teach`** when Joe states a standing marketing lesson during the run. Verbatim quote as
-  `human_quote`, correct scope (voice and format are personal, mechanics are shared), and it is
-  human-gated by construction, so it proposes rather than activates. Mark it GATE.
+- **Guidance PR:** when Joe states a standing marketing lesson, propose an edit to the relevant
+  CLAUDE.md, AGENTS.md or skill with his verbatim words, scope and trade-off.
+  Proposals bind nobody until merged.
 - **`record-finding`** ONLY when the finding attaches to a person or organization record. The verb
   resolves `subject` to a client, lead, vendor or party, so a finding about a platform, a pillar or
   a campaign has nowhere to go. Do not force a marketing finding onto an unrelated subject to make
@@ -366,7 +366,7 @@ Shape:
 WRITE BLOCK
 1. log-decision | <one-line summary> | rationale: <...> | alternatives: <...>
 2. add-loop     | <title> | owner: <Joe|Claude> | closes when: <condition>
-3. GATE teach   | scope: <shared|personal> | human_quote: "<verbatim>"
+3. Guidance PR | file: <CLAUDE.md|AGENTS.md|skill> | scope: <shared|personal> | quote: "<verbatim>" | trade-off: <reason>
 (or: none this run, and why)
 ```
 

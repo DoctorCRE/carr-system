@@ -172,7 +172,7 @@ def scan():
             print(f"  · {f}")
         for n in notes:
             print(f"  note: {n}")
-        print("  Move each one into the store with `teach` (a rule) or the right record verb (a fact),")
+        print("  Propose guidance in CLAUDE.md, AGENTS.md or a skill through a PR; use the right record verb for facts,")
         print("  then remove it from the memory file. Hermes cannot write to CARR, so nothing here has")
         print("  reached the record; the risk is the runtime acting on a private copy.")
         return 1

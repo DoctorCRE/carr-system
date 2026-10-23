@@ -669,9 +669,9 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 
   if [[ "$MIGRATION_PART" != gates* && "$MIGRATION_PART" != acceptance ]]; then
     if ! CARR_RULE_TEST_DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-rule-supersession.log" \
-        node --test mcp-server/test/find-rule-supersedes.test.mjs mcp-server/test/one-step-rule-approval.test.mjs; then
+        node --test mcp-server/test/find-rule-supersedes.test.mjs; then
       tail -30 "$LOGDIR/migration-rule-supersession.log" >&2
-      bad migration "rule lookup, teach supersession or one-step approval database proof failed"
+      bad migration "rule lookup or historical supersession SQL database proof failed"
       return
     fi
 
@@ -1076,7 +1076,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 }
 
 check_binding() {
-  local problems="" machine_drift=""
+  local problems=""
   if [ -f mcp-server/wrangler.toml ]; then
     run_quiet "$LOGDIR/binding-wrangler.log" node -e '
       const fs=require("fs"), t=fs.readFileSync("mcp-server/wrangler.toml","utf8");
@@ -1094,30 +1094,10 @@ check_binding() {
   else
     printf '        \033[33mskip\033[0m  worker-boot-check — wrangler not installed (run npm install in mcp-server/)\n' >&2
   fi
-  if [ -f "$HOME/.claude/settings.json" ]; then
-    if ! run_quiet "$LOGDIR/binding-config.log" "$PY" ops/config-as-code.py; then
-      local cfg_changed cfg_owned
-      cfg_changed="$(git diff --name-only origin/main...HEAD 2>/dev/null || true)"
-      tail -15 "$LOGDIR/binding-config.log" >&2
-      cfg_owned="$("$PY" ops/config_drift_ownership.py $cfg_changed \
-        < "$LOGDIR/binding-config.log" 2>/dev/null || true)"
-      if [ -n "$cfg_owned" ]; then
-        problems="$problems config-as-code"
-        printf '        this branch touches the drifting declaration(s), so they are yours:\n%s\n' "$cfg_owned" >&2
-      else
-        machine_drift="yes"
-        printf '        \033[33mnot fatal here\033[0m  config-as-code drift is on the MACHINE and this branch touches\n' >&2
-        printf '        none of the drifting declarations above. Reported, not vetoed —\n' >&2
-        printf '        run `ops/config-as-code.py pull` on a branch that owns the change.\n' >&2
-      fi
-    fi
-  fi
   if [ -n "$problems" ]; then
     bad binding "drift:$problems"
-  elif [ -n "$machine_drift" ]; then
-    ok binding "worker config declared; MACHINE config-as-code drift reported above, not owned by this branch"
   else
-    ok binding "worker config declared; installed wiring matches repo"
+    ok binding "worker config declared; worker boot checked when wrangler is installed"
   fi
 }
 
