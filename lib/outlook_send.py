@@ -364,7 +364,7 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
 
 def _send_refusal(item: Mail | Event, ports: Ports, ledger: Ledger) -> str | None:
     recipients = sorted(set(item.recipients if isinstance(item, Mail) else item.attendees))
-    if sum(address != account() and not address.endswith('@carr.us') for address in recipients) > 1:
+    if sum(address != account() and address.rsplit('@', 1)[-1] != 'carr.us' for address in recipients) > 1:
         return 'one_to_one_required'
     if recipients:
         try:
