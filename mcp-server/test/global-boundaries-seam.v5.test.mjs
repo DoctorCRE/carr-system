@@ -27,22 +27,6 @@ const recordingClient = () => {
   };
 };
 
-test("the read projection is registered as a read verb and served through the seam", async () => {
-  const tool = TOOLS["read-global-boundaries"];
-  assert.ok(tool, "read-global-boundaries is registered");
-  assert.notEqual(tool.write, true);
-  assert.notEqual(tool.humanOnly, true);
-  assert.notEqual(tool.authorityOnly, true);
-  assert.equal(tool.registrySource, "mcp-server/src/global-boundaries-door.v5.js");
-  resetDoorObservationForTest();
-  const client = recordingClient();
-  const result = await executeRegisteredTool(client, DELL, "read-global-boundaries", {});
-  assert.equal(result.projection.policy_digest, v5BoundaryPolicyDigest());
-  assert.equal(result.door.mode, "shadow");
-  assert.equal(client.queries.length, 0, "the projection reads no database");
-  assert.equal(doorObservationSnapshot().evaluated, 1, "the seam evaluated this dispatch");
-});
-
 test("shadow at the seam: Dell's approve-rule is recorded as refused and still reaches the handler", async () => {
   assert.equal(V5_BOUNDARY_DOOR_MODE, "shadow");
   resetDoorObservationForTest();

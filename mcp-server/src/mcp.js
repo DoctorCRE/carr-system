@@ -75,11 +75,11 @@ export async function setWriterActorContext(client, actor, { partnerAuthorityAct
   const sponsoringHumanSlug = personalScope.status === "personal" ? personalScope.sponsor : "";
   if (receiptSessionRef === null) {
     await client.query(
-      "select set_config('carr.acting_actor_slug',$1::text,true), " +
-      "set_config('carr.verified_human_actor_slug',$2::text,true), " +
-      "set_config('carr.organization_tenant_id',$3::text,true), " +
-      "set_config('carr.execution_host_id',$4::text,true), " +
-      "set_config('carr.sponsoring_human_slug',$5::text,true) /* writer-actor-context */",
+     "select set_config('carr.acting_actor_slug',$1::text,true), " +
+     "set_config('carr.verified_human_actor_slug',$2::text,true), " +
+     "set_config('carr.organization_tenant_id',$3::text,true), " +
+     "set_config('carr.execution_host_id',$4::text,true), " +
+     "set_config('carr.sponsoring_human_slug',$5::text,true) /* writer-actor-context */",
       [actor.slug, verifiedHumanSlug, tenant, executionHost, sponsoringHumanSlug],
     );
     return;
@@ -128,9 +128,7 @@ export const PROFILES = {
 
   // Native lifecycle credentials are purpose-bound server-side. They expose
   // only their own record surface even if a caller asks for ?profile=full.
-  "codex-continuity": new Set([
-    "codex-checkpoint", "codex-read-recovery",
-  ]),
+  "codex-continuity": new Set(),
 
   // Reads plus the capture verbs that are safe to run unattended: each one is
   // additive, carries an idempotency key, and cannot destroy or re-point an
@@ -141,7 +139,6 @@ export const PROFILES = {
   capture: new Set([
     "log-activity", "stamp-touch", "add-loop", "update-loop",
     "set-next-action", "complete-action", "add-critical-date", "record-finding",
-    "record-signal", "record-branch-evidence",
     "report-problem",
     // propose-outcome-feedback proposes and completes nothing (0872). Its
     // completion door, bind-work-request-criterion-evidence, is deliberately
@@ -163,7 +160,7 @@ export const PROFILES = {
     // partner authority (close-incident is humanOnly). Triage may advance only
     // detected -> triaged with a next action and provisional impact; it cannot
     // set severity, root cause, recovery evidence, or a closed state.
-    "open-incident", "triage-incident",
+    "triage-incident",
     // The research-site index (#1646): the weekly research runs add a source
     // they found useful and retire a dead one. Both are keyed; removal is soft.
     "add-research-site", "remove-research-site",
@@ -201,14 +198,13 @@ export const PROFILES = {
     // everything capture holds
     "log-activity", "stamp-touch", "add-loop", "update-loop",
     "set-next-action", "complete-action", "add-critical-date", "record-finding",
-    "record-signal", "record-branch-evidence", "record-defect", "open-incident", "triage-incident",
+     "record-defect",  "triage-incident",
     "add-research-site", "remove-research-site",
     // plus: close what it opened, advance the book, draft, and keep the record honest
     "close-loop", "update-deal", "add-premises", "record-counter",
     "prepare-document", "update-document-status",
     "log-decision", "update-decision",
-    "open-investigation", "open-investigation-branch",
-    "adjudicate-investigation-branch", "close-investigation",
+    "close-investigation",
     // plus: the marketing lane, since social is carved out of Dell's review
     "open-campaign", "score-campaign", "attach-to-campaign", "measure-placement",
   ]),
@@ -305,7 +301,7 @@ export const PROFILES = {
     "record-defect",
     // Runtime-only dispatch doors. The link's database function independently
     // requires the server-derived hermes-pilot actor.
-    "project-room-queue", "record-dispatch-link",
+    "record-dispatch-link",
   ]),
 
   // UNATTENDED (PR #1727 review, finding 2; rule b42e217e: unattended runs get
@@ -323,8 +319,8 @@ export const PROFILES = {
   unattended: new Set([
     "log-activity", "stamp-touch", "add-loop", "update-loop",
     "set-next-action", "complete-action", "add-critical-date", "record-finding",
-    "record-signal", "record-branch-evidence", "report-problem", "record-defect",
-    "open-incident", "triage-incident",
+     "report-problem", "record-defect",
+    "triage-incident",
     "close-loop",
     ...UNATTENDED_AUTHORITY_VERBS,
   ]),
@@ -337,7 +333,7 @@ export const PROFILES = {
   "hermes-cos": new Set([
     "log-activity", "stamp-touch", "add-loop", "update-loop",
     "set-next-action", "complete-action", "add-critical-date", "record-finding",
-    "record-defect", "project-room-queue", "record-dispatch-link", "update-deal", "add-premises",
+    "record-defect", "record-dispatch-link", "update-deal", "add-premises",
   ]),
 };
 
@@ -474,10 +470,10 @@ const CORE_TOOL_NAMES = new Set([
   "standing-context", "list-verbs", "call-verb",
   "report-problem", "record-defect", "add-loop",
   "teach", "activate-rule",
-  "capability-program", "catch-me-up", "find", "loop-board",
+  "catch-me-up", "find", "loop-board",
   "read-doctrine", "read-loop", "read-room", "search-doctrine",
   "deal-room-board", "get-deal-room", "lead-board", "morning-brief", "today-triage",
-  "engineering-passport-source", "doctrine-sections",
+  "doctrine-sections",
   "add-room-turn", "map-architecture",
   "applicable-rules", "resolve-doctrine-rules", "doctrine-index",
 ]);
@@ -823,7 +819,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     // exactly here, and that is a plausible shape of mistake during onboarding.
     if (!a.rows.length) throw new ToolError({ error: "actor_not_provisioned", slug: actor.slug,
       hint: "the token authenticates as this actor but no row exists in the actor table — " +
-            "provision the actor before any write verb will run" });
+           "provision the actor before any write verb will run" });
     // In place, not a copy — see executeWithTrustedPrincipal above.
     const actorWithId = Object.assign(actor, { id: a.rows[0].id });
     await setWriterActorContext(client, actorWithId,
@@ -963,26 +959,26 @@ export async function dispatch(request, env, ctx, actor) {
           capabilities: { tools: {} },
           serverInfo: { name: "carr-record-layer", version: "0.1.0" },
           instructions: profile === "doc" ? DOC_INSTRUCTIONS :
-            "CARR's record layer AND the doctrine store — the ONE source of truth for Joe Bookout's " +
-            "healthcare-CRE practice (partner Dell McCraney; business only, personal life is Life AI). " +
-            "OPENING ACT, every session: call standing-context FIRST — it returns the taught rules " +
-            "with the counts to recite in your first response, open action-required items, and the " +
-            "doctrine pointer. There are NO doctrine files: read via doctrine-index / search-doctrine / " +
-            "read-doctrine; state via catch-me-up / today-triage. Discovery advertises a compact core. " +
-            "For any other verb, use list-verbs with a filter to fetch its schema, then call-verb. " +
-            "Reuse discovered schemas in this session; do not load the complete catalog at startup. " +
-            "WRITE LAW (rule 14181e60): database " +
-            "first — content goes through verbs, NEVER into a .md file. Writes need a fresh " +
-            "idempotency_key (UUID) per intended action; mutations need base_version from a fresh read. " +
-            "version_conflict and needs_confirm are questions for the human, never auto-retried. Claude sends email and other outbound messages on Joe's behalf whenever Joe asks (one message or a standing instruction); with no ask, the default is a draft (decision 41906a30). This server has no send verb; sends go through Joe's own accounts. If this server is unreachable mid-task, " +
-            "STOP AND SAY SO — never improvise files. DELEGATION LATCH: when a partner says delegate, " +
-            "subagent, or cheapest qualified model for an active task, that authority survives new logins " +
-            "or data sources, phase changes, retries, continuation and compaction until the task ends " +
-            "or the partner revokes it. Choose the cheapest model still qualified to do the task " +
-            "correctly; this may be a peer-tier agent, never a forced downgrade. The main seat " +
-            "orchestrates, verifies and performs authorized " +
-            "writes; it does not reclaim the mechanical sweep. State the executor before each phase; " +
-            "a second inline mechanical tool call is the tripwire." + RULE_DELIVERY_RAIL +
+           "CARR's record layer AND the doctrine store — the ONE source of truth for Joe Bookout's " +
+           "healthcare-CRE practice (partner Dell McCraney; business only, personal life is Life AI). " +
+           "OPENING ACT, every session: call standing-context FIRST — it returns the taught rules " +
+           "with the counts to recite in your first response, open action-required items, and the " +
+           "doctrine pointer. There are NO doctrine files: read via doctrine-index / search-doctrine / " +
+           "read-doctrine; state via catch-me-up / today-triage. Discovery advertises a compact core. " +
+           "For any other verb, use list-verbs with a filter to fetch its schema, then call-verb. " +
+           "Reuse discovered schemas in this session; do not load the complete catalog at startup. " +
+           "WRITE LAW (rule 14181e60): database " +
+           "first — content goes through verbs, NEVER into a .md file. Writes need a fresh " +
+           "idempotency_key (UUID) per intended action; mutations need base_version from a fresh read. " +
+           "version_conflict and needs_confirm are questions for the human, never auto-retried. Claude sends email and other outbound messages on Joe's behalf whenever Joe asks (one message or a standing instruction); with no ask, the default is a draft (decision 41906a30). This server has no send verb; sends go through Joe's own accounts. If this server is unreachable mid-task, " +
+           "STOP AND SAY SO — never improvise files. DELEGATION LATCH: when a partner says delegate, " +
+           "subagent, or cheapest qualified model for an active task, that authority survives new logins " +
+           "or data sources, phase changes, retries, continuation and compaction until the task ends " +
+           "or the partner revokes it. Choose the cheapest model still qualified to do the task " +
+           "correctly; this may be a peer-tier agent, never a forced downgrade. The main seat " +
+           "orchestrates, verifies and performs authorized " +
+           "writes; it does not reclaim the mechanical sweep. State the executor before each phase; " +
+           "a second inline mechanical tool call is the tripwire." + RULE_DELIVERY_RAIL +
             (profile === "full" ? "" : ` ACTIVE PROFILE: ${profile}.` + (PROFILE_NOTICE[profile] || "")),
         });
       case "notifications/initialized":
@@ -1033,9 +1029,9 @@ export async function dispatch(request, env, ctx, actor) {
             verb: rpc?.params?.name || null,
             cause,
             hint: "this is the server's own exception, not a refusal of your arguments — the verb " +
-                  "reached code that threw. Read it before retrying: an unhandled failure repeated " +
-                  "with the same arguments fails the same way. If it names a database fault, the " +
-                  "handler's SQL is the place to look.",
+                 "reached code that threw. Read it before retrying: an unhandled failure repeated " +
+                 "with the same arguments fails the same way. If it names a database fault, the " +
+                 "handler's SQL is the place to look.",
           }) }] });
         }
       }

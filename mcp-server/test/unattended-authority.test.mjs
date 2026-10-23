@@ -187,12 +187,6 @@ test("confirm-merge is the one verb carrying humanCallerOnly", () => {
   assert.deepEqual(flagged, ["confirm-merge"]);
 });
 
-test("the live SCAC inventory reads the human-caller principal mode off the flag", () => {
-  const rows = new Map(mcpInventory(TOOLS).map(row => [row.operation, row]));
-  assert.equal(rows.get("confirm-merge").principal_mode, "server_verified_human");
-  assert.equal(rows.get("close-incident").principal_mode, "server_verified_human_or_native_agent");
-});
-
 test("confirm-merge refuses the unattended actor before database access", async () => {
   const error = await executeRegisteredTool(forbiddenClient, unattended(), "confirm-merge", {
     idempotency_key: "4f0e7c1a-2b3d-4e5f-8a9b-0c1d2e3f4a5b",
@@ -215,8 +209,8 @@ const authorityVerbs = () => Object.keys(TOOLS).filter(name =>
 
 test("the allowlist names only real humanOnly/authorityOnly verbs, none human-caller-only", () => {
   assert.deepEqual([...UNATTENDED_AUTHORITY_VERBS].sort(), [
-    "accept-ready-plan", "accept-ready-plan-amendment", "adjudicate-incident",
-    "approve-lead-draft", "approve-lead-move", "close-incident", "review-and-triage",
+    "accept-ready-plan", "accept-ready-plan-amendment",
+    "approve-lead-draft", "approve-lead-move", "review-and-triage",
     "undo-lead-move"]);
   assert.ok(Object.isFrozen(UNATTENDED_AUTHORITY_VERBS));
   for (const verb of UNATTENDED_AUTHORITY_VERBS) {

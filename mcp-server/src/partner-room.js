@@ -269,50 +269,6 @@ export function partnerRoomTools({ withEnvelope, ToolError }) {
       }),
     },
 
-    "project-room-queue": {
-      write: true,
-      description: "Append one shape-checked carr-build projection receipt through the locked Hermes machine identity. The server fixes partner-line/joe/hermes/receipt and rejects arbitrary room prose. This is the unattended room bridge's projection door, not a general transcript writer.",
-      inputSchema: { type: "object", properties: {
-        idempotency_key: { type: "string" },
-        body: { type: "string", description: "exact queue_event or queue_projection_health JSON envelope" },
-        msg_id: { type: "string", description: "deterministic UUID replay id from the projector" },
-      }, required: ["idempotency_key", "body", "msg_id"] },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "project-room-queue", args, async () => {
-        if (actor?.hermes !== true || actor.slug !== "hermes-pilot")
-          throw new ToolError({ error: "queue_projector_identity_required",
-            hint: "this door requires the server-derived hermes-pilot identity" });
-        const body = typeof args.body === "string" ? args.body : "";
-        if (body.length > ROOM_BODY_MAX)
-          throw new ToolError({ error: "body_too_long", limit: ROOM_BODY_MAX, got: body.length });
-        if (!UUID.test(String(args.msg_id || "")))
-          throw new ToolError({ error: "msg_id_invalid", hint: "msg_id must be a UUID" });
-        const msgId = String(args.msg_id).toLowerCase();
-        const fixed = { sponsor: "joe", seat: "hermes", kind: "receipt", body,
-          origin_channel: "mcp", origin_actor: "hermes-pilot", at: new Date().toISOString() };
-        if (!queueProjectionReceiptFromTurn(fixed))
-          throw new ToolError({ error: "queue_projection_receipt_invalid",
-            hint: "body must be an exact reader-valid queue_event or queue_projection_health envelope" });
-
-        const appended = await appendRoomTurn(c, { room: DEFAULT_ROOM, sponsor: "joe", seat: "hermes",
-          kind: "receipt", body, msgId, originChannel: "mcp", originActor: "hermes-pilot" });
-        if (appended.ok !== true) {
-          const { ok: _ok, ...failure } = appended;
-          throw new ToolError(failure);
-        }
-        let observed = { ...fixed, at: appended.at || fixed.at };
-        if (appended.deduplicated) {
-          const prior = await c.query(
-            `select to_jsonb(at)#>>'{}' as at, sponsor, seat, kind, body, origin_channel, origin_actor
-               from partner_room_turn where msg_id=$1 /* partner-room:projection-dedup-proof */`, [msgId]);
-          observed = prior.rows[0] || {};
-        }
-        if (!queueProjectionReceiptFromTurn(observed))
-          throw new ToolError({ error: "queue_projection_provenance_rejected",
-            hint: "the durable row does not satisfy the same provenance and body parser as read-room-queue" });
-        return appended;
-      }),
-    },
-
     "read-room": {
       description: "Read a partner room's turns after a cursor, oldest first — the poll half of the partner line and the spectator view's source. Returns raw turns exactly as written (who, when, seat, text — never a recap), the new cursor (latest_seq), and whether more rows are waiting. A quiet room returns an empty list, honestly; poll by passing the last latest_seq back as after_seq.",
       inputSchema: { type: "object", properties: {

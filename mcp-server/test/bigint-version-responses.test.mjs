@@ -9,7 +9,7 @@ const board = { board_id: "project" };
 const question = { ...board, question_id: "question", prompt: "Choose", asker_ref: "desk" };
 const cases = [
   ["read-profiles", {}, ["profiles", 0], "profile"],
-  ["assign-profile", { profile_key: "builder", status: "parked", base_version: 2 }, ["profile"], "profile"],
+
   ["read-progress-board", board, ["snapshot"], "board"],
   ["read-board-answers", { after_cursor: 0, asker_ref: "desk" }, ["answers", 0], "board"],
   ["publish-board-snapshot", { ...board, base_version: 2, snapshot: {} }, ["snapshot"], "board"],
@@ -17,14 +17,13 @@ const cases = [
   ["revise-board-question", { ...question, base_version: 2 }, ["question"], "board"],
   ["answer-board-question", { ...board, question_id: "question", base_version: 2, answer_text: "Yes" }, ["answer"], "board"],
   ["acknowledge-board-answer", { answer_id: id, asker_ref: "desk", base_version: 2 }, ["answer"], "board"],
-  ["record-board-answer-applied", { answer_id: id, base_version: 2, effect_ref: "effect" }, ["answer"], "board"],
-  ["observe-memory", { kind: "fact", statement: "Synthetic fact", scope: "shared",
-    evidence: { source_type: "human", observation: "Synthetic observation" } }, ["memory"], "memory"],
+
+
   ["recall-memory", { query: "synthetic" }, ["memories", 0], "memory"],
-  ["review-memory", { memory_id: id }, ["memory"], "memory"],
-  ["promote-memory", { memory_id: id, base_version: 2, reason: "Synthetic confirmation" }, ["memory"], "memory"],
-  ["correct-memory", { memory_id: id, base_version: 2, statement: "Synthetic correction", reason: "Synthetic correction" }, ["memory"], "memory"],
-  ["forget-memory", { memory_id: id, base_version: 2, reason: "Synthetic removal" }, ["memory"], "memory"],
+
+
+
+
 ];
 const at = (object, path) => path.reduce((value, key) => value[key], object);
 

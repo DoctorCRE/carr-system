@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { TOOLS } from '../src/tools.js';
 import { requireFeature } from '../src/feature-switches.js';
+import { organizationTenantForActor } from '../src/identity.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const schema = readFileSync(path.join(root, 'db/schema.sql'), 'utf8');
@@ -23,7 +24,7 @@ for (const config of ['pg_config', '/opt/homebrew/opt/postgresql@17/bin/pg_confi
 const id = n => `aa000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const actor = { id: id(1), slug: 'joe', human: true, via: 'dealroom-cookie', client_id: 'dealroom-pwa' };
 
-test('Feature switch record lifecycle on disposable PostgreSQL', { skip: !bin && !process.env.CARR_CI_DATABASE_URL && 'PostgreSQL unavailable' }, async t => {
+test('Feature switch reads and scheduled health on disposable PostgreSQL', { skip: !bin && !process.env.CARR_CI_DATABASE_URL && 'PostgreSQL unavailable' }, async t => {
   const ciDsn = process.env.CARR_CI_DATABASE_URL;
   let postgresFixture, dir;
   let admin;
@@ -115,79 +116,29 @@ test('Feature switch record lifecycle on disposable PostgreSQL', { skip: !bin &&
     await c.query("insert into loop_block(id,kind,block_key,rel_path,seq,col_order,renders_closed,created_by,updated_by) values(gen_random_uuid(),'open_loop','backlog','synthetic',1,array[]::text[],false,$1,$1)",[actor.id]);
     const input = { idempotency_key:randomUUID(), name:'synthetic-feature', description:'Show a synthetic test control',
       base_version:0, default_enabled:false, audience:'joe', owner:'claude', expected_removal_on:'2099-01-01' };
-    await t.test('invalid switch input rolls back without records or audit writes', async () => {
-      const counts = {};
-      for (const table of ['feature_switch','event','tool_call']) {
-        counts[table] = (await c.query(`select count(*)::integer n from ${table}`)).rows[0].n;
-      }
-      const invalid = [
-        {name:'Invalid Name'}, {audience:'public'}, {owner:'unregistered'},
-        {expected_removal_on:'2099-02-29'}, {description:'   '}, {description:'x'.repeat(1001)},
-        {default_enabled:'false'}, {retired:'false'}, {base_version:-1}, {base_version:0.5},
-      ];
-      for (const patch of invalid) {
-        await assert.rejects(invoke('set-feature-switch',{...input,...patch,idempotency_key:randomUUID()}),
-          error => error.payload.error === 'feature_switch_input_invalid', JSON.stringify(patch));
-      }
-      for (const patch of [{name:'Invalid Name'}, {audience:'public'}, {enabled:'true'}, {base_version:-1}]) {
-        await assert.rejects(invoke('flip-feature-switch',{...input,enabled:true,...patch,idempotency_key:randomUUID()}),
-          error => error.payload.error === 'feature_switch_input_invalid', JSON.stringify(patch));
-      }
-      await assert.rejects(invoke('set-feature-switch',{...input,retired:true,idempotency_key:randomUUID()}),
-        error => error.payload.error === 'feature_switch_cannot_create_retired');
-      await assert.rejects(invoke('flip-feature-switch',{name:input.name,base_version:0,enabled:true,idempotency_key:randomUUID()}),
-        error => error.payload.error === 'feature_switch_version_conflict' && error.payload.current_version === 0);
-      for (const table of ['feature_switch','event','tool_call']) {
-        assert.equal((await c.query(`select count(*)::integer n from ${table}`)).rows[0].n,counts[table],table);
-      }
-    });
-    const created = await invoke('set-feature-switch',input);
-    assert.equal(created.switch.version,1);
-    assert.ok(created.switch.created_at);
-    const flip = { idempotency_key:randomUUID(), name:input.name, base_version:1, enabled:true, audience:'team' };
-    const changed = await invoke('flip-feature-switch',flip);
-    assert.equal(changed.switch.version,2);
-    assert.equal((await invoke('flip-feature-switch',flip)).replayed,true);
-    await assert.rejects(invoke('flip-feature-switch',{ ...flip,idempotency_key:randomUUID() }), /feature_switch_version_conflict/);
+    const seeded = (await c.query('select * from ops.write_feature_switch($1,$2::jsonb)',
+      ['create',JSON.stringify({tenant:organizationTenantForActor(actor),name:input.name,description:input.description,
+        default_enabled:true,audience:'team',owner:'claude',expected_removal_on:'2000-01-01'})])).rows[0];
     const read = await invoke('list-feature-switches',{name:input.name}, { ...actor,slug:'dell' });
     assert.equal(read.schema,'feature-switches.v1');
     assert.equal(read.switches[0].available,true);
-    assert.equal(read.history.length,2);
-    const events = (await c.query('select mutation_order from event order by mutation_order')).rows;
-    assert.equal(events.length, 2);
-    assert.ok(BigInt(events[0].mutation_order) > 0n);
-    assert.ok(BigInt(events[1].mutation_order) > BigInt(events[0].mutation_order));
-    assert.equal(read.history[0].actor,'joe');
-    assert.equal(read.history[0].before.enabled,null);
-    assert.equal(read.history[0].after.enabled,true);
-    assert.ok(read.history[0].recorded_at);
     await requireFeature(c,{...actor,slug:'dell'},input.name);
-    await invoke('flip-feature-switch',{...flip, idempotency_key:randomUUID(),base_version:2,enabled:false});
-    await assert.rejects(requireFeature(c,{...actor,slug:'dell'},input.name), /feature_disabled/);
-    await invoke('set-feature-switch',{...input,idempotency_key:randomUUID(),base_version:3,expected_removal_on:'2000-01-01'});
     const health=await invoke('check-feature-switches',{idempotency_key:randomUUID()});
     assert.equal(health.overdue.length,1);
     assert.equal(health.overdue[0].owner,'claude');
     assert.match(health.overdue[0].line,/on breach:.*owner claude.*retire.*verify.*auto-clear/);
     const again=await invoke('check-feature-switches',{idempotency_key:randomUUID()});
     assert.equal(again.overdue[0].loop_id,health.overdue[0].loop_id);
-    const retired = await invoke('set-feature-switch',{ ...input,idempotency_key:randomUUID(),base_version:4,retired:true });
-    assert.ok(retired.switch.retired_at);
+    const current=(await c.query('select version from feature_switch where id=$1',[seeded.id])).rows[0];
+    await c.query('select * from ops.write_feature_switch($1,$2::jsonb)',
+      ['revise',JSON.stringify({id:seeded.id,base_version:Number(current.version),
+        description:input.description,default_enabled:true,audience:'team',owner:'claude',
+        expected_removal_on:'2000-01-01',retired:true})]);
     const cleared=await invoke('check-feature-switches',{idempotency_key:randomUUID()});
     assert.equal(cleared.overdue.length,0);
     assert.deepEqual(cleared.cleared,[health.overdue[0].loop_id]);
     assert.equal((await invoke('list-feature-switches',{name:input.name})).switches[0].available,false);
-    await t.test('retired switches refuse flips and may be explicitly restored', async () => {
-      await assert.rejects(invoke('flip-feature-switch',{...flip,base_version:5,idempotency_key:randomUUID()}),
-        error => error.payload.error === 'feature_switch_retired');
-      assert.equal((await invoke('list-feature-switches',{name:input.name})).switches[0].version,5);
-      const restored=await invoke('set-feature-switch',{...input,base_version:5,retired:false,idempotency_key:randomUUID()});
-      assert.equal(restored.switch.retired_at,null);
-      assert.equal(restored.switch.version,6);
-      const turnedOn=await invoke('flip-feature-switch',{...flip,base_version:6,idempotency_key:randomUUID()});
-      assert.equal(turnedOn.switch.enabled,true);
-      assert.equal((await invoke('list-feature-switches',{name:input.name})).switches[0].available,true);
-    });
+    await assert.rejects(requireFeature(c,{...actor,slug:'dell'},input.name), /feature_disabled/);
   } finally {
     if(c) await c.end();
     if(admin) await admin.end();

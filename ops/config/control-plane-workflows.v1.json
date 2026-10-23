@@ -121,20 +121,6 @@
       "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
-      "key": "engineering-slice", "version": 1, "enabled": true, "risk": "yellow",
-      "recurrence": {"kind": "on_demand", "schedule": null, "cron": null, "timezone": "America/Chicago", "source": "MCP admit-engineering-slice only"},
-      "execution": {"kind": "deterministic", "entrypoint": "mcp-server/src/engineering-runtime.js", "export": "runEngineeringWorker", "args": ["room-bridge-engineering-controller"], "shadow_args": [], "canary": {"enabled": false, "reason": "fresh native Codex execution has no isolated canary adapter"}},
-      "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "MCP admission only; no scheduler", "owner": "ops.job dispatcher", "inputs": ["accepted Work Request", "accepted plan revision", "typed engineering slice"], "canonical_reads": ["ops.work_request", "ops.sourced_work_request_plan", "ops.engineering_slice_plan", "ops.job_definition"], "canonical_writes": ["ops.job", "ops.engineering_execution_envelope", "ops.engineering_slice_receipt", "ops.engineering_reviewer_fact"], "external_dependencies": ["room-bridge lease-bound controller", "Codex Desktop fresh-native-session adapter"], "authority": "server-derived sponsored Codex execution with a closed repository action allowlist; no caller-selected identity, authority, model, action, or native session", "current_completion_signal": "lease-bound typed receipt plus independent reviewer fact", "replacement_program": "ops.job_definition:engineering-slice:v1", "acceptance": "typed envelope, receipt, dependency, and independent-review gates", "retirement_approval": "Joe approval after replacement evidence"},
-      "routing": {"key": "facts.all_true", "spec": {"all_of": ["capability.candidate_admitted", "runner.identity_bound"]}, "description": "an accepted capability candidate and bound runner identity admit the slice"},
-      "filtering": {"key": "facts.all_true", "spec": {"all_of": ["command.registered_args_selected"]}, "description": "only the registered fresh Codex adapter is selected"},
-      "validation": {"key": "facts.all_true", "spec": {"all_of": ["command.exit_zero", "command.workflow_marker_valid"]}, "description": "the bounded adapter succeeds and returns its typed workflow marker"},
-      "retry": {"max_attempts": 2, "backoff": "constant", "base_seconds": 30, "cap_seconds": 300, "timeout_seconds": 1800},
-      "deduplication": {"key_template": "engineering-slice:{plan_digest}:{work_request}:{slice_ref}:generation:{generation}"},
-      "completion": {"key": "facts.all_true", "spec": {"all_of": ["command.receipt_persisted", "command.execution_evidence_reconciles"]}, "description": "lease-bound typed receipt persists and reconciles to the issued envelope", "receipt_kind": "engineering_slice"},
-      "legacy_schedule": {"provider": "none", "status": "disabled", "disable_requires": "no scheduler exists; on-demand MCP admission only"}
-    },
-    {
       "key": "health-audit-monthly", "version": 1, "enabled": true, "risk": "green",
       "recurrence": {"cron": "0 9 6-10 * *", "timezone": "America/Chicago", "source": "services registry; ledger gate collapses window"},
       "execution": {"kind": "cognition", "cognition_job": "audit.proposal", "input_builder": "system-health.monthly-evidence"},
