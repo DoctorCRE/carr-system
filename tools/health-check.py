@@ -1796,8 +1796,6 @@ WATCH = [
      "availability_matcher.py, step 2 of the nightly chain (exits 78 without a jobs credential)"),
     ("JOB cadence",       os.path.expanduser("~/carr-system/out/cadence-latest.md"), 26/24, [],
      "cadence_engine.py, step 1 of the nightly chain (exits 78 without a jobs credential)"),
-    ("Joe calendar feed", "DNA/Team/calendar-latest.ics", 4, [],
-     "fetch-calendar.sh; business days only"),
     ("Dell calendar feed","DNA/Team/calendar-latest-dell.ics", 4, [],
      "KNOWN BLOCKED on Dell's OS update (memory: dell-calendar-fetch-blocked) — expected stale until he updates"),
 ]
