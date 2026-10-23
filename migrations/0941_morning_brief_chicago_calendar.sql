@@ -11,7 +11,14 @@ comment on function public.carr_business_date(timestamptz) is
   'CARR calendar day in America/Chicago, independent of session timezone. Date-only facts stay dates.';
 revoke all on function public.carr_business_date(timestamptz) from public;
 grant execute on function public.carr_business_date(timestamptz)
-  to carr_reader, carr_writer, carr_jobs, carr_exporter, carr_authority;
+  to carr_reader, carr_writer, carr_jobs, carr_exporter, carr_authority, dot_reader;
+
+do $backup_calendar_read$
+begin
+  if exists (select 1 from pg_roles where rolname='carr_backup') then
+    grant execute on function public.carr_business_date(timestamptz) to carr_backup;
+  end if;
+end $backup_calendar_read$;
 
 create or replace view v_today_triage as
   select 'next_action'::text as item_kind, na.id, na.subject_type, na.subject_id,

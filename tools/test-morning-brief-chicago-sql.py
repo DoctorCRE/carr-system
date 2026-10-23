@@ -36,6 +36,8 @@ create role carr_writer;
 create role carr_jobs;
 create role carr_exporter;
 create role carr_authority;
+create role dot_reader noinherit;
+create role carr_backup noinherit;
 create table actor(id int, slug text);
 create table next_action(id int,subject_type text,subject_id int,owner_id int,
   description text,due_on date,hold_until date,status text);
@@ -101,7 +103,7 @@ class ChicagoCalendar(unittest.TestCase):
         type(self).zone = zone
         self.sql(f"set timezone='{zone}'; create or replace function fixture_now() returns timestamptz language sql immutable as $$select '{instant}'::timestamptz$$;")
         text = '\n'.join(definition(name, source) for name, source in SOURCES.items())
-        text += '\ngrant select on ' + ','.join(SOURCES) + ' to carr_reader;'
+        text += '\ngrant select on ' + ','.join(SOURCES) + ' to carr_reader,dot_reader,carr_backup;'
         if MIGRATION.exists():
             text += '\n' + MIGRATION.read_text()
         text = re.sub(r'\bcurrent_date\b', '(fixture_now()::date)', text, flags=re.I)
@@ -164,6 +166,28 @@ class ChicagoCalendar(unittest.TestCase):
             for name in SOURCES:
                 self.assertEqual(self.sql(f'set role carr_reader;select count(*) from {name};reset role;'), ['0' if name != 'v_renewal_decision_queue_status' else '2'])
             self.assertEqual(self.sql("select count(*) from pg_proc p, lateral aclexplode(p.proacl) a where p.oid='public.carr_business_date(timestamptz)'::regprocedure and a.grantee=0 and a.privilege_type='EXECUTE'"), ['0'])
+
+    def test_all_view_readers_can_read_populated_calendar_views(self):
+        self.install('2026-10-24T01:00:00Z','UTC')
+        self.sql("""
+          insert into next_action values(1,'deal',1,1,'Synthetic action','2026-10-23',null,'open');
+          insert into candidate_pool(id,status,dup_do_not_contact,est_lease_event)
+            values(1,'pool',false,'2026-10-24');
+          insert into lease(deal_id,client_id,expiration_on,status,evidence_kind,evidence_ref,source)
+            values(1,1,'2026-10-23','current','executed_lease','fixture','fixture');
+          insert into activity values('call','Synthetic contact','2026-10-24T01:00:00Z',null,1,1,1);
+        """)
+        checks = {
+            'select due_on from v_today_triage': ['2026-10-23'],
+            'select days_to_window from v_claim_card': ['1'],
+            'select est_lease_event from v_renewal_decision_queue': ['2026-10-23'],
+            'select distinct last_touch from v_last_touch': ['2026-10-23'],
+        }
+        for role in ['dot_reader','carr_backup']:
+            for query, expected in checks.items():
+                with self.subTest(role=role,query=query):
+                    self.assertEqual(self.sql(f'set role {role};{query};reset role;'), expected)
+        self.assertEqual(self.sql("select count(*) from pg_proc p, lateral aclexplode(p.proacl) a where p.oid='public.carr_business_date(timestamptz)'::regprocedure and a.grantee=0 and a.privilege_type='EXECUTE'"), ['0'])
 
 
 if __name__ == '__main__':
