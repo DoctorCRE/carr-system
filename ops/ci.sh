@@ -497,7 +497,7 @@ check_pushfloor() {
   fi
 
   if [ -n "$changed" ] && printf '%s\n' "$changed" | grep -Eq \
-      '^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.v[0-9]+\.generated\.js|ops/config/scac-registry-.*\.json)$'; then
+      '^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.current\.generated\.js|ops/config/scac-registry-.*\.json)$'; then
     ran="$ran scac-atlas"
     run_quiet "$LOGDIR/pushfloor-scac-atlas.log" node --test \
       mcp-server/test/atlas-inventory-graph-read.test.mjs \
@@ -519,6 +519,8 @@ check_pushfloor() {
       base="$(basename "$touched_gate" .py)"
       paired="ops/$base-selftest.py"
       if [ -f "$paired" ]; then
+        # Changed selftests run in the next loop, including a changed hook's pair.
+        printf '%s\n' "$gate_surface" | grep -Fxq "$paired" && continue
         run_quiet "$LOGDIR/pushfloor-$base-selftest.log" "$PY" "$paired" \
           || { tail -15 "$LOGDIR/pushfloor-$base-selftest.log" >&2
                floor_fail "$base-selftest" \
