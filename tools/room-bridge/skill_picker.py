@@ -4,8 +4,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import re
+import sys
 
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from credential_env import load_carr_tokens, TokensFilePermissionError
 
 
 @dataclass(frozen=True)
@@ -75,14 +79,14 @@ def _batches(brief, skills):
     return batches
 
 
-async def _score(brief, skills, client_factory):
+async def _score(brief, skills, client_factory, api_key):
     import asyncio
     from typesafe_sdk import AsyncTypeSafeClient, RetryPolicy
 
     batches = _batches(brief, skills)
     if client_factory is None:
         client_factory = lambda: AsyncTypeSafeClient(
-            model='jev-latest', timeout=TIMEOUT_S, retry=RetryPolicy(max_retries=0))
+            api_key=api_key, model='jev-latest', timeout=TIMEOUT_S, retry=RetryPolicy(max_retries=0))
     async with client_factory() as client:
         if len(batches) == 1:
             responses = [await client.system_one(state=brief, questions=batches[0])]
@@ -109,11 +113,18 @@ def prepare(brief: str, repo: Path, *, home: Path | None = None, client_factory=
                      next((s for s in skills if s.name == name), None)) for name in BASELINE]
     selected = [s for s in baseline if s is not None]
     probabilities, skipped = {}, ''
-    if not os.environ.get('TYPESAFE_API_KEY', '').strip():
+    api_key = os.environ.get('TYPESAFE_API_KEY', '').strip()
+    if not api_key:
+        try:
+            api_key = load_carr_tokens(['TYPESAFE_API_KEY'],
+                path=(home or Path.home()) / '.config/carr/typesafe.env').get('TYPESAFE_API_KEY', '').strip()
+        except TokensFilePermissionError:
+            pass
+    if not api_key:
         skipped = 'TYPESAFE_API_KEY is missing'
     elif skills:
         async def bounded():
-            return await asyncio.wait_for(_score(brief, skills, client_factory), timeout=TIMEOUT_S)
+            return await asyncio.wait_for(_score(brief, skills, client_factory, api_key), timeout=TIMEOUT_S)
         try:
             probabilities = asyncio.run(bounded())
         except TimeoutError:
