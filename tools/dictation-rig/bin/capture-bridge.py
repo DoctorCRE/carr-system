@@ -127,7 +127,7 @@ def load_config() -> dict[str, str] | None:
 def read_json(path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
 
@@ -232,23 +232,33 @@ def claim_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         log_line(f"SKIP claim already-ingested session={name}")
         return 0
 
-    announcement = read_json(session_dir / "announcement.json")
+    announcement_path = session_dir / "announcement.json"
+    announcement = read_json(announcement_path)
     if announcement is None:
+        if announcement_path.exists():
+            log_line(f"ERROR claim announcement.json unreadable session={name}")
+            return Outcome.UNAVAILABLE
         log_line(f"SKIP claim no-announcement session={name} (consent proof missing)")
         return 0
-    announced_at = str(announcement.get("announcement_fired_at") or "").strip()
-    if not announced_at:
-        log_line(f"SKIP claim announcement.json missing announcement_fired_at session={name}")
-        return 0
+    announced_at = announcement.get("announcement_fired_at")
+    if not isinstance(announced_at, str) or not announced_at.strip():
+        log_line(f"ERROR claim announcement.json invalid announcement_fired_at session={name}")
+        return Outcome.UNAVAILABLE
+    announced_at = announced_at.strip()
 
-    meta = read_json(session_dir / "meta.json")
+    meta_path = session_dir / "meta.json"
+    meta = read_json(meta_path)
     if meta is None:
+        if meta_path.exists():
+            log_line(f"ERROR claim meta.json unreadable session={name}")
+            return Outcome.UNAVAILABLE
         log_line(f"SKIP claim no-meta session={name}")
         return 0
-    started_at = str(meta.get("started") or "").strip()
-    if not started_at:
-        log_line(f"SKIP claim meta.json missing started session={name}")
-        return 0
+    started_at = meta.get("started")
+    if not isinstance(started_at, str) or not started_at.strip():
+        log_line(f"ERROR claim meta.json invalid started session={name}")
+        return Outcome.UNAVAILABLE
+    started_at = started_at.strip()
 
     request_path = session_dir / ".capture-request.json"
     body = read_json(request_path)

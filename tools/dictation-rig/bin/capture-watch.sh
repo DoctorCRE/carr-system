@@ -106,7 +106,7 @@ main() {
         [ -n "$epoch" ] || continue   # not a recognizable session dir
 
         local age=$((now_epoch - epoch))
-        if [ "$age" -gt "$BACKLOG_AGE_SECONDS" ] && [ ! -f "$dir/.capture-request.json" ]; then
+        if [ "$age" -gt "$BACKLOG_AGE_SECONDS" ] && [ ! -f "$dir/.capture-request.json" ] && [ ! -f "$dir/.capture-claim-pending" ]; then
             continue
         fi
 
@@ -119,8 +119,17 @@ main() {
             continue
         fi
 
+        # A failed prerequisite has no consented request/nonce yet.
+        if ! touch "$dir/.capture-claim-pending"; then
+            log_line "ERROR claim could not preserve retry session=$name"
+            scan_rc=1
+            continue
+        fi
         "$PYTHON_BIN" "$BRIDGE_PY" claim "$dir"
         child_rc=$?
+        if [ "$child_rc" -eq 0 ]; then
+            rm -f "$dir/.capture-claim-pending" || child_rc=1
+        fi
         if [ "$child_rc" -ne 0 ] && { [ "$scan_rc" -eq 0 ] || [ "$scan_rc" -eq 78 ]; }; then
             scan_rc="$child_rc"
         fi
