@@ -150,15 +150,12 @@ function reviewerRow(id, receipt_id, slice_ref, state = "passed", created_at = "
   };
 }
 
-test("completed adapter result satisfies the retained receipt completion validator", () => {
+test("validated adapter result satisfies the retained receipt completion validator", () => {
   const result = JSON.parse(execFileSync("python3", ["-c", `
 import copy, json, sys
-from unittest.mock import patch
 sys.path.insert(0, "tools/room-bridge")
 import engineering_dispatch_adapter as adapter
 revision = "a" * 40
-prepared = {"checkout_path": "/private/tmp/room-codex-example/checkout",
-    "checkout_branch": "fix/controller-completion", "checkout_revision": revision}
 evidence = {"ref": "evidence:adapter", "redaction_class": "metadata_only",
     "content_digest": "sha256:" + "a" * 64}
 job = {"repository": "DoctorCRE/carr-system", "revision": revision,
@@ -169,13 +166,9 @@ result = {**copy.deepcopy(job),
     "checks": [{"check_ref": "check:slice:one", "state": "passed", "evidence_refs": [evidence]}],
     "outcome": {"status": "claimed_complete", "artifact_refs": ["artifact:adapter"],
         "evidence_refs": [evidence], "source_evidence": {
-            "worktree_ref": prepared["checkout_path"], "branch_ref": prepared["checkout_branch"],
+            "worktree_ref": "worktree:" + "b" * 64, "branch_ref": "branch:" + "c" * 64,
             "source_sha": revision, "evidence_refs": [evidence]}}}
-with patch.object(adapter, "_dedicated_codex_desk"), \
-     patch.object(adapter.codex_checkout, "prepare", return_value=prepared), \
-     patch.object(adapter.subprocess, "check_output", side_effect=[revision, "", ""]):
-    print(json.dumps(adapter.run(job, dispatch_fn=lambda *a, **kw: {
-        "status": "completed", "result": json.dumps(result)})))
+print(json.dumps(adapter.validate_result(result, job)))
 `], { cwd: new URL("../../", import.meta.url), encoding: "utf8" }));
   const plan = typedEngineeringPlan([engineeringSlice("slice:one", 1)]);
   const envelope = envelopeRow("11111111-1111-4111-8111-111111111111", "slice:one", "2026-08-26T00:00:01Z");

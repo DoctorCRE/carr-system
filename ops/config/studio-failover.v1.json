@@ -112,13 +112,6 @@
       "credentials": [],
       "state": [],
       "enabled": false
-    },
-    {
-      "label": "local.flash-desk",
-      "source": "ops/launchd/local.flash-desk.plist",
-      "credentials": [],
-      "state": [],
-      "enabled": false
     }
   ],
   "manual_roles": [

@@ -22,7 +22,6 @@ import json
 import os
 import re
 import subprocess
-import sqlite3
 import time
 import sys
 import tempfile
@@ -2164,14 +2163,6 @@ def snapshot_linkage_metadata(task: dict[str, Any]) -> dict[str, Any]:
     return metadata
 
 
-@functools.lru_cache(maxsize=1)
-def work_queue_module():
-    spec = importlib.util.spec_from_file_location('carr_work_queue', REPO_ROOT / 'tools/room-bridge/work_queue.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
     return fit_snapshot(project_board_snapshot(state, costs=costs))
 
@@ -2214,8 +2205,6 @@ def project_board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, An
         for qid, q in (state.get("questions") or {}).items() if q.get("answer")
     ]
     return {
-        **({'work_queue': work_queue_module().board_projection()}
-           if state['project'] == 'carr-v5' else {}),
         "schema": SNAPSHOT_SCHEMA,
         "kind": state.get("kind") or "project",
         "project": state["project"],
@@ -2251,10 +2240,6 @@ def project_board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, An
 
 def orchestrator_snapshot(state: dict[str, Any]) -> dict[str, Any]:
     from progress_orchestrator import project
-    try:
-        queue = work_queue_module().board_projection()
-    except (OSError, RuntimeError, sqlite3.Error):
-        queue = None
     portfolio = read_json_file(state_path(ALL_REPOS_BOARD))
     normalized = copy.deepcopy(state)
     for task in normalized.get('tasks', {}).values():
@@ -2262,7 +2247,7 @@ def orchestrator_snapshot(state: dict[str, Any]) -> dict[str, Any]:
         task['activity_status'] = activity_status(task, now_utc())
     return {'schema': SNAPSHOT_SCHEMA, 'project': 'orchestrator', 'title': 'Orchestrator',
             'tasks': {}, 'history': {}, 'omitted': {'live': 0, 'merged': 0, 'history': 0},
-            'orchestrator': project(normalized, queue, portfolio=portfolio)}
+            'orchestrator': project(normalized, portfolio=portfolio)}
 
 
 def require_primary_publication() -> None:
@@ -2280,21 +2265,11 @@ def publish_orchestrator(state: dict[str, Any]) -> int:
 
 
 def _publish_orchestrator(state: dict[str, Any]) -> int:
-    from progress_orchestrator import retain_unavailable_queue
     before = call_verb('read-progress-board', {'board_id': 'orchestrator'}).get('snapshot')
     snapshot = orchestrator_snapshot(state)
     view = snapshot['orchestrator']
     bank = 1 - (before or {}).get('snapshot_json', {}).get('orchestrator', {}).get('bank', 1)
     view['bank'] = bank
-    if before:
-        previous = copy.deepcopy(before.get('snapshot_json', {}).get('orchestrator'))
-        if previous:
-            for page in previous.get('pages', []):
-                saved = call_verb('read-progress-board', {'board_id': page['board_id']}).get('snapshot')
-                if not saved or saved['version'] != page['version']:
-                    raise RuntimeError('previous orchestrator page unavailable; observation retained')
-                previous['cards'].extend(saved['snapshot_json']['cards'])
-            retain_unavailable_queue(view, previous)
     cards = sorted(view['cards'], key=lambda card: (card.get('changed_at') or '', card['id']), reverse=True)
     view['total_cards'] = len(cards)
     view['state_counts'] = dict(Counter(card['state'] for card in cards))
@@ -2453,11 +2428,8 @@ def publish_paged_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             break
         collections = [(key, preview, key) for key, value in preview.items()
                        if isinstance(value, (list, dict)) and value
-                       and key not in {"pagination", "task_defaults", "task_counts", "omitted", "work_queue"}
+                       and key not in {"pagination", "task_defaults", "task_counts", "omitted"}
                        and (key != "notes" or len(value) > 1)]
-        queue = preview.get("work_queue") or {}
-        collections.extend(("work_queue." + key, queue, key) for key, value in queue.items()
-                           if isinstance(value, (list, dict)) and value and key != "omitted")
         if not collections:
             raise SnapshotTooLarge("snapshot page manifest exceeds publication budget; previous observation retained")
         path, parent, key = max(collections, key=lambda entry: snapshot_size(entry[1][entry[2]]))

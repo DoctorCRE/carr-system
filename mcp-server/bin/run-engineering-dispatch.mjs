@@ -16,8 +16,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "../..");
 const ADAPTER = path.join(REPO, "tools", "room-bridge", "engineering_dispatch_adapter.py");
 const PYTHON = path.join(REPO, ".venv", "bin", "python");
-// This is an execution identity, never a controller/operator option.  The
-// adapter resolves and validates this exact desk before the envelope is sent.
+// The logical worker identity remains bound to the accepted engineering envelope.
 const DESK = "engineering-codex";
 const WORKER = "room-bridge-engineering-controller";
 const CONTROLLER_WORKER = WORKER;
@@ -179,22 +178,22 @@ async function withCanonicalOwnership(claim, execute) {
   }
 }
 
-function preflightDedicatedDesk() {
+function preflightCodexExecutor() {
   return new Promise((resolve, reject) => {
     const child = spawn(PYTHON, [ADAPTER, "--preflight"], {
       env: safeAdapterEnv(), stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
     child.stdout.on("data", chunk => { stdout += chunk; });
-    child.on("error", () => reject(new ControllerError({ error: "engineering_desk_preflight_unavailable" })));
+    child.on("error", () => reject(new ControllerError({ error: "engineering_executor_preflight_unavailable" })));
     child.on("close", code => {
-      if (code !== 0) return reject(new ControllerError({ error: "engineering_desk_preflight_refused" }));
+      if (code !== 0) return reject(new ControllerError({ error: "engineering_executor_preflight_refused" }));
       try {
         const row = JSON.parse(stdout);
-        if (row?.ok !== true || row?.desk?.name !== DESK || row?.desk?.kind !== "codex-session") throw new Error("bad preflight");
+        if (row?.ok !== true || row?.executor !== "codex exec") throw new Error("bad preflight");
         resolve();
       } catch {
-        reject(new ControllerError({ error: "engineering_desk_preflight_invalid" }));
+        reject(new ControllerError({ error: "engineering_executor_preflight_invalid" }));
       }
     });
   });
@@ -208,9 +207,8 @@ async function main() {
       issuer_credential: null, child_credentials: [] }));
     return;
   }
-  // Prove the exact unseated family desk before opening the jobs pool.
-  // A missing or altered desk therefore cannot claim a live lease.
-  await preflightDedicatedDesk();
+  // Verify the native executable before claiming a live job.
+  await preflightCodexExecutor();
   // Authenticate the isolated Worker controller before claiming a live job.
   // This is a closed tools/list proof; issuer slots are never loaded locally.
   await preflightAuthenticatedController();

@@ -96,7 +96,7 @@ def enforcement_path(path):
     return ''
 
 
-def queued_dispatch(command, cwd):
+def background_build(command, cwd):
     lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n')
     lexer.whitespace = ' \t\r'
     lexer.whitespace_split = True
@@ -116,9 +116,9 @@ def queued_dispatch(command, cwd):
             args = args[1:]
         if len(args) < 4:
             continue
-        if (Path(cwd) / args[0]).resolve() != (Path(cwd) / 'tools/room-bridge/dispatch.py').resolve():
+        if (Path(cwd) / args[0]).resolve() != (Path(cwd) / 'bin/codex-job').resolve():
             continue
-        if args[1] == 'send' and re.search(
+        if re.search(
             r'\b(?:build|add|create|implement|write)\b[^.!?]*\b(?:hook|gate|test|CI check)\b',
             args[3], re.I):
             return True
@@ -209,9 +209,9 @@ def check_turn(event, records):
         content = record['message']['content']
         for block in content if isinstance(content, list) else []:
             if (block.get('type') == 'tool_use' and block.get('name') == 'Bash'
-                    and re.search(r'\bqueued\b', text, re.I)
+                    and re.search(r'\b(?:running|started)\b', text, re.I)
                     and re.search(r'\bnot (?:yet )?enforced\b', text, re.I)
-                    and queued_dispatch(block['input'].get('command', ''), event['cwd'])):
+                    and background_build(block['input'].get('command', ''), event['cwd'])):
                 return
             if block.get('type') != 'tool_use' or block.get('name') not in {'Edit', 'Write'}:
                 continue
@@ -232,8 +232,8 @@ def check_turn(event, records):
     return Verdict.block('Rule claim lacks enforcement evidence: ' + claims[0]
                          + '\nEdit/Write non-Markdown enforcement code in hooks/, tools/, tests/, '
                          '.github/workflows/, .claude/settings.json or mcp-server/src/; '
-                         'send tools/room-bridge/dispatch.py a build brief for a hook, gate, test '
-                         'or CI check and say queued and not yet enforced; or say not enforced '
+                         'launch bin/codex-job with a build brief for a hook, gate, test '
+                         'or CI check and say running and not yet enforced; or say not enforced '
                          'and explain why it cannot be checked mechanically. '
                          'Memory files, CLAUDE.md, AGENTS.md, Markdown and teach do not enforce rules.')
 

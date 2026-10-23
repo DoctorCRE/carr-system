@@ -1,6 +1,5 @@
 """Deterministic shell precheck: report missing repository paths without denying.
 
-Model CLI invocations also receive the current Model Room routing rule.
 Failures are advisory and never prevent the command from running.
 """
 
@@ -42,51 +41,6 @@ SENSITIVE_COMMAND = re.compile(
     r"authorization|bearer|pgpassword|database_url)\b\s*(?:=|:|\s+)"
     r"|postgres(?:ql)?://|\b[a-z]+://[^/\s]+@)"
 )
-
-# The rule itself is read at the moment of use from the checkout's boot file.
-# This narrow detector runs before the ordinary command-failure precheck, so a
-# direct model invocation gets the route even when there are no filesystem
-# facts to judge. It does not match a read such as `rg claude`.
-MODEL_CLI = re.compile(
-    r"(?m)(?:^|[;&|]\s*)(?:\s*(?:env\s+)?(?:[A-Za-z_][\w]*=\S+\s+)*)?"
-    r"(?:\S*/)?(?:claude|grok|gemini|codex|opencode|ollama|aider)(?=\s|$)", re.I)
-MODEL_PACKAGE_CLI = re.compile(
-    r"(?m)(?:^|[;&|]\s*)\s*npx\s+(?:-y\s+)?"
-    r"(?:@anthropic-ai/claude-code|@google/gemini-cli|@openai/codex)(?=\s|$)", re.I)
-MODEL_CLI_AUTH = re.compile(r"^\s*(?:auth|login|logout|status|doctor|version|--version|--help)\b", re.I)
-MODEL_ROOM_START = "<!-- carr-model-room-route:start -->"
-MODEL_ROOM_END = "<!-- carr-model-room-route:end -->"
-
-
-def model_room_rule(repo=REPO):
-    """Pull the current source-controlled route instead of embedding a copy."""
-    # A model call may start while the shell is in doctorcre-app or another
-    # checkout. The installed hook still lives in CARR, so use its own boot
-    # rule when that checkout has no route section.
-    for root in dict.fromkeys((repo, REPO)):
-        try:
-            with open(os.path.join(root, "AGENTS.md"), encoding="utf-8") as handle:
-                source = handle.read()
-            return source.split(MODEL_ROOM_START, 1)[1].split(MODEL_ROOM_END, 1)[0].strip()
-        except (OSError, IndexError):
-            continue
-    return None
-
-
-def model_room_advisory(command, repo=REPO):
-    """The route, read before a direct model CLI is attempted. Never deny.
-
-    The executable position is found deterministically, which is all the
-    route needs. The paid "direct-work score" this used to append changed
-    nothing the rule did not already say (2026-10-04 audit)."""
-    match = MODEL_CLI.search(command) or MODEL_PACKAGE_CLI.search(command)
-    if not match or MODEL_CLI_AUTH.match(command[match.end():]):
-        return None
-    rule = model_room_rule(repo)
-    if not rule:
-        return None
-    return "MODEL ROOM ROUTE — read the current rule before this CLI call: " + rule
-
 
 def _log(record):
     """Append one observation. Never raises, and never fills the disk."""
@@ -267,10 +221,6 @@ def advisory(payload):
         repo = repo_root(command_cwd)
         warnings = []
         for command in _commands(payload):
-            route = model_room_advisory(command, repo)
-            if route:
-                warnings.append(route)
-                break
             if not command.strip() or is_pure_read(command) or SENSITIVE_COMMAND.search(command):
                 continue
             probability, facts, reasons = check(command, repo)
