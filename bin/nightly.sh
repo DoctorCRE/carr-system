@@ -3,44 +3,11 @@
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 export PATH="/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:/opt/homebrew/opt/libpq/bin:/usr/local/bin:/usr/bin:/bin"
-run_canary() {
-  [ "${CARR_CONTROL_PLANE_MODE:-}" = "canary" ] || {
-    print -ru2 -- "nightly canary requires explicit control-plane canary mode"; return 64; }
-  [ -n "${CARR_NIGHTLY_CANARY_ROOT:-}" ] || {
-    print -ru2 -- "nightly canary requires a parent-selected output root"; return 64; }
-  local key value
-  while IFS='=' read -r key value; do
-    case "$key" in
-      DATABASE_URL|BACKUP_DATABASE_URL|PG*|CARR_VAULT|CARR_ONEDRIVE_DEALS|CARR_EXPORT_LIVE|CARR_DRIVE_RECOVERY|CARR_ROUTINE_DB_ENV_FILE|CARR_INGEST_URL|CARR_AI_ROUTE_PRIMARY_URL|CARR_AI_ROUTE_SECONDARY_URL|CARR_GMAIL_APP_PASSWORD|CARR_AGE_IDENTITY|CARR_DB_*|*TOKEN*|*SECRET*|*PASSWORD*|*API_KEY*|*PROVIDER_URL*|*EXPORTER_URL*|*BACKUP_URL*)
-        print -ru2 -- "nightly canary refused ambient live capability: $key"; return 78 ;;
-    esac
-  done < <(env)
-  local base="$REPO/out/canary/nightly-record-layer" root="$CARR_NIGHTLY_CANARY_ROOT"
-  case "$root" in "$base"/*) ;; *) print -ru2 -- "nightly canary output root escapes dedicated canary directory"; return 64 ;; esac
-  [[ "$root" != *'/../'* && "$root" != *'/./'* && "$root" != "$base" ]] || {
-    print -ru2 -- "nightly canary output root is not a direct run directory"; return 64; }
-  local component
-  for component in "$REPO/out" "$REPO/out/canary" "$base"; do
-    [ ! -L "$component" ] || { print -ru2 -- "nightly canary output root crosses a symlink"; return 64; }
-  done
-  local py="$REPO/.venv/bin/python"
-  [ -x "$py" ] || py=python3
-  local snapshot marker
-  snapshot="$(cat)"
-  [ -n "$snapshot" ] || { print -ru2 -- "nightly canary requires a protected parent snapshot"; return 78; }
-  marker="$(print -rn -- "$snapshot" | "$py" "$REPO/pipelines/availability_matcher.py" --canary)" || return $?
-  case "$marker" in
-    'availability-matcher: canary-result '*) print -r -- "nightly canary result: ${marker#availability-matcher: canary-result }" ;;
-    *) print -ru2 -- "nightly canary child emitted no registered aggregate"; return 1 ;;
-  esac
-}
-
 case "${1:-}" in
   --preflight) /bin/zsh -n "$0"; exit $? ;;
-  --canary) run_canary; exit $? ;;
   --exports) ;;
   "") ;;
-  *) print -ru2 -- "usage: bin/nightly.sh [--preflight|--canary|--exports]"; exit 64 ;;
+  *) print -ru2 -- "usage: bin/nightly.sh [--preflight|--exports]"; exit 64 ;;
 esac
 unset CARR_VAULT CARR_EXPORT_LIVE CARR_DRIVE_RECOVERY
 cd "$REPO" || exit 1
