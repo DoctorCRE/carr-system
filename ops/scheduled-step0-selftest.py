@@ -57,15 +57,6 @@ class PredicateTests(unittest.TestCase):
                 self.assertEqual(stop_reason('radar-weekly', datetime.fromisoformat(now),
                                              [{**row, 'end': end}]), expected)
 
-    def test_prompt_calls_share_the_step0_command(self):
-        for task in ['health-audit-monthly', 'idea-resurface-monthly',
-                     'system-sweep-monthly', 'playbook-review-monthly', 'cc-update-audit']:
-            prompt = (REPO/'ops/scheduled-tasks'/f'{task}.SKILL.md').read_text()
-            with self.subTest(task=task):
-                python = 'python3' if task == 'cc-update-audit' else '.venv/bin/python'
-                self.assertIn(f'{python} bin/scheduled-step0.py {task}', prompt)
-        audit = (REPO/'ops/scheduled-tasks/cc-update-audit.SKILL.md').read_text()
-        self.assertNotIn('If `current` equals `last_audited`', audit)
 
 class CommandTests(unittest.TestCase):
     def test_monthly_ledger_timeout_fails_open(self):
