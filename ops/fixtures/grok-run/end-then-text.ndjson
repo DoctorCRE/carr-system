@@ -1,3 +1,0 @@
-{"type":"text","data":"answer"}
-{"type":"end","stopReason":"end_turn","modelUsage":{"grok-4.7-build":{"modelCalls":1}}}
-{"type":"text","data":"late"}
