@@ -332,8 +332,8 @@ and size-floor checks, and atomic promotion that preserves prior acknowledged fi
 Recovery retains fresh-target isolation, target-host and default-branch guards,
 cleanup limited to the returned branch ID, exact counts and content hashes,
 COPY-aware streaming in the cloud loader, `psql -X` with `ON_ERROR_STOP=1`, and
-error redaction. These controls must remain intact; the local SQL-prefix filter
-defect still needs separate remediation. No runtime behavior changes with this guide.
+error redaction. These controls must remain intact. Artifact verification also
+requires the pinned schema grants and app-role security parity before completion.
 
 ## Worker recovery
 

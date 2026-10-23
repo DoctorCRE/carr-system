@@ -35,7 +35,7 @@ class RecoveryRunbookTest(unittest.TestCase):
                      "tools/dictation-rig/vocab-local.txt", "machine-role marker",
                      "matching age identity", "account recovery factors"):
             self.assertIn(item, text)
-        for limit in ("no provider-bound restore receipt", "evidence_producer_unavailable",
+        for limit in ("a fresh successful outcome must be checked separately", "evidence_producer_unavailable",
                       "workflow identity", "provider's current restore window", "historical result"):
             self.assertIn(limit, text)
 
