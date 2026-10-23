@@ -16,7 +16,7 @@ test('Home agenda returns the versioned minimal snapshot in one read, retaining 
   const calls = [];
   const client = { async query(sql, params) { calls.push({ sql, params }); return { rows: [{ overflow: false, deals: [deal] }] }; } };
   const result = await TOOLS['read-home-agenda'].handler(client, { slug: 'joe' }, {});
-  assert.deepEqual(result, { schema_version: 'home-agenda.v1', actor: 'joe', deals: [deal] });
+  assert.deepEqual(result, { schema_version: 'home-agenda.v1', actor: 'joe', deals: [{ ...deal, short_name: deal.name }] });
   assert.equal(calls.length, 1);
   assert.equal(TOOLS['read-home-agenda'].write, undefined);
   assert.deepEqual(TOOLS['read-home-agenda'].inputSchema, { type: 'object', additionalProperties: false, properties: {} });
@@ -26,7 +26,7 @@ test('Home agenda refuses overflow instead of returning an incomplete agenda', a
   const client = { async query() { return { rows: [{ overflow: true, deals: null }] }; } };
   await assert.rejects(() => TOOLS['read-home-agenda'].handler(client, { slug: 'joe' }, {}), error => {
     assert.equal(error.payload.error, 'agenda_limit_exceeded');
-    assert.deepEqual(error.payload.limits, { deals: 1000, critical_dates: 10000, open_actions: 10000 });
+    assert.deepEqual(error.payload.limits, { deals: 1000, critical_dates: 10000, open_actions: 10000, checklist_items: 10000 });
     return true;
   });
 });
