@@ -78,7 +78,7 @@ LIVE HEALTH CHECK:
 
      A business-count finding (e.g. rule_enforcement's "98 active rule
      gaps") is deliberately NOT hard_error=True — see the regression-diff
-     test in ops/release-pipeline-selftest.py's HealthGate class, which
+     test in the health report selftests's HealthGate class, which
      pins that a count DECREASE must not fail a release. hard_error is
      reserved for a section that could not be read at all, or a structural integrity failure rather than an improvable business
      metric — see ALWAYS_HARD_ERROR_KEYS below.
@@ -1075,7 +1075,7 @@ class RcAssignedOnlyViaRed(unittest.TestCase):
     def test_business_count_keys_are_not_hard_error(self):
         # The other half of the same contract: a count that can legitimately
         # improve (98 -> 97 rule gaps) must never be hard_error, or the
-        # release gate in ops/release-pipeline.py would fail every release
+        # release gate in the retired local executor would fail every release
         # with any standing count, defeating the whole point of the gate.
         fn = _find_function("_canonical_health")
         alarm = _find_function("_canonical_contradiction_alarm")
@@ -1274,7 +1274,7 @@ class CompletionMarkerAlwaysPrints(unittest.TestCase):
     completion-marker print entirely, even though it had already recorded a
     real, fully-explained `canonical_health_refused` hard_error finding. A
     read that catches and names its own failure is COMPLETE, not
-    unavailable — without the marker, ops/release-pipeline.py's
+    unavailable — without the marker, the retired local executor's
     read_health_findings() would read it as an incomplete baseline and hold
     forever, never reaching the hard_error verdict it already has. This
     proves, statically, that every `return` out of `_canonical_health`

@@ -13,7 +13,7 @@
     "WHY environment IS 'production' FOR JOBS THAT RUN ON JOE'S MAC. The launchd",
     "jobs are local edge agents by the BDUF's definition, but every one of them",
     "reads and writes the PRODUCTION record layer. The environment field answers",
-    "'what was affected', not 'what machine was it typed on' \u2014 a Control Room",
+    "'what was affected', not 'what machine was it typed on' — a Control Room",
     "asking which environment last night's export damaged wants the first answer.",
     "The machine is carried by runtime instead, and for a launchd job by",
     "runs_on: 'primary', 'secondary' or 'every'. lib/launchd_scope.py derives",
@@ -32,7 +32,7 @@
     "",
     "A SERVICE WITH NO CADENCE IS NOT AN OVERSIGHT. carr-mcp is not scheduled, so",
     "nothing about it goes stale on a clock; its health comes from synthetic",
-    "golden-workflow checks, and until those run it reads unknown \u2014 which is the",
+    "golden-workflow checks, and until those run it reads unknown — which is the",
     "honest answer for a service nobody has observed."
   ],
   "_comment_scheduled_tasks": [
@@ -40,12 +40,12 @@
     "the launchd services. One service per task, keyed IDENTICALLY to the",
     "task's own directory name under ~/.claude/scheduled-tasks/<key>/SKILL.md",
     "(that is also the taskId the scheduler reports and the name the launch",
-    "marker in each session's own transcript carries) \u2014 no separate mapping",
+    "marker in each session's own transcript carries) — no separate mapping",
     "table exists to fall out of sync with either. runtime is",
     "'claude-code-scheduled-task': these are prompts a Claude session executes,",
     "not a script with an exit code, so hooks/scheduled-run-record.py (a Stop",
     "hook) derives the outcome from the session's own transcript",
-    "deterministically and records it here \u2014 see lib/scheduled_run.py.",
+    "deterministically and records it here — see lib/scheduled_run.py.",
     "",
     "nightly-record-layer (above, under the launchd services) already exists as",
     "a service for the launchd chain bin/nightly.sh runs; it is NOT duplicated",
@@ -60,7 +60,7 @@
     "unregistered: a cadence-bound service for a task nobody is running would",
     "read STALE forever, which is exactly the false-alarm failure mode",
     "local-briefs' grace design and the launchd services above already learned",
-    "to avoid. Register one when its task is re-enabled \u2014 sync-registry retires",
+    "to avoid. Register one when its task is re-enabled — sync-registry retires",
     "a service that leaves this file, never the reverse, so nothing is lost by",
     "waiting.",
     "",
@@ -163,12 +163,12 @@
         {
           "environment": "production",
           "endpoint": "api.practicecre.com",
-          "deploy_mechanism": "bin/deploy-worker.sh"
+          "deploy_mechanism": ".github/workflows/deploy.yml"
         },
         {
           "environment": "staging",
           "endpoint": "carr-mcp-staging.joe-bookout-carr-us.workers.dev",
-          "deploy_mechanism": "bin/deploy-worker.sh --env staging"
+          "deploy_mechanism": "external console ownership; retained only as a foundation assurance evidence origin"
         }
       ]
     },
@@ -184,34 +184,14 @@
       "environments": [
         {
           "environment": "production",
-          "deploy_mechanism": "bin/migrate-prod.sh"
-        },
-        {
-          "environment": "staging",
-          "deploy_mechanism": "tools/db-tap.py --project staging run tools/migrate.py"
-        }
-      ]
-    },
-    {
-      "key": "migrate-prod",
-      "name": "Production migration door (bin/migrate-prod.sh)",
-      "purpose": "Registered so the door's own WR-000048 prevention wiring can open-incident against a real service key \u2014 open-incident refuses an unregistered one rather than inventing it (mcp-server/src/incident.js). This is the WRAPPER SCRIPT ITSELF as a monitored subject, distinct from neon-record-layer above (the data store migrate-prod.sh writes to, which lists bin/migrate-prod.sh only as ITS deploy_mechanism).",
-      "family": "Data",
-      "criticality": "high",
-      "owner_actor": "joe",
-      "repo_path": "bin/migrate-prod.sh",
-      "runtime": "operator-invoked",
-      "environments": [
-        {
-          "environment": "production",
-          "notes": "No cadence: this door is run by hand or by a session, never on a schedule, so absence of activity is not itself an anomaly \u2014 same 'a service with no cadence is not an oversight' posture as carr-mcp above."
+          "deploy_mechanism": ".github/workflows/deploy.yml"
         }
       ]
     },
     {
       "key": "nightly-record-layer",
       "name": "Nightly record-layer chain",
-      "purpose": "Cadence, matcher, exports, corpus push, consumers, graph, backup \u2014 in that order.",
+      "purpose": "Cadence, matcher, exports, corpus push, consumers, graph, backup — in that order.",
       "family": "Local Mac edge",
       "criticality": "high",
       "owner_actor": "joe",
@@ -284,7 +264,7 @@
           "runs_on": "every",
           "expected_cadence_seconds": 3600,
           "cadence_grace_seconds": 3600,
-          "notes": "Grace widened 1800\u21923600 on 2026-08-18: run rows now ride the local spool (tools/ops-spool.py) and land at the next run-spool-flush, so a row can be inserted up to 1800s after its fire; the old grace put the worst honest gap exactly at the window edge."
+          "notes": "Grace widened 1800→3600 on 2026-08-18: run rows now ride the local spool (tools/ops-spool.py) and land at the next run-spool-flush, so a row can be inserted up to 1800s after its fire; the old grace put the worst honest gap exactly at the window edge."
         }
       ]
     },
@@ -304,7 +284,7 @@
           "runs_on": "primary",
           "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 2700,
-          "notes": "Wakes every two minutes, but bin/run-scheduled.sh's --heartbeat-interval (Program 4 follow-up) throttles a SUCCEEDED row to at most one per 1800s \u2014 recording all ~720 fires/day as rows would be pure noise from a healthy channel. Every FAILURE is still recorded immediately regardless of the throttle, so cadence here reflects the succeeded heartbeat, not the wake. Grace widened 900\u21922700 on 2026-08-18: the succeeded row now rides the local spool (tools/ops-spool.py) and is inserted at the next run-spool-flush, up to 1800s after the throttle emitted it, so the honest worst-case gap between inserts is throttle+flush (3600s) against a window of cadence+grace (4500s). Also 2026-08-18: the plist passes --scheduled, which skips the QUERY (never the wake, never the row) outside weekdays 07:00-19:00 local \u2014 the last thing keeping the Neon compute from autosuspending. The 2-minute interrupt Joe promised on 2026-08-03 is unchanged during the working day; outside it the job still wakes, still exits 0, and still records its heartbeat through the spool, so this service stays observable overnight exactly as before. This job once logged 382 consecutive identical 'nothing new' lines to a local log with a broken query, because a channel with nothing to say and a channel that cannot ask produce byte-identical output \u2014 a run row (even throttled) still distinguishes them, since a genuinely broken query fails loud and goes to the ledger direct, ahead of the spool."
+          "notes": "Wakes every two minutes, but bin/run-scheduled.sh's --heartbeat-interval (Program 4 follow-up) throttles a SUCCEEDED row to at most one per 1800s — recording all ~720 fires/day as rows would be pure noise from a healthy channel. Every FAILURE is still recorded immediately regardless of the throttle, so cadence here reflects the succeeded heartbeat, not the wake. Grace widened 900→2700 on 2026-08-18: the succeeded row now rides the local spool (tools/ops-spool.py) and is inserted at the next run-spool-flush, up to 1800s after the throttle emitted it, so the honest worst-case gap between inserts is throttle+flush (3600s) against a window of cadence+grace (4500s). Also 2026-08-18: the plist passes --scheduled, which skips the QUERY (never the wake, never the row) outside weekdays 07:00-19:00 local — the last thing keeping the Neon compute from autosuspending. The 2-minute interrupt Joe promised on 2026-08-03 is unchanged during the working day; outside it the job still wakes, still exits 0, and still records its heartbeat through the spool, so this service stays observable overnight exactly as before. This job once logged 382 consecutive identical 'nothing new' lines to a local log with a broken query, because a channel with nothing to say and a channel that cannot ask produce byte-identical output — a run row (even throttled) still distinguishes them, since a genuinely broken query fails loud and goes to the ledger direct, ahead of the spool."
         }
       ]
     },
@@ -323,7 +303,7 @@
           "runs_on": "every",
           "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 2700,
-          "notes": "Wakes every 5 min, but bin/run-scheduled.sh's --heartbeat-interval (Program 4 follow-up) throttles a SUCCEEDED row to at most one per 1800s (30 min) \u2014 recording all ~288 fires/day would be noise from a quiet inbox. Every FAILURE is still recorded immediately regardless of the throttle. Grace widened 900\u21922700 on 2026-08-18 for the spool delay (tools/ops-spool.py): a succeeded row is inserted at the next run-spool-flush, up to 1800s after it was emitted."
+          "notes": "Wakes every 5 min, but bin/run-scheduled.sh's --heartbeat-interval (Program 4 follow-up) throttles a SUCCEEDED row to at most one per 1800s (30 min) — recording all ~288 fires/day would be noise from a quiet inbox. Every FAILURE is still recorded immediately regardless of the throttle. Grace widened 900→2700 on 2026-08-18 for the spool delay (tools/ops-spool.py): a succeeded row is inserted at the next run-spool-flush, up to 1800s after it was emitted."
         }
       ]
     },
@@ -421,27 +401,7 @@
           "runs_on": "every",
           "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 2700,
-          "notes": "Criticality HIGH although the job is small: every wrapper-recorded service's freshness now depends on this one draining the queue, so a silently stopped flusher would age every heartbeat at once. Its OWN succeeded row rides the spool it just drained and lands on the NEXT flush \u2014 hence a grace wider than its cadence: the steady-state gap between its inserts is one full flush interval plus the next flush's delay. A genuinely failed flush is state=failed and goes to the ledger direct (the spool tries failures direct first), so a broken flusher does not have to wait for itself to be reported."
-        }
-      ]
-    },
-    {
-      "key": "release-pipeline",
-      "name": "Scripted release pipeline (Worker + DoctorCRE app)",
-      "purpose": "Decisions 17ef11fa/b729859d: release is script-triggered. Every minute compares each lane's origin/main with the last SHA it released and, when the batch touches release paths, runs the sanctioned manual release sequence unattended from a detached worktree at the exact SHA (staging replacement, staging app writer, migrate-prod, deploy-worker upload/staging/promote, live readback, health; credential-free node scripts/prepare-release.mjs, then provider-only node scripts/release-production.mjs for the app). Stops on any nonzero exit, records the step and log, never retries that SHA, and enqueues a repo-write Model Room diagnosis session to fix forward by PR. Kill switch: ops/config/release-pipeline.v1.json enabled, or ~/.config/carr/release-pipeline.off. See ops/release-pipeline.py.",
-      "family": "Local Mac edge",
-      "criticality": "high",
-      "owner_actor": "joe",
-      "repo_path": "ops/release-pipeline.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.release-pipeline.plist",
-          "runs_on": "primary",
-          "expected_cadence_seconds": 3600,
-          "cadence_grace_seconds": 5400,
-          "notes": "Wakes every 60s; bin/run-scheduled.sh --heartbeat-interval 3600 throttles SUCCEEDED rows to one an hour, and every failure (a stopped release, or exit 3 for a missing unattended credential) is recorded immediately. Grace covers the ops-spool flush delay, as for room-bridge. What shipped, failed or blocked is in out/release-pipeline/releases.jsonl; `ops/release-pipeline.py report --date D` prints it for a daily note."
+          "notes": "Criticality HIGH although the job is small: every wrapper-recorded service's freshness now depends on this one draining the queue, so a silently stopped flusher would age every heartbeat at once. Its OWN succeeded row rides the spool it just drained and lands on the NEXT flush — hence a grace wider than its cadence: the steady-state gap between its inserts is one full flush interval plus the next flush's delay. A genuinely failed flush is state=failed and goes to the ledger direct (the spool tries failures direct first), so a broken flusher does not have to wait for itself to be reported."
         }
       ]
     },
@@ -703,7 +663,7 @@
           "deploy_mechanism": "Claude Code scheduled task (native), cron 30 9 * * 1",
           "expected_cadence_seconds": 604800,
           "cadence_grace_seconds": 172800,
-          "notes": "ENABLED AND UNREGISTERED until 2026-08-15, found by cross-checking list_scheduled_tasks against this file rather than by anything noticing on its own. The registry's own rule above is that only currently-enabled tasks are registered and disabled ones are deliberately left out, so this omission was a gap and not a choice: unregistered it had no cadence, nothing could call it stale, and ops/edge-liveness.py could not see it go quiet from off the Mac. Same 7-day cadence and 2-day grace as every other weekly task, for the reason local-briefs established \u2014 a weekly job can miss its one window if the Mac is asleep. Criticality is low because its output feeds the Friday batch rather than any client-facing or recovery path: a missed week costs that batch some fuel and nothing else. Re-registered on the Studio 2026-09-26 after a SECOND registration gap (2026-09-23); verification pending: the first proof run stalled on a tool-approval prompt (session local_7f276c32-2bc0-4484-af4d-08dd24bc5114, still 'running', 36 messages, no readback yet). Cause: an in-progress MacBook->Studio hub move copied this task's SKILL.md onto the Studio (one of 22 folders copied that day) but again never called create_scheduled_task, while the MacBook copy was deleted and its scheduled-tasks.json kept the stale enabled row. Family changed from Local Mac edge to Studio edge: the Studio is the host now, MacBook is a thin client over SSH. This is the same failure class as the 2026-08-15 gap above and neither edge-liveness.py nor any other automated check has caught either occurrence -- both were found by a human cross-check."
+          "notes": "ENABLED AND UNREGISTERED until 2026-08-15, found by cross-checking list_scheduled_tasks against this file rather than by anything noticing on its own. The registry's own rule above is that only currently-enabled tasks are registered and disabled ones are deliberately left out, so this omission was a gap and not a choice: unregistered it had no cadence, nothing could call it stale, and ops/edge-liveness.py could not see it go quiet from off the Mac. Same 7-day cadence and 2-day grace as every other weekly task, for the reason local-briefs established — a weekly job can miss its one window if the Mac is asleep. Criticality is low because its output feeds the Friday batch rather than any client-facing or recovery path: a missed week costs that batch some fuel and nothing else. Re-registered on the Studio 2026-09-26 after a SECOND registration gap (2026-09-23); verification pending: the first proof run stalled on a tool-approval prompt (session local_7f276c32-2bc0-4484-af4d-08dd24bc5114, still 'running', 36 messages, no readback yet). Cause: an in-progress MacBook->Studio hub move copied this task's SKILL.md onto the Studio (one of 22 folders copied that day) but again never called create_scheduled_task, while the MacBook copy was deleted and its scheduled-tasks.json kept the stale enabled row. Family changed from Local Mac edge to Studio edge: the Studio is the host now, MacBook is a thin client over SSH. This is the same failure class as the 2026-08-15 gap above and neither edge-liveness.py nor any other automated check has caught either occurrence -- both were found by a human cross-check."
         }
       ]
     },
@@ -813,7 +773,7 @@
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.capture-watch.plist",
           "runs_on": "every",
-          "notes": "WatchPaths-triggered, so SILENCE IS THE NORMAL STATE \u2014 it fires only when a recording session starts. Any cadence would cry wolf on every day Joe records nothing, which is most days, and an alarm that fires on a quiet day is how both partners learn to stop reading alarms."
+          "notes": "WatchPaths-triggered, so SILENCE IS THE NORMAL STATE — it fires only when a recording session starts. Any cadence would cry wolf on every day Joe records nothing, which is most days, and an alarm that fires on a quiet day is how both partners learn to stop reading alarms."
         }
       ]
     },

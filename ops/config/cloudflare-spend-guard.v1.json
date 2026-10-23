@@ -227,7 +227,7 @@
     "fast_path": "POST /client/v4/graphql; token permission Account > Account Analytics > Read (https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/)"
   },
   "staging_configs": {
-    "carr-mcp-staging": "mcp-server/wrangler.toml",
+    "carr-mcp-staging": "ops/config/staging-trigger-inventory.v1.json",
     "doctorcre-app-staging": "~/doctorcre-app/wrangler.jsonc"
   },
   "price_model": {

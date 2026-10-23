@@ -76,21 +76,6 @@ class Callers(unittest.TestCase):
             input=result.stdout, capture_output=True, text=True)
         self.assertEqual((node.returncode, json.loads(node.stdout)), (0, [1, 2]))
 
-    def test_foundation_python_caller_keeps_exact_head_checks_across_pages(self):
-        foundation = module('caller_foundation', 'ops/foundation-assurance-candidate-rehearsal.py')
-        head = 'a' * 40
-        checks = [{'id': i+1, 'name': name, 'head_sha': head, 'status': 'completed',
-                   'conclusion': 'success', 'completed_at': '2026-10-07T00:00:00Z'}
-                  for i, name in enumerate(foundation.CHECKS)]
-        self.provider('from urllib.parse import urlsplit,parse_qs\n'
-            'page=int(parse_qs(urlsplit(sys.argv[2]).query)["page"][0])\n'
-            f'checks={checks!r}\n'
-            'link="Link: <https://api.github.com/x?page=2>; rel=\\\"next\\\"\\n" if page==1 else ""\n'
-            'print("HTTP/2.0 200\\n"+link+"X-RateLimit-Remaining: 20\\n\\n"+'
-            'json.dumps({"total_count":len(checks),"check_runs":checks[:2] if page==1 else checks[2:]}))\n')
-        rows = foundation.hosted_checks(head)
-        self.assertEqual([row['name'] for row in rows], list(foundation.CHECKS))
-        self.assertEqual([row['run_id'] for row in rows], [1, 2, 3])
 
     def test_object_jq_slurp_semantics_and_page_cap(self):
         self.object_pages('check_runs')

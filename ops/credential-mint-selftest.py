@@ -673,7 +673,7 @@ def test_neon_child_scope_is_explicit() -> None:
     print("finding 2: the Neon child's scope is a recorded choice, and project scope is honoured")
     scope = next(g for g in cm.load_plan().grants if g.name == "neon").params["child_scope"]
     check("the shipped child is org-wide with a recorded reason naming its org-level consumers",
-          scope["kind"] == "organization" and "staging-project-replacement" in scope["because"]
+          scope["kind"] == "organization" and "projects list --org-id" in scope["because"]
           and "system_costs" in scope["because"] and "consumption_history" in scope["because"], scope)
 
     def no_scope(g):

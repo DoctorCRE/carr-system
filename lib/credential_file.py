@@ -1,7 +1,7 @@
 """The one Python reader of ~/.config/carr/*.env credential files.
 
 These files have two consumers with one contract. Shell jobs load them with
-`set -a; . db.env` (bin/nightly.sh, bin/migrate-prod.sh and the rest), so a
+`set -a; . db.env` (bin/nightly.sh, the GitHub production deployment workflow and the rest), so a
 DSN carrying `&` must be single-quoted. Python jobs used to parse them with
 their own `split("=", 1)` lines, at least nine of them, each slightly
 different. On 2026-08-02 quoting a value for the shell broke four of those

@@ -91,18 +91,6 @@
       "enabled": true
     },
     {
-      "label": "com.carr.release-pipeline",
-      "source": "ops/launchd/com.carr.release-pipeline.plist",
-      "credentials": [
-        "~/.config/carr/db.env",
-        "~/.config/carr/tokens.env"
-      ],
-      "state": [
-        "~/carr-system/out/release-pipeline"
-      ],
-      "enabled": true
-    },
-    {
       "label": "com.carr.tailscale-up",
       "source": "ops/launchd/com.carr.tailscale-up.plist",
       "credentials": [],
