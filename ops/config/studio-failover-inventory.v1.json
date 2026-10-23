@@ -94,32 +94,6 @@
       }
     },
     {
-      "label": "com.carr.delivery-cadence-a05-sweep",
-      "path": "~/Library/LaunchAgents/com.carr.delivery-cadence-a05-sweep.plist",
-      "executables": [
-        "/bin/zsh"
-      ],
-      "dependencies": [
-        "~/carr-system/bin/run-scheduled.sh",
-        "~/carr-system/.venv/bin/python",
-        "~/carr-system/ops/delivery-cadence-a05-sweep.py"
-      ],
-      "disabled": false,
-      "environment_names": [
-        "CARR_REPO",
-        "PATH"
-      ],
-      "schedule_source": "~/Library/LaunchAgents/com.carr.delivery-cadence-a05-sweep.plist",
-      "classification": "leader-job",
-      "macbook_installed": false,
-      "macbook_missing": [],
-      "schedule_expectation": {
-        "scheduler": "launchd",
-        "expected_enabled": false,
-        "expected_installed": false
-      }
-    },
-    {
       "label": "com.carr.fix-train",
       "path": "~/Library/LaunchAgents/com.carr.fix-train.plist",
       "executables": [

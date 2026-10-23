@@ -328,26 +328,6 @@
       ]
     },
     {
-      "key": "delivery-cadence-a05-sweep",
-      "name": "V5-A05 delivery-cadence sweep",
-      "purpose": "Reads cadence-status for the bounded v1 subject (engineering_program/doctorcre-v5) and, only on a detected 14-day miss, raises the replan-on-miss escalation through raise-delivery-cadence-alert. Daily 07:00. See ops/delivery-cadence-a05-sweep.py.",
-      "family": "Local Mac edge",
-      "criticality": "low",
-      "owner_actor": "joe",
-      "repo_path": "ops/delivery-cadence-a05-sweep.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.delivery-cadence-a05-sweep.plist",
-          "runs_on": "primary",
-          "expected_cadence_seconds": 86400,
-          "cadence_grace_seconds": 172800,
-          "notes": "Daily, 07:00 local, before the working day. Grace spans a missed day plus buffer to the following run, matching timebomb-audit's own weekend-spanning reasoning."
-        }
-      ]
-    },
-    {
       "key": "recordings-purge",
       "name": "Recording retention purge",
       "purpose": "Deletes call recordings past their retention window.",

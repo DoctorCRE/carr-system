@@ -166,23 +166,13 @@ check("fixture owner role is created", events[3][0] == "/fake/psql" and "neondb_
 check("migration class runs through canonical CI", events[4][-2:] == ("--only", "migration"))
 check("migration gates discover the selected PostgreSQL binaries in the scrubbed child",
       child_envs[4]["PATH"].split(os.pathsep)[0] == "/fake")
-check(
-    "F03 PostgreSQL acceptance runs immediately after canonical CI",
-    events[5][-1].endswith("tools/test-f03-production-migration.py"),
-)
-check(
-    "F03 acceptance receives only the disposable DSN and exact psql",
-    child_envs[5].get("CARR_CI_DATABASE_URL")
-    == "postgres://carr_ci@127.0.0.1:55432/carr_ci"
-    and child_envs[5].get("CARR_F03_PSQL") == "/fake/psql",
-)
 continuity_event = next(
     index for index, event in enumerate(events)
     if event[-1].endswith("mcp-server/test/codex-continuity.test.mjs")
 )
 check(
     "Codex continuity real-PostgreSQL proof runs after canonical CI",
-    continuity_event == 6,
+    continuity_event == 5,
 )
 check(
     "Codex continuity proof receives the same disposable DSN and raw-PG driver",
@@ -190,15 +180,15 @@ check(
     == "postgres://carr_ci@127.0.0.1:55432/carr_ci"
     and child_envs[continuity_event].get("CARR_CONTINUITY_DATABASE_DRIVER_MODULE") == "pg",
 )
-check("Leads PostgreSQL regressions run after continuity", events[7][-1].endswith("mcp-server/test/lead-workspace-pg.test.mjs"))
-check("Leads PostgreSQL regressions receive the disposable DSN", child_envs[7].get("LEAD_WORKSPACE_TEST_DATABASE_URL") == "postgres://carr_ci@127.0.0.1:55432/carr_ci")
+check("Leads PostgreSQL regressions run after continuity", events[6][-1].endswith("mcp-server/test/lead-workspace-pg.test.mjs"))
+check("Leads PostgreSQL regressions receive the disposable DSN", child_envs[6].get("LEAD_WORKSPACE_TEST_DATABASE_URL") == "postgres://carr_ci@127.0.0.1:55432/carr_ci")
 check(
     "atomic Joe lifecycle runs after canonical CI",
-    events[8][-1].endswith("ops/atomic-rule-approval-local-pg-acceptance.py"),
+    events[7][-1].endswith("ops/atomic-rule-approval-local-pg-acceptance.py"),
 )
 check(
     "atomic rule-delivery cutover runs after authority acceptance",
-    events[9][-1].endswith("ops/rule-delivery-local-pg-acceptance.py"),
+    events[8][-1].endswith("ops/rule-delivery-local-pg-acceptance.py"),
 )
 snapshot_event = next(
     index for index, event in enumerate(events)
@@ -214,9 +204,9 @@ check(
 )
 check(
     "authority acceptance receives only the local disposable DSN",
-    child_envs[8].get("CARR_LOCAL_PG_DSN")
+    child_envs[7].get("CARR_LOCAL_PG_DSN")
     == "postgres://carr_ci@127.0.0.1:55432/carr_ci"
-    and "CARR_CI_DATABASE_URL" not in child_envs[8],
+    and "CARR_CI_DATABASE_URL" not in child_envs[7],
 )
 check("server always stops", events[-1][0] == "/fake/pg_ctl" and events[-1][-1] == "stop")
 check("temporary cluster is always removed", remove.call_count == 1)
@@ -236,7 +226,7 @@ with (
 core_events = events[core_events_start:]
 check("core partition remains strict and runs the full acceptance manifest",
       result == 0 and any(event[-3:] == ("--strict", "--migration-part", "core") for event in core_events)
-      and any(event[-1].endswith("tools/test-f03-production-migration.py") for event in core_events)
+      and any(event[-1].endswith("mcp-server/test/codex-continuity.test.mjs") for event in core_events)
       and any("--verify-only" in event for event in core_events))
 for part in ("proofs", "gates", "gates-serial", "gates-isolated", "acceptance"):
     start = len(events)
@@ -250,7 +240,7 @@ for part in ("proofs", "gates", "gates-serial", "gates-isolated", "acceptance"):
     calls = events[start:]
     check(f"{part} partition runs strictly", result == 0 and any(
         event[-3:] == ("--strict", "--migration-part", part) for event in calls))
-    acceptance = any(event[-1].endswith("tools/test-f03-production-migration.py") for event in calls)
+    acceptance = any(event[-1].endswith("mcp-server/test/codex-continuity.test.mjs") for event in calls)
     check(f"{part} partition owns the intended acceptance programs", acceptance == (part == "acceptance"))
 
 for invalid_part in ("fixtures", "unknown"):
@@ -275,15 +265,14 @@ continuity_event = next(
     index for index, event in enumerate(events)
     if event[-1].endswith("mcp-server/test/codex-continuity.test.mjs")
 )
-check("strict lane runs the F03 PostgreSQL acceptance", events[5][-1].endswith("tools/test-f03-production-migration.py"))
-check("strict lane runs the Codex continuity real-PostgreSQL proof", continuity_event == 6)
+check("strict lane runs the Codex continuity real-PostgreSQL proof", continuity_event == 5)
 check(
     "strict lane also proves atomic Joe lifecycle",
-    events[8][-1].endswith("ops/atomic-rule-approval-local-pg-acceptance.py"),
+    events[7][-1].endswith("ops/atomic-rule-approval-local-pg-acceptance.py"),
 )
 check(
     "strict lane also proves atomic rule-delivery cutover",
-    events[9][-1].endswith("ops/rule-delivery-local-pg-acceptance.py"),
+    events[8][-1].endswith("ops/rule-delivery-local-pg-acceptance.py"),
 )
 
 missing_gate = mod.run_required_local_gate(
