@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.pull_request.draft && 'draft' || 'ready' }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -21,8 +21,8 @@ permissions:
 
 jobs:
   scope:
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-24.04
-    continue-on-error: true
     timeout-minutes: 5
     outputs:
       full: ${{ steps.scope.outputs.full }}
@@ -41,7 +41,7 @@ jobs:
 
   classes:
     # Dispatch immediately; migration classifies locally with the same scope owner.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     name: ${{ matrix.gate_shard == 2 && matrix.job_names.gates_shard_2.name || matrix.job_names[matrix.classes].name }}
     runs-on: ubuntu-24.04
     strategy:
@@ -65,8 +65,12 @@ jobs:
             gates_shard_2: {name: "Gates selftests shard 2 of 2", classes: "gates"}
             hxprobe: {name: "ops/ci.sh --strict --only hxprobe", classes: "hxprobe"}
             dependency: {name: "ops/ci.sh --strict --only dependency", classes: "dependency"}
-        # The second dimension partitions only gates. Drafts keep their fast classes.
-        exclude: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.draft && '[{"classes":"dependency","gate_shard":2},{"classes":"pushfloor unit types contract secret binding artifact freshness","gate_shard":2},{"classes":"hxprobe","gate_shard":2},{"classes":"gates"},{"classes":"migration"}]' || '[{"classes":"dependency","gate_shard":2},{"classes":"pushfloor unit types contract secret binding artifact freshness","gate_shard":2},{"classes":"migration","gate_shard":2},{"classes":"hxprobe","gate_shard":2}]') }}
+        # The second dimension partitions only gates; ready runs keep every class.
+        exclude:
+          - {classes: "dependency", gate_shard: 2}
+          - {classes: "pushfloor unit types contract secret binding artifact freshness", gate_shard: 2}
+          - {classes: "migration", gate_shard: 2}
+          - {classes: "hxprobe", gate_shard: 2}
     timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
 
     services:
@@ -248,6 +252,7 @@ jobs:
 
 
   fallow:
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     name: Fallow (${{ matrix.root }})
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -297,6 +302,7 @@ jobs:
       - name: Fail unless every class group succeeded
         env:
           CI_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+          CI_CANCELLED: ${{ cancelled() }}
           CI_NEEDS: ${{ toJSON(needs) }}
         run: python3 ops/ci-evidence.py verdict
       - name: Record the tested tree and class contract

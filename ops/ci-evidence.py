@@ -42,38 +42,29 @@ def class_jobs(root=ROOT):
     return groups
 
 
-def verdict(jobs, groups, *, db_full=True, draft=False):
-    """Report job conclusions for every class, failing closed on missing jobs."""
-    lines, passed = [], True
-    labels = {'success': 'PASSED', 'failure': 'FAILED', 'cancelled': 'CANCELLED',
-              'skipped': 'SKIPPED', 'timed_out': 'TIMED OUT'}
-    for group in groups:
-        matches = [j for j in jobs if j.get('name') == 'ops/ci.sh --strict --only ' + group]
-        if len(matches) != 1:
-            label = 'MISSING' if not matches else 'AMBIGUOUS'
-        elif matches[0].get('status') != 'completed':
-            label = 'INCOMPLETE'
-        else:
-            label = labels.get(matches[0].get('conclusion'), 'UNKNOWN')
-        if draft and group in ('gates', 'migration') and not matches:
-            label = 'DEFERRED (draft)'
-        elif group == 'migration' and not db_full and label == 'PASSED':
-            label = 'NOT APPLICABLE (receipt)'
-        passed = passed and label in ('PASSED', 'NOT APPLICABLE (receipt)', 'DEFERRED (draft)')
-        lines.extend(c + ': ' + label for c in group.split())
-    return (0 if passed else 1), lines
-
-
-def hosted_verdict():
+def hosted_verdict(*, drift=False):
     """Use the scheduler's terminal results, never the eventually consistent jobs API."""
+    if os.environ.get('CI_CANCELLED') == 'true':
+        print('CI verdict: run cancelled; no full-suite evidence')
+        return 1
+    if os.environ.get('CI_DRAFT') != 'false':
+        message = 'Draft: deferred; no full-suite evidence'
+        print(message)
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+            summary.write(message + '\n')
+        return 1
     needs = json.loads(os.environ['CI_NEEDS'])
-    scope = needs['scope']
-    full = scope.get('outputs', {}).get('full') if scope['result'] == 'success' else None
-    draft = os.environ.get('CI_DRAFT') == 'true'
-    results = {name: needs[name]['result'] for name in ('classes', 'migration-fixtures', 'fallow')}
-    allowed = {'classes': {'success'}, 'migration-fixtures': {'success'}, 'fallow': {'success'}}
-    if full == 'false' or draft:
-        allowed['migration-fixtures'].add('skipped')
+    lanes = ('check',) if drift else ('scope', 'classes', 'migration-fixtures', 'fallow')
+    results = {name: needs[name]['result'] for name in lanes}
+    allowed = {name: {'success'} for name in lanes}
+    if not drift:
+        scope = needs['scope']
+        full = scope.get('outputs', {}).get('full') if scope['result'] == 'success' else None
+        if full not in ('true', 'false'):
+            print('CI verdict: scope receipt unavailable; refusing success')
+            return 1
+        if full == 'false':
+            allowed['migration-fixtures'].add('skipped')
     lines = [f"{name}: {'PASSED' if result == 'success' else str(result).upper()}"
              for name, result in results.items()]
     print('\n'.join(lines))
@@ -84,7 +75,7 @@ def hosted_verdict():
 
 def contract_digest(root=ROOT):
     digest = hashlib.sha256()
-    for name in ('.github/workflows/ci.yml', 'ops/ci.sh', 'ops/ci-unit.py', 'ops/node_test_summary.py',
+    for name in ('.github/workflows/ci.yml', 'ops/ci-evidence.py', 'ops/ci.sh', 'ops/ci-unit.py', 'ops/node_test_summary.py',
                  'ops/ci-node-file.mjs',
                  'requirements.lock',
                  'mcp-server/package-lock.json', '.nvmrc', '.python-version'):
@@ -98,6 +89,7 @@ def can_reuse(run, jobs, receipt, *, tree, head_tree, tested_tree, contract, gro
     return (run.get('name') == 'CI' and run.get('event') == 'pull_request'
             and run.get('status') == 'completed' and run.get('conclusion') == 'success'
             and required <= green and receipt.get('schema') == 'carr-ci-evidence/v1'
+            and receipt.get('event') == 'pull_request' and receipt.get('draft') is False
             and receipt.get('run_id') == run.get('id')
             and receipt.get('run_attempt') == run.get('run_attempt', 1)
             and receipt.get('head_sha') == run.get('head_sha')
@@ -160,23 +152,29 @@ def git(value):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['record', 'resolve', 'verdict'])
+    parser.add_argument('action', choices=['record', 'resolve', 'verdict', 'drift-verdict'])
     parser.add_argument('--output')
     args = parser.parse_args()
-    if args.action == 'verdict':
+    if args.action in ('verdict', 'drift-verdict'):
         try:
-            return hosted_verdict()
+            return hosted_verdict(drift=args.action == 'drift-verdict')
         except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
             print('CI verdict: dependency results unavailable; refusing success')
             return 1
     if not args.output:
         parser.error('--output is required for record/resolve')
+    if args.action == 'record':
+        event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+        if os.environ['GITHUB_EVENT_NAME'] == 'pull_request' and event['pull_request']['draft'] is not False:
+            print('Draft: deferred; no full-suite evidence')
+            return 1
     groups, contract = class_groups(), contract_digest()
     sha, tree = git('HEAD'), git('HEAD^{tree}')
     if args.action == 'record':
-        event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
         result = {'schema': 'carr-ci-evidence/v1', 'run_id': int(os.environ['GITHUB_RUN_ID']),
                   'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+                  'event': os.environ['GITHUB_EVENT_NAME'], 'action': event.get('action'),
+                  'draft': event.get('pull_request', {}).get('draft', False),
                   'head_sha': event.get('pull_request', {}).get('head', {}).get('sha', sha),
                   'tested_sha': sha, 'tree_sha': tree, 'contract': contract, 'groups': groups}
     else:
