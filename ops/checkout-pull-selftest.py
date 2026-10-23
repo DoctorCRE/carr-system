@@ -38,7 +38,6 @@ class CheckoutPullTests(unittest.TestCase):
             target = self.home / "carr-system/bin/checkout-pull.sh"
             target.parent.mkdir()
             shutil.copy2(script, target)
-            self.git(self.repositories[0][0], "config", "status.showUntrackedFiles", "no")
             exclude = self.repositories[0][0] / ".git/info/exclude"
             exclude.write_text("/bin/checkout-pull.sh\n")
 
@@ -69,6 +68,65 @@ class CheckoutPullTests(unittest.TestCase):
         self.assertEqual(self.git(repo, "rev-parse", "HEAD"), before)
         self.assertEqual(self.git(repo, "branch", "--show-current"), "feature")
         self.assert_sibling_updated()
+
+    def test_clean_main_refreshes_both_checkouts(self):
+        result = self.refresh()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for repo, seed, _ in self.repositories:
+            self.assertEqual(self.git(repo, "rev-parse", "HEAD"), self.git(seed, "rev-parse", "HEAD"))
+        self.assertEqual(self.refresh().returncode, 0)
+
+    def test_dirty_checkout_fails_and_preserves_work(self):
+        repo, _, _ = self.repositories[0]
+        (repo / "fixture").write_text("local edits\n")
+        result = self.refresh()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((repo / "fixture").read_text(), "local edits\n")
+        self.assert_sibling_updated()
+
+    def test_untracked_work_is_refused_even_when_hidden_by_git_config(self):
+        repo, _, _ = self.repositories[0]
+        self.git(repo, "config", "status.showUntrackedFiles", "no")
+        (repo / "local-work").write_text("unsaved work\n")
+        before = self.git(repo, "rev-parse", "HEAD")
+        self.assertNotEqual(self.refresh().returncode, 0)
+        self.assertEqual(self.git(repo, "rev-parse", "HEAD"), before)
+        self.assert_sibling_updated()
+
+    def test_explicit_origin_main_ignores_another_tracking_branch(self):
+        repo, seed, _ = self.repositories[0]
+        self.git(seed, "branch", "other", "HEAD~1")
+        self.git(seed, "push", "origin", "other")
+        self.git(repo, "config", "branch.main.merge", "refs/heads/other")
+        self.assertEqual(self.refresh().returncode, 0)
+        self.assertEqual(self.git(repo, "rev-parse", "HEAD"), self.git(seed, "rev-parse", "main"))
+        self.assert_sibling_updated()
+
+    def test_divergent_main_fails_without_discarding_commit(self):
+        repo, _, _ = self.repositories[0]
+        (repo / "local-work").write_text("committed work\n")
+        self.git(repo, "add", "local-work")
+        self.git(repo, "commit", "-m", "local fixture")
+        before = self.git(repo, "rev-parse", "HEAD")
+        self.assertNotEqual(self.refresh().returncode, 0)
+        self.assertEqual(self.git(repo, "rev-parse", "HEAD"), before)
+        self.assert_sibling_updated()
+
+    def test_fetch_failure_stays_failed_while_sibling_refreshes(self):
+        repo, _, _ = self.repositories[0]
+        self.git(repo, "remote", "set-url", "origin", str(self.home / "absent-origin"))
+        self.assertNotEqual(self.refresh().returncode, 0)
+        self.assert_sibling_updated()
+
+    def test_linked_worktree_is_refused_at_canonical_path(self):
+        repo, seed, _ = self.repositories[1]
+        shutil.rmtree(repo)
+        self.git(seed, "worktree", "add", "--detach", str(repo), "HEAD~1")
+        before = self.git(repo, "rev-parse", "HEAD")
+        self.assertNotEqual(self.refresh().returncode, 0)
+        self.assertEqual(self.git(repo, "rev-parse", "HEAD"), before)
+        first, first_seed, _ = self.repositories[0]
+        self.assertEqual(self.git(first, "rev-parse", "HEAD"), self.git(first_seed, "rev-parse", "HEAD"))
 
 
 if __name__ == "__main__":
