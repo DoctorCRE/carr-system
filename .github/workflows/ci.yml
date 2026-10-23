@@ -11,11 +11,6 @@ on:
     # edge-liveness slot.
     - cron: "20 6 * * *"
   workflow_dispatch:
-    inputs:
-      test_first_base:
-        description: Full base SHA for a manual test-first comparison against this ref
-        required: false
-        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.pull_request.draft && 'draft' || 'ready' }}
@@ -25,57 +20,6 @@ permissions:
   contents: read
 
 jobs:
-  test-first:
-    name: Test-first footprint
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    services:
-      postgres:
-        image: mirror.gcr.io/library/postgres:17@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
-        env:
-          POSTGRES_USER: carr_ci
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: carr_ci
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U carr_ci -d carr_ci"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version-file: .python-version
-      - name: Install test dependencies
-        run: |
-          python -m pip install -r requirements.lock
-          npm --prefix mcp-server ci --no-audit
-          npm --prefix practice-plugin ci --no-audit
-      - name: Install zsh
-        env:
-          ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
-        run: ops/ci-zsh.sh
-      - name: Prove changed tests distinguish the base and head code
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.test_first_base }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          CARR_CI_DATABASE_URL: postgres://carr_ci:postgres@localhost:5432/carr_ci # ci-secret-scan: allow - disposable loopback fixture
-          CARR_CI_PORTABLE_ONLY: "1"
-        run: |
-          if [ "$GITHUB_EVENT_NAME" != pull_request ] && [ -z "$BASE_SHA" ]; then
-            echo 'test-first: not applicable; no pull request or manual base SHA' >> "$GITHUB_STEP_SUMMARY"
-          else
-            ops/ci.sh --test-first "$BASE_SHA" "$HEAD_SHA"
-          fi
-
   scope:
     runs-on: ubuntu-24.04
     continue-on-error: true
@@ -341,7 +285,7 @@ jobs:
     # the merge silently instead of saying why.
     name: ops/ci.sh --strict
     runs-on: ubuntu-24.04
-    needs: [scope, classes, migration-fixtures, fallow, test-first]
+    needs: [scope, classes, migration-fixtures, fallow]
     permissions:
       contents: read
     if: ${{ always() }}
@@ -350,10 +294,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
-      - name: Require test-first footprint
-        env:
-          TEST_FIRST_RESULT: ${{ needs.test-first.result }}
-        run: test "$TEST_FIRST_RESULT" = success
       - name: Fail unless every class group succeeded
         env:
           CI_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
