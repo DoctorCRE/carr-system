@@ -129,7 +129,6 @@
      "tools": [],
      "verbs": [
       "add-loop",
-      "bot-brief",
       "loop-board",
       "morning-brief",
       "today-triage",
@@ -218,7 +217,6 @@
       "mcp__*__update_scheduled_task"
      ],
      "verbs": [
-      "record-cadence-receipt",
       "record-finding"
      ],
      "bash_patterns": [
