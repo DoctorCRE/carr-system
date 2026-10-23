@@ -40,8 +40,16 @@ class BuilderSkillsTests(unittest.TestCase):
                 self.assertIn('poteto-mode', sent)
                 self.assertIn('principle-prove-it-works', sent)
                 self.assertEqual(sent.count('Rules:'), 1)
-                self.assertIn('never merge', sent)
+                self.assertNotIn('never merge', sent)
+                self.assertIn('GitHub auto-merge turned on (squash, pinned to your head commit)', sent)
                 self.assertEqual(self.send(sent, *flags), sent)
+
+    def test_builder_uses_result_questions_and_pinned_auto_merge(self):
+        builder = (Path(__file__).parent / 'briefs/builder.md').read_text()
+        self.assertIn('QUESTION:', builder)
+        self.assertIn('Open the PR with GitHub auto-merge turned on (squash, pinned to your head commit); it merges itself when CI is green. App screen changes open as drafts until the independent taste score passes.', builder)
+        for name in ('builder.md', 'staging-score.md'):
+            self.assertNotIn('never merge', (Path(__file__).parent / 'briefs' / name).read_text())
 
     def test_custom_skills_are_preserved_and_standard_safety_is_added(self):
         task = 'Review dispatch.\n\nSkills: custom reviewer\n\nRules: inspect only.'

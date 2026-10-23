@@ -69,7 +69,8 @@ source = repo / 'tools/outlook-intake-copy.c'
 helper = home / COPY_HELPER
 flags = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
          f'-DOUTLOOK_PROFILE={json.dumps(str(home / PROFILE))}',
-         f'-DOUTLOOK_WORK_ROOT={json.dumps(str(repo / OUT))}']
+         f'-DOUTLOOK_WORK_ROOT={json.dumps(str(repo / OUT))}',
+         f'-DOUTLOOK_REPO={json.dumps(str(repo))}']
 pin = helper.with_suffix('.pin')
 wanted = hashlib.sha256(source.read_bytes() + json.dumps(flags).encode()).hexdigest()
 helper.parent.mkdir(parents=True, exist_ok=True)

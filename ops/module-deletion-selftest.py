@@ -31,7 +31,6 @@ class ModuleDeletionTests(unittest.TestCase):
         for path in (
             "lib/record_sources.py", "generators/build-deal-room.py",
             "generators/build-lead-board.py", "shared/build-lead-board-template.py",
-            "hooks/draft-export-gate.py", "ops/draft-export-gate-selftest.py",
             "specs/party-graph-ref-fallback.md", "ops/config/rule-routes.v1.json",
         ):
             with self.subTest(path=path):

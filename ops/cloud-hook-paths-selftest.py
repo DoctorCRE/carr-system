@@ -37,9 +37,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 SETTINGS = REPO / ".claude" / "settings.json"
 SHELLS = [s for s in ("/bin/sh", "/bin/bash", "/bin/zsh") if os.access(s, os.X_OK)]
-GATE = "builder-agent-gate.py"
+GATE = "rule-claim-gate.py"
 MACHINE_HOOKS = ("worktree-self-plumb.py", "machine-converge.py")
-KNOWN_HOOKS = (GATE, "builder-agent-gate.py", "rule-claim-gate.py", *MACHINE_HOOKS)
+KNOWN_HOOKS = (GATE, *MACHINE_HOOKS)
 
 FAILURES: list[str] = []
 
@@ -201,7 +201,7 @@ def mac_cases() -> None:
         # state, so the command must not quietly fall back to the project copy.
         (canonical / GATE).unlink()
         command = next(c for e, s, c in wired_commands() if s == GATE)
-        r = run(SHELLS[0], command, env, cases["PreToolUse"][0], project)
+        r = run(SHELLS[0], command, env, cases["Stop"][0], project)
         check("mac: a missing canonical gate never falls back to the project copy",
               "PROJECT:" not in r.stdout, f"stdout={r.stdout.strip()!r}")
 

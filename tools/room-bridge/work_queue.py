@@ -175,8 +175,12 @@ class WorkQueue:
                 item = {**data, **{k: r[k] for k in
                         ('card_id', 'position', 'stage', 'desk', 'ready', 'review_round')}}
                 item['result_status'] = result.get('status')
+                item['checkout_cleanup'] = result.get('checkout_cleanup')
                 item['required_skills'] = json.loads(r['options']).get('required_skills', [])
-                item['result_detail'] = str(result.get('detail') or '')[:500]
+                answer = str(result.get('result') or '').strip().splitlines()
+                question = answer[0] if answer and answer[0].startswith('QUESTION:') else ''
+                cleanup = result.get('checkout_cleanup') or {}
+                item['result_detail'] = question or str(result.get('detail') or cleanup.get('detail') or '')[:500]
                 item['dispatch_ref'] = result.get('msg_id')
                 item['thread_id'] = result.get('thread_id')
                 item['claim'] = r['claim']
@@ -480,6 +484,13 @@ def board_projection(path=None):
               'total_time_s', 'findings_opened', 'findings_resolved', 'merge_position', 'timing_unknown'}
     for item in snapshot['items']:
         projected = {key: clean(value) for key, value in item.items() if key in fields}
+        detail = str(item.get('result_detail') or '')
+        if detail.startswith('QUESTION:'):
+            projected['result_detail'] = clean(detail)
+        elif (item.get('checkout_cleanup') or {}).get('detail'):
+            projected['result_detail'] = clean(item['checkout_cleanup']['detail'])
+        projected['checkout_cleanup'] = {key: clean(value)
+            for key, value in (item.get('checkout_cleanup') or {}).items() if key in ('status', 'detail')}
         projected['prs'] = [{key: ref[key] for key in ('repo', 'number', 'head') if key in ref}
                             for ref in item.get('prs', []) if isinstance(ref, dict)
                             and re.fullmatch(r'(DoctorCRE/carr-system|jbookout/(doctorcre-app|software-factory))', str(ref.get('repo', '')))]

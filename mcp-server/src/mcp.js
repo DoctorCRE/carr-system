@@ -36,7 +36,7 @@ const CANONICAL_OWNERSHIP_HOST_VERSION = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,95}$/;
 // header, RPC parameter, or tool argument.  The ownership adapter refuses when
 // it is absent: a pool connection that cannot name its configured host cannot
 // be trusted to acquire or renew a canonical ownership lease.
-export function canonicalOwnershipExecutionHost(env) {
+function canonicalOwnershipExecutionHost(env) {
   const version = typeof env?.CF_VERSION_METADATA?.id === "string"
     ? env.CF_VERSION_METADATA.id.trim() : "";
   return CANONICAL_OWNERSHIP_HOST_VERSION.test(version)

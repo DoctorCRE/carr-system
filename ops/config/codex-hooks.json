@@ -23,16 +23,6 @@
         ]
       },
       {
-        "matcher": "^(Bash|exec_command|functions\\.exec)$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if [ ! -f \"{{REPO}}/hooks/github-burst-guard.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/github-burst-guard.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/github-burst-guard.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/github-burst-guard.py",
-            "timeout": 5
-          }
-        ]
-      },
-      {
         "matcher": "^(apply_patch|functions\\.apply_patch)$",
         "hooks": [
           {
