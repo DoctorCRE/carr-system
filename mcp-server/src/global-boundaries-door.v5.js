@@ -1,11 +1,8 @@
 // DoctorCRE v5 slice V5-S01, the LIVE DOOR for the global boundaries.
 //
 // global-boundaries.v5.js (#929) encodes the eight settled decisions as a pure,
-// versioned policy. Until this file, nothing evaluated that policy against a
-// live dispatch: forty-odd v5 modules import its constants, and exactly one
-// registered verb (set-current-model-role-revision) asks its authority
-// evaluator a question from inside its own handler. This module is the seam
-// between a live verb dispatch and that policy, and nothing more.
+// versioned policy. This module evaluates that policy at the live verb
+// dispatch seam before each handler runs.
 //
 // WHAT THE DOOR DOES, per dispatch, before the handler runs:
 //   * actor authority (Q003/Q020/Q141) for the closed set of verbs whose
@@ -150,10 +147,6 @@ export const V5_DOOR_SYSTEM_AUTHORITY_VERBS = deepFreeze({
   "accept-workflow": {
     action: "system.autonomy_tier_activation", when: { field: "mode", equals: "canary" },
     existing_enforcement: "ops.record_workflow_acceptance refuses canary acceptance by a non-Joe authority session",
-  },
-  "set-current-model-role-revision": {
-    action: "system.design", when: null,
-    existing_enforcement: "model-role-store.v5.js evaluates system.design in its own handler",
   },
 });
 

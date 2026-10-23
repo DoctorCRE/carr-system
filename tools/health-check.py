@@ -1797,7 +1797,7 @@ WATCH = [
     ("JOB cadence",       os.path.expanduser("~/carr-system/out/cadence-latest.md"), 26/24, [],
      "cadence_engine.py, step 1 of the nightly chain (exits 78 without a jobs credential)"),
     ("Joe calendar feed", "DNA/Team/calendar-latest.ics", 4, [],
-     "fetch-calendar.sh; business days only"),
+     "~/carr-local/fetch-calendar.sh; business days only; read by the morning brief"),
     ("Dell calendar feed","DNA/Team/calendar-latest-dell.ics", 4, [],
      "KNOWN BLOCKED on Dell's OS update (memory: dell-calendar-fetch-blocked) — expected stale until he updates"),
 ]
@@ -2893,7 +2893,7 @@ try:
                 print(f"  {'OK' if _j['remaining'] == 0 else '→︎'} migration-coverage   "
                       f"{_j['remaining']} corpus files not yet in a verified batch "
                       f"({_docs} docs, generation {_gen}) · on breach: run the next bounded "
-                      f"batch through bin/import-doctrine.sh")
+                      f"batch through the authenticated record verbs")
 except Exception as e:
     print(f"  ⚠︎ doctrine store check failed ({type(e).__name__}: {e})")
     rc = 1

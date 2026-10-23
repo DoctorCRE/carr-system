@@ -721,7 +721,7 @@
       "carrying_control": "delegation_names_model_and_effort",
       "home": "gate",
       "id": "6cfb67f5",
-      "reason": "Already machine-enforced via control 'delegation_names_model_and_effort' (tools/room-bridge/dispatch.py, tools/room-bridge/desks.py); binds at dispatch of a delegated task to another seat. Failure mode on violation: DeskError unnamed_model_or_effort at dispatch, before anything reaches the desk, when a codex-kind desk lacks a named model or rea",
+      "reason": "Codex jobs use bin/codex-job and inherit model and effort from Codex config. Codex validates the configuration; explicit -c overrides pass through unchanged.",
       "title_gist": "CONSTRAINT, binding at the moment a session delegates any task to another seat"
     },
     {

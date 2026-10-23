@@ -780,7 +780,7 @@ def codex_app_server_request(method, params):
     command = [os.environ.get("CARR_CODEX_CLI", "codex"), "app-server", "--stdio"]
     messages = [
         {"method": "initialize", "id": 1, "params": {
-            "clientInfo": {"name": "carr-continuity-installer", "version": "1.0.0"},
+            "clientInfo": {"name": "carr-codex-continuity-installer", "version": "1.0.0"},
             "capabilities": {"experimentalApi": True},
         }},
         {"method": "initialized", "params": {}},
@@ -893,7 +893,7 @@ def _write_codex_config_edits(edits, expected_version):
 
 
 def cmd_install_codex_continuity_mcp(apply=False):
-    """Install the existing adapter in explicit Codex mode with scoped permissions."""
+    """Install the Codex-only adapter with scoped permissions."""
     import copy
     import hashlib
     import shutil
@@ -902,7 +902,7 @@ def cmd_install_codex_continuity_mcp(apply=False):
     DEST = Path.home() / '.config/carr/codex-continuity'
     SERVER = 'carr-codex-continuity'
     TOOLS = ['codex-checkpoint', 'codex-read-recovery']
-    FILES = ['continuity-stdio-proxy.mjs', 'continuity-reference-manifest.mjs',
+    FILES = ['codex-continuity-stdio-proxy.mjs', 'continuity-reference-manifest.mjs',
              'local-client-auth.mjs']
     node = shutil.which('node')
     if not node:
@@ -910,7 +910,7 @@ def cmd_install_codex_continuity_mcp(apply=False):
     before = _codex_user_config_layer()
     expected = copy.deepcopy(before['config'])
     servers = expected.setdefault('mcp_servers', {})
-    servers[SERVER] = {'command': node, 'args': [str(DEST / FILES[0]), '--codex'],
+    servers[SERVER] = {'command': node, 'args': [str(DEST / FILES[0])],
                        'enabled_tools': TOOLS,
                        'tools': {name: {'approval_mode': 'approve'} for name in TOOLS}}
     # Remove the two broken duplicate routes in Codex only. All other tools and
@@ -2043,7 +2043,7 @@ def cmd_install(apply):
     if apply:
         os.makedirs(LAUNCHD_SRC, exist_ok=True)
     for f in sorted(os.listdir(LAUNCHD_REPO)) if os.path.isdir(LAUNCHD_REPO) else []:
-        if f in {"local.ds4-flash-next.plist", "local.flash-desk.plist", "com.carr.flash-idle-stop.plist"}:
+        if f in {"local.ds4-flash-next.plist", "com.carr.flash-idle-stop.plist"}:
             continue
         source = read(launchd_repo_path(f))
         if (launchd_calendar.plist_label(source or "") or f.removesuffix(".plist")) in held_labels:

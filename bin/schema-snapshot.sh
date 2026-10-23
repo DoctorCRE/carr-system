@@ -2206,8 +2206,7 @@ DOCTRINE_META
 # package contract carries NOT NULL foreign keys into ops.work_request rows that
 # 0324 itself creates. Once 0324 enters this snapshot's ledger nothing replays,
 # the vocabulary dump cannot pass the seals, and a rebuilt database has SIEP
-# structure with an empty, unseedable manifest — siep-program-local-pg-gate
-# fails on the full package set (found live on the first post-0324 snapshot,
+# structure with an empty, unseedable manifest (found on the first post-0324 snapshot,
 # pull request 712, closed unmerged).
 #
 # THE SHAPE CHOSEN, of the three recorded on WR-000016: a deterministic block

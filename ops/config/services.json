@@ -328,26 +328,6 @@
       ]
     },
     {
-      "key": "delivery-cadence-a05-sweep",
-      "name": "V5-A05 delivery-cadence sweep",
-      "purpose": "Reads cadence-status for the bounded v1 subject (engineering_program/doctorcre-v5) and, only on a detected 14-day miss, raises the replan-on-miss escalation through raise-delivery-cadence-alert. Daily 07:00. See ops/delivery-cadence-a05-sweep.py.",
-      "family": "Local Mac edge",
-      "criticality": "low",
-      "owner_actor": "joe",
-      "repo_path": "ops/delivery-cadence-a05-sweep.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.delivery-cadence-a05-sweep.plist",
-          "runs_on": "primary",
-          "expected_cadence_seconds": 86400,
-          "cadence_grace_seconds": 172800,
-          "notes": "Daily, 07:00 local, before the working day. Grace spans a missed day plus buffer to the following run, matching timebomb-audit's own weekend-spanning reasoning."
-        }
-      ]
-    },
-    {
       "key": "recordings-purge",
       "name": "Recording retention purge",
       "purpose": "Deletes call recordings past their retention window.",
@@ -813,26 +793,6 @@
       ]
     },
     {
-      "key": "expert-reply-watch",
-      "name": "Expert reply watch",
-      "purpose": "Weekly read-only mining of tracked X accounts replies into queued log-capture records, with URL deduplication and a dated local run ledger.",
-      "family": "Local Mac edge",
-      "criticality": "medium",
-      "owner_actor": "joe",
-      "repo_path": "tools/expert_reply_watch.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.expert-reply-watch.plist",
-          "runs_on": "primary",
-          "expected_cadence_seconds": 604800,
-          "cadence_grace_seconds": 86400,
-          "notes": "Monday 06:00 local. Primary only; Grok stdout proposals pass deterministic validation. CLI failure records one defect and exits nonzero. No X writes."
-        }
-      ]
-    },
-    {
       "key": "lead-signals-weekly",
       "name": "Weekly NPPES signal preparation",
       "purpose": "Classified NPPES proposals pending Joe/Dell verdicts; npi-sweep-weekly retains research, recommendations and ranked Hot output.",
@@ -887,33 +847,9 @@
           "notes": "Canonical checkout and out/boards are preserved. Only the active host publishes. Source declaration only; no service import or activation performed."
         }
       ]
-    },
-    {
-      "key": "job-cleaner",
-      "name": "Finished job checkout cleanup",
-      "purpose": "Daily worktree prune and safe retirement of pushed finished job clones older than two days. Keeps dirty, unpushed, live and uncertain work. Stages removals during the first week.",
-      "family": "Local Mac edge",
-      "criticality": "medium",
-      "owner_actor": "orchestrator",
-      "repo_path": "ops/job_cleanup.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.job-cleaner.plist",
-          "runs_on": "every",
-          "expected_cadence_seconds": 86400,
-          "cadence_grace_seconds": 86400,
-          "notes": "Runs at 03:17 local time. Lists every retained checkout and its reason in out/job-cleaner.log. No branch deletion."
-        }
-      ]
     }
   ],
   "dependencies": [
-    {
-      "service": "expert-reply-watch",
-      "depends_on": "neon-record-layer"
-    },
     {
       "service": "carr-mcp",
       "depends_on": "neon-record-layer"

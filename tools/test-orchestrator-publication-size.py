@@ -31,29 +31,6 @@ class PublicationBoundaryTests(unittest.TestCase):
                     remote.assert_not_called()
                     render.assert_not_called()
 
-    def test_secondary_queue_publish_retains_dirty_revision_without_remote_effects(self):
-        from pathlib import Path
-        import sys
-        sys.path.insert(0, str(board.REPO_ROOT / "tools/room-bridge"))
-        from work_queue import WorkQueue
-        from work_runner import main
-        root = Path(tempfile.gettempdir())
-        db = root / 'queue.sqlite3'
-        with WorkQueue(db) as queue:
-            queue.enqueue('synthetic', desk='cx-app2', task='Synthetic work', actor='test')
-            dirty = queue.publication()['dirty']
-            with patch.object(board.repo_lib('machine_role'), 'read_marker', return_value='secondary'), \
-                 patch.dict(board.os.environ, {}), \
-                 patch.object(board, 'read_state', return_value={'project': 'carr-v5', 'tasks': {}}), \
-                 patch.object(board, 'call_verb', side_effect=RuntimeError('remote reached')) as remote:
-                self.assertEqual(main(['--db', str(db), '--registry', str(root / 'registry.json'),
-                                       '--results', str(root / 'results.jsonl'), '--publish']), 0)
-            receipt = queue.publication()
-            self.assertEqual(receipt['dirty'], dirty)
-            self.assertEqual(receipt['published'], 0)
-            self.assertIn('primary', receipt['error'])
-            remote.assert_not_called()
-
     def test_repeated_updates_reuse_page_slots(self):
         state = {'tasks': {str(i): {'title': f'Work {i}', 'stage': 'review',
             'updated_at': '2026-01-01T00:00:00Z'} for i in range(1000)}}
@@ -65,7 +42,7 @@ class PublicationBoundaryTests(unittest.TestCase):
             self.assertEqual(args['base_version'], store.get(key, {}).get('version', 0))
             store[key] = {'version': args['base_version'] + 1, 'snapshot_json': copy.deepcopy(args['snapshot'])}
             return {'ok': True}
-        with patch.object(board, 'call_verb', side_effect=call), patch.object(board, 'read_json_file', return_value={}), patch.object(board.work_queue_module(), 'board_projection', return_value={'items': []}):
+        with patch.object(board, 'call_verb', side_effect=call), patch.object(board, 'read_json_file', return_value={}):
             for i in range(11):
                 state['tasks'][str(i)]['updated_at'] = f'2026-10-21T19:00:{i:02d}Z'
                 board.publish_orchestrator(state)
@@ -88,7 +65,7 @@ class PublicationBoundaryTests(unittest.TestCase):
             self.assertEqual(args['base_version'], store.get(key, {}).get('version', 0))
             store[key] = {'version': args['base_version'] + 1, 'snapshot_json': copy.deepcopy(args['snapshot'])}
             return {'ok': True}
-        with patch.object(board, 'call_verb', side_effect=call), patch.object(board, 'read_json_file', return_value={}), patch.object(board.work_queue_module(), 'board_projection', return_value={'items': []}):
+        with patch.object(board, 'call_verb', side_effect=call), patch.object(board, 'read_json_file', return_value={}):
             board.publish_orchestrator(state)
             before = copy.deepcopy(store['orchestrator'])
             fail = True
@@ -122,24 +99,17 @@ class PublicationBoundaryTests(unittest.TestCase):
             store[key] = {'version': args['base_version'] + 1, 'snapshot_json': copy.deepcopy(args['snapshot'])}
             return {'ok': True}
         with patch.object(board, 'call_verb', side_effect=call), \
-             patch.object(board, 'read_json_file', return_value={}), \
-             patch.object(board.work_queue_module(), 'board_projection', return_value={'items': [{'card_id': str(i), 'stage': 'building', 'title': 'Queue work', 'last_event': {'at': '2026-10-20T00:00:00Z'}} for i in range(205)]}):
+             patch.object(board, 'read_json_file', return_value={}):
             board.publish_orchestrator(state)
             view = store['orchestrator']['snapshot_json']['orchestrator']
             self.assertEqual(view['cards'][0]['title'], 'Fresh active work')
-            self.assertEqual(view['total_cards'], 1406)
+            self.assertEqual(view['total_cards'], 1201)
             cards = list(view['cards'])
             for page in view['pages']:
                 cards.extend(store[page['board_id']]['snapshot_json']['cards'])
-            self.assertEqual(len({card['id'] for card in cards}), 1406)
+            self.assertEqual(len({card['id'] for card in cards}), 1201)
             self.assertEqual(sum(card['state'] == 'merged' for card in cards), 600)
             self.assertFalse(any(card['state'] == 'live' for card in cards))
-            with patch.object(board.work_queue_module(), 'board_projection', side_effect=OSError('queue offline')):
-                board.publish_orchestrator(state)
-            outage = store['orchestrator']['snapshot_json']['orchestrator']
-            retained = outage['cards'] + [c for page in outage['pages'] for c in store[page['board_id']]['snapshot_json']['cards']]
-            self.assertEqual(sum(c['origin'] == 'queue' for c in retained), 205)
-            self.assertEqual(outage['sources']['queue']['state'], 'unavailable')
             previous = copy.deepcopy(store['orchestrator'])
             with patch.object(board, 'call_verb', side_effect=RuntimeError('offline')):
                 with self.assertRaises(RuntimeError):

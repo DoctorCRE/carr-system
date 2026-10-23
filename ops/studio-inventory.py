@@ -124,14 +124,13 @@ def compare(root):
     s, m = [json.loads((folder / (h + '.json')).read_text()) for h in ('studio', 'macbook')]
     labels = {p.removesuffix('.plist') for p in PRIMARY_ONLY}
     captured = {'com.carr.cliproxyapi', 'local.carr-progress-board',
-                'local.ds4-flash-next', 'local.flash-desk'}
+                'local.ds4-flash-next'}
     labels.update(captured)
     credentials = {
         'nightly-record-layer': ['db.env', 'tokens.env', 'healthchecks.env', 'age-key.txt'],
         'nightly-exports-daytime-retry': ['db.env', 'tokens.env'],
         'partner-ping': ['db.env'],
-        'job-watchdog': ['db.env', 'mcp-tokens.env'], 'cutover-watch': ['mcp-tokens.env'],
-        'delivery-cadence-a05-sweep': ['mcp-tokens.env']}
+        'job-watchdog': ['db.env', 'mcp-tokens.env'], 'cutover-watch': ['mcp-tokens.env']}
     states = {'partner-ping': ['~/.config/carr/partner-ping.json'],
               'local.carr-progress-board': ['~/carr-system/out/boards'],
               'nightly-record-layer': ['~/carr-system/out/backups']}

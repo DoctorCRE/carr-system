@@ -229,7 +229,7 @@ class GrokRunTests(unittest.TestCase):
                 self.assertEqual(text, ack)
                 self.assertEqual(code, 0)
 
-    def test_corrections_and_literal_answers_through_both_public_callers(self):
+    def test_corrections_and_literal_answers_through_runner(self):
         end = json.loads((FIXTURES / "hook-turns.ndjson").read_text().splitlines()[-1])
         correction = "The rule boot stopped after page 3. Pages 1 and 2 are already complete; retry page 3."
         for answer in (correction, "No action.", "The lifecycle warning is noted. Restart the failed job."):
@@ -237,9 +237,6 @@ class GrokRunTests(unittest.TestCase):
                 with self.subTest(answer=answer, earlier=bool(earlier)):
                     raw = '\n'.join(map(json.dumps, [*earlier, {"type": "text", "data": answer}, {"type": "usage"}, end]))
                     provider = mock.Mock(return_value=subprocess.CompletedProcess([], 0, raw, ''))
-                    desk = grok_wire.run_task({"model": "grok-4.7", "effort": "high", "sandbox": "read-only"}, 'Explain the result', run=provider)
-                    self.assertEqual(desk.get("result"), answer)
-                    self.assertEqual(desk["status"], "completed")
                     for writable in (False, True):
                         argv = ['grok-run', '--prompt', 'Explain the result'] + (['--writable'] if writable else [])
                         with mock.patch.object(sys, 'argv', argv), mock.patch.object(runner, 'preflight', return_value='fixture'), \
@@ -307,19 +304,12 @@ class GrokRunTests(unittest.TestCase):
         self.assertEqual(run.returncode, 4)
         self.assertEqual(receipt["stopReason"], "cancelled")
 
-    def test_accounting_after_completed_response_preserves_runner_and_desk_answer(self):
+    def test_accounting_after_completed_response_preserves_runner_answer(self):
         run, receipt = self.run_fixture("accounting-after-response.ndjson")
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout, "Final answer\n")
         self.assertEqual(receipt["stopReason"], "end_turn")
         self.assertEqual(receipt["actual_models"], ["grok-4.7-build"])
-        desk = grok_wire.run_task(
-            {"model": "grok-4.7", "effort": "high", "sandbox": "read-only"}, "test",
-            run=lambda argv, **kw: subprocess.CompletedProcess(
-                argv, 0, (FIXTURES / "accounting-after-response.ndjson").read_text(), ""))
-        self.assertEqual(desk["status"], "completed")
-        self.assertEqual(desk["result"], "Final answer")
-
     def test_wrong_model_refuses_substitution(self):
         run, receipt = self.run_fixture("wrong-model.ndjson")
         self.assertEqual(run.returncode, 5)
@@ -375,18 +365,6 @@ class GrokRunTests(unittest.TestCase):
         run, receipt = self.run_fixture("duplicate-end.ndjson")
         self.assertEqual(run.returncode, 4)
         self.assertEqual(receipt["stopReason"], "invalid_stream")
-
-    def test_runner_and_desk_reject_the_same_review_fixtures(self):
-        for fixture in ("mixed-model.ndjson", "lookalike-model.ndjson", "end-then-text.ndjson",
-                        "end-then-error.ndjson", "duplicate-end.ndjson"):
-            with self.subTest(fixture=fixture):
-                shell, _ = self.run_fixture(fixture)
-                raw = (FIXTURES / fixture).read_text()
-                desk = grok_wire.run_task(
-                    {"model": "grok-4.7", "effort": "high", "sandbox": "read-only"}, "test",
-                    run=lambda argv, **kw: subprocess.CompletedProcess(argv, 0, raw, ""))
-                self.assertNotEqual(shell.returncode, 0)
-                self.assertEqual(desk["status"], "failed")
 
     def run_cli(self, *args, installed="1.0.9", latest="1.0.10", auth=True,
                 registry=True, upgrade=True, cli_exit=0):
@@ -458,25 +436,6 @@ class GrokRunTests(unittest.TestCase):
                                "--output-format", "streaming-json", "--single",
                                    "Do not call any CARR or record-layer tool; do not write anything unless asked.\n\nliteral $HOME `x`"])
         self.assertEqual(json.loads(run.stderr)["cli_version"], "1.0.10")
-
-    def test_runner_and_desk_share_invocation_except_write_posture(self):
-        shell, calls = self.run_cli("--prompt", "test", installed="1.0.10")
-        self.assertEqual(shell.returncode, 0, shell.stderr)
-        desk_calls = []
-
-        def provider(argv, **kwargs):
-            desk_calls.append((argv, kwargs))
-            return subprocess.CompletedProcess(argv, 0, (FIXTURES / "live-ok.ndjson").read_text(), "")
-
-        desk = grok_wire.run_task(
-            {"model": "grok-4.7", "effort": "high", "sandbox": "read-only"}, "test", run=provider)
-        self.assertEqual(desk["status"], "completed")
-        self.assertEqual(len(desk_calls), 1)
-        expected = calls[-1][:-1]
-        expected[expected.index('--sandbox') + 1] = 'workspace'
-        self.assertEqual(expected, desk_calls[0][0][:-1])
-        self.assertTrue(calls[-1][-1].endswith("\n\ntest"))
-        self.assertTrue(desk_calls[0][0][-1].endswith("\n\ntest"))
 
     def test_writable_prompt_file_and_options(self):
         run, calls = self.run_cli("--writable", "--effort", "low", "--max-turns", "3",
