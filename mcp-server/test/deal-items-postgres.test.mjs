@@ -115,6 +115,29 @@ test('board and detail expose the same stored item contract', async () => {
   assert.deepEqual(detail.items, card.items);
 });
 
+test('Home agenda exposes the same stored checklist and short heading as Deals in one reader snapshot', async () => {
+  await c.query('begin');
+  try {
+    await c.query("update party set name='Dr. Morgan Example (Synthetic Practice)' where id=(select party_id from client where id=(select client_id from deal where id=$1))", [deal]);
+    await c.query("update deal set city='Baytown' where id=$1", [deal]);
+    const board = await TOOLS['deal-room-board'].handler(c, actor, {});
+    const card = board.deals.find(d => d.id === deal);
+    const detail = await TOOLS['get-deal-room'].handler(c, actor, { deal });
+    await c.query('set local role carr_reader');
+    let queries = 0;
+    const reader = { query(...args) { queries++; return c.query(...args); } };
+    const agenda = await executeRegisteredTool(reader, actor, 'read-home-agenda', {});
+    const home = agenda.deals.find(d => d.id === deal);
+    assert.equal(queries, 1);
+    assert.equal(home.item_schema_version, 'deal-items.v1');
+    assert.equal(home.short_name, "Dr. Example's Baytown Deal");
+    assert.deepEqual(home.items, card.items);
+    assert.deepEqual(home.items, detail.items);
+    assert.deepEqual(home.items.map(i => [i.title, i.status]), [['Vendor Introductions', 'done'], ['Prelim Market Study', 'open']]);
+    assert.deepEqual(Object.keys(home.items[0]).sort(), ['bullets', 'due_on', 'id', 'source_ref', 'status', 'title']);
+  } finally { await c.query('rollback'); }
+});
+
 test('ordinary notes and legacy complete-action do not discard or complete checklist siblings', async () => {
   const before = await readDealItems(c, deal);
   await command('add-deal-note', { text: 'A brief update.' });
