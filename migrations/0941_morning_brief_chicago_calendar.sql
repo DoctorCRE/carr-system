@@ -1,6 +1,6 @@
 -- lock-review: Replace four read views in place; no business rows or existing grants change.
+-- rollback: Restore the previous four view definitions, then drop carr_business_date(timestamptz).
 -- Slice D / F5: timestamp-derived days and current-day predicates use Chicago.
-begin;
 
 create or replace function public.carr_business_date(instant timestamptz default current_timestamp)
 returns date language sql stable strict parallel safe
@@ -147,5 +147,3 @@ select 'lead'::text, lead_id, public.carr_business_date(max(occurred_at))
 union all
 select 'vendor'::text, vendor_id, public.carr_business_date(max(occurred_at))
   from contact where vendor_id is not null group by vendor_id;
-
-commit;

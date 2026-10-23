@@ -69314,6 +69314,23 @@ $$;
 
 
 --
+-- Name: carr_business_date(timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.carr_business_date(instant timestamp with time zone DEFAULT CURRENT_TIMESTAMP) RETURNS date
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path TO 'pg_catalog'
+    AS $$ select (instant at time zone 'America/Chicago')::date $$;
+
+
+--
+-- Name: FUNCTION carr_business_date(instant timestamp with time zone); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.carr_business_date(instant timestamp with time zone) IS 'CARR calendar day in America/Chicago, independent of session timezone. Date-only facts stay dates.';
+
+
+--
 -- Name: carr_business_days(date, date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -86176,7 +86193,8 @@ CREATE VIEW public.v_last_touch AS
             a.source,
             a.version,
             a.updated_at,
-            a.updated_by
+            a.updated_by,
+            a.connected
            FROM (public.activity a
              JOIN public.activity_kind k ON ((k.slug = a.kind)))
           WHERE (k.is_contact OR ((a.kind = 'note'::text) AND (a.summary = 'last-touch stamp (imported)'::text)) OR ((a.kind = 'note'::text) AND (a.summary ~~ 'Last touch carried from%'::text)))
@@ -86194,27 +86212,27 @@ CREATE VIEW public.v_last_touch AS
         )
  SELECT 'deal'::text AS subject_type,
     deal_contact.deal_id AS subject_id,
-    (max(deal_contact.occurred_at))::date AS last_touch
+    public.carr_business_date(max(deal_contact.occurred_at)) AS last_touch
    FROM deal_contact
   GROUP BY deal_contact.deal_id
 UNION ALL
  SELECT 'client'::text AS subject_type,
     contact.client_id AS subject_id,
-    (max(contact.occurred_at))::date AS last_touch
+    public.carr_business_date(max(contact.occurred_at)) AS last_touch
    FROM contact
   WHERE (contact.client_id IS NOT NULL)
   GROUP BY contact.client_id
 UNION ALL
  SELECT 'lead'::text AS subject_type,
     contact.lead_id AS subject_id,
-    (max(contact.occurred_at))::date AS last_touch
+    public.carr_business_date(max(contact.occurred_at)) AS last_touch
    FROM contact
   WHERE (contact.lead_id IS NOT NULL)
   GROUP BY contact.lead_id
 UNION ALL
  SELECT 'vendor'::text AS subject_type,
     contact.vendor_id AS subject_id,
-    (max(contact.occurred_at))::date AS last_touch
+    public.carr_business_date(max(contact.occurred_at)) AS last_touch
    FROM contact
   WHERE (contact.vendor_id IS NOT NULL)
   GROUP BY contact.vendor_id;
@@ -86680,7 +86698,7 @@ CREATE VIEW public.v_claim_card AS
     dup_basis,
     (((email IS NOT NULL) AND (email <> ''::text)) OR ((phone IS NOT NULL) AND (phone <> ''::text))) AS has_channel,
     (NOT (((email IS NOT NULL) AND (email <> ''::text)) OR ((phone IS NOT NULL) AND (phone <> ''::text)))) AS needs_contact,
-    (est_lease_event - CURRENT_DATE) AS days_to_window,
+    (est_lease_event - public.carr_business_date()) AS days_to_window,
     created_at
    FROM public.candidate_pool cp
   WHERE ((status = 'pool'::text) AND (NOT dup_do_not_contact));
@@ -88895,11 +88913,11 @@ CREATE VIEW public.v_today_triage AS
     na.due_on,
     COALESCE(r.display_name, r.org_name) AS subject_name,
     r.ref AS subject_ref,
-    public.carr_business_days(na.due_on, CURRENT_DATE) AS business_days_overdue
+    public.carr_business_days(na.due_on, public.carr_business_date()) AS business_days_overdue
    FROM ((public.next_action na
      JOIN public.actor owner ON ((owner.id = na.owner_id)))
      LEFT JOIN public.v_ref_index r ON (((r.subject_id = na.subject_id) AND (r.subject_type = na.subject_type))))
-  WHERE ((na.status = 'open'::text) AND (na.due_on IS NOT NULL) AND (na.due_on <= CURRENT_DATE) AND ((na.hold_until IS NULL) OR (na.hold_until <= CURRENT_DATE)))
+  WHERE ((na.status = 'open'::text) AND (na.due_on IS NOT NULL) AND (na.due_on <= public.carr_business_date()) AND ((na.hold_until IS NULL) OR (na.hold_until <= public.carr_business_date())))
 UNION ALL
  SELECT 'post_call_action'::text AS item_kind,
     pca.id,
@@ -88910,11 +88928,11 @@ UNION ALL
     pca.due_on,
     COALESCE(r.display_name, r.org_name) AS subject_name,
     r.ref AS subject_ref,
-    public.carr_business_days(pca.due_on, CURRENT_DATE) AS business_days_overdue
+    public.carr_business_days(pca.due_on, public.carr_business_date()) AS business_days_overdue
    FROM ((public.capture_post_call_action pca
      JOIN public.actor owner ON ((owner.id = pca.owner_id)))
      LEFT JOIN public.v_ref_index r ON (((r.subject_id = pca.deal_id) AND (r.subject_type = 'deal'::text))))
-  WHERE ((pca.status = 'open'::text) AND (pca.due_on IS NOT NULL) AND (pca.due_on <= CURRENT_DATE))
+  WHERE ((pca.status = 'open'::text) AND (pca.due_on IS NOT NULL) AND (pca.due_on <= public.carr_business_date()))
 UNION ALL
  SELECT 'critical_date'::text AS item_kind,
     cd.id,
@@ -88925,10 +88943,10 @@ UNION ALL
     cd.due_on,
     COALESCE(r.display_name, r.org_name) AS subject_name,
     r.ref AS subject_ref,
-    public.carr_business_days(cd.due_on, CURRENT_DATE) AS business_days_overdue
+    public.carr_business_days(cd.due_on, public.carr_business_date()) AS business_days_overdue
    FROM (public.critical_date cd
      LEFT JOIN public.v_ref_index r ON (((r.subject_id = cd.deal_id) AND (r.subject_type = 'deal'::text))))
-  WHERE ((cd.status = 'open'::text) AND (cd.due_on <= (CURRENT_DATE + 14)))
+  WHERE ((cd.status = 'open'::text) AND (cd.due_on <= (public.carr_business_date() + 14)))
 UNION ALL
  SELECT 'ingest'::text AS item_kind,
     i.id,
@@ -88936,10 +88954,10 @@ UNION ALL
     i.id AS subject_id,
     NULL::text AS owner,
     COALESCE(NULLIF(TRIM(BOTH FROM (i.payload ->> 'summary'::text)), ''::text), NULLIF(TRIM(BOTH FROM (i.payload ->> 'title'::text)), ''::text), NULLIF(TRIM(BOTH FROM (i.payload ->> 'subject'::text)), ''::text), (i.source || ' item awaiting triage'::text)) AS what,
-    (i.received_at)::date AS due_on,
+    public.carr_business_date(i.received_at) AS due_on,
     NULLIF(TRIM(BOTH FROM (i.payload ->> 'organizer'::text)), ''::text) AS subject_name,
     NULL::text AS subject_ref,
-    public.carr_business_days((i.received_at)::date, CURRENT_DATE) AS business_days_overdue
+    public.carr_business_days(public.carr_business_date(i.received_at), public.carr_business_date()) AS business_days_overdue
    FROM public.ingest_inbox i
   WHERE (i.status = 'new'::text);
 
@@ -90734,7 +90752,7 @@ CREATE VIEW public.v_renewal_decision_queue AS
            FROM public.deal_participant dp
           WHERE ((dp.deal_id = d.id) AND (dp.role = 'lead'::text) AND (dp.to_at IS NULL))
          LIMIT 1), c.created_by)) AND (owner.slug = ANY (ARRAY['joe'::text, 'dell'::text])))))
-  WHERE ((l.status = 'current'::text) AND ((l.expiration_on >= (CURRENT_DATE - 90)) AND (l.expiration_on <= (CURRENT_DATE + 548))) AND (l.evidence_kind = ANY (ARRAY['executed_lease'::text, 'lease_amendment'::text, 'lease_abstract'::text])) AND (NULLIF(btrim(l.evidence_ref), ''::text) IS NOT NULL) AND (NULLIF(btrim(l.source), ''::text) IS NOT NULL));
+  WHERE ((l.status = 'current'::text) AND ((l.expiration_on >= (public.carr_business_date() - 90)) AND (l.expiration_on <= (public.carr_business_date() + 548))) AND (l.evidence_kind = ANY (ARRAY['executed_lease'::text, 'lease_amendment'::text, 'lease_abstract'::text])) AND (NULLIF(btrim(l.evidence_ref), ''::text) IS NOT NULL) AND (NULLIF(btrim(l.source), ''::text) IS NOT NULL));
 
 
 --
@@ -117848,6 +117866,7 @@ revoke all on function ops.write_tour_share_shortlist(p_session_digest text, p_p
 revoke all on function public.action_class_successor_gate(p_action_class text) from public;
 revoke all on function public.assert_situation_retrieval_golden(p_suite_digest text) from public;
 revoke all on function public.capture_call_context(requested_deal_ids uuid[]) from public;
+revoke all on function public.carr_business_date(instant timestamp with time zone) from public;
 revoke all on function public.defect_resolution_evidence_must_resolve() from public;
 revoke all on function public.defect_resolution_is_append_only() from public;
 revoke all on function public.enforce_allocation_tree() from public;
@@ -121282,6 +121301,12 @@ grant execute on function public.action_class_successor_gate(p_action_class text
 grant execute on function public.assert_situation_retrieval_golden(p_suite_digest text) to carr_writer;
 grant execute on function public.capture_call_context(requested_deal_ids uuid[]) to carr_reader;
 grant execute on function public.capture_call_context(requested_deal_ids uuid[]) to carr_writer;
+grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_authority;
+grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_exporter;
+grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_jobs;
+grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_reader;
+grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_writer;
+grant execute on function public.carr_business_date(instant timestamp with time zone) to dot_reader;
 grant execute on function public.current_retrievable_doctrine(p_actor_id uuid, p_content_classes text[]) to carr_reader;
 grant execute on function public.current_retrievable_doctrine(p_actor_id uuid, p_content_classes text[]) to carr_writer;
 grant execute on function public.log_retrieval_query(p_query text, p_result_count integer, p_section_ids uuid[], p_score_bands jsonb, p_policy_id text, p_policy_version bigint, p_explicit_hit boolean, p_scope_ref text) to carr_writer;
@@ -121927,6 +121952,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0937_retire_deleted_hook_control_projections.sql	dcd518923d1a6a052060f87ae1797e17a7270fb660fc7a208e97b9944234bcaf	1970-01-01 00:00:00+00
 0938_j102_engagement_fields.sql	2f3496d3249138c9860c021510ae611d01324ef48d9d94c51386e8df4edb0629	1970-01-01 00:00:00+00
 0940_codex_job_delegation_control_refs.sql	9402a4057ee309d9a4959257e9d5a9a4c41451536f57d3def2201f02fd6741ab	1970-01-01 00:00:00+00
+0941_morning_brief_chicago_calendar.sql	b6a1c2d4666a7fe2ba645d3048b2f874014f47f97e88a3144e07bd6079f6903d	1970-01-01 00:00:00+00
 \.
 
 
