@@ -569,7 +569,7 @@ def migration_batches(
     The approved-control recovery suffix alone runs its repair first and
     commits all its SQL and ledger rows together.
     """
-    by_first = {group[0]: group for group in ATOMIC_MIGRATION_GROUPS}
+    by_first: dict[str, tuple[str, ...]] = {group[0]: group for group in ATOMIC_MIGRATION_GROUPS}
     recovery_suffixes = {
         name: APPROVED_CONTROL_RECOVERY_GROUP[offset:]
         for offset, name in enumerate(APPROVED_CONTROL_RECOVERY_GROUP)

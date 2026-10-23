@@ -15,6 +15,7 @@ REPAIR = '0945_allow_approved_control_evidence_refresh.sql'
 CONTROL = 'delegation_names_model_and_effort'
 
 spec = importlib.util.spec_from_file_location('control_metadata_shadow', ROOT / 'ops/migration-shadow.py')
+assert spec is not None and spec.loader is not None
 shadow = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = shadow
 spec.loader.exec_module(shadow)
