@@ -200,8 +200,6 @@ def main() -> int:
         }, today=date(2026, 8, 17))))
 
     branch_sources = {
-        "ops/p1-integration-gate.py",
-        "ops/p1-rebuild-gate.py",
         "bin/restore-rehearse.sh",
     }
     # A create through the provider's REST API (POST .../branches) is a branch
