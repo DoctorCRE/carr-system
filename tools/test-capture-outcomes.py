@@ -138,6 +138,37 @@ class CaptureOutcomesTests(unittest.TestCase):
         request.assert_not_called()
         self.assertFalse((self.session / ".capture-request.json").exists())
 
+    def test_claim_invalid_timestamp_can_be_repaired_before_request_is_frozen(self) -> None:
+        (self.session / ".capture.json").unlink()
+        (self.session / "call-context.json").write_text('{"mode":"other_call"}')
+        valid = {"announcement.json": {"announcement_fired_at": "2026-01-05T12:00:00Z"},
+                 "meta.json": {"started": "2026-01-05T12:00:00Z"}}
+        for filename, contents in valid.items():
+            with self.subTest(filename=filename):
+                for marker, data in valid.items():
+                    (self.session / marker).write_text(json.dumps(data))
+                (self.session / filename).write_text(json.dumps({key: "not-a-date" for key in contents}))
+                with patch.object(bridge, "http_request", return_value=(400, {"error": "invalid_claim"})) as request:
+                    self.assertEqual(bridge.claim_cmd(self.cfg, self.session), bridge.Outcome.UNAVAILABLE)
+                request.assert_not_called()
+                self.assertFalse((self.session / ".capture-request.json").exists())
+                self.assertFalse((self.session / ".capture.json").exists())
+
+                (self.session / filename).write_text(json.dumps(contents))
+                with patch.object(bridge, "http_request", side_effect=[
+                    (200, {"session_token": "fixture-session", "ttl_seconds": 60}),
+                    (200, {"ok": True}),
+                ]):
+                    self.assertEqual(bridge.claim_cmd(self.cfg, self.session), bridge.Outcome.VERIFIED)
+                body = json.loads((self.session / ".capture-request.json").read_text())
+                self.assertEqual(body["started_at"], "2026-01-05T12:00:00Z")
+                self.assertEqual(body["consent"]["announced_at"], "2026-01-05T12:00:00Z")
+                self.assertTrue((self.session / ".capture.json").exists())
+                self.assertTrue((self.session / "mic.caf").exists())
+                self.assertFalse((self.session / "ingested.json").exists())
+                for marker in (".capture-request.json", ".capture.json", ".capture-health.json"):
+                    (self.session / marker).unlink()
+
     def test_existing_malformed_capture_marker_is_unavailable(self) -> None:
         for marker in ("not-json", "{}"):
             with self.subTest(marker=marker), patch.object(bridge, "http_request", side_effect=AssertionError("invalid marker reached HTTP")):
@@ -223,6 +254,7 @@ class CaptureSweepTests(unittest.TestCase):
             "def request(method, url, body, headers):\n"
             "    if url.endswith('/capture/claim'):\n"
             "        assert body['consent']['announced_at'] == '2026-01-05T12:00:00Z'\n"
+            "        assert body['started_at'] == '2026-01-05T12:00:00Z'\n"
             f"        with open({str(requests)!r}, 'a') as log: log.write(Path(sys.argv[3]).name + '\\n')\n"
             "        return 200, {'session_token': 'fixture-session', 'ttl_seconds': 60}\n"
             "    return 200, {'ok': True}\n"
@@ -233,7 +265,9 @@ class CaptureSweepTests(unittest.TestCase):
         self.command("date", f"#!/bin/bash\nif [ \"$1\" = -j ]; then echo 200000; elif [ \"$2\" = '+%s' ]; then cat '{clock}'; else /bin/date \"$@\"; fi\n")
         valid = {"announcement.json": {"announcement_fired_at": "2026-01-05T12:00:00Z"},
                  "meta.json": {"started": "2026-01-05T12:00:00Z"}}
-        for index, (filename, invalid) in enumerate((name, data) for name in valid for data in (b"{}", b"not-json", b"\xff")):
+        for index, (filename, invalid) in enumerate((name, data) for name in valid for data in (
+            b"{}", b"not-json", b"\xff", b'{"announcement_fired_at":"not-a-date","started":"not-a-date"}',
+        )):
             with self.subTest(filename=filename, invalid=invalid):
                 self.recordings = self.root / f"recordings-{index}"
                 self.recordings.mkdir()
