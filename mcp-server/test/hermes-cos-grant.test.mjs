@@ -255,11 +255,3 @@ test("add-premises CoS payload lock refuses new_party but allows party_ref", () 
   assert.equal(hermesCosPremisesRefusal("hermes", "add-premises",
     { ownership: [{ kind: "owner", new_party: { name: "not reachable by name" } }] }), false);
 });
-
-test("bot-brief admission remains read-only and caller authority fields remain absent", () => {
-  const brief = TOOLS["bot-brief"];
-  assert.notEqual(brief.write, true);
-  assert.equal(brief.inputSchema.additionalProperties, false);
-  for (const key of ["capability_profile", "read_only", "grants_authority", "envelope_digest", "sponsoring_human_slug"])
-    assert.equal(Object.hasOwn(brief.inputSchema.properties, key), false, key);
-});

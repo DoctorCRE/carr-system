@@ -25,7 +25,6 @@ import { docActivityTools } from "./doc-activity.js";
 import { whatsNewTools } from "./whats-new.js";
 import { MEETING_MODE_WRITE_VERBS, meetingModeTools } from "./meeting-mode.js";
 import { notificationTools } from "./notifications.js";
-import { deliveryCadenceA05Tools } from "./delivery-cadence-a05-tools.js";
 import { sessionIdentityTools } from "./session-identity.js";
 import { dispatchSpineTools } from "./dispatch-spine.js";
 import { capabilityProgramTools } from "./capability-program.js";
@@ -35,13 +34,9 @@ import { workPortfolioTools } from "./work-portfolio.js";
 import { leaseTermComparisonTools } from "./lease-term-comparison.js";
 import { partnerRoomTools } from "./partner-room.js";
 import { agentProfileTools } from "./agent-profiles.js";
-import { botBriefTools } from "./bot-brief.js";
 import { memoryTools } from "./memory.js";
 import { codexContinuityTools } from "./codex-continuity.js";
-import { claudeContinuityTools } from "./claude-continuity.js";
 import { incidentTools } from "./incident.js";
-import { defectResolutionTools } from "./defect-resolution.js";
-import { evidenceActivationTools } from "./evidence-activation.js";
 import { resourceObservationTools } from "./resource-observation.v5.js";
 import { invoiceAutomation } from "./invoice-automation.js";
 import { leadAutomationTools } from "./lead-automation.js";
@@ -53,7 +48,6 @@ import { tourDomainTools } from "./tour-domain.js";
 import { tourPropertySearchTools } from "./tour-property-search.js";
 import { tourSharingTools } from "./tour-sharing.js";
 import { tourMapPromotionTools } from "./tour-map-promotion.js";
-import { actionClassSuccessorRegistryTools } from "./action-class-successor-registry.v5.js";
 import { tourArtifactTools } from "./tour-artifacts.js";
 import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./dealroom.js";
 import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
@@ -61,8 +55,6 @@ import { authenticatedIdentity, authorizationClassForActor, organizationTenantFo
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { assertRegisteredOperation, mutationManifestIdentity, MutationRegistryRefusal } from "./mutation-registry.js";
 import { readRuleEnforcementCoverage } from "./lifecycle-assurance.v5.js";
-import { benchmarkAcceptanceStoreTools } from "./benchmark-acceptance-store.v5.js";
-import { modelRoleStoreTools } from "./model-role-store.v5.js";
 import { recordSourceAuthorityStoreTools } from "./record-source-authority-store.v5.js";
 // V5-J102's healthcare CRE lifecycle door: every verb on the writer connection
 // through mcp.js's setWriterActorContext, which sets the actor and the
@@ -77,7 +69,6 @@ import { salesforceReadRunStoreTools } from "./salesforce-read-run-store-rw02.v5
 // seam below (shadow until Joe approves enforcement), and their read projection.
 import { V5BoundaryDoorRefusal, globalBoundariesDoorTools, passBoundaryDoor } from
   "./global-boundaries-door.v5.js";
-import { journeyOneClockDoorTools } from "./journey-one-clock-door.v5.js";
 import { governedCorrespondenceStoreTools } from "./governed-correspondence-store.v5.js";
 import { assuranceHealthStoreTools } from "./assurance-health-store.v5.js";
 import { ruleContextRuntimeTools } from "./rule-context-runtime.v5.js";
@@ -9110,7 +9101,6 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "doc-activity": "mcp-server/src/doc-activity.js",
   "meeting-mode": "mcp-server/src/meeting-mode.js",
   "notifications": "mcp-server/src/notifications.js",
-  "delivery-cadence-a05": "mcp-server/src/delivery-cadence-a05-tools.js",
   "session-identity": "mcp-server/src/session-identity.js",
   "dispatch-spine": "mcp-server/src/dispatch-spine.js",
   "doc-outcome-cards": "mcp-server/src/tools.js",
@@ -9120,17 +9110,13 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
-  "bot-brief": "mcp-server/src/bot-brief.js",
-  "evidence-activation": "mcp-server/src/evidence-activation.js",
   "resource-observation": "mcp-server/src/resource-observation.v5.js",
   "lead-automation": "mcp-server/src/lead-automation.js",
   "invoice-automation": "mcp-server/src/invoice-automation.js",
   "workflow-cutover": "mcp-server/src/workflow-cutover.v5.js",
   "memory": "mcp-server/src/memory.js",
   "codex-continuity": "mcp-server/src/codex-continuity.js",
-  "claude-continuity": "mcp-server/src/claude-continuity.js",
   "incident": "mcp-server/src/incident.js",
-  "defect-resolution": "mcp-server/src/defect-resolution.js",
   "engineering-runtime": "mcp-server/src/engineering-runtime.js",
   "work-portfolio": "mcp-server/src/work-portfolio.js",
   "tour-rights-projection": "mcp-server/src/tour-rights-projection.js",
@@ -9140,17 +9126,13 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "tour-map-promotion": "mcp-server/src/tour-map-promotion.js",
   "tour-sharing": "mcp-server/src/tour-sharing.js",
   "tour-artifacts": "mcp-server/src/tour-artifacts.js",
-  "benchmark-acceptance": "mcp-server/src/benchmark-acceptance-store.v5.js",
-  "model-role-store": "mcp-server/src/model-role-store.v5.js",
   "record-source-authority": "mcp-server/src/record-source-authority-store.v5.js",
   "cre-lifecycle": "mcp-server/src/cre-lifecycle-store.v5.js",
   "salesforce-reconciliation-rw02": "mcp-server/src/salesforce-reconciliation-store-rw02.v5.js",
   "salesforce-read-run-rw02": "mcp-server/src/salesforce-read-run-store-rw02.v5.js",
   "global-boundaries-door": "mcp-server/src/global-boundaries-door.v5.js",
-  "journey-one-clock-door": "mcp-server/src/journey-one-clock-door.v5.js",
   "governed-correspondence-store": "mcp-server/src/governed-correspondence-store.v5.js",
   "assurance-health-store": "mcp-server/src/assurance-health-store.v5.js",
-  "action-class-successor-registry": "mcp-server/src/action-class-successor-registry.v5.js",
   "rule-context-runtime": "mcp-server/src/rule-context-runtime.v5.js",
   "system-work-census": "mcp-server/src/system-work-census.v5.js",
   "board-answers": "mcp-server/src/board-answers.js",
@@ -10280,7 +10262,6 @@ registerTools(meetingModeTools({ withEnvelope, writeEvent, ToolError,
 // acknowledge-notification writes ops.notification_read and nothing else, which
 // is why a session may never report it as having moved a task.
 registerTools(notificationTools({ withEnvelope, writeEvent, ToolError }), "notifications");
-registerTools(deliveryCadenceA05Tools({ withEnvelope, writeEvent, ToolError }), "delivery-cadence-a05");
 
 // WR-000117: the session-identity read pair. Both verbs are READS on the writer
 // connection -- ops.session_identity_facts and ops.session_dispatch_history
@@ -10334,8 +10315,6 @@ registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
 registerTools(agentProfileTools({ withEnvelope, writeEvent, ToolError }), "agent-profile");
-registerTools(botBriefTools({ ToolError, assertNoCallerAuthorityFields }), "bot-brief");
-registerTools(evidenceActivationTools({ withEnvelope, ToolError }), "evidence-activation");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
 // src/resource-observation.v5.js.
@@ -10358,7 +10337,6 @@ registerTools(memoryTools({ withEnvelope, writeEvent, ToolError, assertNoCallerA
 // checkpoint revisions and lifecycle receipts; transcript bodies stay local to
 // the Codex adapter and Claude never reaches these verbs through its config.
 registerTools(codexContinuityTools({ withEnvelope, writeEvent, ToolError, assertNoCallerAuthorityFields }), "codex-continuity");
-registerTools(claudeContinuityTools({ withEnvelope, writeEvent, ToolError, assertNoCallerAuthorityFields }), "claude-continuity");
 
 // The operational incident ledger gets a front door (2026-08-23 rules-and-verbs
 // council, item 1 from both chairs). ops.incident has been written by two
@@ -10369,11 +10347,6 @@ registerTools(claudeContinuityTools({ withEnvelope, writeEvent, ToolError, asser
 // boundary into the grants and the verb surface should not be laxer than the
 // grants are. See migrations/0286 for the permission half.
 registerTools(incidentTools({ withEnvelope, writeEvent, ToolError, authorizationClassForActor }), "incident");
-
-// The defect log's close door (decision cbe91287). A close is an append-only
-// resolution receipt beside the defect, never a change to it: defects still
-// accumulate by class. See src/defect-resolution.js and migrations/0872.
-registerTools(defectResolutionTools({ withEnvelope, writeEvent, ToolError }), "defect-resolution");
 
 // Engineering Passport runtime: typed plan registration, server-derived
 // admission, and read-only closure projection over the canonical job ledger.
@@ -10398,12 +10371,6 @@ registerTools(tourPropertySearchTools({ withEnvelope, writeEvent, ToolError }), 
 registerTools(tourMapPromotionTools({ withEnvelope, writeEvent, ToolError }), "tour-map-promotion");
 registerTools(tourSharingTools({ withEnvelope, writeEvent, ToolError }), "tour-sharing");
 registerTools(tourArtifactTools({ withEnvelope, writeEvent, ToolError }), "tour-artifacts");
-registerTools(benchmarkAcceptanceStoreTools({
-  withEnvelope, writeEvent, ToolError, authenticatedIdentity,
-}),
-  "benchmark-acceptance");
-registerTools(modelRoleStoreTools({ withEnvelope, writeEvent, ToolError }),
-  "model-role-store");
 registerTools(creLifecycleStoreTools({ withEnvelope, ToolError }), "cre-lifecycle");
 registerTools(salesforceReconciliationStoreTools({ withEnvelope, ToolError }),
   "salesforce-reconciliation-rw02");
@@ -10413,7 +10380,6 @@ registerTools(recordSourceAuthorityStoreTools({ withEnvelope, ToolError }),
 // V5-S01: read-only projection of the settled global boundaries and the
 // dispatch door's mode and shadow counters. No database access.
 registerTools(globalBoundariesDoorTools({ ToolError }), "global-boundaries-door");
-registerTools(journeyOneClockDoorTools({ withEnvelope, ToolError }), "journey-one-clock-door");
 // DoctorCRE V5-J103: the governed correspondence store. Two reads
 // (correspondence-readiness, read-correspondence-thread) and the humanOnly
 // consent pair, each partner only for their own carr.us mailbox. There is no
@@ -10424,13 +10390,6 @@ registerTools(journeyOneClockDoorTools({ withEnvelope, ToolError }), "journey-on
 registerTools(governedCorrespondenceStoreTools({ withEnvelope, writeEvent, ToolError }),
   "governed-correspondence-store");
 registerTools(assuranceHealthStoreTools({ withEnvelope, ToolError }), "assurance-health-store");
-// DoctorCRE V5-D01: inactive action-specific autonomy successors. Three verbs
-// over migration 0708's append-only registry -- register-, read- and the
-// deterministic read-action-class-gate, which as shipped always denies (no
-// activation door exists). Registration grants no authority and no verb here
-// can ever produce a row this gate reads as allowed.
-registerTools(actionClassSuccessorRegistryTools({ withEnvelope, writeEvent, ToolError }),
-  "action-class-successor-registry");
 // DoctorCRE V5-F05: authenticated, actor-scoped rule-universe read plus the
 // Joe-authority typed-contract binder. The read uses the writer connection only
 // to receive server-established actor/sponsor transaction settings; its tool
