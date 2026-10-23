@@ -109,7 +109,7 @@ def main() -> int:
             if result.returncode:
                 raise ValueError(result.stderr[-8000:])
         def verify_pr():
-            result = subprocess.run(['gh', 'api', f'repos/jbookout/carr-system/pulls/{int(args.pr)}'],
+            result = subprocess.run(['gh', 'api', f'repos/DoctorCRE/carr-system/pulls/{int(args.pr)}'],
                                     capture_output=True, text=True, check=True, timeout=120)
             pr = json.loads(result.stdout)
             if (pr['head']['sha'] != args.head or pr['state'] != 'open' or pr['base']['ref'] != 'main'

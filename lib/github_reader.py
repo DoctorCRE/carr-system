@@ -4,7 +4,7 @@ Scheduled scripts read GitHub through the authenticated gh CLI. Each used to
 carry its own wrapper, so a fix for one incident class landed in one place
 and nowhere else: the release pipeline learned to retry a transient `gh api`
 failure (fc5fe401) while the progress board, the PR actor, the recovery-point
-reader and the Jev value report kept failing on the first blip.
+readers kept failing on the first blip.
 
 GitHubReader owns how a read is done; callers keep their domain queries.
 

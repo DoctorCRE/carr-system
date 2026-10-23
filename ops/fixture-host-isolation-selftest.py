@@ -40,8 +40,6 @@ class HostIsolation(unittest.TestCase):
     def test_config_reconciliation_proof_is_independent_of_host(self):
         self.run_suite('config-as-code-selftest.py')
 
-    def test_orphan_reaper_proof_is_independent_of_host(self):
-        self.run_suite('orphan-reaper-selftest.py')
 
     def run_capacity_proof(self, script, case):
         with tempfile.TemporaryDirectory(prefix='carr-parent-slots-') as temp:
@@ -54,9 +52,6 @@ class HostIsolation(unittest.TestCase):
                                         env=env, capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_watchdog_streaming_proof_ignores_parent_capacity(self):
-        self.run_capacity_proof('tools/test_job_watchdog.py',
-                                'RunnerTests.test_model_room_streams_progress_before_completion')
 
     def test_model_selection_proof_ignores_parent_capacity(self):
         self.run_capacity_proof('tools/room-bridge/test_codex_models_unit.py',

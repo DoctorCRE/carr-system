@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readdir, readFile } from "node:fs/promises";
+import { matchesGlob } from "node:path";
 import { suiteBatches } from "../run-tests.mjs";
 
 test("every Node suite runs exactly once without the retired browser shim", () => {
@@ -38,4 +40,14 @@ test("browser suites run alone even when their filenames do not say browser", ()
     assert.deepEqual(batches.find(batch => batch.includes(file)), [file]);
   }
   assert.deepEqual(batches.flat().sort(), files.sort());
+});
+
+test("Fallow sees exactly the suites loaded dynamically by the Node runner", async () => {
+  const config = JSON.parse(await readFile(new URL("../.fallowrc.json", import.meta.url), "utf8"));
+  const files = await readdir(new URL("./", import.meta.url));
+  const matches = file => config.dynamicallyLoaded.some(pattern => matchesGlob(`test/${file}`, pattern));
+  assert.deepEqual(files.filter(matches).sort(), suiteBatches(files).flat().sort());
+  for (const file of ["future.test.js", "future.test.mjs"]) assert.equal(matches(file), true, file);
+  for (const file of ["helper.mjs", "future.js", "nested/future.test.mjs", "../src/unused.js"])
+    assert.equal(matches(file), false, file);
 });

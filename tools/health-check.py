@@ -24,7 +24,6 @@ from pathlib import Path
 from types import MappingProxyType
 from zoneinfo import ZoneInfo
 import health_submodule as _health_sub
-import jev_outage_health as _jev_outage
 import uptime_health as _uptime
 import flashlib
 from lib.credential_file import read_env_file
@@ -113,8 +112,8 @@ def _reader_args(argv):
         # A parent shell may carry this old ambient variable.  Normal health must
         # not pass it to any child or let a child silently choose a Drive reader.
         os.environ.pop("CARR_VAULT", None)
-    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "uptime", "storage", "sends"):
-        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|uptime|storage|sends")
+    if section not in ("all", "exports", "jobs", "registry", "credentials", "grok-session", "tailscale", "headless", "costs", "uptime"):
+        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|grok-session|tailscale|headless|costs|uptime")
     if fixture and recovery:
         raise SystemExit("health-check: --fixture is for hermetic canonical tests only")
     # --act executes every red row's bound action (tools/health_breach.py). It
@@ -152,42 +151,10 @@ def _cloudflare_rows():
     return health_rows()
 
 
-def _jev_spend_row():
-    """Use the same receipt reader and response loop for manual and nightly health."""
-    spend_path = os.path.join(REPO_ROOT, "ops", "jev_spend_health.py")
-    spend_spec = importlib.util.spec_from_file_location("jev_spend_health", spend_path)
-    jev_spend_health = importlib.util.module_from_spec(spend_spec)
-    spend_spec.loader.exec_module(jev_spend_health)
-    return jev_spend_health, jev_spend_health.check_spend(
-        extra_logs=[jev_spend_health.FACTORY_USAGE_LOG],
-        worker_usage=jev_spend_health.read_worker_usage)
 
 
-def _jev_paid_cap_row():
-    try:
-        client_path = os.path.join(REPO_ROOT, "ops", "typesafe_client.py")
-        spec = importlib.util.spec_from_file_location("jev_cap_client", client_path)
-        client = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(client)
-        return client.paid_cap_health()
-    except Exception as exc:
-        return (f"UNKNOWN jev paid cap — {type(exc).__name__} · on breach: "
-                "owner orchestrator · remediation restore the cap reader/configuration · "
-                "verify rerun health · auto-clear on successful read")
 
 
-def _jev_site_spend_row():
-    """Today's paid Jev attempts per registered call site, against its budget."""
-    try:
-        client_path = os.path.join(REPO_ROOT, "ops", "typesafe_client.py")
-        spec = importlib.util.spec_from_file_location("jev_site_client", client_path)
-        client = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(client)
-        return client.spend_by_site_health()
-    except Exception as exc:
-        return (f"UNKNOWN jev spend by site — {type(exc).__name__} · on breach: "
-                "owner orchestrator · remediation restore ops/config/jev-call-sites.v1.json "
-                "or the cap reader · verify rerun health · auto-clear on successful read")
 
 
 def _grok_session_row():
@@ -201,18 +168,6 @@ def _grok_session_row():
                 "owner orchestrator · remediation restore the Grok reader/lock storage · "
                 "verify rerun health · auto-clear on successful read", 1)
 
-
-if CANONICAL_SECTION == "jev-spend":
-    try:
-        _spend_module, _spend_line = _jev_spend_row()
-    except Exception as exc:
-        print(f"UNAVAILABLE jev spend — {type(exc).__name__}; "
-              "on breach: nightly ledger records an incident · owner orchestrator · "
-              "remediation restore the receipt reader · verify the next run reads "
-              "all usage sources · noncritical incidents auto-clear after three healthy runs")
-        sys.exit(1)
-    print(_spend_line)
-    sys.exit(_spend_module.nightly_exit_status(_spend_line))
 
 if CANONICAL_SECTION == "costs":
     import system_costs
@@ -370,97 +325,8 @@ if "--tasks" in sys.argv:
     sys.exit(classify_tasks(sys.argv[_i + 1]))
 
 
-def _canonical_workflow_truth():
-    """Print the F09 workflow-census section, WHICH IS UNAVAILABLE, and print
-    nothing else.
-
-    WHAT THIS SECTION USED TO DO, AND THE DEFECT THAT ENDED IT.  It performed the
-    V5-F09 control-plane read through ``lib/control_plane_workflow_truth_reader``
-    and printed the census it got back -- how many workflows are declared, how
-    many are evidence-backed, which ones conflict.  The reader resolved its own
-    module-level snapshot function at call time, so a caller sharing the process
-    rebound that name and this section printed the caller's census as the control
-    plane's own answer, under ``run.sh health``.  A reviewer did exactly that and
-    got a summary line of its own choosing out of this surface.
-
-    SO THE ROUTE WAS DELETED RATHER THAN HARDENED.  The reader mints nothing and
-    renders nothing any more; it exports one frozen unavailable answer built from
-    string literals at import time, and this section prints it.  There is no
-    branch here, no input, and no state to print: the same three-part line, every
-    run, whatever anybody has done to any module in this process.
-
-    WHY THE WHOLE SECTION RATHER THAN THE LABEL ONLY.  The A01 label route is what
-    converts a census into a state, and it reported not-proven one round earlier.
-    But this section DISPLAYS a census, and a displayed census is read as a report
-    of the control plane by anybody looking at ``run.sh health`` -- which is the
-    same authority, one surface out.  Both routes on this slice say the same
-    thing now: nothing here can be proven.
-    """
-    print("Workflow truth — census route deleted; this surface derives nothing")
-    try:
-        sys.path.insert(0, REPO_ROOT)
-        from lib.control_plane_workflow_truth_reader import workflow_truth_census
-    except Exception:
-        # Deliberately no exception text: this line is swept for privileged words
-        # by ops/assurance-health-selftest.py, and a traceback is caller content.
-        print("  -- workflow census   UNAVAILABLE — the census route module is absent")
-        return
-    census = workflow_truth_census()
-    print(f"  -- workflow census   UNAVAILABLE — {census['reason']}; item carried as "
-          f"{census['item_disposition']}; owed seam {census['owed_seam']}")
 
 
-def _canonical_assurance_health():
-    """Print the A01 assurance-health item, WHICH IS NOT PROVEN, and print nothing
-    else.
-
-    THERE IS NO STATE ON THIS SECTION, AND THAT IS THE FINDING.  Ten review
-    rounds tried to derive a health label for each bound workflow scope out of the
-    F09 reading, and each round closed the exact forgery route it was shown and
-    left the class open: a caller-supplied census, a caller-supplied receipt, a
-    payload attribute on the reading handle, a stateful mapping honest during
-    verification and forged during rendering, an opaque registry key swapped
-    inside its own ``__hash__``, a raw base-descriptor write to ``__class__``,
-    rebinding the reader's own snapshot function, writing its private mint
-    registry, a hostile mapping key running caller code during the thaw, and
-    finally a ``__del__`` that rebound the label route's own exported strings
-    while it was building its answer.
-
-    SO THE ROUTE WAS DELETED RATHER THAN NARROWED AGAIN.
-    ``lib/assurance_health_sources.assurance_health_census`` now takes NO
-    ARGUMENT and returns one frozen mapping built from string literals at import
-    time: ``available=False``, reason ``handle_integrity_unprovable``, disposition
-    ``not_proven``, and the short name of the durable-store seam that is owed.
-    This section prints those three facts and nothing else.  What is missing is an
-    OWNER for "this census is the one the control plane served"; an object in this
-    process cannot be that owner.
-
-    THE SECTION ABOVE SAYS THE SAME THING NOW, and that is the tenth correction:
-    the workflow-truth section DISPLAYED a census, which a reader of ``run.sh
-    health`` takes as a report of the control plane, so a forged census reached
-    the same authority one surface further out.  Both routes report unavailable.
-
-    THE --fixture DOOR IS A TEST DOOR, LABELS ITSELF AS ONE, AND IS A DIFFERENT
-    FUNCTION.  It is called instead of this one when --fixture is given, reaches
-    the adapter's unexported test hook, and prints every state as an explicit
-    would-be-<state>-if-authoritative hypothetical.  Nothing it says is evidence,
-    nothing it says is healthy, and no finding is recorded from it.
-    """
-    try:
-        sys.path.insert(0, REPO_ROOT)
-        import lib.assurance_health_sources as sources
-    except Exception:
-        # No exception text on this line either: it is swept for privileged words.
-        print("Assurance health — NOT PROVEN; no owner exists for the fact a label "
-              "would need")
-        print("  -- assurance health   UNAVAILABLE — the label route module is absent")
-        return
-    result = sources.assurance_health_census()
-    print("Assurance health — NOT PROVEN; no owner exists for the fact a label would "
-          "need")
-    print(f"  -- assurance health   UNAVAILABLE — {result['reason']}; item carried as "
-          f"{result['item_disposition']}")
-    print(f"  -- OWED SEAM {result['owed_seam']}")
 
 
 # ── the workflow-truth contradiction alarm (twelfth correction, 2026-09-11) ──
@@ -656,74 +522,8 @@ def _canonical_contradiction_alarm():
     return 0
 
 
-def _print_assurance_layer_gaps(projection):
-    """Name the layers this projection could not bind or could not read."""
-    unbindable = sorted({slot for row in projection["rows"]
-                         for slot, layer in row["evidence"].items()
-                         if layer["state"] == "unbindable"})
-    if unbindable:
-        print("  -- UNBINDABLE ON THIS CENSUS " + ", ".join(unbindable) +
-              " — the workflow census carries no Work Request identity, so this layer has "
-              "nothing to join through and no scope read here can reach act capability")
-    unread = sorted({slot for row in projection["rows"]
-                     for slot, layer in row["evidence"].items()
-                     if layer["state"] == "unreadable"})
-    if unread:
-        print("  -- NOT READ BY THIS SURFACE " + ", ".join(unread) +
-              " — no scope can be shown healthy until an authoritative reading of each "
-              "reaches this census; an unread layer is never counted as passing")
 
 
-def _fixture_assurance_health(snap):
-    """The --fixture test door, which prints hypotheticals and returns 0.
-
-    A fixture census is the caller's assertion, so this door reaches the
-    adapter's UNEXPORTED test hook rather than its public entry, prints every
-    state under a would-be-<state>-if-authoritative name, records no finding, and
-    cannot turn this process red.  Its output is deliberately unusable as a
-    health claim: there is no line in it that says a scope is healthy or green.
-    """
-    sys.path.insert(0, REPO_ROOT)
-    import lib.assurance_health_sources as sources
-
-    print("Assurance health — FIXTURE-DERIVED HYPOTHETICAL, NOT A READING (test door)")
-    print("  -- --fixture supplied this census, so the adapter did NOT read the control "
-          "plane. Every line below is what the projection WOULD say IF this fixture were "
-          "authoritative; none of it is evidence, no scope in it is healthy or green, and "
-          "no finding is recorded from it.")
-    workflows = (snap or {}).get("workflows")
-    if workflows is None:
-        print("  -- assurance health   NOT IN FIXTURE (this fixture supplied no census)")
-        return 0
-    try:
-        hypothetical = sources._would_be_assurance_health_if_authoritative(
-            workflows, now=datetime.now(timezone.utc))["would_be_census_if_authoritative"]
-    except Exception as exc:
-        print(f"  -- assurance health   UNAVAILABLE — the projection refused this fixture "
-              f"({type(exc).__name__}: {exc})")
-        return 0
-    if not hypothetical.get("available"):
-        print(f"  -- assurance health   UNAVAILABLE — {hypothetical.get('reason', 'unstated')}")
-        return 0
-
-    projection = hypothetical["projection"]
-    summary = projection["summary"]
-    states = summary["states"]
-    print(f"  {summary['scopes']} bound scope(s) WOULD BE: "
-          + ", ".join(f"{states.get(state, 0)} would-be-{state}-if-authoritative"
-                      for state in projection["states"])
-          + f"; {summary['green']} would-be-green-if-authoritative")
-    for entry in hypothetical.get("unprojectable", []):
-        print(f"  -- WOULD BE UNPROJECTABLE {entry['workflow']} — {entry['reason']}")
-    for row in projection["rows"]:
-        scope = row["scope"]
-        identity = f"{scope['workflow_key']} v{scope['workflow_version']}"
-        if row["state"] in ("failed", "degraded"):
-            print(f"  ⚠︎ {identity} WOULD BE {row['state'].upper()} IF AUTHORITATIVE: "
-                  f"{row['state_reason']} — a fixture evidences nothing, so this is "
-                  "printed and no finding is recorded")
-    _print_assurance_layer_gaps(projection)
-    return 0
 
 
 def _canonical_snapshot():
@@ -811,24 +611,7 @@ print(json.dumps({"registered": sorted(TARGETS), "rows": rows, "retired": retire
                    from ops.v_job_control v join ops.job j on j.id=v.id
                    where v.created_at > now() - interval '40 days' and v.mode='live'
                   order by v.created_at desc;
-                 select 'CPB',
-                        coalesce((select r.activated_at::text
-                                    from ops.calendar_prebrief_runtime_activation_receipt r
-                                    join ops.calendar_prebrief_allowed_calendar a
-                                      on a.sponsor='joe' and a.active_revision_id=r.allowlist_revision_id
-                                    join ops.calendar_prebrief_allowlist_receipt l2
-                                      on l2.id=a.active_revision_id and l2.sponsor='joe'
-                                     and l2.configuration_digest=a.configuration_digest
-                                   where r.id=(select l.id
-                                                 from ops.calendar_prebrief_runtime_activation_receipt l
-                                                where l.sponsor='joe'
-                                                order by l.activated_at desc,l.id desc limit 1)),''),
-                        coalesce((select json_agg(json_build_object(
-                                           'job_id',p.job_id,'attempt',p.attempt,
-                                           'event_count',p.event_count))
-                                    from ops.calendar_prebrief_projection_receipt p
-                                   where p.sponsor='joe'
-                                     and p.captured_at > now() - interval '40 days')::text,'[]')"""
+                 """
         _venv_python = os.path.join(REPO_ROOT, ".venv/bin/python")
         _query_python = _venv_python if os.path.exists(_venv_python) else sys.executable
         p = subprocess.run(
@@ -874,15 +657,6 @@ print(json.dumps({"registered": sorted(TARGETS), "rows": rows, "retired": retire
                         "leased_until": cols[13], "timeout_seconds": int(cols[14]),
                         "completion_receipt_count": int(cols[15]),
                     })
-                elif len(cols) == 3 and cols[0] == "CPB":
-                    try:
-                        receipts = json.loads(cols[2])
-                    except ValueError:
-                        receipts = None
-                    snapshot["calendar_prebrief"] = {
-                        "activated_at": cols[1] or None,
-                        "receipts": receipts if isinstance(receipts, list) else None,
-                    }
             snapshot["job_definitions"] = definitions
             snapshot["jobs"] = rows
         # NO F09 READING IS PERFORMED HERE ANY MORE. This run used to carry one
@@ -1171,7 +945,7 @@ def _stuck_live_jobs(snap):
 # The completion marker _canonical_health() prints on EVERY path out of it,
 # clean or already-broken (see both call sites below). It must be printed
 # character-for-character identically from both places — a caller
-# (ops/release-pipeline.py's HEALTH_COMPLETE_MARKER) compares against this
+# (the retired local executor's HEALTH_COMPLETE_MARKER) compares against this
 # EXACT string as the last non-empty stdout line to decide whether a read
 # is trustworthy at all (point 3 of the third round of an independent
 # review of PR #1237: this string and that constant drifted apart for
@@ -1212,125 +986,6 @@ _GREEN_EVIDENCE: dict = {}
 # crossing the 26h STALE clock, a rolling 24h gate-block window — none of
 # which is caused by any particular release, so the pipeline reports these
 # but excludes them from its regression diff (review point D).
-
-
-CALENDAR_PREBRIEF_KEY = "calendar-prebrief-projection-joe-daily"
-# The runtime may enqueue only inside 06:30-06:45 America/Chicago and a claim
-# retries once (base 60s, 300s timeout), so a weekday slot is judged an hour on.
-CALENDAR_PREBRIEF_JUDGED_AFTER = timedelta(minutes=60)
-CALENDAR_PREBRIEF_BREACH = (
-    "on breach: update loop #665 (owner joe-desk session) — read "
-    "out/calendar-prebrief-joe-launchd.log and the job's failure_class, fix the named "
-    "gate, verify with the next 06:30 weekday receipt; clears when the latest due slot "
-    "succeeds with event_count > 0")
-
-
-def _calendar_prebrief_standing(snap):
-    """Joe's live calendar prebrief: a missed weekday run, or 0 events 2 runs running.
-
-    Returns (finding_key, detail) pairs. Silent (no finding) while the prebrief is
-    not activated: an allowlist changed after the last activation fences the
-    scheduler by design, and a fenced job is not a missed one. Once activated,
-    every weekday 06:30 America/Chicago slot at or after the activation must end
-    in a succeeded job carrying a projection receipt, and the two latest
-    receipted slots must not both have read zero events — a bounded 52-day window
-    over Joe's primary calendar that is empty two weekdays in a row is a broken
-    source (wrong calendar, lost permission), not a quiet week.
-    """
-    state = snap.get("calendar_prebrief")
-    if not isinstance(state, dict):
-        return []
-    enabled = {d.get("key") for d in snap.get("job_definitions") or [] if isinstance(d, dict)}
-    activated = _iso(state.get("activated_at"))
-    if CALENDAR_PREBRIEF_KEY not in enabled or activated is None:
-        return []
-    receipts = state.get("receipts")
-    counts = {}
-    for row in receipts if isinstance(receipts, list) else [None]:
-        if (not isinstance(row, dict) or not isinstance(row.get("job_id"), str)
-                or type(row.get("attempt")) is not int or type(row.get("event_count")) is not int):
-            return [("calendar_prebrief_unreadable",
-                     f"{CALENDAR_PREBRIEF_KEY} projection receipts unreadable · {CALENDAR_PREBRIEF_BREACH}")]
-        counts[(row["job_id"], row["attempt"])] = row["event_count"]
-    zone = ZoneInfo("America/Chicago")
-    now = _canonical_now(snap)
-    jobs = [j for j in _live_jobs(snap) if j.get("definition_key") == CALENDAR_PREBRIEF_KEY]
-    slots = []
-    # The job ledger read covers 40 days; judge the recent fortnight only.
-    day = max(activated, now - timedelta(days=14)).astimezone(zone).date()
-    while True:
-        slot = datetime(day.year, day.month, day.day, 6, 30, tzinfo=zone)
-        if slot + CALENDAR_PREBRIEF_JUDGED_AFTER > now:
-            break
-        # The scheduler can still enqueue a slot until 06:45 local.
-        if day.isoweekday() <= 5 and slot + timedelta(minutes=15) > activated:
-            slots.append(slot)
-        day += timedelta(days=1)
-    if not slots:
-        return []
-    outcomes = []  # (slot, event_count or None when no receipted success, job state)
-    for slot in slots:
-        match = [j for j in jobs if _iso(j.get("scheduled_for")) == slot.astimezone(timezone.utc)]
-        done = [counts[(j.get("id"), j.get("attempt"))] for j in match
-                if j.get("state") == "succeeded" and (j.get("id"), j.get("attempt")) in counts]
-        outcomes.append((slot, done[0] if done else None,
-                         match[0].get("state") if match else "never scheduled"))
-    findings = []
-    latest_slot, latest_events, latest_state = outcomes[-1]
-    if latest_events is None:
-        missed = sum(1 for _, events, _ in outcomes[-2:] if events is None)
-        findings.append(("calendar_prebrief_missed_run",
-                         f"{CALENDAR_PREBRIEF_KEY} MISSED its "
-                         f"{latest_slot.strftime('%Y-%m-%d %H:%M %Z')} run ({latest_state}); "
-                         f"{missed} of the last {min(2, len(outcomes))} weekday slot(s) missed "
-                         f"· {CALENDAR_PREBRIEF_BREACH}"))
-    read = [(slot, events) for slot, events, _ in outcomes if events is not None]
-    if len(read) >= 2 and read[-1][1] == 0 and read[-2][1] == 0:
-        findings.append(("calendar_prebrief_zero_events",
-                         f"{CALENDAR_PREBRIEF_KEY} read 0 events on its last 2 runs "
-                         f"({read[-2][0].date()}, {read[-1][0].date()}) "
-                         f"· {CALENDAR_PREBRIEF_BREACH}"))
-    return findings
-
-
-CALENDAR_PREBRIEF_LAST_RUN = os.path.join(REPO_ROOT, "out", "calendar-prebrief-joe-last-run.json")
-CALENDAR_PREBRIEF_UNKNOWN_BREACH = (
-    "on breach: attendee intake (rule d7c69aa6) — search mail, research, then create the "
-    "record for each skipped attendee; owner joe-desk session; verify with the next "
-    "prebrief's count; clears at 0")
-
-
-def _calendar_prebrief_unknowns(now, path=CALENDAR_PREBRIEF_LAST_RUN):
-    """Skipped unknown attendees in the latest completed Joe prebrief (migration 0735).
-
-    Since 0735 an outside attendee the record does not know no longer refuses the
-    snapshot; it is skipped and counted. The count is intake debt, not a failure,
-    so it is surfaced here (the runtime's addressless last-run summary is the only
-    place it lives) and cleared by intake. A summary older than four days is
-    ignored: a stale run is the missed-run finding's business, not this one's.
-    The summary is written under the checkout the runtime runs from, so a
-    health run from any other checkout finds no file and stays silent.
-    Returns (finding_key, detail) pairs; never an address.
-    """
-    try:
-        with open(path, encoding="utf-8") as fh:
-            body = json.load(fh)
-    except FileNotFoundError:
-        return []
-    except (OSError, ValueError):
-        return [("calendar_prebrief_unknowns_unreadable",
-                 f"{CALENDAR_PREBRIEF_KEY} last-run summary unreadable · {CALENDAR_PREBRIEF_UNKNOWN_BREACH}")]
-    report = body.get("unknown_attendees") if isinstance(body, dict) else None
-    when = _iso(body.get("scheduled_for")) if isinstance(body, dict) else None
-    if (not isinstance(report, dict) or type(report.get("count")) is not int
-            or report["count"] < 0 or when is None):
-        return [("calendar_prebrief_unknowns_unreadable",
-                 f"{CALENDAR_PREBRIEF_KEY} last-run summary malformed · {CALENDAR_PREBRIEF_UNKNOWN_BREACH}")]
-    if now - when > timedelta(days=4) or report["count"] == 0:
-        return []
-    return [("calendar_prebrief_unknown_attendees",
-             f"{CALENDAR_PREBRIEF_KEY} skipped {report['count']} unknown outside attendee(s) "
-             f"on its {when.date()} run · {CALENDAR_PREBRIEF_UNKNOWN_BREACH}")]
 
 
 # MONITORS NOT YET PROVISIONED (Joe 2026-10-06: "don't just leave them in place and let them
@@ -1380,7 +1035,7 @@ def _canonical_finding(key, detail, *, subject="", count=1, hard_error=False, ti
 
 def _write_findings_json(path):
     """Machine-readable sibling of the CANONICAL_FINDING text lines — added so
-    ops/release-pipeline.py's health gate can diff by (key, subject) instead
+    the retired local executor's health gate can diff by (key, subject) instead
     of scraping exact finding strings (Jev-favored design over regex parsing;
     independent review of PR #1237)."""
     payload = {"findings": list(_FINDINGS),
@@ -1430,8 +1085,6 @@ def _host_liveness_rows():
     return module.rows(live, config)
 
 
-
-
 def _cloudflare_spend_row():
     """(line, failed, not_run) from the Cloudflare spend guard's local receipt; no network.
 
@@ -1460,14 +1113,6 @@ def _tailscale_row():
     return module.row(binary=os.environ.get("TAILSCALE_BIN", module.TAILSCALE_BIN))
 
 
-def _studio_failover_row():
-    spec = importlib.util.spec_from_file_location(
-        'studio_failover_health', os.path.join(REPO_ROOT, 'ops/studio-failover-health.py'))
-    if spec is None or spec.loader is None:
-        raise ImportError('Studio failover health loader unavailable')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.check(reconcile_loop=True)
 
 
 def _system_cost_row():
@@ -1476,38 +1121,6 @@ def _system_cost_row():
     return snapshot, system_costs.health_row(snapshot, 'nightly collector owns reconciliation')
 
 
-def _branch_janitor_row():
-    sys.path.insert(0, os.path.join(REPO_ROOT, "lib"))
-    from branch_retirement import health
-    return health(REPO_ROOT)
-
-
-def _storage_hygiene_row():
-    if sys.platform != "darwin":
-        return ("SKIP storage hygiene — Studio Data volume check not applicable "
-                "outside macOS", False)
-    import storage_hygiene
-    _tmp, clone_root, _replay = storage_hygiene.storage_roots()
-    used, clones = storage_hygiene.storage_snapshot(
-        Path("/System/Volumes/Data"), clone_root)
-    return (storage_hygiene.health_row(used_bytes=used, clone_count=clones),
-            used > storage_hygiene.DATA_THRESHOLD_BYTES)
-
-
-def _system_sends_row():
-    """lib/system_sender.py's own row: today's sends against the cap, shadow vs
-    live, kill-switch state, held dedupe claims, config validity. Same reader
-    the sender's cap uses (rule a8c55a47), so the row cannot disagree with the
-    refusal. It reads the machine-wide state_dir (default
-    ~/carr-local/system-sender: ledger with the cap slots, sends.jsonl, stop
-    file), not this checkout's out/, so it reports this MACHINE."""
-    try:
-        from lib.system_sender import health_row
-        return health_row()
-    except Exception as exc:
-        return (f"UNKNOWN system sends — sender unavailable ({type(exc).__name__}) · on breach: "
-                "owner orchestrator · restore lib/system_sender.py or ops/config/system-sender.v1.json "
-                "· verify: run.sh health --section sends · auto-clear after a successful read", True, True)
 
 
 def _canonical_health():
@@ -1516,37 +1129,13 @@ def _canonical_health():
     _GREEN_EVIDENCE.clear()
     rc = 0
     if CANONICAL_SECTION == "all":
-        try:
-            _failover = _studio_failover_row()
-            print('  ' + _failover['line'])
-            if _failover['status'] == 'warn':
-                rc = _red('studio_failover', _failover['line'])
-        except Exception:
-            _failover_line = ('WARN Studio failover evidence unreadable · on breach: '
-                              'ops/studio-failover-health.py --reconcile opens/updates one loop; '
-                              'owner orchestrator; restore the evidence reader and rerun MacBook dry-run; '
-                              'verify a fresh current-contract receipt; auto-clear on that receipt')
-            print('  ' + _failover_line)
-            rc = _red('studio_failover_evidence', _failover_line, hard_error=True)
         _cost_snapshot, _cost_line = _system_cost_row()
         print("  " + _cost_line)
         if _cost_snapshot['state'] != 'ready' or _cost_snapshot['alerts']:
             rc = _red('system_costs', _cost_line, hard_error=_cost_snapshot['state'] == 'unavailable'
                       and 'system_costs' not in PROVISIONING_PENDING)
-    if CANONICAL_SECTION in ("all", "credentials", "jev-cap"):
-        _cap_line = _jev_paid_cap_row()
-        print("  " + _cap_line)
-        if _cap_line.startswith(("HIT", "UNKNOWN")):
-            rc = _red("jev_paid_cap", _cap_line, hard_error=_cap_line.startswith("UNKNOWN"))
-        for _subject, _count in re.findall(r"(pending|failed)=(\d+)", _cap_line):
-            if int(_count):
-                rc = _red("jev_spend_alert", _cap_line, subject=_subject, count=int(_count))
-        _site_line = _jev_site_spend_row()
-        print("  " + _site_line)
-        if " over budget: " in _site_line or _site_line.startswith("UNKNOWN"):
-            rc = _red("jev_site_budget", _site_line, hard_error=_site_line.startswith("UNKNOWN"))
     try:
-        snap = {} if CANONICAL_SECTION in ("jev-cap", "grok-session", "storage", "uptime", "sends") else _canonical_snapshot()
+        snap = {} if CANONICAL_SECTION in ("grok-session", "uptime") else _canonical_snapshot()
     except Exception as exc:
         print(f"canonical health: REFUSED ({type(exc).__name__}: {exc})")
         _red("canonical_health_refused", f"{type(exc).__name__}: {exc}", hard_error=True)
@@ -1554,7 +1143,7 @@ def _canonical_health():
         # round of an independent review of PR #1237): this branch already
         # recorded a real, fully-explained hard_error finding — a read that
         # caught its own failure and named it is COMPLETE, not unavailable.
-        # Without the marker, ops/release-pipeline.py's read_health_findings
+        # Without the marker, the retired local executor's read_health_findings
         # would read this as an INCOMPLETE baseline (marker missing) and
         # hold forever waiting for a "clean" read that is never coming,
         # instead of treating the hard_error as the decisive answer it is.
@@ -1562,20 +1151,7 @@ def _canonical_health():
         return 1
 
     print(f"Façade check (rule 28) — {time.strftime('%Y-%m-%d %H:%M')} — canonical receipts, not Drive renders")
-    if CANONICAL_SECTION in ("all", "storage") and not CANONICAL_FIXTURE:
-        try:
-            storage_line, storage_failed = _storage_hygiene_row()
-            print("  " + storage_line)
-            if storage_failed:
-                rc = _red("storage_capacity", storage_line, subject="studio-data-volume",
-                          time_rolling=True)
-        except (OSError, ValueError) as exc:
-            storage_line = (f"storage hygiene unavailable ({type(exc).__name__}) · on breach: "
-                            "owner orchestrator · restore tools/storage_hygiene.py · "
-                            "verify: run.sh health --section storage · auto-clear after readback")
-            print("  WARN " + storage_line)
-            rc = _red("storage_health_unavailable", storage_line,
-                      subject="studio-data-volume", hard_error=True)
+
     if CANONICAL_SECTION in ("all", "jobs") and not CANONICAL_FIXTURE:
         flash_line = flashlib.health_row()
         print("  " + flash_line)
@@ -1662,7 +1238,7 @@ def _canonical_health():
                     print("  OK scheduled jobs match manifest; canonical main is current")
             except Exception as exc:
                 _detail = (f"scheduled job check unreadable ({type(exc).__name__}) · on breach: "
-                           "job-watchdog.py scan files/updates loop scheduled_jobs:checker:evidence_unavailable · "
+                           "loop scheduled_jobs:checker:evidence_unavailable · "
                            "owner orchestrator · fix: restore the manifest and machine evidence reader · "
                            "verify: python3 ops/scheduled-jobs-check.py · auto-clear: next complete scan")
                 print("  WARN " + _detail)
@@ -1730,22 +1306,6 @@ def _canonical_health():
                 detail = f"{job.get('definition_key')} job={job.get('id')} {why}"
                 print(f"  ⚠︎ {detail}")
                 rc = _red("job_stuck", detail, subject=str(job.get("definition_key")))
-            prebrief = _calendar_prebrief_standing(snap)
-            if not CANONICAL_FIXTURE:
-                prebrief += _calendar_prebrief_unknowns(_canonical_now(snap))
-            for key, detail in prebrief:
-                print(f"  ⚠︎ {detail}")
-                # A missed slot is a specific calendar instant, reported like
-                # job_missing_due; zero events is a state, not a clock crossing.
-                # Skipped-attendee counts are intake debt that moves daily. The
-                # key is time_rolling but NOT on the release pipeline's
-                # first-appearance allowlist, so the release gate still diffs it
-                # like doctrine_gate: a first appearance between baseline and
-                # live read fails that release. The finding carries count 1,
-                # so N rising day to day does not.
-                rc = _red(key, detail, subject=CALENDAR_PREBRIEF_KEY,
-                          time_rolling=(key in ("calendar_prebrief_missed_run",
-                                                "calendar_prebrief_unknown_attendees")))
             # THE CARRIED COUNT RIDES ON THE LINE EITHER WAY, same contract the
             # exports section uses for retired targets: a chosen state stays
             # visible rather than becoming silence (rule bd4a6d22).
@@ -1753,30 +1313,10 @@ def _canonical_health():
                 print(f"  -- CARRIED {len(legacy)} definition(s) still on a legacy "
                       f"scheduler, no Control Plane ledger row expected: "
                       f"{', '.join(legacy)}")
-            if not (bad or unreceipted or missing or stuck or prebrief):
+            if not (bad or unreceipted or missing or stuck):
                 print(f"  OK {len(live_jobs)} live job(s), every due window present; "
                       "no terminal failure, stuck state, or unreceipted success")
-        # NEITHER OF THE TWO CENSUS SECTIONS CAN TURN THIS PROCESS RED, and
-        # neither returns a code: both report that their route cannot be proven,
-        # which is a standing fact about this repository rather than a fault of
-        # today's run. The fixture door is the one caller-fed path and it is
-        # labelled as a test door.
-        #
-        # THE ALARM BELOW IS THE EXCEPTION AND IT IS NOT FED BY ANY OF THAT. It
-        # takes no argument, ignores the fixture entirely, and reads the store
-        # itself; a contradiction in the control plane's own rows is the one
-        # condition on this slice that still turns health red. It runs on the
-        # fixture path too, because a caller must not be able to quiet it by
-        # choosing a door. It already records its own finding (workflow_truth_
-        # conflict) before returning 1, so folding its result into `rc` with
-        # `or` — rather than a bare `rc = 1` — keeps this call self-recording
-        # too without recording the same finding a second time.
-        _canonical_workflow_truth()
         rc = _canonical_contradiction_alarm() or rc
-        if CANONICAL_FIXTURE:
-            _fixture_assurance_health(snap)
-        else:
-            _canonical_assurance_health()
 
     if CANONICAL_SECTION in ("all", "registry"):
         feature_command = [sys.executable, os.path.join(REPO_ROOT, "tools/feature-switch-health.py")]
@@ -1927,15 +1467,6 @@ def _canonical_health():
                 else:
                     rc = _red("cloudflare_token", token_row["line"], subject=token_row["subject"],
                               status=token_row["status"])
-        # The source log is canonical across worktrees. The row carries its
-        # response action on both OK and WARN, and the helper owns one loop.
-        try:
-            _, _spend_line = _jev_spend_row()
-            print("  " + _spend_line)
-        except Exception as exc:
-            print(f"  UNAVAILABLE jev spend — {type(exc).__name__}; "
-                  "on breach: open/update one dedup loop · owner orchestrator · "
-                  "remediation find caller in jev usage log · auto-clear when below threshold")
         # ── credential health (added 2026-09-24) ────────────────────────────
         # Daily liveness lane for every credential CARR needs to run
         # unattended — wrangler/Cloudflare, Neon, the two MCP machine-bearer
@@ -2062,105 +1593,6 @@ def _canonical_health():
             print(f"  ⚠︎ {'credential health':<18} check failed ({type(e).__name__}: {e})")
             rc = _red("credential_health", f"check failed ({type(e).__name__}: {e})", hard_error=True)
 
-    if CANONICAL_SECTION == "all":
-        # Jev liveness compares the last usable provider receipt with a
-        # recent failed judgment attempt. The row's loop is filed once and
-        # closed only after a later schema-valid judgment appears in these logs.
-        try:
-            _loop_state = os.path.join(REPO_ROOT, "out", "jev-outage-loop.json")
-            _joh = _jev_outage.evaluate(
-                os.path.join(REPO_ROOT, "out", "jev-judge.jsonl"),
-                os.path.join(REPO_ROOT, "out", "jev-calls.jsonl"),
-                state_path=_loop_state)
-            _action = _jev_outage.action(_joh.get("reason"))
-            _outcome = _jev_outage.reconcile(
-                _joh, _loop_state,
-                _jev_outage.call_verb)
-            if _joh["status"] == "warn":
-                _last = (f"last success {_joh['age_hours']}h ago"
-                         if _joh["age_hours"] is not None else "no usable call recorded")
-                _condition = ("outage evidence unreadable" if _joh["reason"] == "log_unreadable"
-                              else f"recent attempt failed ({_joh['reason']})")
-                _detail = f"{_last}; {_condition}; loop {_outcome}"
-                print(f"  ⚠︎ {'Jev live judgment':<18} {_detail} · {_action}")
-                rc = _red("jev_live_outage", f"{_detail} · {_action}")
-            elif _outcome == "error":
-                _detail = "outage loop could not be auto-cleared"
-                print(f"  ⚠︎ {'Jev live judgment':<18} {_detail} · {_action}")
-                rc = _red("jev_live_outage", f"{_detail} · {_action}")
-            else:
-                _summary = ("success verified; outage loop cleared" if _outcome == "cleared"
-                            else "recent failure; last success is inside the grace window"
-                            if _joh["pending"]
-                            else "no recent failed attempts" if _joh["status"] == "skip"
-                            else "successful Jev call is fresh")
-                print(f"  {'OK' if _joh['status'] == 'ok' else '--'} "
-                      f"{'Jev live judgment':<18} {_summary} · {_action}")
-        except Exception as e:
-            _detail = f"outage evidence unreadable ({type(e).__name__})"
-            print(f"  ⚠︎ {'Jev live judgment':<18} {_detail} · {_jev_outage.action('log_unreadable')}")
-            rc = _red("jev_live_outage", f"{_detail} · {_jev_outage.action('log_unreadable')}")
-
-    if CANONICAL_SECTION == "all":
-        # Jev call receipt tamper audit (migrations/0587). The receipt store is
-        # detectable-not-prevented against its database owner; this is the
-        # detection half: a receipt with no matching ask-jev tool_call row, or
-        # an append-only trigger that is not enabled, is a failing line. The
-        # child asks the deployed Worker through `./run.sh call` (no credential
-        # of its own); a Worker that does not serve the verb yet (unknown_tool)
-        # is a skip line, not a failure.
-        try:
-            _rih = os.path.join(REPO_ROOT, "ops", "receipt-integrity-health.py")
-            if not os.path.exists(_rih):
-                print(f"  -- {'jev receipts':<18} ops/receipt-integrity-health.py not present; skipped")
-            else:
-                _venv = os.path.join(REPO_ROOT, ".venv", "bin", "python")
-                _py = _venv if os.path.exists(_venv) else sys.executable
-                _p = subprocess.run([_py, _rih], capture_output=True, text=True, timeout=120,
-                                    stdin=subprocess.DEVNULL)
-                _lines = (_p.stdout or "").strip().splitlines()
-                _first = _lines[0] if _lines else "(no output)"
-                if _first.startswith("SKIP"):
-                    print(f"  -- {'jev receipts':<18} {_first.split(': ', 1)[-1]}")
-                elif _p.returncode == 0:
-                    print(f"  OK {'jev receipts':<18} {_first.split('— ', 1)[-1]}")
-                else:
-                    _detail = _first.split("— ", 1)[-1]
-                    print(f"  ⚠︎ {'jev receipts':<18} {_detail}")
-                    # hard_error=True unconditionally (round 8 of an
-                    # independent review of PR #1237, point 4): this is a
-                    # tamper-DETECTION check on the Jev call receipt store,
-                    # which is detectable-not-prevented against its own
-                    # database owner (see the block comment above) — a
-                    # mismatched receipt or a disabled append-only trigger is
-                    # never a business count a baseline comparison should be
-                    # allowed to excuse, the same reasoning `failed` gets in
-                    # the credential-health loop above. `count` is the actual
-                    # number of receipts without a matching ask-jev tool_call
-                    # row when the message says so (not a fixed 1), so a rise
-                    # from one mismatch to five is visible to ops/release-
-                    # pipeline.py's baseline-vs-live regression diff instead
-                    # of two runs reporting the identical count=1.
-                    _rm = re.search(r"(\d+)\s+receipt\(s\)\s+without\s+a\s+matching", _detail)
-                    rc = _red("jev_call_receipt_integrity", _detail,
-                              count=int(_rm.group(1)) if _rm else 1, hard_error=True)
-        except Exception as e:
-            _detail = f"check failed ({type(e).__name__}: {e})"
-            print(f"  ⚠︎ {'jev receipts':<18} {_detail}")
-            rc = _red("jev_call_receipt_integrity", _detail, hard_error=True)
-
-    if CANONICAL_SECTION in ("all", "jobs") and not CANONICAL_FIXTURE:
-        print("Branch retirement — local scheduled receipts")
-        try:
-            line, failed = _branch_janitor_row()
-            print("  " + line)
-            if failed:
-                rc = _red("branch_janitor", line, subject="three-repo-retirement")
-        except Exception as exc:
-            line = (f"branch janitor unavailable ({type(exc).__name__}) · on breach: owner orchestrator "
-                    "· restore lib/branch_retirement.py · verify health · auto-clear after successful readback")
-            print("  WARN " + line)
-            rc = _red("branch_janitor", line, subject="three-repo-retirement")
 
     if CANONICAL_SECTION in ("all", "uptime") and not CANONICAL_FIXTURE:
         line, failed = _uptime.row()
@@ -2176,12 +1608,6 @@ def _canonical_health():
         if failed:
             rc = _red("cloudflare_spend", line, subject="cloudflare-account",
                       hard_error=not (not_run and "cloudflare_spend" in PROVISIONING_PENDING))
-
-    if CANONICAL_SECTION in ("all", "sends") and not CANONICAL_FIXTURE:
-        line, breach, hard = _system_sends_row()
-        print("  " + line)
-        if breach:
-            rc = _red("system_sends", line, subject="system-sender", hard_error=hard)
 
     if CANONICAL_SECTION in ("all", "tailscale"):
         try:
@@ -2258,7 +1684,7 @@ def _breach_consumer():
     """Execute (with --act) and audit every red row's bound action.
 
     Runs before the completion marker, which must stay the last stdout line
-    (ops/release-pipeline.py reads it). Never touches `rc`: the audit is a
+    (the retired local executor reads it). Never touches `rc`: the audit is a
     report about loops, not a new health fault, so a release's health diff
     is unchanged by it. A fixture run stays hermetic and prints nothing."""
     global _ACT_ERRORS
@@ -2467,7 +1893,7 @@ def db_env_parse_failure():
     That is not hypothetical twice over. 2026-08-02 was CARR_DB_JOBS_URL. Then on
     2026-08-20 CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL — a key no watch here
     names, so nothing in this file could see it — landed unquoted and closed
-    bin/migrate-prod.sh, the one sanctioned door to production migrations, for
+    the GitHub deployment workflow, for
     six days, for every caller that did not already have NEON_API_KEY exported.
     This check is file-level and unconditional for exactly that reason: it does
     not need to know which keys matter.
@@ -2490,8 +1916,8 @@ print(f"Façade check (rule 28) — {time.strftime('%Y-%m-%d %H:%M')} — output
 _db_env_line = db_env_parse_failure()
 if _db_env_line is not None:
     print(f"  ⚠︎ {'db.env':<18} UNSOURCEABLE — {DB_ENV} does not parse as shell at line "
-          f"{_db_env_line}. Every job that does `set -a; . db.env` (bin/migrate-prod.sh, "
-          f"bin/nightly.sh, bin/control-plane-tick.sh and the rest) "
+          f"{_db_env_line}. Every job that does `set -a; . db.env` (the GitHub production deployment workflow, "
+          f"bin/nightly.sh and the other scheduled jobs) "
           f"loses ALL of its keys, not just the bad one, and reports its credential missing. "
           f"Fix: single-quote that value  · one bad line disables every credential here")
     rc = 1
@@ -3222,20 +2648,6 @@ except Exception as e:
     print(f"  ⚠︎ {'machine config':<18} check failed ({type(e).__name__}: {e})")
     rc = 1
 
-try:
-    sys.path.insert(0, REPO_ROOT)
-    from lib import launchd_hold_health as _launchd_hold_health
-    _hold_line, _hold_rc = _launchd_hold_health.check(
-        os.path.expanduser("~"),
-        lambda name, payload: _jev_outage.call_verb(name, payload, repo=REPO_ROOT))
-    print(f"  {_hold_line}")
-    rc = max(rc, _hold_rc)
-except Exception as e:
-    print(f"  WARN launchd holds response failed ({type(e).__name__}) · "
-          "on breach: owner claude (Platform Engineer) repairs the hold health reader; "
-          "verify rerun health; auto-clear on a successful read")
-    rc = 1
-
 # ── the egress guard: is its LOGIC right, and is its DATA fresh (2026-08-09) ──
 # Two rows, because they fail independently and the 2026-08-08 incident turned on
 # exactly that distinction. `machine config` above answers "is the guard
@@ -3420,40 +2832,6 @@ except Exception as e:
     print(f"  ⚠︎ {'renders-verify':<18} check failed ({type(e).__name__}: {e})")
     rc = 1
 
-# ── ledger-vs-live ───────────────────────────────────────────────────────────
-# Does the deployment ledger still describe the Worker that is answering? The
-# two disagreed THREE times on 2026-08-19 and 2026-08-20 — a good deploy booked
-# failed on a stale identity read-back, another booked failed on a performance
-# budget that clocked the whole golden suite, and a third booked complete with
-# no verb count at all — and every one was found by a human curling /release,
-# never by a check. The ledger is not a diary: bin/deploy-worker.sh's verb-loss
-# guard reads it to decide whether a deploy is about to remove verbs, so a
-# baseline that has drifted below reality re-opens the 2026-08-09 hole where
-# production went from 75 verbs to 66 with nothing objecting. Bound action is
-# printed by the child per rule 590b11e1.
-try:
-    _dlv = os.path.join(REPO_ROOT, "ops", "deploy-ledger-vs-live.py")
-    if not os.path.exists(_dlv):
-        print(f"  -- {'ledger-vs-live':<18} ops/deploy-ledger-vs-live.py not present; skipped")
-    else:
-        _venv = os.path.join(REPO_ROOT, ".venv", "bin", "python")
-        _py = _venv if os.path.exists(_venv) else sys.executable
-        _p = subprocess.run([_py, _dlv], capture_output=True, text=True, timeout=120)
-        _lines = (_p.stdout or "").strip().splitlines()
-        _first = _lines[0] if _lines else (
-            f"(no output; stderr: {(_p.stderr or '').strip().splitlines()[-1]})"
-            if (_p.stderr or "").strip() else "(no output, no stderr)")
-        if _first.startswith("SKIP"):
-            print(f"  -- {'ledger-vs-live':<18} {_first.split(': ', 1)[-1]}")
-        elif _p.returncode == 0:
-            print(f"  OK {'ledger-vs-live':<18} {_first.split('— ', 1)[-1]}")
-        else:
-            print(f"  ⚠︎ {'ledger-vs-live':<18} {_first.split('— ', 1)[-1]}")
-            rc = 1
-except Exception as e:
-    print(f"  ⚠︎ {'ledger-vs-live':<18} check failed ({type(e).__name__}: {e})")
-    rc = 1
-
 # --- the doctrine store (P4/P5, 2026-08-08; decisions 82a2fb62 + import door) -
 # Every row prints its bound action inline (rule 590b11e1: no metric without a
 # bound action, visible in the render itself). A failed read is never all-clear.
@@ -3533,7 +2911,7 @@ except Exception as e:
 # than none.
 #
 # THIS ROW READS THE WORKER ITSELF, not the local marker — that is the whole
-# point (see bin/deploy-worker.sh's DEPLOY PROVENANCE note: the marker only
+# point (see the GitHub production deployment workflow's DEPLOY PROVENANCE note: the marker only
 # ever protects a deploy that goes through the script, and `wrangler deploy`
 # is also called directly elsewhere in this repo's own history). The Git SHA
 # is stamped into the Worker at deploy time (`wrangler deploy --var
@@ -3546,7 +2924,7 @@ except Exception as e:
 # no record of — this checkout is behind, or someone deployed from a branch
 # or a force-pushed-away commit. That is loop #276's failure mode (a verb
 # silently vanishing from production because the wrong tree shipped),
-# checked independently of whether bin/deploy-worker.sh's own preflight ran.
+# checked independently of whether the GitHub production deployment workflow's own preflight ran.
 print("\ndeploy provenance (/release)")
 RELEASE_URL = os.environ.get("CARR_RELEASE_URL", "https://api.doctorcre.com/release")
 try:
@@ -3574,7 +2952,7 @@ try:
             _reason = _sha_obj.get("reason") or "no reason given"
             print(f"  ⚠︎ release       git_sha NOT STAMPED — {_reason} · production's "
                   f"provenance cannot be checked against this checkout until the next "
-                  f"deploy goes through bin/deploy-worker.sh ({_rel_verbs} verbs reported)")
+                  f"GitHub deploy stamps the release ({_rel_verbs} verbs reported)")
             rc = 1
         else:
             # The commit may not exist in this checkout's object database yet (a
@@ -3659,23 +3037,6 @@ except Exception as e:
 # went looking by hand. The nightly chain runs this file, so a stranded pull
 # request now surfaces within a day with no inbox involved. Thresholds and the
 # reasoning behind their width live in ops/pr-hygiene-check.py.
-print("\ndefect log")
-# WR-000269: every recorded defect has a Work Request naming it, or it is
-# counted here. ops/defect-bridge.py --health-row prints the row with its bound
-# action inline (rule 590b11e1); a failed read prints UNKNOWN, never all-clear.
-try:
-    _dbp = subprocess.run([os.path.join(REPO_ROOT, ".venv/bin/python"),
-                           os.path.join(REPO_ROOT, "ops", "defect-bridge.py"), "--health-row"],
-                          cwd=REPO_ROOT, capture_output=True, text=True, timeout=300)
-    print((_dbp.stdout or "").rstrip() or
-          "  ⚠︎ unaddressed defects  check produced no output · on breach: run "
-          "ops/defect-bridge.py --dry-run by hand")
-    if _dbp.returncode != 0:
-        rc = 1
-except Exception as e:
-    print(f"  ⚠︎ unaddressed defects check failed ({type(e).__name__}: {e})")
-    rc = 1
-
 print("\nrepo hygiene")
 try:
     _prh = os.path.join(REPO_ROOT, "ops", "pr-hygiene-check.py")

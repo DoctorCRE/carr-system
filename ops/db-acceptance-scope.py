@@ -1,17 +1,18 @@
 """Decide whether the hosted disposable-Postgres lane must run in full.
 
-The lane (`local-db-ci --class migration`) takes 34-45 minutes. A PR whose
-diff touches no migration, schema, or record-layer database file cannot change
-its verdict, so the workflow skips the install and the run and still reports
-green. Schedule, manual runs and anything this script cannot decide stay full.
+One path inventory covers the canonical class, its disposable runner and all
+acceptance programs. A PR outside this inventory records not applicable. Schedule, manual runs and anything this script cannot decide stay full.
 
 Prints `full=true|false` (and appends it to $GITHUB_OUTPUT when set).
 """
 from __future__ import annotations
 
+import argparse
+import functools
 import fnmatch
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -20,53 +21,110 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from git_env import scrubbed_env  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
+SOURCE_ROOT = ROOT
 
-# Any match runs the full lane. fnmatch `*` crosses `/`, so `dir/*` is a tree.
+# Runtime-discovered inputs remain broad. Static JS dependencies outside these
+# trees come from the canonical proof commands, not a second path list.
 FULL_PATTERNS = (
-    'migrations/*', 'db/*', 'lib/*', 'mcp-server/src/*',
-    'mcp-server/test/codex-continuity*',
+    '*.sql', 'migrations/*', 'db/*', 'lib/*', 'ops/*', 'tools/*', 'bin/*',
+    'control-room/contracts/*', 'pipelines/*',
+    'audits/guidance-migration-manifest.v1.tsv', 'runbooks/rollback-worker.md',
+    'mcp-server/src/*', 'mcp-server/test/*',
     'mcp-server/package.json', 'mcp-server/package-lock.json',
-    'bin/schema-snapshot.sh', 'run.sh', 'requirements.lock',
-    '.python-version', '.nvmrc',
-    '.github/workflows/db-acceptance.yml',
-    'ops/ci.sh', 'ops/local-pg-ci*', 'ops/db-*', 'ops/db_*',
-    'ops/*migration*', 'ops/*schema*', 'ops/*postgres*', 'ops/*-pg-*',
-    'ops/*acceptance*', 'ops/*rule-delivery*', 'ops/*canonical-ownership*',
-    'ops/config/rule-enforcement-map*', 'ops/config/*migration*',
-    'tools/migrat*', 'tools/test_migr*', 'tools/*schema*', 'tools/git_env.py',
-    'tools/renumber-at-merge*', 'tools/*f03*', 'ops/*f03*', 'ops/*.sql',
-    'mcp-server/test/*pg*', 'mcp-server/test/*f03*',
-    'mcp-server/test/find-rule-supersedes*', 'mcp-server/test/catch-me-up-writer-route*',
-    'mcp-server/test/one-step-rule-approval*',
+    'run.sh', 'requirements*', '.python-version', '.nvmrc',
+    '.github/workflows/ci.yml',
 )
 
 
+def relative_imports(roots: list[Path], root: Path) -> frozenset[str]:
+    """Follow literal local imports without executing proof code."""
+    pending, seen = list(roots), set()
+    while pending:
+        path = pending.pop().resolve()
+        if not path.is_relative_to(root.resolve()):
+            raise ValueError('proof dependency escapes repository')
+        name = path.relative_to(root.resolve()).as_posix()
+        if name in seen:
+            continue
+        seen.add(name)
+        # Include static import/export, literal import() and require(). Bare
+        # packages are covered by package.json/lock. Unknown local paths fail
+        # scope resolution instead of silently dropping a dependency.
+        text = path.read_text()
+        for imported in re.findall(r"(?:from\s*|import\s*\(?\s*|require\s*\(\s*)[\"'](\.[^\"']+)[\"']", text):
+            target = path.parent / imported
+            if target.suffix in ('.js', '.mjs', '.cjs'):
+                pending.append(target)
+            else:
+                seen.add(target.resolve().relative_to(root.resolve()).as_posix())
+    return frozenset(seen)
+
+
+@functools.lru_cache(maxsize=1)
+def proof_inputs() -> frozenset[str]:
+    text = (SOURCE_ROOT / 'ops/ci.sh').read_text().split('check_migration_fixtures() {', 1)[1].split('check_binding()', 1)[0]
+    text += (SOURCE_ROOT / 'ops/db_acceptance_programs.py').read_text()
+    roots = set(re.findall(r'mcp-server/test/[A-Za-z0-9_.-]+\.mjs', text))
+    for values in re.findall(r'for proof in ([^;]+); do', text):
+        roots.update('mcp-server/test/' + value + '.test.mjs' for value in values.split())
+    return relative_imports([SOURCE_ROOT / path for path in sorted(roots) if (SOURCE_ROOT / path).is_file()], SOURCE_ROOT)
+
+
 def needs_full(paths: list[str]) -> bool:
-    return any(fnmatch.fnmatchcase(p, pat) for p in paths for pat in FULL_PATTERNS)
+    inputs = proof_inputs()
+    return any(p in inputs or any(fnmatch.fnmatchcase(p, pat) for pat in FULL_PATTERNS)
+               for p in paths)
 
 
 def changed_paths(event: dict) -> list[str] | None:
     pr = event.get('pull_request')
     if not pr:
         return None
-    base, head = 'origin/' + pr['base']['ref'], pr['head']['sha']
-    out = subprocess.run(['git', 'diff', '--name-only', '--no-renames', f'{base}...{head}'], cwd=ROOT, env=scrubbed_env(),
+    base, head = pr['base'].get('sha', 'origin/' + pr['base']['ref']), pr['head']['sha']
+    out = subprocess.run(['git', 'diff', '--name-only', '--no-renames', '-z', f'{base}...{head}'], cwd=ROOT, env=scrubbed_env(),
                          capture_output=True, text=True, check=True, timeout=120).stdout
-    return [line for line in out.splitlines() if line]
+    return [path for path in out.split('\0') if path]
+
+
+def classify() -> tuple[bool, list[str] | None, str]:
+    if os.environ.get('GITHUB_EVENT_NAME') != 'pull_request':
+        return True, None, 'non-PR event requires full proof'
+    try:
+        paths = changed_paths(json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()))
+        full = True if paths is None else needs_full(paths)
+    except (KeyError, TypeError, AttributeError, OSError, ValueError, subprocess.SubprocessError):
+        return True, None, 'diff unavailable; run full proof'
+    if paths is None:
+        return True, None, 'PR identity unavailable; run full proof'
+    return full, paths, 'database input changed' if full else 'no database input changed'
 
 
 def decide() -> bool:
-    if os.environ.get('GITHUB_EVENT_NAME') != 'pull_request':
-        return True
-    try:
-        paths = changed_paths(json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()))
-    except (KeyError, OSError, ValueError, subprocess.SubprocessError):
-        return True  # cannot decide: run everything
-    return True if paths is None else needs_full(paths)
+    return classify()[0]
 
 
 def main() -> int:
-    full = decide()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--receipt', type=Path)
+    args = parser.parse_args()
+    full, paths, reason = classify()
+    status = 'required' if full else 'not applicable'
+    try:
+        inputs = sorted(proof_inputs())
+    except (OSError, ValueError):
+        inputs = None
+    receipt = {'schema': 'carr-db-scope/v1', 'full': full,
+               'status': status,
+               'paths': paths, 'reason': reason,
+               'event': os.environ.get('GITHUB_EVENT_NAME'),
+               'tested_sha': os.environ.get('GITHUB_SHA'),
+               'patterns': FULL_PATTERNS, 'inputs': inputs}
+    if args.receipt:
+        args.receipt.write_text(json.dumps(receipt, indent=2) + '\n')
+    print(json.dumps(receipt))
+    if os.environ.get('GITHUB_STEP_SUMMARY'):
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+            summary.write('Database migration proof: ' + status + '\n')
     line = f'full={"true" if full else "false"}'
     print(line)
     if os.environ.get('GITHUB_OUTPUT'):

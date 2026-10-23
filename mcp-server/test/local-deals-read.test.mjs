@@ -17,12 +17,12 @@ test('deal-board exposes parking fields and excludes invoiced deals in its execu
 
 test('deal-room-board returns exact phase event identity and invoice marker in the same snapshot', async () => {
   let boardQuery;
-  const row={id:'demo-1', operating_state:'active',phase_change:{event_id:'demo-event',prior_phase:'research',phase:'negotiation',automatic:true,reason:'LOI submitted',evidence_date:'2026-10-01'},invoiced_on:null};
+  const row={id:'demo-1',name:'Synthetic assignment',operating_state:'active',phase_change:{event_id:'demo-event',prior_phase:'research',phase:'negotiation',automatic:true,reason:'LOI submitted',evidence_date:'2026-10-01'},invoiced_on:null};
   const result=await TOOLS['deal-room-board'].handler({query:async (sql,args) => {
     if(sql.includes('dealroom:board-field-base')) {boardQuery=sql;assert.equal(args[0],'team');return {rows:[row]};}
     return {rows:[]};
   }},{slug:'joe'},{workspace:'team'});
-  assert.deepEqual(result.deals,[row]);
+  assert.deepEqual(result.deals,[{...row,short_name:'Synthetic assignment'}]);
   assert.match(boardQuery,/v_deal_room_phase_change pc where pc\.deal_id=b\.id/);
   assert.match(boardQuery,/b\.invoiced_on/);
 });

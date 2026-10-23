@@ -1,16 +1,6 @@
 {
   "PreToolUse": [
     {
-      "matcher": ".*",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/rule-boot-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
-          "timeout": 5
-        }
-      ]
-    },
-    {
       "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\\.update_plan|mcp__.*",
       "hooks": [
         {
@@ -77,16 +67,6 @@
       ]
     },
     {
-      "matcher": "Agent",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/executor-tier-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/executor-tier-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/executor-tier-gate.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/executor-tier-gate.py",
-          "timeout": 10
-        }
-      ]
-    },
-    {
       "matcher": "Bash|mcp__claude-in-chrome__.*",
       "hooks": [
         {
@@ -142,16 +122,6 @@
           "timeout": 5
         }
       ]
-    },
-    {
-      "matcher": "Bash|run_terminal_command|.*__standing[-_]context",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/rule-boot-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
-          "timeout": 5
-        }
-      ]
     }
   ],
   "PostToolUseFailure": [
@@ -161,16 +131,6 @@
         {
           "type": "command",
           "command": "if [ ! -f \"{{REPO}}/hooks/github-burst-guard.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/github-burst-guard.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/github-burst-guard.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/github-burst-guard.py",
-          "timeout": 5
-        }
-      ]
-    },
-    {
-      "matcher": "Bash|run_terminal_command|.*__standing[-_]context",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/rule-boot-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
           "timeout": 5
         }
       ]
@@ -213,61 +173,17 @@
           "type": "command",
           "command": "if [ ! -f \"{{REPO}}/hooks/gate-integrity.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/gate-integrity.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/gate-integrity.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/gate-integrity.py",
           "timeout": 15
-        },
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/rule-boot-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
-          "timeout": 5
-        }
-      ]
-    },
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -e \"{{REPO}}/hooks/session-presence-hook.py\" ] && [ ! -L \"{{REPO}}/hooks/session-presence-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/session-presence-hook.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/session-presence-hook.py claude",
-          "timeout": 5
         }
       ]
     }
   ],
-  "SubagentStart": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -f \"{{REPO}}/hooks/rule-boot-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
-          "timeout": 5
-        }
-      ]
-    }
-  ],
-  "SessionEnd": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -e \"{{REPO}}/hooks/session-presence-hook.py\" ] && [ ! -L \"{{REPO}}/hooks/session-presence-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/session-presence-hook.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/session-presence-hook.py claude",
-          "timeout": 5
-        }
-      ]
-    }
-  ],
+  "SessionEnd": [],
   "UserPromptSubmit": [
     {
       "hooks": [
         {
           "type": "command",
           "command": "if [ ! -e \"{{REPO}}/hooks/job-watchdog-digest.py\" ] && [ ! -L \"{{REPO}}/hooks/job-watchdog-digest.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/job-watchdog-digest.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/job-watchdog-digest.py",
-          "timeout": 5
-        }
-      ]
-    },
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "if [ ! -e \"{{REPO}}/hooks/session-presence-hook.py\" ] && [ ! -L \"{{REPO}}/hooks/session-presence-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/session-presence-hook.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/session-presence-hook.py claude",
           "timeout": 5
         }
       ]

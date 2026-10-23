@@ -35,8 +35,8 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(result['sources']['github']['state'], 'unknown')
 
     def test_portfolio_contains_backend_and_app_and_bounds_completed_history(self):
-        tasks = {str(i): {'title': f'Feature {i}', 'stage': 'live', 'repo': 'jbookout/carr-system'} for i in range(100)}
-        tasks['active'] = {'title': 'Shared search contract', 'stage': 'build', 'repo': 'jbookout/carr-system'}
+        tasks = {str(i): {'title': f'Feature {i}', 'stage': 'live', 'repo': 'DoctorCRE/carr-system'} for i in range(100)}
+        tasks['active'] = {'title': 'Shared search contract', 'stage': 'build', 'repo': 'DoctorCRE/carr-system'}
         result = project({'tasks': tasks}, None, portfolio={'tasks': {'app': {'title': 'Deal room search', 'stage': 'review', 'repo': 'jbookout/doctorcre-app'}}})
         self.assertEqual(len(result['history']), 20)
         self.assertEqual(len(result['cards']), 2)
@@ -60,11 +60,11 @@ class PublicationTests(unittest.TestCase):
             for private in ('PRIVATE BRIEF','PRIVATE DESCRIPTION','PRIVATE RESULT',card['claim']):
                 self.assertNotIn(private,encoded)
 
-    def test_scheduled_refresh_is_bounded_to_one_minute_without_a_model(self):
+    def test_scheduled_refresh_runs_every_five_minutes_without_a_model(self):
         import plistlib
         from pathlib import Path
         config=plistlib.loads((Path(__file__).parents[1]/'ops/launchd/local.carr-progress-board.plist').read_bytes())
-        self.assertEqual(len(config['StartCalendarInterval']),60)
+        self.assertEqual(len(config['StartCalendarInterval']),12)
         self.assertEqual(config['ProgramArguments'][1],'{{REPO}}/ops/progress-board-render.sh')
 
     def test_source_outage_preserves_the_last_successful_queue_observation(self):
@@ -128,7 +128,7 @@ def publication_sequence():
         state={'project':'carr-v5','tasks':{'source':{'title':'Find a deal across the portfolio','status':'review',
                'stage':'review','repo':'jbookout/doctorcre-app','pr':12,'pr_head':'a'*40}},'github_sync':sync}
         portfolio={'tasks':{'backend':{'title':'Shared search contract','status':'running','stage':'build',
-                   'repo':'jbookout/carr-system'}},'github_sync':sync}
+                   'repo':'DoctorCRE/carr-system'}},'github_sync':sync}
         with patch.object(tempfile, 'tempdir', tmp), \
              patch.object(board.repo_lib('machine_role'), 'read_marker', return_value='primary'), \
              patch.dict(os.environ,{'CARR_WORK_QUEUE_DB':str(db),'PROGRESS_BOARD_ROOT':tmp}), \
@@ -149,8 +149,7 @@ def publication_sequence():
             claimed=q.claim(eligible_desks={'cx-app2'},actor='runner',owner={})
             q.finish('search',claimed['claim'],{'status':'completed'},actor='worker')
             q.transition('search','merging',actor='orchestrator',reason='Independent review passed');publish()
-            q.finish_merge('search',repo='jbookout/doctorcre-app',pr=12,head='a'*40,merged=True,
-                           actor='provider',reason='Provider confirmed the merge')
+            q.transition('search','done',actor='provider',reason='Provider confirmed the approved head merged')
             state['tasks']['source'].update(stage='merged',pr_phase='Merged',merge_sha='a'*40)
             publish()
             state['tasks']['source'].update(**exercise_fields(source='a'*40,repo='jbookout/doctorcre-app'),stage='live',status='done')

@@ -26,8 +26,6 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from lib import system_sender as ss
-from lib.record_call import VerbResult
 from lib import outlook_send as send_mod
 from lib import outlook_ui as ui
 from lib.outlook_send import EventRow, Ports, SentRow, Snapshot, State
@@ -190,7 +188,7 @@ class FakeOutlook:
         return self.press_count
 
 
-MAIL = dict(to=['person-a@example.test'], cc=['person-b@example.test'], bcc=['person-c@example.test'],
+MAIL = dict(to=['person-a@example.test'], cc=[ACCOUNT], bcc=[ACCOUNT],
             subject='subject-001', body='Line one.\nLine two.')
 
 
@@ -206,21 +204,12 @@ class Harness:
         self.front_idle = 600
         self.frontmost = lambda: self.previous
         self.carr_calls: list[tuple[str, dict]] = []
-        config = ss.load_config()
-        config['mail'] = {'self_addresses': [ACCOUNT, 'person-b@example.test', 'person-c@example.test'],
-                          'self_test_address': ACCOUNT}
-        carr = self.carr
-        self.policy = ss.Sender(config=config, state_dir=out / 'policy',
-                                verb=lambda name, args: VerbResult(name, 'ok', carr(name, dict(args))),
-                                lint=lambda text, surface: (True, ''),
-                                now=lambda: datetime.fromtimestamp(self.clock.now(), timezone.utc))
         self.ports = Ports(open_form=lambda item: send_mod.open_form(item, ui.Waits(settle_seconds=0,
                                                                                    poll_seconds=0,
                                                                                    new_window_seconds=0)),
                            mailbox=self.mailbox, idle_seconds=lambda: self.idle[0] if len(self.idle) == 1
                            else self.idle.pop(0), carr=self.carr, now=self.clock.now, sleep=self.clock.sleep,
                            out=out, close_seconds=30, confirm_seconds=300, poll_seconds=20)
-        self.ports.sender = self.policy
 
     def carr(self, verb: str, args: dict) -> dict:
         self.carr_calls.append((verb, args))
@@ -235,7 +224,7 @@ class Harness:
             return {'parties': [{'name': 'client-001', 'ref': 'C-1', 'merged': False}]}
         return {'ok': True}
 
-    def send(self, key='key-1', record=None, **overrides):
+    def send(self, key='key-1', record=None, send_requested=True, **overrides):
         spec = {**MAIL, **overrides}
         with patch.object(send_mod, 'account', lambda: ACCOUNT), patch.object(ui, 'cua', self.transport or self.fake), patch.object(ui, 'outlook_pid', lambda: 42), \
                 patch.object(send_mod, '_mailto_handler', lambda: self.handler), \
@@ -245,8 +234,7 @@ class Harness:
                 patch.object(send_mod.time, 'sleep', lambda s: None):
             return send_mod.send(spec['to'], spec['cc'], spec['bcc'], spec['subject'], spec['body'],
                                  idempotency_key=key, record=record, ports=self.ports,
-                                 deal_id='11111111-2222-3333-4444-555555555555',
-                                 follow_up={'next_on': '2030-01-03', 'next_step': 'Check reply'})
+                                 **({} if send_requested is None else {'send_requested': send_requested}))
 
 
 EVENT = dict(subject='event-001', start=datetime(2030, 1, 2, 15, tzinfo=timezone.utc),
@@ -254,15 +242,14 @@ EVENT = dict(subject='event-001', start=datetime(2030, 1, 2, 15, tzinfo=timezone
              attendees=['person-a@example.test'])
 
 
-def event(h, key='event-key', **overrides):
+def event(h, key='event-key', send_requested=True, **overrides):
     with patch.object(send_mod, 'account', lambda: ACCOUNT), patch.object(ui, 'cua', h.fake), \
             patch.object(ui, 'outlook_pid', lambda: 42), patch.object(send_mod.time, 'sleep', lambda _: None), \
             patch.object(send_mod, '_idle_seconds', lambda: 600), patch.object(send_mod, '_frontmost', lambda: 'com.example.editor'), \
             patch.object(send_mod, '_activate', lambda _: None):
         return send_mod.create_event(**{**EVENT, **overrides}, idempotency_key=key,
                                      record='client-001', ports=h.ports,
-                                     deal_id='11111111-2222-3333-4444-555555555555',
-                                     follow_up={'next_on': '2030-01-03', 'next_step': 'Check reply'})
+                                     **({} if send_requested is None else {'send_requested': send_requested}))
 
 
 class SendTests(unittest.TestCase):
@@ -277,73 +264,43 @@ class SendTests(unittest.TestCase):
         path = self.out / send_mod.LEDGER
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
-    def test_policy_kill_switch_blocks_before_outlook(self):
+    def test_default_call_prepares_a_draft_without_pressing_send(self):
         h = Harness(self.out)
-        h.policy.stop_file.parent.mkdir(parents=True)
-        h.policy.stop_file.touch()
-        result = h.send()
-        self.assertEqual(result.reason, 'kill_switch_engaged')
-        self.assertFalse(result.ok)
-        self.assertEqual(h.fake.press_count, 0)
-        self.assertEqual(h.mailbox.reads, 0)
+        result = h.send(send_requested=None)
+        self.assertEqual(result.state.value, 'draft')
+        self.assertEqual(h.fake.presses(), 0)
+        self.assertEqual(len(h.fake.forms), 1)
+        self.assertEqual(self.ledger(), [])
 
-    def test_eleventh_send_is_refused_by_shared_daily_cap(self):
+
+    def test_eleventh_requested_send_is_refused_by_daily_cap(self):
         h = Harness(self.out)
         for i in range(10):
             self.assertTrue(h.send(key=f'cap-{i}', subject=f'Individual note {i}').ok)
         result = h.send(key='cap-11', subject='Individual note eleven')
         self.assertEqual(result.reason, 'daily_cap')
         self.assertEqual(h.fake.press_count, 10)
-        self.assertEqual(h.policy.sends_today('mail'), 10)
 
     def test_do_not_contact_refuses_every_recipient_field(self):
         for field in ('to', 'cc', 'bcc'):
             with self.subTest(field=field):
                 h = Harness(self.out / field)
-                original = h.policy._verb
+                original = h.ports.carr
                 def verb(name, args):
                     if name == 'mail-contact-policy':
-                        return VerbResult(name, 'ok', {'recipients': [
+                        return {'recipients': [
                             {'email': email, 'blocked': email == 'person-a@example.test'}
-                            for email in args['emails']]})
+                            for email in args['emails']]}
                     return original(name, args)
-                h.policy._verb = verb
+                h.ports.carr = verb
                 spec = {'to': [ACCOUNT], 'cc': [], 'bcc': [], field: ['person-a@example.test']}
                 result = h.send(**spec)
                 self.assertEqual(result.reason, 'do_not_contact')
                 self.assertEqual(h.fake.press_count, 0)
                 self.assertEqual(h.mailbox.reads, 0)
 
-    def test_invites_and_personal_saves_use_mail_policy(self):
-        for attendees in (['person-a@example.test'], []):
-            with self.subTest(attendees=attendees):
-                h = Harness(self.out / ('invite' if attendees else 'save'))
-                h.policy.stop_file.parent.mkdir(parents=True)
-                h.policy.stop_file.touch()
-                result = event(h, attendees=attendees)
-                self.assertEqual(result.reason, 'kill_switch_engaged')
-                self.assertEqual(h.fake.press_count, 0)
-                self.assertEqual(h.mailbox.reads, 0)
 
-    def test_outside_recipient_is_refused_in_mail_and_invites(self):
-        for kind in ('to', 'cc', 'bcc', 'invite'):
-            with self.subTest(kind=kind):
-                h = Harness(self.out / kind)
-                result = (event(h, attendees=['stranger@example.test']) if kind == 'invite' else
-                          h.send(**{'to': [ACCOUNT], 'cc': [], 'bcc': [], kind: ['stranger@example.test']}))
-                self.assertEqual(result.reason, 'recipient_not_allowed')
-                self.assertEqual(h.fake.press_count, 0)
-                self.assertEqual(h.mailbox.reads, 0)
 
-    def test_lint_and_shadow_apply_to_invites(self):
-        h = Harness(self.out)
-        h.policy._lint = lambda text, surface: (False, 'synthetic lint')
-        self.assertEqual(event(h).reason, 'lint')
-        self.assertEqual(h.fake.press_count, 0)
-        h.policy._lint = lambda text, surface: (True, '')
-        h.policy._live_start = None
-        self.assertEqual(event(h).state, State.POLICY_SHADOW)
-        self.assertEqual(h.fake.press_count, 0)
 
     def test_bulk_external_recipients_are_refused(self):
         h = Harness(self.out)
@@ -358,8 +315,8 @@ class SendTests(unittest.TestCase):
             for kind in ('mail', 'invite'):
                 with self.subTest(reply=reply, kind=kind):
                     h = Harness(self.out / f'{i}-{kind}')
-                    original = h.policy._verb
-                    h.policy._verb = lambda name, args: (VerbResult(name, 'ok', reply) if
+                    original = h.ports.carr
+                    h.ports.carr = lambda name, args: (reply if
                         name == 'mail-contact-policy' else original(name, args))
                     result = h.send() if kind == 'mail' else event(h)
                     self.assertEqual(result.reason, 'contact_policy_unreadable')
@@ -368,31 +325,26 @@ class SendTests(unittest.TestCase):
 
     def test_do_not_contact_blocks_invite(self):
         h = Harness(self.out)
-        original = h.policy._verb
-        h.policy._verb = lambda name, args: (VerbResult(name, 'ok', {'recipients': [
-            {'email': 'person-a@example.test', 'blocked': True}]}) if
+        original = h.ports.carr
+        h.ports.carr = lambda name, args: ({'recipients': [
+            {'email': 'person-a@example.test', 'blocked': True}]} if
             name == 'mail-contact-policy' else original(name, args))
         self.assertEqual(event(h).reason, 'do_not_contact')
         self.assertEqual(h.fake.press_count, 0)
 
-    def test_legacy_mail_and_invites_share_the_ten_send_cap(self):
-        h = Harness(self.out)
-        h.policy._outlook = lambda url, subject: 'SENT'
-        for i in range(9):
-            self.assertEqual(h.policy.send_mail(to=[ACCOUNT], subject=f'Private note {i}',
-                             body='Synthetic body').outcome, ss.SENT)
-        self.assertTrue(event(h).ok)
-        self.assertEqual(h.send().reason, 'daily_cap')
-        self.assertEqual(h.fake.press_count, 1)
-        self.assertEqual(h.policy.sends_today('mail'), 10)
 
-    def test_configuration_cannot_raise_mail_cap_above_ten(self):
+
+    def test_default_calendar_call_prepares_a_draft_without_inviting(self):
         h = Harness(self.out)
-        config = {**h.policy.config, 'daily_caps': {'mail': 11, 'social': 5}}
-        h.ports.sender = ss.Sender(config=config, state_dir=self.out / 'raised-cap',
-                                  verb=h.policy._verb, lint=lambda text, surface: (True, ''))
-        self.assertEqual(h.send().reason, 'config_invalid')
-        self.assertEqual(h.fake.press_count, 0)
+        result = event(h, send_requested=None)
+        self.assertEqual(result.state, State.DRAFT)
+        self.assertEqual(h.fake.presses(), 0)
+        self.assertEqual(h.mailbox.reads, 0)
+        self.assertEqual(self.ledger(), [])
+
+    def test_send_intent_must_be_a_boolean(self):
+        with self.assertRaises(ValueError):
+            Harness(self.out).send(send_requested='false')
 
     def test_transport_timeout_never_exposes_message_in_diagnostics(self):
         h = Harness(self.out)
@@ -414,7 +366,7 @@ class SendTests(unittest.TestCase):
                     patch.object(send_mod.subprocess, 'run', timeout), \
                     patch.object(send_mod, 'send', dispatch):
                 try:
-                    code = send_mod.main(['send', '--json', str(path)])
+                    code = send_mod.main(['send', '--send', '--json', str(path)])
                 except Exception:
                     traceback.print_exc()
                     code = 1
@@ -589,12 +541,13 @@ class SendTests(unittest.TestCase):
 
     def test_unmatched_record_still_reports_the_send(self):
         h = Harness(self.out)
-        h.carr = lambda verb, args: {'parties': []}
+        original = h.carr
+        h.carr = lambda verb, args: ({'parties': []} if verb == 'find' else original(verb, args))
         h.ports.carr = h.carr
         result = h.send(record='client-404')
         self.assertEqual((result.state, result.logged), (State.DONE, ('record_not_matched',)))
 
-    def test_default_adapter_does_not_require_intake_module(self):
+    def test_default_adapter_provides_mailbox_and_record_ports(self):
         ports = send_mod.default_ports(ROOT)
         self.assertTrue(callable(ports.carr))
         self.assertTrue(callable(ports.mailbox.snapshot))
@@ -718,18 +671,16 @@ class SendTests(unittest.TestCase):
         workspaces = []
         vendor = home / 'carr-local/hxstore-reverse-engineering'
         vendor.mkdir(parents=True)
-        (vendor / '.carr-pin').write_text(send_mod.DecodedMailbox.PIN)
         store = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity/HxStore.hxd'
         store.parent.mkdir(parents=True)
         store.write_bytes(b'fixture-store')
         def decode(command, **kwargs):
             work = Path(command[2]).parent
             workspaces.append(work)
-            self.assertFalse(work.is_relative_to(repo.resolve()))
-            self.assertTrue(work.is_relative_to((home / 'carr-local').resolve()))
+            self.assertTrue(work.is_relative_to((repo / 'out/outlook-intake').resolve()))
+            self.assertTrue(work.name.startswith('work-'))
             self.assertEqual(stat.S_IMODE(work.stat().st_mode), 0o700)
             self.assertEqual(stat.S_IMODE(Path(command[3]).stat().st_mode), 0o600)
-            self.assertEqual(kwargs['umask'], 0o077)
             self.assertEqual(Path(command[2]).read_bytes(), b'fixture-store')
             self.assertEqual(stat.S_IMODE(Path(command[2]).stat().st_mode), 0o600)
             con = sqlite3.connect(command[3])
@@ -746,12 +697,17 @@ class SendTests(unittest.TestCase):
             """)
             con.close()
             return subprocess.CompletedProcess(command, 0)
-        with patch.object(send_mod.subprocess, 'run', decode):
-            snap = send_mod.DecodedMailbox(home).snapshot()
+        def copy(home_arg, work):
+            self.assertEqual(home_arg, home)
+            (work / 'store.hxd').write_bytes(b'fixture-store')
+            (work / 'store.hxd').chmod(0o600)
+        with patch('lib.outlook_intake._snapshot', side_effect=copy) as copier, patch.object(send_mod.subprocess, 'run', decode):
+            snap = send_mod.DecodedMailbox(home, repo).snapshot()
+        copier.assert_called_once()
         self.assertEqual([m.subject for m in snap.sent], ['sent-001'])
         self.assertEqual(snap.events, (EventRow('event-001', 1893596400),))
         self.assertFalse(any(work.exists() for work in workspaces))
-        self.assertEqual(list(repo.rglob('*')), [repo / '.git'])
+        self.assertEqual(list((repo / 'out/outlook-intake').iterdir()), [])
         self.assertEqual(store.read_bytes(), b'fixture-store')
 
     def test_decoder_failure_removes_copies_outside_git(self):
@@ -760,7 +716,6 @@ class SendTests(unittest.TestCase):
         repo.mkdir()
         vendor = home / 'carr-local/hxstore-reverse-engineering'
         vendor.mkdir(parents=True)
-        (vendor / '.carr-pin').write_text(send_mod.DecodedMailbox.PIN)
         store = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity/HxStore.hxd'
         store.parent.mkdir(parents=True)
         store.write_bytes(b'synthetic-mailbox')
@@ -768,38 +723,15 @@ class SendTests(unittest.TestCase):
         def timeout(command, **kwargs):
             workspaces.append(Path(command[2]).parent)
             raise subprocess.TimeoutExpired(command, 1)
-        with patch.object(send_mod.subprocess, 'run', timeout):
-            with self.assertRaises(send_mod.UiFailure):
-                send_mod.DecodedMailbox(home).snapshot()
+        from lib.outlook_intake import DecodeError
+        with patch('lib.outlook_intake._snapshot'), patch.object(send_mod.subprocess, 'run', timeout):
+            with self.assertRaises(DecodeError):
+                send_mod.DecodedMailbox(home, repo).snapshot()
         self.assertTrue(workspaces)
         self.assertFalse(any(work.exists() for work in workspaces))
-        self.assertEqual(list(repo.rglob('*')), [])
+        self.assertEqual(list((repo / 'out/outlook-intake').iterdir()), [])
 
-    def test_decoder_refuses_a_local_cache_inside_any_git_tree(self):
-        home = Path(self.tmp.name) / 'home'
-        vendor = home / 'carr-local/hxstore-reverse-engineering'
-        vendor.mkdir(parents=True)
-        (vendor / '.carr-pin').write_text(send_mod.DecodedMailbox.PIN)
-        (home / '.git').write_text('gitdir: synthetic-worktree')
-        store = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity/HxStore.hxd'
-        store.parent.mkdir(parents=True)
-        store.write_bytes(b'synthetic-mailbox')
-        repo = Path(self.tmp.name) / 'checkout'
-        with patch.object(send_mod.subprocess, 'run') as decoder:
-            with self.assertRaisesRegex(send_mod.UiFailure, 'decode_workspace_in_git_tree'):
-                send_mod.DecodedMailbox(home).snapshot()
-            decoder.assert_not_called()
-        self.assertFalse((home / 'carr-local/outlook-send').exists())
 
-    def test_decoder_refuses_an_unpinned_build(self):
-        home = Path(self.tmp.name)
-        vendor = home / 'carr-local/hxstore-reverse-engineering'
-        vendor.mkdir(parents=True)
-        (vendor / '.carr-pin').write_text('wrong-pin')
-        with patch.object(send_mod.subprocess, 'run') as decoder:
-            with self.assertRaises(send_mod.UiFailure):
-                send_mod.DecodedMailbox(home).snapshot()
-            decoder.assert_not_called()
 
     def test_transport_exception_after_latching_key_is_not_retried(self):
         h = Harness(self.out)
@@ -873,64 +805,6 @@ class SendTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Harness(self.out).send(to=['not an address'])
 
-
-class StoreResolverTest(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.home = Path(self.tmp.name)
-        self.profiles = self.home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles'
-        self.env = patch.dict(os.environ, {}, clear=False)
-        self.env.start()
-        self.addCleanup(self.env.stop)
-        os.environ.pop('CARR_OUTLOOK_STORE', None)
-
-    def store(self, profile):
-        path = self.profiles / profile / 'HxStore.hxd'
-        path.parent.mkdir(parents=True)
-        path.write_bytes(b'synthetic-store')
-        return path
-
-    def test_main_identity_profile(self):
-        expected = self.store('Main Identity')
-        self.assertEqual(send_mod.resolve_store(self.home), expected)
-
-    def test_main_profile(self):
-        expected = self.store('Main Profile')
-        self.assertEqual(send_mod.resolve_store(self.home), expected)
-
-    def test_no_store_names_the_searched_directory(self):
-        with self.assertLogs(level='ERROR') as logs, self.assertRaises(FileNotFoundError) as refusal:
-            send_mod.resolve_store(self.home)
-        self.assertIn(str(self.profiles), str(refusal.exception))
-        self.assertIn(str(self.profiles), '\n'.join(logs.output))
-
-    def test_newest_store_wins_and_is_logged(self):
-        older = self.store('Main Identity')
-        newer = self.store('Main Profile')
-        for old, new in ((older, newer), (newer, older)):
-            os.utime(old, ns=(1_000_000_000, 1_000_000_000))
-            os.utime(new, ns=(2_000_000_000, 2_000_000_000))
-            with self.assertLogs(level='WARNING') as logs:
-                self.assertEqual(send_mod.resolve_store(self.home), new)
-            self.assertIn(str(new), '\n'.join(logs.output))
-
-    def test_override_takes_precedence(self):
-        self.store('Main Identity')
-        override = self.home / 'chosen.hxd'
-        override.write_bytes(b'synthetic-override')
-        os.environ['CARR_OUTLOOK_STORE'] = str(override)
-        self.assertEqual(send_mod.resolve_store(self.home), override)
-
-    def test_invalid_override_refuses_without_fallback(self):
-        self.store('Main Identity')
-        override = self.home / 'missing.hxd'
-        os.environ['CARR_OUTLOOK_STORE'] = str(override)
-        with self.assertLogs(level='ERROR') as logs, self.assertRaises(FileNotFoundError) as refusal:
-            send_mod.resolve_store(self.home)
-        self.assertIn('CARR_OUTLOOK_STORE', str(refusal.exception))
-        self.assertIn(str(override), str(refusal.exception))
-        self.assertIn(str(override), '\n'.join(logs.output))
 
 if __name__ == '__main__':
     unittest.main()

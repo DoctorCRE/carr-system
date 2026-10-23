@@ -9,7 +9,7 @@ execFileSync("wrangler", ["types", output, "--strict-vars=false", "--env-file", 
 
 let declarations = readFileSync(output, "utf8");
 for (const [site, count] of [
-  [/^[\t ]*OAUTH_CONSENT_STATE: DurableObjectNamespace<import\("\.\.\/src\/index"\)\.OAuthConsentState>;/gm, 2],
+  [/^[\t ]*OAUTH_CONSENT_STATE: DurableObjectNamespace<import\("\.\.\/src\/index"\)\.OAuthConsentState>;/gm, 1],
   [/^[\t ]*\[K in keyof MainModule\]: LoopbackForExport<MainModule\[K\]>/gm, 1],
 ]) {
   if ([...declarations.matchAll(site)].length !== count) {

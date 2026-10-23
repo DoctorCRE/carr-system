@@ -1,7 +1,7 @@
 #!/bin/zsh
 # import-doctrine.sh — the sanctioned door for doctrine-store imports into
 # PRODUCTION (Joe, 2026-08-08: "sanction the import door"), second member of
-# the door family bin/migrate-prod.sh founded. Same construction: the
+# the door family the GitHub production deployment workflow founded. Same construction: the
 # credential is derived in-process via neonctl (never on a command line),
 # dry-run is the default, and every invocation logs.
 #
@@ -34,7 +34,7 @@ if [[ " $* " == *" --apply "* ]]; then
     exit 1
   fi
   # Non-interactive auth, same reason and same source as restore-rehearse.sh,
-  # migrate-prod.sh and tools/db-tap.py: an expiring browser login does not fail,
+  # the production deployment workflow and tools/db-tap.py: an expiring browser login does not fail,
   # it prompts and times out, and this is the fourth caller that inherited it.
   if [ -z "${NEON_API_KEY:-}" ] && [ -f "$HOME/.config/carr/db.env" ]; then
     . "$REPO"/bin/routine-credential-env.sh

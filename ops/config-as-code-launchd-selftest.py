@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location(
@@ -215,7 +216,7 @@ def check_and_install_cases() -> list[bool]:
     """Drive the refusal through cmd_check and cmd_install, not only the helpers."""
     out: list[bool] = []
     saved = {name: getattr(mod, name) for name in (
-        "HOME", "REPO", "REPO_HERE", "SETTINGS", "CLAUDE_CONTINUITY_MODE_FILE", "CLAUDE_MCP_CONFIG",
+        "HOME", "REPO", "REPO_HERE", "SETTINGS",
         "TASKS_SRC", "TASKS_REPO", "TASKS_QUARANTINE", "LAUNCHD_SRC", "LAUNCHD_REPO",
         "LAUNCHD_ALT_REPO", "HOOKS_REPO", "CODEX_HOOKS_SRC", "CODEX_CONFIG",
         "PREREQUISITE_CHECK")}
@@ -248,12 +249,6 @@ def check_and_install_cases() -> list[bool]:
             launchd.mkdir(parents=True)
             (repo / "ops" / "scheduled-tasks").mkdir(parents=True)
             (repo / "ops" / "config").mkdir(parents=True, exist_ok=True)
-            for relative in ("ops/config/claude-continuity-hooks.json",
-                             "ops/claude-continuity-hook.py",
-                             "mcp-server/continuity-stdio-proxy.mjs"):
-                target = repo / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes((REPO / relative).read_bytes())
             (repo / "ops" / "config" / "hooks.json").write_text(
                 '{\n  "PreToolUse": []\n}\n', encoding="utf-8")
             planted = plistlib.dumps({"Label": "com.carr.planted",
@@ -267,8 +262,6 @@ def check_and_install_cases() -> list[bool]:
             mod.HOME = str(home)
             mod.REPO = mod.REPO_HERE = str(repo)
             mod.SETTINGS = str(home / ".claude" / "settings.json")
-            mod.CLAUDE_CONTINUITY_MODE_FILE = str(home / ".config/carr/claude-continuity-mode.json")
-            mod.CLAUDE_MCP_CONFIG = str(home / ".claude.json")
             mod.TASKS_SRC = str(home / ".claude" / "scheduled-tasks")
             mod.TASKS_REPO = str(repo / "ops" / "scheduled-tasks")
             mod.TASKS_QUARANTINE = str(home / ".claude" / "scheduled-tasks-quarantine")
@@ -305,6 +298,40 @@ def check_and_install_cases() -> list[bool]:
             out.append(check("install retires removed templates in its apply path",
                              not orphan.exists()
                              and len(list((home / "Library/LaunchAgents-quarantine").rglob(orphan.name))) == 1))
+            # A routine fleet refresh must not opt a machine into Flash.
+            from tools import flash_install
+            (launchd / "com.carr.planted.plist").unlink()
+            for label in (*flash_install.LABELS, flash_install.WATCHER):
+                filename = label + ".plist"
+                (launchd / filename).write_bytes((REPO / "ops/launchd" / filename).read_bytes())
+            with patch.object(flash_install, "install") as flash_setup, \
+                    patch.dict(os.environ, {mod.ACTIVE_LAUNCHD_LABEL_ENV: "com.carr.good"}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                first_rc = mod.cmd_install(True)
+                before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns)
+                          for p in agents.iterdir()}
+                launchctl_calls.clear()
+                def read_only(file, mode="r", *args, **kwargs):
+                    if any(flag in mode for flag in "wax+"):
+                        raise AssertionError(f"unchanged install opened {file} for writing")
+                    return real_open(file, mode, *args, **kwargs)
+                real_open = open
+                with patch("builtins.open", side_effect=read_only), \
+                        patch("io.open", side_effect=read_only):
+                    second_rc = mod.cmd_install(True)
+                after = {p.name: (p.read_bytes(), p.stat().st_mtime_ns)
+                         for p in agents.iterdir()}
+            out.append(check(
+                "two fleet installs at the same revision leave plists untouched and never install Flash",
+                first_rc == second_rc == 0 and not flash_setup.called
+                and before == after and launchctl_calls == []
+                and not any((agents / (label + ".plist")).exists()
+                            for label in (*flash_install.LABELS, flash_install.WATCHER)),
+                (first_rc, second_rc, flash_setup.call_count, launchctl_calls),
+            ))
+            for label in (*flash_install.LABELS, flash_install.WATCHER):
+                (launchd / (label + ".plist")).unlink()
+            (launchd / "com.carr.planted.plist").write_text(planted, encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()) as check_out:
                 check_rc = mod.cmd_check()
             text = check_out.getvalue()
@@ -372,21 +399,26 @@ def retired_launchd_cases() -> list[bool]:
             mod.LAUNCHD_ALT_REPO = {"com.carr.alternate.plist": str(home / "alternate.plist")}
             mod.subprocess.run = fake_launchctl
             names = ("com.carr.retired", "com.carr.current", "com.carr.alternate",
-                     "com.vendor.personal", "local.carr-progress-board", "com.carr.held",
-                     "com.carr.cliproxyapi", "com.carr.fix-train")
+                     "com.carr.declared-link", "com.vendor.personal", "local.carr-progress-board")
             for label in names:
                 (agents / f"{label}.plist").write_text(plist(label))
             (templates / "com.carr.current.plist").write_text(plist("com.carr.current"))
+            (home / "alternate.plist").write_text(plist("com.carr.alternate"))
+            (templates / "com.carr.declared-link.plist").symlink_to(home / "missing-template.plist")
+            retired = ("com.carr.retired", "com.carr.fix-train", "com.carr.cliproxyapi", "com.carr.held")
+            for label in retired:
+                target = agents / f"{label}.plist"
+                target.write_text(plist(label))
+                loaded[label] = str(target)
             hold = home / ".config/carr/launchd-hold"
             hold.parent.mkdir(parents=True)
             hold.write_text("com.carr.held deliberate machine-local hold\n")
             live = agents / "com.carr.retired.plist"
-            loaded["com.carr.retired"] = str(live)
             with contextlib.redirect_stdout(io.StringIO()) as dry:
                 failures = mod.reconcile_retired_launchd(False)
             out.append(check("retirement dry run lists only owned missing templates without effects",
                              failures == [] and "would retire  com.carr.retired.plist" in dry.getvalue()
-                             and dry.getvalue().count("would retire") == 1 and not calls
+                             and dry.getvalue().count("would retire") == len(retired) and not calls
                              and live.exists() and not (home / "Library/LaunchAgents-quarantine").exists(),
                              dry.getvalue()))
             with contextlib.redirect_stdout(io.StringIO()):
@@ -395,9 +427,14 @@ def retired_launchd_cases() -> list[bool]:
             out.append(check("removed template boots out, verifies absent, and preserves bytes in quarantine",
                              failures == [] and not live.exists() and len(quarantined) == 1
                              and quarantined[0].read_text() == plist("com.carr.retired")
-                             and [c[1] for c in calls] == ["print", "bootout", "print"]
-                             and "com.carr.retired" not in loaded, (failures, calls)))
-            out.append(check("current, alternate, machine-local, held and non-carr plists stay untouched",
+                             and [c[1] for c in calls] == ["print", "bootout", "print"] * len(retired)
+                             and not loaded, (failures, calls)))
+            quarantine = home / "Library/LaunchAgents-quarantine/carr-retired"
+            out.append(check("every undeclared CARR label retires despite former exceptions and holds",
+                             all(not (agents / f"{label}.plist").exists()
+                                 and len(copies := list(quarantine.rglob(f"{label}.plist"))) == 1
+                                 and copies[0].read_text() == plist(label) for label in retired)))
+            out.append(check("current, alternate and non-carr plists stay untouched",
                              all((agents / f"{label}.plist").read_text() == plist(label)
                                  for label in names[1:])))
             calls.clear()
@@ -739,6 +776,22 @@ def main() -> int:
                 ] and other_dest.read_text(encoding="utf-8") == desired_other
                 and "kept loaded" in kept_out.getvalue(),
                 (other, calls, kept_out.getvalue()),
+            ))
+
+            before = other_dest.stat().st_mtime_ns
+            calls.clear()
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    patch("builtins.open", wraps=open) as writes:
+                repaired = mod.install_launchd_plist(
+                    other_dest.name, str(other_dest), desired_other, False
+                )
+            cases.append(check(
+                "repairing stale loaded arguments never rewrites identical plist bytes",
+                repaired == "loaded" and other_dest.stat().st_mtime_ns == before
+                and not any(call.args[0] == str(other_dest) and "w" in str(call.args[1:])
+                            for call in writes.call_args_list)
+                and ["launchctl", "load", "-w", str(other_dest)] in calls,
+                (repaired, calls),
             ))
 
             loaded_paths[other_label] = str(root / "foreign.plist")

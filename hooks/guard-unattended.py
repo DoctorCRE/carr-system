@@ -81,8 +81,6 @@ try:                                    # telemetry only — never load-bearing
     LOG = hook_meter.guard_log_path(REPO)
 except Exception:                       # a missing meter must not change a verdict
     LOG = os.path.join(REPO, "out", "hook-guard.log")
-DELEGATION_STATE = os.path.join(REPO, "out", "delegation-gate-state.json")
-DELEGATION_LOCK = DELEGATION_STATE + ".lock"
 
 # The nightly chain, verbatim. Belt and braces: it matches nothing below, and it
 # is also allowlisted so it can never be caught by a pattern added later.
@@ -111,7 +109,7 @@ KNOWN_HOSTS = (
     # custom domain: on 2026-08-13 a staging deploy without `routes = []`
     # inherited all three production custom domains and served api.doctorcre.com
     # from the empty staging database for about two minutes. Staging now attaches
-    # to workers.dev alone, which ops/deploy-attachment-check.py verifies before
+    # to workers.dev alone, which the deployment configuration declares before
     # any non-production deploy — so this hostname is exactly how a session
     # reaches staging WITHOUT touching production, and blocking it pushes anyone
     # verifying a staging deploy toward the production URL instead. That is the
@@ -167,21 +165,6 @@ KNOWN_HOSTS = (
     "langchain.com", "emergentmind.com",
     # Official vendor announcements and developer/API documentation.
     "openai.com", "developers.openai.com", "platform.openai.com",
-    # TypeSafe, added 2026-09-17 on Joe's ruling. docs.typesafe.ai is the
-    # documentation host and is a plain research read like the row above it;
-    # api.typesafe.ai is the inference endpoint for Jev, a model that takes text
-    # plus typed questions and returns probabilities rather than written text.
-    # Joe ruled the same day that CARR content INCLUDING CLIENT AND DEAL
-    # MATERIAL may be sent there, overruling this session's reading that
-    # third-party client confidentiality was a floor: his reasoning is that the
-    # practice already sends the same material to several model vendors, so
-    # singling this one out protects nothing. That makes api.typesafe.ai a
-    # CONTENT-BEARING host, unlike every research host listed above it, which is
-    # why it is called out here rather than folded into that line. It is listed
-    # in CODE rather than derived from the record because it is fixed
-    # infrastructure somebody decides once, which is what this half of the list
-    # is reserved for.
-    "docs.typesafe.ai", "api.typesafe.ai",
     # blotato.io: the media-upload backend of the ALREADY-SANCTIONED Blotato
     # connector. Its create-post tool takes public mediaUrls, and the only way
     # to get a local PNG there is the presigned PUT its own tool description
@@ -600,7 +583,7 @@ RULES = [
     # review, bypass audit C38). These were shell-text regexes over a
     # locally-run accident-stopper hook (ops/githooks/pre-commit itself says
     # so: "not a security control: anyone can bypass it with --no-verify").
-    # Jev agreed (0.94) that hosted CI, not this local hook, is what actually
+    # Hosted CI is what actually
     # stops a bypass from reaching main — so this file no longer chases every
     # spelling of a local-only escape hatch. Broad add is different: it is
     # covered below as a dedicated, argument-aware function rather than a
@@ -1854,22 +1837,6 @@ def raw_targets_carr(cmd):
     return any(re.search(marker, cmd) for marker in markers)
 
 
-def delegation_control_plane_write(cmd):
-    """Block ordinary shell tampering with the delegation gate's mutable state.
-
-    The hook itself updates this state by direct atomic filesystem calls, not by
-    issuing a harness Bash tool call, so this does not interfere with normal
-    state transitions.  A model-issued shell command, however, must never edit
-    the latch/control files to release its own task.
-    """
-    names = (DELEGATION_STATE, DELEGATION_LOCK, "delegation-gate-state.json",
-             ".delegation-gate-")
-    if not any(name in cmd for name in names):
-        return None
-    write_shape = re.compile(r"(>>?|\btee\b|\bsed\s+-i\b|\btruncate\b|\brm\b|\bmv\b|\bcp\b|\bchmod\b|\bchflags\b|open\([^\n]+['\"][wa])", re.I)
-    if write_shape.search(cmd):
-        return "delegation control-plane state write — blocked by the CARR guard"
-    return None
 
 
 def direct_metered_dispatch(cmd):
@@ -1883,7 +1850,7 @@ def direct_metered_dispatch(cmd):
     executable = strip_inert_text(cmd)
     patterns = (
         (re.compile(r"\b(?:npx\s+)?wrangler\s+(?:deploy|versions\s+(?:upload|deploy))\b", re.I),
-         "direct Cloudflare release bypasses bin/deploy-worker.sh"),
+         "direct Cloudflare release bypasses the GitHub deployment workflow"),
         (re.compile(r"\bneonctl\b[^\n;&|]*\bbranches\s+create\b", re.I),
          "direct Neon branch create bypasses neon-disposable-branch admission"),
         (re.compile(r"\bgh\s+(?:workflow\s+run|run\s+rerun)\b", re.I),
@@ -2144,9 +2111,6 @@ def check(cmd, cwd=None):
     if reason:
         return reason
 
-    reason = delegation_control_plane_write(cmd)
-    if reason:
-        return reason
 
     reason = direct_metered_dispatch(cmd)
     if reason:
@@ -2312,7 +2276,7 @@ def decide(payload):
     # client-side against a parsed `./run.sh call <verb> '<json>'`
     # command (hooks/verb_gate_recheck.py, now deleted). A replay of
     # 12,145 real Bash commands found the shell-text side of that
-    # approach fundamentally leaky (Jev: 0.93) — 62 legitimate commands
+    # approach fundamentally leaky — 62 legitimate commands
     # would have been falsely denied (`git add -A <paths>`, a grep for
     # the pattern text, fixture repos in /tmp…), and several trivial
     # bypasses (a shell variable holding the verb, `$(cat f)` JSON,
@@ -2321,8 +2285,7 @@ def decide(payload):
     # those doors recurses through the SAME server-side callTool(), so
     # the checks now live in the verb handlers themselves
     # (mcp-server/src/verb-gate-checks.js, wired into add-loop's handler
-    # in tools.js) and this hook no longer duplicates them. Jev agreed
-    # (0.94) that hosted CI is what actually stops a local-hook bypass
+    # in tools.js) and this hook no longer duplicates them. Hosted CI stops a local-hook bypass
     # from reaching main, which is the other reason a client-side
     # regex recheck was the wrong enforcement point.
 

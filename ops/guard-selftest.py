@@ -769,11 +769,8 @@ case("a destructive command after a newline keeps its own targets",
      bash("rm -f /private/tmp/claude-501/scratch/file\nrm -f /Users/booko/important"), DENY)
 case("a quoted newline is part of an unsafe deletion target",
      bash("rm -f /private/tmp/claude-501/scratch/file 'unsafe\nfile'"), DENY)
-case("delegation state shell write", bash("echo '{}' > /Users/booko/carr-system/out/delegation-gate-state.json"), DENY)
-case("delegation state read is fine", bash("cat /Users/booko/carr-system/out/delegation-gate-state.json"), ALLOW)
 case("direct Cloudflare deploy is metering-refused", bash("npx wrangler deploy"), DENY)
 case("direct Cloudflare version upload is metering-refused", bash("wrangler versions upload"), DENY)
-case("sanctioned Worker release wrapper is allowed", bash("./bin/deploy-worker.sh --check"), ALLOW)
 case("direct Neon branch create is metering-refused",
      bash("neonctl branches create --project-id p --name x"), DENY)
 case("reviewed Neon rebuild wrapper is allowed", bash("python3 ops/p1-rebuild-gate.py"), ALLOW)

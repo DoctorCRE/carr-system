@@ -756,7 +756,7 @@
    "gist": "If a verb needs to be created to do something, create the verb immediately and add it to the system",
    "statement": "When a required record-layer capability has no verb, create and register that verb immediately as part of the same work; do not leave a database mutation dependent on an undocumented or manual path.",
    "scope": {
-    "repo": "jbookout/carr-system",
+    "repo": "DoctorCRE/carr-system",
     "domain": "system-development"
    }
   },
@@ -1079,7 +1079,7 @@
    "gist": "Each coding session owns an isolated checkout and the full delivery path through merge, verification, and cleanup",
    "statement": "Every coding session must work in its own isolated worktree or clone. The shared checkout is coordination and bootstrap state only; it must not be used as an agent work surface. A session that changes code owns the full delivery path through branch, checks, pull request, merge, verification, and cleanup unless a concrete human-only gate prevents completion.",
    "scope": {
-    "repo": "jbookout/carr-system",
+    "repo": "DoctorCRE/carr-system",
     "applies_to": "all coding sessions"
    }
   },

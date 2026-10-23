@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "protected_branches": [
+    "main",
+    "master",
+    "develop"
+  ],
+  "repositories": [
+    "DoctorCRE/carr-system",
+    "jbookout/doctorcre-app",
+    "jbookout/software-factory"
+  ],
+  "repository_roots": {
+    "DoctorCRE/carr-system": "~/carr-system",
+    "jbookout/doctorcre-app": "~/doctorcre-app",
+    "jbookout/software-factory": "~/software-factory"
+  },
+  "board": "carr-v5",
+  "board_github_enabled": false,
+  "thresholds": {
+    "branch_idle_seconds": 10800,
+    "command_timeout_seconds": 30,
+    "kill_grace_seconds": 5,
+    "process_probe_seconds": 5,
+    "log_tail_bytes": 16384
+  },
+  "paths": {
+    "registry": "out/jobs/registry.jsonl",
+    "job_logs": "out/jobs/logs"
+  },
+  "next_actions": {
+    "job_failed": "Read the recorded exit and log tail; repair the failing command."
+  }
+}

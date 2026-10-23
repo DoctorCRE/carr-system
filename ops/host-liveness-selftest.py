@@ -33,9 +33,8 @@ class HostLiveness(unittest.TestCase):
     config = hl.load_config()
 
     def test_config_names_every_seat_and_both_macs(self):
-        self.assertEqual(set(self.config['seats']), {'opus-studio', 'sol-studio', 'sol-macbook', 'grok', 'e2e-auth', 'jev'})
+        self.assertEqual(set(self.config['seats']), {'opus-studio', 'sol-studio', 'sol-macbook', 'grok', 'e2e-auth'})
         self.assertEqual(set(self.config['hosts']), {'mac-studio', 'joes-macbook-pro'})
-        self.assertIsNone(hl.seat_host('jev', self.config))
         self.assertEqual(hl.seat_host('sol-macbook', self.config), 'joes-macbook-pro')
 
     def test_offline_peer_is_red_with_last_seen_and_bound_action(self):

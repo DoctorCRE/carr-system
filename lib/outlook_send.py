@@ -1,27 +1,10 @@
-"""Send an email or save a calendar event from Joe's New Outlook for Mac, by code.
+"""Prepare one Outlook mail or calendar draft, or dispatch it when Joe asked.
 
-New Outlook's AppleScript model has no Exchange account and HxStore.hxd is a
-read cache, so the only write path is the app's own window, driven through the
-cua-driver accessibility CLI (lib/outlook_ui.py). One call is one item:
-
-1. Run Sender's existing policy chain before Outlook is read or opened, including
-   kill switch, lint, exact recipient policy and suppression, shared dedupe and
-   the shared daily cap of ten. Calendar invitations use the same chain.
-2. Refuse an idempotency key the private ledger already holds, and refuse an
-   item the decoded mailbox already shows (same subject and recipient sent in
-   the last 24 hours; same subject and start for an event).
-3. Open the compose or event form, fill it, and read every field back. Any
-   mismatch discards the form.
-4. Write the key to the ledger as "pressing", then press Send or Save once.
-   Try background AX first. Only an explicit pre-dispatch background refusal
-   permits front fallback, after a fresh five-minute idle check. Restore focus.
-5. Confirm the window closed, then confirm the item in a fresh decode of the
-   mailbox. Anything short of that is a distinct result that is never retried.
-6. Log to the named or exact-recipient-matched CARR records with log-activity.
-   Report unmatched records and failed logs separately from mailbox confirmation.
-
-Transport diagnostics contain no addresses, subjects or bodies. The transport
-ledger holds keys, states and a fingerprint. Sender owns the policy receipts.
+A default call leaves a field-verified draft open. Explicit send intent permits
+one Send or Save after suppression, the ten-item daily limit, duplicate checks
+and idle checks. A local delivery latch prevents ambiguous effects from being
+repeated. Successful delivery is confirmed against Sent Items or the calendar
+before logging an activity. Diagnostics contain no addresses, subjects or bodies.
 """
 from __future__ import annotations
 
@@ -32,13 +15,11 @@ import fcntl
 import ctypes
 import hashlib
 import json
-import logging
 import os
 from pathlib import Path
 import re
 import subprocess
 import stat
-import shutil
 import sqlite3
 import tempfile
 import time
@@ -47,7 +28,7 @@ from urllib.parse import quote
 import uuid
 
 from lib import outlook_ui as ui
-from lib.system_sender import Sender
+from zoneinfo import ZoneInfo
 
 ACCOUNT_CONFIG = Path.home() / '.config/carr/outlook-account'
 OUT = Path('out/outlook-send')
@@ -64,6 +45,7 @@ BODY_ROLE, BODY_LABEL = 'AXTextArea', 'Message body'
 
 
 class State(Enum):
+    DRAFT = 'draft'
     DONE = 'done'
     ACTIVITY_LOG_FAILED = 'activity_log_failed'
     PRESSED_UNCONFIRMED = 'pressed_unconfirmed'
@@ -73,8 +55,7 @@ class State(Enum):
     FIELD_MISMATCH = 'field_mismatch'
     NOT_IDLE = 'not_idle'
     FAILED = 'failed'
-    POLICY_REFUSED = 'policy_refused'
-    POLICY_SHADOW = 'policy_shadow'
+    REFUSED = 'refused'
 
     @property
     def pressed(self) -> bool:
@@ -90,7 +71,7 @@ class Result:
 
     @property
     def ok(self) -> bool:
-        return self.state is State.DONE
+        return self.state in (State.DONE, State.DRAFT)
 
     def line(self, kind: str) -> str:
         logged = f' logged={",".join(self.logged)}' if self.logged else ''
@@ -166,7 +147,6 @@ class Ports:
     close_seconds: float = 30
     confirm_seconds: float = 300
     poll_seconds: float = 20
-    sender: Sender | None = None
 
 
 class UiFailure(Exception):
@@ -295,7 +275,8 @@ def _kind(item: Mail | Event) -> str:
     return 'send' if isinstance(item, Mail) else 'event'
 
 
-def _write_transport(item: Mail | Event, key: str, ports: Ports, record: str | None = None) -> Result:
+def _write_transport(item: Mail | Event, key: str, ports: Ports, record: str | None = None,
+                     *, send_requested: bool = False) -> Result:
     """Send one mail or save one event, at most once per key and per mailbox match."""
     if not isinstance(key, str) or not key.strip():
         raise ValueError('idempotency_key is required')
@@ -308,24 +289,28 @@ def _write_transport(item: Mail | Event, key: str, ports: Ports, record: str | N
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             return Result(State.FAILED, 'another_write_running')
-        result = _write(item, key, ports, Ledger(out / LEDGER))
-    if result.ok:
+        result = _write(item, key, ports, Ledger(out / LEDGER), send_requested)
+    if result.state is State.DONE:
         result = replace(result, logged=_log_matches(item, key, record, ports))
         if 'log_failed' in result.logged:
             result = replace(result, state=State.ACTIVITY_LOG_FAILED, reason='confirmed_in_mailbox:log_failed')
     return result
 
 
-def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger) -> Result:
-    if ledger.states(key) or ledger.contains_item(fingerprint(item),
-            ports.now() - DUPLICATE_WINDOW if isinstance(item, Mail) else 0):
+def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requested: bool) -> Result:
+    if send_requested and (ledger.states(key) or ledger.contains_item(fingerprint(item),
+            ports.now() - DUPLICATE_WINDOW if isinstance(item, Mail) else 0)):
         return Result(State.DUPLICATE_KEY, 'key_already_pressed')
-    try:
-        before = ports.mailbox.snapshot()
-    except Exception:
-        return Result(State.FAILED, 'mailbox_unreadable')
-    if _in_mailbox(before, item, ports.now() - DUPLICATE_WINDOW):
-        return Result(State.ALREADY_IN_MAILBOX, 'matching_item_found')
+    if send_requested:
+        refused = _send_refusal(item, ports, ledger)
+        if refused:
+            return Result(State.REFUSED, refused)
+        try:
+            before = ports.mailbox.snapshot()
+        except Exception:
+            return Result(State.FAILED, 'mailbox_unreadable')
+        if _in_mailbox(before, item, ports.now() - DUPLICATE_WINDOW):
+            return Result(State.ALREADY_IN_MAILBOX, 'matching_item_found')
     idle = ports.idle_seconds()
     if idle is None:
         return Result(State.FAILED, 'idle_time_unreadable')
@@ -342,6 +327,8 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger) -> Result
     if shown != fields(item):
         wrong = ','.join(sorted(k for k in fields(item) if shown.get(k) != fields(item)[k]))
         return _discard(form, Result(State.FIELD_MISMATCH, f'mismatch:{wrong}'))
+    if not send_requested:
+        return Result(State.DRAFT, 'draft_ready')
     idle = ports.idle_seconds()
     if idle is None or idle < IDLE_SECONDS:
         return _discard(form, Result(State.NOT_IDLE, 'user_active'))
@@ -373,6 +360,32 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger) -> Result
         return Result(State.PRESSED_UNCONFIRMED, 'not_in_mailbox_yet', mode)
     ledger.append(key, kind, State.DONE.value, print_, ports.now())
     return Result(State.DONE, 'confirmed_in_mailbox', mode)
+
+
+def _send_refusal(item: Mail | Event, ports: Ports, ledger: Ledger) -> str | None:
+    recipients = sorted(set(item.recipients if isinstance(item, Mail) else item.attendees))
+    if sum(address != account() and not address.endswith('@carr.us') for address in recipients) > 1:
+        return 'one_to_one_required'
+    if recipients:
+        try:
+            rows = ports.carr('mail-contact-policy', {'emails': recipients}).get('recipients')
+        except Exception:
+            return 'contact_policy_unreadable'
+        if (not isinstance(rows, list) or len(rows) != len(recipients)
+                or any(not isinstance(row, dict) or not isinstance(row.get('email'), str)
+                       or type(row.get('blocked')) is not bool for row in rows)
+                or {row['email'] for row in rows} != set(recipients)):
+            return 'contact_policy_unreadable'
+        if any(row['blocked'] for row in rows):
+            return 'do_not_contact'
+    zone = ZoneInfo('America/Chicago')
+    today = datetime.fromtimestamp(ports.now(), zone).date()
+    if ledger.path.exists():
+        attempts = [json.loads(line) for line in ledger.path.read_text().splitlines()]
+        if sum(row['state'] == 'pressing' and datetime.fromtimestamp(row['at'], zone).date() == today
+               for row in attempts) >= 10:
+            return 'daily_cap'
+    return None
 
 
 def _discard(form: Form, result: Result) -> Result:
@@ -742,59 +755,26 @@ def open_form(item: Mail | Event, waits: ui.Waits = ui.Waits()) -> ComposeWindow
         raise _transport_failure(exc) from None
 
 
-def resolve_store(home: Path) -> Path:
-    """Locate the New Outlook store when a job runs."""
-    profiles = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles'
-    override = os.environ.get('CARR_OUTLOOK_STORE')
-    if override:
-        selected = home / Path(override).expanduser()
-        if selected.is_file():
-            return selected
-        message = f'CARR_OUTLOOK_STORE is not a file: {selected}'
-        logging.error('%s', message)
-        raise FileNotFoundError(message)
-    stores = [path for path in profiles.glob('*/HxStore.hxd') if path.is_file()]
-    if not stores:
-        message = f'No Outlook store found: searched {profiles}/*/HxStore.hxd'
-        logging.error('%s', message)
-        raise FileNotFoundError(message)
-    selected = max(stores, key=lambda path: (path.stat().st_mtime_ns, str(path)))
-    if len(stores) > 1:
-        logging.warning('Multiple Outlook stores found; using most recently modified: %s', selected)
-    return selected
-
-
 class DecodedMailbox:
-    """Read metadata from a private snapshot using PR #2023's pinned calendar decoder.
+    """Read confirmation metadata through intake's existing private snapshot helper."""
 
-    No body sidecars are needed for duplicate/confirmation checks. The temporary
-    store and SQLite output are removed even when decoding or schema checks fail.
-    """
-    PIN = ('191b54e42757687806202f8f696e9066f0514e11 '
-           '2f09252e1336f17e374a4c1fd8d112bcc44d3af185a9daa283c0c9fba20471f0')
-
-    def __init__(self, home: Path):
+    def __init__(self, home: Path, repo: Path | None = None):
         self.home = home
+        self.repo = repo or Path(__file__).resolve().parents[1]
 
     def snapshot(self) -> Snapshot:
-        vendor = self.home / 'carr-local/hxstore-reverse-engineering'
-        if (vendor / '.carr-pin').read_text().strip() != self.PIN:
-            raise UiFailure('decoder_pin_mismatch')
-        out = (self.home / 'carr-local/outlook-send').resolve()
-        if any((parent / '.git').exists() for parent in (out, *out.parents)):
-            raise UiFailure('decode_workspace_in_git_tree')
+        from lib.outlook_intake import OUT, WORK_PREFIX, _snapshot, _decoder
+
+        out = (self.repo / OUT).resolve()
         out.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(out, 0o700)
-        with tempfile.TemporaryDirectory(prefix='decode-', dir=out) as folder:
+        with tempfile.TemporaryDirectory(prefix=WORK_PREFIX, dir=out) as folder:
             work = Path(folder)
             copy, db = work / 'store.hxd', work / 'store.db'
-            fd = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, 'wb') as writer, resolve_store(self.home).open('rb') as reader:
-                shutil.copyfileobj(reader, writer)
+            _snapshot(self.home, work)
             fd = os.open(db, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             os.close(fd)
-            _run([str(vendor / 'hxprobe/target/release/hxprobe'), 'db', str(copy), str(db)],
-                                  capture_output=True, timeout=900, umask=0o077)
+            _decoder(self.home)(copy, work / 'Files', db)
             os.chmod(db, 0o600)
             con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
             try:
@@ -833,7 +813,7 @@ def default_ports(repo: Path | None = None) -> Ports:
                                  str(row.get(id_col) or '').strip()))
         return rows
 
-    return Ports(open_form=open_form, mailbox=DecodedMailbox(Path.home()),
+    return Ports(open_form=open_form, mailbox=DecodedMailbox(Path.home(), repo),
                  idle_seconds=outlook_triage.hid_idle_seconds, carr=carr, contacts=contacts,
                  out=Path.home() / '.local/state/carr/outlook-send')
 
@@ -841,31 +821,31 @@ def default_ports(repo: Path | None = None) -> Ports:
 # ---- public interface --------------------------------------------------------
 
 def send(to, cc, bcc, subject: str, body: str, *, idempotency_key: str, record: str | None = None,
-         ports: Ports | None = None, deal_id: str | None = None,
-         follow_up: dict[str, str] | None = None) -> Result:
-    """Send one email from Joe's carr.us Outlook. See the module docstring for the guarantees."""
+         ports: Ports | None = None, send_requested: bool = False) -> Result:
+    """Prepare one email; send it only when Joe requested this item."""
     mail = Mail(_addresses(to), _addresses(cc), _addresses(bcc), subject, body)
     if not mail.to or not subject.strip():
         raise ValueError('an email needs a To address and a subject')
-    ports = ports or default_ports()
-    return (ports.sender or Sender()).send_outlook(mail, idempotency_key=idempotency_key, ports=ports,
-                                                 record=record, deal_id=deal_id, follow_up=follow_up)
+    if type(send_requested) is not bool:
+        raise ValueError('send_requested must be a boolean')
+    return _write_transport(mail, idempotency_key, ports or default_ports(), record,
+                            send_requested=send_requested)
 
 
 def create_event(subject: str, start: datetime, end: datetime, location: str, body: str,
                  attendees=(), *, idempotency_key: str, record: str | None = None,
-                 ports: Ports | None = None, deal_id: str | None = None,
-                 follow_up: dict[str, str] | None = None) -> Result:
-    """Save one event on Joe's carr.us calendar; with attendees the save sends invitations."""
+                 ports: Ports | None = None, send_requested: bool = False) -> Result:
+    """Prepare one event; an explicitly requested save sends its invitations."""
     if start.tzinfo is None or end.tzinfo is None or end <= start or not subject.strip():
         raise ValueError('an event needs a subject and a timezone-aware start before its end')
     event = Event(subject, start, end, location, body, _addresses(attendees))
-    ports = ports or default_ports()
-    return (ports.sender or Sender()).send_outlook(event, idempotency_key=idempotency_key, ports=ports,
-                                                  record=record, deal_id=deal_id, follow_up=follow_up)
+    if type(send_requested) is not bool:
+        raise ValueError('send_requested must be a boolean')
+    return _write_transport(event, idempotency_key, ports or default_ports(), record,
+                            send_requested=send_requested)
 
 
-EXIT = {State.DONE: 0, State.ACTIVITY_LOG_FAILED: 4, State.NOT_IDLE: 75, State.PRESSED_UNCONFIRMED: 3, State.WINDOW_NOT_CLOSED: 3}
+EXIT = {State.DRAFT: 0, State.DONE: 0, State.ACTIVITY_LOG_FAILED: 4, State.NOT_IDLE: 75, State.PRESSED_UNCONFIRMED: 3, State.WINDOW_NOT_CLOSED: 3}
 
 
 def main(argv: list[str]) -> int:
@@ -875,6 +855,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog='run.sh outlook-send')
     parser.add_argument('kind', choices=('send', 'event'))
     parser.add_argument('--json', required=True, type=Path)
+    parser.add_argument('--send', action='store_true', help="send or save only when Joe asked for this item; default is draft")
     args = parser.parse_args(argv)
     info = args.json.lstat()
     if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.getuid():
@@ -882,13 +863,13 @@ def main(argv: list[str]) -> int:
         return 1
     spec = json.loads(args.json.read_text())
     key, record = spec.pop('idempotency_key'), spec.pop('record', None)
-    policy = {'deal_id': spec.pop('deal_id', None), 'follow_up': spec.pop('follow_up', None)}
     if args.kind == 'send':
         result = send(spec.get('to', ()), spec.get('cc', ()), spec.get('bcc', ()), spec['subject'],
-                      spec.get('body', ''), idempotency_key=key, record=record, **policy)
+                      spec.get('body', ''), idempotency_key=key, record=record, send_requested=args.send)
     else:
         result = create_event(spec['subject'], datetime.fromisoformat(spec['start']),
                               datetime.fromisoformat(spec['end']), spec.get('location', ''),
-                              spec.get('body', ''), spec.get('attendees', ()), idempotency_key=key, record=record, **policy)
+                              spec.get('body', ''), spec.get('attendees', ()), idempotency_key=key, record=record,
+                              send_requested=args.send)
     print(result.line(args.kind))
     return EXIT.get(result.state, 1)

@@ -9,7 +9,7 @@ them: production held 0 registrations, 0 criteria and 0 marks, so every one of
 the 36 catalog slices read marked:false. Migration 0628 gives the automated
 seat its own doors and two new server-resolved evidence kinds; this script is
 the process that calls them. The release pipeline runs it after every
-SHIPPED worker release (ops/release-pipeline.py, best-effort), and it runs by
+SHIPPED worker release, and it runs by
 hand for the backfill:
 
     ./.venv/bin/python ops/slice-done-marker.py            # every catalog slice

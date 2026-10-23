@@ -19,7 +19,7 @@ LEGACY_ADOPTION = REPO / "migrations" / "0867_adopt_active_legacy_rule_approval.
 ADOPTION_PROOF = REPO / "mcp-server" / "test" / "approve-rule-legacy-adoption-postgres.test.mjs"
 CI = REPO / "ops" / "ci.sh"
 TOOLS = REPO / "mcp-server" / "src" / "tools.js"
-DB_GATE = REPO / "ops" / "control-plane-db-gate.py"
+DB_GATE = REPO / "ops" / "rule-admission-db-gate.py"
 LOCAL_ACCEPTANCE = REPO / "ops" / "atomic-rule-approval-local-pg-acceptance.py"
 
 

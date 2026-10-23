@@ -27,12 +27,6 @@
       "evidence": "a93eea45 (The cutoff fired, 2026-08-19)"
     },
     {
-      "path": "bin/pg-orphan-reap.sh",
-      "class": "hand_tool",
-      "reason": "Thin wrapper a person runs to reap disposable PostgreSQL clusters left behind by a killed test; lib/pg_orphan_reap.py is what the selftests call.",
-      "evidence": "979321f4; the wrapper's own exec line names lib/pg_orphan_reap.py"
-    },
-    {
       "path": "bin/r2-forget.py",
       "class": "hand_tool",
       "reason": "Remedy a person runs by name to remove a bad object from the R2 archive and its ledger after a failed nightly dump.",
@@ -90,13 +84,7 @@
       "path": "ops/headless-tasks/install.sh",
       "class": "hand_tool",
       "reason": "The orchestrator invokes this explicit cutover helper after a watched first run to install or uninstall reviewed headless launchd jobs; it is not scheduled.",
-      "evidence": "ops/headless-tasks/install.sh and lib/scheduler_hygiene.py install_main preflight, then lib/headless_tasks.py installation adapter"
-    },
-    {
-      "path": "ops/launchd-plist-parity.py",
-      "class": "hand_tool",
-      "reason": "A person runs this read-only audit by name to find loaded CARR jobs without a backing plist; it has no scheduled caller.",
-      "evidence": "ops/launchd-plist-parity.py docstring documents python3 ops/launchd-plist-parity.py [--quiet]; WR-000381 removes its only cross-file mention, an obsolete selftest comment."
+      "evidence": "ops/headless-tasks/install.sh delegates to lib/headless_tasks.py install_main"
     },
     {
       "path": "ops/incident-fingerprint-shadow.py",
@@ -237,18 +225,6 @@
       "evidence": "f163962f (ORDER 40, rehearsed)"
     },
     {
-      "path": "tools/staging-ledger-repair-0315.py",
-      "class": "one_shot",
-      "reason": "Replayed the skipped 0315 migration on staging once and recorded its truthful ledger row.",
-      "evidence": "24509804 (merged 5477e842, #666)"
-    },
-    {
-      "path": "tools/staging-siep-0324-replay.py",
-      "class": "one_shot",
-      "reason": "Replayed the skipped SIEP migration 0324 on staging once and recorded its truthful ledger row.",
-      "evidence": "54d1372c (merged 513d159a, #693)"
-    },
-    {
       "path": "tools/stamp-doctrine-ownership.py",
       "class": "one_shot",
       "reason": "Applied ORDER 38's doctrine-ownership stamp to ORDER 30 phase 2's file set; the stamped markdown is retired.",
@@ -279,16 +255,28 @@
       "evidence": "ops/build-duration-check.py module docstring and main CLI"
     },
     {
-      "path": "ops/scheduler-hygiene.py",
+      "path": "evals/context-hooks/make_report.py",
       "class": "hand_tool",
-      "reason": "The orchestrator runs this read-only registration report before scheduler cutover and one-shot cleanup. It never installs, activates, or deletes a task.",
-      "evidence": "WR-000014 slice 4; ops/scheduler-hygiene-selftest.py exercises its CLI with isolated provider state."
+      "reason": "Manually renders the fixed-base context-hook comparison report; it is not a runtime or scheduled entrypoint.",
+      "evidence": "evals/context-hooks/make_report.py main() binds its baseline and writes the evaluation report."
     },
     {
-      "path": "ops/scheduler-observation-receipts.py",
+      "path": "evals/model-routing/make_report.py",
       "class": "hand_tool",
-      "reason": "The orchestrator runs this local observation collector for one reviewed headless task. It reads device and scheduler state and prints local evidence, with no activation or canonical receipt writes.",
-      "evidence": "WR-000014 final source slice; ops/scheduler-observation-receipts-selftest.py exercises synthetic device, prompt, plist, and launchctl observations."
+      "reason": "Manually renders the model-routing evaluation report; it is not a runtime or scheduled entrypoint.",
+      "evidence": "evals/model-routing/make_report.py main() consumes evaluation fixtures and writes report artifacts."
+    },
+    {
+      "path": "bin/github-app-key-intake.sh",
+      "class": "hand_tool",
+      "reason": "Manual GitHub App key intake remains owned by the credential/release lane outside this library reset.",
+      "evidence": "lib/github_app_config.py documents the retained manual intake script; this declaration grants no new credential access."
+    },
+    {
+      "path": "tools/reconcile.py",
+      "class": "hand_tool",
+      "reason": "Manual workbook reconciliation utility remains outside the library and evaluation reset scope.",
+      "evidence": "tools/reconcile.py is the retained reconciliation CLI; deleting the stale registry writer documentation removed its prose-only reference."
     }
   ]
 }

@@ -111,7 +111,7 @@ class PublicationBoundaryTests(unittest.TestCase):
         state = {'project': 'carr-v5', 'tasks': {str(i): {
             'title': 'Engineering delivery ' + str(i) + 'x' * 180, 'stage': 'merged' if i % 2 else 'review',
             'updated_at': '2026-01-01T00:00:00Z', 'activity_status': 'stale', 'summary': 'Waiting for verified release ' + 'x' * 180,
-            'repo': 'jbookout/carr-system', 'pr': i + 1} for i in range(1200)}}
+            'repo': 'DoctorCRE/carr-system', 'pr': i + 1} for i in range(1200)}}
         state['tasks']['fresh'] = {'title': 'Fresh active work', 'stage': 'build', 'updated_at': '2026-10-21T19:00:00Z'}
         store = {}
         def call(verb, args):

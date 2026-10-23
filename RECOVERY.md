@@ -22,7 +22,7 @@ Nothing important is only on the Mac. Confirmed 2026-08-14:
 
 | thing | where it lives | reachable with |
 |---|---|---|
-| All code, config, migrations, this file | GitHub, `jbookout/carr-system` | your GitHub login |
+| All code, config, migrations, this file | GitHub, `DoctorCRE/carr-system` | your GitHub login |
 | Every record — clients, deals, doctrine, rules | Neon Postgres, hosted | your Neon login |
 | The API, Deal Room, OAuth | Cloudflare Worker, hosted | your Cloudflare login |
 | Encrypted nightly dumps | Cloudflare R2 bucket `carr-documents` | your Cloudflare login |
@@ -105,7 +105,7 @@ only history that exists. There is no vendor safety net behind them.
    decrypt leaves production data in cleartext on disk; the sanctioned path
    shreds the plaintext on every exit including interrupt.
 4. **Re-point the Worker** at the recovered database and redeploy:
-   `bin/deploy-worker.sh`. Apply any migrations the dump predates with
+   the GitHub production deployment workflow. Apply any migrations the dump predates with
    `bin/migrate-prod.sh`.
 
 ---
@@ -161,49 +161,7 @@ A transcription error in the paper copy is silent until the day it matters.
   offline with you. If those are lost, the Worker and the R2 archive are both
   unreachable and only the GitHub artifact path remains.
 
-## Worker rollback: backing out a bad release
+## Worker recovery
 
-*Added 2026-08-19, because the release path requires a rollback-plan reference
-and the only worker procedure here was about re-pointing at a recovered
-database. That is a different incident. This one is: the Worker is up, serving,
-and the version now live is wrong.*
-
-**This is the plan `--rollback-plan-ref RECOVERY.md#worker-rollback` names.**
-
-Production traffic is moved by promoting an immutable provider version, never
-by rebuilding from source — `bin/deploy-worker.sh` refuses a source deploy to
-Production for exactly this reason. That property is what makes rollback cheap:
-the previous version is still uploaded, still immutable, and still promotable.
-
-1. **Get the version list.** `cd ~/carr-system && npx wrangler versions list`
-   The currently serving version is marked; the one before it is the rollback
-   target. Note its id.
-
-2. **Promote the previous version to all traffic.**
-   `./bin/deploy-worker.sh --promote-version <previous-id>` with the same four
-   approval inputs the forward release used. If the release record for that
-   earlier version still exists, its approval is already on file — a rollback
-   to a previously approved version is not a new approval decision.
-
-3. **Verify from outside, not from the command's exit code.** The deploy script
-   reads the serving identity back from the fixed Production endpoint and
-   refuses to claim success without it. Confirm independently:
-   `./run.sh call list-verbs '{}'` should return the verb count you expect for
-   the version you rolled back to. A verb count that DROPPED unexpectedly is
-   the signal that started loop #276 and the whole immutable-release design.
-
-4. **Say what happened.** Record the rollback with
-   `.venv/bin/python tools/ops-record.py run --kind check --service carr-mcp
-   --key release.rollback --state succeeded --environment production`
-   and log the reason with the `log-decision` verb. A rollback nobody recorded
-   looks identical to a release that never happened.
-
-**What this does NOT cover.** A bad *migration* is not rolled back this way —
-schema changes are forward-only here, and a Worker rollback across a migration
-boundary can leave code reading a shape the database no longer has. If the
-release included a migration, the rollback question is a database question
-first; see the record-layer section above.
-
-**Time to recover** is the length of one version promotion, which is seconds of
-Cloudflare propagation rather than a rebuild. That is the reason the recovery
-strategy on an ordinary verb release is `rollback` rather than `forward_fix`.
+See [Worker recovery](runbooks/rollback-worker.md). Production deployments run
+through `.github/workflows/deploy.yml` after a green main canary.
