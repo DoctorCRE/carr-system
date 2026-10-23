@@ -898,8 +898,8 @@ class ScheduleTest(unittest.TestCase):
         self.assertEqual(len(plist['StartCalendarInterval']), 25)
         self.assertNotIn('RunAtLoad', plist)
         self.assertNotIn('StartInterval', plist)
-        self.assertEqual(plist['ProgramArguments'][1:4],
-                         ['{{REPO}}/bin/run-scheduled.sh', 'outlook-intake', 'outlook.intake'])
+        self.assertEqual(plist['ProgramArguments'],
+                         ['{{HOME}}/carr-local/bin/outlook-intake-copy', '--run-intake'])
         services = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
         [env] = [s for s in services if s['key'] == 'outlook-intake'][0]['environments']
         self.assertEqual(env['runs_on'], 'primary')
