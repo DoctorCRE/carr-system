@@ -104,6 +104,15 @@ class CaptureOutcomesTests(unittest.TestCase):
         with patch.object(bridge, "http_request", return_value=(503, {})):
             self.assertNotEqual(bridge.status_cmd(self.cfg, self.session, "recording", None), 0)
 
+    def test_existing_malformed_capture_marker_is_unavailable(self) -> None:
+        for marker in ("not-json", "{}"):
+            with self.subTest(marker=marker), patch.object(bridge, "http_request", side_effect=AssertionError("invalid marker reached HTTP")):
+                (self.session / ".capture.json").write_text(marker)
+                self.assertNotEqual(bridge.poll_cmd(self.cfg, self.session), 0)
+                self.assertNotEqual(bridge.status_cmd(self.cfg, self.session, "recording", None), 0)
+                self.assertTrue((self.session / "mic.caf").exists())
+                self.assertFalse((self.session / "ingested.json").exists())
+
 
 class CaptureSweepTests(unittest.TestCase):
     def setUp(self) -> None:

@@ -321,14 +321,18 @@ def claim_cmd(cfg: dict[str, str], session_dir: Path) -> int:
 
 def status_cmd(cfg: dict[str, str], session_dir: Path, state: str, detail: str | None) -> int:
     name = session_dir.name
-    marker = read_json(session_dir / ".capture.json")
+    capture_marker = session_dir / ".capture.json"
+    marker = read_json(capture_marker)
     if marker is None:
+        if capture_marker.exists():
+            log_line(f"ERROR status capture-marker-unreadable session={name} state={state}")
+            return Outcome.UNAVAILABLE
         log_line(f"NOOP status no-capture-marker session={name} state={state}")
-        return 0
+        return Outcome.VERIFIED
     session_token = str(marker.get("session_token") or "").strip()
     if not session_token:
-        log_line(f"NOOP status capture-marker-missing-token session={name} state={state}")
-        return 0
+        log_line(f"ERROR status capture-marker-missing-token session={name} state={state}")
+        return Outcome.UNAVAILABLE
 
     body: dict[str, Any] = {
         "session_token": session_token,
@@ -488,12 +492,15 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     capture_marker = session_dir / ".capture.json"
     marker = read_json(capture_marker)
     if marker is None:
+        if capture_marker.exists():
+            log_line(f"ERROR poll capture-marker-unreadable session={name}")
+            return Outcome.UNAVAILABLE
         log_line(f"NOOP poll no-capture-marker session={name}")
-        return 0
+        return Outcome.VERIFIED
     session_token = str(marker.get("session_token") or "").strip()
     if not session_token:
-        log_line(f"NOOP poll capture-marker-missing-token session={name}")
-        return 0
+        log_line(f"ERROR poll capture-marker-missing-token session={name}")
+        return Outcome.UNAVAILABLE
 
     # Candidate filing must win this race. Filing a zero-count aggregate report
     # before local proposals have their remote IDs would lock the session and

@@ -115,6 +115,14 @@ class ScheduledRefreshTests(unittest.TestCase):
         self.assertTrue(failed["stale"])
         self.assertEqual(failed["last_verified_at"], success["last_verified_at"])
 
+    def test_diagnostic_write_failure_does_not_prevent_product_work(self):
+        completed = []
+        failure = OSError("synthetic read-only status directory")
+        with patch.object(board, "record_publication_stage", side_effect=failure), patch("sys.stderr", new_callable=io.StringIO):
+            error = board.run_publication_stage("synthetic", "answers", lambda: completed.append("answered"))
+        self.assertEqual(completed, ["answered"])
+        self.assertIs(error, failure)
+
 
 if __name__ == '__main__':
     unittest.main()

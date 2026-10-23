@@ -2067,10 +2067,14 @@ def record_publication_stage(project: str, phase: str, outcome: str, elapsed: fl
 def run_publication_stage(project: str, phase: str, action: Callable[[], Any]) -> Exception | None:
     started = time.monotonic()
     error = None
+    reporting_error = None
     outcome = "failed"
     try:
         with publication_stage(project, phase):
-            record_publication_stage(project, phase, "running", 0)
+            try:
+                record_publication_stage(project, phase, "running", 0)
+            except Exception as exc:
+                reporting_error = exc
             action()
         outcome = "succeeded"
     except SystemExit:
@@ -2079,6 +2083,9 @@ def run_publication_stage(project: str, phase: str, action: Callable[[], Any]) -
         error = exc
         if isinstance(exc, PublicationTimeout):
             outcome = "timed_out"
+    if error is None and reporting_error is not None:
+        error = reporting_error
+        outcome = "reporting_failed"
     elapsed = time.monotonic() - started
     try:
         record_publication_stage(project, phase, outcome, elapsed)
