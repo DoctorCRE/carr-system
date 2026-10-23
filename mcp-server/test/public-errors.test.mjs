@@ -167,7 +167,7 @@ for (const delegated of [false, true]) {
         : { name: 'get-deal-room', arguments: { deal: 'Synthetic' } } }),
     });
     const body = await (await dispatch(request, { CORRELATION_ID: correlationId,
-      DATABASE_URL_READER: 'postgres://synthetic:synthetic@synthetic.invalid/fixture' }, {},
+      DATABASE_URL_READER: 'postgres://fake:fake@synthetic.invalid/fixture' }, {},
     { slug: 'joe', human: true })).json();
     assert.equal(body.result.isError, true);
     const payload = JSON.parse(body.result.content[0].text);

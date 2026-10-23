@@ -268,6 +268,12 @@
       "sha256": "7fef2e4a5aa5f1eb6662212cee2d628d36eb8d60f255d55edac10f689758950a",
       "rule": "pii-address",
       "reason": "Historical synthetic fixture in PR #2120 uses an invented example address; current fixture uses a synthetic location marker. Exact historical file bytes only, retained because force-push is forbidden."
+    },
+    {
+      "path": "mcp-server/test/public-errors.test.mjs",
+      "sha256": "96d22c481e6ff548b035f90c5824cebbe68bfc2bea2ee4b63b0f928c9c565024",
+      "rule": "credential-url",
+      "reason": "Historical synthetic MCP fixture in PR #2194 uses a placeholder password against the reserved .invalid host, never a credential. The current fixture uses the established short fake value. This exception binds only the exact historical file bytes because pushed history is retained without force-push."
     }
   ]
 }
