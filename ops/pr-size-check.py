@@ -8,8 +8,8 @@ one that mixes a refactor with a behavior change, gets a decomposition warning
 at the pre-push floor. Warning, not block, until the weekly numbers show what
 the distribution actually is.
 
-  * Test evidence uses lib/review_tiers.py classification and is reported
-    separately from code lines and files. It remains reviewable.
+  * Test evidence is reported separately from code lines and files. It remains
+    reviewable.
   * Changed lines are added plus deleted, from `git diff -M --numstat` over the
     range (default origin/main...HEAD). A binary file counts as a file with no
     lines.
@@ -31,12 +31,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-from lib.review_tiers import is_test_file
-
-# THE EXCLUSION LIST, in one place and in data form so a later shared
-# review-tier map in ops/config/ can take it over row for row. Each row is
+# Each exclusion row is
 # (label, match kind, value):
 #   basename  the file's name equals value
 #   suffix    the path ends with value
@@ -64,6 +59,18 @@ NEVER_EXCLUDED_SEGMENTS: tuple[str, ...] = ("migrations",)
 
 NEAR_PURE_RENAME = 90   # git rename similarity, percent
 TOP_FILES = 5
+
+
+def is_test_file(path: str) -> bool:
+    parts = path.replace("\\", "/").split("/")
+    name = parts[-1]
+    return (any(p in {"test", "tests", "__tests__", "__snapshots__", "e2e", "journeys", "fixtures"}
+                for p in parts[:-1])
+            or any(p.startswith("test_") for p in parts)
+            or (name.startswith("test-") and name.endswith(".py"))
+            or name.endswith(("-selftest.py", "_test.py", ".test.js", ".test.mjs",
+                              ".test.cjs", ".test.ts", ".test.tsx", ".test.jsx"))
+            or ".spec." in path)
 
 
 def thresholds() -> tuple[int, int]:

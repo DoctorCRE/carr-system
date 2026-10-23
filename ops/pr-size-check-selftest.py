@@ -104,6 +104,18 @@ checks.append(("an ordinary source path is not excluded",
                check.is_excluded("ops/pr-size-check.py") is None
                and check.is_excluded("tools/outline.py") is None))
 
+checks.append(("test paths are classified without review tiers",
+               all(check.is_test_file(p) for p in (
+                   "test_example.py", "src/test_example.py", "src/example_test.py",
+                   "ops/example-selftest.py", "tools/test-example.py", "./tools\\test-example.py",
+                   "src/example.test.tsx", "src/example.spec.js", "test/review.test.mjs",
+                   "tests/a.py", "src/__tests__/a.ts", "__snapshots__/a.snap",
+                   "e2e/journeys/a.ts", "fixtures/a.json", "./src\\tests\\a.py"))
+               and not any(check.is_test_file(p) for p in (
+                   "src/contest_example.py", "src/latest/a.py", "src/example.test.tsx.bak",
+                   "src/testing/a.py", "tools/test-example.py.bak", "tools/test-example.js",
+                   "tools/test-example.py/source.py", "tools/test-example/source.py"))))
+
 report = check.assess([check.Change("lib/fix.py", 3, "M"),
                        check.Change("tests/test_fix.py", 400, "A")], LIMIT_LINES, LIMIT_FILES)
 checks.append(("test evidence cannot inflate code size or code file count",
