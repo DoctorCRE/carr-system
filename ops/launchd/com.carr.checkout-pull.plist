@@ -18,6 +18,11 @@
     <string>-c</string>
     <string>for repo in {{HOME}}/carr-system {{HOME}}/doctorcre-app; do /usr/bin/git -C "$repo" pull --ff-only --quiet || echo "checkout-pull: $repo did not fast-forward"; done</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
   <key>StartCalendarInterval</key>
   <array>
     <dict><key>Minute</key><integer>0</integer></dict>
