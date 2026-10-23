@@ -103,6 +103,7 @@ test("test-first installs the shell required by changed nightly tests", () => {
   const install = steps.findIndex(step => step.run === "ops/ci-zsh.sh");
   const prove = steps.findIndex(step => step.run?.includes("ops/ci.sh --test-first"));
   assert.ok(install >= 0 && install < prove, "install zsh before running changed shell tests");
+  assert.equal(steps[install].env?.ZSH_ARCHIVE_DIR, "${{ runner.temp }}/zsh-debs");
 });
 
 test("only unit fixtures provision the shared PostgreSQL service", () => {
