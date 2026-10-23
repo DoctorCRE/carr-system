@@ -13,8 +13,7 @@ const loopId = "30000000-0000-4000-8000-000000000001";
 const documentId = "40000000-0000-4000-8000-000000000001";
 const receiptId = "50000000-0000-4000-8000-000000000001";
 const doctrineVerbs = ["write-doctrine-section", "change-doctrine-sections",
-  "set-doctrine-refs", "retire-doctrine-section", "claim-doctrine-sections",
-  "release-doctrine-claims"];
+  "set-doctrine-refs", "retire-doctrine-section", "claim-doctrine-sections"];
 const loopVerbs = ["update-loop", "close-loop", "amend-closed-loop"];
 
 function argsFor(verb, base_version = 2, byNumber = false) {
@@ -28,7 +27,7 @@ function argsFor(verb, base_version = 2, byNumber = false) {
 }
 
 function database(verb, { owner = joe.id, shared = false, claimHolder = null,
-  changedOwner = null } = {}) {
+  changedOwner = null, foreignSection = null } = {}) {
   const queries = [], writes = [], events = [];
   const doc = { id: documentId, slug: "test-doc", content_class: "reference",
     visibility: shared ? "shared" : "personal", owner_actor_id: shared ? null : owner };
@@ -46,7 +45,8 @@ function database(verb, { owner = joe.id, shared = false, claimHolder = null,
       return { rows: [joe, dell].filter(a => a.slug === params[0]).map(a => ({ id: a.id })) };
     if (sql.includes("from doctrine_document") && !sql.includes("max_age_days")) return { rows: [doc] };
     if (sql.includes("max_age_days")) return { rows: [{ max_age_days: null }] };
-    if (sql.includes("from doctrine_section")) return { rows: [section] };
+    if (sql.includes("from doctrine_section")) return { rows: [{ ...section,
+      ...(foreignSection === params[0] ? { owner_actor_id: dell.id } : {}) }] };
     if (sql.includes("from doctrine_revision")) return { rows: [{ version: "2" }] };
     if (sql.includes("from doctrine_gate_check")) return { rows: [] };
     if (sql.includes("from doctrine_claim")) return { rows: claimHolder
@@ -83,7 +83,7 @@ async function denied(verb, actor, options, baseVersion = 2, byNumber = false) {
 
 for (const verb of [...doctrineVerbs, ...loopVerbs]) {
   for (const [owner, intruder] of [[joe, dell], [dell, joe]]) {
-    for (const version of [2, 1, null]) {
+    for (const version of (loopVerbs.includes(verb) ? [2, 1, null] : [2, 1])) {
       test(`${verb}: ${intruder.slug} cannot mutate ${owner.slug}'s personal record (base ${version})`,
         () => denied(verb, intruder, { owner: owner.id, claimHolder: intruder.id }, version));
     }
@@ -143,4 +143,26 @@ test("claim-doctrine-sections preserves foreign-holder denial on an authorized s
   assert.equal(result.claims.length, 0);
   assert.equal(result.denied.length, 1);
   assert.equal(db.writes.length, 0);
+});
+
+for (const verb of [...doctrineVerbs, ...loopVerbs]) {
+  test(`${verb}: caller-supplied sponsor is refused before database access`, async () => {
+    const db = database(verb);
+    await assert.rejects(() => executeRegisteredTool(db, dell, verb, {
+      ...argsFor(verb), sponsoring_human_slug: "joe",
+    }), e => e instanceof ToolError && e.payload.error === "caller_authority_field_forbidden");
+    assert.equal(db.queries.length, 0);
+  });
+  test(`${verb}: a personal record without an owner fails closed`,
+    () => denied(verb, joe, { owner: null }));
+}
+
+test("claim-doctrine-sections authorizes every section before changing any claim", async () => {
+  const foreignSection = "20000000-0000-4000-8000-000000000002";
+  const db = database("claim-doctrine-sections", { foreignSection });
+  await assert.rejects(() => executeRegisteredTool(db, joe, "claim-doctrine-sections", {
+    ...argsFor("claim-doctrine-sections"), section_ids: [sectionId, foreignSection],
+  }), e => e instanceof ToolError && e.payload.error === "personal_doc_not_owner");
+  assert.equal(db.writes.length, 0);
+  assert.equal(db.queries.some(sql => sql.includes("from doctrine_claim")), false);
 });

@@ -18,6 +18,7 @@ import { searchDoctrineSituations } from "./situation-retrieval.js";
 import { CORE_RULE_IDS, CORE_RULE_COUNT, CORE_RULE_TRIAGE_SOURCE } from "./core-rule-ids.js";
 import { ruleBootPage } from "./rule-boot.js";
 import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.js";
+import { isPersonalRecordOwner } from "./personal-record-ownership.js";
 
 const CORE_RULE_ID_SET = new Set(CORE_RULE_IDS);
 
@@ -65,15 +66,15 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
     return actor.id;
   }
 
-  async function resolveDoc(c, ref) {
+  async function resolveDoc(c, ref, lock = false) {
     // by id, live slug, or alias — aliases keep old links resolving (0075)
     let r = await c.query(
-      `select * from doctrine_document where id::text = $1 or slug = $1`, [ref]);
+      `select * from doctrine_document where id::text = $1 or slug = $1${lock ? " for update" : ""}`, [ref]);
     if (!r.rows.length) {
       r = await c.query(
         `select d.* from doctrine_slug_alias a
            join doctrine_document d on d.id = a.document_id
-          where a.alias_slug = $1`, [ref]);
+          where a.alias_slug = $1${lock ? " for update of d" : ""}`, [ref]);
     }
     if (!r.rows.length)
       throw new ToolError({ error: "doctrine_doc_not_found", ref,
@@ -81,13 +82,20 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
     return r.rows[0];
   }
 
-  async function lockSection(c, sectionId) {
+  async function assertDocumentOwner(c, actor, doc) {
+    if (doc.visibility === "personal" &&
+        !await isPersonalRecordOwner(c, actor, doc.owner_actor_id))
+      throw new ToolError({ error: "personal_doc_not_owner" });
+  }
+
+  async function lockSection(c, sectionId, actor) {
     const r = await c.query(
       `select s.*, d.content_class, d.visibility, d.owner_actor_id, d.slug as doc_slug
          from doctrine_section s join doctrine_document d on d.id = s.document_id
-        where s.id = $1 for update of s`, [sectionId]);
+        where s.id = $1 for update of s, d`, [sectionId]);
     if (!r.rows.length)
       throw new ToolError({ error: "doctrine_section_not_found", section_id: sectionId });
+    await assertDocumentOwner(c, actor, r.rows[0]);
     return r.rows[0];
   }
 
@@ -404,7 +412,8 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         commit_message: { type: "string" } },
         required: ["idempotency_key", "document", "section_key", "body_text", "base_version"] },
       handler: async (c, actor, args) => withEnvelope(c, actor, "write-doctrine-section", args, async () => {
-        const doc = await resolveDoc(c, args.document);
+        const doc = await resolveDoc(c, args.document, true);
+        await assertDocumentOwner(c, actor, doc);
         let sec = (await c.query(
           `select * from doctrine_section where document_id=$1 and section_key=$2 for update`,
           [doc.id, args.section_key])).rows[0];
@@ -418,8 +427,6 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         await runGates(c, actor, "write", { section_id: sec ? sec.id : null, body,
           content_class: doc.content_class, visibility: doc.visibility,
           owner_actor_id: doc.owner_actor_id, doc_slug: doc.slug });
-        if (doc.visibility === "personal" && doc.owner_actor_id !== actor.id)
-          throw new ToolError({ error: "personal_doc_not_owner" });
         if (!sec) {
           const ord = args.ordinal ?? (await c.query(
             `select coalesce(max(ordinal),0)+10 as o from doctrine_section where document_id=$1`,
@@ -478,7 +485,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
           scope: { type: "object" } }, required: ["edge_type", "target_section_id"] } } },
         required: ["idempotency_key", "section_id", "base_version"] },
       handler: async (c, actor, args) => withEnvelope(c, actor, "set-doctrine-refs", args, async () => {
-        const sec = await lockSection(c, args.section_id);
+        const sec = await lockSection(c, args.section_id, actor);
         baseVersion(args.base_version);
         if (version(sec.current_version) !== args.base_version)
           throw await versionConflict(c, sec);
@@ -521,7 +528,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         reason: { type: "string" } },
         required: ["idempotency_key", "section_id", "base_version", "reason"] },
       handler: async (c, actor, args) => withEnvelope(c, actor, "retire-doctrine-section", args, async () => {
-        const sec = await lockSection(c, args.section_id);
+        const sec = await lockSection(c, args.section_id, actor);
         baseVersion(args.base_version);
         if (version(sec.current_version) !== args.base_version)
           throw await versionConflict(c, sec);
@@ -725,6 +732,9 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         required: ["idempotency_key", "section_ids", "purpose"] },
       handler: async (c, actor, args) => withEnvelope(c, actor, "claim-doctrine-sections", args, async () => {
         const ttl = Math.min(Math.max(args.ttl_seconds || 300, 30), 1800);
+        // Authorize the entire batch before claim reads or writes.
+        for (const id of [...new Set(args.section_ids)].sort())
+          await lockSection(c, id, actor);
         const claims = [], denied = [];
         for (const id of args.section_ids) {
           const cur = await c.query(
@@ -783,9 +793,8 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         validateChangeDoctrineItems(args.items);
         return withEnvelope(c, actor, "change-doctrine-sections", args, async () => {
         if (!args.items.length) throw new ToolError({ error: "empty_change_set" });
-        const doc = await resolveDoc(c, args.document);
-        if (doc.visibility === "personal" && doc.owner_actor_id !== actor.id)
-          throw new ToolError({ error: "personal_doc_not_owner" });
+        const doc = await resolveDoc(c, args.document, true);
+        await assertDocumentOwner(c, actor, doc);
         const cs = await c.query(
           `insert into doctrine_change_set (actor_id, session_key, idempotency_key, state)
            values ($1,$2,$3,'prepared') returning id`,
