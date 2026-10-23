@@ -1,4 +1,5 @@
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
+import { readMigration } from './migration-source.testhelper.mjs';
 import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -115,6 +116,122 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query('begin');
       try { await fn(); } finally { await c.query('rollback'); }
     };
+
+    await t.test('Leads workspace preserves eligibility and bounds client matching work as inventory grows', async t => transaction(async () => {
+      for (const table of ['party','client','lead']) await c.query(`create unique index on ${table}(id)`);
+      // Compare the migration with the actual previous reader, including when
+      // the checked-in schema has already incorporated the new views.
+      for (const [file, name] of [
+        ['0845_lead_archived_stage.sql', 'v_lead_workspace_lifecycle'],
+        ['0847_lead_score_owner_reader_repair.sql', 'v_lead_workspace'],
+      ]) {
+        const source = await readMigration(new URL(`../../migrations/${file}`, import.meta.url));
+        const view = source.match(new RegExp(`create (?:or replace )?view ${name} as[\\s\\S]*?;`, 'i'))?.[0];
+        assert.ok(view, name);
+        await c.query(view.replace(/create (?:or replace )?view/i, 'create or replace view'));
+      }
+      await c.query("insert into lead_stage(slug,label,sort) values('new','New',10)");
+      await c.query(`insert into party(id,kind,name,created_by,updated_by)
+        select ('bb000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
+          'person','Synthetic lead '||n,$1,$1 from generate_series(1,1480) n`, [actor.id]);
+      const party = n => `bb000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+      const lead = n => `cc000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+      const client = n => `dd000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+      await c.query(`insert into client(id,party_id,created_by,updated_by)
+        select ('dd000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
+          ('bb000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,$1,$1
+        from generate_series(401,775) n`, [actor.id]);
+      const seedLeads = async (first, last) => c.query(`insert into lead(id,party_id,stage,created_by,updated_by)
+        select ('cc000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
+          ('bb000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'new',$1,$1
+        from generate_series($2::int,$3::int) n`, [actor.id,first,last]);
+      await seedLeads(1,25);
+      // All exact bridge bases, including siblings and the self-only org case.
+      await c.query('update lead set client_id=$1 where id=$2', [client(401),lead(1)]);
+      await c.query('update client set party_id=$1 where id=$2', [party(2),client(402)]);
+      await c.query('update party set org_id=$1 where id=$2', [party(403),party(3)]);
+      await c.query('update party set org_id=$1 where id=any($2::uuid[])', [party(900),[party(4),party(404)]]);
+      await c.query('update client set party_id=$1 where id=$2', [party(5),client(405)]);
+      await c.query('update party set org_id=$1 where id=$2', [party(901),party(5)]);
+      await c.query('update client set party_id=$1 where id=$2', [party(2),client(416)]);
+      await c.query("update lead set stage='archived' where id=$1", [lead(14)]);
+      // Same names remain suggestions only, with deterministic ambiguity.
+      await c.query("update party set name='  Synthetic DUPLICATE  ' where id=$1", [party(6)]);
+      await c.query("update party set name='synthetic duplicate' where id=any($1::uuid[])", [[party(406),party(407),party(408),party(409),party(410)]]);
+      await c.query('update client set merged_into=$1 where id=$2', [client(411),client(408)]);
+      await c.query('update party set merged_into=$1 where id=$2', [party(411),party(409)]);
+      await c.query('update party set deleted_at=now() where id=$1', [party(410)]);
+      // Tombstones, suppression and do-not-contact retain their separate meanings.
+      await c.query('update lead set suppressed=true where id=$1', [lead(7)]);
+      await c.query('update party set merged_into=$1 where id=$2', [party(900),party(8)]);
+      await c.query('update party set deleted_at=now() where id=$1', [party(9)]);
+      await c.query("update lead set stage='do_not_contact',suppressed=true where id=$1", [lead(10)]);
+      await c.query("update party set contact_state='do_not_contact' where id=$1", [party(11)]);
+      await c.query('update lead set client_id=$1 where id=any($2::uuid[])', [client(401),[lead(8),lead(9)]]);
+      await c.query('update lead set client_id=$1 where id=$2', [client(408),lead(12)]);
+      await c.query('update party set org_id=$1 where id=$2', [party(409),party(13)]);
+      await c.query("insert into deal(id,client_id,name,deal_type,phase,created_by,updated_by) values($1,$2,'Synthetic lead deal','renewal','research',$3,$3)", [id(80),client(401),actor.id]);
+      // Latest means mutation order, not occurrence time; retain undo evidence.
+      for (const [n,occurred,stage] of [[81,'2026-10-02','qualified'],[82,'2026-10-01','new']]) {
+        await c.query(`insert into event(id,actor_id,verb,subject_type,subject_id,old_value,new_value,occurred_at,cause)
+          values($1,$2,'update-lead','lead',$3,'{"stage":"new"}',$4,$5,'automation_job')`,
+          [id(n),actor.id,lead(6),JSON.stringify({stage,stage_review:{evidence_date:'2026-09-30',undo_event_id:id(79)}}),occurred]);
+      }
+      await c.query('analyze party; analyze client; analyze lead; analyze event; analyze deal');
+      const read = async () => {
+        await c.query('set local role carr_reader');
+        const queries=[];
+        try {
+          const response = await TOOLS['lead-board'].handler({query: (sql, params) => {
+            queries.push([sql,params]); return c.query(sql,params);
+          }},actor,{workspace:'leads',lead_id:lead(6)});
+          assert.equal(queries.length,1,'workspace and detail retain one statement/snapshot');
+          const plan = (await c.query('explain (analyze, format json, timing off) '+queries[0][0],queries[0][1])).rows[0]['QUERY PLAN'][0].Plan;
+          const {generated_at,...stable}=response;
+          return {stable,plan};
+        } finally { await c.query('reset role'); }
+      };
+      const expectedLife = (await c.query('select * from v_lead_workspace_lifecycle order by id')).rows;
+      const before = await read();
+      const byId = new Map(before.stable.leads.map(row=>[row.id,row]));
+      assert.deepEqual([1,2,3,4,5].map(n=>[byId.get(lead(n)).is_client,byId.get(lead(n)).linked_client]),
+        [[false,true],[true,true],[false,true],[false,true],[true,true]]);
+      assert.deepEqual(byId.get(lead(6)).possible_clients.map(row=>row.client_id),[client(406),client(407)]);
+      assert.equal(byId.get(lead(6)).linked_client,false,'names never establish identity');
+      for (const n of [7,8,9,10]) assert.equal(byId.has(lead(n)),false);
+      assert.equal(byId.get(lead(11)).contact_eligible,false);
+      for (const n of [12,13]) assert.equal(byId.get(lead(n)).linked_client,false);
+      assert.equal(byId.get(lead(14)).stage,'archived');
+      assert.equal(byId.get(lead(1)).is_deal,true);
+      assert.equal(byId.get(lead(6)).last_stage_move.event_id,id(82));
+      assert.equal(byId.get(lead(6)).last_stage_move.undone,id(79));
+
+      await c.query(readFileSync(path.join(root,'migrations/0941_lead_workspace_set_reads.sql'),'utf8'));
+      const small = await read();
+      assert.deepEqual(small.stable,before.stable,'all workspace/detail fields and ordering survive');
+      assert.deepEqual((await c.query('select * from v_lead_workspace_lifecycle order by id')).rows,expectedLife);
+      await seedLeads(26,375);
+      await c.query('analyze party; analyze client; analyze lead; analyze event; analyze deal');
+      const large = await read();
+      assert.equal(large.stable.leads.length,371);
+      for (const [size,{plan}] of [[25,small],[375,large]]) {
+        const scans=[],matches=[];
+        const walk=node=>{
+          if (['party','client'].includes(node['Relation Name']) && node['Node Type'].includes('Seq Scan')) scans.push(node);
+          if (['live_clients','client_parties','client_orgs','name_matches'].includes(node['CTE Name'])) matches.push(node);
+          for (const child of node.Plans??[]) walk(child);
+        };
+        walk(plan);
+        assert.ok(scans.length>0,'proof exercises actual party/client table scans');
+        const visits=scans.reduce((sum,node)=>sum+node['Actual Loops']*(node['Actual Rows']+(node['Rows Removed by Filter']??0)),0);
+        t.diagnostic(`${size} leads: ${visits} party/client sequential row visits; maximum scan loops ${Math.max(...scans.map(n=>n['Actual Loops']))}`);
+        assert.ok(scans.every(node=>node['Actual Loops']<=1),'party/client full scans must run once, never once per lead');
+        assert.ok(visits<=12*(1480+375),'matching work stays bounded by source inventory');
+        const matchedVisits=matches.reduce((sum,node)=>sum+node['Actual Loops']*(node['Actual Rows']+(node['Rows Removed by Filter']??0)),0);
+        assert.ok(matchedVisits<=12*(1480+375),'materializing matches must not hide per-lead full rescans');
+      }
+      assert.equal((await c.query("select has_table_privilege('carr_reader','party','select') allowed")).rows[0].allowed,false);
+    }));
 
     await t.test('deal detail survives missing checklist storage and recovers after migration 0922', async t => {
       const warning = t.mock.method(console, 'warn', () => {});
