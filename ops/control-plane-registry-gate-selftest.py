@@ -11,12 +11,13 @@ from __future__ import annotations
 import pathlib
 import runpy
 import sys
+from unittest.mock import MagicMock, patch
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 compare = runpy.run_path(str(REPO / "ops/control-plane-registry-gate.py"))["compare"]
 
 WORKFLOW = {"key": "w", "version": 2, "enabled": False, "risk": "low",
-            "execution": {"kind": "command"}, "inventory": {}, "recurrence": {},
+            "execution": {"kind": "command"}, "inventory": {}, "recurrence": {}, "state": {},
             "routing": {}, "filtering": {}, "validation": {}, "retry": {},
             "deduplication": {}, "completion": {}, "legacy_schedule": {}}
 MANIFEST = {"workflows": [WORKFLOW], "cognition_jobs": []}
@@ -44,8 +45,27 @@ def failures(rows):
     return compare(Cursor(rows), MANIFEST)[0]
 
 
+def check_bootstrap() -> bool:
+    sync = runpy.run_path(str(REPO / "tools/workflow-registry.py"))["sync_registry"]
+    conn, cur = MagicMock(), MagicMock()
+    conn.__enter__.return_value = conn
+    conn.cursor.return_value.__enter__.return_value = cur
+    cur.fetchall.return_value = []
+    with patch.dict(sync.__globals__, connect=lambda: conn):
+        try:
+            result = sync(MANIFEST)
+        except RuntimeError:
+            return False
+    queries = [call.args[0] for call in cur.execute.call_args_list]
+    return (result == {"workflows": 1}
+            and sum("insert into ops.job_definition" in sql for sql in queries) == 1
+            and not any("ops.legacy_schedule_" in sql for sql in queries)
+            and conn.commit.call_count == 1)
+
+
 def main() -> int:
     checks = {
+        "bootstrap seeds workflows without changing native schedule approval tables": check_bootstrap(),
         "exact registry passes": failures([row("w", 2, False)]) == [],
         "disabled superseded version passes": failures([row("w", 1, False), row("w", 2, False)]) == [],
         "enabled superseded version fails": failures([row("w", 1, True), row("w", 2, False)]) != [],

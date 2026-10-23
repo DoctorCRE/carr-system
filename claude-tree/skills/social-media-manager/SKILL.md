@@ -5,7 +5,7 @@ description: Executes the CALENDAR/BATCH side of Joe Bookout's individual social
 
 # CARR Social Media Manager
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Guidance changes:** Propose an edit to the relevant CLAUDE.md, AGENTS.md or skill in a PR, with the trade-off. Proposals bind nobody until merged; Git history preserves attribution.
 
 **Reconciled with `write-content` on 2026-07-02.** These two skills used to overlap (both could draft copy and generate visuals) with `write-content` carrying the actual voice work — a real interview with Joe plus three rounds of live feedback — and this skill still running on an older, generic pillar-mix draft style and blind Canva quote-card prompts. That's now split cleanly: **`write-content` owns all voice, copy drafting, and platform judgment calls. This skill owns calendar bookkeeping, visual generation, publishing, and logging.** This skill never invents post copy on its own anymore — see Workflow step 1.
 

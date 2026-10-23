@@ -46,38 +46,3 @@ test("retired record-layer verbs are unavailable through MCP dispatch", async ()
       error => error.payload?.error === "unknown_tool");
   }
 });
-
-for (const [name, args, sqlFunction, field, stored] of [
-  ['read-model-role', { role_key: 'reviewer' }, 'ops.model_role_readback', 'readback', { role_key: 'reviewer', versions: [{ version: 2, description: 'Independent review' }] }],
-  ['read-benchmark-manifest', { benchmark_ref: 'benchmark:fixture' }, 'ops.benchmark_readback', 'readback', { benchmark_ref: 'benchmark:fixture', measurements: [{ duration_ms: 125 }] }],
-]) test(`${name} preserves versioned records without a lifecycle write`, async () => {
-  const calls = [];
-  const client = { query: async (sql, params) => {
-    calls.push({ sql, params });
-    assert.ok(sql.startsWith(`select ${sqlFunction}(`));
-    return { rows: [{ [field]: stored }] };
-  } };
-  const result = await TOOLS[name].handler(client, { slug: 'joe' }, args);
-  assert.deepEqual(result, { ok: true, ...stored });
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].params, Object.values(args));
-});
-
-test('the Journey One read preserves stored start and pause history', async () => {
-  const scope = 'sha256:' + 'a'.repeat(64);
-  const clock = { history: { events: [
-    { type: 'clock_started', observed_at: '2026-09-01T15:00:00Z' },
-    { type: 'paused', observed_at: '2026-09-02T15:00:00Z' },
-  ] } };
-  const client = { query: async (sql, params) => {
-    if (sql.startsWith('select ops.j1_clock_scope_bindings(')) {
-      assert.deepEqual(params, [scope, null]);
-      return { rows: [{ bindings: { by_scope: { clock_key: 'clock:fixture' } } }] };
-    }
-    assert.ok(sql.startsWith('select ops.j1_clock_history('));
-    assert.deepEqual(params, ['clock:fixture']);
-    return { rows: [{ clock }] };
-  } };
-  assert.deepEqual(await TOOLS['read-journey-one-clock'].handler(client, {}, { clock_scope_key: scope }),
-    { ok: true, clock_scope_key: scope, clock_key: 'clock:fixture', clock_started: true, clock });
-});

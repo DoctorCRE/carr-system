@@ -68,7 +68,10 @@ step() {
   carr_routine_exec /bin/zsh "$REPO/bin/run-scheduled.sh" "$SERVICE" "$key" \
     "${CARR_STEP_TIMEOUT_ARGV[@]}" "$@" >> "$LOG" 2>&1
   LAST_STEP_RC=$?
-  [ "$LAST_STEP_RC" -eq 0 ] || NIGHTLY_RC="$LAST_STEP_RC"
+  case "$LAST_STEP_RC" in
+    0|78) ;;
+    *) [ "$NIGHTLY_RC" -ne 0 ] || NIGHTLY_RC="$LAST_STEP_RC" ;;
+  esac
   return 0
 }
 
@@ -81,14 +84,12 @@ if [ "${1:-}" = --exports ]; then
   step "graph" ./run.sh graph
   step "section index" ./run.sh section-index
   step "system graph" ./run.sh graph-system
-  exit 0
+  exit "$NIGHTLY_RC"
 fi
 
 step "encrypted backup" env CARR_DB_BACKUP_URL="$CARR_DB_BACKUP_URL" ./bin/backup-dump.sh
 step "backup ping" env HC_BACKUP_RC="$LAST_STEP_RC" ./bin/hc-ping.sh
 step "recovery point" ./.venv/bin/python ops/recovery-point.py
-step "credential mint" ./.venv/bin/python ops/credential-mint.py
-step "credential health" ./.venv/bin/python ops/credential-health.py --nightly
 step "cadence engine" ./.venv/bin/python pipelines/cadence_engine.py --apply
 step "availability matcher" ./.venv/bin/python pipelines/availability_matcher.py
 step "fetch allowlist" ./.venv/bin/python ops/fetch-allowlist.py
@@ -106,4 +107,4 @@ step "mail capture" ./bin/mail-capture.sh
 step "lead stages" python3 ./bin/lead-stage-job.py
 step "verb probe" ./.venv/bin/python ops/nightly-verb-probe.py
 step "nightly ping" env HC_CHAIN_RC="$NIGHTLY_RC" ./bin/hc-ping.sh --nightly
-exit 0
+exit "$NIGHTLY_RC"

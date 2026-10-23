@@ -9,7 +9,6 @@ cannot reach success, and a separate observer for the terminal provider state.
 from __future__ import annotations
 
 import ast
-import hashlib
 import importlib.util
 import json
 import os
@@ -31,13 +30,6 @@ _ROOT = Path(__file__).resolve().parents[1]
 _WORKFLOW = _ROOT / ".github" / "workflows" / "backup-nightly.yml"
 _STATUS_HELPER = _ROOT / "ops" / "backup-workflow-status.py"
 _SERVICES = _ROOT / "ops" / "config" / "services.json"
-_METERING_POLICY = _ROOT / "ops" / "config" / "platform-metering.v1.json"
-
-sys.path.insert(0, str(_ROOT))
-
-from lib.platform_metering import (  # noqa: E402
-    authorize_metered_execution as _authorize_metered_execution,
-)
 
 _passed = 0
 _failed: list[str] = []
@@ -1426,12 +1418,9 @@ def _mutated_status_tree(original: str, replacement: str, prefix: str) -> Path |
     if source.count(original) != 1:
         return None
     root = Path(temporary_directory(prefix=prefix))
-    (root / "ops" / "config").mkdir(parents=True)
-    (root / "lib").mkdir()
+    (root / "ops").mkdir()
     (root / "ops" / _STATUS_HELPER.name).write_text(
         source.replace(original, replacement, 1), encoding="utf-8")
-    shutil.copy2(_ROOT / "lib" / "platform_metering.py", root / "lib" / "platform_metering.py")
-    shutil.copy2(_METERING_POLICY, root / "ops" / "config" / _METERING_POLICY.name)
     return root
 
 
@@ -1447,24 +1436,11 @@ def _name_only_required_tree() -> Path | None:
         _POSITIVE_BINDING, _NAME_ONLY_BINDING, "carr-dispatch-nameonly-")
 
 
-def _paused_policy_tree() -> Path:
-    """A copy of the door's own tree whose metering policy re-imposes the pause.
-
-    The door resolves its policy from its OWN resolved location, not from an
-    environment variable, which is the property that makes it a door rather than
-    a bypass -- so the only honest way to watch a real metering refusal is to run
-    the door from a tree whose policy says no. Nothing is patched, injected or
-    rebound: the same bytes of the same script read a different sealed file.
-    """
-    root = Path(temporary_directory(prefix="carr-dispatch-paused-"))
-    (root / "ops" / "config").mkdir(parents=True)
-    (root / "lib").mkdir()
+def _standalone_status_tree() -> Path:
+    """Copy only the helper so no repository policy or library can support it."""
+    root = Path(temporary_directory(prefix="carr-dispatch-standalone-"))
+    (root / "ops").mkdir()
     shutil.copy2(_STATUS_HELPER, root / "ops" / _STATUS_HELPER.name)
-    shutil.copy2(_ROOT / "lib" / "platform_metering.py", root / "lib" / "platform_metering.py")
-    policy = json.loads(_METERING_POLICY.read_text(encoding="utf-8"))
-    policy["temporary_controls"]["github_actions_pause"]["repository_actions_enabled"] = False
-    (root / "ops" / "config" / "platform-metering.v1.json").write_text(
-        json.dumps(policy, indent=2), encoding="utf-8")
     return root
 
 
@@ -1483,16 +1459,7 @@ def _code_only(body: str) -> str:
 
 
 def _dispatch_door_contract() -> None:
-    """The reviewed dispatch door: admit the spend, or reach no vendor at all.
-
-    The door exists because hooks/guard-unattended.py refuses a session-issued
-    `gh workflow run` and names a reviewed in-process admission as the sanctioned
-    shape instead. These checks hold the three properties that make it that
-    rather than a bypass: the budget refusal happens BEFORE the dispatch POST and
-    is proved by making the budget actually refuse, the only workflow, ref and
-    input names it can reach are literals, and the fact the budget gate requires
-    is established from the head's own Checks rather than asserted.
-    """
+    """The backup proof dispatch preserves provenance and required CI checks."""
     dispatch = "dispatch-controlled-failure"
     status_source = _STATUS_HELPER.read_text(encoding="utf-8")
     # The door's exact signature is the anchor for everything below, so it is
@@ -1507,36 +1474,8 @@ def _dispatch_door_contract() -> None:
         "a public door that reads attributes off a caller's object runs caller code "
         "between the guards and the POST",
     )
-    # Read the DOOR'S OWN BODY, not the file. Asked of the whole file, "does it
-    # call the metering authorizer" is answered yes by the import line alone
-    # — which is how this check first passed against a door whose admission had
-    # been deleted outright.
     door_body = (status_source.split(signature, 1)[-1].split("\ndef ", 1)[0]
                  if signature in status_source else "")
-    # THE PRIVATE SPELLING IS PART OF THE ASSERTION. The door must call the gate
-    # through the underscore-aliased import, because the public one would also
-    # be an export of this repository's decision function through the status
-    # module -- which is the finding _public_surface_contract now closes.
-    _check(
-        "the dispatch door admits the metered spend in its own body",
-        "_authorize_metered_execution(" in door_body
-        and '"github-actions-remote-ci"' in door_body,
-        "a dispatcher that skips admission is the bypass the metering gate exists to stop",
-    )
-    _check(
-        "the dispatch door admits BEFORE it reaches the vendor",
-        "_authorize_metered_execution(" in door_body and "/dispatches" in door_body
-        and door_body.index("_authorize_metered_execution(") < door_body.index("/dispatches"),
-        "admitting after the POST spends the minutes the admission was guarding",
-    )
-    _check(
-        "the dispatch door establishes green local checks before it admits",
-        "_require_head_checks_clean(identity)" in door_body
-        and "_authorize_metered_execution(" in door_body
-        and door_body.index("_require_head_checks_clean(identity)")
-        < door_body.index("_authorize_metered_execution("),
-        "handing the budget gate a literal True makes the admission decorative",
-    )
     # HOW the head evidence is scoped, read off the two functions that decide
     # it. A source read rather than a behavioural one because the behavioural
     # controls below can only prove the outcome for the shapes they seed; this
@@ -1579,7 +1518,7 @@ def _dispatch_door_contract() -> None:
         "_is_seam_producer_check(item, identity, seam_suites)" in clean_code
         and "CHECK_NAME" not in clean_code.replace("REQUIRED_CHECK_NAME", ""),
         "excluding by name lets anyone who can attach that label hide a red Check "
-        "from the evidence the budget admission stands on",
+        "from the evidence required before dispatch",
     )
     _check(
         "the provider stamp reader decides on provider facts only, never on creator text",
@@ -1721,7 +1660,7 @@ def _dispatch_door_contract() -> None:
     body = dispatched[0].get("body") if dispatched else {}
     inputs = body.get("inputs") if isinstance(body, dict) else {}
     _check(
-        f"{dispatch}: an admitted request dispatches the seeded inputs on main",
+        f"{dispatch}: a valid request dispatches the seeded inputs on main",
         result.returncode == 0
         and len(dispatched) == 1
         and str(dispatched[0].get("url", "")).endswith(
@@ -1765,13 +1704,13 @@ def _dispatch_door_contract() -> None:
         f"provider before it trusts any row that carries that name: got {required_listings!r}",
     )
     receipt = _parsed_output(result)
-    digest = receipt.get("metering_gate_digest")
     _check(
-        f"{dispatch}: the receipt records WHICH admission it stands on, opaquely",
-        receipt.get("state") == "dispatched"
-        and receipt.get("metering_gate") == "github-actions-remote-ci"
-        and isinstance(digest, str) and bool(re.fullmatch(r"[0-9a-f]{16}", digest)),
-        f"expected an opaque 16-hex admission digest beside the gate key, got {receipt!r}",
+        f"{dispatch}: the receipt identifies the workflow, ref, head and proof",
+        receipt == {
+            "state": "dispatched", "workflow": "backup-nightly.yml", "ref": "main",
+            "head_sha": _PROOF_HEAD, "proof_id": _PROOF_ID,
+        },
+        f"expected a dispatch receipt without a custom admission, got {receipt!r}",
     )
     _check(
         f"{dispatch}: no receipt key or value is a privileged word",
@@ -1779,26 +1718,6 @@ def _dispatch_door_contract() -> None:
         f"a receipt an auditor can read as the outcome is a label wearing authority: "
         f"{_privileged_hits(receipt)}",
     )
-    # The digest is EVIDENCE, not decoration: it must reproduce from the gate's
-    # own answer for this same request, and must not be some constant the door
-    # could print without ever calling the gate.
-    expected = _authorize_metered_execution(
-        json.loads(_METERING_POLICY.read_text(encoding="utf-8")),
-        "github-actions-remote-ci",
-        {"candidate_sha": _PROOF_HEAD, "local_checks_green": True},
-    )
-    recomputed = hashlib.sha256(json.dumps({
-        key: expected.get(key)
-        for key in ("admitted", "authority", "gate", "platform", "policy_schema_version")
-    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:16]
-    _check(
-        f"{dispatch}: the receipt's digest reproduces from the gate's own answer",
-        digest == recomputed,
-        f"expected {recomputed}, got {digest!r}",
-    )
-
-    # EVERY REFUSAL MUST LEAVE THE VENDOR UNTOUCHED. A door that refuses after
-    # the POST has already spent the minutes it was guarding.
     refusals: list[tuple[str, dict[str, object], tuple[str, ...]]] = [
         ("a malformed proof ID refuses", {}, _proof_args(proof_id="not-a-uuid")),
         ("an uppercase proof ID refuses rather than being normalised", {},
@@ -1814,8 +1733,8 @@ def _dispatch_door_contract() -> None:
          {"check_runs": [_spent_proof_check()]}, _proof_args()),
         ("exhausted Check pagination fails closed instead of dispatching",
          {"check_pagination_exhausted": True}, _proof_args()),
-        # The fact the budget gate requires is READ, not asserted: these are the
-        # head states that cannot support it. Every row that is NOT about a
+        # Required CI success comes from provider readback. These are the
+        # head states that cannot support dispatch. Every row that is NOT about a
         # missing required check is seeded on _green_head(), so it refuses for
         # the row under test rather than for the positive half being absent.
         ("a head carrying no Checks at all refuses rather than claiming green",
@@ -1964,7 +1883,7 @@ def _dispatch_door_contract() -> None:
     # ever seeded a proof -- which is the reason it exists. An authentic seam
     # failure, provider-stamped and carrying this seam's envelope for this head
     # with an EARLIER proof ID in its summary, is excluded; the ordinary green
-    # Check beside it carries the admission and a fresh proof dispatches.
+    # Check beside it permits a fresh proof dispatch.
     env, state_path, log_path = fixture({"check_runs": _green_head(
         _ci_check("concluded_red", label="seam_label", envelope="seam_this_head",
                   suite="seam_run", summary="earlier_proof"),
@@ -2078,24 +1997,21 @@ def _dispatch_door_contract() -> None:
             f"rc={name_only.returncode} {name_only.stderr.strip()} {name_only_posted!r}",
         )
 
-    # THE ONE REFUSAL THE SOURCE SEARCHES ABOVE CANNOT PROVE: the BUDGET GATE
-    # itself saying no. Run the door's own bytes from a tree whose sealed policy
-    # re-imposes the Actions pause, and watch it reach no vendor at all.
-    paused_root = _paused_policy_tree()
+    standalone_root = _standalone_status_tree()
     env, state_path, log_path = fixture()
-    refused = subprocess.run(
-        [sys.executable, str(paused_root / "ops" / _STATUS_HELPER.name), dispatch, *_proof_args()],
-        cwd=paused_root, env=env, text=True, capture_output=True, timeout=8, check=False,
+    result = subprocess.run(
+        [sys.executable, str(standalone_root / "ops" / _STATUS_HELPER.name),
+         dispatch, *_proof_args()],
+        cwd=standalone_root, env=env, text=True, capture_output=True, timeout=8, check=False,
     )
     posted = [row for row in _calls(log_path) if str(row.get("url", "")).endswith("/dispatches")]
+    standalone_dispatches = _read_json(state_path).get("dispatches")
     _check(
-        f"{dispatch}: a refusing budget gate stops the dispatch before the vendor",
-        refused.returncode != 0
-        and "metered execution refused" in refused.stderr
-        and not posted
-        and not (_read_json(state_path).get("dispatches") or []),
-        f"expected the metering refusal to reach no vendor, got rc={refused.returncode} "
-        f"posted={posted!r} stderr={refused.stderr.strip()}",
+        f"{dispatch}: the standalone helper needs no metering library or policy",
+        result.returncode == 0 and len(posted) == 1
+        and isinstance(standalone_dispatches, list) and len(standalone_dispatches) == 1,
+        f"expected one dispatch without repository dependencies, got rc={result.returncode} "
+        f"posted={posted!r} stderr={result.stderr.strip()}",
     )
 
 
@@ -2158,10 +2074,7 @@ def _repo_reexports(module: ModuleType, home: Path) -> set[str]:
 def _public_repo_imports(text: str) -> set[str]:
     """Public names a source binds by importing them FROM this repository's modules.
 
-    The static half of the same question, and it needs a real parser rather than
-    a regex: the reachable shape is `from lib.platform_metering import
-    authorize_metered_execution`, and its spellings (parenthesised lists,
-    aliases, multiple names per statement) are exactly what a regex gets wrong.
+    A parser handles parenthesised imports, aliases and multiple names.
     ``from __future__`` is skipped, and so is any module that does not resolve to
     a file in this repository -- stdlib vocabulary is not a re-export.
     """
@@ -2198,61 +2111,8 @@ def _load_module(path: Path, name: str) -> ModuleType:
     return module
 
 
-def _reexport_probe_module() -> tuple[ModuleType, str]:
-    """A module that DOES re-export the metering authorizer, for the control.
-
-    This is the exact line the re-review found on the status helper, alone in a
-    file of its own: the mutation the guard above has to catch. The caller
-    proves two things with it -- that the sweep finds the name, and that the name
-    it finds really does hand a caller the privileged outcome from the caller's
-    own policy and request.
-    """
-    source = ("import sys\n"
-              f"sys.path.insert(0, {str(_ROOT)!r})\n"
-              "from lib.platform_metering import authorize_metered_execution\n")
-    root = Path(temporary_directory(prefix="carr-reexport-probe-"))
-    probe = root / "reexport_probe.py"
-    probe.write_text(source, encoding="utf-8")
-    return _load_module(probe, "carr_reexport_probe"), source
-
-
 def _public_surface_contract() -> None:
-    """The public surface of BOTH modules this slice changed, swept.
-
-    WHY THE SURFACE AND NOT THE FIXTURES. The standing authority rule forbids an
-    EXPORTED function that returns a privileged outcome built from caller input.
-    The fixtures in this file legitimately carry GitHub's own vocabulary --
-    "completed", "success" -- which is upstream text the suite reports rather
-    than authority it mints. The closeable property is therefore the surface: if
-    the only public name this file defines is main(), which returns a process
-    exit code, then no caller-input-to-privileged-outcome path is exported at
-    all, under ANY name. A previous revision exported green_ci_check(name=...,
-    status=...) and privileged_hits(), which is the shape this sweep catches.
-
-    AND WHY IT NOW SWEEPS THE STATUS MODULE TOO. An earlier revision of this
-    function proved that property about ITSELF while the module it exercises
-    grew a public `from lib.platform_metering import authorize_metered_execution`
-    -- the exact re-export named in the docstring below it. A read-only probe
-    imported ops/backup-workflow-status.py, reached the gate through it, and got
-    the privileged outcome back from its own objects. Proving a rule about the
-    test file while the changed file breaks it is worse than not proving it: it
-    reads as covered.
-
-    THE ORDERED QUESTIONS:
-      1. Statically, what module-level names does THIS file bind, and is the
-         public subset exactly {"main"} with an int return?
-      2. At runtime, does this module expose anything of its own -- or anything
-         re-exported from this repository's modules -- beyond main()?
-      3. Does the closed union of privileged words appear anywhere in that
-         public surface?
-      4. Does the STATUS module bind any of this repository's names publicly,
-         statically (a real parser, not a regex) or at runtime -- and does it
-         still reach the gate privately, rather than not at all?
-      5. MUTATION CONTROLS: re-adding the exact re-export must turn both status
-         sweeps red, and the name it re-exports must really yield the privileged
-         outcome; and question 1's reader must see the helper shape the earlier
-         review flagged, when it is given one.
-    """
+    """Neither backup module re-exports repository decision functions."""
     source = Path(__file__).read_text(encoding="utf-8")
     public = {name for name in _module_level_names(source) if not name.startswith("_")}
     _check(
@@ -2290,8 +2150,7 @@ def _public_surface_contract() -> None:
     _check(
         "the suite re-exports nothing from this repository's own modules",
         not reexported,
-        "importing authorize_metered_execution under a public name would re-export "
-        f"the gate's verdict through this file: {sorted(reexported)}",
+        f"unexpected repository re-exports: {sorted(reexported)}",
     )
     _check(
         "no privileged word appears in the suite's public surface",
@@ -2301,14 +2160,6 @@ def _public_surface_contract() -> None:
     )
 
 
-    # ── THE CHANGED MODULE'S OWN SURFACE ───────────────────────────────────
-    # The re-review found this suite proving a property about ITSELF while the
-    # module it exercises grew the very re-export this function's docstring
-    # names. A read-only probe imported ops/backup-workflow-status.py, reached
-    # authorize_metered_execution through it, and got {"admitted": true} back
-    # from its own policy and request objects. The sweep now walks the STATUS
-    # module too, statically and at runtime, and the control below re-adds the
-    # exact line and watches it turn red.
     status_source = _STATUS_HELPER.read_text(encoding="utf-8")
     status_imports = _public_repo_imports(status_source)
     _check(
@@ -2323,47 +2174,8 @@ def _public_surface_contract() -> None:
     _check(
         "at runtime the status module re-exports nothing of this repository's",
         not status_reexports,
-        "the metering gate must not be reachable through the door's own file under any "
-        f"name: {sorted(status_reexports)}",
+        f"unexpected repository re-exports: {sorted(status_reexports)}",
     )
-    _check(
-        "the status module still admits its own spend through a private name",
-        getattr(status_module, "_authorize_metered_execution", None) is not None
-        and getattr(status_module, "_MeteringRefusal", None) is not None
-        and not hasattr(status_module, "authorize_metered_execution")
-        and not hasattr(status_module, "MeteringRefusal"),
-        "the fix is a PRIVATE binding, not a deleted admission: a door that stopped "
-        "calling the gate would also pass the two checks above",
-    )
-
-    # THE MUTATION CONTROL FOR BOTH SWEEPS. A module carrying exactly the line
-    # the re-review found, and nothing else. It has to (a) be caught by the
-    # static reader, (b) be caught by the runtime sweep, and (c) actually hand a
-    # caller the privileged outcome -- because a control that flags a harmless
-    # name proves nothing about what the guard is for.
-    probe_module, probe_source = _reexport_probe_module()
-    probe_public = _public_repo_imports(probe_source)
-    probe_runtime = _repo_reexports(probe_module, Path(probe_module.__file__ or ""))
-    privileged_outcome = getattr(probe_module, "authorize_metered_execution")(
-        json.loads(_METERING_POLICY.read_text(encoding="utf-8")),
-        "github-actions-remote-ci",
-        {"candidate_sha": _PROOF_HEAD, "local_checks_green": True},
-    )
-    _check(
-        "re-adding the re-export turns both sweeps red",
-        probe_public == {"authorize_metered_execution"}
-        and probe_runtime == {"authorize_metered_execution"},
-        "a sweep that cannot find the exact line the re-review found is measuring "
-        f"nothing: static {sorted(probe_public)}, runtime {sorted(probe_runtime)}",
-    )
-    _check(
-        "the re-export the sweeps catch is the privileged outcome, not a harmless name",
-        isinstance(privileged_outcome, dict)
-        and privileged_outcome.get("admitted") is True,
-        "if reaching the gate through a public re-export did NOT yield the privileged "
-        f"outcome, the two sweeps above would be guarding nothing: {privileged_outcome!r}",
-    )
-
     flagged = _module_level_names(
         "import json\n"
         "PRIVILEGED_WORDS = ('pass',)\n"

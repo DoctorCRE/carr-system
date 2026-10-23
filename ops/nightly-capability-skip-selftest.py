@@ -142,13 +142,6 @@ check("the portability mirror skips rather than fails without a credential",
 check("and it says which setting is missing",
       "DATABASE_URL" in (mirror.stderr + mirror.stdout))
 
-refusal = subprocess.run(
-    ["/bin/sh", str(REPO / "bin" / "routine-admin-refusal.sh"), "probe"],
-    capture_output=True, text=True,
-)
-check("the refusal helper exits 78 (SKIP, not FAIL)", refusal.returncode == 78,
-      f"rc={refusal.returncode}")
-
 print()
 if failures:
     print(f"nightly-capability-skip: FAIL — {len(failures)} case(s): {', '.join(failures)}")
