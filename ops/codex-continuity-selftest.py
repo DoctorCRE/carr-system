@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contract tests for the native Codex continuity adapters."""
+"""Contract tests for native Codex transcript history."""
 import json
 import importlib.util
 import os
@@ -13,7 +13,6 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 HISTORY = ROOT / "ops" / "codex-history.py"
-HOOK = ROOT / "ops" / "codex-continuity-hook.py"
 TEST_TMP = pathlib.Path(os.environ.get("TMPDIR", ROOT / "out" / "test-tmp"))
 ROLLOUT_NAME = "rollout-2026-09-05T12-00-00-01a0715a-6623-7220-82df-506062d5072f.jsonl"
 
@@ -24,13 +23,6 @@ def window_id(label):
 
 def load_history_module():
     spec = importlib.util.spec_from_file_location("codex_history_selftest", HISTORY)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def load_hook_module():
-    spec = importlib.util.spec_from_file_location("codex_hook_selftest", HOOK)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -84,59 +76,6 @@ class AdapterCase(unittest.TestCase):
                               input=json.dumps(payload), text=True, capture_output=True,
                               check=False, env=self.env)
 
-    def install_fake_record_call(self, response=None, outage=False, recovery_tool_error=False):
-        fake = self.base / "fake-call.py"
-        log = self.base / "calls.jsonl"
-        if log.exists():
-            log.unlink()
-        response_path = self.base / "response.json"
-        if response is not None:
-            response_path.write_text(json.dumps(response), encoding="utf-8")
-        fake.write_text(
-            """#!/usr/bin/env python3
-import json, os, pathlib, sys
-log = pathlib.Path(os.environ["FAKE_CALL_LOG"])
-with log.open("a", encoding="utf-8") as handle:
-    handle.write(json.dumps({"verb": sys.argv[1], "args": json.loads(sys.argv[2])}, separators=(",", ":")) + "\\n")
-if os.environ.get("FAKE_CALL_OUTAGE") == "1":
-    print("simulated store outage", file=sys.stderr)
-    raise SystemExit(1)
-if sys.argv[1] == "codex-read-recovery":
-    path = os.environ.get("FAKE_RESPONSE")
-    value = pathlib.Path(path).read_text(encoding="utf-8") if path else '{"ok":true,"found":false,"checkpoint":null}'
-    if os.environ.get("FAKE_RECOVERY_TOOL_ERROR") == "1":
-        print("wrapper diagnostic", file=sys.stderr)
-        print("TOOL ERROR " + value, file=sys.stderr)
-        raise SystemExit(1)
-    print(value)
-else:
-    print('{"ok":true}')
-""", encoding="utf-8")
-        env = {**self.env, "CARR_CODEX_CONTINUITY_CALL": f"{sys.executable} {fake}",
-               "FAKE_CALL_LOG": str(log)}
-        if response is not None:
-            env["FAKE_RESPONSE"] = str(response_path)
-        if recovery_tool_error:
-            env["FAKE_RECOVERY_TOOL_ERROR"] = "1"
-        if outage:
-            env["FAKE_CALL_OUTAGE"] = "1"
-        return env, log
-
-    def desktop_assignment(self, roots=None):
-        project_id = "93df6a68-6a0c-4ed2-8021-1a2787acf6f7"
-        state = {
-            "thread-project-assignments": {self.session_id: {
-                "projectKind": "local", "projectId": project_id}},
-            "local-projects": {project_id: {
-                "id": project_id,
-                "rootPaths": [str(self.project)] if roots is None else roots}},
-        }
-        (self.codex_home / ".codex-global-state.json").write_text(json.dumps(state))
-        return project_id
-
-    def run_hook(self, payload, env):
-        return subprocess.run([sys.executable, str(HOOK)], input=json.dumps(payload),
-                              text=True, capture_output=True, check=False, env=env)
 
 
 class CodexHistoryTests(AdapterCase):
@@ -347,117 +286,6 @@ class CodexHistoryTests(AdapterCase):
         self.assertEqual(truncated.exception.payload["error"], "transcript_truncated")
 
 
-class CodexHookTests(AdapterCase):
-    def checkpoint(self, state=None, cursor=None, version=7):
-        return {"ok": True, "found": True, "checkpoint": {
-            "checkpoint_version": version,
-            "state": state or {
-                "objective": "keep one task effective",
-                "latest_corrections": [{"text": "use native payloads", "refs": ["rollout:2"]}],
-                "decisions": [{"text": "rejected approach", "why": "fabricated schema",
-                               "refs": ["rollout:3"]}],
-                "next_action": "verify the actual hook contract"},
-            "cursor": cursor or {"byte_offset": 1, "source_digest": "0" * 64}}}
-
-    def context(self, result):
-        self.assertEqual(result.returncode, 0, result.stderr)
-        output = json.loads(result.stdout)["hookSpecificOutput"]
-        self.assertEqual(output["hookEventName"], "SessionStart")
-        context = output["additionalContext"]
-        self.assertLessEqual(len(context.encode("utf-8")), 12000)
-        return context
-
-    def binding(self, context):
-        line = next(line for line in context.splitlines() if "arguments=" in line)
-        return json.loads(line.split("arguments=", 1)[1])
-
-    def test_session_start_delivers_saved_state_and_next_binding(self):
-        self.native_rollout({"type": "event_msg", "payload": {"message": "latest"}})
-        env, log = self.install_fake_record_call(self.checkpoint())
-        for source in ("startup", "resume", "compact"):
-            context = self.context(self.run_hook(self.hook_payload(source=source), env))
-            for expected in ("keep one task effective", "use native payloads", "rejected approach",
-                             "fabricated schema", "verify the actual hook contract",
-                             "checkpoint version 7", "never auto-reexecute", "codex-history.py search"):
-                self.assertIn(expected, context)
-            binding = self.binding(context)
-            self.assertEqual(binding["expected_version"], 7)
-            self.assertEqual(binding["native_task_id"], self.session_id)
-            self.assertEqual(binding["cursor"]["byte_offset"], self.rollout.stat().st_size)
-        calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-        self.assertEqual({call["verb"] for call in calls}, {"codex-read-recovery"})
-        self.assertTrue(all("project_id" in call["args"] for call in calls))
-
-    def test_missing_outage_and_rejection_are_distinct(self):
-        self.native_rollout({"type": "event_msg", "payload": {"message": "latest"}})
-        env, _ = self.install_fake_record_call({"ok": True, "found": False, "checkpoint": None})
-        missing = self.context(self.run_hook(self.hook_payload(source="startup"), env))
-        self.assertIn("no checkpoint is saved", missing)
-        self.assertEqual(self.binding(missing)["expected_version"], 0)
-        env, _ = self.install_fake_record_call(outage=True)
-        outage = self.context(self.run_hook(self.hook_payload(source="startup"), env))
-        self.assertIn("checkpoint recovery unavailable", outage)
-        self.assertNotIn("arguments=", outage)
-        env, _ = self.install_fake_record_call({"error": "codex_native_principal_required"},
-                                               recovery_tool_error=True)
-        rejected = self.context(self.run_hook(self.hook_payload(source="resume"), env))
-        self.assertIn("checkpoint recovery codex_native_principal_required", rejected)
-
-    def test_large_recovery_omits_whole_items_with_warning(self):
-        self.native_rollout({"type": "event_msg", "payload": {"message": "latest"}})
-        state = {"objective": "objective",
-                 "latest_corrections": [{"text": "latest correction", "refs": ["rollout:2"]}],
-                 "constraints": [{"text": f"constraint-{i}-" + "z" * 3000, "refs": ["rollout:3"]}
-                                 for i in range(6)],
-                 "next_action": "next action"}
-        env, _ = self.install_fake_record_call(self.checkpoint(state=state))
-        context = self.context(self.run_hook(self.hook_payload(source="compact"), env))
-        for expected in ("latest correction", "next action", "coverage warning", "arguments="):
-            self.assertIn(expected, context)
-        self.assertNotIn('"text":"constraint-5-', context)
-
-    def test_legacy_desktop_project_recovers_only_verified_existing_checkpoint(self):
-        hook = load_hook_module()
-        project_id = self.desktop_assignment()
-        meta = {"runtime": "codex", "native_task_id": self.session_id,
-                "project_id": "git:canonical", "cwd": str(self.project)}
-        calls = []
-
-        def found(_verb, args):
-            calls.append(args["project_id"])
-            if args["project_id"] == "git:canonical":
-                return {"status": "rejected", "error": "codex_recovery_binding_conflict"}
-            return {"status": "ok", "response": {"ok": True, "found": True,
-                                                 "checkpoint": {"checkpoint_version": 2}}}
-
-        with mock.patch.dict(os.environ, {"CODEX_HOME": str(self.codex_home)}), \
-             mock.patch.object(hook, "call_verb", side_effect=found):
-            self.assertEqual(hook.read_recovery(meta)["status"], "ok")
-        self.assertEqual((meta["project_id"], calls), (project_id, ["git:canonical", project_id]))
-
-        meta["project_id"] = "git:canonical"
-
-        def missing(_verb, args):
-            if args["project_id"] == "git:canonical":
-                return {"status": "rejected", "error": "codex_recovery_binding_conflict"}
-            return {"status": "ok", "response": {"ok": True, "found": False}}
-
-        with mock.patch.dict(os.environ, {"CODEX_HOME": str(self.codex_home)}), \
-             mock.patch.object(hook, "call_verb", side_effect=missing):
-            self.assertEqual(hook.read_recovery(meta)["status"], "rejected")
-        self.assertEqual(meta["project_id"], "git:canonical")
-
-    def test_other_events_and_untrusted_payloads_have_no_side_effect(self):
-        self.native_rollout({"type": "event_msg", "payload": {"message": "latest"}})
-        env, log = self.install_fake_record_call(self.checkpoint())
-        for payload in (self.hook_payload("UserPromptSubmit", turn_id="t1"),
-                        self.hook_payload("PreCompact", turn_id="t1", trigger="auto"),
-                        self.hook_payload(source="clear"),
-                        {**self.hook_payload(source="startup"), "session_id": "other-session"},
-                        {**self.hook_payload(source="startup"), "runtime": "claude"}):
-            result = self.run_hook(payload, env)
-            self.assertEqual((result.returncode, result.stdout), (0, ""))
-        self.assertFalse(log.exists())
 
 
 if __name__ == "__main__":

@@ -55,7 +55,7 @@ export async function reconcileRuntimeErrors(call = callRecord) {
     if (incident.ref !== row.id) throw new Error('runtime_incident_identity_mismatch');
     const signal = { ref: incident.ref, environment: incident.environment, failure_class: failureClass };
     const finding = await call('record-finding', { idempotency_key: key(signal.ref, 'finding'),
-      subject: 'repo:jbookout/carr-system', kind: 'runtime_error', internal: true,
+      subject: 'repo:DoctorCRE/carr-system', kind: 'runtime_error', internal: true,
       epistemic_status: 'observed', source: `incident:${signal.ref}`,
       value: { schema: 'carr.runtime-error.v1', ...signal } });
     if (!UUID.test(finding.flag_id)) throw new Error('runtime_finding_receipt_invalid');

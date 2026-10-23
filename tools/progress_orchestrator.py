@@ -5,7 +5,7 @@ import re
 SCHEMA = 'doctorcre-orchestrator/v1'
 STATES = ('waiting', 'working', 'review', 'fixing', 'merging', 'merged', 'live', 'blocked')
 PRIVATE = re.compile(r'@|(?:/Users/|/home/|/private/|/tmp/)|(?:token|password|secret|authorization)\s*[:=]|[a-f0-9]{32,}', re.I)
-REPO = re.compile(r'^jbookout/(carr-system|doctorcre-app|software-factory)$')
+REPO = re.compile(r'^(DoctorCRE/carr-system|jbookout/(doctorcre-app|software-factory))$')
 
 
 def text(value, fallback='Not recorded', limit=220):
@@ -17,7 +17,7 @@ def text(value, fallback='Not recorded', limit=220):
 def links(card):
     refs = list(card.get('prs') or [])
     if card.get('pr'):
-        refs.append({'repo': card.get('repo', 'jbookout/carr-system'), 'number': card['pr']})
+        refs.append({'repo': card.get('repo', 'DoctorCRE/carr-system'), 'number': card['pr']})
     result = []
     for ref in refs:
         if isinstance(ref, dict) and REPO.fullmatch(str(ref.get('repo', ''))) and isinstance(ref.get('number'), int) and ref['number'] > 0:
@@ -88,7 +88,7 @@ def project(state, queue, *, portfolio=None, observed_at=None):
             'changed_at': task.get('updated_at'), 'prs': refs,
             'delivery_evidence': text(task.get('evidence'), '', 440) if state_of(task) == 'live' else '',
             'origin': 'board', 'terminal': False,
-            'area': {'jbookout/carr-system': 'Shared backend', 'jbookout/doctorcre-app': 'DoctorCRE app',
+            'area': {'DoctorCRE/carr-system': 'Shared backend', 'jbookout/doctorcre-app': 'DoctorCRE app',
                      'jbookout/software-factory': 'Development tools'}.get(task.get('repo'), 'Shared portfolio')})
     history = sorted((c for c in cards if c['state'] == 'live' or c['terminal']), key=lambda c: c['changed_at'] or '', reverse=True)
     active = [c for c in cards if c['state'] != 'live' and not c['terminal']]

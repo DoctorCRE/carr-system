@@ -138,7 +138,7 @@ test("buildRelease: git_sha reports null + a specific reason when GIT_SHA was ne
   const out = await buildRelease({ env: {}, sql, verbCount: 1, now: FIXED_NOW });
 
   assert.equal(out.git_sha.value, null);
-  assert.equal(out.git_sha.reason, "not stamped: deployed outside bin/deploy-worker.sh");
+  assert.equal(out.git_sha.reason, "not stamped: deployed outside the GitHub production deployment workflow");
   // An empty string is exactly the shape a broken --var wiring could produce;
   // it must fall to the same honest null, never render as a truthy sha.
 });
@@ -150,7 +150,7 @@ test("buildRelease: an empty-string GIT_SHA degrades to the same not-stamped rea
   ]);
   const out = await buildRelease({ env: { GIT_SHA: "" }, sql, verbCount: 1, now: FIXED_NOW });
   assert.equal(out.git_sha.value, null);
-  assert.equal(out.git_sha.reason, "not stamped: deployed outside bin/deploy-worker.sh");
+  assert.equal(out.git_sha.reason, "not stamped: deployed outside the GitHub production deployment workflow");
 });
 
 test("buildRelease: a database failure degrades schema and doctrine_generation to null + reason, never throws", async () => {

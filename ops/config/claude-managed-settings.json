@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(gh workflow run *)",
+      "Read(~/.ssh/id_*)",
+      "Read(~/.aws/credentials)",
+      "Read(~/.aws/sso/cache/**)",
+      "Read(~/.config/carr/*.env)",
+      "Read(~/.config/carr/*credentials*)",
+      "Read(~/.config/carr/age-key.txt)",
+      "Read(~/Library/Keychains/**)",
+      "Read(//**/.env)",
+      "Read(//**/.env.*)",
+      "Read(//**/*.pem)",
+      "Read(//**/*.p12)"
+    ]
+  }
+}

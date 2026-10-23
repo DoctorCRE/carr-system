@@ -63,7 +63,6 @@ NAMESPACE = uuid.UUID("5c0f3a4e-8a51-4b8e-9d0e-6f1d2b7c4a90")
 # fails if a phrase stops appearing in that reader's source.
 READER_LOOP_PHRASES = {
     "production_uptime": ("DoctorCRE uptime monitoring unavailable",),   # tools/uptime_health.py
-    "jev_live_outage": ("Jev outage remains open", "Jev is offline"),      # tools/jev_outage_health.py
     "grok_session": ("Grok needs sign-in",),                               # ops/grok_session.py
 }
 

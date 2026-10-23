@@ -15,7 +15,7 @@ import engineering_dispatch_adapter as adapter
 
 class JobTests(unittest.TestCase):
     def setUp(self):
-        self.job = {"repository": "jbookout/carr-system", "revision": "a" * 40,
+        self.job = {"repository": "DoctorCRE/carr-system", "revision": "a" * 40,
             "permitted_work": {"objective": "Fix dispatch", "scope_boundary": "Dispatch only",
                 "actions": ["repository:write-declared-scope"], "resource_refs": ["resource:dispatch"],
                 "component_refs": [], "paths": ["tools/room-bridge/*.py"]},

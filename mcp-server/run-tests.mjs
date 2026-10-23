@@ -1,4 +1,4 @@
-import { readdir, readFile, mkdir, writeFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const LAUNCH_REGRESSIONS = "chrome-launch.test.mjs";
 const PRIVATE_POSTGRES_SUITES = new Set([
+  "deal-items-postgres.test.mjs",
   "feature-switches-postgres.test.mjs",
   "a02-rule-enforcement-postgres.test.mjs", "confirm-merge-schema.test.mjs",
   "journey-one-clock-input-store.v5.test.mjs", "journey-one-clock-store.v5.test.mjs",
@@ -25,20 +26,6 @@ export function suiteBatches(files, browserFiles = []) {
 }
 
 async function main() {
-  const repo = path.dirname(ROOT);
-  const python = process.env.CARR_CI_PYTHON || 'python3';
-  const runner = path.join(repo, 'ops/ci-quarantine.py');
-  const logs = path.join(repo, 'out/ci-node', String(process.pid));
-  await mkdir(logs, { recursive: true });
-  const identity = path.join(logs, 'source-identity.json');
-  const snapshot = await new Promise((resolve, reject) => {
-    let output = '';
-    const child = spawn(python, [runner, 'snapshot'], { cwd: repo, stdio: ['ignore', 'pipe', 'inherit'] });
-    child.stdout.on('data', (chunk) => { output += chunk; });
-    child.once('error', reject);
-    child.once('close', (code) => code === 0 ? resolve(output) : reject(new Error('source identity unreadable')));
-  });
-  await writeFile(identity, snapshot);
   // Chrome's cold first launch must not compete with the bulk MCP test pool.
   // Keep the browser shim intact (its inventory test enforces all imports),
   // Run the timing-sensitive launch fixtures alone too, then run the rest
@@ -50,6 +37,7 @@ async function main() {
   for (const file of files.filter(file => /\.test\.(?:js|mjs)$/.test(file))) {
     if ((await readFile(path.join(ROOT, "test", file), "utf8")).includes("chrome-launch.mjs")) browserFiles.push(file);
   }
+  const failures = [];
   for (const batch of suiteBatches(files, browserFiles)) {
     if (!batch.length) continue;
     let cursor = 0;
@@ -58,18 +46,22 @@ async function main() {
     await Promise.all(Array.from({ length: workers }, async () => {
       while (cursor < batch.length) {
         const file = batch[cursor++];
+        let output = '';
         const code = await new Promise((resolve, reject) => {
-          const child = spawn(python, [runner, 'run', '--test', `mcp-server/test/${file}`,
-            '--identity-file', identity, '--log', path.join(logs, `${file}.log`), '--print-log', '--',
-            process.execPath, '--test', path.join(ROOT, 'test', file)],
-            { cwd: ROOT, stdio: 'inherit' });
+          const child = spawn(process.execPath, ['--test', path.join(ROOT, 'test', file)],
+            { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+          for (const [stream, destination] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
+            stream.on('data', chunk => { output += chunk; destination.write(chunk); });
+          }
           child.once('error', reject);
           child.once('close', (exitCode) => resolve(exitCode ?? 1));
         });
-        if (code !== 0) process.exitCode = 1;
+        if (code !== 0) { process.exitCode = 1; failures.push({ file, output }); }
       }
     }));
   }
+  for (const { file, output } of failures) console.error(`FAILED SUITE ${file}\n${output}`);
+  if (failures.length) console.error(`Failed suites: ${failures.map(({ file }) => file).join(", ")}`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

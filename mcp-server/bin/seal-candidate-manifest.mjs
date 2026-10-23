@@ -7,7 +7,7 @@
 // zlib-inflating loose objects. The deployed Worker has no checkout: Cloudflare
 // serves the bundled modules over a read-only virtual filesystem and supplies no
 // `.git`, so that derivation could only refuse in production. The work moves to
-// the one place that DOES stand in a repository — bin/deploy-worker.sh, which
+// the one place that DOES stand in a repository — the GitHub deployment workflow, which
 // runs this script and stamps its output into the upload beside GIT_SHA.
 //
 // WHAT IT SEALS, and every field is a fact about the REVISION rather than about
@@ -45,7 +45,7 @@
 // entrypoint is an INGRESS: admitting one moves the frozen source inventory,
 // which only a sealed registry successor and its migration may do. This module
 // therefore has no shebang and no command-line main; the one thing that runs it
-// is bin/deploy-worker.sh, which imports `sealCandidateManifest` in a single
+// is the GitHub deployment workflow, which imports `sealCandidateManifest` in a single
 // `node --input-type=module` evaluation and stamps what comes back.
 
 import { execFileSync } from "node:child_process";

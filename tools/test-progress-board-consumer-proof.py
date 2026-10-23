@@ -43,7 +43,7 @@ class ConsumerCompletion(unittest.TestCase):
     def test_only_a_passing_exercise_matching_every_binding_is_live(self):
         task = self.proven_task()
         self.assertEqual(board.task_stage(task), "live")
-        for field, value in {"schema": "other.v1", "outcome": "fail", "repo": "jbookout/carr-system",
+        for field, value in {"schema": "other.v1", "outcome": "fail", "repo": "DoctorCRE/carr-system",
                              "source_sha": "b" * 40, "target": "https://staging.doctorcre.com",
                              "workflow": "different workflow", "evidence_ref": " ", "observed_at": "not a date"}.items():
             with self.subTest(field=field):

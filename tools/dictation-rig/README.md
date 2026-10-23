@@ -231,7 +231,7 @@ party, ever.
 
 ## Dell setup (both modes, from his existing clone)
 
-Dell already has `jbookout/carr-system` cloned; the whole rollout is local.
+Dell already has `DoctorCRE/carr-system` cloned; the whole rollout is local.
 In order, on his Mac:
 
 1. `git pull` on main, then `git submodule update --init tools/dictation-rig/vendor/quill`

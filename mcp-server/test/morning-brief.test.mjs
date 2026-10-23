@@ -16,11 +16,10 @@ function costFixture() {
   const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
   return { schema: "carr-system-costs.v1", observed_at: new Date().toISOString(),
     month: yesterday.slice(0, 7), through: yesterday, state: "ready",
-    providers: [{ provider: "jev", label: "Jev", plan: "Per call", mtd_usd: 2.5,
+    providers: [{ provider: "github", label: "GitHub", plan: "Usage", mtd_usd: 2.5,
       projection_usd: 10, budget_usd: 50, state: "ready", reason: null,
-      daily: [{ day: yesterday, usd: 2.5, drivers: { "hook:route": 2.5 } }],
-      call_sites: { "hook:route": 2.5 } }],
-    months: [{ month: yesterday.slice(0, 7), usd: 2.5, providers: { jev: 2.5 } }],
+      daily: [{ day: yesterday, usd: 2.5, drivers: { "actions": 2.5 } }] }],
+    months: [{ month: yesterday.slice(0, 7), usd: 2.5, providers: { github: 2.5 } }],
     alerts: [], action: "Finance Ops: inspect provider and driver; verify the next complete day; auto-clear when thresholds pass." };
 }
 
@@ -234,7 +233,7 @@ test("tool_read_call remains metadata-only for the composite response", () => {
 });
 
 
-test("morning costs preserves daily and call-site evidence using authenticated board scope", async () => {
+test("morning costs preserves provider and daily evidence using authenticated board scope", async () => {
   const costs = costFixture();
   costs.billing_response = { card_number: "never-return-fixture" };
   costs.providers[0].raw_response = { account_number: "never-return-fixture" };
@@ -243,7 +242,7 @@ test("morning costs preserves daily and call-site evidence using authenticated b
   const value = result.sections.costs;
   assert.equal(value.state, "ready");
   assert.equal(value.providers[0].mtd_usd, 2.5);
-  assert.deepEqual(value.providers[0].call_sites, { "hook:route": 2.5 });
+  assert.equal(Object.hasOwn(value.providers[0], "call_sites"), false);
   assert.deepEqual(value.providers[0].daily, costs.providers[0].daily);
   assert.equal(value.months[0].usd, 2.5);
   assert.doesNotMatch(JSON.stringify(value), /never-return-fixture|billing_response|raw_response/);
@@ -258,7 +257,7 @@ test("partial cost coverage remains partial with unavailable providers visible",
   costs.state = "partial";
   costs.providers.push({ provider: "neon", label: "Neon", plan: "Usage", state: "unavailable",
     reason: "missing NEON_API_KEY", mtd_usd: null, projection_usd: null, budget_usd: 50,
-    daily: [], call_sites: {} });
+    daily: [] });
   const result = await executeRegisteredTool(client({ costs }), JOE, "morning-brief", {});
   assert.equal(result.state, "partial");
   assert.equal(result.sections.costs.state, "partial");

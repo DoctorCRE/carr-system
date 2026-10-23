@@ -37,7 +37,7 @@ def check_current_topology() -> None:
                    for leg in paths[flow["id"]])
 
     rendered = mod.render(model, paths)
-    assert "jbookout/carr-system" in rendered
+    assert "DoctorCRE/carr-system" in rendered
     assert "eleven buildings and four paths" in rendered
     assert "graphify-out/graph.json" not in rendered
 

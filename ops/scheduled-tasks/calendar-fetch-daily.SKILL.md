@@ -36,6 +36,6 @@ Treat a nonzero `failed` count or a missing marker as a failed run. Report only
 the aggregate marker or failure line; do not place attendee addresses, calendar
 prose, event identifiers, tokens, or protected snapshots in task output.
 
-The built-in retry policy is the registered control-plane policy. Do not add a
+The native scheduler owns recurrence. Do not add a
 manual retry loop, bypass the registered mode, or claim completion from the
 launch alone. There is no synced-file fallback on the normal path.

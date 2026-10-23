@@ -27124,132 +27124,6 @@ CREATE FUNCTION ops.j1_minimum_subject_environment() RETURNS text
 
 
 --
--- Name: jev_call_receipt_append_only(); Type: FUNCTION; Schema: ops; Owner: -
---
-
-CREATE FUNCTION ops.jev_call_receipt_append_only() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path TO 'pg_catalog', 'ops'
-    AS $$
-begin
-  raise exception 'ops.jev_call_receipt is append-only (% refused)', tg_op;
-end;
-$$;
-
-
---
--- Name: jev_call_receipt_integrity(); Type: FUNCTION; Schema: ops; Owner: -
---
-
-CREATE FUNCTION ops.jev_call_receipt_integrity() RETURNS jsonb
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'pg_temp'
-    AS $_$
-declare
-  v_total bigint;
-  v_orphans bigint;
-  v_orphan_ids jsonb;
-  v_triggers jsonb;
-  v_enabled boolean;
-  v_day date;
-  v_calls bigint;
-  v_tokens bigint;
-  v_unknown bigint;
-  v_pending bigint;
-  v_abandoned bigint;
-  v_now timestamptz := clock_timestamp();
-  v_abandon_after_seconds integer := 3600;
-begin
-  select count(*) into v_total from ops.jev_call_receipt;
-  with orphan as (
-    select r.receipt_id, r.recorded_at
-      from ops.jev_call_receipt r
-     where not exists (
-       select 1 from public.tool_call t
-        where t.verb in ('ask-jev', 'ask-jev-attempt')
-          and t.idempotency_key = r.idempotency_key
-          and t.verb = case when r.model_answered = 'jev-attempt-pending'
-                            then 'ask-jev-attempt' else 'ask-jev' end
-          and t.actor_id = r.actor_id
-          and t.response->>'receipt_id' = r.receipt_id::text)
-  )
-  select count(*),
-         coalesce((select jsonb_agg(o2.receipt_id order by o2.recorded_at desc, o2.receipt_id)
-                     from (select * from orphan order by recorded_at desc, receipt_id limit 20) o2), '[]'::jsonb)
-    into v_orphans, v_orphan_ids
-    from orphan;
-  with expected(name) as (
-    values ('jev_call_receipt_append_only'), ('jev_call_receipt_no_truncate')
-  )
-  select jsonb_agg(jsonb_build_object(
-           'name', e.name,
-           'tgenabled', t.tgenabled::text,
-           'enabled', coalesce(t.tgenabled in ('O','A'), false)) order by e.name),
-         bool_and(coalesce(t.tgenabled in ('O','A'), false))
-    into v_triggers, v_enabled
-    from expected e
-    left join pg_catalog.pg_trigger t
-      on t.tgname = e.name
-     and t.tgrelid = 'ops.jev_call_receipt'::regclass
-     and not t.tgisinternal;
-
-  v_day := (v_now at time zone 'UTC')::date;
-  select count(*) filter (where r.usage is not null),
-         coalesce(sum(case when r.usage->>'input_tokens' ~ '^[0-9]{1,15}$'
-                           then (r.usage->>'input_tokens')::bigint else 0 end), 0),
-         count(*) filter (where (r.usage is null and r.model_answered <> 'jev-attempt-pending'
-                                   and coalesce(t.response->>'cache_hit', 'false') <> 'true')
-                            or (r.usage is not null and
-                                coalesce(r.usage->>'input_tokens', '') !~ '^[0-9]{1,15}$'))
-    into v_calls, v_tokens, v_unknown
-    from ops.jev_call_receipt r
-    left join public.tool_call t
-      on t.verb in ('ask-jev', 'ask-jev-attempt')
-     and t.idempotency_key = r.idempotency_key
-     and t.verb = case when r.model_answered = 'jev-attempt-pending'
-                       then 'ask-jev-attempt' else 'ask-jev' end
-     and t.actor_id = r.actor_id
-     and t.response->>'receipt_id' = r.receipt_id::text
-   where r.recorded_at >= v_day::timestamp at time zone 'UTC'
-     and r.recorded_at < (v_day + 1)::timestamp at time zone 'UTC';
-
-  -- Upstream requests are bounded to seconds. After one hour an unsettled
-  -- reservation is abandoned, not an indefinitely pending billable call.
-  -- Keep the append-only evidence; a later settlement excludes it as before.
-  select count(*) filter (where a.recorded_at >= v_now - make_interval(secs => v_abandon_after_seconds)),
-         count(*) filter (where a.recorded_at < v_now - make_interval(secs => v_abandon_after_seconds))
-    into v_pending, v_abandoned from ops.jev_call_receipt a
-   where a.model_answered = 'jev-attempt-pending'
-     and not exists (
-       select 1 from public.tool_call t
-        where t.idempotency_key = a.idempotency_key
-          and t.verb = 'ask-jev-attempt' and t.actor_id = a.actor_id
-          and t.response->>'receipt_id' = a.receipt_id::text
-          and t.response->>'cache_hit' = 'true');
-
-  return jsonb_build_object(
-    'receipts_total', v_total,
-    'receipts_without_tool_call', jsonb_build_object('count', v_orphans, 'receipt_ids', v_orphan_ids),
-    'trigger_enabled', v_enabled,
-    'triggers', v_triggers,
-    'daily_usage', jsonb_build_object('utc_day', v_day, 'calls', v_calls,
-                                     'input_tokens', v_tokens, 'unknown', v_unknown + v_pending,
-                                     'pending_attempts', v_pending,
-                                     'abandoned_attempts', v_abandoned,
-                                     'abandon_after_seconds', v_abandon_after_seconds),
-    'checked_at', to_jsonb(clock_timestamp()));
-end;
-$_$;
-
-
---
--- Name: FUNCTION jev_call_receipt_integrity(); Type: COMMENT; Schema: ops; Owner: -
---
-
-COMMENT ON FUNCTION ops.jev_call_receipt_integrity() IS 'Integrity and daily usage audit for append-only Worker Jev receipts, including pending billable attempts, cache-hit exclusion and missing-usage count.';
-
-
---
 -- Name: legacy_rule_admission_note(uuid, text, timestamp with time zone); Type: FUNCTION; Schema: ops; Owner: -
 --
 
@@ -32631,77 +32505,6 @@ $$;
 
 
 --
--- Name: read_jev_call_receipts(text, timestamp with time zone, integer, text); Type: FUNCTION; Schema: ops; Owner: -
---
-
-CREATE FUNCTION ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text) RETURNS jsonb
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'pg_temp'
-    AS $$
-declare
-  v_actor uuid;
-  v_since timestamptz;
-  v_rows jsonb;
-  v_count int;
-begin
-  if p_session is null or char_length(p_session) not between 1 and 200 then
-    raise exception 'jev_session_id_invalid';
-  end if;
-  if p_lim is null or p_lim not between 1 and 500 then
-    raise exception 'jev_limit_invalid';
-  end if;
-  select a.id into v_actor from public.actor a where a.slug = p_actor_slug;
-  if v_actor is null then
-    raise exception 'jev_call_receipt_actor_unresolved';
-  end if;
-  v_since := coalesce(p_since, clock_timestamp() - interval '24 hours');
-  select coalesce(jsonb_agg(jsonb_build_object(
-           'receipt_id', credited.receipt_id,
-           'recorded_at', credited.recorded_at,
-           'purpose', credited.purpose,
-           'question_ids', to_jsonb(credited.question_ids),
-           'facets', to_jsonb(credited.facets),
-           'model', credited.model_answered,
-           'state_sha256', credited.state_sha256,
-           'prompt_sha256', credited.prompt_sha256,
-           'answers', case when credited.purpose = 'build_advisory' then credited.answers else null end
-         ) order by credited.recorded_at, credited.receipt_id), '[]'::jsonb),
-         count(*)
-    into v_rows, v_count
-    from (
-      select r.*
-        from ops.jev_call_receipt r
-        join public.tool_call t
-          on t.idempotency_key = r.idempotency_key
-         and t.verb = 'ask-jev'
-         and t.actor_id = r.actor_id
-         and t.response->>'receipt_id' = r.receipt_id::text
-       where r.session_id = p_session
-         and r.actor_id = v_actor
-         and r.recorded_at >= v_since
-       order by r.recorded_at, r.receipt_id
-       limit p_lim + 1
-    ) credited;
-  if v_count > p_lim then
-    v_rows := v_rows - p_lim;
-  end if;
-  return jsonb_build_object(
-    'server_now', to_jsonb(clock_timestamp()),
-    'since', to_jsonb(v_since),
-    'truncated', v_count > p_lim,
-    'receipts', v_rows);
-end;
-$$;
-
-
---
--- Name: FUNCTION read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text); Type: COMMENT; Schema: ops; Owner: -
---
-
-COMMENT ON FUNCTION ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text) IS 'Read door for ops.jev_call_receipt: the calling actor''s credited receipts (matching ask-jev tool_call row) for one session from p_since, oldest first, at most p_lim with a truncated flag, answers only for build_advisory, plus the server clock.';
-
-
---
 -- Name: read_resource_dashboard(); Type: FUNCTION; Schema: ops; Owner: -
 --
 
@@ -35228,84 +35031,6 @@ begin
   returning id into event_id;
   return event_id;
 end $$;
-
-
---
--- Name: record_jev_call_receipt(text, text, text[], text[], text, text, text, text, text, text, jsonb, jsonb, uuid, text, text); Type: FUNCTION; Schema: ops; Owner: -
---
-
-CREATE FUNCTION ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text) RETURNS TABLE(receipt_id uuid, recorded_at timestamp with time zone, replayed boolean)
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'pg_temp'
-    AS $$
-declare
-  v_existing ops.jev_call_receipt%rowtype;
-  v_row ops.jev_call_receipt%rowtype;
-  v_acting text;
-begin
-  if p_idempotency_key is null or btrim(p_idempotency_key) = '' then
-    raise exception 'idempotency_key_required';
-  end if;
-  -- The actor is the Worker's server-authenticated actor. It must be a real
-  -- actor row, id and slug together, and -- when the writer transaction has
-  -- set the acting-actor context (mcp.js setWriterActorContext) -- the same
-  -- actor that context names.
-  if p_actor_id is null or p_actor_slug is null or not exists (
-       select 1 from public.actor a where a.id = p_actor_id and a.slug = p_actor_slug) then
-    raise exception 'jev_call_receipt_actor_unresolved';
-  end if;
-  v_acting := nullif(current_setting('carr.acting_actor_slug', true), '');
-  if v_acting is not null and v_acting <> p_actor_slug then
-    raise exception 'jev_call_receipt_actor_mismatch';
-  end if;
-  if p_session_id is null or char_length(p_session_id) not between 1 and 200 then
-    raise exception 'jev_session_id_invalid';
-  end if;
-  if p_purpose is null or p_purpose not in ('call','build_advisory') then
-    raise exception 'jev_purpose_invalid';
-  end if;
-  if (p_purpose = 'build_advisory') <> (p_prompt_sha256 is not null) then
-    raise exception 'jev_call_receipt_prompt_sha256_iff_build_advisory';
-  end if;
-
-  -- The Worker holds an advisory lock on the key for the whole transaction
-  -- (withEnvelope), so a same-key replay reaches here only when the envelope
-  -- ledger and this table disagree. Identical content replays; anything else
-  -- is key reuse.
-  select * into v_existing from ops.jev_call_receipt r where r.idempotency_key = p_idempotency_key;
-  if found then
-    if v_existing.session_id is distinct from p_session_id
-       or v_existing.purpose is distinct from p_purpose
-       or v_existing.state_sha256 is distinct from p_state_sha256
-       or v_existing.questions_sha256 is distinct from p_questions_sha256
-       or v_existing.actor_id is distinct from p_actor_id then
-      raise exception 'jev_call_receipt_key_reuse';
-    end if;
-    return query select v_existing.receipt_id, v_existing.recorded_at, true;
-    return;
-  end if;
-
-  insert into ops.jev_call_receipt (
-    session_id, purpose, question_ids, facets, model_requested, model_answered,
-    state_sha256, questions_sha256, answers_sha256, prompt_sha256, answers, usage,
-    actor_id, actor_slug, idempotency_key
-  ) values (
-    p_session_id, p_purpose, p_question_ids, coalesce(p_facets, '{}'::text[]),
-    p_model_requested, p_model_answered, p_state_sha256, p_questions_sha256,
-    p_answers_sha256, p_prompt_sha256, p_answers, p_usage, p_actor_id, p_actor_slug,
-    p_idempotency_key
-  ) returning * into v_row;
-
-  return query select v_row.receipt_id, v_row.recorded_at, false;
-end;
-$$;
-
-
---
--- Name: FUNCTION record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text); Type: COMMENT; Schema: ops; Owner: -
---
-
-COMMENT ON FUNCTION ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text) IS 'Write door for ops.jev_call_receipt: append one receipt of a Jev call the Worker made, for the server-derived actor. recorded_at is the server clock. Idempotent on p_idempotency_key; no update or delete path exists.';
 
 
 --
@@ -40583,6 +40308,36 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
     },
     {
       "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.jev_call_receipt_integrity()",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.jev_call_receipt_integrity()",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
         "search_path=pg_catalog, ops, public, pg_temp"
       ],
       "grantee": "carr_writer",
@@ -40592,6 +40347,51 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
       "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text):carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
@@ -76033,53 +75833,6 @@ COMMENT ON TABLE ops.j1_minimum_inventory IS 'The admitted-minimum input invento
 
 
 --
--- Name: jev_call_receipt; Type: TABLE; Schema: ops; Owner: -
---
-
-CREATE TABLE ops.jev_call_receipt (
-    receipt_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    recorded_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
-    session_id text NOT NULL,
-    purpose text NOT NULL,
-    question_ids text[] NOT NULL,
-    facets text[] DEFAULT '{}'::text[] NOT NULL,
-    model_requested text NOT NULL,
-    model_answered text NOT NULL,
-    state_sha256 text NOT NULL,
-    questions_sha256 text NOT NULL,
-    answers_sha256 text NOT NULL,
-    prompt_sha256 text,
-    answers jsonb NOT NULL,
-    usage jsonb,
-    actor_id uuid NOT NULL,
-    actor_slug text NOT NULL,
-    idempotency_key text NOT NULL,
-    CONSTRAINT jev_call_receipt_actor_slug_check CHECK ((btrim(actor_slug) <> ''::text)),
-    CONSTRAINT jev_call_receipt_answers_check CHECK ((jsonb_typeof(answers) = 'object'::text)),
-    CONSTRAINT jev_call_receipt_answers_sha256_check CHECK ((answers_sha256 ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT jev_call_receipt_facets_check CHECK (((facets <@ ARRAY['architecture_or_design'::text, 'semantic_creation'::text, 'diagnosis'::text, 'verification_selection'::text, 'evidence_matching'::text, 'next_action_priority'::text]) AND (array_position(facets, NULL::text) IS NULL))),
-    CONSTRAINT jev_call_receipt_idempotency_key_check CHECK ((btrim(idempotency_key) <> ''::text)),
-    CONSTRAINT jev_call_receipt_model_answered_check CHECK ((btrim(model_answered) <> ''::text)),
-    CONSTRAINT jev_call_receipt_model_requested_check CHECK ((btrim(model_requested) <> ''::text)),
-    CONSTRAINT jev_call_receipt_prompt_iff_build_advisory CHECK (((purpose = 'build_advisory'::text) = (prompt_sha256 IS NOT NULL))),
-    CONSTRAINT jev_call_receipt_prompt_sha256_check CHECK ((prompt_sha256 ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT jev_call_receipt_purpose_check CHECK ((purpose = ANY (ARRAY['call'::text, 'build_advisory'::text]))),
-    CONSTRAINT jev_call_receipt_question_ids_check CHECK (((cardinality(question_ids) >= 1) AND (cardinality(question_ids) <= 64) AND (array_position(question_ids, NULL::text) IS NULL))),
-    CONSTRAINT jev_call_receipt_questions_sha256_check CHECK ((questions_sha256 ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT jev_call_receipt_session_id_check CHECK (((char_length(session_id) >= 1) AND (char_length(session_id) <= 200))),
-    CONSTRAINT jev_call_receipt_state_sha256_check CHECK ((state_sha256 ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT jev_call_receipt_usage_check CHECK (((usage IS NULL) OR (jsonb_typeof(usage) = 'object'::text)))
-);
-
-
---
--- Name: TABLE jev_call_receipt; Type: COMMENT; Schema: ops; Owner: -
---
-
-COMMENT ON TABLE ops.jev_call_receipt IS 'Append-only receipt of each Jev (TypeSafe) call the Worker made through ask-jev. recorded_at is the server clock; actor_id/actor_slug are the server-derived actor. Ids, digests and probabilities only; no state text. Tampering by the owner is detectable (tool_call cross-check, integrity audit), not prevented.';
-
-
---
 -- Name: job_attempt; Type: TABLE; Schema: ops; Owner: -
 --
 
@@ -84104,9 +83857,13 @@ CREATE TABLE public.capture_post_call_action (
     status text DEFAULT 'open'::text NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     completed_at timestamp with time zone,
+    item_title text,
+    item_bullets jsonb DEFAULT '[]'::jsonb NOT NULL,
+    source_ref text,
     CONSTRAINT capture_post_call_action_check CHECK ((((status = 'done'::text) AND (completed_at IS NOT NULL)) OR ((status = ANY (ARRAY['open'::text, 'dropped'::text])) AND (completed_at IS NULL)))),
     CONSTRAINT capture_post_call_action_description_check CHECK ((btrim(description) <> ''::text)),
-    CONSTRAINT capture_post_call_action_status_check CHECK ((status = ANY (ARRAY['open'::text, 'done'::text, 'dropped'::text])))
+    CONSTRAINT capture_post_call_action_status_check CHECK ((status = ANY (ARRAY['open'::text, 'done'::text, 'dropped'::text]))),
+    CONSTRAINT capture_post_call_item_shape CHECK (((item_title IS NULL) OR ((cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) >= 2) AND (cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) <= 4) AND (source_ref IS NOT NULL) AND (btrim(source_ref) <> ''::text) AND (jsonb_typeof(item_bullets) = 'array'::text))))
 );
 
 
@@ -86146,6 +85903,10 @@ CREATE TABLE public.next_action (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by uuid,
     hold_until date,
+    item_title text,
+    item_bullets jsonb DEFAULT '[]'::jsonb NOT NULL,
+    source_ref text,
+    CONSTRAINT next_action_item_shape CHECK (((item_title IS NULL) OR ((subject_type = 'deal'::text) AND ((cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) >= 2) AND (cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) <= 4)) AND (source_ref IS NOT NULL) AND (btrim(source_ref) <> ''::text) AND (jsonb_typeof(item_bullets) = 'array'::text)))),
     CONSTRAINT next_action_status_check CHECK ((status = ANY (ARRAY['open'::text, 'done'::text, 'dropped'::text]))),
     CONSTRAINT next_action_subject_type_check CHECK ((subject_type = ANY (ARRAY['deal'::text, 'client'::text, 'lead'::text, 'vendor'::text])))
 );
@@ -89490,7 +89251,7 @@ CREATE VIEW public.v_deal_room_board AS
     d.next_date,
     COALESCE(( SELECT n.description
            FROM public.next_action n
-          WHERE ((n.subject_type = 'deal'::text) AND (n.subject_id = d.id) AND (n.status = 'open'::text))
+          WHERE ((n.subject_type = 'deal'::text) AND (n.subject_id = d.id) AND (n.status = 'open'::text) AND (n.item_title IS NULL))
           ORDER BY n.updated_at DESC, n.id DESC
          LIMIT 1), ( SELECT n.text
            FROM public.deal_note n
@@ -89578,7 +89339,11 @@ CREATE VIEW public.v_deal_room_action AS
     n.due_on,
     n.status,
     n.updated_at,
-    n.hold_until
+    n.hold_until,
+    n.item_title,
+    n.item_bullets,
+    n.source_ref,
+    n.created_at AS created_order
    FROM (public.next_action n
      JOIN public.actor a ON ((a.id = n.owner_id)))
   WHERE (n.subject_type = 'deal'::text)
@@ -89590,7 +89355,11 @@ UNION ALL
     pca.due_on,
     pca.status,
     pca.updated_at,
-    NULL::date AS hold_until
+    NULL::date AS hold_until,
+    pca.item_title,
+    pca.item_bullets,
+    pca.source_ref,
+    pca.accepted_at AS created_order
    FROM (public.capture_post_call_action pca
      JOIN public.actor a ON ((a.id = pca.owner_id)));
 
@@ -90933,25 +90702,6 @@ CREATE VIEW public.v_lead_stage_transition AS
 --
 
 CREATE VIEW public.v_lead_workspace_lifecycle AS
- WITH live_clients AS MATERIALIZED (
-         SELECT cl.id,
-            cl.party_id
-           FROM (public.client cl
-             JOIN public.party cp_1 ON ((cp_1.id = cl.party_id)))
-          WHERE ((cl.merged_into IS NULL) AND (cp_1.merged_into IS NULL) AND (cp_1.deleted_at IS NULL))
-        ), client_parties AS (
-         SELECT DISTINCT live_clients.party_id
-           FROM live_clients
-        ), linked_leads AS MATERIALIZED (
-         SELECT DISTINCT bridge_1.lead_id
-           FROM (public.v_lead_client_link bridge_1
-             JOIN live_clients cl ON ((cl.id = bridge_1.client_id)))
-          WHERE (NOT bridge_1.either_merged)
-        ), deal_clients AS (
-         SELECT DISTINCT deal.client_id
-           FROM public.deal
-          WHERE (deal.client_id IS NOT NULL)
-        )
  SELECT l.id,
     l.party_id,
     l.client_id,
@@ -90962,14 +90712,20 @@ CREATE VIEW public.v_lead_workspace_lifecycle AS
     p.contact_state,
     (l.suppressed OR (l.stage = 'do_not_contact'::text) OR (p.contact_state = 'do_not_contact'::text)) AS do_not_contact,
     (NOT (l.suppressed OR (l.stage = 'do_not_contact'::text) OR (p.contact_state = 'do_not_contact'::text))) AS contact_eligible,
-    (cp.party_id IS NOT NULL) AS is_client,
-    (bridge.lead_id IS NOT NULL) AS linked_client,
-    (d.client_id IS NOT NULL) AS is_deal
-   FROM ((((public.lead l
-     JOIN public.party p ON ((p.id = l.party_id)))
-     LEFT JOIN client_parties cp ON ((cp.party_id = p.id)))
-     LEFT JOIN linked_leads bridge ON ((bridge.lead_id = l.id)))
-     LEFT JOIN deal_clients d ON ((d.client_id = l.client_id)));
+    (EXISTS ( SELECT 1
+           FROM (public.client cl
+             JOIN public.party cp ON ((cp.id = cl.party_id)))
+          WHERE ((cl.party_id = p.id) AND (cl.merged_into IS NULL) AND (cp.merged_into IS NULL) AND (cp.deleted_at IS NULL)))) AS is_client,
+    (EXISTS ( SELECT 1
+           FROM ((public.v_lead_client_link bridge
+             JOIN public.client cl ON ((cl.id = bridge.client_id)))
+             JOIN public.party cp ON ((cp.id = cl.party_id)))
+          WHERE ((bridge.lead_id = l.id) AND (NOT bridge.either_merged) AND (cl.merged_into IS NULL) AND (cp.merged_into IS NULL) AND (cp.deleted_at IS NULL)))) AS linked_client,
+    (EXISTS ( SELECT 1
+           FROM public.deal d
+          WHERE (d.client_id = l.client_id))) AS is_deal
+   FROM (public.lead l
+     JOIN public.party p ON ((p.id = l.party_id)));
 
 
 --
@@ -90977,26 +90733,6 @@ CREATE VIEW public.v_lead_workspace_lifecycle AS
 --
 
 CREATE VIEW public.v_lead_workspace AS
- WITH live_clients AS MATERIALIZED (
-         SELECT cl.id,
-            cp.id AS party_id,
-            cp.name,
-            lower(TRIM(BOTH FROM cp.name)) AS normalized_name
-           FROM (public.client cl
-             JOIN public.party cp ON ((cp.id = cl.party_id)))
-          WHERE ((cl.merged_into IS NULL) AND (cp.merged_into IS NULL) AND (cp.deleted_at IS NULL))
-        ), possible_clients AS MATERIALIZED (
-         SELECT p_1.id AS party_id,
-            jsonb_agg(jsonb_build_object('client_id', cl.id, 'name', cl.name) ORDER BY cl.id) AS items
-           FROM (public.party p_1
-             JOIN live_clients cl ON (((cl.normalized_name = lower(TRIM(BOTH FROM p_1.name))) AND (cl.party_id <> p_1.id))))
-          GROUP BY p_1.id
-        ), last_moves AS MATERIALIZED (
-         SELECT DISTINCT ON (e.lead_id) e.lead_id,
-            jsonb_build_object('event_id', e.event_id, 'idempotency_key', e.idempotency_key, 'from', e.prior_stage, 'to', e.stage, 'occurred_at', e.occurred_at, 'automatic', e.automatic, 'reason', e.reason, 'evidence_date', (e.stage_review ->> 'evidence_date'::text), 'undone', (e.stage_review ->> 'undo_event_id'::text)) AS item
-           FROM public.v_lead_stage_transition e
-          ORDER BY e.lead_id, e.mutation_order DESC
-        )
  SELECT b.id,
     b.registry_ref,
     b.name,
@@ -91042,8 +90778,15 @@ CREATE VIEW public.v_lead_workspace AS
      JOIN public.lead l ON ((l.id = b.id)))
      JOIN public.party p ON ((p.id = life.party_id)))
      LEFT JOIN public.party org ON ((org.id = p.org_id)))
-     LEFT JOIN possible_clients matches ON ((matches.party_id = p.id)))
-     LEFT JOIN last_moves last_move ON ((last_move.lead_id = b.id)))
+     LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('client_id', cl.id, 'name', cp.name) ORDER BY cl.id) AS items
+           FROM (public.client cl
+             JOIN public.party cp ON ((cp.id = cl.party_id)))
+          WHERE ((lower(TRIM(BOTH FROM cp.name)) = lower(TRIM(BOTH FROM p.name))) AND (cp.id <> p.id) AND (cl.merged_into IS NULL) AND (cp.merged_into IS NULL) AND (cp.deleted_at IS NULL))) matches ON (true))
+     LEFT JOIN LATERAL ( SELECT jsonb_build_object('event_id', e.event_id, 'idempotency_key', e.idempotency_key, 'from', e.prior_stage, 'to', e.stage, 'occurred_at', e.occurred_at, 'automatic', e.automatic, 'reason', e.reason, 'evidence_date', (e.stage_review ->> 'evidence_date'::text), 'undone', (e.stage_review ->> 'undo_event_id'::text)) AS item
+           FROM public.v_lead_stage_transition e
+          WHERE (e.lead_id = b.id)
+          ORDER BY e.mutation_order DESC
+         LIMIT 1) last_move ON (true))
   WHERE ((NOT life.suppressed) AND life.live_party);
 
 
@@ -94811,22 +94554,6 @@ ALTER TABLE ONLY ops.j1_minimum_inventory
 
 ALTER TABLE ONLY ops.j1_minimum_inventory
     ADD CONSTRAINT j1_minimum_inventory_pkey PRIMARY KEY (id);
-
-
---
--- Name: jev_call_receipt jev_call_receipt_idempotency_key_key; Type: CONSTRAINT; Schema: ops; Owner: -
---
-
-ALTER TABLE ONLY ops.jev_call_receipt
-    ADD CONSTRAINT jev_call_receipt_idempotency_key_key UNIQUE (idempotency_key);
-
-
---
--- Name: jev_call_receipt jev_call_receipt_pkey; Type: CONSTRAINT; Schema: ops; Owner: -
---
-
-ALTER TABLE ONLY ops.jev_call_receipt
-    ADD CONSTRAINT jev_call_receipt_pkey PRIMARY KEY (receipt_id);
 
 
 --
@@ -101675,13 +101402,6 @@ CREATE UNIQUE INDEX j1_minimum_admission_one_opening ON ops.j1_minimum_admission
 
 
 --
--- Name: jev_call_receipt_session_recorded_at_idx; Type: INDEX; Schema: ops; Owner: -
---
-
-CREATE INDEX jev_call_receipt_session_recorded_at_idx ON ops.jev_call_receipt USING btree (session_id, recorded_at);
-
-
---
 -- Name: job_dispatch_idx; Type: INDEX; Schema: ops; Owner: -
 --
 
@@ -102269,6 +101989,13 @@ CREATE INDEX deal_conflict_open_idx ON public.deal_conflict USING btree (deal_id
 
 
 --
+-- Name: deal_item_source_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX deal_item_source_unique ON public.next_action USING btree (subject_id, source_ref, item_title) WHERE ((subject_type = 'deal'::text) AND (item_title IS NOT NULL));
+
+
+--
 -- Name: deal_note_thread_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -102636,7 +102363,7 @@ CREATE INDEX negotiation_claim_type_idx ON public.negotiation_claim USING btree 
 -- Name: one_open_next_action_per_owner; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX one_open_next_action_per_owner ON public.next_action USING btree (subject_type, subject_id, owner_id) WHERE (status = 'open'::text);
+CREATE UNIQUE INDEX one_open_next_action_per_owner ON public.next_action USING btree (subject_type, subject_id, owner_id) WHERE ((status = 'open'::text) AND (item_title IS NULL));
 
 
 --
@@ -102910,20 +102637,6 @@ CREATE INDEX source_capture_session_trgm ON public.source_capture USING gin (ses
 --
 
 CREATE INDEX tool_call_correlation_idx ON public.tool_call USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: tool_call_jev_receipt_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX tool_call_jev_receipt_idx ON public.tool_call USING btree (verb) WHERE (verb = ANY (ARRAY['ask-jev'::text, 'ask-jev-attempt'::text]));
-
-
---
--- Name: tool_call_jev_settlement_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX tool_call_jev_settlement_idx ON public.tool_call USING btree (idempotency_key, actor_id, ((response ->> 'receipt_id'::text))) WHERE ((verb = 'ask-jev-attempt'::text) AND ((response ->> 'cache_hit'::text) = 'true'::text));
 
 
 --
@@ -104781,20 +104494,6 @@ CREATE TRIGGER j1_minimum_inventory_append_only BEFORE DELETE OR UPDATE ON ops.j
 --
 
 CREATE TRIGGER j1_minimum_inventory_no_truncate BEFORE TRUNCATE ON ops.j1_minimum_inventory FOR EACH STATEMENT EXECUTE FUNCTION ops.j1_minimum_rows_immutable();
-
-
---
--- Name: jev_call_receipt jev_call_receipt_append_only; Type: TRIGGER; Schema: ops; Owner: -
---
-
-CREATE TRIGGER jev_call_receipt_append_only BEFORE DELETE OR UPDATE ON ops.jev_call_receipt FOR EACH ROW EXECUTE FUNCTION ops.jev_call_receipt_append_only();
-
-
---
--- Name: jev_call_receipt jev_call_receipt_no_truncate; Type: TRIGGER; Schema: ops; Owner: -
---
-
-CREATE TRIGGER jev_call_receipt_no_truncate BEFORE TRUNCATE ON ops.jev_call_receipt FOR EACH STATEMENT EXECUTE FUNCTION ops.jev_call_receipt_append_only();
 
 
 --
@@ -111947,14 +111646,6 @@ ALTER TABLE ONLY ops.j1_minimum_inventory
 
 
 --
--- Name: jev_call_receipt jev_call_receipt_actor_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: -
---
-
-ALTER TABLE ONLY ops.jev_call_receipt
-    ADD CONSTRAINT jev_call_receipt_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES public.actor(id);
-
-
---
 -- Name: job_attempt job_attempt_job_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: -
 --
 
@@ -117918,8 +117609,6 @@ revoke all on function ops.j1_minimum_receipt_fields() from public;
 revoke all on function ops.j1_minimum_receipt_schema() from public;
 revoke all on function ops.j1_minimum_record_layer_cannot_prove() from public;
 revoke all on function ops.j1_minimum_subject_environment() from public;
-revoke all on function ops.jev_call_receipt_append_only() from public;
-revoke all on function ops.jev_call_receipt_integrity() from public;
 revoke all on function ops.list_doc_conversations(p_cursor text, p_limit integer, p_include_archived boolean) from public;
 revoke all on function ops.list_doc_suggestions(p_conversation uuid, p_include_parked boolean) from public;
 revoke all on function ops.list_shipped_releases(p_since timestamp with time zone) from public;
@@ -118021,7 +117710,6 @@ revoke all on function ops.read_canonical_ownership_operation(p_idempotency_key 
 revoke all on function ops.read_context_activation(p_work_request text, p_binding_id text) from public;
 revoke all on function ops.read_doc_outcome_cards_successor(p_cursor text, p_limit integer) from public;
 revoke all on function ops.read_execution_environment_providers() from public;
-revoke all on function ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text) from public;
 revoke all on function ops.read_resource_dashboard() from public;
 revoke all on function ops.read_slice_completion(p_slice_id text) from public;
 revoke all on function ops.read_slice_done_state(p_slice_id text) from public;
@@ -118062,7 +117750,6 @@ revoke all on function ops.record_device_evidence(p_job_id uuid, p_builder_key t
 revoke all on function ops.record_dispatch_link(p_turn_msg_id uuid, p_session_id text, p_work_request_id uuid, p_dispatch_ref uuid) from public;
 revoke all on function ops.record_executed_lease(p_deal text, p_base_version integer, p_executed_on date, p_commencement_on date, p_expiration_on date, p_term_months integer, p_evidence_kind text, p_evidence_ref text, p_source text) from public;
 revoke all on function ops.record_guidance_decision(p_revision_id uuid, p_state text, p_idempotency_key text, p_reason text) from public;
-revoke all on function ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text) from public;
 revoke all on function ops.record_launchd_scheduler_observation(p_surface_id text, p_label text, p_timezone text, p_enabled boolean, p_plist_sha256 text, p_schedule_sha256 text, p_launchctl_revision text, p_source_fingerprint text, p_observed_at timestamp with time zone, p_idempotency_key text) from public;
 revoke all on function ops.record_meeting_action_outcome(p_meeting uuid, p_action_number integer, p_client_instance text, p_idempotency_key uuid) from public;
 revoke all on function ops.record_nightly_availability_canary_receipt(p_job_id uuid, p_lease uuid, p_source_snapshot_id uuid, p_output_digest text, p_match_count integer) from public;
@@ -119423,7 +119110,6 @@ grant select on table ops.j1_minimum_inventory to carr_authority;
 grant select on table ops.j1_minimum_inventory to carr_reader;
 grant select on table ops.j1_minimum_inventory to carr_writer;
 grant select on table ops.j1_minimum_inventory to dot_reader;
-grant select on table ops.jev_call_receipt to dot_reader;
 grant select on table ops.job to carr_jobs;
 grant select on table ops.job to carr_reader;
 grant select on table ops.job to carr_writer;
@@ -121437,8 +121123,6 @@ grant execute on function ops.j1_minimum_record_layer_cannot_prove() to carr_wri
 grant execute on function ops.j1_minimum_subject_environment() to carr_authority;
 grant execute on function ops.j1_minimum_subject_environment() to carr_reader;
 grant execute on function ops.j1_minimum_subject_environment() to carr_writer;
-grant execute on function ops.jev_call_receipt_integrity() to carr_reader;
-grant execute on function ops.jev_call_receipt_integrity() to carr_writer;
 grant execute on function ops.list_doc_conversations(p_cursor text, p_limit integer, p_include_archived boolean) to carr_authority;
 grant execute on function ops.list_doc_conversations(p_cursor text, p_limit integer, p_include_archived boolean) to carr_writer;
 grant execute on function ops.list_doc_suggestions(p_conversation uuid, p_include_parked boolean) to carr_authority;
@@ -121662,8 +121346,6 @@ grant execute on function ops.read_execution_environment_providers() to carr_wri
 grant execute on function ops.read_governance_queue() to carr_authority;
 grant execute on function ops.read_governance_queue() to carr_reader;
 grant execute on function ops.read_governance_queue() to carr_writer;
-grant execute on function ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text) to carr_reader;
-grant execute on function ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text) to carr_writer;
 grant execute on function ops.read_resource_dashboard() to carr_reader;
 grant execute on function ops.read_slice_completion(p_slice_id text) to carr_reader;
 grant execute on function ops.read_slice_done_state(p_slice_id text) to carr_reader;
@@ -121715,7 +121397,6 @@ grant execute on function ops.record_dispatch_link(p_turn_msg_id uuid, p_session
 grant execute on function ops.record_dispatch_link(p_turn_msg_id uuid, p_session_id text, p_work_request_id uuid, p_dispatch_ref uuid) to carr_writer;
 grant execute on function ops.record_executed_lease(p_deal text, p_base_version integer, p_executed_on date, p_commencement_on date, p_expiration_on date, p_term_months integer, p_evidence_kind text, p_evidence_ref text, p_source text) to carr_authority;
 grant execute on function ops.record_guidance_decision(p_revision_id uuid, p_state text, p_idempotency_key text, p_reason text) to carr_authority;
-grant execute on function ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text) to carr_writer;
 grant execute on function ops.record_launchd_scheduler_observation(p_surface_id text, p_label text, p_timezone text, p_enabled boolean, p_plist_sha256 text, p_schedule_sha256 text, p_launchctl_revision text, p_source_fingerprint text, p_observed_at timestamp with time zone, p_idempotency_key text) to carr_device_evidence;
 grant execute on function ops.record_meeting_action_outcome(p_meeting uuid, p_action_number integer, p_client_instance text, p_idempotency_key uuid) to carr_writer;
 grant execute on function ops.record_nightly_availability_canary_receipt(p_job_id uuid, p_lease uuid, p_source_snapshot_id uuid, p_output_digest text, p_match_count integer) to carr_jobs;
@@ -123029,7 +122710,12 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0924_jev_attempt_settlement_lookup.sql	20eb98baf8e1075c9bd90f3ab12447787b112492207c5219a085117ba8e4646d	1970-01-01 00:00:00+00
 0926_jev_receipt_audit_lookup.sql	c6b07553d4e818dcb7da686a9446dd020c660e8fc663637626c06cff2507ab3a	1970-01-01 00:00:00+00
 0927_deal_action_hold_date.sql	ce7522c72d7ab978aeaf70a78362144c65cdde0c310dc3681f596c3f2cab4848	1970-01-01 00:00:00+00
-0928_lead_workspace_set_reads.sql	687e444a25754aa975adcbcf45b92b5ab6f763a5c7c1a20a3b571aca4e10e28e	1970-01-01 00:00:00+00
+0932_retire_dead_background_jobs.sql	2920a630039f908deba5fa0d04ec959f180f7fd069b0a908a6d160279d24a2dd	1970-01-01 00:00:00+00
+0933_source_merge_projection_control_refs.sql	8e7a69d8ca622e59de97b8cdee76186694bbe88b99c4c26195c21340e7d14f85	1970-01-01 00:00:00+00
+0934_retire_generic_scheduler_control_projections.sql	20e15e33b237e887a29577876821d622972d0bfc4fb9f4d372c5a72503c70c92	1970-01-01 00:00:00+00
+0935_retire_jev_gateway.sql	82dd8e9023b31cb5d56eedce2d5029fad1d93318d44ce4e1a996dce1e0210cdf	1970-01-01 00:00:00+00
+0936_deal_alert_items.sql	469f722bb5005547378d43bed510fb1b4edc98c1fc146ea8d50ae423b0275bb3	1970-01-01 00:00:00+00
+0937_retire_deleted_hook_control_projections.sql	dcd518923d1a6a052060f87ae1797e17a7270fb660fc7a208e97b9944234bcaf	1970-01-01 00:00:00+00
 \.
 
 
@@ -123535,16 +123221,14 @@ insert into ops.enforcement_control_catalog (control_key,implementation_ref,test
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('canonical_edit','hooks/canonical-edit-gate.py','ops/canonical-edit-gate-selftest.py','deny_gate','t','2026-09-04T21:37:54.757303Z'::timestamptz,'2026-09-04T21:37:54.757303Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('ci_gates','ops/ci.sh','ops/hermes-autonomy-check-selftest.py','surfacing','t','2026-08-19T03:38:59.844809Z'::timestamptz,'2026-08-22T11:37:19.935580Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('client_asset_packet','lib/client_asset_controls.py; pipelines/build-space-search.py','ops/client-asset-controls-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('control-plane-workflow-manifest','ops/config/control-plane-workflows.v1.json','ops/control-plane-selftest.py; ops/control-plane-db-gate.py','deny_gate','t','2026-08-27T14:09:26.564721Z'::timestamptz,'2026-08-20T15:09:01.704306Z'::timestamptz) on conflict (control_key) do nothing;
+insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('control-plane-workflow-manifest','ops/config/control-plane-workflows.v1.json','ops/control-plane-selftest.py; ops/control-plane-db-gate.py','deny_gate','f',NULL::timestamptz,'2026-10-22T19:45:19.592586Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('costar_lane','hooks/costar-lane-gate.py','ops/costar-lane-gate-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('deal_guard','mcp-server/src/tools.js; migrations/0079_deal_room_api.sql; migrations/0091_deal_reconciliation_read.sql','mcp-server/test/dealroom.test.js','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('delegation_names_model_and_effort','tools/room-bridge/dispatch.py; tools/room-bridge/desks.py','ops/room-bridge-selftest.py','deny_gate','t','2026-08-24T12:22:03.304333Z'::timestamptz,'2026-08-24T12:22:03.304333Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('delegation_tripwire','hooks/delegation-gate.py','ops/delegation-gate-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('draft_export_read','hooks/draft-export-gate.py','ops/draft-export-gate-selftest.py','surfacing','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
+insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('draft_export_read','hooks/draft-export-gate.py','ops/draft-export-gate-selftest.py','surfacing','f',NULL::timestamptz,'2026-10-23T02:09:39.137819Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('egress_guard','hooks/guard-unattended.py','ops/guard-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('executor_tier','hooks/executor-tier-gate.py','external:no dedicated suite yet','deny_gate','f',NULL::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('gate_integrity','hooks/gate-integrity.py','command:python3 hooks/gate-integrity.py --selftest','stop_gate','f',NULL::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('github-burst-guard','hooks/github-burst-guard.py','ops/github-burst-guard-selftest.py','deny_gate','t','2026-10-13T11:50:55.570087Z'::timestamptz,'2026-10-13T11:50:55.570087Z'::timestamptz) on conflict (control_key) do nothing;
+insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('github-burst-guard','hooks/github-burst-guard.py','ops/github-burst-guard-selftest.py','deny_gate','f',NULL::timestamptz,'2026-10-23T02:09:39.137819Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('human_authority_runtime','migrations/0161_control_plane_authority_boundary.sql; mcp-server/src/mcp.js','mcp-server/test/control-plane-authority-boundary.test.mjs; ops/control-plane-authority-runtime-preflight-selftest.py','transactional_schema','t','2026-08-20T15:09:01.704306Z'::timestamptz,'2026-08-20T15:09:01.704306Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('index_upkeep','ops/githooks/index-upkeep-check.py; ops/githooks/pre-commit','ops/path-index-hygiene-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('lead_client_pair','mcp-server/src/tools.js','mcp-server/test/confirm-merge-lead-client.test.mjs','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
@@ -123553,26 +123237,26 @@ insert into ops.enforcement_control_catalog (control_key,implementation_ref,test
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('merge_survivor','mcp-server/src/tools.js','mcp-server/test/confirm-merge-lead-client.test.mjs','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('model_floor','hooks/model-floor-gate.py','external:no dedicated suite yet','deny_gate','f',NULL::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('no_send_worker','mcp-server/src/mcp.js','glob:mcp-server/test/*.test.js','judgment_ambient','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('one_repo','hooks/one-repo-gate.py; hooks/bash-write-gate.py','ops/one-repo-gate-selftest.py; ops/bash-write-gate-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
+insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('one_repo','hooks/one-repo-gate.py; hooks/bash-write-gate.py','ops/one-repo-gate-selftest.py; ops/bash-write-gate-selftest.py','deny_gate','f',NULL::timestamptz,'2026-10-23T02:09:39.137819Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('outbound_format','mcp-server/src/tools.js','mcp-server/test/document-outbound-format.test.mjs','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('pack_delivery','hooks/rule-pack-preuse-reselection.py','ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py','stop_gate','t','2026-08-24T16:04:56.103125Z'::timestamptz,'2026-10-16T13:48:30.306057Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('path_hygiene','ops/githooks/path-hygiene-check.py; ops/githooks/pre-commit','ops/path-index-hygiene-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('platform_metering_pre_dispatch','lib/platform_metering.py; ops/platform-metering-gate.py; hooks/guard-unattended.py','ops/platform-metering-gate-selftest.py; ops/platform-metering-policy-selftest.py; ops/guard-selftest.py','deny_gate','t','2026-08-20T15:09:01.704306Z'::timestamptz,'2026-08-20T15:09:01.704306Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('pr_only_main_ruleset','external:GitHub branch ruleset 20824501 on jbookout/carr-system''s main branch — PR-only, direct pushes rejected server-side with required status checks; ops/githooks/pre-commit','ops/main-commit-gate-selftest.py; external:a direct `git push origin main` from a local clone is rejected by GitHub before it reaches the branch','deny_gate','t','2026-08-27T11:28:27.421558Z'::timestamptz,'2026-08-27T11:28:27.421558Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('record_home','hooks/record-home-gate.py; hooks/bash-write-gate.py; hooks/guard-unattended.py; hooks/write-effect-check.py','tools/test-record-home-gate.py; ops/bash-write-gate-selftest.py; ops/guard-selftest.py; ops/write-effect-check-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-24T16:04:55.510694Z'::timestamptz) on conflict (control_key) do nothing;
+insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('record_home','hooks/record-home-gate.py; hooks/bash-write-gate.py; hooks/guard-unattended.py; hooks/write-effect-check.py','tools/test-record-home-gate.py; ops/bash-write-gate-selftest.py; ops/guard-selftest.py; ops/write-effect-check-selftest.py','deny_gate','f',NULL::timestamptz,'2026-10-23T02:09:39.137819Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('record_research','mcp-server/src/tools.js','mcp-server/test/intake-research-gates.test.mjs','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('scheduled_run_record','hooks/scheduled-run-record.py','ops/scheduled-run-record-selftest.py','stop_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('session_boot','hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js','ops/session-brief-selftest.py; ops/machine-converge-selftest.py','surfacing','t','2026-10-13T11:50:55.554253Z'::timestamptz,'2026-10-13T11:50:55.554253Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('shared_rename_absence','mcp-server/src/tools.js','mcp-server/test/shared-row-rename-registry.test.mjs','schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('source_merge_eligibility','.github/workflows/source-merge-controller.yml; mcp-server/src/engineering-runtime.js; mcp-server/src/work-request-intake.js; mcp-server/src/source-merge-policy.js; mcp-server/bin/run-source-merge.mjs; migrations/0470_source_merge_authority_projection.sql; ops/source-merge-authority-local-pg-gate.py','mcp-server/test/engineering-runtime.test.mjs; mcp-server/test/source-merge-policy.test.mjs; mcp-server/test/source-merge-migration.test.mjs; mcp-server/test/work-request-ready-plan.test.mjs; ops/local-pg-ci-selftest.py','deny_gate','t','2026-09-04T17:30:06.801098Z'::timestamptz,'2026-09-04T17:30:06.801098Z'::timestamptz) on conflict (control_key) do nothing;
+insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('source_merge_eligibility','mcp-server/src/engineering-runtime.js; mcp-server/src/work-request-intake.js; migrations/0470_source_merge_authority_projection.sql','mcp-server/test/engineering-runtime.test.mjs; mcp-server/test/work-request-ready-plan.test.mjs','deny_gate','t','2026-10-22T19:07:22.274412Z'::timestamptz,'2026-10-22T19:07:22.274412Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('stale_count','ops/stale-count-check.py','ops/stale-count-selftest.py','schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('trigger_grant','ops/trigger-grant-check.py','ops/trigger-grant-selftest.py','schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('vault_salvage','ops/vault-drift-watch.py','ops/vault-drift-watch-selftest.py','judgment_ambient','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('vendor_level_drift','ops/vendor-level-drift-check.py; bin/nightly.sh','ops/vendor-level-drift-selftest.py','surfacing','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('verification_status','migrations/0104_reverify_queue_supersession.sql; tools/control-plane.py; lib/control_plane_inputs.py','ops/control-plane-inputs-selftest.py; ops/control-plane-db-gate.py','surfacing','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
+insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('verification_status','migrations/0104_reverify_queue_supersession.sql; tools/control-plane.py; lib/control_plane_inputs.py','ops/control-plane-inputs-selftest.py; ops/control-plane-db-gate.py','surfacing','f',NULL::timestamptz,'2026-10-22T19:45:19.592586Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('versioned_record','path:mcp-server/src/tools.js; external:database constraints','glob:mcp-server/test/*.test.js; external:migration probes','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('weekend_quiet','hooks/weekend-quiet-gate.py','ops/weekend-quiet-gate-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('weekly_social_route','lib/control_plane_runner.py; tools/social-batch-candidates.py','ops/control-plane-runner-selftest.py; ops/client-asset-controls-selftest.py','judgment_ambient','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
+insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('weekly_social_route','lib/control_plane_runner.py; tools/social-batch-candidates.py','ops/control-plane-runner-selftest.py; ops/client-asset-controls-selftest.py','judgment_ambient','f',NULL::timestamptz,'2026-10-22T19:45:19.592586Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('whose_work','bin/whose-work.py; tools/health-check.py','ops/whose-work-selftest.py','surfacing','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 -- CARR RULE DELIVERY POLICY (bin/schema-snapshot.sh) — safe rebuild default.
 -- The bounded vocabulary dump preserves an existing singleton. If the source

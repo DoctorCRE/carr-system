@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import re
 import shutil
 import subprocess
 import sys
@@ -83,8 +85,47 @@ def prepare(target: str, env: dict | None = None) -> dict[str, str]:
             'checkout_branch': branch, 'checkout_revision': revision}
 
 
+def retire(checkout: dict, task: str, result: str, evidence_dir: Path) -> dict:
+    """Copy declared/linked reports, then remove exactly the workspace prepare created."""
+    evidence: list[str] = []
+    try:
+        workspace = Path(checkout['checkout_workspace'])
+        repo = Path(checkout['checkout_path'])
+        if workspace.is_symlink() or repo.is_symlink() or repo.parent != workspace:
+            raise ValueError('checkout ownership changed')
+        reports = []
+        for match in re.finditer(r'^Completion artifact: (.+)$', task, re.M):
+            spec = json.loads(match[1])
+            if spec['kind'] != 'report_line':
+                continue
+            reports.append(Path(spec['path']))
+        for angle, plain in re.findall(r'\[[^\]]*\]\((?:<([^>]+)>|([^\s)]+))\)', result):
+            source = Path(re.sub(r':\d+$', '', angle or plain))
+            if not source.is_absolute():
+                source = repo / source
+            if source.resolve().is_relative_to(workspace.resolve()) and source.is_file():
+                reports.append(source)
+        for source in dict.fromkeys(reports):
+            if not source.is_absolute():
+                source = repo / source
+            if not source.resolve().is_relative_to(workspace.resolve()):
+                continue
+            relative = source.resolve().relative_to(workspace.resolve())
+            destination = evidence_dir / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            evidence.append(str(destination))
+        shutil.rmtree(workspace)
+        return {'status': 'deleted', 'evidence': evidence}
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return {'status': 'failed', 'detail': f'checkout cleanup failed: {type(exc).__name__}',
+                'evidence': evidence}
+
+
 def instruction(checkout: dict[str, str]) -> str:
     return (f"Job checkout: {checkout['checkout_path']}\n"
             'Change into this standalone repository and read its AGENTS.md before working. '
             'Commit and push from this checkout. Its parent is the fresh Codex workspace; '
-            'a resumed desk keeps its existing cwd. The checkout is retained after the turn.\n\n')
+            'a resumed desk keeps its existing cwd. The runner deletes this workspace after terminal completion. '
+            'Link local evidence files in your final report or declare Completion artifacts so they are copied out first. '
+            'Push all work you need to keep before ending the turn.\n\n')

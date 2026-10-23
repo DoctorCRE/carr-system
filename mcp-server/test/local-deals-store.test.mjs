@@ -160,9 +160,13 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         (id,session_id,idempotency_key,batch_hash,item_index,kind,deal_id,assignee_slug,action_description,due_on,evidence_quote,confidence)
         values ($1,$2,$3,$4,0,'assigned_action',$5,$6,'Review call terms',$7,'Review call terms',1)`,
         [candidate, randomUUID(), randomUUID(), 'a'.repeat(64), deal, owner, due]);
-      return (await TOOLS['resolve-post-call-candidate'].handler(c, actor, {
+      const ref = (await TOOLS['resolve-post-call-candidate'].handler(c, actor, {
         idempotency_key: randomUUID(), candidate_id: candidate, accept: true,
       })).ref;
+      // These singleton regressions model actions accepted before structured
+      // items existed. New structured captures have their own isolation proof.
+      await c.query("update capture_post_call_action set item_title=null,item_bullets='[]'::jsonb,source_ref=null where id=$1",[ref]);
+      return ref;
     };
 
     await t.test('deal detail preserves held actions and exposes hold dates for both action sources', async () => transaction(async () => {
@@ -800,7 +804,9 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             delete prior.lease;
             delete prior.checklist;
           }
-          rowsOf(prior).forEach(row => delete row.phase_started_on);
+          rowsOf(prior).forEach(row => {
+            for (const field of ['phase_started_on','short_name','items','item_schema_version']) delete row[field];
+          });
           const oldRows = rowsOf(baseline[name]);
           rowsOf(prior).forEach(row => { for (const field of ['client_status','client_version','prospect_engagement_status']) delete row[field]; });
           rowsOf(prior).forEach((row, index) => [...invoiceFields, 'next_step_required'].forEach(field => {

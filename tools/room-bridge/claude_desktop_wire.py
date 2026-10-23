@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Backend-only Claude background-session and Desktop handoff wire.
 
-The Model Room bridge does not drive the Claude Desktop UI.  It starts a
+The desk starts a
 durable Claude Code background session with a caller-supplied UUID, observes
 that session through ``claude agents --json --all``, reads the completed
 assistant result from Claude Code's own persisted transcript, and finally
@@ -9,9 +9,8 @@ uses Claude Code's supported ``/desktop`` command from an attached PTY.  The
 PTY is load-bearing: slash commands are interactive client commands, not
 prompts that should be sent to a model with ``-p``.
 
-No poll creates a session.  ``launch_background`` is called only after Hermes
-has atomically claimed an explicitly addressed queue card; later poll cycles
-only inspect the UUID already persisted in room-bridge state.
+Dispatch launches the background session after the work queue claims a job.
+The queue retains the reservation until a completion receipt is recorded.
 """
 
 from __future__ import annotations
@@ -41,9 +40,7 @@ ACTIVE_STATES = {"starting", "running", "working", "idle"}
 COMPLETED_STATES = {"completed", "done"}
 FAILED_STATES = {"failed", "stopped", "killed"}
 NEEDS_INPUT_STATES = {"needs_input", "needs-input", "blocked"}
-CARR_MCP_URL = json.loads(
-    (Path(__file__).resolve().parents[2] / "ops/config/release-pipeline.v1.json").read_text()
-)["worker"]["live_url"] + "/mcp"
+CARR_MCP_URL = "https://api.doctorcre.com/mcp"
 # --bare skips inherited customizations and OAuth/keychain auth. A missing
 # explicit auth source must fail rather than retry with inherited settings.
 TOOL_POSTURES = {

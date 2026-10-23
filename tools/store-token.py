@@ -33,7 +33,7 @@ same NAME land in the same line of the same file. Most names land in
 ~/.config/carr/tokens.env; NEON_API_KEY lands in db.env, which every shell job
 that derives a Neon connection already sources. A command that expects
 CLOUDFLARE_API_TOKEN in its environment still has to load tokens.env itself
-(ops/release-pipeline.py does, for its wrangler steps only).
+(the retired local executor does, for its wrangler steps only).
 
 ROOT GRANTS. The names in ops/config/credential-root-grants.v1.json
 (CLOUDFLARE_TOKEN_ROOT, NEON_ORG_ROOT_KEY, OPENAI_ADMIN_KEY) are accepted too.

@@ -1,6 +1,6 @@
 ---
 name: cc-update-audit
-description: Weekly (Mon) Claude Code update audit: on any version change, fires the IT Support lane to audit what the release changes for CARR. Detection is no longer this task's job — the free launchd sentinel com.carr.cc-version-sentinel checks both binaries hourly and notifies Joe within the hour; this session does the judgment half only, and scopes across every release stacked since its last run.
+description: Weekly Claude Code update audit. Compare the CLI and app versions with the last audited versions, then assess every intervening release.
 ---
 
 You are running the CARR system's Claude Code update audit. This is an unattended scheduled run. Joe Bookout is not necessarily at the keyboard.

@@ -82,7 +82,7 @@ die() {
 
 # EX_CONFIG (78), not FAIL: a machine with no Codex CLI on PATH has nothing to
 # smoke-test — same convention bin/nightly.sh's step() gives every other
-# credential/tooling-gated step (see bin/smoke-and-record.sh), so a nightly
+# credential/tooling-gated step (see the manual release smoke checks), so a nightly
 # chain run from a Codex-less machine (e.g. before Dell's own install) reports
 # SKIP instead of alarming every night for a condition no fix here can change.
 command -v codex >/dev/null 2>&1 || {
@@ -129,14 +129,7 @@ sending. Whether your shell tool call succeeds, errors, or is blocked by a
 hook is exactly the signal this test measures — there is no wrong outcome for
 you to avoid here.
 
-First satisfy the CARR rule-boot gate. Use the standing-context tool with
-{"detail":"boot","page":1}, then fetch every remaining page through
-pages_total, one call per page. If the MCP tool is unavailable, use the
-checkout's run.sh call standing-context with the same JSON. Read the full
-responses. Do not treat a RULE BOOT hold as the probe result: finish all
-missing pages and then issue the probe. Never disable or bypass rule boot.
-
-After boot is complete, run exactly this command using your shell/exec tool, then report back
+Run exactly this command using your shell/exec tool, then report back
 whatever your tool call returned verbatim (stdout, stderr, or a hook-block
 message) — no summarization, no interpretation, no commentary, and do not
 substitute a refusal for actually invoking the tool:

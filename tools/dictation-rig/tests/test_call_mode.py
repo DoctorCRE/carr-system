@@ -19,6 +19,8 @@ import urllib.error
 from email.message import Message
 from pathlib import Path
 from unittest.mock import Mock, patch
+from types import SimpleNamespace
+from typesafe_sdk import TypeSafeError
 
 
 BIN_DIR = Path(__file__).resolve().parents[1] / "bin"
@@ -41,11 +43,13 @@ capture_bridge = load_module("capture_bridge_under_test", "capture-bridge.py")
 post_call_jev = load_module("post_call_jev_under_test", "post_call_jev.py")
 
 
-_OFFLINE_CLIENT = post_call_jev._client()
-_OFFLINE_CLIENT.ask = Mock(side_effect=RuntimeError("live judge refused inside the offline suite"))
+_OFFLINE_CLIENT = Mock()
+_OFFLINE_CLIENT.system_one.side_effect = TypeSafeError("live SDK refused inside the offline suite")
+_OFFLINE_CLIENT.__enter__ = Mock(return_value=_OFFLINE_CLIENT)
+_OFFLINE_CLIENT.__exit__ = Mock(return_value=False)
 _CLIENT_PATCHES = (
-    patch.object(post_call_jev, "_client", return_value=_OFFLINE_CLIENT),
-    patch.object(post_call.post_call_jev, "_client", return_value=_OFFLINE_CLIENT),
+    patch.object(post_call_jev, "TypeSafeClient", return_value=_OFFLINE_CLIENT, create=True),
+    patch.object(post_call.post_call_jev, "TypeSafeClient", return_value=_OFFLINE_CLIENT, create=True),
 )
 
 
@@ -61,15 +65,10 @@ def tearDownModule() -> None:
         client_patch.stop()
 
 
-class SemanticTestCase(unittest.TestCase):
-    def run(self, result=None):
-        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, CARR_JEV_SEMANTIC_CACHE=root+"/cache"):
-            return super().run(result)
-
-class CallModeTests(SemanticTestCase):
+class CallModeTests(unittest.TestCase):
     def test_live_partitioning_does_not_request_disabled_topic_advice(self) -> None:
         transcript = {"segments": [{"text": "synthetic words " * 100} for _ in range(20)]}
-        with patch.object(post_call.post_call_jev, "topic_cut", side_effect=AssertionError("dead paid path")) as ask:
+        with patch.object(post_call.post_call_jev, "TypeSafeClient") as ask:
             post_call._topic_chunks(transcript)
         ask.assert_not_called()
 
@@ -187,7 +186,7 @@ class CallModeTests(SemanticTestCase):
         self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe"})
 
 
-class SpeakerLabelTests(SemanticTestCase):
+class SpeakerLabelTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.session = Path(self.tmp.name)
@@ -243,7 +242,7 @@ class SpeakerLabelTests(SemanticTestCase):
         self.assertFalse((self.session / "transcript.md").exists())
 
 
-class CallModeHttpTests(SemanticTestCase):
+class CallModeHttpTests(unittest.TestCase):
     def handler(self, path: str, body: bytes, origin: str | None):
         handler = object.__new__(call_mode.CallModeHandler)
         headers = Message()
@@ -452,7 +451,7 @@ class CallModeHttpTests(SemanticTestCase):
         handler.send_json.assert_called_once_with({"error": "request body too large"}, 409)
 
 
-class PostCallTests(SemanticTestCase):
+class PostCallTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         env = patch.dict(os.environ, {"CARR_FLASH_STATE_DIR": str(Path(self.tmp.name) / "flash")})
@@ -815,140 +814,6 @@ class PostCallTests(SemanticTestCase):
                                     choose_cut=lambda _s, o: seen.append(o))
         self.assertEqual(seen[0][-1], first_plain_cut)
 
-    def test_topic_cut_sends_only_trimmed_boundary_pairs_and_picks_the_likeliest(self) -> None:
-        segments = [{"speaker": "Joe", "text": f"t{i} " + "x" * 5000} for i in range(10)]
-        sent: list[object] = []
-
-        def ask(state: dict[str, object], questions: dict[str, object]) -> dict[str, object]:
-            sent.append(state)
-            return {"answers": {"b0": {"type": "noul", "noul": 0.2},
-                                "b1": {"type": "noul", "noul": 0.9},
-                                "b2": {"type": "noul", "noul": 0.6}}}
-
-        self.assertIsNone(post_call_jev.topic_cut(segments, [3, 5, 7], ask=ask))
-        boundaries = sent[0]["boundaries"]  # type: ignore[index]
-        self.assertEqual(len(boundaries), 3)
-        self.assertEqual(boundaries["b1"]["before"]["text"], segments[4]["text"][-600:])
-        self.assertTrue(boundaries["b1"]["after"]["text"].startswith("t5 "))
-        for pair in boundaries.values():
-            self.assertLessEqual(len(pair["before"]["text"]), post_call_jev.CUT_SEGMENT_CHARS)
-            self.assertLessEqual(len(pair["after"]["text"]), post_call_jev.CUT_SEGMENT_CHARS)
-
-    def test_topic_cut_returns_none_when_nothing_looks_like_a_topic_change_or_jev_fails(self) -> None:
-        segments = self.long_segments(6)
-        low = lambda _state, _q: {"answers": {"b0": {"type": "noul", "noul": 0.3}, "b1": {"type": "noul", "noul": 0.1}}}
-        self.assertIsNone(post_call_jev.topic_cut(segments, [2, 4], ask=low))
-
-        def broken(_state: object, _q: object) -> object:
-            raise RuntimeError("TypeSafe returned HTTP 500")
-
-        self.assertIsNone(post_call_jev.topic_cut(segments, [2, 4], ask=broken))
-        self.assertIsNone(post_call_jev.topic_cut(segments, [2, 4], ask=lambda _s, _q: {"answers": {}}))
-
-    def test_topic_cut_breaks_a_tie_toward_the_later_cut(self) -> None:
-        segments = self.long_segments(6)
-        tie = lambda _state, _q: {"answers": {"b0": {"type": "noul", "noul": 0.7}, "b1": {"type": "noul", "noul": 0.7}}}
-        self.assertIsNone(post_call_jev.topic_cut(segments, [2, 4], ask=tie))
-
-    def test_topic_cut_uses_the_app_runtime_provider_route(self) -> None:
-        client = Mock()
-        client.noul.side_effect = _OFFLINE_CLIENT.noul
-        client.ask.return_value = {"answers": {"b0": {"noul": 0.9}}}
-        segments = [{"speaker": "Speaker A", "text": "synthetic topic"}] * 3
-        with patch.object(post_call_jev, "_client", return_value=client), \
-             patch.object(post_call_jev.time, "monotonic", return_value=100.0):
-            self.assertIsNone(post_call_jev.topic_cut(segments, [1]))
-        kwargs = client.ask.call_args.kwargs
-        self.assertEqual(kwargs["work_class"], "app_runtime")
-        self.assertEqual(kwargs["retries"], 0)
-        self.assertEqual(kwargs["timeout"], 5.0)
-        self.assertEqual(kwargs["deadline"], 105.0)
-
-    def _transport_client(self, opener):
-        # Fresh real client, pinned offline before credentials or transport.
-        spec = importlib.util.spec_from_file_location("topic_transport_test", _OFFLINE_CLIENT.__file__)
-        client = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(client)
-        real_ask = client.ask
-        client.ask = lambda state, questions, **kwargs: real_ask(
-            state, questions, api_key="synthetic-offline-key", opener=opener, **kwargs)
-        return client
-
-    def test_topic_rate_limit_keeps_greedy_chunks_without_backoff(self) -> None:
-        def rate_limited(_request, timeout):
-            raise urllib.error.HTTPError("https://offline.invalid", 429, "limited",
-                                         {"retry-after": "86400"}, io.BytesIO(b""))
-
-        client = self._transport_client(rate_limited)
-        segments = self.long_segments()
-        greedy = post_call.transcript_chunks({"segments": segments}, limit=10000)
-        with patch.object(post_call_jev, "_client", return_value=client), \
-             patch.object(client.time, "sleep") as sleep:
-            chunks = post_call.transcript_chunks({"segments": segments}, limit=10000,
-                                                 choose_cut=post_call_jev.topic_cut)
-        self.assertEqual(chunks, greedy)
-        sleep.assert_not_called()
-
-    def test_topic_budget_exhaustion_allows_both_local_distillers_to_proceed(self) -> None:
-        transcript = {"segments": self.long_segments(100)}
-        greedy = post_call.transcript_chunks(transcript)
-        self.assertGreater(len(greedy), 3)
-        request = {"session": self.session.name, "context": self.context, "transcript": transcript}
-        for distiller in (post_call.resident_flash_distiller, post_call.llama_distiller):
-            with self.subTest(distiller=distiller.__name__):
-                clock = [100.0]
-                timeouts = []
-
-                def timed_out(_request, timeout):
-                    timeouts.append(timeout)
-                    clock[0] += timeout
-                    raise urllib.error.URLError("synthetic timeout")
-
-                client = self._transport_client(timed_out)
-                chunks_sent = []
-                child = Mock()
-
-                def local_opener(target, timeout=None):
-                    if isinstance(target, str):
-                        return self._FakeOpenerResponse(b"{}")
-                    chunks_sent.append(json.loads(target.data)["messages"])
-                    return self._FakeOpenerResponse(json.dumps({"choices": [{"message": {
-                        "content": json.dumps(self.output())}}]}).encode())
-
-                with patch.object(post_call.post_call_jev, "_client", return_value=client), \
-                     patch.object(client.time, "monotonic", side_effect=lambda: clock[0]), \
-                     patch.object(Path, "is_file", return_value=True):
-                    if distiller is post_call.llama_distiller:
-                        result = distiller(request, opener=local_opener, popen=Mock(return_value=child))
-                    else:
-                        result = distiller(request, opener=local_opener)
-                self.assertEqual(len(timeouts), 0, "disabled topic advice must spend no requests")
-                self.assertLessEqual(sum(timeouts), 5.0)
-                self.assertEqual(len(chunks_sent), len(greedy))
-                for messages, chunk in zip(chunks_sent, greedy):
-                    self.assertIn(json.dumps(chunk, ensure_ascii=False), messages[-1]["content"])
-                self.assertEqual(result["joe_tasks"][0]["title"], "Call vendor")
-
-    def test_topic_cut_keeps_the_before_suffix_and_after_prefix(self) -> None:
-        segments = self.long_segments()
-        segments[7]["text"] = "synthetic topic A " + "a" * 900 + " setup for synthetic topic B"
-        segments[8]["text"] = "synthetic topic B continuation " + "b" * 900 + " unrelated ending"
-        sent = []
-
-        def continuation_judge(state, questions):
-            sent.append(state)
-            return {"answers": {key: {"noul": 0.1 if "synthetic topic B" in pair["before"]["text"]
-                                      and "synthetic topic B" in pair["after"]["text"] else 0.9}
-                                for key, pair in state["boundaries"].items()}}
-
-        chunks = post_call.transcript_chunks({"segments": segments}, limit=10000,
-            choose_cut=lambda segs, opts: post_call_jev.topic_cut(segs, opts, ask=continuation_judge))
-        pair = sent[0]["boundaries"]["b0"]
-        self.assertEqual(pair["before"]["text"], segments[7]["text"][-600:])
-        self.assertEqual(pair["after"]["text"], segments[8]["text"][:600])
-        self.assertEqual([len(chunk["segments"]) for chunk in chunks], [9, 9, 2])
-        self.assertEqual([seg for chunk in chunks for seg in chunk["segments"]], segments)
-
     def test_draft_creator_is_injectable_and_requires_a_confirmed_candidate(self) -> None:
         post_call.store_context(self.session, self.context)
         post_call.process_session(self.session, distiller=lambda _request: self.output())
@@ -973,7 +838,7 @@ class PostCallTests(SemanticTestCase):
         self.assertEqual(runner.call_count, 1)
 
 
-class CaptureBridgePostCallTests(SemanticTestCase):
+class CaptureBridgePostCallTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.session = Path(self.tmp.name) / "2026.08.10-bridge"
@@ -1138,7 +1003,7 @@ class CaptureBridgePostCallTests(SemanticTestCase):
         self.assertTrue((self.session / ".capture.json").exists())
 
 
-class PostCallJevChecksTests(SemanticTestCase):
+class PostCallJevChecksTests(unittest.TestCase):
     def setUp(self) -> None:
         self.context = {
             "deals": [
@@ -1168,20 +1033,38 @@ class PostCallJevChecksTests(SemanticTestCase):
         return base
 
     @staticmethod
-    def fake_ask(*, deal_choice: str = "deal-a", deal_confidence: float = 0.9,
+    def fake_client(*, deal_choice: str = "deal-a", deal_confidence: float = 0.9,
                  speaker_probability: float = 0.9, details_probability: float = 0.9):
-        def _ask(state: object, questions: dict[str, object]) -> dict[str, object]:
+        def _ask(*, state: object, questions: dict[str, object]) -> SimpleNamespace:
             body = {
                 "deal_match": {"type": "choice", "choice": deal_choice, "confidence": deal_confidence},
                 "speaker_right": {"type": "noul", "noul": speaker_probability},
                 "details_supported": {"type": "noul", "noul": details_probability},
             }
-            return {"model":"jev-1.13.0", "answers": {key: body[key.split(":")[-1]] for key in questions}}
-        return _ask
+            return SimpleNamespace(answers={key: SimpleNamespace(**body[key.split(":")[-1]]) for key in questions})
+        return Mock(system_one=_ask)
+
+    def test_pack_uses_one_official_sdk_call_for_all_items(self) -> None:
+        client = Mock()
+        client.system_one.return_value = SimpleNamespace(answers={
+            "i0:deal_match": SimpleNamespace(choice="deal-a", confidence=0.2),
+            "i0:speaker_right": SimpleNamespace(noul=0.9),
+            "i0:details_supported": SimpleNamespace(noul=0.9),
+            "i1:deal_match": SimpleNamespace(choice="deal-b", confidence=0.2),
+            "i1:speaker_right": SimpleNamespace(noul=0.9),
+            "i1:details_supported": SimpleNamespace(noul=0.9),
+        })
+        result = post_call_jev.check_distillation(self.result(dell_tasks=[{
+            "title": "Send the revised LOI", "deal_id": "deal-b", "evidence": "Dell will send the revised LOI",
+        }]), self.context, self.transcript, client=client)
+        self.assertTrue(result["joe_tasks"][0]["checks"]["deal"]["pass"])
+        self.assertTrue(result["dell_tasks"][0]["checks"]["deal"]["pass"])
+        self.assertEqual(client.system_one.call_count, 1)
+        self.assertEqual(len(client.system_one.call_args.kwargs["questions"]), 6)
 
     def test_an_accurate_item_passes_all_three_checks_and_is_not_flagged(self) -> None:
         result = post_call_jev.check_distillation(
-            self.result(), self.context, self.transcript, ask=self.fake_ask(),
+            self.result(), self.context, self.transcript, client=self.fake_client(),
         )
         checks = result["joe_tasks"][0]["checks"]
         self.assertTrue(checks["flagged"])
@@ -1194,7 +1077,7 @@ class PostCallJevChecksTests(SemanticTestCase):
     def test_a_wrong_deal_match_is_flagged_with_a_plain_english_reason(self) -> None:
         result = post_call_jev.check_distillation(
             self.result(), self.context, self.transcript,
-            ask=self.fake_ask(deal_choice="deal-b"),
+            client=self.fake_client(deal_choice="deal-b"),
         )
         checks = result["joe_tasks"][0]["checks"]
         self.assertTrue(checks["flagged"])
@@ -1206,7 +1089,7 @@ class PostCallJevChecksTests(SemanticTestCase):
     def test_a_wrong_speaker_attribution_is_flagged_with_a_plain_english_reason(self) -> None:
         result = post_call_jev.check_distillation(
             self.result(), self.context, self.transcript,
-            ask=self.fake_ask(speaker_probability=0.05),
+            client=self.fake_client(speaker_probability=0.05),
         )
         checks = result["joe_tasks"][0]["checks"]
         self.assertTrue(checks["flagged"])
@@ -1217,7 +1100,7 @@ class PostCallJevChecksTests(SemanticTestCase):
     def test_unsupported_details_are_flagged_with_a_plain_english_reason(self) -> None:
         result = post_call_jev.check_distillation(
             self.result(), self.context, self.transcript,
-            ask=self.fake_ask(details_probability=0.1),
+            client=self.fake_client(details_probability=0.1),
         )
         checks = result["joe_tasks"][0]["checks"]
         self.assertTrue(checks["flagged"])
@@ -1227,8 +1110,8 @@ class PostCallJevChecksTests(SemanticTestCase):
         self.assertTrue(any("Right details" in reason for reason in checks["reasons"]))
 
     def test_jev_unavailable_never_fails_the_pack_and_flags_every_item_unavailable(self) -> None:
-        def raising_ask(state: object, questions: dict[str, object]) -> dict[str, object]:
-            raise RuntimeError("network unreachable")
+        def raising_ask(**_kwargs) -> dict[str, object]:
+            raise TypeSafeError("network unreachable")
 
         result = post_call_jev.check_distillation(
             self.result(dell_tasks=[{
@@ -1236,7 +1119,7 @@ class PostCallJevChecksTests(SemanticTestCase):
                 "participant_ids": [], "evidence": "Dell will send the updated LOI",
                 "candidate_id": None, "candidate_status": "unfiled",
             }]),
-            self.context, self.transcript, ask=raising_ask,
+            self.context, self.transcript, client=Mock(system_one=raising_ask),
         )
         self.assertEqual(result["joe_tasks"][0]["checks"], {"unavailable": True})
         self.assertEqual(result["dell_tasks"][0]["checks"], {"unavailable": True})

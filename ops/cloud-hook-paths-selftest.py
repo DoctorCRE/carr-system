@@ -15,8 +15,6 @@ THE CONTRACT, per layout:
       project directory. A branch or worktree cannot swap in its own gate.
 
   cloud layout (~/carr-system/hooks absent)
-      delegation-gate.py runs from $CLAUDE_PROJECT_DIR. It only observes and
-      never denies, so the repository copy is safe to run.
       worktree-self-plumb.py and machine-converge.py do nothing: both act on
       machine state (worktree symlinks, the orphan reaper, a fast-forward of
       the canonical checkout, config-as-code install) that a container lacks.
@@ -38,11 +36,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 SETTINGS = REPO / ".claude" / "settings.json"
-CONTRACT = REPO / "ops" / "config" / "delegation-gate-hook.json"
 SHELLS = [s for s in ("/bin/sh", "/bin/bash", "/bin/zsh") if os.access(s, os.X_OK)]
-GATE = "delegation-gate.py"
+GATE = "rule-claim-gate.py"
 MACHINE_HOOKS = ("worktree-self-plumb.py", "machine-converge.py")
-KNOWN_HOOKS = (GATE, "builder-agent-gate.py", "rule-claim-gate.py", *MACHINE_HOOKS)
+KNOWN_HOOKS = (GATE, *MACHINE_HOOKS)
 
 FAILURES: list[str] = []
 
@@ -117,7 +114,7 @@ def cloud_project(tmp: Path) -> Path:
 
 
 def transcript_for(tmp: Path) -> Path:
-    """A real transcript so delegation-gate walks its full classification path."""
+    """A synthetic transcript for the retained project hooks."""
     path = tmp / "transcript.jsonl"
     rows = [{"type": "user", "message": {"role": "user", "content": "delegate the sweep"}}]
     rows += [{"type": "assistant", "message": {"role": "assistant", "content": [
@@ -149,12 +146,6 @@ def cloud_cases() -> None:
         # no ~/.claude, no ~/.codex, no ~/.config/carr, no canonical checkout.
         check("cloud: HOME is untouched by every hook", sorted(os.listdir(home)) == [],
               str(sorted(os.listdir(home))))
-        # delegation-gate still RAN from the project copy: its state ledger
-        # landed under the project's out/, not under HOME.
-        check("cloud: delegation-gate ran from $CLAUDE_PROJECT_DIR",
-              (project / "out" / "delegation-gate-state.json").is_file(),
-              str(sorted(p.name for p in project.iterdir())))
-
         # $CLAUDE_PROJECT_DIR unset, and set to a directory with no hooks at all.
         bare = tmp / "bare"
         bare.mkdir()
@@ -210,21 +201,14 @@ def mac_cases() -> None:
         # state, so the command must not quietly fall back to the project copy.
         (canonical / GATE).unlink()
         command = next(c for e, s, c in wired_commands() if s == GATE)
-        r = run(SHELLS[0], command, env, cases["PreToolUse"][0], project)
+        r = run(SHELLS[0], command, env, cases["Stop"][0], project)
         check("mac: a missing canonical gate never falls back to the project copy",
               "PROJECT:" not in r.stdout, f"stdout={r.stdout.strip()!r}")
 
 
 def contract_cases() -> None:
-    contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
     commands = {(e, s): c for e, s, c in wired_commands()}
-    check("every wired hook names a known script",
-          all(s for (_e, s) in commands), str(list(commands)))
-    pre, stop = commands.get(("PreToolUse", GATE)), commands.get(("Stop", GATE))
-    check("PreToolUse and Stop run the identical delegation-gate command", pre == stop)
-    check("the tracked contract names the settings' delegation command", contract["command"] == pre)
-    check("the contract command falls back to $CLAUDE_PROJECT_DIR",
-          "${CLAUDE_PROJECT_DIR" in contract["command"])
+    check("every wired hook names a known script", all(s for (_e, s) in commands))
 
 
 def main() -> int:

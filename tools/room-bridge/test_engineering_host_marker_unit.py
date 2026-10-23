@@ -14,7 +14,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import bridge  # noqa: E402
 
 LAUNCHER = HERE.parents[1] / "bin" / "run-engineering-dispatch.sh"
 ZSH = shutil.which("zsh")
@@ -62,17 +61,6 @@ def test_unmarked_mac_without_credential_still_fails():
         assert p.returncode != 0 and "not_controller_host" not in p.stdout, (p.returncode, p.stdout)
 
 
-def test_bridge_keeps_the_host_state_visible():
-    with tempfile.TemporaryDirectory() as d:
-        fake = Path(d) / "fake.sh"
-        fake.write_text("#!/bin/sh\necho '{\"ok\":true,\"claimed\":0,\"host\":\"not_controller_host\"}'\n")
-        fake.chmod(0o755)
-        out = bridge.run_engineering_dispatch(command=fake)
-        assert out == {"claimed": 0, "completed": 0, "results": [], "host": "not_controller_host"}, out
-        fake.write_text("#!/bin/sh\necho '{\"ok\":true,\"claimed\":1,\"completed\":1,\"results\":[]}'\n")
-        assert "host" not in bridge.run_engineering_dispatch(command=fake)
-
-
 def main() -> int:
     if ZSH:
         check("marked Mac without credential answers no-claim", test_marked_mac_without_credential_answers_no_claim)
@@ -80,7 +68,6 @@ def main() -> int:
         check("unmarked Mac without credential still fails", test_unmarked_mac_without_credential_still_fails)
     else:
         print("  skip  launcher cases: zsh is not installed here")
-    check("bridge keeps the host state visible", test_bridge_keeps_the_host_state_visible)
     if FAILURES:
         print(f"{len(FAILURES)} engineering host marker test(s) failed", file=sys.stderr)
         return 1
