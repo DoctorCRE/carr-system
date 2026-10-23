@@ -49,7 +49,12 @@ test("the shared client endpoint preserves five verbs' direct and passthrough gu
     const direct = await rpc("tools/call", { name, arguments: args });
     const delegated = await rpc("tools/call", { name: "call-verb", arguments: { verb: name, args } });
     assert.equal(direct.result.isError, true, name);
-    assert.deepEqual(delegated.result, direct.result, name);
+    const { correlation_id: directId, ...directError } = JSON.parse(direct.result.content[0].text);
+    const { correlation_id: delegatedId, ...delegatedError } = JSON.parse(delegated.result.content[0].text);
+    assert.match(directId, /^[a-f0-9-]{36}$/);
+    assert.match(delegatedId, /^[a-f0-9-]{36}$/);
+    assert.notEqual(directId, delegatedId, "separate requests have separate log lookup ids");
+    assert.deepEqual(delegatedError, directError, name);
     assert.equal(JSON.parse(direct.result.content[0].text).error, expected, name);
   }
 });
