@@ -349,16 +349,6 @@
         "ops/candidate-match-threshold-selftest.py"
       ]
     },
-    "canonical_edit": {
-      "failure_mode": "an Edit/Write/MultiEdit landing on a file git already tracks inside the shared canonical checkout ~/carr-system, before any commit, push or merge exists to refuse it",
-      "implementation": [
-        "hooks/canonical-edit-gate.py"
-      ],
-      "note": "REINSTATED 2026-09-01 by Joe's ruling 7f48abf6 (Repo Hygiene Program R02, WR-000040), reversing the retirement in WR-000019 slice S3 (2026-08-27) and migration 0348. It returns with three dispositions applied: the registered-worktree exemption widened to every worktree git registers for this repo, the untracked-file allowance KEPT (receipts and out/ are load-bearing, with ops/untracked-anomaly-report.py as the non-paging visibility control), and the CARR_ALLOW_CANONICAL_EDIT scoped-edit escape hatch REMOVED. HONESTLY SCOPED, and the gate's own docstring is the authority: it sees Write, Edit and MultiEdit only. NotebookEdit is in its tool tuple but no matcher delivers it, so it is not covered. Bash and Codex sessions are not covered at all -- the R04 canonical-dirt alarm is the planned compensating control and is NOT BUILT YET, so those paths are uncompensated today. This control does not replace pr_only_main_ruleset; it binds EARLIER, at the edit, and that control still binds at merge.",
-      "test": [
-        "ops/canonical-edit-gate-selftest.py"
-      ]
-    },
     "client_asset_packet": {
       "failure_mode": "renderer refusal",
       "implementation": [
@@ -367,25 +357,6 @@
       ],
       "test": [
         "ops/client-asset-controls-selftest.py"
-      ]
-    },
-    "control-plane-workflow-manifest": {
-      "failure_mode": "control-plane manifest loading and the cognition dispatcher refuse an untyped, unbudgeted, or canonical-write-authorized cognition contract before it is registered or dispatched",
-      "implementation": [
-        "ops/config/control-plane-workflows.v1.json"
-      ],
-      "test": [
-        "ops/control-plane-selftest.py",
-        "ops/control-plane-db-gate.py"
-      ]
-    },
-    "costar_lane": {
-      "failure_mode": "PreToolUse deny",
-      "implementation": [
-        "hooks/costar-lane-gate.py"
-      ],
-      "test": [
-        "ops/costar-lane-gate-selftest.py"
       ]
     },
     "deal_guard": {
@@ -408,15 +379,6 @@
         "tools/test-codex-job.py"
       ]
     },
-    "draft_export_read": {
-      "failure_mode": "surfaces the draft's age beside the live render; allows the read, never denies",
-      "implementation": [
-        "hooks/draft-export-gate.py"
-      ],
-      "test": [
-        "ops/draft-export-gate-selftest.py"
-      ]
-    },
     "egress_guard": {
       "failure_mode": "PreToolUse deny",
       "implementation": [
@@ -433,15 +395,6 @@
       ],
       "test": [
         "command:python3 hooks/gate-integrity.py --selftest"
-      ]
-    },
-    "github-burst-guard": {
-      "failure_mode": "PreToolUse deny on Bash",
-      "implementation": [
-        "hooks/github-burst-guard.py"
-      ],
-      "test": [
-        "ops/github-burst-guard-selftest.py"
       ]
     },
     "index_upkeep": {
@@ -491,15 +444,6 @@
         "mcp-server/test/confirm-merge-lead-client.test.mjs"
       ]
     },
-    "model_floor": {
-      "failure_mode": "PreToolUse deny",
-      "implementation": [
-        "hooks/model-floor-gate.py"
-      ],
-      "test": [
-        "external:no dedicated suite yet"
-      ]
-    },
     "no_send_worker": {
       "failure_mode": "capability absent",
       "implementation": [
@@ -507,17 +451,6 @@
       ],
       "test": [
         "glob:mcp-server/test/*.test.js"
-      ]
-    },
-    "one_repo": {
-      "failure_mode": "deny",
-      "implementation": [
-        "hooks/one-repo-gate.py",
-        "hooks/bash-write-gate.py"
-      ],
-      "test": [
-        "ops/one-repo-gate-selftest.py",
-        "ops/bash-write-gate-selftest.py"
       ]
     },
     "outbound_format": {
@@ -565,15 +498,11 @@
       "failure_mode": "PreToolUse deny",
       "implementation": [
         "hooks/record-home-gate.py",
-        "hooks/bash-write-gate.py",
-        "hooks/guard-unattended.py",
-        "hooks/write-effect-check.py"
+        "hooks/guard-unattended.py"
       ],
       "test": [
         "tools/test-record-home-gate.py",
-        "ops/bash-write-gate-selftest.py",
-        "ops/guard-selftest.py",
-        "ops/write-effect-check-selftest.py"
+        "ops/guard-selftest.py"
       ]
     },
     "record_research": {
@@ -652,18 +581,6 @@
         "ops/vendor-level-drift-selftest.py"
       ]
     },
-    "verification_status": {
-      "failure_mode": "expired or unstamped volatile subjects are surfaced as explicitly not-current re-verification work; they are never relabeled verified",
-      "implementation": [
-        "migrations/0104_reverify_queue_supersession.sql",
-        "tools/control-plane.py",
-        "lib/control_plane_inputs.py"
-      ],
-      "test": [
-        "ops/control-plane-inputs-selftest.py",
-        "ops/control-plane-db-gate.py"
-      ]
-    },
     "versioned_record": {
       "failure_mode": "transaction refusal",
       "implementation": [
@@ -673,26 +590,6 @@
       "test": [
         "glob:mcp-server/test/*.test.js",
         "external:migration probes"
-      ]
-    },
-    "weekend_quiet": {
-      "failure_mode": "PreToolUse deny",
-      "implementation": [
-        "hooks/weekend-quiet-gate.py"
-      ],
-      "test": [
-        "ops/weekend-quiet-gate-selftest.py"
-      ]
-    },
-    "weekly_social_route": {
-      "failure_mode": "weekly proposal is rejected before acceptance",
-      "implementation": [
-        "lib/control_plane_runner.py",
-        "tools/social-batch-candidates.py"
-      ],
-      "test": [
-        "ops/control-plane-runner-selftest.py",
-        "ops/client-asset-controls-selftest.py"
       ]
     },
     "whose_work": {
@@ -832,11 +729,10 @@
       "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "236ca227": {
-      "binding_moment": "before a partner-facing send",
-      "category": "hard_pre_action",
-      "control": "weekend_quiet",
-      "enforcement_class": "deny_gate",
-      "exceptions": "a partner has typed in this session \u2014 his own election to work, which a session cannot assert for him"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "The former weekend_quiet control was retired. The rule remains prose guidance delivered by its task pack; no installed denial is claimed.",
+      "retired_control": "weekend_quiet"
     },
     "23ea0607": {
       "binding_moment": "Salesforce reconciliation",
@@ -851,11 +747,10 @@
       "why_unenforceable": "Automated gate commit_claims removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "25fab860": {
-      "binding_moment": "weekly social cognition proposal validation",
-      "category": "hard_pre_action",
-      "control": "weekly_social_route",
-      "enforcement_class": "deny_gate",
-      "exceptions": "quote tweets remain valid in the daily X reply workflow"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "The former weekly_social_route control was retired. The rule remains prose guidance delivered by its task pack; no installed denial is claimed.",
+      "retired_control": "weekly_social_route"
     },
     "25fcddee": {
       "binding_moment": "new-territory task",
@@ -1009,12 +904,10 @@
       "why_unenforceable": "Research-discipline judgment."
     },
     "4a53ff82": {
-      "binding_moment": "the first edit to a tracked canonical file",
-      "category": "hard_pre_action",
-      "control": "canonical_edit",
-      "enforcement_class": "deny_gate",
-      "exceptions": "registered worktrees; integration-lane work (nightly chain, merges/landings, pulls)",
-      "note": "Reassigned 2026-08-27 (WR-000019 slice S3) to pr_only_main_ruleset when hooks/canonical-edit-gate.py retired, then RETURNED to canonical_edit on 2026-09-01 by Joe's ruling 7f48abf6 (Repo Hygiene Program R02) when that gate was reinstated. The 2026-08-27 reassignment reasoned that the server-side backstop carried the same property later; that reasoning is now void because the earlier control exists again. BOTH controls really do bind this rule now, at different moments -- canonical_edit at the edit, pr_only_main_ruleset at merge -- and this field holds ONE control key, so it names the EARLIEST binding moment, which is the one this rule is about. pr_only_main_ruleset is unchanged and still carries 308ef1de. HISTORY: this read unbuilt on 2026-08-15, with a planned_control describing a hook that had already been built the day before as hooks/canonical-edit-gate.py, blessed in the gate baseline and live in the PreToolUse set. A session working the unbuilt list came one step from building a second gate for an already-enforced rule. ops/enforcement-coverage-check.py now fails on any blessed gate no control names."
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "The former canonical_edit control was retired. The rule remains prose guidance delivered by its task pack; no installed denial is claimed.",
+      "retired_control": "canonical_edit"
     },
     "4a9188f3": {
       "category": "judgment_advisory",
@@ -1112,11 +1005,10 @@
       "why_unenforceable": "Requires judging whether a blocker is self-servable at all, which depends on the specific refusal and what the session already holds. A predicate could not tell a missing credential apart from a gate that names its own escape hatch. Activated after the 2026-08-14 audit, so it carries no audit row."
     },
     "5d44d3f3": {
-      "binding_moment": "canonical enrichment and deal-history queue construction",
-      "category": "session_task_rail",
-      "control": "verification_status",
-      "enforcement_class": "surfacing",
-      "exceptions": "identity corrections remain proposals requiring the owning partner; contextual human decisions must still identify an unverified record as such"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "The former verification_status control was retired. The rule remains prose guidance delivered by its task pack; no installed denial is claimed.",
+      "retired_control": "verification_status"
     },
     "5e896ed6": {
       "category": "judgment_advisory",
@@ -1124,58 +1016,10 @@
       "why_unenforceable": "Judgment on where something merges and whether it was 'incorporated' enough."
     },
     "5e89c211": {
-      "admission": {
-        "applicability": {
-          "workflows": [
-            "*"
-          ]
-        },
-        "input_contract": {
-          "properties": {
-            "budget": {
-              "type": "object"
-            },
-            "canonical_write_authority": {
-              "type": "boolean"
-            },
-            "execution": {
-              "type": "object"
-            },
-            "input_schema_version": {
-              "type": "integer"
-            },
-            "output_schema_version": {
-              "type": "integer"
-            }
-          },
-          "required": [
-            "execution",
-            "input_schema_version",
-            "output_schema_version",
-            "budget",
-            "canonical_write_authority"
-          ],
-          "type": "object"
-        },
-        "projection": {
-          "targets": [
-            "workflow-manifest",
-            "typed-broker"
-          ]
-        },
-        "reachability": {
-          "paths": [
-            "record-layer",
-            "CI",
-            "runner"
-          ]
-        }
-      },
-      "binding_moment": "before a cognition workflow is registered or dispatched",
-      "category": "hard_pre_action",
-      "control": "control-plane-workflow-manifest",
-      "enforcement_class": "deny_gate",
-      "exceptions": "This boundary does not decide whether an otherwise valid task genuinely needs AI; it refuses only untyped, unbudgeted, write-authorized, or unregistered cognition contracts."
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "The former control-plane-workflow-manifest control was retired. The rule remains prose guidance delivered by its task pack; no installed denial is claimed.",
+      "retired_control": "control-plane-workflow-manifest"
     },
     "5f8c661d": {
       "category": "judgment_advisory",
@@ -1787,11 +1631,10 @@
       "why_unenforceable": "Judgment on what is worth capturing and where."
     },
     "f5d97b4a": {
-      "binding_moment": "a Chrome-extension tool call whose target host is costar.com",
-      "category": "hard_pre_action",
-      "control": "costar_lane",
-      "enforcement_class": "deny_gate",
-      "exceptions": "none \u2014 the sanctioned Browser-pane lane is always open on the same URL, so a refusal never blocks the work"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "The former costar_lane control was retired. The rule remains prose guidance delivered by its task pack; no installed denial is claimed.",
+      "retired_control": "costar_lane"
     },
     "f92dfab2": {
       "binding_moment": "client search-packet render",
@@ -2041,9 +1884,11 @@
       "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "236ca227": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed deny gate delivers this at its binding moment."
+      "load_layer": "pack",
+      "packs": [
+        "joe-comms"
+      ],
+      "why": "Retired control; retain task guidance without claiming automatic enforcement."
     },
     "23ea0607": {
       "load_layer": "control",
@@ -2060,11 +1905,11 @@
       "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "25fab860": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "joe-comms"
       ],
-      "why": "An installed deny gate delivers this at its binding moment."
+      "why": "Retired control; retain task guidance without claiming automatic enforcement."
     },
     "25fcddee": {
       "load_layer": "pack",
@@ -2225,11 +2070,11 @@
       "why": "Claims about what the record layer cannot do arise in every domain."
     },
     "4a53ff82": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "engineering-git"
       ],
-      "why": "An installed deny gate delivers this at its binding moment. WR-000019 S3 (2026-08-27) reassigned the control to the server-side PR-only main ruleset when hooks/canonical-edit-gate.py retired; Joe's ruling 7f48abf6 (2026-09-01) reinstated that gate, so the control returns to canonical_edit and the rule is delivered at the edit again, with the merge-time ruleset still behind it."
+      "why": "Retired control; retain task guidance without claiming automatic enforcement."
     },
     "4a9188f3": {
       "load_layer": "pack",
@@ -2335,7 +2180,8 @@
       "load_layer": "pack",
       "packs": [
         "records-intake"
-      ]
+      ],
+      "why": "Retired control; retain task guidance without claiming automatic enforcement."
     },
     "5e896ed6": {
       "load_layer": "pack",
@@ -2344,11 +2190,11 @@
       ]
     },
     "5e89c211": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "engineering-git"
       ],
-      "why": "An installed deny gate delivers this at its binding moment."
+      "why": "Retired control; retain task guidance without claiming automatic enforcement."
     },
     "5f8c661d": {
       "load_layer": "pack",
@@ -3021,11 +2867,11 @@
       ]
     },
     "f5d97b4a": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "client-deal"
       ],
-      "why": "An installed deny gate delivers this at its binding moment."
+      "why": "Retired control; retain task guidance without claiming automatic enforcement."
     },
     "f92dfab2": {
       "load_layer": "control",

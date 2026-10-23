@@ -199,8 +199,10 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(value['model_calls'], 0)
 
     def test_judgment_routine_remains_configured(self):
-        from lib.headless_tasks import config
-        self.assertIn('npi-sweep-weekly', config(ROOT)['tasks'])
+        services = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
+        npi = next(row for row in services if row['key'] == 'npi-sweep-weekly')
+        self.assertEqual(npi['runtime'], 'claude-code-scheduled-task')
+        self.assertTrue((ROOT / 'ops/scheduled-tasks/npi-sweep-weekly.SKILL.md').is_file())
 
 
 

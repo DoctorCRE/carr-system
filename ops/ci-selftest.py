@@ -589,6 +589,10 @@ def test_each_class_runs_in_exactly_one_hosted_group():
 
 def test_every_test_file_in_the_tree_is_collected():
     ci = (REPO / "ops" / "ci.sh").read_text()
+    guarded = re.findall(r'\[ -f (mcp-server/test/[\w./-]+) \]', ci)
+    missing = sorted(path for path in guarded if not (REPO / path).is_file())
+    check("every conditional migration proof names an existing file", not missing,
+          f"absent files provide no coverage: {', '.join(missing)}")
     patterns: list[str] = []
     for m in re.finditer(r"for t in ([^;]+); do", ci):
         patterns += [tok for tok in m.group(1).split()
