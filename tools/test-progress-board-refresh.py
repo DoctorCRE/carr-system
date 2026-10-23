@@ -26,8 +26,8 @@ class ScheduledRefreshTests(unittest.TestCase):
                 board.command_render(Namespace(project=board.LAUNCHD_BOARD, publish=True))
         self.assertIs(raised.exception, failure)
         self.assertEqual(events, [('refresh', 'all-repos'), ('publish', 'carr-v5'), ('publish', 'all-repos')])
-        poll.assert_not_called()
-        local.assert_not_called()
+        poll.assert_called_once_with(board.LAUNCHD_BOARD)
+        local.assert_called_once_with()
         self.assertIn('legacy snapshot too large', err.getvalue())
 
     def test_refreshed_facts_and_outages_reach_orchestrator_before_legacy_error(self):
@@ -65,7 +65,7 @@ class ScheduledRefreshTests(unittest.TestCase):
                 self.assertEqual(view['sources']['portfolio'], {'state': 'stale' if outage != 'none' else 'observed', 'checked_at': fresh, 'last_success_at': old if outage != 'none' else fresh})
                 self.assertEqual(view['cards'][0]['state'], 'review' if outage != 'none' else 'merged')
                 self.assertEqual([call.args[0] for call in release.call_args_list], [] if outage == 'full' else ['DoctorCRE/carr-system'] if outage == 'partial' else ['DoctorCRE/carr-system', 'jbookout/doctorcre-app'])
-                poll.assert_not_called()
+                poll.assert_called_once_with(board.LAUNCHD_BOARD)
 
 
 if __name__ == '__main__':
