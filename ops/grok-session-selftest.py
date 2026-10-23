@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Synthetic timestamp-only tests; no real credential or provider call."""
 import importlib.util
+import contextlib
+import io
+import runpy
 import json
 from pathlib import Path
 import tempfile
@@ -8,6 +11,7 @@ import unittest
 from unittest import mock
 import subprocess
 import sys
+from types import ModuleType, SimpleNamespace
 from datetime import datetime, timedelta, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,19 +26,22 @@ class GrokSessionTests(unittest.TestCase):
     def test_public_health_section_is_narrow_and_propagates_status(self):
         # Supply synthetic results through the helper seam. This entrypoint
         # must finish without running DB/other-provider health readers.
-        harness = '''import runpy, sys, types
-sys.path.insert(0, sys.argv.pop(1))
-status = sys.argv.pop(1)
-fake = types.ModuleType("grok_session")
-fake.health_row = lambda: status + " Grok session — synthetic timestamps · run grok login"
-sys.modules["grok_session"] = fake
-path = sys.argv.pop(1)
-runpy.run_path(path, run_name="__main__")
-'''
+        sys.path.insert(0, str(ROOT / "tools"))
+        import health_breach
+        path = ROOT / "tools/health-check.py"
+        fake = ModuleType("grok_session")
         for status, code in [("OK", 0), ("WARN", 0), ("FAIL", 1)]:
-            result = subprocess.run([sys.executable, "-c", harness, str(ROOT / "tools"), status,
-                                     str(ROOT / "tools/health-check.py"), "--section", "grok-session"],
-                                    capture_output=True, text=True, timeout=10)
+            fake.health_row = lambda: status + " Grok session — synthetic timestamps · run grok login"
+            with mock.patch.dict(sys.modules, grok_session=fake), \
+                    mock.patch.object(sys, "argv", [str(path), "--section", "grok-session"]), \
+                    mock.patch.object(health_breach, "record_door", return_value=SimpleNamespace(ok=True, reply={"loops": []})), \
+                    mock.patch.object(subprocess, "run", side_effect=AssertionError("unexpected subprocess")) as process, \
+                    contextlib.redirect_stdout(io.StringIO()) as stdout, \
+                    contextlib.redirect_stderr(io.StringIO()) as stderr:
+                with self.assertRaises(SystemExit) as exited:
+                    runpy.run_path(str(path), run_name="__main__")
+                process.assert_not_called()
+            result = subprocess.CompletedProcess([], exited.exception.code, stdout.getvalue(), stderr.getvalue())
             self.assertEqual(result.returncode, code, result.stderr)
             self.assertIn(status + " Grok session", result.stdout)
             self.assertTrue(result.stdout.rstrip().endswith(

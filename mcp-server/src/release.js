@@ -45,7 +45,7 @@
 //                          on schema_migrations direct) and 0113 closed it
 //                          with a view rather than a base-table grant, to
 //                          keep that posture intact. It is NOT ground truth
-//                          either way: tools/ledger-repair.py exists because
+//                          either way: historical ledger repair was needed because
 //                          this exact table drifted from reality once already
 //                          (four migrations physically applied to production
 //                          outside the runner were invisible to it until
@@ -190,9 +190,8 @@ export async function buildRelease({ env, sql, verbCount, now = () => new Date()
       applied_count: schema.applied_count,
       ledger_sha256: schema.ledger_sha256,
       reason: schema.reason,
-      note: "what the tracking table claims, not ground truth — tools/ledger-repair.py "
-          + "records a past drift where schema_migrations fell behind migrations already "
-          + "applied to production",
+      note: "what the tracking table claims, not ground truth; use tools/migrate.py "
+          + "to check the immutable migration history and baseline before recovery",
     },
     // Read from the registry the runtime itself dispatches against, so this can
     // no more lie about the shipped command contract than verb_count can about

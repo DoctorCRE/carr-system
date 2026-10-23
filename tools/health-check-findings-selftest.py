@@ -127,7 +127,7 @@ FINDING_CALL_NAMES = {"_canonical_finding", "_red"}
 STRUCTURAL_KEYS = {
     "canonical_health_refused", "source_unreadable", "export_unreadable",
     "job_ledger", "control_state", "repo_status", "registry_integrity",
-    "credential_health", "unrecorded_failure", "tailscale",
+    "unrecorded_failure", "tailscale",
     "verb_usage",
 }
 ALWAYS_HARD_ERROR_KEYS = STRUCTURAL_KEYS | {"scheduled_jobs_evidence_unavailable"}
@@ -717,7 +717,8 @@ class CanonicalHealthTests(unittest.TestCase):
                     self.assertEqual(out.getvalue().count("HEALTH_COMPLETE"), 1)
                     self.assertIn("UNAVAILABLE Grok session", out.getvalue())
                     self.assertIn(error, out.getvalue())
-                    self.assertIn("credential health", out.getvalue())
+                    self.assertFalse(any("credential-health.py" in str(call.args[0])
+                                         for call in ns["subprocess"].run.call_args_list))
                     [finding] = ns["_FINDINGS"]
                     self.assertEqual(finding["key"], "grok_session")
                     self.assertTrue(finding["hard_error"])

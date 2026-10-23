@@ -51,15 +51,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
-  "accept-workflow": {
-    "ingress_key": "mcp-tool:accept-workflow",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "40027d7fa73418abf3158ae56c78305b80850bf3e09a2e70ac48b4ce322c4e89",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
-    "delegates_to": []
-  },
   "acknowledge-board-answer": {
     "ingress_key": "mcp-tool:acknowledge-board-answer",
     "source_locator": "mcp-server/src/board-answers.js",
@@ -91,24 +82,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:acknowledge-ready-plan-amendment",
     "source_locator": "mcp-server/src/work-request-intake.js",
     "schema_digest": "8135fef2d2ee7ba14a894765ffa34621db24796b3114a4ef9c4128f161d90ed4",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "activate-guidance-registry": {
-    "ingress_key": "mcp-tool:activate-guidance-registry",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "77dbe3168fd437060aa0d8f2f50741982858ba6614040249b8cfc1e698de7e8d",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
-    "delegates_to": []
-  },
-  "activate-rule": {
-    "ingress_key": "mcp-tool:activate-rule",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "b01819ab4ea18883102b084c26915392421468f672dc04ae519838820df7cccb",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -231,15 +204,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "admit-rule": {
-    "ingress_key": "mcp-tool:admit-rule",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "afc33dac8d4ece567dedb49bdb1c4eede435db08aae76828586edffa6b538cd2",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
   "advance-leads": {
     "ingress_key": "mcp-tool:advance-leads",
     "source_locator": "mcp-server/src/lead-automation.js",
@@ -265,15 +229,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": false,
     "authority_only": false,
-    "delegates_to": []
-  },
-  "amend-rule": {
-    "ingress_key": "mcp-tool:amend-rule",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "6b3624e7de04d0aac63258144f364b4aa0830def1b3345bae7995fc8c3d3b92d",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
     "delegates_to": []
   },
   "answer-board-question": {
@@ -427,15 +382,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": false,
     "authority_only": false,
-    "delegates_to": []
-  },
-  "approve-rule": {
-    "ingress_key": "mcp-tool:approve-rule",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "32a195235ea549852cde7c9aee68ecf5f55db4f73b89ff18d605bf0324d41237",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
     "delegates_to": []
   },
   "ask-board-question": {
@@ -836,15 +782,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "deactivate-guidance-registry": {
-    "ingress_key": "mcp-tool:deactivate-guidance-registry",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "6676c2b0adb3e0c450bbcb359df6920999ac959c93921548f1f2ea60b16d8774",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
-    "delegates_to": []
-  },
   "deal-board": {
     "ingress_key": "mcp-tool:deal-board",
     "source_locator": "mcp-server/src/tools.js",
@@ -870,15 +807,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": true,
     "authority_only": false,
-    "delegates_to": []
-  },
-  "decide-guidance-import-batch": {
-    "ingress_key": "mcp-tool:decide-guidance-import-batch",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "013869683456d458086584472600b08b8e86002b146d39c1227a6a0c5a7faef6",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
     "delegates_to": []
   },
   "decide-meeting-action": {
@@ -915,15 +843,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": false,
     "authority_only": false,
-    "delegates_to": []
-  },
-  "disable-legacy-schedule": {
-    "ingress_key": "mcp-tool:disable-legacy-schedule",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "01aa29ab4be1a680efd8990e348198b32985aab29e92279de949fe2dea816b66",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
     "delegates_to": []
   },
   "doctrine-index": {
@@ -2742,15 +2661,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "retire-rule": {
-    "ingress_key": "mcp-tool:retire-rule",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "35e2de1ff71a84e1fc2f09769487a2f9a92622f84f23f68af8e86d469b46152f",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
-    "delegates_to": []
-  },
   "retire-workflow-cutover-plan": {
     "ingress_key": "mcp-tool:retire-workflow-cutover-plan",
     "source_locator": "mcp-server/src/workflow-cutover.v5.js",
@@ -3117,15 +3027,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:supersede-work-request",
     "source_locator": "mcp-server/src/work-request-intake.js",
     "schema_digest": "7be9820032d47bb94888aad94a52f89a50aa5fa7e0638d1d689fefdca03f8ccf",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "teach": {
-    "ingress_key": "mcp-tool:teach",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "ac28ee6aec77dace4d0f7b0493edd9815f1171606bc04a94bcd8a39a735fc8e4",
     "write": true,
     "human_only": false,
     "authority_only": false,
