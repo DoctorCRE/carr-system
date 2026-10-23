@@ -18,10 +18,6 @@ from pathlib import Path
 LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 # Source definitions that have not passed their activation cutover.
 DEFINITION_ONLY: dict[str, str] = {
-    "com.carr.repo-hygiene-janitor.plist":
-        "the repo-hygiene janitor plans branch, worktree and cache cleanup; its "
-        "gate is a separately reviewed live-effect packet, so the definition is "
-        "written down and left uninstalled until that packet is approved",
     "com.carr.resource-collector.plist":
         "the capacity/model-route collector ships with no trigger key until its "
         "cadence and ops.service mapping are decided, so the definition is "

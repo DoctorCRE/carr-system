@@ -304,7 +304,7 @@ Do not paraphrase that checklist from memory. Read it.
 ### lane = `sysdev` (seat: System development / growth by multiplication)
 
 **Repo state.** Uncommitted durable work is work that reaches nobody, and the standing rule is
-that ALL durable code lives in `jbookout/carr-system` and nowhere else.
+that ALL durable code lives in `DoctorCRE/carr-system` and nowhere else.
 ```
 cd ~/carr-system && git status --short && git log --oneline -10 && git log origin/main..HEAD --oneline
 ```

@@ -52,8 +52,8 @@ def load(name="health_breach_under_test"):
 SEAT = ("FAIL grok latency=3.151s layer=auth · on breach: open/update one deduplicated loop "
         "seat-health:grok; owner orchestrator; Restore grok login on Studio. Verify: this seat must "
         "return exactly 323 for 17 * 19; auto-clear on the next passing daily probe.")
-JANITOR = ("WARN branch janitor: scheduled evidence absent or stale · on breach: owner orchestrator · "
-           "run hooks/worktree-self-plumb.py --reap --fleet · verify out/orch/branch-janitor-report.json · "
+SCHEDULE = ("WARN fixture schedule: scheduled evidence absent or stale · on breach: owner orchestrator · "
+           "run ops/fixture-schedule.py · verify out/orch/fixture-schedule-report.json · "
            "auto-clear after a complete scheduled run")
 GROK = ("FAIL Grok session — credential timestamps unavailable or invalid · on breach: one incident loop; "
         "one alert attempt/channel/UTC day · owner Joe · remediation run grok login · verify grok models "
@@ -72,9 +72,6 @@ UPTIME = ("WARN production uptime · monitor unreachable or response invalid · 
           "owner orchestrator; fix: restore failed routes or configure/restart carr-uptime and its secrets; "
           "verify: three JSON probes, Healthchecks down/up delivery, and incident loop reconciliation; "
           "auto-clear: fresh passing monitor, no pending alerts or incident loops")
-JEV = ("no usable call recorded; recent attempt failed (state_unreadable); loop error · on breach: open/update "
-       "one deduplicated loop (owner Joe; repair the Jev outage state file); verify a usable Jev judgment; "
-       "auto-clear on that judgment")
 TAILSCALE = ("FAIL tailscale stopped · on breach: open/update one dedup loop 'Tailscale down on this Mac' · "
              "owner orchestrator · fix: launchctl kickstart gui/$(id -u)/com.carr.tailscale-up · verify: "
              "Tailscale status --json reports Running · auto-clear: the next health run reads a running node")
@@ -159,7 +156,7 @@ def finding(key, detail, subject=""):
 
 
 RED = [
-    finding("branch_janitor", JANITOR, "three-repo-retirement"),   # bound, no loop yet -> filed
+    finding("fixture_schedule", SCHEDULE, "fixture-schedule"),   # bound, no loop yet -> filed
     finding("ai_seat_health", SEAT, "grok"),                       # reader-filed loop -> covered
     finding("export_receipt", "STALE vendors.xlsx (last ok 2026-10-09T07:13)", "vendors.xlsx"),  # unbound
     finding("calendar_prebrief_missed_run", PREBRIEF, "calendar-prebrief-projection-joe-daily"),  # #665
@@ -172,13 +169,13 @@ def world(lib):
     """Prior state: a reader-filed seat loop (twice: a real duplicate), loop
     #665, and two loops this consumer filed for rows that are now green."""
     green_claude = lib.breach_from_finding(finding("tailscale", TAILSCALE, "local-node"))
-    green_joe = lib.breach_from_finding(finding("jev_live_outage", JEV))
+    green_joe = lib.breach_from_finding(finding("ai_seat_health", SEAT, "grok-retired-seat"))
     return FakeDoor([
         {"number": 713, "body": SEAT.split(" · ", 1)[1]},
         {"number": 738, "body": SEAT.split(" · ", 1)[1]},
         {"number": 665, "body": "2026-09-27: helper INSTALLED on the Studio", "owner": "joe"},
         {"number": 790, "body": f"{green_claude.tag}{green_claude.digest}] FAIL tailscale stopped\nrest"},
-        {"number": 791, "body": f"{green_joe.tag}{green_joe.digest}] WARN jev\nrest", "owner": "joe"},
+        {"number": 791, "body": f"{green_joe.tag}{green_joe.digest}] FAIL grok retired seat\nrest", "owner": "joe"},
     ])
 
 
@@ -194,7 +191,7 @@ def scenario(lib):
 
         before = lib.audit(RED, door)
         jobs_row = "scheduled_jobs_failing_exit/com.carr.calendar-eventkit"
-        expect(sorted(before.unlooped) == sorted(["branch_janitor/three-repo-retirement",
+        expect(sorted(before.unlooped) == sorted(["fixture_schedule/fixture-schedule",
                                                   "export_receipt/vendors.xlsx", "grok_session", jobs_row]),
                f"audit before act: unlooped {before.unlooped}")
         expect(before.delegated == [(jobs_row, "tools/job-watchdog.py")], f"delegated {before.delegated}")
@@ -206,14 +203,14 @@ def scenario(lib):
         decisions = {r["row_id"]: r["decision"] for r in report.receipts}
         adds = door.writes("add-loop")
         expect(len(adds) == 2, f"first run filed {len(adds)} loop(s), want 2")
-        expect(decisions.get("branch_janitor/three-repo-retirement") == "filed", f"janitor: {decisions}")
+        expect(decisions.get("fixture_schedule/fixture-schedule") == "filed", f"schedule: {decisions}")
         expect(decisions.get("grok_session") == "filed", f"grok: {decisions}")
         grok_add = [a for _, a in adds if "grok_session" in a["body"]]
         expect(bool(grok_add) and grok_add[0]["owner"] == "joe" and grok_add[0]["blocker"] == "human_only",
                "a row owned by Joe must file a loop owned by joe with a human_only blocker")
-        janitor_add = [a for _, a in adds if "branch_janitor" in a["body"]]
-        expect(bool(janitor_add) and "Remediation: run hooks/worktree-self-plumb.py --reap --fleet"
-               in janitor_add[0]["body"] and "Verify: out/orch/branch-janitor-report.json" in janitor_add[0]["body"],
+        schedule_add = [a for _, a in adds if "fixture_schedule" in a["body"]]
+        expect(bool(schedule_add) and "Remediation: run ops/fixture-schedule.py"
+               in schedule_add[0]["body"] and "Verify: out/orch/fixture-schedule-report.json" in schedule_add[0]["body"],
                "the filed loop must carry the row's remediation and verify text")
         expect(decisions.get("ai_seat_health/grok") == "covered", "reader-filed seat loop must be covered")
         seat = [r for r in report.receipts if r["row_id"] == "ai_seat_health/grok"]
@@ -237,12 +234,12 @@ def scenario(lib):
         writes_before = len(door.writes())
         again = lib.act(RED, door, receipts_path=receipts, complete=True, now=NOW)
         expect(len(door.writes()) == writes_before, "a second run with the same rows must write nothing")
-        expect(len([l for l in door.open_loops() if "branch_janitor" in l["body"]]) == 1,
-               "exactly one open loop for the janitor row after two runs")
+        expect(len([l for l in door.open_loops() if "fixture_schedule" in l["body"]]) == 1,
+               "exactly one open loop for the schedule row after two runs")
         expect(again.count("unchanged") == 2, f"second run: {again.summary()}")
 
         changed = [dict(f) for f in RED]
-        changed[0]["detail"] = JANITOR.replace("--reap --fleet", "--reap --fleet --verbose")
+        changed[0]["detail"] = SCHEDULE.replace("fixture-schedule.py", "fixture-schedule.py --verbose")
         third = lib.act(changed, door, receipts_path=receipts, complete=True, now=NOW)
         expect(third.count("updated") == 1 and len(door.writes("add-loop")) == 2,
                "a changed bound action updates the same loop, never files another")
@@ -272,11 +269,11 @@ class HealthActTests(unittest.TestCase):
     def test_mutant_that_skips_a_red_row_fails(self):
         lib = load("mutant_skip")
         real = lib.breach_from_finding
-        def drop_janitor(f):
+        def drop_schedule(f):
             b = real(f)
-            return b.__class__(**{**b.__dict__, "action": None}) if f["key"] == "branch_janitor" else b
-        lib.breach_from_finding = drop_janitor
-        self.assertTrue(any("janitor" in f for f in scenario(lib)))
+            return b.__class__(**{**b.__dict__, "action": None}) if f["key"] == "fixture_schedule" else b
+        lib.breach_from_finding = drop_schedule
+        self.assertTrue(any("schedule" in f for f in scenario(lib)))
 
     def test_mutant_that_never_auto_clears_fails(self):
         lib = load("mutant_noclear")
@@ -360,11 +357,9 @@ class HealthActTests(unittest.TestCase):
              "restore failed routes or configure/restart carr-uptime and its secrets",
              "three JSON probes, Healthchecks down/up delivery, and incident loop reconciliation",
              "fresh passing monitor, no pending alerts or incident loops", "health-breach:production_uptime"),
-            ("jev_live_outage", JEV, "Joe", "repair the Jev outage state file", "a usable Jev judgment",
-             "on that judgment", "health-breach:jev_live_outage"),
-            ("branch_janitor", JANITOR, "orchestrator", "run hooks/worktree-self-plumb.py --reap --fleet",
-             "out/orch/branch-janitor-report.json", "after a complete scheduled run",
-             "health-breach:branch_janitor"),
+            ("fixture_schedule", SCHEDULE, "orchestrator", "run ops/fixture-schedule.py",
+             "out/orch/fixture-schedule-report.json", "after a complete scheduled run",
+             "health-breach:fixture_schedule"),
             ("tailscale", TAILSCALE, "orchestrator", "launchctl kickstart gui/$(id -u)/com.carr.tailscale-up",
              "Tailscale status --json reports Running", "the next health run reads a running node",
              "Tailscale down on this Mac"),
@@ -384,7 +379,7 @@ class HealthActTests(unittest.TestCase):
         """A phrase that drifted from its reader's add-loop body would make the
         consumer file a duplicate beside the reader's loop."""
         lib = load()
-        sources = {"production_uptime": "tools/uptime_health.py", "jev_live_outage": "tools/jev_outage_health.py",
+        sources = {"production_uptime": "tools/uptime_health.py",
                    "grok_session": "ops/grok_session.py"}
         self.assertEqual(set(sources), set(lib.READER_LOOP_PHRASES))
         for key, phrases in lib.READER_LOOP_PHRASES.items():

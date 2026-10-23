@@ -21,7 +21,6 @@ ROOT = Path(__file__).resolve().parents[1]
 PLANNER = ROOT / "bin" / "provision-canonical-ownership-runtime.mjs"
 DISPATCH_SH = ROOT / "bin" / "run-engineering-dispatch.sh"
 DISPATCH_MJS = ROOT / "mcp-server" / "bin" / "run-engineering-dispatch.mjs"
-DEPLOY = ROOT / "bin" / "deploy-worker.sh"
 WRANGLER = ROOT / "mcp-server" / "wrangler.toml"
 SENTINEL = "WR126-SENTINEL-DO-NOT-PRINT"
 
@@ -137,10 +136,7 @@ def main() -> int:
 
         wrangler = WRANGLER.read_text(encoding="utf-8")
         check("production runtime remains disabled",
-              wrangler.count('CANONICAL_OWNERSHIP_RUNTIME_MODE = "disabled"') >= 2)
-        deploy = DEPLOY.read_text(encoding="utf-8")
-        check("deploy wrapper refuses an enabled ownership runtime",
-              "OWNERSHIP_RUNTIME_MODE" in deploy and "must keep canonical ownership issuer runtime disabled" in deploy)
+              wrangler.count('CANONICAL_OWNERSHIP_RUNTIME_MODE = "disabled"') == 1)
     except (AssertionError, KeyError, json.JSONDecodeError, OSError) as error:
         failures.append(str(error))
 

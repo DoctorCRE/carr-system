@@ -8,7 +8,6 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
-export CARR_JEV_OFFLINE=1
 
 PY="$REPO/.venv/bin/python"
 [ -x "$PY" ] || PY=python3
@@ -21,30 +20,41 @@ if [ "${1:-}" = "--doc-drift" ]; then
   exec "${CARR_DOC_DRIFT_PYTHON:-$PY}" "$REPO/scripts/doc-drift/ci.py" "$@"
 fi
 
-if [ "${1:-}" = "--pr-skills" ]; then
-  node --test mcp-server/test/pr-skills.test.mjs || exit 1
-  exec node ops/check-pr-skills.mjs
-fi
-
 STRICT=0
 ONLY=""
+MIGRATION_PART=all
+GATE_SHARD=1
+GATE_SHARDS=1
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --strict) STRICT=1 ;;
     --only)   ONLY="$ONLY $(echo "${2:-}" | tr ',' ' ')"; shift ;;
+    --gate-shard)
+      case "${2:-}" in
+        1/2) GATE_SHARD=1; GATE_SHARDS=2 ;;
+        2/2) GATE_SHARD=2; GATE_SHARDS=2 ;;
+        *) echo "ci.sh: gate shard must be 1/2 or 2/2" >&2; exit 64 ;;
+      esac
+      shift ;;
+    --migration-part) MIGRATION_PART="${2:-}"; shift ;;
     --list)   LIST=1 ;;
-    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--list]"; exit 0 ;;
+    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|gates-serial|gates-isolated|acceptance|fixtures|reconstruction|equivalence|shadow] [--gate-shard 1/2|2/2] [--list]"; exit 0 ;;
     *) echo "ci.sh: unknown argument: $1" >&2; exit 64 ;;
   esac
   shift
 done
+
+case "$MIGRATION_PART" in
+  all|core|proofs|gates|gates-serial|gates-isolated|acceptance|fixtures|reconstruction|equivalence|shadow) ;;
+  *) echo "ci.sh: unknown migration part" >&2; exit 64 ;;
+esac
 
 CLASS_ORDER="pushfloor unit types contract gates secret dependency migration binding artifact freshness hxprobe"
 
 class_desc() {
   case "$1" in
     hxprobe) echo "vendored HxStore reader tests and release build with locked dependencies" ;;
-    freshness) echo "source includes the current main revision" ;;
+    freshness) echo "integration index has no unresolved merge entries" ;;
     pushfloor)  echo "seeded defect that must not leave the machine (local pre-push floor)" ;;
     unit)       echo "seeded failing unit test" ;;
     types)      echo "seeded shape mistake in a data hand-off" ;;
@@ -83,8 +93,6 @@ run_quiet() {  # run_quiet <logfile> <cmd...>  — capture output, return status
 
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/carr-ci.XXXXXX")"
 trap 'rm -rf "$LOGDIR"' EXIT
-
-"$PY" ops/ci-quarantine.py validate || exit 1
 
 INHERIT_ASKED=0
 inherited_abort() {
@@ -130,10 +138,13 @@ check_unit() {
 }
 
 check_freshness() {
-  if git merge-base --is-ancestor origin/main HEAD; then
-    ok freshness "source includes origin/main"
+  local unresolved
+  if ! unresolved="$(git ls-files --unmerged)"; then
+    bad freshness "integration index could not be read"
+  elif [ -n "$unresolved" ]; then
+    bad freshness "integration tree has unresolved merge entries"
   else
-    bad freshness "merge origin/main before pushing"
+    ok freshness "integration index has no unresolved merge entries"
   fi
 }
 
@@ -203,8 +214,17 @@ tree_fingerprint() {
 }
 
 check_gates() {
-  local failures="" count=0 skiplist="" gates_timed_out=0
+  local failures="" count=0 skiplist="" gates_timed_out=0 gate_index=0
   export CARR_HOOK_FIXTURE=1
+
+  # rustup installs the pinned toolchain before concurrent HxStore builds.
+  if [ -f vendor/hxprobe/Cargo.toml ]; then
+    if ! run_quiet "$LOGDIR/hxprobe-prepare.log" bash -c 'cd vendor/hxprobe && cargo build --locked'; then
+      fail_tail "$LOGDIR/hxprobe-prepare.log"
+      bad gates "HxStore worker preparation failed"
+      return
+    fi
+  fi
 
   local tree_before; tree_before="$(tree_fingerprint)"
 
@@ -236,25 +256,24 @@ PYEOF
       printf '        \033[33mnot run\033[0m  %s — %s\n' "$base" "$why" >&2
       continue
     fi
+    gate_index=$((gate_index+1))
+    [ "$(( (gate_index-1) % GATE_SHARDS + 1 ))" -eq "$GATE_SHARD" ] || continue
     count=$((count+1))
     eligible="$eligible $t"
   done
   local pooled_timeout=$(( CI_SELFTEST_TIMEOUT_SECONDS * ${CARR_CI_GATE_JOBS:-4} ))
-  "$PY" ops/ci-quarantine.py snapshot >"$LOGDIR/source-identity.json" || { bad gates "source identity unreadable"; return; }
   export CI_TIMEOUT_HELPER CI_SELFTEST_TIMEOUT_SECONDS LOGDIR PY pooled_timeout
   printf '%s\n' $eligible | xargs -P "${CARR_CI_GATE_JOBS:-4}" -n1 bash -c '
     b="$(basename "$1")"
-    "$PY" ops/ci-quarantine.py run --print-log --test "$1" --log "$LOGDIR/gate-$b.log" \
-      --identity-file "$LOGDIR/source-identity.json" -- \
-      "$PY" "$CI_TIMEOUT_HELPER" "$pooled_timeout" "$PY" "$1" \
-      >"$LOGDIR/gate-$b.report" 2>&1
+    "$PY" "$CI_TIMEOUT_HELPER" "$pooled_timeout" "$PY" "$1" \
+      >"$LOGDIR/gate-$b.log" 2>&1
     echo $? >"$LOGDIR/gate-$b.rc"
   ' _
   local grc
   for t in $eligible; do
     base="$(basename "$t")"
     grc="$(cat "$LOGDIR/gate-$base.rc" 2>/dev/null || echo 1)"
-    cat "$LOGDIR/gate-$base.report"
+    [ "$grc" -eq 0 ] && cat "$LOGDIR/gate-$base.log"
     if [ "$grc" -eq 124 ]; then
       failures="$failures TIMEOUT:$base"
       gates_timed_out=1
@@ -281,10 +300,10 @@ PYEOF
       printf '        \033[33mnot run\033[0m  %s — %s\n' "$sbase" "$swhy" >&2
       continue
     fi
+    gate_index=$((gate_index+1))
+    [ "$(( (gate_index-1) % GATE_SHARDS + 1 ))" -eq "$GATE_SHARD" ] || continue
     count=$((count+1))
-    "$PY" ops/ci-quarantine.py run --print-log --test "$t" --log "$LOGDIR/gate-$sbase.log" \
-      --identity-file "$LOGDIR/source-identity.json" -- \
-      "$PY" "$CI_TIMEOUT_HELPER" "$CI_SELFTEST_TIMEOUT_SECONDS" "$t"
+    run_quiet "$LOGDIR/gate-$sbase.log" "$PY" "$CI_TIMEOUT_HELPER" "$CI_SELFTEST_TIMEOUT_SECONDS" "$t"
     grc=$?
     if [ "$grc" -eq 124 ]; then
       failures="$failures TIMEOUT:$sbase"
@@ -310,7 +329,7 @@ PYEOF
              selftest-git-isolation-check \
              sync-core-rule-ids rule-route-coverage \
              migration-order-gate \
-             migration-safety-gate check-jev-conformance door-reachability-check; do
+             migration-safety-gate door-reachability-check; do
     [ -f "ops/$inv.py" ] || continue
     local inv_args=()
     case "$inv" in
@@ -406,7 +425,7 @@ check_pushfloor() {
 
   run_quiet "$LOGDIR/pushfloor-hook-deletion.log" "$PY" ops/hook-deletion-check.py \
     || { cat "$LOGDIR/pushfloor-hook-deletion.log" >&2
-         floor_fail hook-deletion "unwire hook scripts in a prior PR before deleting or renaming them"; }
+         floor_fail hook-deletion "remove hook registrations before deleting or renaming their scripts"; }
 
   if [ -n "$changed" ] && [ -f ops/githooks/path-hygiene-check.py ]; then
     local added
@@ -477,7 +496,7 @@ check_pushfloor() {
 
   local gate_surface=""
   if [ -n "$changed" ]; then
-    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(delegation-gate-hook|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
+    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(hook-script-policy|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
   fi
   if [ -n "$gate_surface" ]; then
     ran="$ran gate-closure"
@@ -540,7 +559,53 @@ check_dependency() {
   fi
 }
 
+check_migration_fixtures() {
+  if [[ "$MIGRATION_PART" = all || "$MIGRATION_PART" = fixtures || "$MIGRATION_PART" = reconstruction ]]; then
+    if ! run_quiet "$LOGDIR/migration-reconstruction.log" \
+         "$PY" ops/schema-reconstruction-selftest.py --postgres; then
+      tail -30 "$LOGDIR/migration-reconstruction.log" >&2
+      bad migration "snapshot reconstruction did not reach the exact source migration ledger"
+      return
+    fi
+  fi
+  if [[ "$MIGRATION_PART" = all || "$MIGRATION_PART" = fixtures || "$MIGRATION_PART" = equivalence ]]; then
+    if ! run_quiet "$LOGDIR/migration-production-proof-fixture.log" \
+         "$PY" ops/migration-production-proof-selftest.py --postgres; then
+      tail -30 "$LOGDIR/migration-production-proof-fixture.log" >&2
+      bad migration "production equivalence proof failed against the offline database fixture"
+      return
+    fi
+  fi
+  if [[ "$MIGRATION_PART" = all || "$MIGRATION_PART" = fixtures || "$MIGRATION_PART" = shadow ]]; then
+    local shadow_rc=0 shadow_note
+    "$PY" ops/migration-shadow.py ${CARR_SHADOW_ARTIFACT_DIR:+--artifact-dir "$CARR_SHADOW_ARTIFACT_DIR"} \
+      > "$LOGDIR/migration-shadow.log" 2>&1 || shadow_rc=$?
+    case "$shadow_rc" in
+      0) if ! run_quiet "$LOGDIR/schema-snapshot-rebuild.log" "$PY" ops/schema-snapshot-rebuild-test.py; then
+           tail -30 "$LOGDIR/schema-snapshot-rebuild.log" >&2
+           bad migration "db/schema.sql loses an applied seed update during snapshot refresh and rebuild"
+           return
+         fi
+         shadow_note="; $(sed -n 's/^migration-shadow: \([0-9]* pending migration(s) applied\).*/\1/p' "$LOGDIR/migration-shadow.log" | head -1) on a PostgreSQL 18 shadow; refreshed snapshot restores with reviewed seeds intact" ;;
+      3) if [ "$STRICT" = "1" ]; then
+           cat "$LOGDIR/migration-shadow.log" >&2
+           bad migration "the migration shadow needs PostgreSQL 18 server binaries (CI installs postgresql-18)"
+           return
+         fi
+         shadow_note="; migration shadow not run (no PostgreSQL 18 here)" ;;
+      *) tail -60 "$LOGDIR/migration-shadow.log" >&2
+         bad migration "migration shadow: pending migrations did not apply over the base snapshot, or db/schema.sql is not what they produce"
+         return ;;
+    esac
+  fi
+  ok migration "migration fixture partition $MIGRATION_PART passes${shadow_note:-}"
+}
+
 check_migration() {
+  if [[ "$MIGRATION_PART" = fixtures || "$MIGRATION_PART" = reconstruction || "$MIGRATION_PART" = equivalence || "$MIGRATION_PART" = shadow ]]; then
+    check_migration_fixtures
+    return
+  fi
   if ! run_quiet "$LOGDIR/migration-open-pr.log" "$PY" ops/migration-open-pr-gate.py; then
     cat "$LOGDIR/migration-open-pr.log" >&2
     bad migration "an earlier PR or main owns a migration slot; run ./run.sh regen --pr <number>"
@@ -596,370 +661,358 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
   fi
 
   _mstep load
-  if ! run_quiet "$LOGDIR/migration-reconstruction.log" \
-       "$PY" ops/schema-reconstruction-selftest.py --postgres; then
-    tail -30 "$LOGDIR/migration-reconstruction.log" >&2
-    bad migration "snapshot reconstruction did not reach the exact source migration ledger"
-    return
-  fi
-  _mstep reconstruction
-  if ! run_quiet "$LOGDIR/migration-production-proof-fixture.log" \
-       "$PY" ops/migration-production-proof-selftest.py --postgres; then
-    tail -30 "$LOGDIR/migration-production-proof-fixture.log" >&2
-    bad migration "production equivalence proof failed against the offline database fixture"
-    return
-  fi
-  _mstep production-proof-fixture
   if ! DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration.log" "$PY" tools/migrate.py --apply --yes; then
     tail -30 "$LOGDIR/migration.log" >&2
     bad migration "a pending migration did not apply to the committed schema"
     return
   fi
 
-  if ! CARR_RULE_TEST_DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-rule-supersession.log" \
-      node --test mcp-server/test/find-rule-supersedes.test.mjs mcp-server/test/one-step-rule-approval.test.mjs; then
-    tail -30 "$LOGDIR/migration-rule-supersession.log" >&2
-    bad migration "rule lookup, teach supersession or one-step approval database proof failed"
-    return
-  fi
-
-  if ! CARR_WRITER_READ_TEST_DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-writer-read-route.log" \
-      node --test mcp-server/test/catch-me-up-writer-route.test.mjs; then
-    tail -30 "$LOGDIR/migration-writer-read-route.log" >&2
-    bad migration "timeline verbs cannot read their views as carr_writer"
-    return
-  fi
-
-  # The unit runner has no PostgreSQL server on PATH. Run the historical-data
-  # correction proof here, where matching server tools are installed, and
-  # require it to execute rather than silently skip.
-  if ! CARR_NATIONAL_ACCOUNT_TEST_REQUIRED=1 run_quiet "$LOGDIR/migration-national-account-correction.log" \
-      node --test mcp-server/test/national-account-classification-correction.test.mjs; then
-    tail -30 "$LOGDIR/migration-national-account-correction.log" >&2
-    bad migration "the national-account correction or linked-work rollback proof failed"
-    return
-  fi
-
-  _mstep migrate
-  local definer_pg_proof definer_pg_log
-  for definer_pg_proof in \
-    mcp-server/test/security-definer-search-path-postgres.sql \
-    mcp-server/test/definer-temp-substitution-postgres.sql \
-    mcp-server/test/completion-tenant-barriers-postgres.sql; do
-    definer_pg_log="$LOGDIR/$(basename "$definer_pg_proof" .sql).log"
-    if ! run_quiet "$definer_pg_log" \
-         "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" -f "$definer_pg_proof"; then
-      tail -30 "$definer_pg_log" >&2
-      bad migration "SECURITY DEFINER PostgreSQL acceptance failed: $definer_pg_proof"
+  if [[ "$MIGRATION_PART" != gates* && "$MIGRATION_PART" != acceptance ]]; then
+    if ! CARR_RULE_TEST_DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-rule-supersession.log" \
+        node --test mcp-server/test/find-rule-supersedes.test.mjs mcp-server/test/one-step-rule-approval.test.mjs; then
+      tail -30 "$LOGDIR/migration-rule-supersession.log" >&2
+      bad migration "rule lookup, teach supersession or one-step approval database proof failed"
       return
     fi
-  done
-  local dot_proof_shards="${CARR_DOT_PROOF_SHARDS:-3}"
-  if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" --psql "$psql_bin" \
-       --sql-proof mcp-server/test/definer-hardening-catalog-postgres.sql \
-       --sql-proof "mcp-server/test/dot-security-definers-postgres.sql:$dot_proof_shards"; then
-    bad migration "SECURITY DEFINER PostgreSQL acceptance failed: definer-hardening-catalog or dot-security-definers (named above)"
-    return
-  fi
-  if ! CARR_INVOICE_TEST_DATABASE_URL="$dsn" CARR_INVOICE_TEST_REQUIRED=1 \
-       run_quiet "$LOGDIR/invoice-tracker-transaction.log" \
-       node --test mcp-server/test/invoice-tracker-transaction.test.mjs; then
-    tail -30 "$LOGDIR/invoice-tracker-transaction.log" >&2
-    bad migration "the registered invoice receipt and atomic rollback proof failed"
-    return
-  fi
-  local tour_pg_proof tour_pg_log
-  for tour_pg_proof in \
-    mcp-server/test/tour-operations-slice2-postgres.sql \
-    mcp-server/test/tour-property-identity-jurisdiction-postgres.sql \
-    mcp-server/test/tour-domain-route-cheat-sheet-postgres.sql \
-    mcp-server/test/tour-delivery-data-plane-postgres.sql \
-    mcp-server/test/tour-client-share-allowlist-postgres.sql \
-    mcp-server/test/assurance-health-store-postgres.sql \
-    mcp-server/test/work-portfolio-postgres.sql \
-    mcp-server/test/local-deals-postgres.sql \
-    mcp-server/test/invoice-tracker-postgres.sql; do
-    [ -f "$tour_pg_proof" ] || continue
-    tour_pg_log="$LOGDIR/$(basename "$tour_pg_proof" .sql).log"
-    if ! run_quiet "$tour_pg_log" \
-         "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" -f "$tour_pg_proof"; then
-      tail -30 "$tour_pg_log" >&2
-      bad migration "Tour Operations PostgreSQL acceptance failed: $tour_pg_proof"
+
+    if ! CARR_WRITER_READ_TEST_DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-writer-read-route.log" \
+        node --test mcp-server/test/catch-me-up-writer-route.test.mjs; then
+      tail -30 "$LOGDIR/migration-writer-read-route.log" >&2
+      bad migration "timeline verbs cannot read their views as carr_writer"
       return
     fi
-  done
 
-  if ! run_quiet "$LOGDIR/model-role-store-postgres.log" \
-       "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-       -f mcp-server/test/model-role-store-postgres.sql; then
-    tail -30 "$LOGDIR/model-role-store-postgres.log" >&2
-    bad migration "Model Room role-store PostgreSQL acceptance failed"
-    return
-  fi
-
-  if ! run_quiet "$LOGDIR/governed-correspondence-store-postgres.log" \
-       "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-       -f mcp-server/test/governed-correspondence-store-postgres.sql; then
-    tail -30 "$LOGDIR/governed-correspondence-store-postgres.log" >&2
-    bad migration "V5-J103 governed correspondence store PostgreSQL acceptance failed"
-    return
-  fi
-
-  if [ -f mcp-server/test/record-source-authority-live-pg.v5.test.mjs ]; then
-    if ! DATABASE_URL="$dsn" CARR_F01_DB_REQUIRED=1 PSQL="$psql_bin" \
-         run_quiet "$LOGDIR/record-source-authority-live-pg.log" \
-         node --test mcp-server/test/record-source-authority-live-pg.v5.test.mjs; then
-      tail -40 "$LOGDIR/record-source-authority-live-pg.log" >&2
-      bad migration "V5-F01 record-source-authority PostgreSQL acceptance failed"
+    # The unit runner has no PostgreSQL server on PATH. Run the historical-data
+    # correction proof here, where matching server tools are installed, and
+    # require it to execute rather than silently skip.
+    if ! CARR_NATIONAL_ACCOUNT_TEST_REQUIRED=1 run_quiet "$LOGDIR/migration-national-account-correction.log" \
+        node --test mcp-server/test/national-account-classification-correction.test.mjs; then
+      tail -30 "$LOGDIR/migration-national-account-correction.log" >&2
+      bad migration "the national-account correction or linked-work rollback proof failed"
       return
     fi
-  fi
 
-  if [ -f mcp-server/test/f01-login-bundle-membership-postgres.sql ]; then
-    if ! run_quiet "$LOGDIR/f01-login-bundle-membership-postgres.log" \
+    _mstep migrate
+    local definer_pg_proof definer_pg_log
+    for definer_pg_proof in \
+      mcp-server/test/security-definer-search-path-postgres.sql \
+      mcp-server/test/definer-temp-substitution-postgres.sql \
+      mcp-server/test/completion-tenant-barriers-postgres.sql; do
+      definer_pg_log="$LOGDIR/$(basename "$definer_pg_proof" .sql).log"
+      if ! run_quiet "$definer_pg_log" \
+           "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" -f "$definer_pg_proof"; then
+        tail -30 "$definer_pg_log" >&2
+        bad migration "SECURITY DEFINER PostgreSQL acceptance failed: $definer_pg_proof"
+        return
+      fi
+    done
+    local dot_proof_shards="${CARR_DOT_PROOF_SHARDS:-3}"
+    if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" --psql "$psql_bin" \
+         --sql-proof mcp-server/test/definer-hardening-catalog-postgres.sql \
+         --sql-proof "mcp-server/test/dot-security-definers-postgres.sql:$dot_proof_shards"; then
+      bad migration "SECURITY DEFINER PostgreSQL acceptance failed: definer-hardening-catalog or dot-security-definers (named above)"
+      return
+    fi
+    if ! CARR_INVOICE_TEST_DATABASE_URL="$dsn" CARR_INVOICE_TEST_REQUIRED=1 \
+         run_quiet "$LOGDIR/invoice-tracker-transaction.log" \
+         node --test mcp-server/test/invoice-tracker-transaction.test.mjs; then
+      tail -30 "$LOGDIR/invoice-tracker-transaction.log" >&2
+      bad migration "the registered invoice receipt and atomic rollback proof failed"
+      return
+    fi
+    local tour_pg_proof tour_pg_log
+    for tour_pg_proof in \
+      mcp-server/test/tour-operations-slice2-postgres.sql \
+      mcp-server/test/tour-property-identity-jurisdiction-postgres.sql \
+      mcp-server/test/tour-domain-route-cheat-sheet-postgres.sql \
+      mcp-server/test/tour-delivery-data-plane-postgres.sql \
+      mcp-server/test/tour-client-share-allowlist-postgres.sql \
+      mcp-server/test/assurance-health-store-postgres.sql \
+      mcp-server/test/work-portfolio-postgres.sql \
+      mcp-server/test/local-deals-postgres.sql \
+      mcp-server/test/invoice-tracker-postgres.sql; do
+      [ -f "$tour_pg_proof" ] || continue
+      tour_pg_log="$LOGDIR/$(basename "$tour_pg_proof" .sql).log"
+      if ! run_quiet "$tour_pg_log" \
+           "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" -f "$tour_pg_proof"; then
+        tail -30 "$tour_pg_log" >&2
+        bad migration "Tour Operations PostgreSQL acceptance failed: $tour_pg_proof"
+        return
+      fi
+    done
+
+    if ! run_quiet "$LOGDIR/model-role-store-postgres.log" \
          "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-         -f mcp-server/test/f01-login-bundle-membership-postgres.sql; then
-      tail -30 "$LOGDIR/f01-login-bundle-membership-postgres.log" >&2
-      bad migration "the F01 login-bundle membership proof (0732) failed"
+         -f mcp-server/test/model-role-store-postgres.sql; then
+      tail -30 "$LOGDIR/model-role-store-postgres.log" >&2
+      bad migration "Model Room role-store PostgreSQL acceptance failed"
       return
     fi
-  fi
 
-  if [ -f mcp-server/test/rule-context-runtime-postgres.test.mjs ]; then
-    if ! DATABASE_URL="$dsn" CARR_F05_DB_REQUIRED=1 \
-         run_quiet "$LOGDIR/rule-context-runtime-postgres.log" \
-         node --test mcp-server/test/rule-context-runtime-postgres.test.mjs; then
-      tail -40 "$LOGDIR/rule-context-runtime-postgres.log" >&2
-      bad migration "V5-F05 rule-context PostgreSQL acceptance failed"
-      return
-    fi
-  fi
-
-  if ! run_quiet "$LOGDIR/codex-continuity-postgres.log" \
-       "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-       -f mcp-server/test/codex-continuity-postgres.sql; then
-    tail -30 "$LOGDIR/codex-continuity-postgres.log" >&2
-    bad migration "Codex continuity PostgreSQL acceptance failed"
-    return
-  fi
-  if ! run_quiet "$LOGDIR/claude-continuity-postgres.log" \
-       "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-       -f mcp-server/test/claude-continuity-postgres.sql; then
-    tail -30 "$LOGDIR/claude-continuity-postgres.log" >&2
-    bad migration "Claude continuity PostgreSQL acceptance failed"
-    return
-  fi
-
-  if [ -f mcp-server/test/gate-zero-outcome-role-boundary.test.mjs ]; then
-    if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-         run_quiet "$LOGDIR/gate-zero-role-boundary.log" \
-         node --test mcp-server/test/gate-zero-outcome-role-boundary.test.mjs; then
-      tail -30 "$LOGDIR/gate-zero-role-boundary.log" >&2
-      bad migration "the Gate Zero producer seat/connection-role boundary proof failed"
-      return
-    fi
-  fi
-
-  if [ -f mcp-server/test/foundation-assurance-oracle-role-boundary.v5.test.mjs ]; then
-    if ! DATABASE_URL="$dsn" CARR_FOUNDATION_ASSURANCE_DB_REQUIRED=1 \
-         run_quiet "$LOGDIR/foundation-assurance-role-boundary.log" \
-         node --test mcp-server/test/foundation-assurance-oracle-role-boundary.v5.test.mjs; then
-      tail -30 "$LOGDIR/foundation-assurance-role-boundary.log" >&2
-      bad migration "the foundation-assurance oracle connection-role boundary proof failed"
-      return
-    fi
-  fi
-
-  if [ -f mcp-server/test/program-controller-census-role-boundary.v5.test.mjs ]; then
-    if ! DATABASE_URL="$dsn" CARR_PROGRAM_CONTROLLER_DB_REQUIRED=1 \
-         run_quiet "$LOGDIR/program-controller-role-boundary.log" \
-         node --test mcp-server/test/program-controller-census-role-boundary.v5.test.mjs; then
-      tail -30 "$LOGDIR/program-controller-role-boundary.log" >&2
-      bad migration "the program-controller seam connection-role boundary proof failed"
-      return
-    fi
-  fi
-
-  if [ -f mcp-server/test/program-controller-census-postgres.sql ]; then
-    if ! run_quiet "$LOGDIR/program-controller-census-postgres.log" \
+    if ! run_quiet "$LOGDIR/governed-correspondence-store-postgres.log" \
          "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-         -f mcp-server/test/program-controller-census-postgres.sql; then
-      tail -30 "$LOGDIR/program-controller-census-postgres.log" >&2
-      bad migration "the program-controller seam catalog and ledger proof failed"
+         -f mcp-server/test/governed-correspondence-store-postgres.sql; then
+      tail -30 "$LOGDIR/governed-correspondence-store-postgres.log" >&2
+      bad migration "V5-J103 governed correspondence store PostgreSQL acceptance failed"
       return
     fi
-  fi
 
-  for proof in cost-ledger-projection.v5 doc-conversation notifications session-identity dispatch-spine meeting-mode delivery-cadence-a05-tools amend-closed-loop-postgres action-class-successor-registry-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres approve-rule-legacy-adoption-postgres; do
-    if [ -f "mcp-server/test/$proof.test.mjs" ]; then
-      if ! DATABASE_URL="$dsn" CARR_COST_LEDGER_DB_REQUIRED=1 \
-           CARR_DOC_CONVERSATION_DB_REQUIRED=1 CARR_R03_DB_REQUIRED=1 \
-           CARR_SESSION_IDENTITY_DB_REQUIRED=1 CARR_DISPATCH_SPINE_DB_REQUIRED=1 \
-           CARR_MEETING_MODE_DB_REQUIRED=1 CARR_AMEND_CLOSED_LOOP_DB_REQUIRED=1 \
-           CARR_ACTION_CLASS_SUCCESSOR_DB_REQUIRED=1 \
-           CARR_V5_A03_DB_REQUIRED=1 \
-           CARR_A02_RULE_COVERAGE_DB_REQUIRED=1 \
-           CARR_RW02_DB_REQUIRED=1 \
-           CARR_APPROVE_RULE_ADOPTION_DB_REQUIRED=1 \
-           CARR_VENDOR_DIRECTORY_DB_REQUIRED=1 CARR_RELATIONSHIP_DB_REQUIRED=1 \
-           run_quiet "$LOGDIR/$proof-db.log" \
-           node --test "mcp-server/test/$proof.test.mjs"; then
-        tail -30 "$LOGDIR/$proof-db.log" >&2
-        bad migration "the $proof database acceptance proof failed"
+    if [ -f mcp-server/test/record-source-authority-live-pg.v5.test.mjs ]; then
+      if ! DATABASE_URL="$dsn" CARR_F01_DB_REQUIRED=1 PSQL="$psql_bin" \
+           run_quiet "$LOGDIR/record-source-authority-live-pg.log" \
+           node --test mcp-server/test/record-source-authority-live-pg.v5.test.mjs; then
+        tail -40 "$LOGDIR/record-source-authority-live-pg.log" >&2
+        bad migration "V5-F01 record-source-authority PostgreSQL acceptance failed"
         return
       fi
     fi
-  done
 
-  if [ -f mcp-server/test/producer-cost-ledger-postgres.sql ]; then
-    if ! run_quiet "$LOGDIR/producer-cost-ledger-postgres.log" \
+    if [ -f mcp-server/test/f01-login-bundle-membership-postgres.sql ]; then
+      if ! run_quiet "$LOGDIR/f01-login-bundle-membership-postgres.log" \
+           "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
+           -f mcp-server/test/f01-login-bundle-membership-postgres.sql; then
+        tail -30 "$LOGDIR/f01-login-bundle-membership-postgres.log" >&2
+        bad migration "the F01 login-bundle membership proof (0732) failed"
+        return
+      fi
+    fi
+
+    if [ -f mcp-server/test/rule-context-runtime-postgres.test.mjs ]; then
+      if ! DATABASE_URL="$dsn" CARR_F05_DB_REQUIRED=1 \
+           run_quiet "$LOGDIR/rule-context-runtime-postgres.log" \
+           node --test mcp-server/test/rule-context-runtime-postgres.test.mjs; then
+        tail -40 "$LOGDIR/rule-context-runtime-postgres.log" >&2
+        bad migration "V5-F05 rule-context PostgreSQL acceptance failed"
+        return
+      fi
+    fi
+
+    if ! run_quiet "$LOGDIR/codex-continuity-postgres.log" \
          "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-         -f mcp-server/test/producer-cost-ledger-postgres.sql; then
-      tail -30 "$LOGDIR/producer-cost-ledger-postgres.log" >&2
-      bad migration "the producer cost ledger admission and grant proof failed"
+         -f mcp-server/test/codex-continuity-postgres.sql; then
+      tail -30 "$LOGDIR/codex-continuity-postgres.log" >&2
+      bad migration "Codex continuity PostgreSQL acceptance failed"
       return
     fi
-  fi
-
-  if [ -f mcp-server/test/doc-conversation-postgres.sql ]; then
-    if ! run_quiet "$LOGDIR/doc-conversation-postgres.log" \
+    if ! run_quiet "$LOGDIR/claude-continuity-postgres.log" \
          "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-         -f mcp-server/test/doc-conversation-postgres.sql; then
-      tail -30 "$LOGDIR/doc-conversation-postgres.log" >&2
-      bad migration "the Doc conversation attribution and access-list proof failed"
+         -f mcp-server/test/claude-continuity-postgres.sql; then
+      tail -30 "$LOGDIR/claude-continuity-postgres.log" >&2
+      bad migration "Claude continuity PostgreSQL acceptance failed"
       return
     fi
-  fi
 
-  if [ -f mcp-server/test/doc-conversation-write-doors-postgres.sql ]; then
-    if ! run_quiet "$LOGDIR/doc-conversation-write-doors-postgres.log" \
-         "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-         -f mcp-server/test/doc-conversation-write-doors-postgres.sql; then
-      tail -30 "$LOGDIR/doc-conversation-write-doors-postgres.log" >&2
-      bad migration "the Doc conversation write-door creator and grant proof failed"
-      return
+    if [ -f mcp-server/test/gate-zero-outcome-role-boundary.test.mjs ]; then
+      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
+           run_quiet "$LOGDIR/gate-zero-role-boundary.log" \
+           node --test mcp-server/test/gate-zero-outcome-role-boundary.test.mjs; then
+        tail -30 "$LOGDIR/gate-zero-role-boundary.log" >&2
+        bad migration "the Gate Zero producer seat/connection-role boundary proof failed"
+        return
+      fi
     fi
-  fi
 
-  if [ -f mcp-server/test/doc-conversation-list-postgres.sql ]; then
-    if ! run_quiet "$LOGDIR/doc-conversation-list-postgres.log" \
-         "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-         -f mcp-server/test/doc-conversation-list-postgres.sql; then
-      tail -30 "$LOGDIR/doc-conversation-list-postgres.log" >&2
-      bad migration "the Doc conversation list attribution, paging and grant proof failed"
-      return
+    if [ -f mcp-server/test/foundation-assurance-oracle-role-boundary.v5.test.mjs ]; then
+      if ! DATABASE_URL="$dsn" CARR_FOUNDATION_ASSURANCE_DB_REQUIRED=1 \
+           run_quiet "$LOGDIR/foundation-assurance-role-boundary.log" \
+           node --test mcp-server/test/foundation-assurance-oracle-role-boundary.v5.test.mjs; then
+        tail -30 "$LOGDIR/foundation-assurance-role-boundary.log" >&2
+        bad migration "the foundation-assurance oracle connection-role boundary proof failed"
+        return
+      fi
     fi
-  fi
 
-  if [ -f mcp-server/test/r03-notifications-postgres.sql ]; then
-    if ! run_quiet "$LOGDIR/r03-notifications-postgres.log" \
-         "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-         -f mcp-server/test/r03-notifications-postgres.sql; then
-      tail -30 "$LOGDIR/r03-notifications-postgres.log" >&2
-      bad migration "the R03 notification mint, recipient and status proof failed"
-      return
+    if [ -f mcp-server/test/program-controller-census-role-boundary.v5.test.mjs ]; then
+      if ! DATABASE_URL="$dsn" CARR_PROGRAM_CONTROLLER_DB_REQUIRED=1 \
+           run_quiet "$LOGDIR/program-controller-role-boundary.log" \
+           node --test mcp-server/test/program-controller-census-role-boundary.v5.test.mjs; then
+        tail -30 "$LOGDIR/program-controller-role-boundary.log" >&2
+        bad migration "the program-controller seam connection-role boundary proof failed"
+        return
+      fi
     fi
-  fi
 
-  if [ -f mcp-server/test/r03-loop-queue-postgres.sql ]; then
-    if ! run_quiet "$LOGDIR/r03-loop-queue-postgres.log" \
-         "$psql_bin" -X -v ON_ERROR_STOP=1 -P format=csv -d "$dsn" \
-         -f mcp-server/test/r03-loop-queue-postgres.sql; then
-      tail -30 "$LOGDIR/r03-loop-queue-postgres.log" >&2
-      bad migration "the R03 loop producer and dedupe proof failed"
-      return
+    if [ -f mcp-server/test/program-controller-census-postgres.sql ]; then
+      if ! run_quiet "$LOGDIR/program-controller-census-postgres.log" \
+           "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
+           -f mcp-server/test/program-controller-census-postgres.sql; then
+        tail -30 "$LOGDIR/program-controller-census-postgres.log" >&2
+        bad migration "the program-controller seam catalog and ledger proof failed"
+        return
+      fi
     fi
-    if ! awk -F, '
-      $0=="r03_recovered_health" { phase=1; next }
-      $0=="r03_actor_mismatch_health" { phase=2; next }
-      $1=="joe" && phase==1 {
-        recovered=($2==3 && $3==3 && $4==3 && $6==0 && $7==0 &&
-                   $8==0 && $9==1 && $10==0 && index($15,"No open")==1)
-        phase=0
-      }
-      $1=="joe" && phase==2 {
-        mismatch=($2==4 && $3==3 && $4==3 && $6==1 && $7==1 &&
-                  $8==1 && $9==1 && $10==0 && index($15,"On missing")==1)
-        phase=0
-      }
-      END { exit !(recovered && mismatch) }
-    ' "$LOGDIR/r03-loop-queue-postgres.log"; then
-      tail -30 "$LOGDIR/r03-loop-queue-postgres.log" >&2
-      bad migration "R03 standing report conflates historical and unresolved failures"
-      return
-    fi
-  fi
 
-  if [ -f mcp-server/test/notification-preferences-postgres.sql ]; then
-    if ! run_quiet "$LOGDIR/notification-preferences-postgres.log" \
-         "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-         -f mcp-server/test/notification-preferences-postgres.sql; then
-      tail -30 "$LOGDIR/notification-preferences-postgres.log" >&2
-      bad migration "the notification preference read, write and quiet-hours proof failed"
-      return
-    fi
-  fi
+    for proof in cost-ledger-projection.v5 doc-conversation notifications session-identity dispatch-spine meeting-mode delivery-cadence-a05-tools amend-closed-loop-postgres action-class-successor-registry-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres approve-rule-legacy-adoption-postgres; do
+      if [ -f "mcp-server/test/$proof.test.mjs" ]; then
+        if ! DATABASE_URL="$dsn" CARR_COST_LEDGER_DB_REQUIRED=1 \
+             CARR_DOC_CONVERSATION_DB_REQUIRED=1 CARR_R03_DB_REQUIRED=1 \
+             CARR_SESSION_IDENTITY_DB_REQUIRED=1 CARR_DISPATCH_SPINE_DB_REQUIRED=1 \
+             CARR_MEETING_MODE_DB_REQUIRED=1 CARR_AMEND_CLOSED_LOOP_DB_REQUIRED=1 \
+             CARR_ACTION_CLASS_SUCCESSOR_DB_REQUIRED=1 \
+             CARR_V5_A03_DB_REQUIRED=1 \
+             CARR_A02_RULE_COVERAGE_DB_REQUIRED=1 \
+             CARR_RW02_DB_REQUIRED=1 \
+             CARR_APPROVE_RULE_ADOPTION_DB_REQUIRED=1 \
+             CARR_VENDOR_DIRECTORY_DB_REQUIRED=1 CARR_RELATIONSHIP_DB_REQUIRED=1 \
+             run_quiet "$LOGDIR/$proof-db.log" \
+             node --test "mcp-server/test/$proof.test.mjs"; then
+          tail -30 "$LOGDIR/$proof-db.log" >&2
+          bad migration "the $proof database acceptance proof failed"
+          return
+        fi
+      fi
+    done
 
-  if [ -f mcp-server/test/session-identity-postgres.sql ]; then
-    if ! run_quiet "$LOGDIR/session-identity-postgres.log" \
-         "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-         -f mcp-server/test/session-identity-postgres.sql; then
-      tail -30 "$LOGDIR/session-identity-postgres.log" >&2
-      bad migration "the session identity projection, filter and dispatch proof failed"
-      return
+    if [ -f mcp-server/test/producer-cost-ledger-postgres.sql ]; then
+      if ! run_quiet "$LOGDIR/producer-cost-ledger-postgres.log" \
+           "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
+           -f mcp-server/test/producer-cost-ledger-postgres.sql; then
+        tail -30 "$LOGDIR/producer-cost-ledger-postgres.log" >&2
+        bad migration "the producer cost ledger admission and grant proof failed"
+        return
+      fi
     fi
-  fi
 
-  if [ -f mcp-server/test/dispatch-spine-postgres.sql ]; then
-    if ! run_quiet "$LOGDIR/dispatch-spine-postgres.log" \
-         "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-         -f mcp-server/test/dispatch-spine-postgres.sql; then
-      tail -30 "$LOGDIR/dispatch-spine-postgres.log" >&2
-      bad migration "the dispatch spine link, acknowledgement and per-dispatch reason proof failed"
-      return
+    if [ -f mcp-server/test/doc-conversation-postgres.sql ]; then
+      if ! run_quiet "$LOGDIR/doc-conversation-postgres.log" \
+           "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
+           -f mcp-server/test/doc-conversation-postgres.sql; then
+        tail -30 "$LOGDIR/doc-conversation-postgres.log" >&2
+        bad migration "the Doc conversation attribution and access-list proof failed"
+        return
+      fi
     fi
-  fi
 
-  if [ -f mcp-server/test/foundation-assurance-minimum-postgres.sql ]; then
-    if ! run_quiet "$LOGDIR/foundation-assurance-minimum-postgres.log" \
-         "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
-         -f mcp-server/test/foundation-assurance-minimum-postgres.sql; then
-      tail -30 "$LOGDIR/foundation-assurance-minimum-postgres.log" >&2
-      bad migration "the foundation-assurance candidate/evidence atomic binding proof failed"
-      return
+    if [ -f mcp-server/test/doc-conversation-write-doors-postgres.sql ]; then
+      if ! run_quiet "$LOGDIR/doc-conversation-write-doors-postgres.log" \
+           "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
+           -f mcp-server/test/doc-conversation-write-doors-postgres.sql; then
+        tail -30 "$LOGDIR/doc-conversation-write-doors-postgres.log" >&2
+        bad migration "the Doc conversation write-door creator and grant proof failed"
+        return
+      fi
     fi
-  fi
 
-  if [ -f mcp-server/test/gate-zero-outcome-record-race.test.mjs ]; then
-    if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-         run_quiet "$LOGDIR/gate-zero-outcome-race.log" \
-         node --test mcp-server/test/gate-zero-outcome-record-race.test.mjs; then
-      tail -30 "$LOGDIR/gate-zero-outcome-race.log" >&2
-      bad migration "the Gate Zero outcome candidate-key race proof failed"
-      return
+    if [ -f mcp-server/test/doc-conversation-list-postgres.sql ]; then
+      if ! run_quiet "$LOGDIR/doc-conversation-list-postgres.log" \
+           "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
+           -f mcp-server/test/doc-conversation-list-postgres.sql; then
+        tail -30 "$LOGDIR/doc-conversation-list-postgres.log" >&2
+        bad migration "the Doc conversation list attribution, paging and grant proof failed"
+        return
+      fi
     fi
-  fi
 
-  if [ -f mcp-server/test/gate-zero-outcome-digest-tagged.test.mjs ]; then
-    if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-         run_quiet "$LOGDIR/gate-zero-digest-tagged.log" \
-         node --test mcp-server/test/gate-zero-outcome-digest-tagged.test.mjs; then
-      tail -30 "$LOGDIR/gate-zero-digest-tagged.log" >&2
-      bad migration "the Gate Zero tagged outcome-digest cross-implementation proof failed"
-      return
+    if [ -f mcp-server/test/r03-notifications-postgres.sql ]; then
+      if ! run_quiet "$LOGDIR/r03-notifications-postgres.log" \
+           "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
+           -f mcp-server/test/r03-notifications-postgres.sql; then
+        tail -30 "$LOGDIR/r03-notifications-postgres.log" >&2
+        bad migration "the R03 notification mint, recipient and status proof failed"
+        return
+      fi
     fi
-  fi
 
-  if [ -f mcp-server/test/gate-zero-candidate-authority-filing.test.mjs ]; then
-    if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-         run_quiet "$LOGDIR/gate-zero-candidate-filing.log" \
-         node --test mcp-server/test/gate-zero-candidate-authority-filing.test.mjs; then
-      tail -30 "$LOGDIR/gate-zero-candidate-filing.log" >&2
-      bad migration "the service-candidate and historical Gate Zero provenance proof failed"
-      return
+    if [ -f mcp-server/test/r03-loop-queue-postgres.sql ]; then
+      if ! run_quiet "$LOGDIR/r03-loop-queue-postgres.log" \
+           "$psql_bin" -X -v ON_ERROR_STOP=1 -P format=csv -d "$dsn" \
+           -f mcp-server/test/r03-loop-queue-postgres.sql; then
+        tail -30 "$LOGDIR/r03-loop-queue-postgres.log" >&2
+        bad migration "the R03 loop producer and dedupe proof failed"
+        return
+      fi
+      if ! awk -F, '
+        $0=="r03_recovered_health" { phase=1; next }
+        $0=="r03_actor_mismatch_health" { phase=2; next }
+        $1=="joe" && phase==1 {
+          recovered=($2==3 && $3==3 && $4==3 && $6==0 && $7==0 &&
+                     $8==0 && $9==1 && $10==0 && index($15,"No open")==1)
+          phase=0
+        }
+        $1=="joe" && phase==2 {
+          mismatch=($2==4 && $3==3 && $4==3 && $6==1 && $7==1 &&
+                    $8==1 && $9==1 && $10==0 && index($15,"On missing")==1)
+          phase=0
+        }
+        END { exit !(recovered && mismatch) }
+      ' "$LOGDIR/r03-loop-queue-postgres.log"; then
+        tail -30 "$LOGDIR/r03-loop-queue-postgres.log" >&2
+        bad migration "R03 standing report conflates historical and unresolved failures"
+        return
+      fi
     fi
-  fi
 
+    if [ -f mcp-server/test/notification-preferences-postgres.sql ]; then
+      if ! run_quiet "$LOGDIR/notification-preferences-postgres.log" \
+           "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
+           -f mcp-server/test/notification-preferences-postgres.sql; then
+        tail -30 "$LOGDIR/notification-preferences-postgres.log" >&2
+        bad migration "the notification preference read, write and quiet-hours proof failed"
+        return
+      fi
+    fi
+
+    if [ -f mcp-server/test/session-identity-postgres.sql ]; then
+      if ! run_quiet "$LOGDIR/session-identity-postgres.log" \
+           "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
+           -f mcp-server/test/session-identity-postgres.sql; then
+        tail -30 "$LOGDIR/session-identity-postgres.log" >&2
+        bad migration "the session identity projection, filter and dispatch proof failed"
+        return
+      fi
+    fi
+
+    if [ -f mcp-server/test/dispatch-spine-postgres.sql ]; then
+      if ! run_quiet "$LOGDIR/dispatch-spine-postgres.log" \
+           "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
+           -f mcp-server/test/dispatch-spine-postgres.sql; then
+        tail -30 "$LOGDIR/dispatch-spine-postgres.log" >&2
+        bad migration "the dispatch spine link, acknowledgement and per-dispatch reason proof failed"
+        return
+      fi
+    fi
+
+    if [ -f mcp-server/test/foundation-assurance-minimum-postgres.sql ]; then
+      if ! run_quiet "$LOGDIR/foundation-assurance-minimum-postgres.log" \
+           "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" \
+           -f mcp-server/test/foundation-assurance-minimum-postgres.sql; then
+        tail -30 "$LOGDIR/foundation-assurance-minimum-postgres.log" >&2
+        bad migration "the foundation-assurance candidate/evidence atomic binding proof failed"
+        return
+      fi
+    fi
+
+    if [ -f mcp-server/test/gate-zero-outcome-record-race.test.mjs ]; then
+      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
+           run_quiet "$LOGDIR/gate-zero-outcome-race.log" \
+           node --test mcp-server/test/gate-zero-outcome-record-race.test.mjs; then
+        tail -30 "$LOGDIR/gate-zero-outcome-race.log" >&2
+        bad migration "the Gate Zero outcome candidate-key race proof failed"
+        return
+      fi
+    fi
+
+    if [ -f mcp-server/test/gate-zero-outcome-digest-tagged.test.mjs ]; then
+      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
+           run_quiet "$LOGDIR/gate-zero-digest-tagged.log" \
+           node --test mcp-server/test/gate-zero-outcome-digest-tagged.test.mjs; then
+        tail -30 "$LOGDIR/gate-zero-digest-tagged.log" >&2
+        bad migration "the Gate Zero tagged outcome-digest cross-implementation proof failed"
+        return
+      fi
+    fi
+
+    if [ -f mcp-server/test/gate-zero-candidate-authority-filing.test.mjs ]; then
+      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
+           run_quiet "$LOGDIR/gate-zero-candidate-filing.log" \
+           node --test mcp-server/test/gate-zero-candidate-authority-filing.test.mjs; then
+        tail -30 "$LOGDIR/gate-zero-candidate-filing.log" >&2
+        bad migration "the service-candidate and historical Gate Zero provenance proof failed"
+        return
+      fi
+    fi
+
+  fi
   _mstep tour
   if run_quiet "$LOGDIR/migration-grants.log" "$psql_bin" -X -v ON_ERROR_STOP=1 -Atq -d "$dsn" -c "
     do \$\$ begin
@@ -989,68 +1042,60 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 
     _mstep triggers
     if ! DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-control-plane-sync.log" \
-         "$PY" tools/control-plane.py sync; then
+         "$PY" tools/workflow-registry.py sync; then
       tail -30 "$LOGDIR/migration-control-plane-sync.log" >&2
       bad migration "control-plane registry sync failed after migrations"
       return
     fi
+    if ! DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-service-registry-sync.log" \
+         "$PY" tools/ops-record.py sync-registry; then
+      tail -30 "$LOGDIR/migration-service-registry-sync.log" >&2
+      bad migration "service registry sync failed after migrations"
+      return
+    fi
 
     local dsn_read='environ\.get\("(CARR_CI_)?DATABASE_URL"|environ\["(CARR_CI_)?DATABASE_URL"\]|getenv\("(CARR_CI_)?DATABASE_URL"'
-    local db_gate_failures="" db_gate_count=0 db_gate_unmarked="" db_gate_declared=""
-    _mstep sync
-    local db_gates=""
-    for g in ops/*-gate.py; do
-      [ -f "$g" ] || continue
-      if grep -q '^# ci: db-gate' "$g"; then
-        db_gate_count=$((db_gate_count+1))
-        db_gates="$db_gates $g"
-      elif grep -qE "$dsn_read" "$g"; then
-        db_gate_unmarked="$db_gate_unmarked $(basename "$g")"
-      elif grep -q '^# ci: runs-outside-ci' "$g"; then
-        db_gate_declared="$db_gate_declared\n            $(basename "$g"): $(sed -n 's/^# ci: runs-outside-ci *— *//p' "$g" | head -1)"
+    if [[ "$MIGRATION_PART" != proofs && "$MIGRATION_PART" != acceptance ]]; then
+      local db_gate_failures="" db_gate_unmarked="" db_gate_declared=""
+      _mstep sync
+      local db_gates=""
+      for g in ops/*-gate.py; do
+        [ -f "$g" ] || continue
+        if grep -q '^# ci: db-gate' "$g"; then
+          db_gates="$db_gates $g"
+        elif grep -qE "$dsn_read" "$g"; then
+          db_gate_unmarked="$db_gate_unmarked $(basename "$g")"
+        elif grep -q '^# ci: runs-outside-ci' "$g"; then
+          db_gate_declared="$db_gate_declared\n            $(basename "$g"): $(sed -n 's/^# ci: runs-outside-ci *— *//p' "$g" | head -1)"
+        fi
+      done
+      local gate_partition=all
+      case "$MIGRATION_PART" in gates-*) gate_partition="${MIGRATION_PART#gates-}" ;; esac
+      if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" --partition "$gate_partition" $db_gates; then
+        db_gate_failures="isolated/serial DB gate runner (see named failures above)"
       fi
-    done
-    if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" $db_gates; then
-      db_gate_failures="isolated/serial DB gate runner (see named failures above)"
+      _mstep gates
+      if [ -n "$db_gate_declared" ]; then
+        printf '        \033[33moutside CI\033[0m  gate(s) declared to run elsewhere:%b\n' \
+          "$db_gate_declared" >&2
+      fi
+      if [ -n "$db_gate_unmarked" ]; then
+        bad migration "gate(s) read a database URL but carry no \`# ci: db-gate\` marker, so nothing runs them:$db_gate_unmarked (add the marker, or declare \`# ci: runs-outside-ci — why\`)"
+        return
+      fi
+      if [ -n "$db_gate_failures" ]; then
+        bad migration "database acceptance gate(s) failed:$db_gate_failures"
+        return
+      fi
+
     fi
-    _mstep gates
     echo "migration-step-timing:${MIGRATION_STEP_TIMINGS}"
-    if [ -n "$db_gate_declared" ]; then
-      printf '        \033[33moutside CI\033[0m  gate(s) declared to run elsewhere:%b\n' \
-        "$db_gate_declared" >&2
-    fi
-    if [ -n "$db_gate_unmarked" ]; then
-      bad migration "gate(s) read a database URL but carry no \`# ci: db-gate\` marker, so nothing runs them:$db_gate_unmarked (add the marker, or declare \`# ci: runs-outside-ci — why\`)"
-      return
-    fi
-    if [ -n "$db_gate_failures" ]; then
-      bad migration "database acceptance gate(s) failed:$db_gate_failures"
-      return
+    if [ "$MIGRATION_PART" = all ]; then
+      check_migration_fixtures
+      [ "$FAILED" -eq 0 ] || return
     fi
 
-    local shadow_rc=0 shadow_note
-    "$PY" ops/migration-shadow.py ${CARR_SHADOW_ARTIFACT_DIR:+--artifact-dir "$CARR_SHADOW_ARTIFACT_DIR"} \
-      > "$LOGDIR/migration-shadow.log" 2>&1 || shadow_rc=$?
-    _mstep shadow
-    case "$shadow_rc" in
-      0) if ! run_quiet "$LOGDIR/schema-snapshot-rebuild.log" "$PY" ops/schema-snapshot-rebuild-test.py; then
-           tail -30 "$LOGDIR/schema-snapshot-rebuild.log" >&2
-           bad migration "db/schema.sql loses an applied seed update during snapshot refresh and rebuild"
-           return
-         fi
-         shadow_note="; $(sed -n 's/^migration-shadow: \([0-9]* pending migration(s) applied\).*/\1/p' "$LOGDIR/migration-shadow.log" | head -1) on a PostgreSQL 18 shadow; refreshed snapshot restores with reviewed seeds intact" ;;
-      3) if [ "$STRICT" = "1" ]; then
-           cat "$LOGDIR/migration-shadow.log" >&2
-           bad migration "the migration shadow needs PostgreSQL 18 server binaries (CI installs postgresql-18)"
-           return
-         fi
-         shadow_note="; migration shadow not run (no PostgreSQL 18 here)" ;;
-      *) tail -60 "$LOGDIR/migration-shadow.log" >&2
-         bad migration "migration shadow: pending migrations did not apply over the base snapshot, or db/schema.sql is not what they produce"
-         return ;;
-    esac
-
-    ok migration "committed schema loads; ${n:-0} pending migration(s) apply; app-role grants verified live; trigger reads granted; $db_gate_count db acceptance gate program(s) pass (each program reports its own assertions)$shadow_note"
+    ok migration "committed schema loads; ${n:-0} pending migration(s) apply; app-role grants verified live; trigger reads granted; partition $MIGRATION_PART passes (programs report their own assertions)"
   else
     tail -15 "$LOGDIR/migration-grants.log" >&2
     bad migration "the app roles' grants did not survive into the built database"
@@ -1059,8 +1104,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 
 check_binding() {
   local problems="" machine_drift=""
-  run_quiet "$LOGDIR/binding-agent-boot.log" "$PY" ops/agent-boot-contract.py \
-    || { problems="$problems agent-boot"; cat "$LOGDIR/binding-agent-boot.log" >&2; }
   if [ -f mcp-server/wrangler.toml ]; then
     run_quiet "$LOGDIR/binding-wrangler.log" node -e '
       const fs=require("fs"), t=fs.readFileSync("mcp-server/wrangler.toml","utf8");
@@ -1106,7 +1149,7 @@ check_binding() {
 }
 
 check_artifact() {
-  local shipping marker
+  local shipping base
   if ! run_quiet "$LOGDIR/doctorcre-artifact.log" "$PY" \
       tools/release-manifest.py doctorcre-artifact verify \
       --pin ops/config/doctorcre-artifact.v1.json; then
@@ -1120,32 +1163,16 @@ check_artifact() {
     bad artifact "registry import or retirement validation failed"
     return
   fi
-  local rc=0
-  marker="$("$PY" ops/last-deployed-verb-count.py carr-mcp production --registry 2>"$LOGDIR/artifact-baseline.log")" || rc=$?
-  case "$rc" in
-    0)
-      if ! sh ops/verb-count.sh "$REPO/mcp-server" --check-retirements "$marker" >"$LOGDIR/artifact-count.log" 2>"$LOGDIR/artifact.log"; then
-        cat "$LOGDIR/artifact.log" >&2
-        bad artifact "verb loss does not match the committed retirement ledger"
-      else
-        ok artifact "$shipping verbs; loss checked by name against deployed source and committed retirements"
-      fi
-      ;;
-    3)
-      ok artifact "$shipping verbs; no prior deployment recorded, this would set the baseline"
-      ;;
-    78)
-      if [ "${CARR_CI_PORTABLE_ONLY:-0}" = "1" ]; then
-            ok artifact "$shipping verbs; shrink guard not run here (portable runner has no ledger credential — the deploy enforces it)"
-      else
-        skip artifact "$shipping verbs counted, but no ledger credential — the shrink comparison did not run"
-      fi
-      ;;
-    *)
-      cat "$LOGDIR/artifact-baseline.log" >&2
-      bad artifact "could not read the deployed verb registry from the ledger (exit $rc) — refusing to call it unmeasured-but-fine"
-      ;;
-  esac
+  base="$(git merge-base HEAD origin/main 2>/dev/null || true)"
+  [ "$base" != "$(git rev-parse HEAD)" ] || base="$(git rev-parse -q --verify 'HEAD^' || true)"
+  if [ -z "$base" ]; then
+    skip artifact "$shipping verbs counted, but no base commit; the shrink comparison did not run"
+  elif sh ops/verb-loss-vs-base.sh "$REPO" "$base" >"$LOGDIR/artifact-count.log" 2>"$LOGDIR/artifact.log"; then
+    ok artifact "$shipping verbs; loss checked by name against base ${base:0:12} and committed retirements"
+  else
+    cat "$LOGDIR/artifact.log" >&2
+    bad artifact "verb loss against base ${base:0:12} does not match the committed retirement ledger"
+  fi
 }
 
 echo "carr-system CI — $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"

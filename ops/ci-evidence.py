@@ -10,7 +10,6 @@ import os
 from pathlib import Path
 import re
 import subprocess
-import time
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +22,27 @@ def class_groups(root=ROOT):
     return re.findall(r'^          - "([^"]+)"', block, re.M)
 
 
-def verdict(jobs, groups):
+def class_jobs(root=ROOT):
+    """Read display-name admission from the workflow's class matrix metadata."""
+    script = """const yaml=require('js-yaml'),fs=require('fs');
+    const job=yaml.load(fs.readFileSync(0,'utf8')).jobs.classes;
+    console.log(JSON.stringify({name:job.name,matrix:job.strategy.matrix}));"""
+    job = json.loads(subprocess.check_output(['node', '-e', script],
+        input=(root / '.github/workflows/ci.yml').read_text(),
+        cwd=root / 'mcp-server', text=True, timeout=30))
+    if len(job['matrix']['job_names']) != 1:
+        raise ValueError('CI class names must be a single metadata dimension')
+    groups = {}
+    for row in job['matrix']['job_names'][0].values():
+        if row['name'] in groups or row['classes'] not in job['matrix']['classes']:
+            raise ValueError('ambiguous or unknown CI class job')
+        groups[row['name']] = row['classes']
+    if set(groups.values()) != set(job['matrix']['classes']):
+        raise ValueError('CI class job metadata is incomplete')
+    return groups
+
+
+def verdict(jobs, groups, *, db_full=True, draft=False):
     """Report job conclusions for every class, failing closed on missing jobs."""
     lines, passed = [], True
     labels = {'success': 'PASSED', 'failure': 'FAILED', 'cancelled': 'CANCELLED',
@@ -36,41 +55,38 @@ def verdict(jobs, groups):
             label = 'INCOMPLETE'
         else:
             label = labels.get(matches[0].get('conclusion'), 'UNKNOWN')
-        passed = passed and label == 'PASSED'
+        if draft and group in ('gates', 'migration') and not matches:
+            label = 'DEFERRED (draft)'
+        elif group == 'migration' and not db_full and label == 'PASSED':
+            label = 'NOT APPLICABLE (receipt)'
+        passed = passed and label in ('PASSED', 'NOT APPLICABLE (receipt)', 'DEFERRED (draft)')
         lines.extend(c + ': ' + label for c in group.split())
     return (0 if passed else 1), lines
 
 
 def hosted_verdict():
-    repo, run_id = os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID']
-    run_attempt = int(os.environ['GITHUB_RUN_ATTEMPT'])
-    groups = class_groups()
-    # The jobs API can lag needs.classes. Leave a minute for checkout and
-    # evidence upload within the checks job's five-minute timeout.
-    deadline = time.monotonic() + 240
-    while True:
-        raw = subprocess.run(['gh', 'api', '--paginate', '--slurp',
-            f'repos/{repo}/actions/runs/{run_id}/attempts/{run_attempt}/jobs?per_page=100'],
-            capture_output=True, text=True,
-            timeout=min(15, max(0.001, deadline - time.monotonic())), check=True)
-        jobs = [job for page in json.loads(raw.stdout) for job in page['jobs']]
-        rc, lines = verdict(jobs, groups)
-        if (rc == 0 or deadline - time.monotonic() <= 5 or any(
-                not line.endswith((': PASSED', ': MISSING', ': INCOMPLETE')) for line in lines)):
-            break
-        print('Class job conclusions still settling; retrying in 5 seconds')
-        time.sleep(5)
+    """Use the scheduler's terminal results, never the eventually consistent jobs API."""
+    needs = json.loads(os.environ['CI_NEEDS'])
+    scope = needs['scope']
+    full = scope.get('outputs', {}).get('full') if scope['result'] == 'success' else None
+    draft = os.environ.get('CI_DRAFT') == 'true'
+    results = {name: needs[name]['result'] for name in ('classes', 'migration-fixtures', 'fallow')}
+    allowed = {'classes': {'success'}, 'migration-fixtures': {'success'}, 'fallow': {'success'}}
+    if full == 'false' or draft:
+        allowed['migration-fixtures'].add('skipped')
+    lines = [f"{name}: {'PASSED' if result == 'success' else str(result).upper()}"
+             for name, result in results.items()]
     print('\n'.join(lines))
     with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
-        summary.write('Class job conclusions:\n\n' + '\n'.join('- ' + line for line in lines) + '\n')
-    return rc
+        summary.write('Job dependency results:\n\n' + '\n'.join('- ' + line for line in lines) + '\n')
+    return 0 if all(result in allowed[name] for name, result in results.items()) else 1
 
 
 def contract_digest(root=ROOT):
     digest = hashlib.sha256()
     for name in ('.github/workflows/ci.yml', 'ops/ci.sh', 'ops/ci-unit.py', 'ops/node_test_summary.py',
                  'ops/ci-node-file.mjs',
-                 'ops/ci-quarantine.py', 'requirements.lock',
+                 'requirements.lock',
                  'mcp-server/package-lock.json', '.nvmrc', '.python-version'):
         digest.update(name.encode() + b'\0' + (root / name).read_bytes() + b'\0')
     return digest.hexdigest()
@@ -150,8 +166,8 @@ def main():
     if args.action == 'verdict':
         try:
             return hosted_verdict()
-        except (OSError, ValueError, KeyError, subprocess.SubprocessError):
-            print('CI verdict: job conclusions unavailable; refusing success')
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
+            print('CI verdict: dependency results unavailable; refusing success')
             return 1
     if not args.output:
         parser.error('--output is required for record/resolve')

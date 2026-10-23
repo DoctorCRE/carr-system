@@ -209,7 +209,7 @@ def is_checkout(path, required, roots):
 
 def render(rows):
     return [f"WARN scheduled jobs {r['label']} {r['code']}: {r['detail']} · on breach: "
-            f"tools/job-watchdog.py scan files/updates loop {r['key']} · owner {r['owner']} · "
+            f"loop {r['key']} · owner {r['owner']} · "
             f"fix: {r['fix']} · verify: python3 ops/scheduled-jobs-check.py · "
             f"auto-clear: next complete scan without {r['code']} for {r['label']}" for r in rows]
 
@@ -249,6 +249,10 @@ def report(manifest, snapshot, now):
         plist = snapshot["plists"].get(label)
         is_cron = job["scheduler"] == "cron"
         present = label in cron if is_cron else plist is not None
+        if label in flash_labels | {"com.carr.flash-idle-stop"}:
+            expected_installed = expected_installed and (present or flash_granted)
+            if label == "com.carr.flash-idle-stop":
+                enabled = enabled and (present or flash_granted)
         if expected_installed and not present:
             emit(label, "missing_job", "declared job definition is absent", "restore the declared job definition from its repository source and verify registration", owner)
         if is_cron:
@@ -273,7 +277,7 @@ def report(manifest, snapshot, now):
             if label in flash_labels and not flash_granted and (plist is not None or label in live):
                 if (not is_disabled or (plist or {}).get("RunAtLoad") or (plist or {}).get("KeepAlive")):
                     emit(label, "flash_without_grant", "Flash can auto-start without an active human grant",
-                         "run config-as-code install --apply to restore off-by-default plists and disable both labels", owner)
+                         "run config-as-code install-flash-on-demand --apply to restore off-by-default plists and disable both labels", owner)
             if enabled and is_disabled and label not in flash_labels:
                 emit(label, "disabled_but_expected", "launchd disabled override or plist Disabled is set", "restore expected enabled state through the agent owner and verify launchctl print-disabled", owner)
             if enabled and plist and label not in live and label not in flash_labels:

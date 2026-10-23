@@ -297,7 +297,7 @@ def main() -> int:
           before == (len(cur.incidents), len(cur.links), len(cur.facts)))
 
     source = RECORD.read_text(encoding="utf-8")
-    deployment_body = source[source.index("def cmd_deployment"):source.index("# ── release")]
+    deployment_body = source[source.index("def cmd_deployment"):source.index("def cmd_settings_change")]
     check("4. run and deployment call the helper in their insert transaction",
           source.count("_record_failure_incident(") >= 4
           and source.count("conn.transaction()") >= 2

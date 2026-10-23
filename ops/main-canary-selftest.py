@@ -60,15 +60,20 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
     main, pr = workflow(CANARY), workflow(CI_YML)
     classes = main['jobs']['classes']
     check('main has the identical parallel class set as PR CI',
-          classes['strategy']['matrix']['classes'] == pr['jobs']['classes']['strategy']['matrix']['classes']
+          sorted(classes['strategy']['matrix']['classes']) == sorted(pr['jobs']['classes']['strategy']['matrix']['classes'])
           and 'exclude' not in classes['strategy']['matrix'])
     check('all classes run unless exact-tree proof succeeded',
           classes.get('if') == "${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}")
     main_steps = classes['steps']
     pr_steps = pr['jobs']['classes']['steps']
-    check('class execution and environment match PR CI',
-          main_steps == [st for st in pr_steps if st.get('name') != 'Require a written pull request description'])
-    check('service containers match PR CI', classes['services'] == pr['jobs']['classes']['services'])
+    check('main retains the full default class while PR partitions the same proof',
+          any(st.get('run') == 'ops/ci.sh --strict --only "${{ matrix.classes }}"' for st in main_steps)
+          and any('--migration-part proofs' in st.get('run', '') for st in pr_steps)
+          and set(pr['jobs']['migration-fixtures']['strategy']['matrix']['part'])
+          == {'reconstruction', 'equivalence', 'shadow', 'gates-serial', 'gates-isolated', 'acceptance'})
+    check('main retains its service and PR limits the shared fixture to unit checks',
+          classes['services']['postgres']['image'] in pr['jobs']['classes']['services']['postgres']['image']
+          and "contains(matrix.classes, 'unit')" in pr['jobs']['classes']['services']['postgres']['image'])
     aggregate = main['jobs']['canary']
     check('one aggregate main canary always reports',
           aggregate['name'] == 'main canary' and 'always()' in aggregate['if'])
@@ -139,12 +144,14 @@ def test_recorded_timings_survive_retirement_of_the_unused_collector():
 def test_role_migration_fixtures_have_postgresql_17_server_binaries():
     for path in (CANARY, CI_YML):
         y = path.read_text(encoding="utf-8")
-        install = y.find("sudo apt-get install -y -qq postgresql-17")
-        check(f"{path.name} installs PG17 for owned role-migration fixtures", install >= 0)
+        installer = 'run: bash ops/ci-postgres.sh'
+        install_text = (REPO / 'ops/ci-postgres.sh').read_text() if installer in y else y
+        install = y.find(installer if installer in y else "sudo apt-get install -y -qq postgresql-17")
+        check(f"{path.name} installs PG17 for owned role-migration fixtures",
+              install >= 0 and "sudo apt-get install -y -qq postgresql-17" in install_text)
         check(f"{path.name} exposes PG17 binaries to the shared discovery helper",
-              'echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"' in y)
+              'echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"' in install_text)
         check(f"{path.name} provisions PG17 before check execution",
-              0 <= install < y.find("run: ops/ci.sh --strict") if path == CI_YML else
               0 <= install < y.find("run: ops/ci.sh --strict"))
 
 

@@ -58,7 +58,7 @@ LAUNCHD_REPORT = """config-as-code: DRIFT — 1 of 49 items
 
 # ── THE WEDGE ITSELF ─────────────────────────────────────────────────────────
 check("a launchd repair does not inherit somebody else's scheduled-task drift",
-      mod.owned(["ops/launchd/com.carr.room-bridge.plist"], REPORT) == [],
+      mod.owned(["ops/launchd/com.carr.capture-poll.plist"], REPORT) == [],
       "this is the exact 2026-08-22 wedge: the branch could not fix that drift "
       "without committing another session's in-flight work")
 
@@ -89,7 +89,7 @@ check("an unrecognised drift family is OWNED, never silently dropped",
       "a new drift kind must not stop being anybody's problem by default")
 
 check("a clean report yields nothing to own",
-      mod.owned(["ops/launchd/com.carr.room-bridge.plist"],
+      mod.owned(["ops/launchd/com.carr.capture-poll.plist"],
                 "config-as-code: 49 of 49 items match") == [])
 
 check("the plist suffix is not required to match on either side",
@@ -109,7 +109,7 @@ check("ops/ci.sh no longer treats any declaration path as owning all drift",
 
 # ── THE EXIT CONTRACT THE SHELL DEPENDS ON ───────────────────────────────────
 proc = subprocess.run([sys.executable, str(ROOT / "ops" / "config_drift_ownership.py"),
-                       "ops/launchd/com.carr.room-bridge.plist"],
+                       "ops/launchd/com.carr.capture-poll.plist"],
                       input=REPORT, capture_output=True, text=True, timeout=60)
 check("exit 0 when the branch owns nothing", proc.returncode == 0,
       f"rc={proc.returncode} out={proc.stdout!r}")

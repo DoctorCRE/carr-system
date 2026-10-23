@@ -17,6 +17,10 @@ import sys
 import time
 
 HERE = Path(__file__).resolve().parent
+# The repo venv carries the runner's dependencies (yaml for the skill picker);
+# a kick from a system-Python caller must not start the runner without them.
+VENV_PYTHON = HERE.parents[1] / '.venv/bin/python'
+PYTHON = str(VENV_PYTHON) if VENV_PYTHON.exists() else sys.executable
 sys.path.insert(0, str(HERE))
 from work_queue import WorkQueue, QueueChanged
 import write_ownership
@@ -28,7 +32,7 @@ class Resources:
     def __init__(self, locks, slots=None, limit=None):
         self.locks = Path(locks)
         self.slots = Path(slots or os.environ.get('CARR_CODEX_SLOT_DIR') or CODEX_SLOT_DIR)
-        self.limit = max(1, int(limit or os.environ.get('CARR_CODEX_MAX_CONCURRENT') or 4))
+        self.limit = max(1, int(limit or os.environ.get('CARR_CODEX_MAX_CONCURRENT') or 6))
 
     @staticmethod
     def _try(path):
@@ -66,7 +70,10 @@ class Runner:
 
     def _claim_pass(self):
         candidates = self.queue.candidates()
+        quota_stops = self.queue.quota_exhausted_desks()
         for candidate in candidates:
+            if candidate['desk'] in quota_stops:
+                continue
             active = self.queue.active()
             if candidate['desk'] in {r['desk'] for r in active}:
                 continue
@@ -77,6 +84,10 @@ class Runner:
             if handles is None:
                 continue
             try:
+                # A worker may finish with quota exhaustion after this claim pass
+                # read its initial stop set but before this desk lock was acquired.
+                if candidate['desk'] in self.queue.quota_exhausted_desks():
+                    continue
                 card = self.queue.claim(eligible_desks={candidate['desk']}, card_id=candidate['card_id'],
                                         actor='runner', owner=write_ownership.process_owner(),
                                         expected_candidates=candidates)
@@ -101,7 +112,7 @@ def kick(path, registry, results):
     """Return immediately; runner flock makes concurrent kicks harmless."""
     path = Path(path)
     with path.with_suffix('.runner.log').open('a') as log:
-        subprocess.Popen([sys.executable, str(HERE / 'work_runner.py'), '--db', str(path),
+        subprocess.Popen([PYTHON, str(HERE / 'work_runner.py'), '--db', str(path),
                           '--registry', str(registry), '--results', str(results)],
                          stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                          start_new_session=True, close_fds=True)
@@ -114,6 +125,7 @@ def worker(queue, card_id, token, registry, results):
     row = queue.execution(card_id, token)
     options = json.loads(row['options'])
     options.pop('codex', None)
+    options.pop('required_skills', None)
     results = Path(options.pop('result_path', results))
     registry = Path(options.pop('registry_path', registry))
     def started(entry):
@@ -154,7 +166,7 @@ def main(argv=None):
                 def publish():
                     if os.environ.get('PROGRESS_BOARD_LOCAL_ONLY') == '1':
                         raise RuntimeError('board publication disabled by PROGRESS_BOARD_LOCAL_ONLY')
-                    progress_board.publish_board('carr-v5', refresh_inventory=False)
+                    progress_board.publish_orchestrator(progress_board.read_state('carr-v5'))
                 queue.publish(publish)
             return 0
         lock = Resources._try(args.db.with_suffix('.runner.lock'))
@@ -164,7 +176,7 @@ def main(argv=None):
         def launch(card, handles):
             key = hashlib.sha256(card['card_id'].encode()).hexdigest()[:20]
             with args.db.with_name(f'work-{key}.log').open('a') as log:
-                child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()),
+                child = subprocess.Popen([PYTHON, str(Path(__file__).resolve()),
                     '--db', str(args.db), '--registry', str(args.registry), '--results', str(args.results),
                     '--worker', card['card_id'], card['claim']], stdin=subprocess.DEVNULL,
                     stdout=log, stderr=log, start_new_session=True,
@@ -187,7 +199,7 @@ def main(argv=None):
                         and time.time() - publication['last_attempt'] >= 2
                         and (publisher is None or publisher.poll() is not None)):
                     with args.db.with_suffix('.publish.log').open('a') as log:
-                        publisher = subprocess.Popen([sys.executable, str(Path(__file__).resolve()),
+                        publisher = subprocess.Popen([PYTHON, str(Path(__file__).resolve()),
                             '--db', str(args.db), '--registry', str(args.registry), '--results', str(args.results),
                             '--publish'], stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                             start_new_session=True)

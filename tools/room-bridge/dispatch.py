@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""One task, one desk, no model in the middle.
+"""One task, one desk, send-time skill selection.
 
-Hermes runs this. It reasons about WHICH seat a task belongs in; this file
-does not reason at all, which is the point — a router that needs its own model
-to route costs the tokens the routing was supposed to save.
+Hermes chooses the desk. At send time the official TypeSafe SDK scores the
+loadable skills against the brief; selected instruction bodies join the task
+before it enters the durable queue. Desk routing stays deterministic.
 
     dispatch.py send claude-desk "reconcile the loop board"
     dispatch.py send codex-desk "rename this variable across the package" --family luna --effort low
@@ -17,13 +17,25 @@ to route costs the tokens the routing was supposed to save.
 `send` saves a card in the durable work queue and returns its queued receipt.
 The detached runner claims cards in the current global order when their desk
 and a Codex slot are free. `prioritize`, `requeue`, `show`, `history`, `export`
-and `merge-order` all use that same store.
+and `queue` all use that same store.
 
 The worker resolves the current Codex family at execution time and records the
 executor model and effort on the card. The `dispatch()` function is the
 synchronous executor used by workers and existing bounded adapters. Execution
 receipts still append to the requested NDJSON results file. Asynchronous desks
 report delivery there and retain their queue reservation until completion.
+
+Headless Codex reconciles answer and native rollout receipts at its deadline.
+Recent item events receive one 300-second grace, except caller-pinned deadlines.
+Completion artifacts can be declared as one JSON line in the task:
+
+    Completion artifact: {"kind":"pushed_head"}
+    Completion artifact: {"kind":"report_line","path":"out/report.txt","contains":"job-id"}
+
+The pushed-head check compares local HEAD with its exact origin branch. Report
+checks require a newly appended complete line containing the job's marker.
+Artifact evidence is recorded separately from the final answer; unverified or
+undeclared artifacts never become a verified delivery claim. No turn is replayed.
 
 Grok desks default to full workspace tools and select the newest standard model
 from `grok models`. Only `send --retrieve` runs read-only source retrieval.
@@ -101,6 +113,7 @@ sys.path.insert(0, str(HERE))
 import codex_models  # noqa: E402
 import codex_checkout  # noqa: E402
 from ops.git_env import scrubbed_env  # noqa: E402
+import codex_deadline  # noqa: E402
 import write_ownership  # noqa: E402
 import desks  # noqa: E402
 from desks import AUTOMATIC_CODEX_DESKS, DeskError, Registry  # noqa: E402
@@ -109,14 +122,13 @@ import claude_desktop_wire  # noqa: E402 — background supervisor + supported /
 import claude_remote_wire
 import claude_api_wire
 import codex_wire  # noqa: E402  — Codex worked out this protocol, see the module
-import codex_ipc  # noqa: E402  — a thread Codex Desktop holds open, see the module
 import grok_wire  # noqa: E402 — authenticated public retrieval, provider metadata checked
 import hermes_wire
 import nous_budget
 import record_layer
 import business_routing
+import skill_picker
 import flash_wire  # noqa: E402  — the local Flash model as a desk, see the module
-import verb_io  # noqa: E402 — the ONE path to the record layer; see that module
 
 TOOLS_ROOT = HERE.parent
 if str(TOOLS_ROOT) not in sys.path:
@@ -133,6 +145,8 @@ DEFAULT_RESULTS = Path(
 )
 
 CODEX_TIMEOUT_S = float(os.environ.get("CARR_HERMES_CODEX_TIMEOUT", "5400"))
+CODEX_DEADLINE_GRACE_S = 300
+CODEX_ACTIVITY_WINDOW_S = 30
 CODEX_CAPACITY_ATTEMPTS = 6
 CODEX_CAPACITY_BACKOFF_S = 300
 
@@ -167,8 +181,6 @@ BRIEF_FOOTERS = {'engineering': 'brief-footer.md', 'business': 'business-brief-f
 
 def _with_footer(task: str, brief: str) -> str:
     for block in (HERE / BRIEF_FOOTERS[brief]).read_text(encoding='utf-8').strip().split('\n\n'):
-        if block.startswith('Skills:') and re.search(r'^Skills:', task, re.M | re.I):
-            continue
         if block not in task:
             task += '\n\n' + block
     return task
@@ -250,7 +262,7 @@ def _to_claude(entry: dict, task: str, msg_id: str) -> dict:
 
 
 def _to_claude_desktop(entry: dict, task: str) -> dict:
-    """Create one durable background session; later bridge cycles observe it."""
+    """Create one durable background desk session."""
     try:
         return claude_desktop_wire.launch_background(entry, task)
     except claude_desktop_wire.ClaudeDesktopError as exc:
@@ -320,7 +332,7 @@ def _codex_timeout_activity(output, thread, env):
     return thread_id, activity
 
 
-def _run_headless_process(argv, env, timeout, on_executor, stream_output, **options):
+def _run_headless_process(argv, env, timeout, on_executor, stream_output, *, on_deadline=None, **options):
     """Track a dedicated process group, including children surviving a CLI exit."""
     proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, **options,
                             start_new_session=True, stdout=subprocess.PIPE,
@@ -329,26 +341,46 @@ def _run_headless_process(argv, env, timeout, on_executor, stream_output, **opti
                                                 else (write_ownership.CHECKOUT_FD,)))
     identity = {**write_ownership.process_owner(), 'pid': proc.pid, 'pgid': proc.pid,
                 'start_time': write_ownership.process_start(proc.pid), 'kind': 'process_group'}
-    chunks = []
+    chunks, errors = [], []
+    readers = []
+    last_event_at = None
     reader = None
+    def relay(pipe, target, echo=False):
+        nonlocal last_event_at
+        for line in pipe:
+            target.append(line)
+            if target is chunks and any(event.get('type', '').startswith('item.')
+                                        for event in _codex_events(line)):
+                last_event_at = time.monotonic()
+            if echo:
+                print(line, end='', flush=True)
     try:
         if on_executor:
             on_executor(identity)
-        if stream_output:
-            def relay():
-                with proc.stdout:
-                    for line in proc.stdout:
-                        chunks.append(line)
-                        print(line, end='', flush=True)
-            reader = threading.Thread(target=relay, daemon=True)
-            reader.start()
-            proc.wait(timeout=timeout)
-            reader.join(timeout=timeout)
-            if reader.is_alive():
-                raise subprocess.TimeoutExpired(argv, timeout)
-            stdout, stderr = ''.join(chunks), ''
-        else:
-            stdout, stderr = proc.communicate(timeout=timeout)
+        reader = threading.Thread(target=relay, args=(proc.stdout, chunks, stream_output), daemon=True)
+        readers.append(reader)
+        if proc.stderr is not None:
+            readers.append(threading.Thread(target=relay, args=(proc.stderr, errors), daemon=True))
+        for worker in readers:
+            worker.start()
+        deadline = time.monotonic() + timeout
+        extended = False
+        while True:
+            try:
+                proc.wait(timeout=max(0, deadline - time.monotonic()))
+                for worker in readers:
+                    worker.join(timeout=max(0, deadline - time.monotonic()))
+                if any(worker.is_alive() for worker in readers):
+                    raise subprocess.TimeoutExpired(argv, timeout)
+                break
+            except subprocess.TimeoutExpired:
+                grace = on_deadline(''.join(chunks), last_event_at) if on_deadline else 0
+                if not extended and grace > 0:
+                    extended = True
+                    deadline = time.monotonic() + grace
+                    continue
+                raise
+        stdout, stderr = ''.join(chunks), ''.join(errors)
     except BaseException as exc:
         cleanup_deadline = time.monotonic() + 2
         try:
@@ -363,9 +395,9 @@ def _run_headless_process(argv, env, timeout, on_executor, stream_output, **opti
         except subprocess.TimeoutExpired:
             pass
         if isinstance(exc, subprocess.TimeoutExpired):
-            if reader is not None:
-                reader.join(timeout=2)
-                exc.output = ''.join(chunks)
+            for worker in readers:
+                worker.join(timeout=max(0, cleanup_deadline - time.monotonic()))
+            exc.output = ''.join(chunks)
             while not (confirmed := write_ownership.process_terminated(identity, group=True)):
                 if time.monotonic() >= cleanup_deadline:
                     break
@@ -375,7 +407,7 @@ def _run_headless_process(argv, env, timeout, on_executor, stream_output, **opti
     finally:
         if reader is None or not reader.is_alive():
             proc.stdout.close()
-        if proc.stderr is not None:
+        if proc.stderr is not None and all(not worker.is_alive() for worker in readers):
             proc.stderr.close()
     result = subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
     result.termination_confirmed = write_ownership.process_terminated(identity, group=True)
@@ -388,12 +420,10 @@ def _to_codex(
     env: dict | None,
     fresh: bool = False,
     config_overrides: tuple[str, ...] = (),
-    live_desktop: bool = False,
     provider_run=None,
     stream_output: bool = False,
     timeout_s: float | None = None,
     on_executor=None,
-    claim_id: str | None = None,
 ) -> dict:
     """Send one task to a standing Codex thread, resuming it when there is one.
 
@@ -419,35 +449,6 @@ def _to_codex(
         return record_layer.run_codex(entry, task, env=env, run=confined_run, timeout_s=limit_s)
 
     thread = None if fresh else entry.get("thread_id")
-    # A THREAD CODEX DESKTOP HOLDS OPEN CANNOT BE RESUMED FROM HERE. Found live
-    # 2026-09-27: the orchestrator's Desktop thread refused `codex exec resume`
-    # with "thread ... already has an active writer", so a turn addressed to it
-    # never arrived. When the Desktop router names an owner, the turn is
-    # started inside that owner instead; the session answers in its own window,
-    # the same contract as a live Claude desk. No owner (Desktop closed, or the
-    # thread not open there) keeps the durable resume path below.
-    #
-    # OPT-IN, and its own status. Only the conversational bridge asks for this
-    # (bridge.deliver passes live_desktop=True). A caller that waits for a result
-    # in the desk log, like the queue executor, would read a plain "delivered" as
-    # "wait", time out, and dispatch again, starting a fresh turn in the same
-    # Desktop thread on every retry (PR #1345 review). "delivered_live" says the
-    # answer arrives in the session's own window and nowhere a caller can wait on.
-    if live_desktop and thread and codex_ipc.thread_owner(thread) is not None:
-        marker = f'Room write owner: {claim_id}' if claim_id else None
-        if marker:
-            task += '\n\n' + marker
-        if on_executor:
-            on_executor({'kind': 'codex_desktop', 'thread_id': thread, 'marker': marker})
-        live = codex_ipc.start_turn(thread, task, approval_policy="never",
-                                    model=entry["model"], effort=entry["effort"])
-        if live.get("status") != "not_live":
-            status = "delivered_live" if live.get("status") == "delivered" else live.get("status")
-            return {"resumed": True, **live, "status": status, "thread_id": thread,
-                    "termination_confirmed": False}
-        if on_executor:
-            on_executor({'kind': 'no_launch', 'thread_id': thread, 'marker': marker,
-                         'reason': 'desktop_not_live'})
     with tempfile.TemporaryDirectory(prefix="hermes-codex-") as tmp:
         last = Path(tmp) / "last-message.txt"
         argv = ["codex", "exec"]
@@ -506,8 +507,31 @@ def _to_codex(
         if thread:
             argv.append(thread)
         argv.append(task)
+        artifact = codex_deadline.Artifact(task, entry.get('checkout_path') or entry.get('cwd') or Path.cwd(), env)
         process_options = ({'cwd': entry['checkout_workspace']}
                            if not thread and entry.get('checkout_workspace') else {})
+
+        reconciliation: dict = {}
+        started_at = time.time()
+        def reconcile(output):
+            thread_id, _ = _codex_timeout_activity(output, thread, env)
+            native = codex_deadline.native_thread(thread_id, env, started_at)
+            result = last.read_text(encoding='utf-8').strip() if last.exists() else ''
+            reconciliation.update(final_message=bool(result), native_thread=native,
+                                  artifact=artifact.readback())
+            return result or native['result']
+
+        def on_deadline(output, last_event_at):
+            result = reconcile(output)
+            native_at = reconciliation['native_thread']['last_progress_at']
+            active = (last_event_at is not None
+                      and time.monotonic() - last_event_at <= CODEX_ACTIVITY_WINDOW_S) or (
+                      native_at is not None and 0 <= time.time() - native_at <= CODEX_ACTIVITY_WINDOW_S)
+            if (not result and timeout_s is None and active
+                    and not reconciliation.get('grace_seconds')):
+                reconciliation['grace_seconds'] = CODEX_DEADLINE_GRACE_S
+                return CODEX_DEADLINE_GRACE_S
+            return 0
 
         try:
             # stdin=DEVNULL is load-bearing: `codex exec` reads stdin when it
@@ -515,11 +539,11 @@ def _to_codex(
             # pipe makes the run hang or swallow whatever the caller was fed.
             # It is the same reason every command in CLAUDE.md carries
             # `</dev/null`.
-            if provider_run is None and (on_executor or stream_output):
+            if provider_run is None:
                 proc = _run_headless_process(argv, env or os.environ.copy(), limit_s,
-                                          on_executor, stream_output, **process_options)
+                                          on_executor, stream_output, on_deadline=on_deadline, **process_options)
             else:
-                proc = (provider_run or subprocess.run)(
+                proc = provider_run(
                     argv, env=env or os.environ.copy(), capture_output=True,
                     text=True, timeout=limit_s, stdin=subprocess.DEVNULL,
                     **process_options,
@@ -528,11 +552,17 @@ def _to_codex(
             return {"status": "failed", "detail": "codex is not on PATH", 'termination_confirmed': True}
         except subprocess.TimeoutExpired as exc:
             thread_id, activity = _codex_timeout_activity(exc.output, thread, env)
+            result = reconcile(exc.output)
+            if result:
+                return {'status': 'completed', 'result': result, 'thread_id': thread_id,
+                        'resumed': bool(thread), 'deadline_reconciliation': reconciliation,
+                        'termination_confirmed': getattr(exc, 'termination_confirmed', False)}
             detail = (f"no answer in {limit_s:.0f}s; last event {activity['last_event_type']}; "
                       f"hook failures in {activity['source'].replace('_', ' ')} tail: "
                       f"{activity['hook_failures']}")
             return {"status": "timed_out", "detail": detail,
                     'thread_id': thread_id, 'resumed': bool(thread), 'last_activity': activity,
+                    'deadline_reconciliation': reconciliation,
                     **({'termination_confirmed': exc.termination_confirmed}
                        if hasattr(exc, 'termination_confirmed') else {})}
 
@@ -544,7 +574,11 @@ def _to_codex(
         )
         result = last.read_text(encoding="utf-8").strip() if last.exists() else ""
 
+        if reconciliation:
+            result = reconcile(proc.stdout)
+
         base = {"thread_id": thread_id, "resumed": bool(thread),
+                **({'deadline_reconciliation': reconciliation} if reconciliation else {}),
                 **({'termination_confirmed': proc.termination_confirmed}
                    if hasattr(proc, 'termination_confirmed') else {})}
 
@@ -592,7 +626,6 @@ def _execute(request: dict, *, on_executor=None) -> dict:
     fresh = request.get('fresh', False)
     cwd = request.get('cwd')
     retrieval = request.get('retrieval', False)
-    live_desktop = request.get('live_desktop', False)
     network_access = entry.get('network_access', False)
     codex_timeout_s = request.get('codex_timeout_s')
     config_overrides = tuple(request.get('config_overrides', ()))
@@ -602,9 +635,20 @@ def _execute(request: dict, *, on_executor=None) -> dict:
         on_executor({**identity, **({'socket': entry['socket']}
                                     if identity.get('kind') in ('codex_turn', 'no_launch') and entry.get('socket') else {})})
     executor_options: dict = {'on_executor': executor_started} if on_executor else {}
-    codex_options: dict = {**executor_options, 'claim_id': request.get('claim_id')} if on_executor else {}
+    termination: dict = {}
     def run_cli(argv, *, timeout, env=None, cwd=None, **options):
-        return _run_headless_process(argv, env, timeout, on_executor, False, cwd=cwd)
+        try:
+            if request.get('provider_run') is not None:
+                proc = request['provider_run'](argv, timeout=timeout, env=env, cwd=cwd, **options)
+            else:
+                proc = _run_headless_process(argv, env, timeout, on_executor, False, cwd=cwd)
+        except subprocess.TimeoutExpired as exc:
+            termination['termination_confirmed'] = (termination.get('termination_confirmed', True)
+                and getattr(exc, 'termination_confirmed', False))
+            raise
+        termination['termination_confirmed'] = (termination.get('termination_confirmed', True)
+            and getattr(proc, 'termination_confirmed', True))
+        return proc
     if entry["kind"] == "claude-session":
         if name == "flash":
             with flashlib.activity_scope():
@@ -627,9 +671,7 @@ def _execute(request: dict, *, on_executor=None) -> dict:
             grok_options['timeout_seconds'] = codex_timeout_s if codex_timeout_s is not None else CODEX_TIMEOUT_S
         if env is not None:
             grok_options['env'] = scrubbed_env(env)
-        if request.get('provider_run') is not None:
-            grok_options["run"] = request['provider_run']
-        elif on_executor:
+        if request.get('provider_run') is not None or on_executor:
             grok_options['run'] = run_cli
         outcome = grok_wire.run_task(entry, task, **grok_options)
     elif entry['kind'] == 'hermes-nous':
@@ -650,15 +692,16 @@ def _execute(request: dict, *, on_executor=None) -> dict:
         outcome = _to_codex(
             {**entry, "cwd": cwd}, task, env, fresh=True, config_overrides=config_overrides,
             timeout_s=codex_timeout_s, **runner_options, **stream_options,
-            **codex_options,
+            **executor_options,
         )
     else:
         outcome = _to_codex(
             entry, task, env, fresh=fresh, config_overrides=config_overrides,
-            live_desktop=live_desktop, timeout_s=codex_timeout_s,
+            timeout_s=codex_timeout_s,
             **runner_options, **stream_options,
-            **codex_options,
+            **executor_options,
         )
+    outcome.update(termination)
     return outcome
 
 
@@ -671,7 +714,6 @@ def dispatch(
     fresh: bool = False,
     config_overrides: tuple[str, ...] = (),
     cwd: str | None = None,
-    live_desktop: bool = False,
     provider_run=None,
     stream_output: bool = False,
     retrieval: bool = False,
@@ -686,10 +728,6 @@ def dispatch(
     posture: str | None = None,
 ) -> dict:
     """Send one task to one desk. Raises DeskError when the desk is not usable.
-
-    `live_desktop` (codex-session desks only) lets a thread Codex Desktop holds
-    open take the turn in its own window, returning status "delivered_live".
-    Only a caller that expects no result back may set it; see _to_codex.
 
     `cwd` (codex-session desks only) runs this one task in that directory on a FRESH
     thread and leaves the desk's standing thread untouched: flash-run's escalation gives
@@ -785,34 +823,40 @@ def dispatch(
                 cwd = prepared['checkout_workspace']
     request = {'entry': entry, 'task': task, 'msg_id': msg_id, 'env': env, 'budget_results_path': str(DEFAULT_RESULTS),
                'fresh': fresh, 'cwd': cwd, 'retrieval': retrieval,
-               'live_desktop': live_desktop, 'codex_timeout_s': codex_timeout_s,
+               'codex_timeout_s': codex_timeout_s,
                'config_overrides': config_overrides, 'stream_output': stream_output,
-               'provider_run': provider_run,
-               'claim_id': msg_id if declared_writes else None}
+               'provider_run': provider_run}
     workspace = base.get('checkout_path') or cwd or entry.get('cwd') or str(Path.cwd())
-    with (_hermes_slot(env or os.environ) if entry['kind'] == 'hermes-nous' else nullcontext()), \
-         (write_ownership.checkout_writer(workspace) if declared_writes or entry['kind'] == 'claude-api' else nullcontext()) as bind:
-        for attempt in range(CODEX_CAPACITY_ATTEMPTS):
-            if entry.get('posture') == 'record-layer':
-                try:
-                    reason = business_routing.unavailable(
-                        entry, results_path, business_routing.limit_states(results_path))
-                except (DeskError, OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
-                    reason = f'execution unavailable: {type(exc).__name__}'
-                if reason:
-                    raise DeskError('business_desk_unavailable', reason)
-            outcome = _execute(request, on_executor=bind)
-            if (entry['kind'] not in codex_models.CODEX_KINDS
-                    or outcome['status'] not in ('failed', 'capacity')
-                    or 'selected model is at capacity' not in outcome.get('detail', '').lower()):
-                break
-            outcome['status'] = 'capacity'
-            if outcome.get('termination_confirmed') is False or attempt + 1 == CODEX_CAPACITY_ATTEMPTS:
-                break
-            print(f"capacity: retrying {name} in {CODEX_CAPACITY_BACKOFF_S}s "
-                  f"(attempt {attempt + 2}/{CODEX_CAPACITY_ATTEMPTS})", file=sys.stderr, flush=True)
-            time.sleep(CODEX_CAPACITY_BACKOFF_S)
-    if outcome.get('thread_id') and not network_access and (entry['kind'] == 'codex-live'
+    try:
+        with (_hermes_slot(env or os.environ) if entry['kind'] == 'hermes-nous' else nullcontext()), \
+             (write_ownership.checkout_writer(workspace) if checkout is not None or declared_writes or entry['kind'] == 'claude-api' else nullcontext()) as bind:
+            for attempt in range(CODEX_CAPACITY_ATTEMPTS):
+                if entry.get('posture') == 'record-layer':
+                    try:
+                        reason = business_routing.unavailable(
+                            entry, results_path, business_routing.limit_states(results_path))
+                    except (DeskError, OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+                        reason = f'execution unavailable: {type(exc).__name__}'
+                    if reason:
+                        raise DeskError('business_desk_unavailable', reason)
+                outcome = _execute(request, on_executor=bind)
+                if (entry['kind'] not in codex_models.CODEX_KINDS
+                        or outcome['status'] not in ('failed', 'capacity')
+                        or 'selected model is at capacity' not in outcome.get('detail', '').lower()):
+                    break
+                outcome['status'] = 'capacity'
+                if outcome.get('termination_confirmed') is False or attempt + 1 == CODEX_CAPACITY_ATTEMPTS:
+                    break
+                print(f"capacity: retrying {name} in {CODEX_CAPACITY_BACKOFF_S}s "
+                      f"(attempt {attempt + 2}/{CODEX_CAPACITY_ATTEMPTS})", file=sys.stderr, flush=True)
+                time.sleep(CODEX_CAPACITY_BACKOFF_S)
+    except DeskError as exc:
+        outcome = {'status': 'failed', 'code': exc.code, 'detail': f'{exc.code}: {exc}',
+                   'termination_confirmed': True}
+    except Exception as exc:
+        outcome = {'status': 'failed', 'detail': f'{type(exc).__name__}: {exc}',
+                   'termination_confirmed': False}
+    if outcome.get('thread_id') and checkout is None and not network_access and (entry['kind'] == 'codex-live'
             or entry['kind'] in codex_models.CODEX_KINDS and not cwd):
         registry.remember_thread(name, outcome['thread_id'])
 
@@ -825,47 +869,16 @@ def dispatch(
     if row['status'] == 'failed' and SAFETY_REFUSAL.search(row.get('detail', '')):
         print('Provider safety refusal. ' + _phrasing_hint(original_task, examples_on_miss=True),
               file=sys.stderr, flush=True)
+    if checkout is not None:
+        if (row['status'] in ('delivered', 'delivered_live', 'backgrounded')
+                or row.get('termination_confirmed') is False):
+            row['checkout_cleanup'] = {'status': 'retained', 'detail': 'executor termination unconfirmed'}
+        else:
+            row['checkout_cleanup'] = codex_checkout.retire(
+                base, original_task, str(row.get('result') or ''),
+                results_path.parent / 'artifacts' / msg_id)
     _record(results_path, row)
     return row
-
-
-# WR-000119 — THE DESK'S OWN ACKNOWLEDGEMENT, AND ONLY ITS OWN.
-#
-# The stage is a MODULE CONSTANT and not a parameter. A desk observes exactly
-# one thing first-hand: that a turn landed in a window, at a byte offset it can
-# name. Whether the session then TOOK THE TURN UP is the session's own fact and
-# it writes that itself, from inside its own turn -- so there is deliberately no
-# way to reach `acknowledged` through this function, and a caller that wanted to
-# send it would have to write a second one.
-#
-# The evidence is the desk name and the injection offset, both measured, never a
-# guess that "it probably arrived".
-DESK_ACK_STAGE = "received"
-
-
-def acknowledge_received(dispatch_ref: str, *, desk: str, log_offset: int,
-                          injected_at: str | None = None,
-                          call_verb=verb_io._run_verb) -> dict:
-    """Append this desk's `received` acknowledgement for one dispatch.
-
-    ``verb_io._run_verb`` is reused rather than a second subprocess path being
-    invented here: two paths to the record layer would be two places for the
-    identity derivation to drift, and verb_io.py is outside this Work Request's
-    authorized paths, so no public wrapper could be added to it.
-    """
-    if not dispatch_ref:
-        raise DeskError("dispatch_ref_missing",
-                        "an acknowledgement names the dispatch it acknowledges")
-    evidence = f"desk {desk} log offset {int(log_offset)}"
-    if injected_at:
-        evidence = f"{evidence} injected at {injected_at}"
-    return call_verb("acknowledge-dispatch", {
-        "idempotency_key": f"dispatch-ack:{dispatch_ref}:{DESK_ACK_STAGE}",
-        "dispatch_ref": dispatch_ref,
-        "stage": DESK_ACK_STAGE,
-        "evidence": evidence,
-    })
-
 
 # ---------------------------------------------------------------------------
 # putting a desk on the line
@@ -994,13 +1007,6 @@ def desk_start(
         f"-p --input-format stream-json --output-format stream-json --verbose "
         f"<&3 >>{shlex.quote(str(log))} 2>&1"
     )
-    # This is the ONE unattended launch of `claude -p` a room-bridge poll cycle
-    # can make (see bridge.py's own header: launchd fires the cycle, no human
-    # is present). The child gets the long-lived login merged into ITS OWN
-    # env only — os.environ itself is never touched — so a keychain entry
-    # that has expired between launchd wakes does not take this desk down.
-    # Absent-safe: with no token configured, this is exactly the env the
-    # caller already passed (or a plain copy of the current environment).
     child_env, warning = credential_env.claude_child_env(env or None, path=token_path)
     if warning:
         print(f"desk_start {name}: {warning}", flush=True)
@@ -1029,9 +1035,6 @@ def desk_start(
 
     if proc.poll() is not None or not _alive(proc.pid):
         raise DeskError("desk_failed_to_start", "the session exited after binding its socket")
-    # An unseeded desk has no pending turn. The instruction rides on its
-    # first dispatched task, avoiding an unrelated bootstrap result racing
-    # with bridge.deliver's first task log offset.
     if seed:
         _send_seed(fifo, seed, proc.pid, deadline)
     registry.register(name, "claude-session", socket=str(sock))
@@ -1169,7 +1172,7 @@ def main(argv: list[str]) -> int:
     s.add_argument("--effort", choices=desks.EFFORT_CHOICES)
     s.add_argument("--writes", action="append", help="repository-relative write glob (repeatable)")
     s.add_argument('--checkout', metavar='BRANCH|new:NAME',
-                   help='clone the canonical carr-system origin before launch into a retained /private/tmp job folder; '
+                   help='clone the canonical carr-system origin before launch into a /private/tmp job folder; safely pushed checkouts retire at job end; '
                         'BRANCH uses that branch, new:NAME branches from origin default HEAD. '
                         'Fresh jobs start in its parent workspace with the nested checkout named '
                         'in the task; resumed desks keep cwd and receive the checkout path. '
@@ -1258,8 +1261,10 @@ def main(argv: list[str]) -> int:
             return 0
 
         task = sys.stdin.read() if a.task == "-" else a.task
+        task = task.split('\n\n## Required skills', 1)[0]
         if not task.strip():
             raise DeskError("empty_task", "dispatch requires a non-empty task")
+        brief_text = task
         task = _with_footer(task, a.brief)
         _lint_phrasing(task, a.allow_phrasing)
         # An offline host or a seat whose last probe failed is refused here,
@@ -1268,12 +1273,16 @@ def main(argv: list[str]) -> int:
         if a.brief != 'business' or a.name != 'business':
             _check_brief_desk(a.brief, desk_entry)
         if a.brief == 'business':
+            task, a.required_skills = skill_picker.prepare(brief_text, HERE.parents[1])
+            task = _with_footer(task, a.brief)
             row = work_cli.send_business(a, task, reg, results)
         else:
             if isinstance(desk_entry, dict):
                 blocked = seat_gate.check({**desk_entry, "name": a.name})
                 if blocked:
                     raise DeskError(*blocked)
+            task, a.required_skills = skill_picker.prepare(brief_text, HERE.parents[1])
+            task = _with_footer(task, a.brief)
             row = work_cli.send(a, task, reg, results)
         print(json.dumps(row, indent=2))
         return 0

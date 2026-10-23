@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 import copy
-import contextlib
-import io
 import json
 import sys
 import importlib.util
@@ -20,173 +18,66 @@ spec.loader.exec_module(evidence)
 
 
 class HostedVerdict(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix='ci-verdict-selftest-')
-        self.addCleanup(self.tmp.cleanup)
-        self.summary = pathlib.Path(self.tmp.name) / 'summary'
-        self.env = patch.dict(os.environ, GITHUB_REPOSITORY='jbookout/carr-system',
-                              GITHUB_RUN_ID='39284055792', GITHUB_RUN_ATTEMPT='1',
-                              GITHUB_STEP_SUMMARY=str(self.summary))
-        self.env.start()
-        self.addCleanup(self.env.stop)
-        self.jobs = [
-            {'id': 118164883351, 'run_attempt': 1, 'status': 'completed',
-             'conclusion': 'success', 'name': 'ops/ci.sh --strict --only migration'},
-            {'id': 118164883636, 'run_attempt': 1, 'status': 'completed',
-             'conclusion': 'success', 'name': 'ops/ci.sh --strict --only gates'},
-            {'id': 118164883742, 'run_attempt': 1, 'status': 'completed',
-             'conclusion': 'success', 'name': 'ops/ci.sh --strict --only '
-                 'pushfloor unit types contract secret dependency binding artifact freshness'},
-            {'id': 118174315239, 'run_attempt': 1, 'status': 'in_progress',
-             'conclusion': None, 'name': 'ops/ci.sh --strict'},
+    def test_completed_needs_succeeds_without_contacting_github(self):
+        with tempfile.TemporaryDirectory() as directory:
+            summary = pathlib.Path(directory) / 'summary'
+            needs = {'scope': {'result': 'success', 'outputs': {'full': 'true'}},
+                     'fallow': {'result': 'success'}, 'classes': {'result': 'success'},
+                     'migration-fixtures': {'result': 'success'}}
+            with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
+                            GITHUB_REPOSITORY='DoctorCRE/carr-system',
+                            GITHUB_RUN_ID='39800451182', GITHUB_RUN_ATTEMPT='1',
+                            GITHUB_STEP_SUMMARY=str(summary)), \
+                    patch('subprocess.run', side_effect=AssertionError('verdict must not query jobs API')):
+                self.assertEqual(evidence.hosted_verdict(), 0)
+            self.assertIn('classes: PASSED', summary.read_text())
+
+    def test_fallow_failure_cannot_pass_the_required_aggregate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for result in ('failure', 'cancelled', 'skipped', 'success'):
+                with self.subTest(result=result):
+                    needs = {'scope': {'result': 'success', 'outputs': {'full': 'false'}},
+                             'classes': {'result': 'success'},
+                             'migration-fixtures': {'result': 'skipped'},
+                             'fallow': {'result': result}}
+                    with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
+                                    GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
+                        self.assertEqual(evidence.hosted_verdict(), 0 if result == 'success' else 1)
+
+    def test_failed_scope_cannot_authorize_skipping_fixtures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            needs = {'scope': {'result': 'failure', 'outputs': {'full': 'false'}},
+                     'fallow': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
+            with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
+                            GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
+                self.assertEqual(evidence.hosted_verdict(), 1)
+
+    def test_cli_fails_closed_for_results_and_allows_only_documented_skips(self):
+        cases = [
+            ('true', 'success', 'success', False, 0),
+            ('false', 'success', 'skipped', False, 0),
+            ('true', 'success', 'skipped', True, 0),
+            ('', 'success', 'skipped', False, 1),
+            ('true', 'success', 'skipped', False, 1),
         ]
-        groups = [job['name'].split('--only ', 1)[1] for job in self.jobs if '--only ' in job['name']]
-        self.enterContext(patch.object(evidence, 'class_groups', return_value=groups))
-
-    def response(self, jobs):
-        return subprocess.CompletedProcess([], 0, stdout=json.dumps([
-            {'total_count': len(jobs), 'jobs': jobs[:2]},
-            {'total_count': len(jobs), 'jobs': jobs[2:]},
-        ]))
-
-    def test_waits_for_class_conclusions_after_needs_succeeded(self):
-        stale = copy.deepcopy(self.jobs)
-        for job in (stale[0], stale[2]):
-            job.update(status='in_progress', conclusion=None)
-        with patch('subprocess.run', side_effect=[self.response(stale),
-                                                 self.response(self.jobs)]), \
-                patch('time.sleep'):
-            self.assertEqual(evidence.hosted_verdict(), 0)
-        summary = self.summary.read_text()
-        self.assertIn('migration: PASSED', summary)
-        self.assertIn('unit: PASSED', summary)
-        self.assertNotIn('INCOMPLETE', summary)
-
-    def test_earlier_success_cannot_mask_failed_current_class(self):
-        os.environ['GITHUB_RUN_ATTEMPT'] = '2'
-        current = copy.deepcopy(self.jobs)
-        for job in current:
-            job['run_attempt'] = 2
-        current[0]['conclusion'] = 'failure'
-
-        def api(command, **kwargs):
-            jobs = current if '/attempts/2/jobs?' in command[-1] else self.jobs
-            return self.response(jobs)
-
-        with patch('subprocess.run', side_effect=api), patch('time.sleep'):
-            self.assertEqual(evidence.hosted_verdict(), 1)
-        self.assertIn('migration: FAILED', self.summary.read_text())
-
-    def rerun_fixture(self):
-        fixture = json.loads((ROOT / 'test/fixtures/ci-single-job-rerun.json').read_text())
-        os.environ['GITHUB_RUN_ID'] = str(fixture['run_id'])
-        os.environ['GITHUB_RUN_ATTEMPT'] = str(fixture['run_attempt'])
-        return fixture
-
-    def test_observed_single_job_rerun_preserves_successful_classes(self):
-        fixture = self.rerun_fixture()
-        initial = {job['name']: job for job in fixture['attempt_1']['jobs']}
-        rerun = {job['name']: job for job in fixture['attempt_2']['jobs']}
-        for name in ('ops/ci.sh --strict --only migration',
-                     'ops/ci.sh --strict --only pushfloor unit types contract secret '
-                     'dependency binding artifact freshness'):
-            self.assertEqual(initial[name]['completed_at'], rerun[name]['completed_at'])
-        self.assertNotEqual(initial['ops/ci.sh --strict --only gates']['started_at'],
-                            rerun['ops/ci.sh --strict --only gates']['started_at'])
-        self.assertEqual(fixture['attempt_2'], fixture['latest'])
-        with patch('subprocess.run', return_value=self.response(fixture['attempt_2']['jobs'])):
-            self.assertEqual(evidence.hosted_verdict(), 0)
-        self.assertEqual(self.summary.read_text().count(': PASSED'), 11)
-
-    def test_rerun_failure_overrides_previously_successful_class(self):
-        fixture = self.rerun_fixture()
-        jobs = fixture['attempt_2']['jobs']
-        migration = next(job for job in jobs if job['name'].endswith('--only migration'))
-        migration['conclusion'] = 'failure'
-        with patch('subprocess.run', return_value=self.response(jobs)):
-            self.assertEqual(evidence.hosted_verdict(), 1)
-        self.assertIn('migration: FAILED', self.summary.read_text())
-
-    def test_pending_rerun_waits_instead_of_reusing_old_success(self):
-        fixture = self.rerun_fixture()
-        jobs = fixture['attempt_2']['jobs']
-        migration = next(job for job in jobs if job['name'].endswith('--only migration'))
-        migration.update(status='in_progress', conclusion=None)
-        failed = copy.deepcopy(jobs)
-        next(job for job in failed if job['name'].endswith('--only migration')).update(
-            status='completed', conclusion='failure')
-        with patch('subprocess.run', side_effect=[self.response(jobs), self.response(failed)]), \
-                patch('time.sleep'):
-            self.assertEqual(evidence.hosted_verdict(), 1)
-        self.assertIn('migration: FAILED', self.summary.read_text())
-
-    def test_waits_through_minutes_of_stale_api_state(self):
-        stale = copy.deepcopy(self.jobs)
-        stale[0].update(status='in_progress', conclusion=None)
-        clock = [0]
-
-        def api(*args, **kwargs):
-            return self.response(stale if clock[0] < 180 else self.jobs)
-
-        def sleep(seconds):
-            clock[0] += seconds
-
-        with patch('subprocess.run', side_effect=api), \
-                patch('time.monotonic', side_effect=lambda: clock[0]), \
-                patch('time.sleep', side_effect=sleep):
-            self.assertEqual(evidence.hosted_verdict(), 0)
-
-    def test_terminal_class_results_cannot_be_retried_into_success(self):
-        for conclusion in ('failure', 'cancelled', 'skipped', 'timed_out', 'neutral', None):
-            with self.subTest(conclusion=conclusion):
-                jobs = copy.deepcopy(self.jobs)
-                jobs[0]['conclusion'] = conclusion
-                with patch('subprocess.run', side_effect=[self.response(jobs),
-                                                         self.response(self.jobs)]), \
-                        patch('time.sleep'):
-                    self.assertEqual(evidence.hosted_verdict(), 1)
-
-    def test_unsettled_jobs_exhaust_budget_and_stay_red(self):
-        for state in ('missing', 'incomplete'):
-            with self.subTest(state=state):
-                jobs = copy.deepcopy(self.jobs)
-                if state == 'missing':
-                    jobs.pop(0)
-                else:
-                    jobs[0].update(status='in_progress', conclusion=None)
-                clock = [0]
-
-                def api_response(*args, **kwargs):
-                    clock[0] += kwargs['timeout']
-                    return self.response(jobs)
-
-                def advance(seconds):
-                    clock[0] += seconds
-
-                with patch('subprocess.run', side_effect=api_response) as api, \
-                        patch('time.monotonic', side_effect=lambda: clock[0]), \
-                        patch('time.sleep', side_effect=advance) as sleep:
-                    self.assertEqual(evidence.hosted_verdict(), 1)
-                budget = sum(call.kwargs['timeout'] for call in api.call_args_list)
-                budget += sum(call.args[0] for call in sleep.call_args_list)
-                self.assertLess(budget, 300)
-
-    def test_ambiguous_class_is_red(self):
-        jobs = self.jobs + [copy.deepcopy(self.jobs[0])]
-        with patch('subprocess.run', return_value=self.response(jobs)), patch('time.sleep'):
-            self.assertEqual(evidence.hosted_verdict(), 1)
-        self.assertIn('migration: AMBIGUOUS', self.summary.read_text())
-
-    def test_unavailable_or_malformed_api_fails_closed(self):
-        for error in (subprocess.CalledProcessError(1, ['gh']),
-                      subprocess.TimeoutExpired(['gh'], 15),
-                      subprocess.CompletedProcess([], 0, stdout='not JSON')):
-            with self.subTest(error=type(error).__name__):
-                with patch('subprocess.run', side_effect=[error]), \
-                        patch.object(sys, 'argv', ['ci-evidence.py', 'verdict']), \
-                        contextlib.redirect_stdout(io.StringIO()) as output:
-                    self.assertEqual(evidence.main(), 1)
-                self.assertIn('job conclusions unavailable; refusing success', output.getvalue())
+        for result in ('failure', 'cancelled', 'skipped', 'neutral', '', None):
+            cases.append(('true', result, 'success', False, 1))
+            if result != 'skipped':
+                cases.append(('false', 'success', result, True, 1))
+        with tempfile.TemporaryDirectory() as directory:
+            for full, classes, fixtures, draft, expected in cases:
+                with self.subTest(full=full, classes=classes, fixtures=fixtures, draft=draft):
+                    needs = {'scope': {'result': 'success', 'outputs': {'full': full}},
+                             'fallow': {'result': 'success'}, 'classes': {'result': classes}, 'migration-fixtures': {'result': fixtures}}
+                    result = subprocess.run([sys.executable, str(ROOT / 'ops/ci-evidence.py'), 'verdict'],
+                        env={**os.environ, 'CI_NEEDS': json.dumps(needs), 'CI_DRAFT': str(draft).lower(),
+                             'GITHUB_STEP_SUMMARY': str(pathlib.Path(directory) / 'summary')},
+                        capture_output=True, text=True, timeout=5)
+                    self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+            for malformed in ('{}', 'not-json', 'null', '{"scope": null}'):
+                result = subprocess.run([sys.executable, str(ROOT / 'ops/ci-evidence.py'), 'verdict'],
+                    env={**os.environ, 'CI_NEEDS': malformed}, capture_output=True, text=True, timeout=5)
+                self.assertNotEqual(result.returncode, 0)
 
 
 class Reuse(unittest.TestCase):
@@ -262,7 +153,7 @@ class Reuse(unittest.TestCase):
             gh.chmod(0o700)
             env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'],
                        GH_TOKEN='must-not-appear-in-evidence',
-                       GITHUB_REPOSITORY='jbookout/carr-system',
+                       GITHUB_REPOSITORY='DoctorCRE/carr-system',
                        GITHUB_OUTPUT=str(root / 'output'),
                        GITHUB_STEP_SUMMARY=str(root / 'summary'))
             result = subprocess.run([sys.executable, str(ROOT / 'ops/ci-evidence.py'),

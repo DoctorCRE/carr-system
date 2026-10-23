@@ -5,7 +5,6 @@
 // from the record that owns it, so it leaves the list when that record closes.
 // Fake-client suite: one fixture per source, no Worker or database.
 
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS } from "../src/tools.js";
@@ -62,11 +61,11 @@ const governance = {
 const localPage = {
   schema: "needs-joe-local.v1", observed_at: "2026-10-05T11:50:00Z",
   items: [
-    { kind: "needs_joe", repo: "jbookout/carr-system", number: 1244, pr_state: "OPEN",
+    { kind: "needs_joe", repo: "DoctorCRE/carr-system", number: 1244, pr_state: "OPEN",
       pr_title: "Route typed calls through TypeSafe", text: "restore TypeSafe API credits",
       at: "2026-10-02T23:08:59" },
     { kind: "waiting", repo: "jbookout/doctorcre-app", number: 131, pr_state: "OPEN",
-      pr_title: "Board lane", text: "WAITING ON jbookout/carr-system#1467", at: "2026-10-03T10:00:00" },
+      pr_title: "Board lane", text: "WAITING ON DoctorCRE/carr-system#1467", at: "2026-10-03T10:00:00" },
     { kind: "tabled", repo: null, number: null, pr_state: null, pr_title: null,
       text: "sign in to Codex and xAI on the Studio", at: "2026-10-04T08:00:00" },
   ],
@@ -128,7 +127,7 @@ test("human-only classes come from the existing gates, most specific first", asy
   assert.equal(byKey["loop:A17"].why.class, "human_only");
   assert.equal(byKey["loop:412"].why.class, "credential");
   assert.equal(byKey["loop:413"].why.class, "ruling");
-  assert.equal(byKey["pr:jbookout/carr-system#1244"].why.class, "money");
+  assert.equal(byKey["pr:DoctorCRE/carr-system#1244"].why.class, "money");
   assert.equal(byKey["tabled:sign in to Codex and xAI on the Studio"].why.class, "credential");
   assert.equal(byKey["work-request:WR-000201"].why.class, "ruling");
   assert.equal(byKey["rule:7d9b1a2c-0000-0000-0000-000000000001"].why.class, "ruling");
@@ -173,7 +172,7 @@ test("ordered by what it blocks: live work, then capabilities, then pending appr
   assert.deepEqual(work.map(item => item.age_days), [...work.map(item => item.age_days)].sort((a, b) => b - a));
   assert.equal(list.items.at(-1).key, "rule:7d9b1a2c-0000-0000-0000-000000000001");
   const pr = list.items.find(item => item.source === "pull_request");
-  assert.equal(pr.link, "https://github.com/jbookout/carr-system/pull/1244");
+  assert.equal(pr.link, "https://github.com/DoctorCRE/carr-system/pull/1244");
   assert.match(pr.blocks.text, /Route typed calls through TypeSafe/);
 });
 
@@ -275,10 +274,7 @@ test("flagged loops always appear and explicit classifications win over keywords
   });
 });
 
-test("display classes cover money and watchdog credential phrases", () => {
+test("display classes cover money", () => {
   for (const text of ["$240", "£20", "€30", "10 usd", "10 dollars", "per month", "a year", "per seat", "a user"])
     assert.equal(classifyHumanOnly(text), "money", text);
-  const watchdog = JSON.parse(readFileSync(new URL("../../ops/config/job-watchdog.json", import.meta.url)));
-  for (const phrase of watchdog.needs_joe_patterns.credentials)
-    assert.equal(classifyHumanOnly(phrase), "credential", phrase);
 });

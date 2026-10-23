@@ -115,9 +115,9 @@ outbound network call. A short quoted evidence excerpt per item, the handful
 of transcript segments nearest that excerpt (with their speaker labels), and
 a short list of candidate deal names go to TypeSafe (`api.typesafe.ai`) for
 this check. The full transcript, the full recorded-deal list, and email
-bodies are never sent. This rides the same 2026-09-17 authority
-`ops/typesafe_client.py` records for sending CARR records to a third-party
-model API.
+bodies are never sent. The classifier calls the official TypeSafe SDK directly,
+with all item questions in one request. The local process supplies
+`TYPESAFE_API_KEY` through its environment.
 
 ## Non-goals
 

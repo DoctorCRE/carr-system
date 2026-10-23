@@ -124,16 +124,6 @@
             "type": "command",
             "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/record-home-gate.py",
             "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/canonical-edit-gate.py",
-            "timeout": 15
-          },
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/one-repo-gate.py",
-            "timeout": 10
           }
         ]
       },
@@ -144,61 +134,6 @@
             "type": "command",
             "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/git-writer-gate.py",
             "timeout": 20
-          },
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/bash-write-gate.py",
-            "timeout": 15
-          },
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/write-effect-check.py",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/draft-export-gate.py",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/executor-tier-gate.py",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Bash|mcp__claude-in-chrome__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/model-floor-gate.py",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__claude-in-chrome__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/costar-lane-gate.py",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "PushNotification|mcp__.*__(send_message|create_draft|update_draft)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/weekend-quiet-gate.py",
-            "timeout": 10
           }
         ]
       }
@@ -211,16 +146,6 @@
             "type": "command",
             "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/lint-gate.py",
             "timeout": 40
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/write-effect-check.py",
-            "timeout": 15
           }
         ]
       }
@@ -246,7 +171,6 @@
           }
         ]
       }
-    ],
-    "UserPromptSubmit": []
+    ]
   }
 }

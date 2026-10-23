@@ -2,36 +2,10 @@
   "autoCompactEnabled": true,
   "autoCompactWindow": 500000,
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; fi; if [ ! -e \"$r/hooks/builder-agent-gate.py\" ] && [ ! -L \"$r/hooks/builder-agent-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/builder-agent-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/builder-agent-gate.py\"",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Bash|Read|Grep|Glob|WebFetch|WebSearch",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; fi; if [ ! -e \"$r/hooks/delegation-gate.py\" ] && [ ! -L \"$r/hooks/delegation-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/delegation-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/delegation-gate.py\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
+    "PreToolUse": [],
     "Stop": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; fi; if [ ! -e \"$r/hooks/delegation-gate.py\" ] && [ ! -L \"$r/hooks/delegation-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/delegation-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/delegation-gate.py\"",
-            "timeout": 10
-          },
           {
             "type": "command",
             "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; fi; if [ ! -e \"$r/hooks/rule-claim-gate.py\" ] && [ ! -L \"$r/hooks/rule-claim-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/rule-claim-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/rule-claim-gate.py\"",
@@ -84,8 +58,8 @@
       "Bash(gh run view:*)",
       "Bash(gh run watch:*)",
       "Bash(gh run list:*)",
-      "Bash(gh api repos/jbookout/carr-system/rulesets:*)",
-      "Bash(gh api repos/jbookout/carr-system/branches/main/protection:*)",
+      "Bash(gh api repos/DoctorCRE/carr-system/rulesets:*)",
+      "Bash(gh api repos/DoctorCRE/carr-system/branches/main/protection:*)",
       "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__read-loop",
       "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__search-doctrine",
       "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__loop-board",

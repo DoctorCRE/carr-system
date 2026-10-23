@@ -15,30 +15,19 @@ A failed check FLAGS the item -- it is never silently dropped.  Joe and Dell
 still approve or reject every candidate by hand; this module only adds a
 visible signal ahead of that approval.
 
-THIS FILE IS A LIBRARY ON PURPOSE, the same way ops/typesafe_client.py is: no
-executable-script construct belongs here.  See that file's docstring for why
-and for the detector that enforces it; the same rule applies to this file.
-
 PRIVACY: a short evidence excerpt, the handful of transcript segments nearest
 that excerpt, and a short list of candidate deal names go to TypeSafe
 (api.typesafe.ai) for this check -- never the full transcript, never the full
-recorded-deal list, never an email body. Choosing where a long transcript is
-split (topic_cut) sends, per split, at most four candidate boundaries of one
-trimmed segment on each side -- never the transcript. This rides the same 2026-09-17
-authority ops/typesafe_client.py records for sending CARR records to a
-third-party model API.
+recorded-deal list, never an email body.
 """
 from __future__ import annotations
 
 import hashlib
-import importlib.util
-import os
+from contextlib import nullcontext
 import re
-import time
-from typing import Any, Callable
+from typing import Any
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(_HERE)))
+from typesafe_sdk import Choice, Noul, TypeSafeClient, TypeSafeError
 
 CHECKS_SCHEMA = "post-call-jev-checks/v1"
 
@@ -55,17 +44,6 @@ _LIST_KIND = {
     "joe_tasks": "joe_task", "dell_tasks": "dell_task",
     "deal_updates": "deal_update", "draft_proposals": "draft_proposal",
 }
-
-
-def _client() -> Any:
-    """Load ops/typesafe_client.py the same way ops/jev_build_advisory.py does."""
-    path = os.path.join(REPO, "ops", "typesafe_client.py")
-    spec = importlib.util.spec_from_file_location("typesafe_client_post_call", path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("cannot load the TypeSafe client")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def _tokens(text: Any) -> set[str]:
@@ -165,15 +143,7 @@ def _text_fields(kind: str, item: dict[str, Any]) -> dict[str, str]:
     return {"subject": item.get("subject", ""), "body": item.get("body", "")}
 
 
-def _reason(label: str, decided: dict[str, Any]) -> str:
-    if decided.get("escalate"):
-        return f"{label}: Jev was not confident enough to accept this."
-    if decided.get("outcome") == "no":
-        return f"{label}: Jev found this does not hold."
-    return f"{label}: Jev matched a different deal ({decided.get('value')!r})."
-
-
-def _questions(tsc: Any, deal_options: dict[str, str], attributed: str | None) -> dict[str, Any]:
+def _questions(deal_options: dict[str, str], attributed: str | None) -> dict[str, Any]:
     if attributed:
         speaker_instructions = (
             f"Do `transcript_excerpt` show that {attributed} actually said or "
@@ -187,27 +157,27 @@ def _questions(tsc: Any, deal_options: dict[str, str], attributed: str | None) -
             "the excerpt?"
         )
     return {
-        "deal_match": tsc.choice(
-            "Given `item` and `transcript_excerpt`, which of `candidate_deals` "
+        "deal_match": Choice(
+            instructions="Given `item` and `transcript_excerpt`, which of `candidate_deals` "
             "does `item`'s words actually match? Choose none if no candidate "
             "fits.",
-            deal_options,
+            criteria=deal_options,
         ),
-        "speaker_right": tsc.noul(
-            speaker_instructions,
-            true="The transcript excerpt supports that attribution.",
-            false="The transcript excerpt contradicts it or does not support it.",
+        "speaker_right": Noul(
+            instructions=speaker_instructions,
+            criteria={"true": "The transcript excerpt supports that attribution.",
+            "false": "The transcript excerpt contradicts it or does not support it."},
         ),
-        "details_supported": tsc.noul(
-            "Read `item.evidence_excerpt` against `transcript_excerpt`. Does it "
+        "details_supported": Noul(
+            instructions="Read `item.evidence_excerpt` against `transcript_excerpt`. Does it "
             "actually support the specifics recorded in `item.fields`?",
-            true="The excerpt supports the item's specifics.",
-            false="The excerpt does not support the item's specifics, or overstates them.",
+            criteria={"true": "The excerpt supports the item's specifics.",
+            "false": "The excerpt does not support the item's specifics, or overstates them."},
         ),
     }
 
 
-def _item_request(tsc: Any, ask: Callable[..., Any], kind: str, list_partner: str | None,
+def _item_request(kind: str, list_partner: str | None,
                  item: dict[str, Any], deals: list[Any], segments: list[Any],
                  context: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     evidence = item.get("evidence", "")
@@ -240,112 +210,33 @@ def _item_request(tsc: Any, ask: Callable[..., Any], kind: str, list_partner: st
         ],
     }
 
-    return state, _questions(tsc, deal_options, attributed)
+    return state, _questions(deal_options, attributed)
 
 
-def _item_checks(tsc, item, response):
-    answers = response.get("answers") if isinstance(response, dict) else None
-    if not isinstance(answers, dict):
-        raise RuntimeError("Jev omitted answers for a post-call check")
-
-    deal_decided = tsc.decide(answers["deal_match"])
-    speaker_decided = tsc.decide(answers["speaker_right"])
-    details_decided = tsc.decide(answers["details_supported"])
-
-    deal_pass = not deal_decided["escalate"] and deal_decided["value"] == item.get("deal_id")
-    speaker_pass = not speaker_decided["escalate"] and speaker_decided["outcome"] == "yes"
-    details_pass = not details_decided["escalate"] and details_decided["outcome"] == "yes"
-
+def _item_checks(item, answers):
+    deal = answers["deal_match"]
+    speaker = answers["speaker_right"]
+    details = answers["details_supported"]
+    deal_pass = deal.choice == item.get("deal_id")
+    # Noul is a yes/no probability: take the more likely answer. No confidence gate.
+    speaker_pass = speaker.noul > 0.5
+    details_pass = details.noul > 0.5
     reasons = []
     if not deal_pass:
-        reasons.append(_reason("Right deal", deal_decided))
+        reasons.append(f"Right deal: Jev matched a different deal ({deal.choice!r}).")
     if not speaker_pass:
-        reasons.append(_reason("Right speaker", speaker_decided))
+        reasons.append("Right speaker: the excerpt does not support the attribution.")
     if not details_pass:
-        reasons.append(_reason("Right details", details_decided))
-
+        reasons.append("Right details: the excerpt does not support the item's specifics.")
     reasons.append("Semantic checks are advisory; independent review is required.")
     return {
         "advisory_only": True,
-        "deal": {**deal_decided, "pass": deal_pass},
-        "speaker": {**speaker_decided, "pass": speaker_pass},
-        "details": {**details_decided, "pass": details_pass},
-        "flagged": bool(reasons),
+        "deal": {"value": deal.choice, "confidence": deal.confidence, "pass": deal_pass},
+        "speaker": {"value": speaker.noul, "pass": speaker_pass},
+        "details": {"value": details.noul, "pass": details_pass},
+        "flagged": True,
         "reasons": reasons,
     }
-
-
-# Topic cuts: each candidate sends the one segment before and the one after it,
-# each trimmed, so a cut never shows TypeSafe more than eight short segments.
-CUT_SEGMENT_CHARS = 600
-# Optional topic selection gets this much time for the whole transcript,
-# irrespective of how many cuts it needs. Local distillation remains primary.
-TOPIC_CUT_BUDGET_SECONDS = 5.0
-# Below this, no candidate looks like a topic change and the size-limit cut
-# stands. A noul's probability IS the answer, so 0.5 means "more likely a new
-# topic than not"; a starting point to replace once real calls are measured.
-TOPIC_CUT_MIN = 0.5
-
-
-def _cut_side(segment: Any, *, before: bool = False) -> dict[str, str]:
-    if not isinstance(segment, dict):
-        return {"speaker": "", "text": ""}
-    text = str(segment.get("text", ""))
-    return {"speaker": str(segment.get("speaker", "")),
-            "text": text[-CUT_SEGMENT_CHARS:] if before else text[:CUT_SEGMENT_CHARS]}
-
-
-def topic_cut(segments: list[Any], options: list[int], *,
-              ask: Callable[..., Any] | None = None,
-              deadline: float | None = None) -> int | None:
-    """Pick which of `options` (cut before that segment index) falls where the
-    conversation changes topic, for post_call.transcript_chunks.
-
-    One batched request: one noul per candidate, each reading only its own
-    before/after pair. Returns the most likely topic change, the later cut on
-    a tie, or None when nothing clears TOPIC_CUT_MIN or Jev is unreachable --
-    the caller then keeps its size-limit cut. Never raises. `deadline` is an
-    absolute monotonic time shared by every cut of a transcript; standalone
-    calls get TOPIC_CUT_BUDGET_SECONDS. No rate-limit retries.
-    """
-    try:
-        now = time.monotonic()
-        call_deadline = now + TOPIC_CUT_BUDGET_SECONDS
-        deadline = min(deadline, call_deadline) if deadline is not None else call_deadline
-        if now >= deadline:
-            return None
-        tsc = _client()
-        live_ask = ask if ask is not None else (
-            lambda state, questions: _semantic().ask(state, questions, client=tsc, caller="post_call_jev", version="topic-v1", work_class="app_runtime",
-                timeout=TOPIC_CUT_BUDGET_SECONDS, deadline=deadline, retries=0)
-        )
-        state = {"boundaries": {
-            f"b{j}": {"before": _cut_side(segments[k - 1], before=True), "after": _cut_side(segments[k])}
-            for j, k in enumerate(options)
-        }}
-        questions = {
-            f"b{j}": tsc.noul(
-                f"In `boundaries.b{j}`, does `after` start a new topic of the "
-                "call, rather than continue the thought in `before`?",
-                true="`after` moves on to a different topic, deal, or agenda item.",
-                false="`after` continues, answers, or refers back to what `before` was discussing.",
-            )
-            for j in range(len(options))
-        }
-        response = live_ask(state, questions)
-        answers = response.get("answers") if isinstance(response, dict) else None
-        if not isinstance(answers, dict):
-            return None
-        best: tuple[float, int] | None = None
-        for j, k in enumerate(options):
-            probability = float(answers[f"b{j}"]["noul"])
-            if best is None or probability >= best[0]:
-                best = (probability, k)
-        if best is None or best[0] < TOPIC_CUT_MIN:
-            return None
-        return None  # unvalidated topic threshold cannot change transcript partition
-    except Exception:
-        return None
 
 
 def _unavailable() -> dict[str, Any]:
@@ -358,7 +249,7 @@ def _review_id(session: str, tag: str) -> str:
 
 def check_distillation(result: dict[str, Any], context: dict[str, Any],
                         transcript: dict[str, Any], *,
-                        ask: Callable[..., Any] | None = None) -> dict[str, Any]:
+                        client: Any = None) -> dict[str, Any]:
     """Attach Jev's RIGHT DEAL / RIGHT SPEAKER / RIGHT DETAILS checks in place.
 
     `result` is normalize_distillation's already-normalized return value.
@@ -367,12 +258,10 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
     `speaker_labels` and `local_partner` the way call-mode.py's
     write_call_context records them, used to resolve "Me"/"Other participant"
     segments to Joe or Dell. `transcript` is the session's transcript.json.
-    `ask` overrides ops/typesafe_client.py's `ask` for tests -- its signature
-    is `ask(state, questions) -> response`.
+    `client` may supply an SDK client for offline tests.
 
-    Mutates and returns `result`. Nothing this function does may block the
-    review pack: a missing Jev key, a network error, or any other failure
-    here never raises past this function. Every affected item instead gets
+    Mutates and returns `result`. A missing Jev key or SDK request failure never blocks the
+    review pack. Every affected item instead gets
     `checks: {"unavailable": True}` and one review_questions entry records
     that the automatic checks did not run.
     """
@@ -386,55 +275,37 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
     lists = [(name, _LIST_KIND[name]) for name in
              ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals")]
 
-    try:
-        tsc = _client()
-    except Exception:
-        tsc = None
-    live_ask = ask if ask is not None else (tsc.ask if tsc is not None else None)
-    if tsc is None or live_ask is None:
-        for list_name, _kind in lists:
-            for item in result.get(list_name, []):
-                item["checks"] = _unavailable()
-        result.setdefault("review_questions", []).append({
-            "id": _review_id(session, "jev_unavailable"),
-            "question": "Automatic Jev checks (deal, speaker, details) did not run for this pack.",
-            "resolved": False,
-        })
-        return result
-
     any_unavailable = False
     state: dict[str, Any] = {"checks": {}}
     questions: dict[str, Any] = {}
     pending: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
     for list_name, kind in lists:
         for item in result.get(list_name, []):
-            if len(pending) >= 20 or not item.get("evidence"):
+            if not item.get("evidence"):
                 item["checks"] = {"advisory_only": True, "flagged": True,
                                   "reasons": ["No bounded evidence available; independent review required."]}
                 continue
             label = "i"+str(len(pending))
-            local_state, local_questions = _item_request(tsc, live_ask, kind, _LIST_PARTNER.get(list_name),
+            local_state, local_questions = _item_request(kind, _LIST_PARTNER.get(list_name),
                                                        item, deals, segments, context)
             state["checks"][label] = local_state
             for name,q in local_questions.items():
-                q = dict(q)
-                instruction = q["instructions"]
+                q = q.model_copy()
+                instruction = q.instructions
                 for field in ("item", "transcript_excerpt", "candidate_deals"):
                     instruction = instruction.replace(field, "checks."+label+"."+field)
-                q["instructions"] = instruction
+                q.instructions = instruction
                 questions[label+":"+name] = q
             pending.append((label,item,local_questions))
     if pending:
         try:
-            # A supplied fake keeps its simple signature; production still enters budget admission.
-            transport = (lambda st, qs, **kw: ask(st, qs)) if ask is not None else live_ask
-            response = _semantic().ask(state, questions, transport=transport,
-                                       caller="post_call_jev", version="recording-v1", work_class="app_runtime")
-            for label,item,local_questions in pending:
-                item["checks"] = _item_checks(tsc,item,{"answers":{name:response["answers"][label+":"+name]
-                                                                  for name in local_questions}})
-        except Exception:
-            for _,item,_ in pending:
+            with nullcontext(client) if client is not None else TypeSafeClient(model="jev-latest") as sdk:
+                response = sdk.system_one(state=state, questions=questions)
+            for label, item, local_questions in pending:
+                item["checks"] = _item_checks(item, {name: response.answers[label+":"+name]
+                                                    for name in local_questions})
+        except TypeSafeError:
+            for _, item, _ in pending:
                 item["checks"] = _unavailable()
             any_unavailable = True
 
@@ -445,10 +316,3 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
             "resolved": False,
         })
     return result
-
-
-def _semantic():
-    spec = importlib.util.spec_from_file_location("jev_semantic", os.path.join(REPO, "ops", "jev_semantic.py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module

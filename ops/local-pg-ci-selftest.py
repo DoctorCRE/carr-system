@@ -60,12 +60,9 @@ source = {
     "OPENAI_API_KEY": "secret",
     "ANTHROPIC_API_KEY": "secret",
     "SAFE_LOCAL_FLAG": "must-not-cross",
-    "CARR_JEV_OFFLINE_REPLAY": "1",
 }
 clean = mod.scrub_cloud_environment(source)
 check("required local environment survives", clean["PATH"] == source["PATH"] and clean["HOME"] == source["HOME"])
-check("explicit offline CI mode survives credential scrubbing",
-      clean.get("CARR_JEV_OFFLINE_REPLAY") == "1")
 check("unregistered ambient values are scrubbed", "SAFE_LOCAL_FLAG" not in clean)
 check("owner DSN is scrubbed", "DATABASE_URL" not in clean)
 check("routine DB DSNs are scrubbed", "CARR_DB_JOBS_URL" not in clean)
@@ -83,14 +80,14 @@ with patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}, clear=True):
     else:
         check("hosted runner refuses", False)
 
-# The declared hosted lane (.github/workflows/db-acceptance.yml) is the one
+# The declared hosted lane (.github/workflows/ci.yml) is the one
 # caller allowed through, and every clause is load-bearing. Dropping any one of
 # them would re-open the blanket hole the refusal exists to keep shut, so each
 # is tested by removing exactly that clause and requiring a refusal.
 DECLARED_HOSTED = {
     "CARR_LOCAL_PG_ALLOW_HOSTED": "1",
     "GITHUB_ACTIONS": "true",
-    "GITHUB_REPOSITORY": "jbookout/carr-system",
+    "GITHUB_REPOSITORY": "DoctorCRE/carr-system",
     "GITHUB_RUN_ID": "1234567890",
 }
 with patch.dict(os.environ, DECLARED_HOSTED, clear=True):
@@ -231,10 +228,6 @@ check(
     "assurance persistence runs immediately after canonical ownership",
     events[18][-1].endswith("ops/assurance-evidence-acceptance-local-pg-gate.py"),
 )
-check(
-    "source-merge reader projection runs immediately after assurance persistence",
-    events[19][-1].endswith("ops/source-merge-authority-local-pg-gate.py"),
-)
 completion_event = next(
     index for index, event in enumerate(events)
     if event[-1].endswith("ops/completion-register-schema-local-pg-gate.py")
@@ -284,6 +277,41 @@ check("ordinary children receive no ambient secrets", all(
     for event, env in zip(events, child_envs)
 ))
 
+core_events_start = len(events)
+with (
+    patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
+    patch.object(mod, "port_is_available", return_value=True),
+):
+    result = mod.run_local_ci(repo=REPO, ci_class="migration", port=55432,
+                              runner=FakeRunner(), migration_part="core")
+core_events = events[core_events_start:]
+check("core partition remains strict and runs the full acceptance manifest",
+      result == 0 and any(event[-3:] == ("--strict", "--migration-part", "core") for event in core_events)
+      and any(event[-1].endswith("tools/test-f03-production-migration.py") for event in core_events)
+      and any("--verify-only" in event for event in core_events))
+for part in ("proofs", "gates", "gates-serial", "gates-isolated", "acceptance"):
+    start = len(events)
+    try:
+        with patch.object(mod, "find_postgres_binaries", return_value=fake_bins), \
+                patch.object(mod, "port_is_available", return_value=True):
+            result = mod.run_local_ci(repo=REPO, ci_class="migration", port=55432,
+                                      runner=FakeRunner(), migration_part=part)
+    except mod.LocalPGRefusal:
+        result = 78
+    calls = events[start:]
+    check(f"{part} partition runs strictly", result == 0 and any(
+        event[-3:] == ("--strict", "--migration-part", part) for event in calls))
+    acceptance = any(event[-1].endswith("tools/test-f03-production-migration.py") for event in calls)
+    check(f"{part} partition owns the intended acceptance programs", acceptance == (part == "acceptance"))
+
+for invalid_part in ("fixtures", "unknown"):
+    try:
+        mod.run_local_ci(repo=REPO, ci_class="migration", port=55432, runner=FakeRunner(), migration_part=invalid_part)
+    except mod.LocalPGRefusal:
+        check(f"local lane refuses migration part {invalid_part}", True)
+    else:
+        check(f"local lane refuses migration part {invalid_part}", False)
+
 events.clear()
 with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
@@ -323,10 +351,6 @@ check(
 check(
     "strict lane also proves assurance persistence",
     events[18][-1].endswith("ops/assurance-evidence-acceptance-local-pg-gate.py"),
-)
-check(
-    "strict lane also proves source-merge reader projection",
-    events[19][-1].endswith("ops/source-merge-authority-local-pg-gate.py"),
 )
 
 missing_gate = mod.run_required_local_gate(

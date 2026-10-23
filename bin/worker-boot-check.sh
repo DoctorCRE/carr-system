@@ -18,7 +18,7 @@
 # runs because the Worker never finishes loading.
 #
 # WHAT THIS CHECKS, PRECISELY. It builds the Worker exactly the way
-# bin/deploy-worker.sh would (same wrangler binary, same source tree, same
+# the GitHub production deployment workflow would (same wrangler binary, same source tree, same
 # main entrypoint), boots it in a REAL local workerd instance via
 # `wrangler dev`, and calls GET /healthz -- a route that touches no secret,
 # no database and no binding, so a 200 from it proves only one thing: the

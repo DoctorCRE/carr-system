@@ -1,19 +1,8 @@
 #!/usr/bin/env python3
-"""flash-prompt-rules.py — UserPromptSubmit hook for interactive Flash sessions.
+"""Deliver deterministic store-scoped rules to interactive Flash sessions.
 
-Joe's direction 2026-09-24: Flash should get the taught rules it needs at the right
-time, picked by Jev. flash-run does that once per scripted task (pick_rules); this does
-it for interactive sessions (the flash command, T3 Code, the Model Room seat), once per
-message, because each message can be a different task. Both go through the same
-pick_rules, so the roster and the failure reporting cannot drift apart.
-
-Wired only in Flash's own config (~/.claude-local/settings.json), never in the Claude
-adapter: Claude sessions already get rules through standing-context and JIT triggers.
-
-It never blocks. A slash command, a message too short to judge, nothing binding, a Jev
-outage or bad input all mean no output and exit 0. Every judged message leaves a row in
-out/flash-prompt-rules.jsonl, carrying the degraded-judgment note when there is one, so
-an outage reads differently from "no rule binds".
+Uses the same selection interface as scripted tasks. Slash commands, empty
+messages, catalog outages, and unmatched scopes produce no blocking output.
 """
 
 from __future__ import annotations
@@ -26,12 +15,6 @@ from datetime import datetime, timezone
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG = os.path.join(REPO, "out", "flash-prompt-rules.jsonl")
-MIN_CHARS = 20
-# Said to the rule picker. Unlike flash-run's disposable copy, an interactive session works
-# in a real checkout and may use git, so session rules are allowed to bind here.
-SITUATION = ("A local coding model (Flash) is in an interactive coding session for Joe, "
-             "working in a real checkout: it may read, edit, run tests and use git. "
-             "Joe's message: ")
 
 
 def _flash_run():
@@ -53,16 +36,15 @@ def _log(row):
         pass
 
 
-def build_output(prompt, **judge):
-    """The hook's JSON output for one message, or None when nothing should be added.
-    `judge` passes through to flash-run's pick_rules (tests inject the paid requests)."""
+def build_output(prompt):
+    """Return context for matched rules; selection gaps remain advisory."""
     text = (prompt or "").strip()
     if text.startswith("/") or not text:
         return None
     row = {"at": datetime.now(timezone.utc).isoformat(), "prompt": text[:300]}
     try:
         flash_run = _flash_run()
-        rules, note = flash_run.pick_rules(text, situation=SITUATION, **judge)
+        rules, note = flash_run.pick_rules(text)
         block = flash_run.rules_block(rules)
     except Exception:
         rules, note, block = [], "rule scope catalog unavailable", None
@@ -76,13 +58,13 @@ def build_output(prompt, **judge):
                                    "additionalContext": block}}
 
 
-def main(stdin_text=None, **judge):
+def main(stdin_text=None):
     try:
         payload = json.loads(sys.stdin.read() if stdin_text is None else stdin_text)
         prompt = payload.get("prompt") if isinstance(payload, dict) else None
     except (ValueError, OSError):
         return 0
-    out = build_output(prompt, **judge)
+    out = build_output(prompt)
     if out:
         print(json.dumps(out))
     return 0

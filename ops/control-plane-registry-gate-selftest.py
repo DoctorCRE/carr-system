@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """control-plane-registry-gate compare(): superseded versions are history, not drift.
 
-tools/control-plane.py sync disables a superseded workflow version and keeps
+tools/workflow-registry.py sync disables a superseded workflow version and keeps
 its row (jobs reference it), so a version bump leaves the old row behind. The
 2026-10-19 release run refused staging on exactly that: notes-sweep-hourly v3
 disabled beside the manifest's v4.

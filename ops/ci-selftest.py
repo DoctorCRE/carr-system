@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
-import atexit
 import contextlib
+import hashlib
 import inspect
 import json
 import os
@@ -32,129 +32,83 @@ def check(label, ok, detail=""):
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-MYPY_PIN_MIN_PYTHON = (3, 10)
-
-def type_check_interpreter_version():
-    venv_python = REPO / ".venv" / "bin" / "python"
-    if venv_python.exists():
-        probe = subprocess.run(
-            [str(venv_python), "-c", "import sys; print(sys.version_info[0], sys.version_info[1])"],
-            capture_output=True, text=True)
-        parts = probe.stdout.split()
-        if probe.returncode == 0 and len(parts) >= 2:
-            return (int(parts[0]), int(parts[1]))
-    return sys.version_info[:2]
-
-def mypy_pin_excludes_this_machine():
-    return type_check_interpreter_version() < MYPY_PIN_MIN_PYTHON
-
-SEED_JOURNAL = REPO / "_ci_selftest_seed_journal.json"
-
-def _restore_from_journal(journal_data):
-    restored = []
-    for rel, original in (journal_data.get("paths") or {}).items():
-        target = REPO / rel
-        if original is None:
-            if target.exists():
-                target.unlink()
-                restored.append(rel)
-            continue
-        if not target.exists() or target.read_text() != original:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(original)
-            restored.append(rel)
-    return restored
-
-def _recover_stale_journal():
-    if not SEED_JOURNAL.exists():
-        return
-    try:
-        data = json.loads(SEED_JOURNAL.read_text())
-    except (OSError, ValueError) as exc:
-        print(f"FATAL: {SEED_JOURNAL.name} exists but is unreadable ({exc}).\n"
-              f"  A previous run seeded real damage into this tree and was killed before\n"
-              f"  restoring it. The journal is the only record of what was changed, so it\n"
-              f"  cannot be repaired automatically. Inspect the file and the tree by hand.",
-              file=sys.stderr)
-        sys.exit(1)
-    restored = _restore_from_journal(data)
-    SEED_JOURNAL.unlink(missing_ok=True)
-    bar = "=" * 68
-    for line in (bar, "NOT A TEST FAILURE — a stale seed was recovered.", bar):
-        print(line, file=sys.stderr)
-    print("A previous run was killed while a seeded defect was live in the working",
-          file=sys.stderr)
-    print("tree. Every path it recorded has been restored from the journal:",
-          file=sys.stderr)
-    for rel in restored:
-        print(f"    restored  {rel}", file=sys.stderr)
-    if not restored:
-        print("    (every recorded path was already correct — nothing to undo)",
-              file=sys.stderr)
-    print("\nRefusing to start is deliberate: a silent repair would hide a crash that",
-          file=sys.stderr)
-    print("blocked every push on this machine for hours on 2026-08-13.", file=sys.stderr)
-    for line in (bar, "NOTHING IS BROKEN. RE-RUN THIS SUITE TO PROCEED.", bar):
-        print(line, file=sys.stderr)
-    sys.exit(75)
-
 @contextlib.contextmanager
-def seeded_paths(*rels):
-    originals = {}
-    for rel in rels:
-        p = REPO / rel
-        originals[rel] = p.read_text() if p.exists() else None
-    SEED_JOURNAL.write_text(json.dumps(
-        {"pid": os.getpid(), "paths": originals}, indent=2))
+def ci_fixture():
+    with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
+        root = pathlib.Path(directory)
+        for rel in (
+            "ops/ci.sh", "ops/node_test_summary.py",
+            "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py",
+            "ops/git_env.py", "ops/no-client-deliverables-gate.py",
+            "ops/hook-deletion-check.py", "ops/githooks/path-hygiene-check.py",
+            "ops/migration-open-pr-gate.py", "ops/migration-order-gate.py",
+            "tools/migration_claims.py", "tools/migration_number_contract.py",
+            "tools/migration_source.py", "tools/migration_baseline.py",
+            "ops/config/public-source-identities.v1.json",
+            "bin/type-check.sh", "bin/with-timeout.py", "mypy.ini",
+        ):
+            target = root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO / rel, target)
+        for name in ("pipelines", "exporters", "lib", "generators", "shared",
+                     "fill-engine", "hooks", "migrations", "mcp-server"):
+            (root / name).mkdir()
+            if name not in {"migrations", "mcp-server"}:
+                (root / name / (name.replace("-", "_") + "_fixture.py")).write_text("value: int = 1\n")
+        (root / "ops/config/ci-check-scope.json").write_text('{}')
+        requirements = "synthetic-package>=1\n"
+        (root / "requirements.txt").write_text(requirements)
+        source_hash = hashlib.sha256(b"synthetic-package>=1").hexdigest()
+        (root / "requirements.lock").write_text(
+            f"# requirements.txt sha256: {source_hash}\nsynthetic-package==1.0\n")
+        tsc = REPO / "mcp-server/node_modules/typescript/bin/tsc"
+        (root / "mcp-server/package.json").write_text(json.dumps({
+            "private": True,
+            "scripts": {"typecheck": f"node {shlex.quote(str(tsc))} --noEmit --allowJs --checkJs fixture.js"},
+        }))
+        (root / "mcp-server/fixture.js").write_text("const value = 1;\n")
+        mypy = REPO / ".venv/bin/mypy"
+        if mypy.is_file():
+            (root / ".venv/bin").mkdir(parents=True)
+            (root / ".venv/bin/mypy").symlink_to(mypy)
+        shutil.copy2(REPO / "ops/integration-successor-selftest.py",
+                     root / "tools/test_migration_fixture.py")
+        env = fixture_env()
+        for args in (("init", "-q", "-b", "main"),
+                     ("config", "user.email", "fixture@example.invalid"),
+                     ("config", "user.name", "Fixture"),
+                     ("add", *[str(p.relative_to(root)) for p in root.rglob("*")
+                               if p.is_file() and ".git" not in p.parts and ".venv" not in p.parts]),
+                     ("commit", "-qm", "CI fixture"),
+                     ("update-ref", "refs/remotes/origin/main", "HEAD")):
+            subprocess.run(["git", *args], cwd=root, env=env, check=True,
+                           capture_output=True, text=True)
+        yield root
 
-    done = {"restored": False}
 
-    def restore(*_args):
-        if done["restored"]:
-            return
-        done["restored"] = True
-        _restore_from_journal({"paths": originals})
-        SEED_JOURNAL.unlink(missing_ok=True)
-
-    prev = {}
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            prev[sig] = signal.getsignal(sig)
-            signal.signal(sig, lambda s, f: (restore(), sys.exit(130)))
-        except (ValueError, OSError):
-            pass  # not on the main thread, or the platform refuses — finally still covers it
-    atexit.register(restore)
-    try:
-        yield
-    finally:
-        restore()
-        for sig, handler in prev.items():
-            try:
-                signal.signal(sig, handler)
-            except (ValueError, OSError):
-                pass
-
-def run(args, env=None, shell_cmd=None, timeout=600):
-    e = dict(os.environ)
-    e.pop("CARR_CI_DATABASE_URL", None)
-    e.pop("GITHUB_EVENT_NAME", None)
-    e.pop("GITHUB_EVENT_PATH", None)
+def run(args, env=None, shell_cmd=None, timeout=60, root=None):
+    if root is None:
+        with ci_fixture() as tree:
+            return run(args, env, shell_cmd, timeout, root=tree)
+    e = fixture_env()
+    for key in ("CARR_CI_DATABASE_URL", "CARR_CI_RANGE", "GITHUB_EVENT_NAME",
+                "GITHUB_EVENT_PATH", "GITHUB_BASE_REF"):
+        e.pop(key, None)
     if env:
         e.update(env)
-    cmd = shell_cmd if shell_cmd else [str(CI), *args]
+    ci = root / "ops/ci.sh"
+    cmd = ([*shell_cmd, str(ci), *args] if shell_cmd else [str(ci), *args])
     with tempfile.TemporaryDirectory(prefix="carr-ci-test-", dir="/tmp") as directory:
         e.update(TMPDIR=directory, TMP=directory, TEMP=directory)
-        p = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO, env=e, timeout=timeout)
+        p = subprocess.run(cmd, capture_output=True, text=True, cwd=root, env=e, timeout=timeout)
     return p.returncode, ANSI.sub("", (p.stdout or "") + (p.stderr or ""))
 
-def test_freshness_requires_main_without_a_second_config_checker():
+def test_freshness_checks_the_tree_without_requiring_main_ancestry():
     with tempfile.TemporaryDirectory() as directory:
         root = pathlib.Path(directory)
         (root / "ops/config").mkdir(parents=True)
         (root / "ops/ci.sh").write_bytes(CI.read_bytes())
-        shutil.copy2(REPO / "ops/ci-quarantine.py", root / "ops/ci-quarantine.py")
         shutil.copy2(REPO / "ops/node_test_summary.py", root / "ops/node_test_summary.py")
-        (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         env = fixture_env()
         def git(*args):
@@ -178,8 +132,18 @@ def test_freshness_requires_main_without_a_second_config_checker():
         git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"))
         git("checkout", "-q", "--detach", first)
         result = freshness()
-        check("freshness refuses source that lacks main", result.returncode == 1
-              and "merge origin/main before pushing" in result.stdout, result.stdout + result.stderr)
+        check("a valid tree passes without containing the latest main", result.returncode == 0,
+              result.stdout + result.stderr)
+        blob = git("rev-parse", "HEAD:source.txt")
+        subprocess.run(["git", "update-index", "--index-info"], cwd=root, env=env,
+                       input=f"0 {'0' * 40}\tsource.txt\n"
+                             f"100644 {blob} 1\tsource.txt\n"
+                             f"100644 {blob} 2\tsource.txt\n"
+                             f"100644 {blob} 3\tsource.txt\n",
+                       text=True, check=True, capture_output=True)
+        result = freshness()
+        check("an unresolved integration tree fails", result.returncode == 1
+              and "unresolved" in result.stdout, result.stdout + result.stderr)
 
 
 def test_no_green_without_running():
@@ -187,11 +151,11 @@ def test_no_green_without_running():
         exe = shutil.which(sh)
         if not exe:
             continue
-        rc, out = run([], shell_cmd=[exe, str(CI), "--only", "artifact"])
+        rc, out = run(["--strict", "--only", "freshness"], shell_cmd=[exe])
         claims_green = "CI passed" in out
-        actually_ran = re.search(r"(OK|FAIL|SKIP)\s+artifact", out) is not None
+        actually_ran = re.search(r"(OK|FAIL|SKIP)\s+freshness", out) is not None
         check(f"{sh}: never reports green without running a class",
-              not (claims_green and not actually_ran),
+              rc == 0 and claims_green and actually_ran,
               f"claimed green={claims_green} ran={actually_ran}")
 
 def test_strict_turns_skip_into_failure():
@@ -204,16 +168,60 @@ def test_strict_turns_skip_into_failure():
     check("--strict failure explains why a skip counts",
           "stopped running" in out_strict.lower() or "skipped" in out_strict.lower())
 
+def test_gates_build_hxprobe_before_parallel_selftests():
+    with tempfile.TemporaryDirectory(prefix="carr-hxprobe-gates-") as directory:
+        root = pathlib.Path(directory).resolve()
+        (root / "ops/config").mkdir(parents=True)
+        (root / "vendor/hxprobe").mkdir(parents=True)
+        (root / "bin").mkdir()
+        for name in ("ci.sh", "node_test_summary.py", "git_env.py",
+                     "ci-secret-scan.py", "pii_guard.py"):
+            shutil.copy2(REPO / "ops" / name, root / "ops" / name)
+        shutil.copy2(REPO / "bin/with-timeout.py", root / "bin/with-timeout.py")
+        (root / "ops/config/ci-check-scope.json").write_text('{}')
+        (root / "vendor/hxprobe/Cargo.toml").touch()
+        (root / "ops/probe-selftest.py").write_text(
+            "from pathlib import Path\n"
+            "assert Path('worker-built').exists(), 'worker not built before pool'\n"
+            "Path('gate-ran').touch()\n")
+        (root / "hooks").mkdir()
+        (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
+        (root / "ops/boot-budget-check.py").write_text("raise SystemExit(0)\n")
+        cargo = root / "bin/cargo"
+        cargo.write_text("#!/bin/sh\n"
+                         'test "$*" = "build --locked" || exit 9\n'
+                         'test "$PWD" = "$CARR_TEST_ROOT/vendor/hxprobe" || exit 10\n'
+                         'test "$CARR_BUILD_FAIL" = 0 || exit 1\n'
+                         'touch "$CARR_TEST_ROOT/worker-built"\n')
+        cargo.chmod(0o755)
+        env = fixture_env()
+        env.update(PATH=str(root / "bin") + os.pathsep + os.environ["PATH"],
+                   CARR_TEST_ROOT=str(root), CARR_CI_GATE_JOBS="2")
+        subprocess.run(["git", "init", "-q", str(root)], env=env, check=True)
+        subprocess.run(["git", "-C", str(root), "add", "ops/ci.sh"], env=env, check=True)
+        subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture", "-c",
+                        "user.email=fixture@example.invalid", "commit", "-qm", "fixture"], env=env, check=True)
+        for failure in ("0", "1"):
+            for name in ("worker-built", "gate-ran"):
+                (root / name).unlink(missing_ok=True)
+            env["CARR_BUILD_FAIL"] = failure
+            result = subprocess.run(["bash", str(root / "ops/ci.sh"), "--strict", "--only", "gates"],
+                                    cwd=root, env=env, capture_output=True, text=True, timeout=30)
+            check(f"gates prepare HxStore worker before pool (build failure={failure})",
+                  (root / "gate-ran").exists() == (failure == "0"), result.stdout + result.stderr)
+            check(f"gates propagate HxStore preparation result (build failure={failure})",
+                  result.returncode == int(failure), result.stdout + result.stderr)
+
+
 def test_hxprobe_runs_locked_checks_and_propagates_failures():
     with tempfile.TemporaryDirectory(prefix="carr-hxprobe-ci-") as directory:
         root = pathlib.Path(directory).resolve()
         (root / "ops/config").mkdir(parents=True)
         (root / "vendor/hxprobe").mkdir(parents=True)
         (root / "bin").mkdir()
-        for rel in ("ops/ci.sh", "ops/ci-quarantine.py", "ops/node_test_summary.py",
+        for rel in ("ops/ci.sh", "ops/node_test_summary.py",
                     "ops/ci-secret-scan.py", "ops/pii_guard.py"):
             shutil.copy2(REPO / rel, root / rel)
-        (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         cargo = root / "bin/cargo"
         cargo.write_text("#!/usr/bin/env python3\n"
@@ -275,6 +283,159 @@ def test_migration_fixtures_ignore_hosted_pr_event():
                 check(f"host portable={portable}: explicit PR event still fails closed",
                       rc == 1 and "cannot verify claims" in out, out)
 
+def test_database_scope_receipts():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("db_scope", REPO / "ops/db-acceptance-scope.py")
+    scope = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(scope)
+    for path in ("migrations/9999_probe.sql", "mcp-server/test/new-proof.sql",
+                 "ops/new-db-gate.py", ".github/workflows/ci.yml"):
+        check(f"database scope runs {path}", scope.needs_full([path]))
+    check("database scope skips app-only change", not scope.needs_full(["web/app.js"]))
+    with tempfile.TemporaryDirectory() as directory:
+        event = pathlib.Path(directory) / "event.json"
+        event.write_text('{}')
+        output, receipt = pathlib.Path(directory) / "output", pathlib.Path(directory) / "receipt.json"
+        result = subprocess.run([sys.executable, str(REPO / "ops/db-acceptance-scope.py"),
+                                 "--receipt", str(receipt)], cwd=REPO,
+                                env={**scrubbed_env(), "GITHUB_EVENT_NAME": "pull_request",
+                                     "GITHUB_EVENT_PATH": str(event), "GITHUB_OUTPUT": str(output)},
+                                capture_output=True, text=True)
+        check("uncertain scope emits a full-run receipt", result.returncode == 0 and receipt.exists()
+              and json.loads(receipt.read_text())["full"] is True, result.stdout + result.stderr)
+
+
+def test_hosted_migration_ownership():
+    wf = _hosted_workflow()
+    runner = next(st for st in wf["jobs"]["classes"]["steps"] if st.get("name") == "Run this group's check classes")
+    check("PR slot claims run before entering the credential-scrubbed database lane",
+          runner["run"].index("python3 ops/migration-open-pr-gate.py") < runner["run"].index("python ops/local-pg-ci.py")
+          and "GH_TOKEN" in runner["env"])
+    check("hosted migration partitions cover all independent proof groups",
+          set(wf["jobs"]["migration-fixtures"].get("strategy", {}).get("matrix", {}).get("part", []))
+          == {"reconstruction", "equivalence", "shadow", "gates-serial", "gates-isolated", "acceptance"}
+          and "--migration-part proofs" in runner["run"])
+    check("required aggregate waits for independent fixtures", "migration-fixtures" in wf["jobs"]["checks"]["needs"])
+    aggregate = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Fail unless every class group succeeded")
+    with tempfile.TemporaryDirectory() as directory:
+        for full, fixtures, classes, draft, expected in (
+            ("true", "success", "success", "false", 0), ("false", "skipped", "success", "false", 0),
+            ("", "skipped", "success", "false", 1), ("true", "failure", "success", "false", 1),
+            ("true", "cancelled", "success", "false", 1), ("false", "failure", "success", "false", 1),
+            ("false", "skipped", "failure", "false", 1),
+            ("true", "skipped", "success", "true", 0),
+            ("true", "skipped", "success", "false", 1),
+        ):
+            result = subprocess.run(["bash", "-e", "-c", aggregate["run"]], capture_output=True, text=True,
+                                    env={**scrubbed_env(), "PATH": str(pathlib.Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
+                                         "CI_DRAFT": draft, "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary"),
+                                         "CI_NEEDS": json.dumps({"scope": {"result": "success", "outputs": {"full": full}},
+                                                                 "classes": {"result": classes},
+                                                                 "fallow": {"result": "success"},
+                                                                 "migration-fixtures": {"result": fixtures}})})
+            check(f"aggregate scope={full!r} fixtures={fixtures} classes={classes}", result.returncode == expected)
+    record = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Record the tested tree and class contract")
+    check("not-applicable proof cannot be reused as full main evidence", "full != 'false'" in record.get("if", ""))
+
+
+def test_migration_partitions_execute_complete_inventory():
+    import shlex
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        shim = root / "program"
+        shim.write_text('#!/bin/bash\necho "$*" >> "$CALLS"\n'
+                        '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && exit 9\n'
+                        'if [[ "$*" == *"ci-migration-gates.py"* && "$*" != *"--sql-proof"* '
+                        '&& ! -f "$SERVICE_CATALOG" ]]; then exit 9; fi\nexit 0\n')
+        shim.chmod(0o755)
+        (root / "psql").symlink_to(shim)
+        body = _ci_function_body("check_migration_fixtures", "check_binding")
+        prefix = "\n".join(("set -uo pipefail", f"PY={shlex.quote(str(shim))}",
+            f"LOGDIR={shlex.quote(str(root))}", "STRICT=1", "FAILED=0",
+            "bad() { FAILED=1; }", "ok() { :; }", "skip() { FAILED=1; }",
+            'run_quiet() { local log="$1"; shift; echo "$*" >> "$CALLS"; '
+            '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && return 9; '
+            '[[ "$*" == *"tools/ops-record.py sync-registry"* ]] && touch "$SERVICE_CATALOG"; '
+            'printf "r03_recovered_health\\njoe,3,3,3,0,0,0,0,1,0,0,0,0,0,No open\\n'
+            'r03_actor_mismatch_health\\njoe,4,3,3,0,1,1,1,1,0,0,0,0,0,On missing\\n" > "$log"; }'))
+        def run(part, fail=""):
+            calls = root / "calls"
+            calls.write_text("")
+            (root / "service-catalog").unlink(missing_ok=True)
+            result = subprocess.run(["bash", "-c", prefix + f"\nMIGRATION_PART={part}\n" + body +
+                                     '\ncheck_migration; exit "$FAILED"'], cwd=REPO,
+                env={**scrubbed_env(), "PATH": directory + os.pathsep + os.environ["PATH"],
+                     "CALLS": str(calls), "CARR_CI_DATABASE_URL": "postgres://ci@127.0.0.1:55432/ci",
+                     "SERVICE_CATALOG": str(root / "service-catalog"),
+                     "FAIL_PROGRAM": fail}, capture_output=True, text=True)
+            return result.returncode, set(calls.read_text().splitlines())
+        fixtures = {}
+        for part in ("reconstruction", "equivalence", "shadow", "fixtures", "proofs", "gates", "gates-serial", "gates-isolated", "acceptance", "core"):
+            rc, fixtures[part] = run(part)
+            check(f"migration {part} partition executes", rc == 0)
+        check("fixture partition union retains the complete canonical fixture inventory",
+              fixtures["reconstruction"] | fixtures["equivalence"] | fixtures["shadow"] == fixtures["fixtures"])
+        check("core partition union retains every canonical database command",
+              fixtures["proofs"] | fixtures["gates"] == fixtures["core"])
+        check("consumer partition excludes DB gate commands", not any(
+              "ci-migration-gates.py --logdir" in call and "--sql-proof" not in call
+              for call in fixtures["proofs"]))
+        check("DB gate partition excludes consumer proofs", not any(
+              "node --test" in call for call in fixtures["gates"]))
+        for partition in ("serial", "isolated"):
+            check(f"gate {partition} partition reaches the canonical selector", any(
+                  f"--partition {partition}" in call for call in fixtures["gates-" + partition]))
+        check("acceptance bootstrap excludes consumer and gate programs", not any(
+              "node --test" in call or "ci-migration-gates.py --logdir" in call
+              for call in fixtures["acceptance"]))
+        check("a failing partition fails the migration verdict", run("reconstruction", "schema-reconstruction-selftest.py")[0] == 1)
+        rc, calls = run("gates-serial", "tools/ops-record.py sync-registry")
+        check("service-catalog bootstrap failure stops database gates", rc == 1 and not any(
+              "ci-migration-gates.py --logdir" in call for call in calls))
+
+
+def test_gate_shards_execute_a_disjoint_complete_inventory():
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        for name in ("ops", "tools", "hooks", "logs"):
+            (root / name).mkdir()
+        inventory = {"ops/a-selftest.py", "ops/b-selftest.py", "ops/c-selftest.py",
+                     "tools/test-d.py", "tools/test-e.sh", "tools/test-f.sh"}
+        for path in inventory:
+            (root / path).write_text("")
+        (root / "hooks/gate-integrity.py").write_text("")
+        (root / "ops/boot-budget-check.py").write_text("")
+        (root / "timeout.py").write_text(
+            "import os,sys\n"
+            "path=sys.argv[-1]\n"
+            "with open(os.environ['CALLS'],'a') as out: out.write(path+'\\n')\n"
+            "sys.exit(7 if path==os.environ.get('FAIL_TEST') else 0)\n")
+        prefix = "\n".join(("set -uo pipefail", f"PY={shlex.quote(sys.executable)}",
+                              f"LOGDIR={shlex.quote(str(root / 'logs'))}", "FAILED=0",
+                              "CI_SELFTEST_TIMEOUT_SECONDS=1", f"CI_TIMEOUT_HELPER={shlex.quote(str(root / 'timeout.py'))}",
+                              "tree_fingerprint() { echo static; }", "ok() { :; }",
+                              "bad() { FAILED=1; }", "inherited_abort() { :; }",
+                              'run_quiet() { local log="$1"; shift; "$@" >"$log" 2>&1; }',
+                              "fail_tail() { :; }"))
+        body = _ci_function_body("check_gates", "check_secret")
+        seen = []
+        for shard in (1, 2):
+            calls = root / f"calls-{shard}"
+            result = subprocess.run(["bash", "-c", prefix + f"\nGATE_SHARD={shard}\nGATE_SHARDS=2\n" + body +
+                                     '\ncheck_gates; exit "$FAILED"'], cwd=root,
+                                    env={**scrubbed_env(), "CALLS": str(calls)}, capture_output=True, text=True)
+            check(f"gate shard {shard} executes successfully", result.returncode == 0, result.stderr)
+            seen.append(set(calls.read_text().splitlines()))
+        check("gate shard union executes every Python and shell suite", seen[0] | seen[1] == inventory, seen)
+        check("gate shards never execute the same suite twice", not seen[0] & seen[1], seen)
+        failed = next(iter(seen[1]))
+        result = subprocess.run(["bash", "-c", prefix + "\nGATE_SHARD=2\nGATE_SHARDS=2\n" + body +
+                                 '\ncheck_gates; exit "$FAILED"'], cwd=root,
+                                env={**scrubbed_env(), "CALLS": str(root / "failed"), "FAIL_TEST": failed},
+                                capture_output=True, text=True)
+        check("a failing second-shard suite fails its job", result.returncode == 1, result.stderr)
+
+
 def test_secret_scanner_catches_and_respects_allow():
     with tempfile.TemporaryDirectory(prefix="carr-ci-scanner.") as tmp:
         root = pathlib.Path(tmp)
@@ -321,91 +482,43 @@ def test_secret_scanner_catches_and_respects_allow():
               "credential fixture was not tracked" if not tracked else f"rc={p.returncode}")
 
 def test_dep_check_detects_a_stale_lock():
-    req = REPO / "requirements.txt"
-    original = req.read_text()
-    dep = [sys.executable, str(REPO / "ops" / "ci-dep-check.py")]
-    with seeded_paths("requirements.txt"):
-        p = subprocess.run(dep, cwd=REPO, capture_output=True, text=True)
-        check("dependency check passes on the committed tree", p.returncode == 0)
-
+    with ci_fixture() as root:
+        req = root / "requirements.txt"
+        original = req.read_text()
+        rc, out = run(["--only", "dependency"], root=root)
+        check("dependency check passes on the clean fixture", rc == 0, out)
         req.write_text(original + "\nsome-package-that-is-not-locked>=1.0\n")
-        p = subprocess.run(dep, cwd=REPO, capture_output=True, text=True)
-        check("a requirements.txt edit makes the lock STALE",
-              p.returncode == 1 and "STALE" in (p.stdout + p.stderr))
-
+        rc, out = run(["--only", "dependency"], root=root)
+        check("a requirements.txt edit makes the lock STALE", rc == 1 and "STALE" in out, out)
         req.write_text(original + "\n# a comment-only edit\n")
-        p = subprocess.run(dep, cwd=REPO, capture_output=True, text=True)
-        check("a comment-only edit does NOT invalidate the lock", p.returncode == 0)
+        rc, out = run(["--only", "dependency"], root=root)
+        check("a comment-only edit does NOT invalidate the lock", rc == 0, out)
 
 def test_types_class_catches_a_seeded_type_error():
-    if mypy_pin_excludes_this_machine():
-        found = type_check_interpreter_version()
-        check(
-            "types: ACCEPTED — Python %d.%d is below the mypy pin %d.%d, so mypy "
-            "cannot be installed here and the seeded-error path cannot run"
-            % (found[0], found[1], MYPY_PIN_MIN_PYTHON[0], MYPY_PIN_MIN_PYTHON[1]),
-            True)
-        rc, out = run(["--only", "types"])
-        check("types still reports honestly on the accepted machine (skip, not pass)",
-              rc == 0 and "SKIP" in out.upper(), f"rc={rc} out={out[-400:]}")
-        return
-
-    fixture = "tools/_ci_selftest_types_fixture.py"
-    with seeded_paths(fixture):
-        rc, out = run(["--only", "types"])
-        check("types passes on the committed tree", rc == 0,
+    fixture = "mcp-server/fixture.js"
+    with ci_fixture() as root:
+        rc, out = run(["--only", "types"], root=root)
+        check("types passes on the clean fixture", rc == 0,
               f"rc={rc} out={out[-400:]}")
 
-        (REPO / fixture).write_text(
-            "# fixture written by ops/ci-selftest.py — removed on exit.\n"
-            "# Module level on purpose: check_untyped_defs = False means an error\n"
-            "# inside an unannotated function body would not be reported at all.\n"
-            "x: int = 'not an int'\n")
-        rc, out = run(["--only", "types"])
+        original = (root / fixture).read_text()
+        (root / fixture).write_text(
+            "/** @type {number} */\n"
+            "const value = 'not a number';\n")
+        rc, out = run(["--only", "types"], root=root)
         check("a seeded type error makes the types class FAIL", rc == 1,
               f"rc={rc} out={out[-400:]}")
-        check("the failing run names the types class",
-              "types" in ANSI.sub("", out).lower(), f"out={out[-400:]}")
+        check("the failing run names the seeded type error and types class",
+              re.search(r"FAIL\s+types\b", out) is not None
+              and "fixture.js" in out and "TS2322" in out,
+              f"out={out[-800:]}")
 
-    rc, out = run(["--only", "types"])
+        (root / fixture).write_text(original)
+        rc, out = run(["--only", "types"], root=root)
     check("removing the seed turns the types class green again", rc == 0,
           f"rc={rc} out={out[-400:]}")
 
-def test_no_env_claims_a_production_hostname():
-    import subprocess as sp
-    toml = REPO / "mcp-server" / "wrangler.toml"
-    checker = REPO / "ops" / "deploy-attachment-check.py"
-    if not toml.exists() or not checker.exists():
-        return
-    src = toml.read_text()
-    envs = re.findall(r"^\[env\.([A-Za-z0-9_-]+)\]", src, re.M)
-    for env in sorted(set(envs)):
-        r = sp.run([sys.executable, str(checker), str(toml), env],
-                   capture_output=True, text=True)
-        check(f"env '{env}' claims no production hostname", r.returncode == 0,
-              (r.stdout + r.stderr).strip()[:120])
-
-    import tempfile as tf
-    broken = "\n".join(l for l in src.splitlines() if l.strip() != "routes = []")
-    with tf.NamedTemporaryFile("w", suffix=".toml", delete=False) as fh:
-        fh.write(broken)
-        path = fh.name
-    try:
-        r = sp.run([sys.executable, str(checker), path, "staging"],
-                   capture_output=True, text=True)
-        check("removing `routes = []` is REFUSED, not silently allowed",
-              r.returncode == 1, f"rc={r.returncode}")
-    finally:
-        os.unlink(path)
-
 UNCOLLECTED_BY_DECISION = {
-    "tools/link-model-bakeoff/pg18-selftest.py":
-        "Requires PostgreSQL 18 binaries and an owned disposable socket-only "
-        "database. The repository-content gates pool has no PostgreSQL 18 "
-        "contract. Run LC_ALL=C .venv/bin/python tools/link-model-bakeoff/pg18-selftest.py "
-        "before changing this harness; it executes regression_sql.py and the "
-        "normal integration workload. Offline failure-path and collection "
-        "regressions run in tools/test-linkfork.py through the gates pool.",
     "tools/room-bridge/test_claude_desk_live.py":
         "LIVE, and deliberately not offline. Its own docstring says it asserts "
         "against no mock: it boots a REAL Claude Code session on a labelled "
@@ -438,12 +551,7 @@ UNCOLLECTED_BY_DECISION = {
         "unittest package under tools/dictation-rig/tests/ that this lane did "
         "not run or vouch for. Named here so it is a known gap with an owner "
         "rather than an invisible one; collecting it is a follow-up that must "
-        "run it first. Same status as tools/partner-line/tests/test_watch.py.",
-    "tools/partner-line/tests/test_watch.py":
-        "Offline and correct, but not evaluated by this unit — see the "
-        "tools/dictation-rig entry. Its docstring claims no live socket and no "
-        "network, so it is a good candidate to collect; this lane owned "
-        "ops/ci.sh and ops/ci-selftest.py only and did not run it.",
+        "run it first.",
     "tools/doc-convo/bin/test-brain-stream.sh":
         "Not evaluated by this unit. It lives in a bin/ directory beside the "
         "convo server rather than in a tests/ directory, and the three "
@@ -672,7 +780,7 @@ def test_gates_selftests_have_a_process_group_watchdog():
         check(f"ordinary exit {code} remains unchanged", p.returncode == code,
               f"rc={p.returncode}")
 
-FIXTURE_GATE = "hooks/zz-ci-selftest-fixture-gate.py"
+FIXTURE_GATE = "hooks/zz-ci-fixture-gate.py"
 FIXTURE_RANGE = "CI-SELFTEST-FLOOR-FIXTURE-RANGE"
 FLOOR_BUDGET_SECONDS = 60
 
@@ -750,7 +858,7 @@ def test_push_floor_defers_the_gates_class_instead_of_running_it():
 
 def test_push_floor_distinguishes_imported_main_paths_from_branch_changes():
     inherited_name = "mcp-server/test/doctorcre-v5-review.test.mjs"
-    inherited_gate = "hooks/zz-ci-selftest-fixture-inherited-gate.py"
+    inherited_gate = "hooks/zz-ci-fixture-inherited-gate.py"
     with _stub_git_answering_the_floor(
             [inherited_name, inherited_gate, FIXTURE_GATE],
             main_paths=[FIXTURE_GATE], added_paths=[inherited_name],
@@ -770,7 +878,7 @@ def test_push_floor_distinguishes_imported_main_paths_from_branch_changes():
                       timeout=FLOOR_BUDGET_SECONDS)
     check("a branch-owned forbidden filename is still refused",
           rc != 0 and owned_name in out and "path-hygiene" in out, out[-900:])
-    historical_gate = "hooks/zz-ci-selftest-historical-v2.py"
+    historical_gate = "hooks/zz-ci-historical-v2.py"
     with _stub_git_answering_the_floor(
             [historical_gate], main_paths=[historical_gate],
             added_paths=[historical_gate], main_tree_paths=[historical_gate]) as stub_env:
@@ -1073,17 +1181,21 @@ def main(argv=None):
         test_every_test_file_in_the_tree_is_collected()
         test_each_class_runs_in_exactly_one_hosted_group()
         return 1 if any(not ok for _, ok, _ in RESULTS) else 0
-    for fn in (test_freshness_requires_main_without_a_second_config_checker,
+    for fn in (test_freshness_checks_the_tree_without_requiring_main_ancestry,
                test_no_green_without_running,
                test_strict_turns_skip_into_failure,
                test_unknown_class_refuses,
                test_hxprobe_runs_locked_checks_and_propagates_failures,
+               test_gates_build_hxprobe_before_parallel_selftests,
+               test_gate_shards_execute_a_disjoint_complete_inventory,
+               test_migration_partitions_execute_complete_inventory,
+               test_hosted_migration_ownership,
+               test_database_scope_receipts,
                test_migration_refuses_non_loopback,
                test_migration_fixtures_ignore_hosted_pr_event,
                test_secret_scanner_catches_and_respects_allow,
                test_dep_check_detects_a_stale_lock,
                test_types_class_catches_a_seeded_type_error,
-               test_no_env_claims_a_production_hostname,
                test_every_test_file_in_the_tree_is_collected,
                test_each_class_runs_in_exactly_one_hosted_group,
                test_the_walk_prunes_named_roots_only,
@@ -1110,5 +1222,4 @@ def main(argv=None):
     return 1 if failed else 0
 
 if __name__ == "__main__":
-    _recover_stale_journal()
     sys.exit(main())

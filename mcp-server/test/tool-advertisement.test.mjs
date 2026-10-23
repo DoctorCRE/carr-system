@@ -17,7 +17,7 @@ test("ordinary client registrations advertise a compact core with unchanged sche
   assert.ok(result.tools.length <= 40, `startup advertised ${result.tools.length} tools`);
   const names = new Set(result.tools.map(t => t.name));
   for (const name of ["standing-context", "list-verbs", "call-verb", "find", "add-loop", "report-problem",
-    "record-defect", "teach", "activate-rule", "engineering-passport-source", "doctrine-sections", "ask-jev", "map-architecture"])
+    "record-defect", "teach", "activate-rule", "engineering-passport-source", "doctrine-sections", "map-architecture"])
     assert.ok(names.has(name), `${name} must remain directly reachable`);
   for (const tool of result.tools) assert.deepEqual(tool.inputSchema, TOOLS[tool.name].inputSchema);
   const settings = JSON.parse(fs.readFileSync(new URL("../../.claude/settings.json", import.meta.url)));
@@ -78,4 +78,18 @@ test("advertisement does not widen locked profiles or Doc's surface", async () =
     verb: "reassign-deal", args: {},
   } }, "?profile=read");
   assert.equal(JSON.parse(out.result.content[0].text).error, "not_in_profile");
+});
+
+
+test("retired Jev gateway verbs are absent from discovery and refuse execution", async () => {
+  const advertised = new Set((await rpc("tools/list")).result.tools.map(tool => tool.name));
+  const full = await TOOLS["list-verbs"].handler(null, {}, {});
+  for (const name of ["ask-jev", "read-jev-call-receipts", "read-jev-call-receipt-integrity"]) {
+    assert.equal(TOOLS[name], undefined, `${name} has no registered implementation`);
+    assert.equal(advertised.has(name), false);
+    assert.equal(full.verbs.some(verb => verb.name === name), false);
+    const direct = await rpc("tools/call", { name, arguments: {} });
+    assert.equal(direct.result.isError, true);
+    assert.equal(JSON.parse(direct.result.content[0].text).error, "unknown_tool");
+  }
 });

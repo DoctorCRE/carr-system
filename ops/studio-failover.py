@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manual failover, failback and monthly dry-run rehearsal.
+"""Manual failover, failback and dry-run rehearsal.
 
 Default is dry-run. --apply must run from canonical main. No credentials are copied.
 The restore/ingress evidence file is ~/.config/carr/failover-prerequisites.json:
@@ -32,7 +32,7 @@ sys.path.insert(0, str(ROOT / 'ops'))
 from git_env import scrubbed_env
 from lib.machine_role import write_marker
 from lib.studio_failover import Leader, connection, guarded_plist, plan, transfer, write_json as save
-from lib.studio_failover_health import contract_hash
+from lib.studio_failover import contract_hash
 
 
 def command(argv, timeout=20):
@@ -249,7 +249,7 @@ class Host:
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode', choices=['takeover', 'demote', 'rehearse', 'install-rehearsal'])
+    p.add_argument('mode', choices=['takeover', 'demote', 'rehearse'])
     p.add_argument('--target', choices=['studio', 'macbook'], default='macbook')
     g = p.add_mutually_exclusive_group()
     g.add_argument('--apply', action='store_true')
@@ -259,30 +259,6 @@ def main():
     args = p.parse_args()
     config = json.loads((ROOT / 'ops/config/studio-failover.v1.json').read_text())
     h = Host(args.repo.resolve(), config, args.target, args.power_fence)
-    if args.mode == 'install-rehearsal':
-        if socket.gethostname() != config['hosts']['macbook']['hostname']:
-            raise RuntimeError('rehearsal_requires_macbook')
-        source = ROOT / 'ops/launchd/com.carr.studio-failover-rehearsal.plist'
-        body = source.read_text().replace('{{REPO}}', str(h.repo))
-        path = h.home / 'Library/LaunchAgents' / source.name
-        if args.apply:
-            snap = h.snapshot()
-            if ROOT != h.repo or not snap['canonical']: raise RuntimeError('apply_requires_clean_canonical_main')
-            (h.repo / 'out/studio-failover').mkdir(parents=True, exist_ok=True)
-            if path.exists() and path.read_text() != body:
-                quarantine = h.home / '_to_delete/studio-failover' / uuid.uuid4().hex
-                quarantine.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(path), str(quarantine / path.name))
-            command(['launchctl', 'bootout', h.domain + '/com.carr.studio-failover-rehearsal'])
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(body)
-            if command(['launchctl', 'enable', h.domain + '/com.carr.studio-failover-rehearsal']).returncode:
-                raise RuntimeError('rehearsal_enable_failed')
-            if command(['launchctl', 'bootstrap', h.domain, str(path)]).returncode:
-                raise RuntimeError('rehearsal_bootstrap_failed')
-        print(json.dumps({'action': 'install-rehearsal', 'path': str(path), 'applied': args.apply,
-                          'cadence': 'monthly, day 5 at 10:15 local; dry-run only'}))
-        return 0
     snap = h.snapshot()
     report = plan(config, snap, args.target)
     report['missing'] += snap['errors']

@@ -203,6 +203,7 @@ class CaptureFake {
     if (sql.includes("capture:resolve-post-call-action")) {
       const action = { id: this.uuid("7"), candidate_id: params[0], deal_id: params[1], owner_id: params[2],
         due_on: params[3], description: params[4], accepted_by: params[5], status: "open",
+        item_title: params[6], item_bullets: JSON.parse(params[7]), source_ref: params[8],
         updated_at: "2026-08-08T15:00:00.000Z", completed_at: null };
       this.postCallActions.push(action);
       return { rows: [{ id: action.id }] };
@@ -510,7 +511,7 @@ test("post-call lifecycle cannot finalize after one acceptance and stores only s
   const claimedResponse = await r.handler.fetch(claimRequest(validPostCallClaim), environment);
   const token = (await claimedResponse.json()).session_token;
   const action = { kind: "assigned_action", deal_id: ids.deal, assignee: "dell",
-    action: "Call Dr. Alpha Tuesday", due_on: "2026-08-11", evidence_quote: "Dell will call Tuesday", confidence: 0.9 };
+    action: "Call Dr. Alpha Tuesday", due_on: "2026-08-11", evidence_quote: "Dell will call Tuesday. Please discuss the lease.", confidence: 0.9 };
   const draft = { kind: "email_draft", deal_id: ids.deal2, recipient_party_id: ids.party,
     recipient_ref: "P-0001", subject: "Next steps", body_sha256: "a".repeat(64),
     evidence_quote: "Please send the revised terms", confidence: 0.8 };
@@ -540,6 +541,9 @@ test("post-call lifecycle cannot finalize after one acceptance and stores only s
   assert.equal(acceptedAction.assignee, "dell");
   assert.equal(db.nextActions.some(action => action.id === "existing-action" && action.status === "open"), true);
   assert.equal(db.postCallActions.length, 1);
+  assert.equal(db.postCallActions[0].item_title.split(/\s+/u).length <= 4, true);
+  assert.equal(db.postCallActions[0].source_ref, `capture_post_call_candidate:${first.id}`);
+  assert.deepEqual(db.postCallActions[0].item_bullets.filter(b => b.kind === 'call').map(b => b.text), ['Dell will call Tuesday.', 'Please discuss the lease.']);
   const tooSoon = await post(r.handler, "/capture/status", { session_token: token, state: "done",
     at: "2026-08-08T16:00:00.000Z" });
   assert.equal(tooSoon.status, 409);

@@ -48,18 +48,6 @@ class DeliveryTests(unittest.TestCase):
             self.assertEqual(rows[0]['unresolved'], [])
             self.assertEqual(rows[0]['data_defects'][0]['rule_id'], '33333333')
 
-    def test_configured_judge_failure_keeps_rules_and_unresolved_entries(self):
-        known = dict(id='11111111', statement='Inspect the current diff.',
-                     scope={'tools': ['Bash']}, personal_to=None)
-        gap = dict(id='22222222', statement='Moment rule.',
-                   scope={'moment': 'Before review'}, personal_to=None)
-        for event in ('PreToolUse', 'UserPromptSubmit'):
-            output = self.invoke([known, gap], event=event, judge=lambda *_: None)
-            row = json.loads(output['hookSpecificOutput']['additionalContext'])
-            self.assertEqual(row['rules'], [known])
-            self.assertEqual(row['unresolved'], [{'rule_id': '22222222', 'reason': 'moment_judgment_unavailable'}])
-            self.assertFalse(row['complete'])
-            self.assertTrue(validate_lookup_receipt(row, repo=REPO))
 
     def test_stop_with_no_rules_and_gaps_stays_silent(self):
         gap = dict(id='22222222', statement='Moment rule.', scope={'moment': 'Before review'}, personal_to=None)
@@ -125,33 +113,6 @@ class DeliveryTests(unittest.TestCase):
                 self.assertFalse(validate_lookup_receipt(bad, repo=REPO))
             self.assertFalse(hook.GAP_LOG.exists())
 
-    def test_scope_defects_and_unavailable_judgment_deliver_known_matches_without_denial(self):
-        known = dict(id='11111111', statement='Inspect the current diff.',
-                     scope={'tools': ['Bash']}, personal_to=None)
-        def timeout(*_):
-            raise TimeoutError('private provider detail')
-        for scope, judge, issue_key, reason in (
-            ({}, None, 'data_defects', 'missing_scope'),
-            ({'moment': 'Before review'}, timeout, 'unresolved', 'moment_judgment_unavailable'),
-            ({'moment': 'Before review'}, lambda *_: {'model': 'wrong', 'answers': {}},
-             'unresolved', 'moment_judgment_unavailable')):
-            with self.subTest(reason=reason, scope=scope):
-                unknown = dict(id='22222222', statement='Must not broadcast this rule.',
-                               scope=scope, personal_to=None)
-                output = self.invoke([known, unknown], judge=judge)
-                specific = output['hookSpecificOutput']
-                self.assertNotIn('permissionDecision', specific)
-                row = json.loads(specific['additionalContext'])
-                self.assertEqual(row['rule_ids'], ['11111111'])
-                self.assertEqual(row['rules'], [known])
-                self.assertFalse(row['complete'])
-                if issue_key == 'unresolved':
-                    self.assertEqual(row['unresolved'], [{'rule_id': '22222222', 'reason': reason}])
-                else:
-                    self.assertEqual(row[issue_key], [{'rule_id': '22222222', 'reason': reason}])
-                self.assertNotIn('Must not broadcast', specific['additionalContext'])
-                self.assertNotIn('private provider detail', specific['additionalContext'])
-                self.assertTrue(validate_lookup_receipt(row, repo=REPO))
 
     def test_many_scope_defects_fit_without_losing_the_known_rule(self):
         known = dict(id='11111111', statement='Inspect the current diff.',
@@ -239,31 +200,6 @@ class DeliveryTests(unittest.TestCase):
                 'agent_id': 'another-child', 'turn_id': 'native-turn'})
             self.assertEqual(mismatch['hookSpecificOutput']['permissionDecision'], 'deny')
 
-    def test_native_child_call_uses_child_task_instead_of_parent(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            parent = Path(tmp) / 'fixture.jsonl'
-            child = Path(tmp) / 'fixture/subagents/agent-reviewer.jsonl'
-            child.parent.mkdir(parents=True)
-            def record(task):
-                return json.dumps({'type': 'user', 'message': {'role': 'user', 'content': task}}) + '\n'
-            parent.write_text(record('Implement the workflow'))
-            child.write_text(record('Review the security change'))
-            def judge(state, questions):
-                task = state['event']['task']
-                return {'model': 'jev-1.13.0', 'answers': {
-                    key: {'type': 'choice', 'confidence': 1.0,
-                          'choice': 'applies' if task == 'Review the security change' else 'not_applicable'}
-                    for key in questions}}
-            for agent_key in ('agent_id', 'agentId'):
-                with self.subTest(agent_key=agent_key):
-                    output = self.invoke([dict(id='11111111', statement='Check the security change.',
-                        scope={'moment': 'Before reviewing the security change'}, personal_to=None)],
-                        payload={'prompt': None, 'transcript_path': str(parent), agent_key: 'reviewer'},
-                        judge=judge)
-                    self.assertIsNotNone(output)
-                    row = json.loads(output['hookSpecificOutput']['additionalContext'])
-                    self.assertEqual(row['rule_ids'], ['11111111'])
-                    self.assertEqual(row['task_sha256'], digest('Review the security change'))
 
     def test_long_turn_keeps_the_latest_task_before_large_tool_output(self):
         for native_user in (
@@ -293,29 +229,6 @@ class DeliveryTests(unittest.TestCase):
             self.assertEqual(rr.fresh_ids('s','Edit',['11111111'],corpus_digest='a'*64),[])
             self.assertEqual(rr.fresh_ids('s','Edit',['11111111'],corpus_digest='b'*64),['11111111'])
 
-    def test_prompt_and_tool_share_authenticated_lookup(self):
-        source = {'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': 'a'*64,
-                  'identity': {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
-                               'sponsoring_human_id': 'joe'},
-                  'rules': [{'id': '11111111', 'statement': 'Check the change.',
-                             'personal_to': None, 'scope': {'moment': 'Before reviewing code'}}]}
-        calls = []
-        def runner(command, **kwargs):
-            calls.append(command)
-            return subprocess.CompletedProcess(command, 0, json.dumps(source), '')
-        def judge(state, questions):
-            self.assertEqual(state['event']['task'], 'Review this change')
-            return {'model': 'jev-1.13.0', 'answers': {k: {'type': 'choice', 'choice': 'applies', 'confidence': .99} for k in questions}}
-        for event in ('UserPromptSubmit', 'PreToolUse'):
-            output = hook.process({'hook_event_name': event, 'session_id': 'fixture',
-                                   'turn_id': 'turn', 'tool_use_id': 'call', 'tool_name': 'Bash',
-                                   'tool_input': {'command': 'git diff'}, 'prompt': 'Review this change'},
-                                  runner=runner, judge=judge, dedupe=False)
-            row = json.loads(output['hookSpecificOutput']['additionalContext'])
-            self.assertEqual(row['schema'], 'rule-lookup-delivery/v1')
-            self.assertEqual(row['rule_ids'], ['11111111'])
-            self.assertTrue(row['complete'])
-        self.assertTrue(all(json.loads(c[-1]) == {'detail': 'scopes'} for c in calls))
 
     def test_unavailable_catalog_is_advisory_and_recovery_remains_reachable(self):
         def unavailable(command, **kwargs):
@@ -344,7 +257,7 @@ class CardDeliveryTests(unittest.TestCase):
         return dict(id=f'{prefix}-0000-0000-0000-000000000000', statement=f'Rule {prefix} as text.',
                     scope=scope or {'tools': ['Bash']}, personal_to=None)
 
-    def invoke(self, rows, *, event='PreToolUse', payload=None, dedupe=False, judge=None):
+    def invoke(self, rows, *, event='PreToolUse', payload=None, dedupe=False):
         source = {'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': 'a'*64,
                   'identity': {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
                                'sponsoring_human_id': 'joe'}, 'rules': rows}
@@ -352,7 +265,7 @@ class CardDeliveryTests(unittest.TestCase):
                 'tool_name': 'Bash', 'tool_input': {'command': 'git diff'}, 'prompt': 'Review this change'}
         base.update(payload or {})
         runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(source), '')
-        return hook.process(base, runner=runner, dedupe=dedupe, judge=judge)
+        return hook.process(base, runner=runner, dedupe=dedupe)
 
     def receipt(self, output):
         specific = output['hookSpecificOutput']
@@ -393,13 +306,6 @@ class CardDeliveryTests(unittest.TestCase):
     def test_stop_gets_no_cards_and_card_rules_never_block(self):
         self.assertIsNone(self.invoke([self.covered('24e10ee8')], event='Stop'))
 
-    def test_card_covered_unresolved_moments_are_not_reported_twice(self):
-        def unavailable(*_):
-            raise TimeoutError('provider detail')
-        moment = self.covered('24e10ee8', scope={'moment': 'Before a retry loop'})
-        row = self.receipt(self.invoke([self.UNCOVERED, moment], judge=unavailable))
-        self.assertEqual(row['unresolved'], [])
-        self.assertTrue(row['complete'])
 
     def test_cards_are_sent_once_per_context(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {

@@ -1,8 +1,6 @@
 """machine_envelope.py — is a prompt ENTIRELY a machine envelope, and of what shape.
 
-Used by the two Jev callers that treat machine prompts differently from partner
-messages: ops/jev_build_advisory.py skips build advice on them, and
-ops/jev_rule_select.py reuses rule verdicts across envelopes of one shape.
+Distinguishes complete machine notifications from partner instructions.
 
 WHOLE-PROMPT, NOT PREFIX (2026-09-25 review of the first cut). A prefix test
 skipped build advice on, and pooled rule verdicts for, a notification block
@@ -25,7 +23,7 @@ Single-line forms ("Stop hook feedback:", "This session is being continued")
 always carry free text after the marker, so they are never envelopes here and
 are judged like any other message. Anything left over is partner text.
 
-A LIBRARY: no entrypoint construct (see ops/typesafe_client.py).
+A library with no script entry point.
 """
 
 import re

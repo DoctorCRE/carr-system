@@ -23,7 +23,7 @@ function bin/schema-snapshot.sh calls, pointed at the file that is actually in t
 repository.
 
 WHAT A FAILURE HERE MEANS. Not that the check is broken. Either the snapshot needs
-regenerating against production (bin/migrate-prod.sh does this, and bin/schema-
+regenerating against production (the GitHub production deployment workflow does this, and bin/schema-
 snapshot.sh --check reports it), or a classification entry was changed without the
 matching emit block. The message names the table either way.
 """

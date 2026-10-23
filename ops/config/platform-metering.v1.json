@@ -12,26 +12,83 @@
     "access_route": "ssh dell",
     "target_identity_verified": false,
     "facts": {
-      "cpu": {"status": "unknown", "value": null, "reason": "SSH timed out before a remote command ran; CPU model, architecture and core counts were not observed."},
-      "ram": {"status": "unknown", "value": null, "reason": "No remote observation of installed or available memory."},
-      "disk": {"status": "unknown", "value": null, "reason": "No remote observation of device, capacity, free space or filesystem."},
-      "os": {"status": "unknown", "value": null, "reason": "Local peer-directory metadata describes a MacBook Air running macOS; it does not establish the intended Dell's OS or identity."},
-      "network": {"status": "unknown", "value": null, "reason": "Local peer-directory online status did not yield SSH or overlay ping reachability; the intended Dell's interfaces, link and route remain unobserved."},
-      "access": {"status": "unknown", "value": null, "reason": "Two minimal noninteractive SSH probes timed out at TCP connection; authentication, account privileges and readable paths were not tested."}
+      "cpu": {
+        "status": "unknown",
+        "value": null,
+        "reason": "SSH timed out before a remote command ran; CPU model, architecture and core counts were not observed."
+      },
+      "ram": {
+        "status": "unknown",
+        "value": null,
+        "reason": "No remote observation of installed or available memory."
+      },
+      "disk": {
+        "status": "unknown",
+        "value": null,
+        "reason": "No remote observation of device, capacity, free space or filesystem."
+      },
+      "os": {
+        "status": "unknown",
+        "value": null,
+        "reason": "Local peer-directory metadata describes a MacBook Air running macOS; it does not establish the intended Dell's OS or identity."
+      },
+      "network": {
+        "status": "unknown",
+        "value": null,
+        "reason": "Local peer-directory online status did not yield SSH or overlay ping reachability; the intended Dell's interfaces, link and route remain unobserved."
+      },
+      "access": {
+        "status": "unknown",
+        "value": null,
+        "reason": "Two minimal noninteractive SSH probes timed out at TCP connection; authentication, account privileges and readable paths were not tested."
+      }
     },
     "access_observations": [
-      {"probe": "ssh -G dell (hostname and port only)", "provenance": "local_access_probe", "result": "Configured destination names a MacBook Air; intended spare-PC identity unverified.", "remote_command_ran": false},
-      {"probe": "ssh -o BatchMode=yes -o ConnectTimeout=10 dell 'uname -s'", "attempts": 2, "provenance": "local_access_probe", "result": "TCP connection timed out before authentication or remote execution.", "remote_command_ran": false},
-      {"probe": "Tailscale status --json (bounded peer metadata)", "provenance": "local_access_probe", "result": "Local directory reports the configured MacBook Air peer as online with macOS; this is not a remote hardware observation.", "remote_command_ran": false},
-      {"probe": "Tailscale ping (one attempt, five-second timeout)", "provenance": "local_access_probe", "result": "No reply from the configured peer.", "remote_command_ran": false}
+      {
+        "probe": "ssh -G dell (hostname and port only)",
+        "provenance": "local_access_probe",
+        "result": "Configured destination names a MacBook Air; intended spare-PC identity unverified.",
+        "remote_command_ran": false
+      },
+      {
+        "probe": "ssh -o BatchMode=yes -o ConnectTimeout=10 dell 'uname -s'",
+        "attempts": 2,
+        "provenance": "local_access_probe",
+        "result": "TCP connection timed out before authentication or remote execution.",
+        "remote_command_ran": false
+      },
+      {
+        "probe": "Tailscale status --json (bounded peer metadata)",
+        "provenance": "local_access_probe",
+        "result": "Local directory reports the configured MacBook Air peer as online with macOS; this is not a remote hardware observation.",
+        "remote_command_ran": false
+      },
+      {
+        "probe": "Tailscale ping (one attempt, five-second timeout)",
+        "provenance": "local_access_probe",
+        "result": "No reply from the configured peer.",
+        "remote_command_ran": false
+      }
     ],
-    "other_unknowns": ["battery condition", "sustained thermals and throttling", "power and energy use", "installed tool versions", "workload memory and disk fit", "cold and warm Dell runtime", "isolation and revocation capabilities"],
+    "other_unknowns": [
+      "battery condition",
+      "sustained thermals and throttling",
+      "power and energy use",
+      "installed tool versions",
+      "workload memory and disk fit",
+      "cold and warm Dell runtime",
+      "isolation and revocation capabilities"
+    ],
     "selected_workload": {
       "name": "DoctorCRE Tour search and selection-cart regression",
       "repository": "jbookout/doctorcre-app",
       "source_commit": "6a9f996cd731a9debe1d9df82b9449f864d28f5e",
       "source_tree": "edc2e0ee8b98d9bed4a1ccb211157ae67a8f732c",
-      "command_argv": ["node", "--test", "test/tours-search-cart.test.mjs"],
+      "command_argv": [
+        "node",
+        "--test",
+        "test/tours-search-cart.test.mjs"
+      ],
       "fixture_kind": "synthetic_jsdom_fetch",
       "required_runtime": "Node.js >=20 and dependencies from the pinned package-lock.json",
       "input_sha256": {
@@ -104,66 +161,65 @@
       "installed": true,
       "installed_enforcement_ref": "account Actions paid-usage budget $0 with stop-usage enabled, plus lib/platform_metering.py authorize_metered_execution before every dispatch (the repository Actions disable was lifted 2026-09-12, decision 9935743c-21de-4490-83db-d11a5e20f6b1)",
       "temporary_control": "github_actions_pause",
-      "required_true": ["local_checks_green"],
-      "required_nonempty": ["candidate_sha"],
+      "required_true": [
+        "local_checks_green"
+      ],
+      "required_nonempty": [
+        "candidate_sha"
+      ],
       "maximums": {}
     },
     "neon-disposable-branch": {
       "platform": "neon",
       "installed": true,
       "installed_enforcement_ref": "lib/platform_metering.py authorize_metered_execution before every registered branch create",
-      "required_true": ["cleanup_registered"],
+      "required_true": [
+        "cleanup_registered"
+      ],
       "required_nonempty": [],
       "maximums": {
         "requested_lifetime_minutes": 120,
         "active_nondefault_branches": 2
       }
-    },
-    "neon-standing-project-create": {
-      "platform": "neon",
-      "installed": true,
-      "installed_enforcement_ref": "tools/staging-project-replacement.py authorizes exactly one operation-bound standing project create before provider dispatch",
-      "required_true": ["local_checks_green"],
-      "required_nonempty": ["candidate_sha", "operation_id"],
-      "maximums": {
-        "standing_project_create_count": 1
-      }
-    },
-    "cloudflare-worker-release": {
-      "platform": "cloudflare-workers",
-      "installed": true,
-      "installed_enforcement_ref": "bin/deploy-worker.sh before Wrangler upload/deploy/promotion",
-      "required_true": ["release_preflight_green"],
-      "required_nonempty": ["performance_budget_ref"],
-      "maximums": {"release_candidate_count": 1}
-    },
-    "cognition-provider": {
-      "platform": "anthropic-claude",
-      "installed": true,
-      "installed_enforcement_ref": "tools/control-plane.py:_reserve->ops.admit_job_cost",
-      "required_true": [],
-      "required_nonempty": [],
-      "maximums": {}
     }
   },
   "control_scope": {
     "pre_dispatch_gated": [
-      "github", "neon", "cloudflare-workers", "anthropic-claude"
+      "github",
+      "neon",
+      "cloudflare-workers",
+      "anthropic-claude"
     ],
     "usage_and_alert_gated": [
-      "cloudflare-kv", "cloudflare-r2", "openai-codex", "google-workspace",
-      "healthchecks", "blotato", "make"
+      "cloudflare-kv",
+      "cloudflare-r2",
+      "openai-codex",
+      "google-workspace",
+      "healthchecks",
+      "blotato",
+      "make"
     ],
-    "human_contract_only": ["salesforce", "market-data-licenses"],
-    "unmetered_local": ["local-mac"]
+    "human_contract_only": [
+      "salesforce",
+      "market-data-licenses"
+    ],
+    "unmetered_local": [
+      "local-mac"
+    ]
   },
   "platforms": [
     {
       "key": "github",
-      "covers_service_runtimes": ["github-actions"],
+      "covers_service_runtimes": [
+        "github-actions"
+      ],
       "scope": "source control, pull requests, packages and GitHub Actions",
       "billing_model": "fixed GitHub plan plus metered Actions minutes and retained artifact/cache/package storage",
-      "meter_units": ["hosted runner minutes", "GB-month artifact and package storage", "GB-month cache storage"],
+      "meter_units": [
+        "hosted runner minutes",
+        "GB-month artifact and package storage",
+        "GB-month cache storage"
+      ],
       "current_plan": "GitHub Pro",
       "live_evidence": {
         "observed_at": "2026-09-12T09:01:51Z",
@@ -191,10 +247,18 @@
     },
     {
       "key": "neon",
-      "covers_service_runtimes": ["neon-postgres"],
+      "covers_service_runtimes": [
+        "neon-postgres"
+      ],
       "scope": "production record layer, staging, disposable migration and restore branches",
       "billing_model": "Launch usage pricing with an organization spending limit",
-      "meter_units": ["compute unit seconds", "root and child GB-month", "instant-restore GB-month", "public network GB beyond allowance", "extra branch-hours"],
+      "meter_units": [
+        "compute unit seconds",
+        "root and child GB-month",
+        "instant-restore GB-month",
+        "public network GB beyond allowance",
+        "extra branch-hours"
+      ],
       "current_plan": "Launch",
       "live_evidence": {
         "observed_at": "2026-08-17T08:08:30Z",
@@ -225,10 +289,15 @@
     },
     {
       "key": "cloudflare-workers",
-      "covers_service_runtimes": ["cloudflare-worker"],
+      "covers_service_runtimes": [
+        "cloudflare-worker"
+      ],
       "scope": "production and staging CARR MCP Workers",
       "billing_model": "Free daily request quota or Paid monthly request and CPU-time allowance plus overage",
-      "meter_units": ["Worker requests", "CPU milliseconds"],
+      "meter_units": [
+        "Worker requests",
+        "CPU milliseconds"
+      ],
       "current_plan": "unknown_requires_human_billing_readback",
       "live_evidence": {
         "observed_at": "2026-08-17",
@@ -242,43 +311,88 @@
       ],
       "optimization": "Avoid polling loops, cache stable reads, bound list sizes, and keep health probes lightweight.",
       "next_human_readback": "Confirm Workers plan, current monthly requests and CPU milliseconds, and account-level spend notification settings.",
-      "sources": ["https://developers.cloudflare.com/workers/platform/pricing/"]
+      "sources": [
+        "https://developers.cloudflare.com/workers/platform/pricing/"
+      ]
     },
     {
       "key": "cloudflare-kv",
       "covers_service_runtimes": [],
       "scope": "OAuth grant and token storage",
       "billing_model": "operation and storage metering under the Workers account",
-      "meter_units": ["key reads", "key writes", "key deletes", "key lists", "GB-month stored"],
+      "meter_units": [
+        "key reads",
+        "key writes",
+        "key deletes",
+        "key lists",
+        "GB-month stored"
+      ],
       "current_plan": "unknown_requires_human_billing_readback",
-      "live_evidence": {"observed_at": "2026-08-17", "usage_readback_verified": false},
-      "hard_controls": ["no list-scan polling", "bounded token lifetime", "one environment-specific namespace"],
+      "live_evidence": {
+        "observed_at": "2026-08-17",
+        "usage_readback_verified": false
+      },
+      "hard_controls": [
+        "no list-scan polling",
+        "bounded token lifetime",
+        "one environment-specific namespace"
+      ],
       "optimization": "Read by exact key, avoid repeated writes, and keep production and staging namespaces isolated.",
       "next_human_readback": "Confirm KV operation and storage usage in the Cloudflare dashboard.",
-      "sources": ["https://developers.cloudflare.com/workers/platform/pricing/"]
+      "sources": [
+        "https://developers.cloudflare.com/workers/platform/pricing/"
+      ]
     },
     {
       "key": "cloudflare-r2",
       "covers_service_runtimes": [],
       "scope": "document attachments and backup-copy objects",
       "billing_model": "stored GB-month plus Class A and Class B operations; Internet egress is free",
-      "meter_units": ["GB-month stored", "Class A operations", "Class B operations"],
+      "meter_units": [
+        "GB-month stored",
+        "Class A operations",
+        "Class B operations"
+      ],
       "current_plan": "unknown_requires_human_billing_readback",
-      "live_evidence": {"observed_at": "2026-08-17", "usage_readback_verified": false},
-      "hard_controls": ["lifecycle retention for temporary artifacts", "deduplicate by object checksum", "do not use object listing as a polling loop"],
+      "live_evidence": {
+        "observed_at": "2026-08-17",
+        "usage_readback_verified": false
+      },
+      "hard_controls": [
+        "lifecycle retention for temporary artifacts",
+        "deduplicate by object checksum",
+        "do not use object listing as a polling loop"
+      ],
       "optimization": "Batch backup copies, avoid redundant PUTs, and expire temporary test objects.",
       "next_human_readback": "Confirm R2 stored bytes and Class A/B operation totals.",
-      "sources": ["https://developers.cloudflare.com/workers/platform/pricing/"]
+      "sources": [
+        "https://developers.cloudflare.com/workers/platform/pricing/"
+      ]
     },
     {
       "key": "anthropic-claude",
-      "covers_service_runtimes": ["claude-code-scheduled-task"],
+      "covers_service_runtimes": [
+        "claude-code-scheduled-task"
+      ],
       "scope": "Claude and Claude Code interactive and scheduled work",
       "billing_model": "subscription usage windows shared by Claude and Claude Code, or API input/output/cache tokens when an API route is used",
-      "meter_units": ["plan usage window", "input tokens", "output tokens", "prompt-cache tokens", "web searches when API-enabled"],
+      "meter_units": [
+        "plan usage window",
+        "input tokens",
+        "output tokens",
+        "prompt-cache tokens",
+        "web searches when API-enabled"
+      ],
       "current_plan": "unknown_requires_human_billing_readback",
-      "live_evidence": {"observed_at": "2026-08-17", "api_billing_route_verified": false},
-      "hard_controls": ["scheduled jobs remain disabled until ledger-backed", "one task owns each workflow", "API calls require a pre-dispatch cost reservation"],
+      "live_evidence": {
+        "observed_at": "2026-08-17",
+        "api_billing_route_verified": false
+      },
+      "hard_controls": [
+        "scheduled jobs remain disabled until ledger-backed",
+        "one task owns each workflow",
+        "API calls require a pre-dispatch cost reservation"
+      ],
       "optimization": "Use typed bounded inputs, reuse cacheable context, consolidate scheduled jobs, and stop retrying long sessions after the first deterministic failure.",
       "next_human_readback": "Confirm Claude subscription tier, API billing organization, credits, and auto-reload settings.",
       "sources": [
@@ -291,10 +405,21 @@
       "covers_service_runtimes": [],
       "scope": "Codex desktop, local and cloud tasks",
       "billing_model": "included agentic usage by ChatGPT plan, then optional purchased credits; API use is token-metered separately",
-      "meter_units": ["agentic usage allowance", "optional credits", "API input and output tokens when API-enabled"],
+      "meter_units": [
+        "agentic usage allowance",
+        "optional credits",
+        "API input and output tokens when API-enabled"
+      ],
       "current_plan": "unknown_requires_human_billing_readback",
-      "live_evidence": {"observed_at": "2026-08-17", "auto_top_up_verified_disabled": false},
-      "hard_controls": ["no auto top-up without Joe approval", "no duplicate agents on the same task", "use local focused verification before cloud delegation"],
+      "live_evidence": {
+        "observed_at": "2026-08-17",
+        "auto_top_up_verified_disabled": false
+      },
+      "hard_controls": [
+        "no auto top-up without Joe approval",
+        "no duplicate agents on the same task",
+        "use local focused verification before cloud delegation"
+      ],
       "optimization": "Keep one owning task, use bounded sub-tasks only when independent, and avoid re-running full repository analysis after every small fix.",
       "next_human_readback": "Confirm ChatGPT plan, Codex credit balance, and auto top-up state in the Usage dashboard.",
       "sources": [
@@ -307,10 +432,22 @@
       "covers_service_runtimes": [],
       "scope": "Google Drive vault, Gmail, Calendar and Google OAuth",
       "billing_model": "fixed Workspace seats and pooled storage; Drive API is quota-unit and egress limited",
-      "meter_units": ["licensed seats", "pooled GB storage", "Drive API quota units", "Drive API daily egress bytes"],
+      "meter_units": [
+        "licensed seats",
+        "pooled GB storage",
+        "Drive API quota units",
+        "Drive API daily egress bytes"
+      ],
       "current_plan": "unknown_requires_human_billing_readback",
-      "live_evidence": {"observed_at": "2026-08-17", "storage_and_api_quota_readback_verified": false},
-      "hard_controls": ["Drive API backoff and bounded pagination", "no full-vault scans in routine work", "no duplicate exported artifacts"],
+      "live_evidence": {
+        "observed_at": "2026-08-17",
+        "storage_and_api_quota_readback_verified": false
+      },
+      "hard_controls": [
+        "Drive API backoff and bounded pagination",
+        "no full-vault scans in routine work",
+        "no duplicate exported artifacts"
+      ],
       "optimization": "Prefer canonical record-layer reads, incremental change tracking and stable IDs instead of repeated Drive searches or full exports.",
       "next_human_readback": "Confirm Workspace edition, licensed seats, pooled storage used, and Google Cloud Drive API quota usage.",
       "sources": [
@@ -323,23 +460,49 @@
       "covers_service_runtimes": [],
       "scope": "dead-man monitoring for exports, backup, Worker health and optional whole-chain status",
       "billing_model": "fixed plan primarily limited by number of checks and retained log entries; SMS and call credits on paid tiers",
-      "meter_units": ["configured checks", "retained log entries per check", "SMS and WhatsApp credits", "phone-call credits"],
+      "meter_units": [
+        "configured checks",
+        "retained log entries per check",
+        "SMS and WhatsApp credits",
+        "phone-call credits"
+      ],
       "current_plan": "unknown_requires_human_billing_readback",
-      "live_evidence": {"observed_at": "2026-08-17", "declared_checks": 4, "account_readback_verified": false},
-      "hard_controls": ["one check per distinct failure domain", "no auto-provisioning", "do not send verbose bodies on successful pings"],
+      "live_evidence": {
+        "observed_at": "2026-08-17",
+        "declared_checks": 4,
+        "account_readback_verified": false
+      },
+      "hard_controls": [
+        "one check per distinct failure domain",
+        "no auto-provisioning",
+        "do not send verbose bodies on successful pings"
+      ],
       "optimization": "Keep the four intentional checks and do not create per-run or per-branch checks.",
       "next_human_readback": "Confirm current Healthchecks plan and actual check count.",
-      "sources": ["https://healthchecks.io/pricing/", "https://healthchecks.io/docs/configuring_checks/"]
+      "sources": [
+        "https://healthchecks.io/pricing/",
+        "https://healthchecks.io/docs/configuring_checks/"
+      ]
     },
     {
       "key": "blotato",
       "covers_service_runtimes": [],
       "scope": "human-gated social publishing and placement metrics",
       "billing_model": "commercial subscription or credits; exact contract not recorded",
-      "meter_units": ["subscription tier", "publishing credits or connected-account allowance"],
+      "meter_units": [
+        "subscription tier",
+        "publishing credits or connected-account allowance"
+      ],
       "current_plan": "unknown_requires_human_billing_readback",
-      "live_evidence": {"observed_at": "2026-08-17", "billing_readback_verified": false},
-      "hard_controls": ["human-gated publishing only", "draft generation cannot publish", "metrics-only access must not inherit send authority"],
+      "live_evidence": {
+        "observed_at": "2026-08-17",
+        "billing_readback_verified": false
+      },
+      "hard_controls": [
+        "human-gated publishing only",
+        "draft generation cannot publish",
+        "metrics-only access must not inherit send authority"
+      ],
       "optimization": "Batch approved weekly posts and do not spend credits on test publications.",
       "next_human_readback": "Record the Blotato plan, renewal, included credits and current balance from the billing page.",
       "sources": []
@@ -349,10 +512,20 @@
       "covers_service_runtimes": [],
       "scope": "legacy Make.com scenarios and webhooks",
       "billing_model": "commercial plan generally metered by scenario operations or credits; exact contract not recorded",
-      "meter_units": ["scenario operations or credits", "active scenarios", "data transfer if contracted"],
+      "meter_units": [
+        "scenario operations or credits",
+        "active scenarios",
+        "data transfer if contracted"
+      ],
       "current_plan": "unknown_requires_human_billing_readback",
-      "live_evidence": {"observed_at": "2026-08-17", "billing_and_send_scope_readback_verified": false},
-      "hard_controls": ["no new scenario until send capability and billing are audited", "disable polling scenarios superseded by the record layer"],
+      "live_evidence": {
+        "observed_at": "2026-08-17",
+        "billing_and_send_scope_readback_verified": false
+      },
+      "hard_controls": [
+        "no new scenario until send capability and billing are audited",
+        "disable polling scenarios superseded by the record layer"
+      ],
       "optimization": "Use event-driven webhooks, filter before fanout and retire duplicate polling scenarios.",
       "next_human_readback": "Record Make plan, operation allowance, current usage and every active scenario.",
       "sources": []
@@ -362,10 +535,21 @@
       "covers_service_runtimes": [],
       "scope": "CARR corporate CRM accessed through Joe's browser-bound account",
       "billing_model": "corporate licensed seat and contracted API/storage limits; not billed through this system account",
-      "meter_units": ["licensed seats", "contracted data and file storage", "API request allocation if enabled"],
+      "meter_units": [
+        "licensed seats",
+        "contracted data and file storage",
+        "API request allocation if enabled"
+      ],
       "current_plan": "corporate_contract_not_observable",
-      "live_evidence": {"observed_at": "2026-08-17", "system_api_credential_present": false},
-      "hard_controls": ["browser-bound human access", "no system API credential", "no duplicate CRM store"],
+      "live_evidence": {
+        "observed_at": "2026-08-17",
+        "system_api_credential_present": false
+      },
+      "hard_controls": [
+        "browser-bound human access",
+        "no system API credential",
+        "no duplicate CRM store"
+      ],
       "optimization": "Keep integration read/manual until CARR supplies an approved API contract and quota.",
       "next_human_readback": "None for system billing; CARR corporate owns the commercial contract.",
       "sources": []
@@ -375,23 +559,47 @@
       "covers_service_runtimes": [],
       "scope": "CoStar, GCCMLS and CREXI browser-bound market data",
       "billing_model": "licensed subscription seats and contractual use limits; no automated API contract recorded",
-      "meter_units": ["licensed seats", "contractual export and automation limits"],
+      "meter_units": [
+        "licensed seats",
+        "contractual export and automation limits"
+      ],
       "current_plan": "human_licensed_contract_not_observable",
-      "live_evidence": {"observed_at": "2026-08-17", "system_api_credential_present": false},
-      "hard_controls": ["browser-bound read access", "no credential extraction", "no unapproved scraping or bulk export"],
+      "live_evidence": {
+        "observed_at": "2026-08-17",
+        "system_api_credential_present": false
+      },
+      "hard_controls": [
+        "browser-bound read access",
+        "no credential extraction",
+        "no unapproved scraping or bulk export"
+      ],
       "optimization": "Use only evidence needed for an active task and store source references rather than duplicating licensed datasets.",
       "next_human_readback": "Joe retains contract and renewal visibility; no system automation is authorized.",
       "sources": []
     },
     {
       "key": "local-mac",
-      "covers_service_runtimes": ["launchd", "operator-invoked"],
+      "covers_service_runtimes": [
+        "launchd",
+        "operator-invoked"
+      ],
       "scope": "Joe's local deterministic jobs and launchd adapters, plus operator-invoked local doors (the WR-000048 migrate-prod wrapper)",
       "billing_model": "no per-run vendor charge; bounded by local power, storage and network",
-      "meter_units": ["local runtime", "local disk bytes", "network bytes sent to metered services"],
+      "meter_units": [
+        "local runtime",
+        "local disk bytes",
+        "network bytes sent to metered services"
+      ],
       "current_plan": "owned_hardware",
-      "live_evidence": {"observed_at": "2026-08-17", "per_run_cloud_charge": false},
-      "hard_controls": ["prefer local focused checks", "local work cannot silently call cloud branches or paid APIs", "network destinations remain allowlisted"],
+      "live_evidence": {
+        "observed_at": "2026-08-17",
+        "per_run_cloud_charge": false
+      },
+      "hard_controls": [
+        "prefer local focused checks",
+        "local work cannot silently call cloud branches or paid APIs",
+        "network destinations remain allowlisted"
+      ],
       "optimization": "Move deterministic validation local and invoke paid platforms only at explicit integration boundaries.",
       "sources": []
     }

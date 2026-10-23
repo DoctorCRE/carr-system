@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[1]
@@ -202,7 +203,6 @@ class FakeCodex:
         if argv[0] == "ssh":
             payload = json.loads(kw["input"])
             from lib import cloudflare_tokens as cf
-            from unittest.mock import patch
             status = "ok"
             if argv[-2] == "studio":
                 path = token_store.destination(payload["name"]).path
@@ -232,7 +232,8 @@ class World:
         minter = cm.Minter(self.plan, self.machine, http=self.http, clock=self.clock,
                            run=self.codex, call_verb=self.board,
                            state_path=self.state, receipts_path=self.receipts)
-        return minter.run_once()
+        with patch("lib.cloudflare_tokens.socket.gethostname", return_value="fixture.example.test"):
+            return minter.run_once()
 
     def stored(self, name: str) -> str | None:
         return token_store.read(name)
@@ -672,7 +673,7 @@ def test_neon_child_scope_is_explicit() -> None:
     print("finding 2: the Neon child's scope is a recorded choice, and project scope is honoured")
     scope = next(g for g in cm.load_plan().grants if g.name == "neon").params["child_scope"]
     check("the shipped child is org-wide with a recorded reason naming its org-level consumers",
-          scope["kind"] == "organization" and "staging-project-replacement" in scope["because"]
+          scope["kind"] == "organization" and "projects list --org-id" in scope["because"]
           and "system_costs" in scope["because"] and "consumption_history" in scope["because"], scope)
 
     def no_scope(g):

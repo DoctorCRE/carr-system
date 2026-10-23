@@ -649,7 +649,7 @@ test("state list items are closed and required text is documented in the schema"
   assert.equal(correctionSchema.properties.refs.items.minLength, 1);
   assert.equal(correctionSchema.properties.refs.items.pattern, "\\S");
   assert.match("/tmp/canonical-evidence.json", new RegExp(correctionSchema.properties.refs.items.pattern));
-  assert.match("https://github.com/jbookout/carr-system/pull/897", new RegExp(correctionSchema.properties.refs.items.pattern));
+  assert.match("https://github.com/DoctorCRE/carr-system/pull/897", new RegExp(correctionSchema.properties.refs.items.pattern));
   const decisionSchema = checkpoint.inputSchema.properties.state.properties.decisions.items;
   assert.deepEqual(decisionSchema.required, ["text", "why", "refs"]);
   assert.equal(decisionSchema.properties.why.minLength, 1);
