@@ -207,7 +207,7 @@
   "reviewed_base_inventory": {
     "excluded_rule_surface": "intro_politics",
     "path": "ops/config/rule-enforcement-map.json",
-    "sha256": "7108a6907924e650c353ac2f04ced936feff45d02c17c3b57ca41a71dae5ae39",
+    "sha256": "3444c458c44b635692275d598a9ebcc4aab5200389a0184dee0de32ad30a7c18",
     "standing_source_count": 190
   },
   "reviewed_source_manifest": {

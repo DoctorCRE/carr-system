@@ -81,28 +81,6 @@
       }
     },
     {
-      "id": "scheduled-calendar-fetch-recovery",
-      "class": "scheduled",
-      "sources": [
-        "bin/fetch-calendar.sh"
-      ],
-      "path_pattern": "{{VAULT}}/**",
-      "producer": "calendar legacy projection",
-      "consumers": [
-        "recovery operator"
-      ],
-      "canonicality": "recovery_only",
-      "replacement": {
-        "status": "accepted",
-        "target": "EventKit-to-record capture",
-        "normal_path": "normal_path_repointed_to_eventkit_record_capture",
-        "accepted_by": "joe",
-        "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
-        "verified": "bin/fetch-calendar.sh refuses with MISSING_CANONICAL_SEAM naming the EventKit-to-record capture (line 30) unless --recovery --reason is given. The nightly calendar archive ran OK through EventKit on 2026-08-22."
-      }
-    },
-    {
       "id": "scheduled-calendar-ics",
       "class": "scheduled",
       "sources": [
@@ -337,7 +315,6 @@
         "pipelines/dso-match.py",
         "pipelines/map_radar_lanes.py",
         "pipelines/prepare_document.py",
-        "tools/verify-emails.py",
         "lib/drive_recovery.py"
       ],
       "path_pattern": "{{VAULT}}/**",
@@ -353,7 +330,7 @@
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
         "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
-        "verified": "This entry IS the shared boundary plus its consumers, and every consumer goes through it. lib/drive_recovery.py provides RecoveryContext and parse_recovery_controls; fill-engine/audit_template_colors.py, pipelines/build-space-search.py, pipelines/dso-match.py, pipelines/map_radar_lanes.py, pipelines/prepare_document.py and tools/verify-emails.py all import it rather than resolving a Drive root themselves. Verified 2026-08-22 by checking each of the six for the import; none hand-rolls its own resolution."
+        "verified": "This entry IS the shared boundary plus its consumers, and every consumer goes through it. lib/drive_recovery.py provides RecoveryContext and parse_recovery_controls; fill-engine/audit_template_colors.py, pipelines/build-space-search.py, pipelines/dso-match.py, pipelines/map_radar_lanes.py, pipelines/prepare_document.py all import it rather than resolving a Drive root themselves. Verified 2026-08-22 by checking each remaining consumer for the import; none hand-rolls its own resolution."
       }
     },
     {

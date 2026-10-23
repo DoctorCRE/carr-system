@@ -2,21 +2,8 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-if [ "$#" = 1 ] && [ "$1" = --from-work-queue ]; then
-  pins=$(python3 "$root/tools/room-bridge/dispatch.py" queue | jq -er '
-    if .schema != "room-work-queue/v1" or (.items | type) != "array" then
-      error("invalid work queue snapshot")
-    else [.items[] | select(.stage == "merging") | .prs[] |
-      [.repo, (.number | tostring), .head] | @tsv] | join("\n") end')
-  while IFS=$'\t' read -r repo pr sha; do
-    [ -n "$repo" ] || continue
-    bash "$root/tools/approve-merge.sh" "$repo" "$pr" "$sha"
-    sleep 2
-  done <<< "$pins"
-  exit 0
-fi
 if [ "$#" != 3 ] || ! [[ "$1" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$2" =~ ^[1-9][0-9]*$ && "$3" =~ ^[0-9a-f]{40}$ ]]; then
-  echo 'Usage: tools/approve-merge.sh <owner/repo> <pr> <approved_sha> | --from-work-queue' >&2
+  echo 'Usage: tools/approve-merge.sh <owner/repo> <pr> <approved_sha>' >&2
   exit 64
 fi
 repo=$1

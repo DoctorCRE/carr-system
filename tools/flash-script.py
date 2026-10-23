@@ -434,10 +434,9 @@ def main(argv):
     ap.add_argument("--json", action="store_true", help="print the result row as JSON")
     a = ap.parse_args(argv)
     if flashlib.is_switched_off():
-        policy = json.loads(Path(REPO, "ops/config/model-routes.v1.json").read_text())
         row = {"at": datetime.now(timezone.utc).isoformat(), "question": a.question[:500],
                "paths": [os.path.abspath(p) for p in a.paths], "answer": "", "support": None,
-               "handoff": flashlib.OFF_REASON, "handoff_desk": policy["routes"]["script"]["then"]["desk"],
+               "handoff": flashlib.OFF_REASON, "handoff_desk": "Codex",
                "turns": 0, "secs": 0, "log": [], "detail": flashlib.OFF_REASON}
         append_run(row)
         if a.json:
@@ -456,7 +455,6 @@ def main(argv):
     if flash_port() is None:
         print(f"flash-script: CARR_FLASH_URL must be a loopback address, not {FLASH_URL}", file=sys.stderr)
         return 2
-    policy = json.loads(Path(REPO, "ops/config/model-routes.v1.json").read_text())
     t = time.monotonic()
     work = tempfile.mkdtemp(prefix="flash-script-")
     try:
@@ -485,7 +483,7 @@ def main(argv):
     row = {"at": datetime.now(timezone.utc).isoformat(), "question": a.question[:500],
            "paths": [os.path.abspath(p) for p in a.paths], "answer": (answer or "")[:3000],
            "support": next((e["support"] for e in reversed(log) if "support" in e), None),
-           "handoff": reason, "handoff_desk": policy["routes"]["script"]["then"]["desk"] if reason else None,
+           "handoff": reason, "handoff_desk": "Codex" if reason else None,
            "turns": sum(1 for e in log if "turn" in e),
            "secs": round(time.monotonic() - t, 1), "log": log}
     append_run(row)
