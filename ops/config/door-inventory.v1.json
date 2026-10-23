@@ -243,12 +243,6 @@
       "evidence": "evals/context-hooks/make_report.py main() binds its baseline and writes the evaluation report."
     },
     {
-      "path": "evals/model-routing/make_report.py",
-      "class": "hand_tool",
-      "reason": "Manually renders the model-routing evaluation report; it is not a runtime or scheduled entrypoint.",
-      "evidence": "evals/model-routing/make_report.py main() consumes evaluation fixtures and writes report artifacts."
-    },
-    {
       "path": "bin/github-app-key-intake.sh",
       "class": "hand_tool",
       "reason": "Manual GitHub App key intake remains owned by the credential/release lane outside this library reset.",
