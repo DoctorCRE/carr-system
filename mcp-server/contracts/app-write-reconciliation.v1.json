@@ -1,0 +1,36 @@
+{
+  "schema": "doctorcre-app-write-reconciliation.v1",
+  "version": "1.0.0",
+  "room": {
+    "endpoint": "POST /api/room/turn",
+    "required": ["idempotency_key"],
+    "idempotency_key": "UUID retained by the caller for the exact reviewed action, including uncertain retries",
+    "scope": "Server-derived session key and actor slug",
+    "payload_binding": "Durable partner_room_turn row compares room, sponsor, seat, kind, body and origin attribution before replay",
+    "replay": "Original seq, at and message identity; no duplicate append; no time bucket",
+    "key_reuse": "HTTP 409 when the same scoped key names different material"
+  },
+  "replacements": {
+    "set-next-step": {
+      "expected": "base_version",
+      "read": "get-deal-room.base_version or deal-room-board.deals[].base_version",
+      "record": "deal",
+      "fields": ["next_step", "next_date"]
+    },
+    "set-market-agent": {
+      "expected": "base_version",
+      "read": "get-deal-room.base_version or deal-room-board.deals[].base_version",
+      "record": "deal",
+      "fields": ["market_agent", "market"]
+    },
+    "set-national-account-owner": {
+      "expected": "base_version",
+      "read": "deal-room-board.accounts[].base_version (client_version)",
+      "record": "client",
+      "fields": ["account_owner"]
+    }
+  },
+  "concurrency": "Version locked and compared inside the writer transaction; mismatch is version_conflict before replacement; no silent rebase",
+  "receipt_recovery": "Same-key serialization and original envelope receipt lookup precede the expected-version check",
+  "consumer_order": "Update the consumer to retain operation identity and send the reviewed fresh version before enabling the producer's required fields"
+}

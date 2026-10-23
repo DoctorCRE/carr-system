@@ -595,30 +595,16 @@ async function roomQueue(_request, env, _session, dependencies) {
  *
  * ATTRIBUTION IS SERVER-DERIVED AND THE SEAT IS FIXED. The body is the only
  * thing read off the request: seat is always "human", kind always "turn", the
- * sponsor comes from the verified session, and the idempotency/msg id is minted
- * here.  A request that supplies seat, sponsor, kind, room or msg_id is not
+ * sponsor comes from the verified session, and the message id is derived here
+ * from the caller's retained operation key and that verified session. A request that supplies seat, sponsor, kind, room or msg_id is not
  * rejected — those fields are simply never consulted, which is the same refusal
  * add-room-turn makes and the reason the panel has no seat selector.
  */
-// The composer promises the reader that a retry cannot double-post. A random
-// id per request does NOT deliver that: the failure this guards is a response
-// the browser never saw, where the turn landed and the reader presses retry.
-//
-// So the id is minted server-side and DETERMINISTICALLY, from the session, the
-// exact body, and a one-minute bucket — the room's own msg_id uniqueness then
-// collapses the retry into a dedup instead of a second turn. Nothing about it
-// comes from the request body's own fields, so this is not a caller-supplied
-// id wearing a different hat.
-//
-// THE DELIBERATE TRADE: the same person posting the same exact text twice
-// inside the same minute lands once. That is the case worth collapsing — it is
-// a double-submit far more often than it is intent — and a minute is short
-// enough that a genuine repeat a moment later still goes through.
-const ROOM_DEDUP_WINDOW_MS = 60_000;
-
-export async function roomMessageId(sessionKey, body, now) {
-  const bucket = Math.floor(now / ROOM_DEDUP_WINDOW_MS);
-  const digest = await sha256(`room-turn\n${sessionKey}\n${bucket}\n${body}`);
+// A browser owns one UUID per reviewed action, including retries after a lost
+// reply. The server scopes it to the verified session and actor; payload reuse
+// is checked by the room append against its durable row, not a Worker cache.
+export async function roomMessageId(sessionKey, actorSlug, operationKey) {
+  const digest = await sha256(`room-turn.v2\n${sessionKey}\n${actorSlug}\n${operationKey}`);
   return [digest.slice(0, 8), digest.slice(8, 12), digest.slice(12, 16),
     digest.slice(16, 20), digest.slice(20, 32)].join("-");
 }
@@ -647,6 +633,9 @@ async function roomTurnPost(request, env, session, dependencies) {
   }
   if (!body.trim()) return json({ error: "body_required" }, 400);
   if (body.length > ROOM_BODY_MAX) return json({ error: "body_too_long", limit: ROOM_BODY_MAX, got: body.length }, 413);
+  const operationKey = guard.value?.idempotency_key;
+  if (typeof operationKey !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(operationKey))
+    return json({ error: "idempotency_key_required", hint: "Use one UUID for this action and retain it for every retry." }, 400);
 
   const scope = personalScopeForActor(session.actor);
   if (scope.status !== "personal") {
@@ -657,13 +646,13 @@ async function roomTurnPost(request, env, session, dependencies) {
   try {
     posted = await dependencies.roomWriteFn(env, {
       sponsor: scope.sponsor, seat: "human", kind, body,
-      msgId: await roomMessageId(session.key, body, dependencies.now()),
+      msgId: await roomMessageId(session.key, session.actor.slug, operationKey.toLowerCase()),
       originChannel: "browser-human", originActor: session.actor.slug,
     });
   } catch (error) {
     return json({ error: "wire_unavailable", detail: String(error?.message || error).slice(0, 200) }, 503);
   }
-  if (!posted || posted.ok !== true) return json({ error: posted?.error || "wire_unavailable" }, 503);
+  if (!posted || posted.ok !== true) return json({ error: posted?.error || "wire_unavailable" }, posted?.error === "key_reuse" ? 409 : 503);
   return json(posted);
 }
 
