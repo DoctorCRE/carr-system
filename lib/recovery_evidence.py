@@ -21,7 +21,7 @@ re-read path; authenticating the verifier would need a key the repository does
 not hold.
 
 WHAT IS AUTHORITY (review K3): only the output of `restore-watermark.py
-verify-restore` or `pitr-restore-proof.py prove` PIPED straight into
+verify-restore` PIPED straight into
 mcp-server/bin/recovery-matrix-evaluate.mjs. A bound file saved to disk is the
 operator's copy; an evaluator verdict on that file is not a recovery result,
 because nothing proves the file is what the verifier printed.
@@ -38,8 +38,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 # The tables a real restore of the record layer must carry rows in: the restore
-# verifier requires each in the artifact watermark with rows > 0 (review K2),
-# and the PITR proof counts them on its branch.
+# verifier requires each in the artifact watermark with rows > 0 (review K2).
 CORE_TABLES = ("public.party", "ops.run")
 
 MAX_CLOCK_SKEW_SECONDS = 180
@@ -55,7 +54,6 @@ def check_clock_skew(local: datetime, server: datetime, what: str) -> None:
 
 VERIFIERS = {
     "restore_exercise": "tools/restore-watermark.py verify-restore",
-    "record_layer_rpo": "tools/pitr-restore-proof.py prove",
     "outbound_census": "tools/restore-watermark.py outbound-census",
 }
 

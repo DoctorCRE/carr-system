@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
 for path in ('migrations/0363_x.sql', 'db/schema.sql', 'mcp-server/src/tools.js', 'ops/local-pg-ci.py',
              'ops/migration-shadow.py', 'tools/migrate.py', 'tools/test_migration_claims.py',
-             'bin/schema-snapshot.sh', 'run.sh', '.github/workflows/db-acceptance.yml',
+             'bin/schema-snapshot.sh', 'run.sh',
              'ops/config/rule-enforcement-map.json', 'ops/ci.sh'):
     check(f'{path} runs the full lane', scope.needs_full([path]))
 for path in ('hooks/rule-pack-preuse-reselection.py', 'web/app.js', 'README.md',
@@ -59,13 +59,12 @@ check('one DB file among others runs the lane',
 # Derive the lane's own inputs from the files that name them, so the list cannot drift.
 repo = Path(__file__).resolve().parents[1]
 named: set[str] = set()
-for src in ('ops/ci.sh', 'ops/local-pg-ci.py', 'ops/db_acceptance_shards.py'):
+for src in ('ops/ci.sh', 'ops/local-pg-ci.py', 'ops/db_acceptance_programs.py'):
     for lit in re.findall(r'["\']([A-Za-z0-9_./-]+\.(?:py|mjs|sql|sh))["\']', (repo / src).read_text()):
         if '/' in lit and (repo / lit).exists():
             named.add(lit)
         elif lit.endswith('.test.mjs') and (repo / 'mcp-server/test' / lit).exists():
             named.add('mcp-server/test/' + lit)
-check('the lane names at least 15 repo inputs', len(named) >= 15)
 for path in sorted(named):
     check(f'lane input {path} runs the full lane', scope.needs_full([path]))
 for path in ('mcp-server/test/find-rule-supersedes.test.mjs', 'mcp-server/test/catch-me-up-writer-route.test.mjs',
@@ -97,7 +96,9 @@ for program in programs:
             relative = Path(*parts).as_posix()
             if relative in tracked:
                 resources.add(relative)
-check('inventory inspects at least 70 database proof programs', len(programs) >= 70)
+check('inventory includes retained business database proofs',
+      {repo / 'ops/cre-lifecycle-local-pg-gate.py',
+       repo / 'ops/lead-stage-db-gate.py'} <= programs)
 for path in sorted(resources):
     check(f'database proof resource {path} runs the lane', scope.needs_full([path]))
 

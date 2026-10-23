@@ -72,7 +72,7 @@ export PATH="/usr/local/opt/node@22/bin:/opt/homebrew/opt/node@22/bin:/opt/homeb
 # browser that is not there, and times out — and this script's only symptom was
 # "cannot list Neon branches", which reads like a Neon outage rather than an
 # expired credential. NEON_API_KEY does not expire on a timer and needs no
-# browser. Sourced from db.env, the same file db-tap.py and migrate-prod.sh read,
+# browser. Sourced from db.env, the same file db-tap.py and the production deployment workflow read,
 # so all four neonctl callers share one credential and one failure mode.
 source "$REPO/bin/routine-credential-env.sh"
 # A dispatcher supplies CARR_JOB_PAYLOAD.  It must never trigger the recovery
@@ -92,7 +92,7 @@ IDENTITY="${CARR_AGE_IDENTITY:-$HOME/.config/carr/age-key.txt}"
 RESTORE_DB="restore_rehearse"
 # Interpreter for the platform-metering-gate call in phase 0, the one place this
 # script uses "$PY". Prefer the repo venv, fall back to python3: the same
-# two-line idiom bin/deploy-worker.sh uses to invoke the same gate. Under
+# two-line idiom the GitHub production deployment workflow uses to invoke the same gate. Under
 # `set -u` an unassigned $PY aborts the run at that call before the gate is
 # consulted.
 PY="$REPO/.venv/bin/python"
@@ -129,7 +129,7 @@ PREFLIGHT_ONLY=0
 KEEP_BRANCH=0
 VERIFY_ONLY=0
 BACKUP_RUN_ID=""
-BACKUP_REPOSITORY="jbookout/carr-system"
+BACKUP_REPOSITORY="DoctorCRE/carr-system"
 COPYDIR=""
 COPY_ARCHIVE=""
 while [ $# -gt 0 ]; do

@@ -407,7 +407,7 @@ class RestoredReader(unittest.TestCase):
 # ── the copy record, read from the provider ──────────────────────────────────
 
 RUN_ID, ATTEMPT, HEAD, SUITE, OTHER_SUITE = 101, 1, "a" * 40, 9001, 9002
-REPO_SLUG = "jbookout/carr-system"
+REPO_SLUG = "DoctorCRE/carr-system"
 
 
 def _zip_bytes() -> bytes:

@@ -21,17 +21,17 @@ class MonthlyCosts(unittest.TestCase):
         self.assertEqual(costs.normalize('openai', fixture['openai'])['rows'][0]['usd'], 2.5)
 
     def test_first_of_month_checks_last_complete_day_for_spike(self):
-        config = {'budget_usd': 100, 'providers': {'jev': {'label': 'Jev', 'plan': 'usage', 'monthly_usd': 0}}}
+        config = {'budget_usd': 100, 'providers': {'github': {'label': 'GitHub', 'plan': 'usage', 'monthly_usd': 0}}}
         rows = [{'day': f'2026-09-{day:02}', 'usd': 1, 'driver': 'review'} for day in range(16, 30)]
         rows.append({'day': '2026-09-30', 'usd': 8, 'driver': 'review'})
-        report = costs.summarize(config, {'jev': {'state': 'ready', 'rows': rows}}, date(2026, 9, 30), month='2026-10')
+        report = costs.summarize(config, {'github': {'state': 'ready', 'rows': rows}}, date(2026, 9, 30), month='2026-10')
         self.assertEqual(report['alerts'][0]['kind'], 'daily_spike')
         self.assertEqual(report['providers'][0]['mtd_usd'], 0)
 
     def test_pending_add_recovers_lost_response_using_same_intent(self):
         report = {'state': 'ready', 'through': '2026-10-05', 'alerts': [
-            {'provider': 'jev', 'driver': 'review', 'kind': 'daily_spike', 'amount_usd': 8, 'threshold_usd': 2}],
-            'providers': [{'provider': 'jev', 'state': 'ready'}]}
+            {'provider': 'github', 'driver': 'review', 'kind': 'daily_spike', 'amount_usd': 8, 'threshold_usd': 2}],
+            'providers': [{'provider': 'github', 'state': 'ready'}]}
         calls = []
         def interrupted(name, payload):
             calls.append((name, payload))
@@ -49,17 +49,7 @@ class MonthlyCosts(unittest.TestCase):
             self.assertEqual(calls[0], calls[1])
             self.assertIsNone(json.loads(path.read_text())['pending'])
 
-    def test_old_jev_missing_receipt_does_not_poison_current_window(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'jev.jsonl'
-            path.write_text(json.dumps({'ts': '2026-01-01T00:00:00Z', 'ok': True, 'usage': {}}))
-            self.assertEqual(costs.jev_usage(path, .042, start=date(2026, 9, 1))['state'], 'ready')
 
-    def test_scalar_jev_receipt_is_partial_and_does_not_abort(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'jev.jsonl'
-            path.write_text('null')
-            self.assertEqual(costs.jev_usage(path, .042)['state'], 'partial')
 
     def test_malformed_nested_snapshot_is_unavailable(self):
         report = costs.summarize({'budget_usd': 100, 'providers': {
@@ -100,26 +90,15 @@ class MonthlyCosts(unittest.TestCase):
             'public_network_transfer_bytes': {'usd': .1, 'units': 1000000000, 'included_units_per_month': 100000000000}})
         self.assertEqual([r['usd'] for r in normalized['rows']], [.048, 0, 1])
 
-    def test_jev_only_counts_billed_receipts_and_uses_call_sites(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'usage.jsonl'
-            path.write_text('\n'.join(json.dumps(r) for r in [
-                {'ts': '2026-10-04T01:00:00Z', 'caller': 'rule_selector', 'usage': {'input_tokens': 1000000}, 'ok': True},
-                {'ts': '2026-10-04T01:00:00Z', 'usage': {}, 'ok': False, 'http_status': 403},
-                {'ts': '2026-10-04T02:00:00Z', 'cache_hit': True, 'usage': {'input_tokens': 1000000}, 'ok': True}]))
-            source = costs.jev_usage(path, .042)
-            self.assertEqual(source['state'], 'ready')
-            self.assertEqual(source['rows'], [{'day': '2026-10-04', 'usd': .042, 'driver': 'rule_selector'}])
 
     def test_spikes_use_previous_fourteen_complete_days_and_budget(self):
-        config = {'budget_usd': 100, 'providers': {'jev': {'label': 'Jev', 'plan': 'usage', 'monthly_usd': 0, 'budget_usd': 60}}}
+        config = {'budget_usd': 100, 'providers': {'github': {'label': 'GitHub', 'plan': 'usage', 'monthly_usd': 0, 'budget_usd': 60}}}
         rows = [{'day': f'2026-09-{day:02}', 'usd': 1, 'driver': 'review'} for day in range(21, 31)]
         rows += [{'day': f'2026-10-{day:02}', 'usd': 1, 'driver': 'review'} for day in range(1, 5)]
         rows += [{'day': '2026-10-05', 'usd': 8, 'driver': 'rule-selector'}]
-        report = costs.summarize(config, {'jev': {'state': 'ready', 'rows': rows}}, date(2026, 10, 5))
-        self.assertEqual(report['providers'][0]['call_sites'], {'review': 4, 'rule-selector': 8})
+        report = costs.summarize(config, {'github': {'state': 'ready', 'rows': rows}}, date(2026, 10, 5))
         self.assertEqual([(a['provider'], a['kind'], a['threshold_usd']) for a in report['alerts']],
-                         [('jev', 'daily_spike', 2), ('jev', 'budget_projection', 60)])
+                         [('github', 'daily_spike', 2), ('github', 'budget_projection', 60)])
         self.assertEqual(report['providers'][0]['projection_usd'], 74.4)
 
     def test_snapshot_load_rejects_stale_and_drops_unknown_fields(self):
@@ -135,8 +114,8 @@ class MonthlyCosts(unittest.TestCase):
 
     def test_loop_reconciliation_deduplicates_and_reopens_after_clear(self):
         report = {'state': 'ready', 'through': '2026-10-05', 'alerts': [
-            {'provider': 'jev', 'driver': 'review', 'kind': 'daily_spike', 'amount_usd': 8, 'threshold_usd': 2}],
-            'providers': [{'provider': 'jev', 'state': 'ready'}]}
+            {'provider': 'github', 'driver': 'review', 'kind': 'daily_spike', 'amount_usd': 8, 'threshold_usd': 2}],
+            'providers': [{'provider': 'github', 'state': 'ready'}]}
         writes = []
         def verb(name, payload):
             if name == 'read-loop':
@@ -156,7 +135,7 @@ class MonthlyCosts(unittest.TestCase):
             report['providers'][0]['state'] = 'ready'
             costs.reconcile(report, state, verb)
             self.assertEqual([w[0] for w in writes], ['add-loop', 'close-loop'])
-            report['alerts'] = [{'provider': 'jev', 'driver': 'review', 'kind': 'daily_spike', 'amount_usd': 9, 'threshold_usd': 2}]
+            report['alerts'] = [{'provider': 'github', 'driver': 'review', 'kind': 'daily_spike', 'amount_usd': 9, 'threshold_usd': 2}]
             costs.reconcile(report, state, verb)
             self.assertNotEqual(writes[0][1]['idempotency_key'], writes[-1][1]['idempotency_key'])
 
@@ -214,9 +193,9 @@ class MonthlyCosts(unittest.TestCase):
 class ReviewRegressions(unittest.TestCase):
     def report(self, amount=8, through='2026-10-05', observed='2026-10-06T01:00:00Z'):
         return {'state': 'ready', 'through': through, 'observed_at': observed,
-                'alerts': [] if amount is None else [{'provider': 'jev', 'driver': 'review',
+                'alerts': [] if amount is None else [{'provider': 'github', 'driver': 'review',
                     'kind': 'daily_spike', 'amount_usd': amount, 'threshold_usd': 2}],
-                'providers': [{'provider': 'jev', 'state': 'ready'}]}
+                'providers': [{'provider': 'github', 'state': 'ready'}]}
 
     def config(self, provider, fixed=0):
         return {'budget_usd': 100, 'providers': {provider: {
@@ -291,41 +270,6 @@ class ReviewRegressions(unittest.TestCase):
         with patch('lib.record_call.subprocess.run', return_value=result):
             self.assertEqual(costs.cost_verb('update-loop', {}), {'ok': False, 'error': 'version_conflict'})
 
-    def test_partial_jev_daily_warning_has_one_owner_and_cannot_clear(self):
-        config = json.loads((costs.ROOT / 'ops/config/system-costs.v1.json').read_text())
-        config['providers'] = {'jev': config['providers']['jev']}
-        for spiking in (True, False):
-            with self.subTest(spiking=spiking), tempfile.TemporaryDirectory() as tmp:
-                local, factory = Path(tmp) / 'local.jsonl', Path(tmp) / 'factory.jsonl'
-                local.write_text('')
-                factory.write_text('\n'.join(json.dumps({'ts': f'2026-10-{day:02}T00:00:00Z',
-                    'ok': True, 'caller': 'factory', 'usage': {'input_tokens':
-                        30000000 if day == 15 else 1000000 if spiking else 30000000}})
-                    for day in range(1, 16)))
-                reader = costs.jev_sources
-                def source(local, price, start, through):
-                    return reader(local, price, start, through, extra_logs=(factory,))
-                with patch.object(costs, 'jev_sources', side_effect=source):
-                    report = costs.collect(config, {}, jev_path=local,
-                        now=datetime(2026, 10, 16, tzinfo=timezone.utc))
-                self.assertEqual(report['providers'][0]['state'], 'partial')
-                warning = next((a for a in report['alerts'] if a['kind'] == 'daily_warning'), None)
-                self.assertIsNotNone(warning)
-                self.assertEqual(warning['amount_usd'], 1.26)
-                self.assertEqual(warning['threshold_usd'], .5)
-                writes = []
-                def verb(name, payload):
-                    if name == 'read-loop':
-                        return {'loop': {'loop_id': 'loop-1', 'version': 1, 'status': 'open'}}
-                    writes.append(name)
-                    return {'ok': True, 'loop_id': 'loop-1'}
-                path = Path(tmp) / 'loops.json'
-                costs.reconcile(report, path, verb)
-                costs.reconcile(report, path, verb)
-                healthy = {**report, 'through': '2026-10-16', 'observed_at': '2026-10-17T00:00:00Z', 'alerts': []}
-                costs.reconcile(healthy, path, verb)
-                self.assertEqual(writes, ['add-loop'])
-                self.assertIn('daily warning threshold', costs.ACTION)
 
     def test_3_action_keys_bind_operation_and_revision(self):
         manifests, writes = {}, []
@@ -413,39 +357,7 @@ class ReviewRegressions(unittest.TestCase):
             costs.reconcile(self.report(), path, verb)
             self.assertEqual(writes[0], writes[1])
 
-    def test_7_factory_known_costs_and_partial_coverage_prevent_clear(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            local, factory = Path(tmp) / 'local.jsonl', Path(tmp) / 'factory.jsonl'
-            local.write_text('')
-            factory.write_text(json.dumps({'ts': '2026-10-04T00:00:00Z', 'ok': True,
-                                           'caller': 'factory', 'usage': {'input_tokens': 1000000}}))
-            source = costs.jev_sources(local, .042, date(2026, 10, 1), date(2026, 10, 4), extra_logs=(factory, factory))
-            self.assertEqual(source['rows'], [{'day': '2026-10-04', 'usd': .042, 'driver': 'factory'}])
-            report = costs.summarize(self.config('jev'), {'jev': source}, date(2026, 10, 6))
-            writes = []
-            def verb(name, payload):
-                if name == 'read-loop':
-                    return {'loop': {'loop_id': 'loop-1', 'version': 1, 'status': 'open'}}
-                writes.append(name)
-                return {'ok': True, 'loop_id': 'loop-1'}
-            path = Path(tmp) / 'loops.json'
-            costs.reconcile(self.report(), path, verb)
-            self.assertEqual(costs.reconcile(report, path, verb), 1)
-            self.assertEqual(writes, ['add-loop'])
 
-    def test_8_existing_jev_loop_is_migrated_without_another_add(self):
-        writes = []
-        def verb(name, payload):
-            if name == 'read-loop':
-                return {'loop': {'loop_id': 'legacy-loop', 'version': 7, 'status': 'open'}}
-            writes.append((name, dict(payload)))
-            return {'ok': True}
-        with tempfile.TemporaryDirectory() as tmp:
-            legacy = Path(tmp) / 'legacy.json'
-            legacy.write_text('{"loop_id":"legacy-loop","day":"2026-10-05"}')
-            costs.reconcile(self.report(), Path(tmp) / 'loops.json', verb, legacy_path=legacy)
-        self.assertEqual(writes[0][0], 'update-loop')
-        self.assertEqual(writes[0][1]['loop_id'], 'legacy-loop')
 
     def test_6_atomic_writers_use_distinct_temporary_files(self):
         import threading
@@ -465,28 +377,7 @@ class ReviewRegressions(unittest.TestCase):
             self.assertIn(json.loads(target.read_text())['writer'], (1, 2))
         self.assertEqual(len(set(paths)), 2)
 
-    def test_7_local_jev_evidence_cannot_claim_complete_provider_coverage(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'usage.jsonl'
-            path.write_text('')
-            report = costs.collect(self.config('jev'), {}, now=datetime(2026, 10, 5, tzinfo=timezone.utc), jev_path=path)
-        self.assertEqual(report['providers'][0]['state'], 'partial')
-        self.assertIn('Worker', report['providers'][0]['reason'])
 
-    def test_8_legacy_spend_reader_does_not_own_a_second_response_loop(self):
-        import jev_spend_health as spend
-        writes = []
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'usage.jsonl'
-            path.write_text(json.dumps({'ts': '2026-10-05T00:00:00Z', 'ok': True,
-                                       'usage': {'input_tokens': 20000000}}))
-            with patch.object(spend, '_run_verb', side_effect=lambda *args: writes.append(args)):
-                line = spend.check_spend(path, now=datetime(2026, 10, 5, tzinfo=timezone.utc))
-        self.assertIn('WARN', line)
-        self.assertEqual(spend.ACTION, costs.ACTION)
-        self.assertEqual(writes, [])
-        nightly = (Path(__file__).parents[1] / 'bin/nightly.sh').read_text()
-        self.assertFalse('step "Jev daily spend alarm"' in nightly)
 
     def test_9_credential_files_use_permission_checked_named_loader(self):
         import os
@@ -502,22 +393,6 @@ class ReviewRegressions(unittest.TestCase):
                     with self.assertRaises(TokensFilePermissionError):
                         costs.read_tokens()
 
-    def test_10_malformed_external_shapes_preserve_other_providers(self):
-        cases = [('neon', {'projects': [], 'pagination': None}),
-                 ('claude', {'data': [{'starting_at': '2026-10-04', 'results': [{'currency': None, 'amount': 1}]}]}),
-                 ('openai', {'data': [None]}), ('openai', {'data': [{'start_time': None, 'results': None}]})]
-        for provider, response in cases:
-            with self.subTest(provider=provider, response=response):
-                config = self.config(provider)
-                config['providers']['github'] = self.config('github', 4)['providers']['github']
-                report = costs.collect(config, {costs.TOKEN_NAMES[provider]: 'synthetic'}, lambda *a: response,
-                                       now=datetime(2026, 10, 5, tzinfo=timezone.utc))
-                self.assertIn(report['providers'][0]['state'], ('partial', 'unavailable'))
-                self.assertGreater(report['providers'][1]['mtd_usd'], 0)
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'usage.jsonl'
-            path.write_text('{"ts":null,"ok":true,"usage":{}}')
-            self.assertEqual(costs.jev_usage(path, .042)['state'], 'partial')
 
     def test_11_null_known_amount_survives_health_cli(self):
         import subprocess

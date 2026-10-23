@@ -1,5 +1,4 @@
-"""What a Flash-written script may import while tools/flash-script.py runs it: llm(prompt) asks the local Flash
-model one question. Standard library only, since the scripts run with nothing else installed."""
+"""Explicit activation, readiness, and shutdown for the local call-note model."""
 
 from __future__ import annotations
 
@@ -16,22 +15,7 @@ import urllib.request
 from pathlib import Path
 from datetime import datetime
 
-URL = os.environ.get("CARR_FLASH_URL", "http://127.0.0.1:8000") + "/v1/chat/completions"
-MODEL = os.environ.get("CARR_FLASH_MODEL", "qwen3.8-flash-next")
-
-
-def llm(prompt: str, max_tokens: int = 8192) -> str:
-    """Ask the local Flash model one question and return its visible answer."""
-    body = {"model": MODEL, "max_tokens": max_tokens, "messages": [{"role": "user", "content": prompt}]}
-    req = urllib.request.Request(URL, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
-    with request_scope(URL.rsplit("/v1/", 1)[0]), urllib.request.urlopen(req, timeout=600) as r:
-        reply = json.load(r)
-    return (reply["choices"][0]["message"].get("content") or "").split("</think>")[-1].strip()
-
-
 SERVER_LABEL = "local.ds4-flash-next"
-DESK_LABEL = "local.flash-desk"
-REPO = Path(__file__).resolve().parents[1]
 LOCAL_URL = "http://127.0.0.1:8000"
 IDLE_SECONDS = 15 * 60
 ENSURE_TIMEOUT = 180
@@ -134,17 +118,12 @@ def _start(label, *, launch=_launch):
 
 def _stop(*, launch=_launch):
     errors = []
-    for label in (DESK_LABEL, SERVER_LABEL):
-        disabled = launch("disable", f"{_domain()}/{label}")
-        if disabled.returncode:
-            errors.append(f"disable {label}: {disabled.stderr.strip()}")
-        result = launch("bootout", f"{_domain()}/{label}")
-        if result.returncode not in (0, 3, 113):
-            errors.append(f"bootout {label}: {result.stderr.strip()}")
-    result = subprocess.run([sys.executable, str(REPO / "tools/room-bridge/dispatch.py"),
-                             "stop", "flash"], capture_output=True, text=True, timeout=30)
-    if result.returncode:
-        errors.append(f"stop flash desk: {result.stderr.strip()}")
+    disabled = launch("disable", f"{_domain()}/{SERVER_LABEL}")
+    if disabled.returncode:
+        errors.append(f"disable {SERVER_LABEL}: {disabled.stderr.strip()}")
+    result = launch("bootout", f"{_domain()}/{SERVER_LABEL}")
+    if result.returncode not in (0, 3, 113):
+        errors.append(f"bootout {SERVER_LABEL}: {result.stderr.strip()}")
     if errors:
         raise RuntimeError("; ".join(errors))
 
@@ -199,13 +178,6 @@ def ensure_server(url=LOCAL_URL, *, timeout=ENSURE_TIMEOUT):
     _require_enabled()
     if url.rstrip("/") == LOCAL_URL and not is_ready(url, timeout=min(2, timeout)):
         raise TimeoutError("Flash is not running; only an explicit bin/flash-on starts it")
-
-
-def ensure_desk(ready):
-    _require_enabled()
-    ensure_server()
-    if not ready():
-        raise TimeoutError("Flash desk is not running; automated dispatch cannot start it")
 
 
 @contextlib.contextmanager
@@ -275,7 +247,7 @@ def _activity(now=None):
         touched = (state_dir() / "last-request").stat().st_mtime
     except FileNotFoundError:
         touched = None
-    # Detached Claude desk requests cannot hold our lock. Read inference lines,
+    # External local model requests cannot hold our lock. Read inference lines,
     # rather than log mtime, so startup, KV saves and health probes stay passive.
     log = Path(os.environ.get("CARR_FLASH_LOG", str(Path.home() / "Library/Logs/ds4-flash-next.log")))
     try:
@@ -347,7 +319,7 @@ def main(command, *, timeout=ENSURE_TIMEOUT, seconds=GRANT_SECONDS):
             return 0 if turn_on(seconds=seconds, timeout=timeout) else 1
         if command == "off":
             turn_off()
-            print("Flash is off; server and desk disabled")
+            print("Flash is off; server disabled")
             return 0
         if command == "ensure":
             if is_switched_off():
@@ -359,7 +331,7 @@ def main(command, *, timeout=ENSURE_TIMEOUT, seconds=GRANT_SECONDS):
             return 1
         if command == "idle-stop":
             if idle_stop():
-                print("flash-idle-stop: stopped idle server and desk; both disabled")
+                print("flash-idle-stop: stopped idle server; disabled")
             return 0
         raise ValueError(f"unknown Flash lifecycle command: {command}")
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:

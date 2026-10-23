@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 
 test("Codex continuity stdio proxy keeps the bearer out of config and exposes two verbs", async () => {
-  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "carr-continuity-proxy-"));
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "carr-codex-continuity-proxy-"));
   const tokenFile = path.join(temp, "mcp-tokens.env");
   fs.writeFileSync(tokenFile, "CARR_CODEX_CONTINUITY_MCP_TOKEN=secret-codex\n", { mode: 0o600 });
   const seen = [];
@@ -43,7 +43,7 @@ test("Codex continuity stdio proxy keeps the bearer out of config and exposes tw
     });
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const child = spawn(process.execPath, [new URL("../continuity-stdio-proxy.mjs", import.meta.url).pathname, "--codex"], {
+  const child = spawn(process.execPath, [new URL("../codex-continuity-stdio-proxy.mjs", import.meta.url).pathname], {
     env: { ...process.env, CARR_MCP_ENV: tokenFile,
       CARR_MCP_URL: `http://127.0.0.1:${server.address().port}${endpoint}` },
     stdio: ["pipe", "pipe", "pipe"],
@@ -129,8 +129,8 @@ m._write_codex_config_edits = write
 with tempfile.TemporaryDirectory() as home, patch.object(Path, 'home', return_value=Path(home)):
     assert m.cmd_install_codex_continuity_mcp(True) == 0
     assert m.cmd_install_codex_continuity_mcp(False) == 0
-    installed = Path(home) / '.config/carr/codex-continuity/continuity-stdio-proxy.mjs'
-    reviewed = Path(sys.argv[1]).resolve().parents[1] / 'mcp-server/continuity-stdio-proxy.mjs'
+    installed = Path(home) / '.config/carr/codex-continuity/codex-continuity-stdio-proxy.mjs'
+    reviewed = Path(sys.argv[1]).resolve().parents[1] / 'mcp-server/codex-continuity-stdio-proxy.mjs'
     assert installed.read_bytes() == reviewed.read_bytes()
     installed_manifest = Path(home) / '.config/carr/codex-continuity/continuity-reference-manifest.mjs'
     reviewed_manifest = Path(sys.argv[1]).resolve().parents[1] / 'mcp-server/continuity-reference-manifest.mjs'
@@ -139,7 +139,7 @@ with tempfile.TemporaryDirectory() as home, patch.object(Path, 'home', return_va
     assert current['mcp_servers']['carr']['url'] == original['mcp_servers']['carr']['url']
     assert current['mcp_servers']['carr']['disabled_tools'] == ['prior', 'codex-checkpoint', 'codex-read-recovery']
     server = current['mcp_servers']['carr-codex-continuity']
-    assert server['args'][-1] == '--codex'
+    assert server['args'] == [str(installed)]
     assert server['tools'] == {name: {'approval_mode': 'approve'} for name in ['codex-checkpoint', 'codex-read-recovery']}
 `, script], { encoding: "utf8" });
   assert.equal(proof.trim().split("\n").map(JSON.parse).every(row => row.ok), true);

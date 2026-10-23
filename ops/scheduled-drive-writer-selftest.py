@@ -93,30 +93,6 @@ def main() -> int:
             check(f"{name} reports target repo-local out/Learning",
                   any(str(root / name / "out" / "Learning") in str(row["args"]) for row in rows))
 
-        calendar_root = root / "calendar"
-        (calendar_root / "bin").mkdir(parents=True)
-        capture = calendar_root / "calendar.json"
-        canonical = calendar_root / "bin" / "calendar-eventkit-capture.sh"
-        canonical.write_text(
-            "#!/bin/sh\n[ -z \"${CARR_VAULT+x}\" ] || exit 99\n: > \"$CAPTURE\"\n",
-            encoding="utf-8",
-        )
-        canonical.chmod(0o700)
-        env = {"PATH": "/usr/bin:/bin", "CARR_REPO": str(calendar_root), "CARR_VAULT": POISON,
-               "CAPTURE": str(capture)}
-        result = subprocess.run(["/bin/bash", str(ROOT / "bin" / "fetch-calendar.sh")],
-                                env=env, text=True, capture_output=True, check=False)
-        captured_env = capture.read_text(encoding="utf-8") if capture.exists() else ""
-        check("calendar normal run uses the EventKit-to-record seam", result.returncode == 0,
-              f"rc={result.returncode} stderr={result.stderr!r}")
-        check("calendar normal child receives no poisoned Drive root", POISON not in json.dumps(captured_env))
-
-        missing = subprocess.run(["/bin/bash", str(ROOT / "bin" / "fetch-calendar.sh")],
-                                 env={"PATH": "/usr/bin:/bin", "CARR_REPO": str(root / "missing"),
-                                      "CARR_VAULT": POISON}, text=True, capture_output=True, check=False)
-        check("calendar names a missing canonical seam rather than falling back to Drive",
-              missing.returncode == 78 and "MISSING_CANONICAL_SEAM" in missing.stderr and POISON not in missing.stderr)
-
         dashboard_python = ROOT / ".venv" / "bin" / "python"
         if not dashboard_python.exists():
             dashboard_python = Path(sys.executable)
@@ -132,16 +108,6 @@ def main() -> int:
                                   capture_output=True, check=False)
         check("dashboard recovery requires a nonblank reason", recovery.returncode != 0 and
               "nonblank --reason" in recovery.stderr)
-
-        hard = subprocess.run(["/bin/sh", str(ROOT / "bin" / "routine-canonical-seam-refusal.sh"),
-                               "record-backed dashboard destination"], text=True, capture_output=True,
-                              check=False)
-        admin = subprocess.run(["/bin/sh", str(ROOT / "bin" / "routine-admin-refusal.sh"),
-                                "backup capability unavailable"], text=True, capture_output=True,
-                               check=False)
-        check("missing canonical seams are hard failures, distinct from admin skips",
-              hard.returncode == 69 and "MISSING_CANONICAL_SEAM" in hard.stderr
-              and admin.returncode == 78 and "routine capability refused" in admin.stderr)
 
         nightly = (ROOT / "bin" / "nightly.sh").read_text(encoding="utf-8")
         normal = nightly[nightly.index('unset CARR_VAULT CARR_EXPORT_LIVE'):]

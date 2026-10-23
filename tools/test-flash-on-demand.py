@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import sys
@@ -12,7 +13,7 @@ from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 (ROOT / "out").mkdir(exist_ok=True)
-sys.path[:0] = [str(ROOT / 'tools'), str(ROOT / 'tools/room-bridge'), str(ROOT / 'lib'), str(ROOT / 'tools/dictation-rig/bin')]
+sys.path[:0] = [str(ROOT / 'tools'), str(ROOT / 'lib'), str(ROOT / 'tools/dictation-rig/bin')]
 import flashlib
 
 
@@ -52,16 +53,13 @@ class FlashPolicyTests(unittest.TestCase):
         self.assertFalse(flashlib.grant_path().exists())
         self.assertTrue(flashlib.off_switch_path().exists())
 
-    def test_grant_never_lets_automated_readiness_restart_a_stopped_server_or_desk(self):
+    def test_grant_never_lets_automated_readiness_restart_a_stopped_server(self):
         flashlib.grant_path().write_text(json.dumps({'issued_at': 0, 'expires_at': 4e9}))
         launch = Mock(side_effect=AssertionError('automatic restart'))
         self.assertFalse(flashlib.ensure(ready=lambda **_: False))
         with patch.object(flashlib, 'is_ready', return_value=False):
             with self.assertRaises(TimeoutError):
                 flashlib.ensure_server()
-        with patch.object(flashlib, 'ensure_server'):
-            with self.assertRaises(TimeoutError):
-                flashlib.ensure_desk(lambda: False)
         launch.assert_not_called()
 
     def test_flash_off_revokes_grant_immediately(self):
@@ -96,55 +94,18 @@ class FlashPolicyTests(unittest.TestCase):
             post.default_distiller({})
         self.process.assert_not_called()
 
-    def test_flash_wire_reports_off_without_a_start_or_request(self):
-        import flash_wire
-        self.assertFalse(flash_wire.is_up())
-        self.assertEqual(flash_wire.run_turn('fixture')['detail'], flashlib.OFF_REASON)
-        self.assertEqual(flash_wire.run_task({'body': 'fixture'})['detail'], flashlib.OFF_REASON)
-        self.process.assert_not_called()
-        self.network.assert_not_called()
-
-    def test_dispatch_and_desk_start_refuse_flash_while_off(self):
-        import desks
-        import dispatch
-        registry = desks.Registry(self.directory / 'desks.json')
-        registry.register('flash', 'claude-session', socket='/tmp/fixture-flash.sock')
-        with self.assertRaises(desks.DeskError):
-            dispatch.dispatch('flash', 'fixture', registry=registry, results_path=self.directory / 'result')
-        with self.assertRaises(desks.DeskError):
-            dispatch.desk_start('flash', registry=registry, state_dir=self.directory, sock_dir=self.directory)
-        self.process.assert_not_called()
-
-    def test_room_probe_and_turns_never_auto_assign_flash(self):
-        import bridge
-        import state
-        self.assertFalse(bridge.probe_live({'kind': 'flash-local'}))
-        self.assertFalse(bridge.probe_live({'kind': 'claude-session', 'room_seat': 'flash'}))
-        turn = {'kind': 'turn', 'msg_id': 'm1', 'seat': 'joe', 'seq': 1, 'body': '@flash hi'}
-        self.assertEqual(state.route_turn({'desks': {}, 'last_seq': 0}, turn, {'flash': 'flash'}), [])
-
-    def test_auto_routes_and_kanban_targets_exclude_flash(self):
-        import kanban_adapter
-        policy = json.loads((ROOT / 'ops/config/model-routes.v1.json').read_text())
-        for route in ('code', 'script', 'direct'):
-            self.assertNotEqual(policy['routes'][route]['model'], 'flash')
-            self.assertNotIn(policy['queue_targets'][route], ('flash', 'flash-model'))
-        catalog = kanban_adapter.load_catalog()
-        self.assertFalse(catalog['targets']['flash']['enabled'])
-        self.assertFalse(kanban_adapter._flash_is_up())
-
-    def test_install_converges_drifted_plists_and_stops_both_labels(self):
+    def test_install_converges_drifted_plists_and_stops_server(self):
         import plistlib
         import flash_install
         home = self.directory / 'home'
         agents = home / 'Library/LaunchAgents'
         agents.mkdir(parents=True)
-        for label in (flashlib.SERVER_LABEL, flashlib.DESK_LABEL):
+        for label in (flashlib.SERVER_LABEL,):
             (agents / (label + '.plist')).write_bytes(plistlib.dumps({
                 'Label': label, 'RunAtLoad': True, 'KeepAlive': {'SuccessfulExit': False}}))
         launch = Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))
         flash_install.install(ROOT, home, launch=launch)
-        for label in (flashlib.SERVER_LABEL, flashlib.DESK_LABEL):
+        for label in (flashlib.SERVER_LABEL,):
             body = plistlib.loads((agents / (label + '.plist')).read_bytes())
             self.assertFalse(body['RunAtLoad'])
             self.assertNotIn('KeepAlive', body)
@@ -154,9 +115,24 @@ class FlashPolicyTests(unittest.TestCase):
             self.assertNotIn('enable', commands)
             self.assertNotIn('bootstrap', commands)
 
+    def test_repeated_explicit_install_keeps_plist_bytes_and_mtimes(self):
+        import flash_install
+        home = self.directory / 'home'
+        flashlib.grant_path().write_text(json.dumps({'issued_at': 0, 'expires_at': 4e9}))
+        launch = Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))
+        flash_install.install(ROOT, home, launch=launch)
+        paths = list((home / 'Library/LaunchAgents').glob('*.plist'))
+        before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths]
+        launch.reset_mock()
+        with patch.object(Path, 'write_bytes', side_effect=AssertionError('unchanged file rewritten')), \
+                patch.object(Path, 'write_text', side_effect=AssertionError('unchanged file rewritten')):
+            flash_install.install(ROOT, home, launch=launch)
+        self.assertEqual(before, [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths])
+        self.assertEqual([c.args[0][1] for c in launch.call_args_list], ['print'])
+
     def test_scheduled_jobs_rejects_enabled_and_drifted_flash_without_a_grant(self):
         import scheduled_jobs
-        for label in (flashlib.SERVER_LABEL, flashlib.DESK_LABEL):
+        for label in (flashlib.SERVER_LABEL,):
             with self.subTest(label=label):
                 manifest = {'jobs': [{'label': label, 'scheduler': 'launchd',
                     'owner': 'orchestrator', 'required_checkout': '~/carr-system',
@@ -186,18 +162,26 @@ class FlashPolicyTests(unittest.TestCase):
         launch = Mock(return_value=subprocess.CompletedProcess([], 0, '{}', ''))
         self.assertTrue(flash_install.check(home, launch=launch))
 
-    def test_granted_session_accepts_a_disabled_unused_desk(self):
+    def test_unconfigured_flash_is_not_configuration_drift(self):
+        import flash_install
+        launch = Mock(side_effect=AssertionError('unconfigured Flash queried launchd'))
+        self.assertEqual(flash_install.check(self.directory / 'home', launch=launch), [])
+
+    def test_scheduled_jobs_accepts_uninstalled_flash_until_activation(self):
         import scheduled_jobs
-        label = flashlib.DESK_LABEL
+        import flash_install
         manifest = {'jobs': [{'label': label, 'scheduler': 'launchd',
             'owner': 'orchestrator', 'required_checkout': '~/carr-system',
-            'expected_enabled': False, 'expected_installed': True,
-            'program_arguments': ['/fixture'], 'interval': {'RunAtLoad': False}}]}
-        snapshot = {'machine_role': 'primary', 'plists': {label: {
-            'Label': label, 'ProgramArguments': ['/fixture'], 'RunAtLoad': False}},
-            'launchctl_list': '', 'launchctl_print': {}, 'launchctl_disabled': '"' + label + '" => true',
-            'cron': '', 'git': {'branch': 'main'}, 'flash_grant': {'issued_at': 900, 'expires_at': 1100}}
+            'expected_enabled': label == flash_install.WATCHER, 'expected_installed': True,
+            'program_arguments': ['/fixture'], 'interval': {'RunAtLoad': False}}
+            for label in (*flash_install.LABELS, flash_install.WATCHER)]}
+        snapshot = {'machine_role': 'primary', 'plists': {}, 'launchctl_list': '',
+                    'launchctl_print': {}, 'launchctl_disabled': '', 'cron': '',
+                    'git': {'branch': 'main'}}
         self.assertEqual(scheduled_jobs.report(manifest, snapshot, 1000), [])
+        snapshot['flash_grant'] = {'issued_at': 900, 'expires_at': 1100}
+        self.assertEqual([r['code'] for r in scheduled_jobs.report(manifest, snapshot, 1000)],
+                         ['missing_job'] * 2)
 
     def test_failed_explicit_start_revokes_the_grant_and_cleans_up(self):
         launch = Mock(side_effect=[subprocess.CompletedProcess([], 1, '', 'fixture failure')] +
@@ -221,7 +205,7 @@ class FlashPolicyTests(unittest.TestCase):
         launch = Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))
         flash_install.install(ROOT, home, launch=launch)
         self.assertTrue(flashlib.is_switched_off())
-        self.assertEqual(sum(c.args[0][1] == 'disable' for c in launch.call_args_list), 2)
+        self.assertEqual(sum(c.args[0][1] == 'disable' for c in launch.call_args_list), 1)
 
     def test_installer_keeps_grant_state_in_its_explicit_home(self):
         import flash_install
@@ -233,8 +217,6 @@ class FlashPolicyTests(unittest.TestCase):
             flash_install.install(ROOT, home, launch=launch)
         self.assertTrue((home / '.config/carr/flash.off').exists())
         self.assertFalse(unexpected.exists())
-        stop = next(c for c in launch.call_args_list if any('dispatch.py' in a for a in c.args[0]))
-        self.assertEqual(stop.kwargs['env']['HOME'], str(home))
 
     def test_missing_grant_is_off_and_automated_ensure_cannot_start(self):
         self.assertTrue(flashlib.is_switched_off())
@@ -242,8 +224,6 @@ class FlashPolicyTests(unittest.TestCase):
         self.assertFalse(flashlib.ensure(ready=lambda **_: True))
         with self.assertRaises(flashlib.FlashSwitchedOff):
             flashlib.ensure_server()
-        with self.assertRaises(flashlib.FlashSwitchedOff):
-            flashlib.ensure_desk(lambda: True)
         for scope in (flashlib.request_scope, flashlib.activity_scope):
             with self.assertRaises(flashlib.FlashSwitchedOff), scope():
                 self.fail('Flash is off')
@@ -251,31 +231,18 @@ class FlashPolicyTests(unittest.TestCase):
 
 
 class FlashCommandTests(unittest.TestCase):
-    def test_off_cli_callers_never_reach_launchctl(self):
-        with tempfile.TemporaryDirectory(dir=ROOT / 'out') as directory:
-            env = {'HOME': directory, 'PATH': '/usr/bin:/bin:/opt/homebrew/bin',
-                   'CARR_FLASH_STATE_DIR': directory}
-            for command in ([sys.executable, str(ROOT / 'bin/flash-ensure')],
-                            ['/bin/zsh', str(ROOT / 'bin/flash-desk-start')]):
-                result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=5)
-                self.assertEqual(result.returncode, 1, result.stderr)
-                self.assertIn('switched off', result.stderr)
-
-    def test_prepared_script_observes_live_grant_and_revocation(self):
-        with tempfile.TemporaryDirectory(dir=ROOT / 'out') as directory, \
-             patch.dict(os.environ, {'CARR_FLASH_STATE_DIR': directory}):
-            script = load('tools/flash-script.py', 'prepared_script')
-            work = Path(directory) / 'work'
-            work.mkdir()
-            script.stage([], str(work))
-            flashlib.grant_path().write_text(json.dumps({'issued_at': 0, 'expires_at': 4e9}))
-            code = 'import flashlib; print(flashlib.is_switched_off())'
-            out, _ = script.run_code(code, str(work), 1, sandbox=Path(script.SANDBOX_EXEC).exists())
-            self.assertEqual(out, 'False')
-            flashlib.grant_path().unlink()
-            with patch.object(script.flashlib, 'activity_scope', return_value=__import__('contextlib').nullcontext()):
-                out, _ = script.run_code(code, str(work), 2, sandbox=Path(script.SANDBOX_EXEC).exists())
-            self.assertEqual(out, 'True')
+    def test_explicit_activation_installs_before_starting_flash(self):
+        import flash_install
+        calls = Mock()
+        calls.attach_mock(Mock(return_value=0), 'configure')
+        calls.attach_mock(Mock(return_value=0), 'activate')
+        with patch.object(flash_install, 'configure', calls.configure), \
+                patch.object(flashlib, 'main', calls.activate), \
+                patch.object(sys, 'argv', ['flash-on']), self.assertRaises(SystemExit) as stopped:
+            runpy.run_path(str(ROOT / 'bin/flash-on'), run_name='__main__')
+        self.assertEqual(stopped.exception.code, 0)
+        self.assertEqual([c[0] for c in calls.mock_calls], ['configure', 'activate'])
+        calls.configure.assert_called_once_with(ROOT, apply=True)
 
 
 if __name__ == '__main__':

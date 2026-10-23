@@ -1,9 +1,9 @@
 {
  "contract": "carr-action-risk-registry",
  "version": "1.0.0",
- "status": "phase1_derived",
- "generated_by": "ops/action-risk-registry.py \u2014 DERIVED, never hand-edited",
- "purpose": "One row per action the runtime can perform, naming which protection actually applies. The council made a canonical action-risk registry blocking before any mutation UI; a survey of all four planning documents found that none of their ladders reaches the runtime, so this describes what runs instead of reconciling what is written.",
+ "status": "historical_phase1_baseline",
+ "generated_by": "ops/action-risk-registry.py \u2014 frozen phase-1 baseline emitter",
+ "purpose": "Frozen phase-1 action-risk baseline and its historical dispositions. This is not a current handler census, dispatcher, or risk-classification freshness check.",
  "protections": {
   "human_boundary": "humanOnly \u2014 the effect binds both partners, so a machine credential is refused",
   "optimistic_concurrency": "base_version required; a stale version is refused as a question, never a silent overwrite",
@@ -739,7 +739,7 @@
     "inserts": 0,
     "upserts": 0
    },
-   "does": "The heartbeat's lines: row counts, export freshness (dead-man; stale/last_ok per target), writes_by_dell_24h, norm_owed_open, merge_queue, triage queue"
+   "does": "The heartbeat's lines: row counts, export freshness (dead-man; stale/last_ok per target), writes_by_dell_24h, norm_owed_open, triage queue"
   },
   "investigation-neighborhood": {
    "protection": "read_only",
@@ -1872,5 +1872,11 @@
    },
    "does": "Append an evidence-backed implementation-shape decision to a canonical Work Request"
   }
- }
+ },
+ "provenance": {
+  "last_artifact_change": "e1dcf5126b56c0ca762152ca6b7de31d3c3213cb",
+  "original_classification_revision": null,
+  "note": "The commit identifies the last artifact change before historical labeling, not the original classification date. Verb and disposition payloads are preserved."
+ },
+ "current_handler_inventory": "mcp-server/src/scac-mutation-registry.current.generated.js"
 }

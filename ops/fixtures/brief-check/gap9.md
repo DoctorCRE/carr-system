@@ -1,4 +1,4 @@
-ROLE: Platform Engineer. Model: Claude Opus 5.5, high effort. Repo jbookout/carr-system, branch claude/continuity-spool.
+ROLE: Platform Engineer. Model: Claude Opus 5.5, high effort. Repo DoctorCRE/carr-system, branch claude/continuity-spool.
 
 GOAL (Joe 2026-10-05, gap #9): the Claude continuity save points must reach the record layer. Every session start reports "Local spool holds 100 unsent continuity receipt(s); nothing replays them. A spool that keeps growing means writes are being refused." So save points are being refused and silently pile up.
 

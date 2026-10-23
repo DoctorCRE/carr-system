@@ -134,7 +134,7 @@ export function nonMcpInventory() {
     implementation_state: "inventoried_not_atomically_mediated", classification_authorizing: false,
   }));
   const scripts = discoverScriptEntrypoints().map(source_locator => {
-    const breakGlass = new Set(["tools/db-tap.py", "tools/call-verb.py", "tools/run-breakglass.py"]).has(source_locator);
+    const breakGlass = new Set(["tools/db-tap.py", "tools/call-verb.py"]).has(source_locator);
     const genericDelegator = new Set(["run.sh", "mcp-server/local-verb.mjs"]).has(source_locator);
     const externalAdmin = !breakGlass && /(?:deploy|migrate|provision|rotate-credential|cleanup|cutoff|install-|sync-.*prod)/.test(source_locator);
     const ingress_kind = breakGlass ? "break_glass" : externalAdmin ? "external_admin" : "script_entrypoint";
@@ -524,12 +524,10 @@ export function fullInventory(tools = defaultTools) {
 export function renderCurrentContracts(tools, source) {
   const rows = mcpInventory(tools);
   const operations = Object.fromEntries(rows.map(row => [row.operation,
-    Object.fromEntries(["ingress_key", "source_locator", "source_digest", "schema_digest",
+    Object.fromEntries(["ingress_key", "source_locator", "schema_digest",
       "write", "human_only", "authority_only", "delegates_to"].map(key => [key, row[key]])),
   ]));
   return source
-    .replace(/export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "[0-9a-f]{64}";/,
-      `export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "${sha256(operations)}";`)
     .replace(/export const SCAC_MUTATION_OPERATIONS = Object.freeze\(\{[\s\S]*?\n\}\);/,
       `export const SCAC_MUTATION_OPERATIONS = Object.freeze(${JSON.stringify(operations, null, 2)});`);
 }

@@ -18,131 +18,290 @@ loses the ability to tell you how to rebuild itself.
 
 ## What actually survives the Mac
 
-Nothing important is only on the Mac. Confirmed 2026-08-14:
+Hosted records can survive Studio loss while local application state is lost.
+This inventory describes recovery dependencies, not verified custody or a
+current provider availability guarantee.
 
 | thing | where it lives | reachable with |
 |---|---|---|
-| All code, config, migrations, this file | GitHub, `jbookout/carr-system` | your GitHub login |
-| Every record — clients, deals, doctrine, rules | Neon Postgres, hosted | your Neon login |
+| Committed code, tracked config, migrations, this file | GitHub, `DoctorCRE/carr-system` | GitHub access |
+| Database-held records, doctrine, and rules | Neon Postgres, hosted | Neon access and a healthy database or recoverable copy |
 | The API, Deal Room, OAuth | Cloudflare Worker, hosted | your Cloudflare login |
-| Encrypted nightly dumps | Cloudflare R2 bucket `carr-documents` | your Cloudflare login |
-| Encrypted nightly dumps, second path | GitHub Actions artifacts, 90-day retention | your GitHub login |
-| The key that opens those dumps | **paper, off the machine** | you |
+| Encrypted database copies | Cloudflare R2 bucket `carr-documents` | Cloudflare access and confirmed object retention |
+| Cloud encrypted database copies | GitHub Actions artifacts, 90-day retention | GitHub access and a nonexpired qualified artifact |
+| Matching age identity and account recovery factors | Operator-held custody, separately recoverable off the Mac | Verified custody and provider recovery procedures |
 
 ### If the R2 archive holds a bad object
 
-`lib/r2_archive.py` can only ever ADD. When a truncated dump is promoted and
-uploaded, the archive ends up with two objects both claiming to be that day's
-backup and no way to remove either — which is exactly what happened on
-2026-08-07. The remedy is:
+Use Cloudflare R2 object management to inspect the exact content-addressed
+backup key. Preserve good backups and review any archive-ledger discrepancy
+through the authenticated record layer before changing stored evidence.
 
-    bin/r2-forget.py --prefix backups/<sha256-prefix>/          # list only
-    bin/r2-forget.py --prefix backups/<sha256-prefix>/ --yes    # delete
+The Studio and cloud producers generate dumps separately. The cloud run copies
+the same ciphertext to GitHub and R2. Those storage locations share the matching
+age identity and account-access dependencies. R2 upload can skip successfully
+when configuration is absent. A successful workflow alone does not prove an
+R2 object exists, decrypts, or restores. Confirm the selected copy independently.
 
-Selection is by key prefix, never a glob and never "the newest N", so the blast
-radius is visible in the command itself. Nothing is deleted without `--yes`; the
-listing run IS the confirmation step. Backup keys are content-addressed, so a
-single corrupt upload is named precisely without touching the good object beside
-it. It removes the ledger row with the object, so the two cannot disagree.
+### Operator-held state inventory
 
-Pointer added 2026-08-22 (open loop 503, item 4): the tool had zero callers and
-was named in no document, so the only remedy for this failure was undiscoverable
-on the day it would be needed.
+Names only. This list is not a backup package or evidence that off-host copies
+exist. Recover or deliberately reconstruct each required item before enabling
+writers. Never put values or client contents into this runbook or a PR.
 
-The two dump paths are independently produced rather than copied — different
-checksums, verified. They share no failure point.
-
-**The Mac holds no unique data.** It holds the Drive vault mount, the
-microphone, the calendar, and the jobs that touch those. Losing it costs those
-capabilities and no records.
+| State or capability | Recovery requirement |
+|---|---|
+| `out/outlook-intake/state.json` | Pending actions, unresolved mail, and intake checkpoints need an independent copy. Missing state falls back to 48 hours. |
+| `out/outlook-intake/needs-refresh.json` | Recover the preview-body refresh queue with intake state. |
+| `out/outlook-send/ledger.jsonl` and `~/.local/state/carr/outlook-send/ledger.jsonl` | Recover the ledger for the configured caller. Reconcile outbound history before sending again. |
+| `out/calendar-archive/` | Recover historical snapshots separately from the current calendar feed. |
+| `out/boards/` | Recover local notes and questions. |
+| `exporters/templates/`, `exporters/dossier-roster.local.json`, `tools/dictation-rig/vocab-local.txt` | Recover local export inputs and vocabulary separately from Git. |
+| Uncommitted work and other ignored working state | Classify losses or recover independent copies. |
+| Installed job configuration, disabled jobs, machine-role marker, and OS permissions | Reconstruct deliberately from trusted configuration and incident records. |
+| Outlook profile, mailbox access, Full Disk Access, and helper installation | Reauthenticate and rebuild capability. Mailbox retention is separate from SQL backup. |
+| Drive and OneDrive vault files, attachments, finished deliverables, and R2 document objects | Recover file bytes through provider-specific retention. Database references are not file backups. |
+| Provider configuration, `neon_auth`, Worker bindings, secrets, and Durable Object state | Recover live provider state separately from source declarations. |
+| Matching age identity, historical decryption identities, credentials, signing material, sessions, keychains, and account recovery factors | Verify independent custody or reissue specific capabilities privately. Reissuing credentials cannot unlock old ciphertext without its matching identity. |
 
 ---
 
 ## If the Mac is gone but everything else is fine
 
-This is the likely case, and the record layer is untouched. You are rebuilding an
-edge node, not recovering data.
+Confirm hosted records remain healthy first. Local state can still require
+recovery. All steps below are required.
 
-1. **New machine, sign in to GitHub, clone the repo.**
-2. **Install the tools**: `age`, `psql`, `neonctl`, `gh`, Python 3, and the
-   virtualenv the repo expects.
-3. **Restore the credentials.** They are NOT in the repo, by design.
-   `secrets-inventory.md` at the repo root lists every one, where it lives, and
-   who can reissue it. Work down that table. Anything you cannot reissue
-   yourself is named there with the path to get it.
-4. **Reinstall the scheduled jobs**: `ops/config-as-code.py install --apply`
-   writes the launchd agents from the repo copies.
-5. **Verify**: `./run.sh health`, `ops/scheduled-jobs-check.py`, and
-   `tools/ops-record.py health`. The last one should stop reading `unknown` for
-   the local jobs as each next fires.
+1. Fence the old primary before preparing replacement writers.
+2. Recover the canonical checkout and frozen runtimes on the replacement Mac.
+3. Restore required operator-held state, export inputs, mailbox access, and vault files before enabling jobs.
+4. Reissue specific required credentials through approved custody procedures.
+5. Set the replacement's machine-role marker without activating jobs.
 
-Nothing above needs a backup. The records were never on the Mac.
+   ```sh
+   .venv/bin/python -c 'from lib.machine_role import write_marker; write_marker("primary")'
+   ```
 
----
+6. Install Outlook build dependencies, helper, and human-granted Full Disk Access before activation.
+7. Activate configuration only after state and dependencies are ready.
 
-## If the record layer itself is lost
+   ```sh
+   .venv/bin/python ops/config-as-code.py install --apply
+   ```
 
-This is the case the backups exist for.
+8. Register exactly one weekly restore scheduler and verify its actual enabled state.
+9. Verify configuration and fresh per-job outcomes, resolving every missing or skipped job.
 
-**Neon's own point-in-time restore covers the first six hours and is the first
-thing to try** — it is faster and loses less. Past six hours, these dumps are the
-only history that exists. There is no vendor safety net behind them.
+   ```sh
+   .venv/bin/python ops/config-as-code.py check
+   .venv/bin/python ops/scheduled-jobs-check.py
+   ./run.sh health
+   .venv/bin/python tools/ops-record.py health
+   ```
 
-1. **Choose a backup run.** Keep the numeric run ID from a successful
-   **Nightly backup (cloud)** run. The rehearsal authenticates its producer Check
-   and artifact metadata, then fetches that run's encrypted artifact. To select
-   the latest verified, available artifact, use
-   `python3 tools/restore-watermark.py latest-run-id --repository jbookout/carr-system`.
-   A local dump path alone cannot identify the pinned schema and is refused.
-2. **Get the key.** From the paper copy. Never from a machine — that is the
-   whole reason it is on paper.
-3. **Restore it.** Use `./run.sh restore-rehearse --backup-run-id RUN`.
-   It creates a throwaway Neon branch, restores the artifact, replays its pinned
-   grants, checks data and app-role security parity, and tears the branch down.
-   First run `./run.sh restore-rehearse --backup-run-id RUN --preflight`.
-   Preflight checks prerequisites and creates nothing.
-   For a real recovery rather than a rehearsal you want the restored data kept,
-   so use `--keep-branch` and promote that branch.
+Run these commands from the recovered canonical checkout. `set-role primary`
+immediately installs jobs, so do not use it as a preflight. The Outlook installer
+requires primary role, Xcode command-line tools, and Cargo/Rust. Follow
+`bin/install-outlook-intake.sh` for helper build and permission steps. A task
+definition alone is not scheduler registration. The retained headless option is
+`ops/headless-tasks/install.sh install restore-rehearse-weekly`; disable any
+duplicate registration and verify the reviewed host timezone first.
 
-   Do not hand-roll a decrypt. A guard blocks it, and the reason is that a raw
-   decrypt leaves production data in cleartext on disk; the sanctioned path
-   shreds the plaintext on every exit including interrupt.
-4. **Re-point the Worker** at the recovered database and redeploy:
-   `bin/deploy-worker.sh`. Apply any migrations the dump predates with
-   `bin/migrate-prod.sh`.
+The nine-job failover inventory does not prove Outlook capability recovery.
+If state is unavailable, record its loss and reconcile pending outbound work
+before enabling senders. Local state backup and clean-Mac capability validation
+remain separate work; these instructions do not implement them.
 
 ---
 
-## What the decrypted file actually is
+## Data recovery
 
-A plain PostgreSQL dump — SQL text. `CREATE TABLE`, `COPY`, thousands of rows.
-Nothing exotic: any Postgres can consume it, and restoring is piping it into an
-empty database. `bin/restore-rehearse.sh` automates exactly that, plus the branch
-creation, the row-count comparison and the teardown.
+These are incident-operator instructions, not a recovery receipt. All numbered
+steps in the selected procedure are required. There is no supported one-command
+end-to-end recovery. Keep writers and traffic fenced until security bootstrap
+and service cutover pass.
 
-That is worth knowing because it means the recovery does not depend on this
-system's code being intact. Given the file and the key, Postgres alone is enough.
+1. Fence surviving writers and preserve the original database and recovery copies.
+2. Select a known-good pre-corruption copy, recording its provider ID, timestamp, digest, and source revision.
+3. Recover provider access and the matching age identity through approved private custody procedures.
+4. Prepare an isolated recovery checkout at the selected compatible source revision with frozen dependencies.
+
+Use Python 3.14, Node matching `.nvmrc`, zsh, age, gh, PostgreSQL 18 clients,
+and the pinned neonctl required by `bin/restore-rehearse.sh`. Install Python
+packages from `requirements.lock` and Node packages with `npm --prefix mcp-server ci`.
+Verify trusted executable locations and use private storage on an encrypted
+operator-controlled volume. Reserve space for ciphertext and the restored database.
+Never print connection URLs or key material. Do not hand-roll decryption or leave
+plaintext on disk. Preserve restricted temporary storage and cleanup on interrupts.
+
+### When production remains readable
+
+The Neon wrapper requires readable production and provider access, including for
+`--preflight`. It resolves production credentials and compares production state.
+Do not use it as a total-outage bootstrap or under an offline-only constraint.
+Complete the role-catalog prerequisite in Security bootstrap before loading data.
+
+All steps below are required for this route.
+
+1. Set `RECOVERY_RUN_ID` to the investigated good cloud run ID through operator tooling.
+2. Run preflight against that exact copy and private identity path.
+
+   ```sh
+   ./run.sh restore-rehearse --preflight \
+     --backup-run-id "$RECOVERY_RUN_ID" --identity /secure/recovery/identity.txt
+   ```
+
+3. Restore the same copy with branch retention enabled.
+
+   ```sh
+   ./run.sh restore-rehearse --backup-run-id "$RECOVERY_RUN_ID" \
+     --identity /secure/recovery/identity.txt --keep-branch
+   ```
+
+4. Require exact count, row-content watermark, and app-role security parity verification before accepting the restored data.
+5. Record the returned branch ID, target host, and recovered database name `restore_rehearse`.
+6. Complete Security bootstrap and Service cutover before restoring traffic.
+
+The newest successful workflow may postdate corruption. The wrapper retains failed runs
+with `--keep-branch` too. Retention alone proves nothing. Its database `restore_rehearse`
+is separate from inherited `neondb`. Branch promotion alone does not connect
+consumers to the recovered database. Investigate failed comparisons against
+corrupted production. Do not disable assertions to manufacture a pass.
+
+### When production is unavailable
+
+Stop before using the Neon wrapper. The retained local verifier,
+`tools/restore-watermark.py verify-restore --target-kind disposable_local_cluster`,
+can load a qualified cloud artifact into a fresh loopback PostgreSQL 18 target
+without production counts. It still needs a trusted cluster-role catalog before
+loading policies. A complete role and ACL bootstrap is not implemented.
+
+No complete outage recovery is established until that prerequisite and role tests
+can be proven. Local ciphertext paths are refused because they cannot identify
+the artifact's pinned schema. There is no equivalent supported isolated-target
+CLI for arbitrary R2 copies. Use a separately reviewed procedure
+for those cases. Do not bypass workflow-identity checks, invent receipts, or call
+staged rows a restored service.
+
+## Structure reconstruction
+
+Use this route only when no full data backup can be recovered. It reconstructs
+structure, the migration ledger, and reviewed seeds. It does not recover lost
+business records, history, or excluded `system_config` settings. Source history
+cannot recreate those values.
+
+All steps below are required for this route.
+
+1. Provision an empty isolated target and securely bind `DATABASE_URL` to its PostgreSQL connection URL.
+2. Load the committed snapshot through the secret-safe database wrapper.
+
+   ```sh
+   .venv/bin/python tools/pg-env-exec.py DATABASE_URL \
+     psql -X --single-transaction -v ON_ERROR_STOP=1 -f db/schema.sql
+   ```
+
+3. Complete Security bootstrap, including pending migration reconciliation.
+4. Record missing business data and settings as unrecovered before considering Service cutover.
+
+The wrapper accepts `postgres://` or `postgresql://` URLs, not keyword-style
+libpq DSNs. Never overlay `db/schema.sql` onto a full restored dump. Do not replay
+all historical migrations from empty or invent ledger rows to bypass refusal.
+See [the rebuild contract](migrations/README.md#rebuild-contract-wr-000385).
+
+## Security bootstrap
+
+Database-only backups exclude cluster roles, passwords, ownership, and ACLs.
+The artifact verifier replays object grants from the authenticated producer's
+pinned `db/schema.sql` and checks effective app-role privileges, including allowed
+and denied operations. It does not reconstruct cluster roles, memberships, or ownership.
+Pending migrations do not replay already-applied permission history.
+Data equality alone is not authorization.
+
+All steps below are required. Step 1 is a prerequisite to loading a data backup.
+
+1. Reconstruct the reviewed cluster-role catalog before loading policies that reference those roles.
+2. Restore memberships, ownership, ACLs, default privileges, and SECURITY DEFINER expectations on the recovered database.
+3. Prove allowed and denied operations under actual reader, writer, jobs, and authority roles.
+4. Securely bind `DATABASE_URL` to the recovered host and database, using `restore_rehearse` for the Neon wrapper.
+5. Inspect the pending migration prefix at the selected compatible source revision.
+
+   ```sh
+   .venv/bin/python tools/migrate.py --through 0940_codex_job_delegation_control_refs.sql
+   ```
+
+6. Apply only the reviewed compatible prefix to that recovered target.
+
+   ```sh
+   .venv/bin/python tools/migrate.py --apply --yes --through 0940_codex_job_delegation_control_refs.sql
+   ```
+
+7. Confirm no migrations remain pending within that prefix.
+
+   ```sh
+   .venv/bin/python tools/migrate.py --through 0940_codex_job_delegation_control_refs.sql
+   ```
+
+8. Repeat authorization checks after migration before entering Service cutover.
+
+The filename bounds this example's reviewed source prefix. Select a compatible
+exact checked-in boundary for another revision. Later files remain held back.
+Keep checksum, unknown-entry, ordering, and atomic-group checks intact. Stop if
+role reconstruction or denial tests cannot be proven. `carr_backup` and
+`dot_reader` are required examples, not a complete role catalog. Extracting the
+snapshot preamble is insufficient. A complete raw-backup security bootstrap is
+still a separate remediation, not something these instructions implement.
+
+## Service cutover
+
+All steps below are required after data and security checks pass.
+
+1. Inventory every current database consumer and preserve the old endpoint for an explicit rollback decision.
+2. Rebind Worker database secrets to the recovered host and actual recovered database.
+3. Rebind the GitHub production migration secret `PRODUCTION_DATABASE_URL` to the same recovered database.
+4. Rebind backup, exporter, scheduled-job, and other consumer connections without printing values.
+5. Follow the ordinary deployment path only when its green main canary and readable `/release` prerequisites hold.
+6. Verify role-denial checks and representative application reads and writes before restoring traffic.
+7. Reconcile outbound work against provider history before enabling senders.
+8. Verify a fresh backup and the deployed `/release` identity before declaring service recovered.
+
+`PRODUCTION_DATABASE_URL` is only the deployment migrator's credential, not the
+whole Worker binding set. If `/release` is unavailable or authorization cannot
+be proven, stop before traffic. The deployment workflow applies pending
+migrations and verifies release identity. It is not a complete outage bootstrap.
+See [Worker recovery](runbooks/rollback-worker.md) for schema compatibility and
+Durable Object migration constraints. These instructions do not authorize a
+production cutover during a documentation change or offline review.
 
 ---
 
 ## Proving it still works, before you need it
 
-- **Weekly, automatic**: `restore-rehearse-weekly` selects the latest verified
-  backup run, runs the full rehearsal, and records durable evidence. If reporting
-  stops, the off-Mac liveness check on GitHub raises it.
-- **The paper key**: `bin/key-recovery-test.sh` prompts for the key typed from
-  paper, derives the public key it produces, and compares that against the
-  repo-tracked `backups-public-key.txt`. A mismatch is decisive and needs no
-  decryption at all. It then hands the typed identity to the rehearsal for the
-  full end-to-end proof. You never create a key file and never have to remember
-  to delete one — it is read silently and shredded on every exit path.
-
-  Use `./run.sh key-recovery-test --backup-run-id RUN` to pin the same
-  authenticated off-Mac artifact. The default selects `latest`, which resolves
-  to a verified numeric run ID before any restore. The old `--backup <path>`
-  option is no longer supported.
-- **Last passed**: 2026-08-14. The paper copy opened a GitHub-artifact backup —
-  43,605,559 bytes, plaintext validated as a real dump.
+- The weekly task definition selects `--backup-run-id latest`. The selector pins
+  one verified numeric cloud run ID before restoring its artifact. Registration
+  and a fresh successful outcome must be checked separately. Routine dispatch
+  payloads are refused for full recovery. Do not assume the scheduler can obtain
+  recovery capability.
+- Cloud-artifact restore verification binds the producer's workflow identity.
+  Changing workflow bytes can reject historical artifacts that remain decryptable.
+  Preserve those checks. Historical producer support needs separately reviewed
+  implementation, not a bypass during an incident.
+- The RPO evaluator reports `no_evidence / evidence_producer_unavailable`.
+  Deleted PITR proof tools are not a fallback. Inspect the provider's current restore window
+  and available recovery points during an incident. Do not promise a fixed six-hour
+  window or a measured recovery-point bound from dated prose.
+- Off-Mac backup creation and off-Mac freshness observation are different controls.
+  The configured freshness observer is Mac-local. An independent off-Mac alert and
+  a scoped cloud-artifact restore drill remain unverified prerequisites.
+- `./run.sh key-recovery-test --backup-run-id RUN` tests an authenticated cloud
+  artifact with the paper identity. Omitting the option selects `latest`.
+  It reads input silently,
+  checks the derived recipient, and uses restricted temporary storage with cleanup
+  on exit and interrupts. It can contact Neon and attempt an ops receipt. Run it
+  only as an authorized incident or drill after the recovery prerequisites exist.
+  It does not prove account recovery, role bootstrap, or complete service cutover.
+- The original guide records a historical result dated 2026-08-14, opening a
+  43,605,559-byte GitHub-artifact backup. That is not current custody or a full
+  recovery pass. A new drill must name its artifact, custody source, and outcome
+  without recording key material.
 
 Re-run the paper-key test whenever the key is re-copied, and at least yearly.
 A transcription error in the paper copy is silent until the day it matters.
@@ -151,61 +310,32 @@ A transcription error in the paper copy is silent until the day it matters.
 
 ## Known limits, so nobody discovers them mid-incident
 
-- **The full Mac-loss rebuild has never been performed.** Each piece above is
-  individually verified; the sequence has not been walked on real replacement
-  hardware. The first person to do it should correct this file from experience.
-- **No measured recovery time.** Nobody has timed any of this, so there is no
-  honest target to promise.
-- **The credential list is a list, not a vault.** Restoring access means
-  reissuing credentials one at a time from `secrets-inventory.md`. How long that
-  takes is unmeasured.
-- **Cloudflare account recovery depends on the 2FA recovery codes**, which are
-  offline with you. If those are lost, the Worker and the R2 archive are both
-  unreachable and only the GitHub artifact path remains.
+- No complete Mac-loss rebuild, raw-backup authorization bootstrap, or service
+  cutover is demonstrated by these instructions. Correct commands are not a drill.
+- No measured recovery time or verified current PITR window is established here.
+  Daily backup cadence bounds lost writes only when a known-good pre-corruption
+  copy exists and its custody and provider access survive.
+- The SQL backup covers `public` and `ops`, not file-vault bytes, local state,
+  other schemas, cluster roles, ownership, or ACLs. Git preserves committed source,
+  not lost business data. Provider recovery and local state protection remain separate.
+- The matching age identity is a shared dependency of every ciphertext copy.
+  Keep historical identities when rotating recipients. No evidence here establishes
+  that custody is absent or currently recoverable.
+- Cloudflare access depends on recoverable account factors. Losing those can make
+  both Worker and R2 inaccessible. GitHub access alone cannot unlock a backup
+  without the matching identity. Recover or reissue specific required capabilities;
+  do not restore retired broad credential-maintenance runners.
 
-## Worker rollback: backing out a bad release
+The retained safety controls include read-only guarded dump generation, table and
+partition census, RLS and sequence checks, snapshot-held verification, encryption
+and size-floor checks, and atomic promotion that preserves prior acknowledged files.
+Recovery retains fresh-target isolation, target-host and default-branch guards,
+cleanup limited to the returned branch ID, exact counts and content hashes,
+COPY-aware streaming in the cloud loader, `psql -X` with `ON_ERROR_STOP=1`, and
+error redaction. These controls must remain intact; the local SQL-prefix filter
+defect still needs separate remediation. No runtime behavior changes with this guide.
 
-*Added 2026-08-19, because the release path requires a rollback-plan reference
-and the only worker procedure here was about re-pointing at a recovered
-database. That is a different incident. This one is: the Worker is up, serving,
-and the version now live is wrong.*
+## Worker recovery
 
-**This is the plan `--rollback-plan-ref RECOVERY.md#worker-rollback` names.**
-
-Production traffic is moved by promoting an immutable provider version, never
-by rebuilding from source — `bin/deploy-worker.sh` refuses a source deploy to
-Production for exactly this reason. That property is what makes rollback cheap:
-the previous version is still uploaded, still immutable, and still promotable.
-
-1. **Get the version list.** `cd ~/carr-system && npx wrangler versions list`
-   The currently serving version is marked; the one before it is the rollback
-   target. Note its id.
-
-2. **Promote the previous version to all traffic.**
-   `./bin/deploy-worker.sh --promote-version <previous-id>` with the same four
-   approval inputs the forward release used. If the release record for that
-   earlier version still exists, its approval is already on file — a rollback
-   to a previously approved version is not a new approval decision.
-
-3. **Verify from outside, not from the command's exit code.** The deploy script
-   reads the serving identity back from the fixed Production endpoint and
-   refuses to claim success without it. Confirm independently:
-   `./run.sh call list-verbs '{}'` should return the verb count you expect for
-   the version you rolled back to. A verb count that DROPPED unexpectedly is
-   the signal that started loop #276 and the whole immutable-release design.
-
-4. **Say what happened.** Record the rollback with
-   `.venv/bin/python tools/ops-record.py run --kind check --service carr-mcp
-   --key release.rollback --state succeeded --environment production`
-   and log the reason with the `log-decision` verb. A rollback nobody recorded
-   looks identical to a release that never happened.
-
-**What this does NOT cover.** A bad *migration* is not rolled back this way —
-schema changes are forward-only here, and a Worker rollback across a migration
-boundary can leave code reading a shape the database no longer has. If the
-release included a migration, the rollback question is a database question
-first; see the record-layer section above.
-
-**Time to recover** is the length of one version promotion, which is seconds of
-Cloudflare propagation rather than a rebuild. That is the reason the recovery
-strategy on an ordinary verb release is `rollback` rather than `forward_fix`.
+See [Worker recovery](runbooks/rollback-worker.md). Production deployments run
+through `.github/workflows/deploy.yml` after a green main canary.

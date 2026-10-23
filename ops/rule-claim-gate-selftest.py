@@ -52,7 +52,7 @@ class RuleClaimGateTest(unittest.TestCase):
     def turn(self, *records):
         return [message('user', 'Please apply the correction.', uuid='human1'), *records]
 
-    def checkout(self, name, origin='https://github.com/jbookout/carr-system.git'):
+    def checkout(self, name, origin='https://github.com/DoctorCRE/carr-system.git'):
         root = self.root / name
         root.mkdir(exist_ok=True)
         subprocess.run(['git', 'init', '-q', str(root)], check=True, capture_output=True, env=ENV)
@@ -68,7 +68,7 @@ class RuleClaimGateTest(unittest.TestCase):
         clone = self.root / 'scratchpad/clone'
         subprocess.run(['git', 'clone', '-q', str(source), str(clone)], check=True, env=ENV)
         subprocess.run(['git', '-C', str(clone), 'remote', 'set-url', 'origin',
-                        'git@github.com:jbookout/carr-system.git'], check=True, env=ENV)
+                        'git@github.com:DoctorCRE/carr-system.git'], check=True, env=ENV)
         worktree = self.root / 'scratchpad/worktree'
         subprocess.run(['git', '-C', str(source), 'worktree', 'add', '-q', '-b',
                         'fixture', str(worktree)], check=True, env=ENV)
@@ -109,8 +109,8 @@ class RuleClaimGateTest(unittest.TestCase):
     def test_foreign_checkout_and_origin_lookalikes_do_not_count(self):
         for index, origin in enumerate([
             'https://github.com/jbookout/other.git',
-            'https://example.com/jbookout/carr-system.git',
-            'https://github.com/jbookout/carr-system-fake.git',
+            'https://example.com/DoctorCRE/carr-system.git',
+            'https://github.com/DoctorCRE/carr-system-fake.git',
             'https://github.com/other/carr-system.git',
         ]):
             with self.subTest(origin=origin):
@@ -127,7 +127,7 @@ class RuleClaimGateTest(unittest.TestCase):
             assistant('I saved a rule.'))).get('decision'), 'block')
 
     def test_external_checkout_preserves_enforcement_path_restrictions(self):
-        root = self.checkout('external', 'ssh://git@github.com/jbookout/carr-system.git')
+        root = self.checkout('external', 'ssh://git@github.com/DoctorCRE/carr-system.git')
         for path in ['hooks/check.py', 'tools/check.py', 'tests/check.py',
                      '.github/workflows/check.yml', '.claude/settings.json',
                      'mcp-server/src/check.js', 'hooks/lesson.md', 'tools/memory/check.py',
@@ -170,10 +170,10 @@ class RuleClaimGateTest(unittest.TestCase):
         self.assertNotEqual(self.run_hook(self.turn(assistant("I'll remember."),
             call('Read', file_path='file'), assistant('I checked the file.'))).get('decision'), 'block')
 
-    def test_queued_dispatch_requires_honest_reply(self):
-        command = 'python3 tools/room-bridge/dispatch.py send builder ' + shlex.quote(
+    def test_background_build_requires_honest_reply(self):
+        command = 'bin/codex-job DoctorCRE/carr-system build/rule ' + shlex.quote(
             'Build a hook that checks this rule.')
-        honest = 'I added a rule. It is queued and not yet enforced.'
+        honest = 'I added a rule. It is running and not yet enforced.'
         self.assertNotEqual(self.run_hook(self.turn(call('Bash', command=command),
             assistant(honest))).get('decision'), 'block')
         self.assertEqual(self.run_hook(self.turn(call('Bash', command=command),
@@ -181,35 +181,35 @@ class RuleClaimGateTest(unittest.TestCase):
 
     def test_fake_dispatch_does_not_count(self):
         for command in [
-            'echo "python3 tools/room-bridge/dispatch.py send builder Build a hook"',
-            'python3 tools/room-bridge/dispatch.py send builder "Review the hook"',
-            'python3 other/dispatch.py send builder "Build a gate"',
+            'echo "bin/codex-job DoctorCRE/carr-system build/rule Build a hook"',
+            'bin/codex-job DoctorCRE/carr-system build/rule "Review the hook"',
+            'other/codex-job DoctorCRE/carr-system build/rule "Build a gate"',
         ]:
             with self.subTest(command=command):
                 self.assertEqual(self.run_hook(self.turn(call('Bash', command=command),
-                    assistant('I added a rule. It is queued and not yet enforced.'))
+                    assistant('I added a rule. It is running and not yet enforced.'))
                     ).get('decision'), 'block')
 
     def test_wrapped_dispatch_segments_count(self):
-        dispatch = ('python3 tools/room-bridge/dispatch.py send builder '
-                    '"Build a hook that checks this rule." --family sol --timeout 14400')
-        prefix = 'cd ~/carr-system && export CARR_HERMES_CODEX_TIMEOUT=14400 && '
+        dispatch = ('bin/codex-job DoctorCRE/carr-system build/rule '
+                    '"Build a hook that checks this rule." -c model_reasoning_effort=high')
+        prefix = 'cd ~/carr-system && export EXAMPLE=fixture && '
         wait = ('F=/tmp/desk-ready; for i in ' + '\n'.join(map(str, range(1, 481)))
                 + '; do grep -q ready "$F" && break; sleep 60; done; sleep 30; ')
         for command in [prefix + dispatch, wait + prefix + dispatch,
-                        'export CARR_HERMES_CODEX_TIMEOUT=14400;\n' + dispatch]:
+                        'export EXAMPLE=fixture;\n' + dispatch]:
             with self.subTest(command=command[:100]):
                 self.assertNotEqual(self.run_hook(self.turn(call('Bash', command=command),
-                    assistant('I added a rule. It is queued and not yet enforced.')))
+                    assistant('I added a rule. It is running and not yet enforced.')))
                     .get('decision'), 'block')
 
     def test_wrapped_dispatch_still_requires_build_brief(self):
         for brief in ['Review the hook.', 'Build a report.', 'Explain the CI check.']:
-            command = ('cd ~/carr-system && export CARR_HERMES_CODEX_TIMEOUT=14400 && '
-                       'python3 tools/room-bridge/dispatch.py send builder ' + shlex.quote(brief))
+            command = ('cd ~/carr-system && export EXAMPLE=fixture && '
+                       'bin/codex-job DoctorCRE/carr-system build/rule ' + shlex.quote(brief))
             with self.subTest(brief=brief):
                 self.assertEqual(self.run_hook(self.turn(call('Bash', command=command),
-                    assistant('I added a rule. It is queued and not yet enforced.')))
+                    assistant('I added a rule. It is running and not yet enforced.')))
                     .get('decision'), 'block')
 
     def test_honest_uncheckable_rule_passes(self):
@@ -270,9 +270,9 @@ class RuleClaimGateTest(unittest.TestCase):
                 self.assertEqual(self.run_hook(self.turn(assistant(text))).get('decision'), 'block')
 
     def test_conditional_dispatch_segment_counts(self):
-        command = 'false && python3 tools/room-bridge/dispatch.py send builder "Build a gate"'
+        command = 'false && bin/codex-job DoctorCRE/carr-system build/rule "Build a gate"'
         self.assertNotEqual(self.run_hook(self.turn(call('Bash', command=command),
-            assistant('I saved a rule. It is queued and not yet enforced.')))
+            assistant('I saved a rule. It is running and not yet enforced.')))
             .get('decision'), 'block')
 
     def test_repeat_stop_allows_and_logs_even_after_reply_changes(self):

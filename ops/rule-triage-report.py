@@ -9,9 +9,8 @@ contradiction this slice resolved (14e0408b vs aa411351, per action item A28).
 
 This script only READS ops/config/rule-triage.v1.json and PRINTS. It performs no
 record-layer calls and no writes — the classification and tooling boundary for
-S7 is: produce the artifact and the review surface, never apply it. Joe's batch
-acceptance (via rule-triage-apply.py's plan, executed by a human-approved run)
-is what actually retires/amends/approves anything in the record layer.
+S7 is: produce the artifact and the review surface, never apply it. Use this historical triage to propose changes to CLAUDE.md, AGENTS.md or skills
+in a pull request. Proposals bind nobody until merged; this report changes no records.
 
 Usage:
     ./ops/rule-triage-report.py                  # print to stdout

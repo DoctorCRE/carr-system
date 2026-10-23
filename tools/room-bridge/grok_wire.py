@@ -186,21 +186,6 @@ def write_receipt(receipt: dict, path=None) -> str:
         stream.write("\n")
     return str(path)
 
-def validate_entry(entry: dict) -> None:
-    if (not re.fullmatch(r"grok(?:-[0-9]+(?:\.[0-9]+)*)?", entry.get("model", ""))
-            or entry.get("effort") not in ("minimal", "low", "medium", "high", "xhigh")):
-        raise ValueError("Grok desk requires a Grok model or family and reasoning effort")
-
-
-def resolve_model(run=subprocess.run, env=None) -> str:
-    proc = run(["grok", "models"], capture_output=True, text=True,
-               stdin=subprocess.DEVNULL, timeout=15, **({'env': env} if env is not None else {}))
-    models = re.findall(r"^\s*[-*]\s+(grok-\d+(?:\.\d+)*)(?=\s|$)", proc.stdout or "", re.M)
-    if proc.returncode or not models:
-        raise ValueError("Grok model catalog unavailable")
-    return max(models, key=lambda model: tuple(map(int, model[5:].split('.'))))
-
-
 def model_usage_error(models, model=MODEL) -> str | None:
     """Validate the complete provider model set and evidence of a model call."""
     provider_model = model + "-build"
@@ -315,7 +300,7 @@ def parse_result(stdout: str, returncode: int, *, stderr: str = "", urls: list[s
 
 def invoke_cli(prompt: str, *, cwd=None, effort=EFFORT, max_turns=MAX_TURNS,
                writable=False, timeout_seconds=TIMEOUT_S, run=subprocess.run, model=MODEL, env=None):
-    """The sole model-work invocation; the desk retains its 180-second default."""
+    """Invoke native Grok with an explicit sandbox and bounded run time."""
     argv = ["grok", "--model", model, "--reasoning-effort", effort,
             "--max-turns", str(max_turns), "--always-approve",
             "--sandbox", "workspace" if writable else "read-only",
@@ -403,20 +388,3 @@ def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFOR
             outcome = {"status": "failed", "code": 4, "detail": "grok_receipt_unavailable"}
             receipt.update(status="failed", code=4, detail=outcome["detail"], diagnostic_path=None)
     return {**outcome, "receipt": receipt}
-
-
-def run_task(entry: dict, task: str, *, retrieval=False, run=subprocess.run, env=None,
-             timeout_seconds=TIMEOUT_S) -> dict:
-    from record_layer import enforce
-    enforce(entry, kind='grok-cli')
-    validate_entry(entry)
-    try:
-        model = resolve_model(run=run, env=env) if entry['model'] == 'grok' else entry['model']
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        return {"status": "failed", "code": 4, "detail": "grok_model_catalog_unavailable"}
-    return run_request(task, retrieval=retrieval, cwd=entry.get("cwd"),
-        model=model, effort=entry['effort'], writable=not retrieval, timeout_seconds=timeout_seconds,
-        prefix=("Read-only retrieval or explanation only. Do not call CARR or MCP tools, "
-                "read credential/config files, write files, or delegate. Return a bounded "
-                "answer with public source URLs when retrieving.") if retrieval else "",
-        invoke=lambda prompt, **kw: invoke_cli(prompt, **kw, run=run, model=model, env=env))

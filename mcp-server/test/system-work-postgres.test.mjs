@@ -68,9 +68,9 @@ test('progress census requires explicit system classification',{skip:!url},async
  try{await client.query('begin');
  await client.query(`insert into public.board_snapshot(organization_tenant_id,sponsoring_human_slug,board_id,snapshot_json,updated_by_actor_id)
  values('carr-internal','joe','synthetic-classification',$1,(select id from public.actor where slug='joe'))`,[JSON.stringify({tasks:{
-  unknown:{repo:'jbookout/carr-system',title:'Synthetic unknown'},
-  system:{repo:'jbookout/carr-system',domain:'system',title:'Synthetic system'},
-  business:{repo:'jbookout/carr-system',domain:'deals',title:'Synthetic business'}}})]);
+  unknown:{repo:'DoctorCRE/carr-system',title:'Synthetic unknown'},
+  system:{repo:'DoctorCRE/carr-system',domain:'system',title:'Synthetic system'},
+  business:{repo:'DoctorCRE/carr-system',domain:'deals',title:'Synthetic business'}}})]);
  await client.query('set local role carr_reader');
  const result=await readSystemWorkCensus({client,actor:{slug:'joe',human:true},kinds:'progress_task'});
  assert.equal(result.coverage[0].state,'complete');

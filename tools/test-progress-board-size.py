@@ -20,15 +20,14 @@ from progress_board_test_support import exercise_fields
 
 
 class CostSnapshotTests(unittest.TestCase):
-    def test_board_includes_validated_provider_days_and_jev_call_sites(self):
+    def test_board_includes_validated_provider_days(self):
         now = datetime(2026, 10, 5, 12, tzinfo=timezone.utc)
         value = {"schema": "carr-system-costs.v1", "observed_at": "2026-10-05T11:00:00Z",
                  "month": "2026-10", "through": "2026-10-04", "state": "ready",
-                 "providers": [{"provider": "jev", "label": "Jev", "plan": "Per call", "state": "ready", "reason": None,
+                 "providers": [{"provider": "github", "label": "GitHub", "plan": "Usage", "state": "ready", "reason": None,
                                 "mtd_usd": 2.5, "projection_usd": 19.375, "budget_usd": 50,
-                                "daily": [{"day": "2026-10-04", "usd": 2.5, "drivers": {"hook:route": 2.5}}],
-                                "call_sites": {"hook:route": 2.5}}],
-                 "months": [{"month": "2026-10", "usd": 2.5, "providers": {"jev": 2.5}}],
+                                "daily": [{"day": "2026-10-04", "usd": 2.5, "drivers": {"Actions": 2.5}}]}],
+                 "months": [{"month": "2026-10", "usd": 2.5, "providers": {"github": 2.5}}],
                  "alerts": [], "action": "Finance Ops: inspect provider and driver; verify next day; auto-clear after thresholds pass.",
                  "billing_response": {"card_number": "never-return-fixture"}}
         with tempfile.TemporaryDirectory() as directory:
@@ -39,7 +38,6 @@ class CostSnapshotTests(unittest.TestCase):
                 costs = board.board_snapshot({"project": "system-costs", "tasks": {}})["costs"]
             self.assertEqual(costs["state"], "ready")
             self.assertEqual(costs["providers"][0]["daily"][0]["usd"], 2.5)
-            self.assertEqual(costs["providers"][0]["call_sites"], {"hook:route": 2.5})
             self.assertEqual(costs["months"][0]["usd"], 2.5)
             self.assertNotIn("never-return-fixture", json.dumps(costs))
             value["state"] = "partial"
@@ -154,9 +152,9 @@ class SnapshotSizeTests(unittest.TestCase):
             task = {"title": f"Synthetic publication task {n:03d} with representative board title",
                     "status": status, "stage": stage, "executor": "codex",
                     "provider": "openai", "model": "gpt-6", "effort": "high",
-                    "repo": "jbookout/carr-system", "pr": 2000 + n,
+                    "repo": "DoctorCRE/carr-system", "pr": 2000 + n,
                     "pr_head": f"{n:040x}", "pr_checks": "1 pass · 0 pending · 0 fail",
-                    "pr_url": f"https://github.com/jbookout/carr-system/pull/{2000 + n}",
+                    "pr_url": f"https://github.com/DoctorCRE/carr-system/pull/{2000 + n}",
                     "created_at": "2026-10-18T00:00:00+00:00", "updated_at": "2026-10-18T04:00:00+00:00",
                     "stage_entered_at": history[-1]["entered_at"], "stage_history": history}
             if n < 30:
@@ -209,7 +207,7 @@ class SnapshotSizeTests(unittest.TestCase):
 
     def test_app_evidence_and_inline_question_survive_projection(self):
         task = {"title": "Review", "status": "review", "stage": "review", "pr": 1553,
-                "repo": "jbookout/carr-system", "pr_head": "a" * 40, "pr_checks": "failure",
+                "repo": "DoctorCRE/carr-system", "pr_head": "a" * 40, "pr_checks": "failure",
                 "pr_links": [{"repo": "jbookout/doctorcre-app", "number": 42, "head_sha": "b" * 40}],
                 "question": "Which delivery target applies?"}
         projected = board.board_snapshot({"project": "fixture", "tasks": {"review": task}},
@@ -227,7 +225,7 @@ class SnapshotSizeTests(unittest.TestCase):
             reason = "GitHub read failed: " + ("diagnostic line\n" * 1800 if n < 29 else "retry the source read")
             tasks[f"task-{n}"] = {
                 "title": f"Scheduled task {n}", "status": "blocked" if n < 297 else "running" if n < 337 else "done",
-                "stage": stage, "executor": "orchestrator", "repo": "jbookout/carr-system",
+                "stage": stage, "executor": "orchestrator", "repo": "DoctorCRE/carr-system",
                 "created_at": "2026-09-29T00:00:00Z", "updated_at": "2026-10-05T00:00:00Z",
                 "stage_entered_at": "2026-09-29T00:00:00Z",
                 "stage_history": [{"stage": stage, "entered_at": "2026-09-29T00:00:00Z"}],
@@ -268,6 +266,9 @@ class PagedPublicationTests(unittest.TestCase):
         self.store = {}
         self.writes = []
         self.enterContext(patch.object(board, "call_verb", side_effect=self.call))
+        self.inventory = {'schema': 'system-work-external.v1', 'items': [], 'complete': True,
+                          'observed_at': '2026-10-21T12:00:00Z', 'coverage': [], 'completed_pr_history': True}
+        self.enterContext(patch('system_work_cache.cached_github', return_value=self.inventory))
 
     def call(self, verb, args):
         key = args["board_id"]
@@ -280,48 +281,14 @@ class PagedPublicationTests(unittest.TestCase):
         self.writes.append(key)
         return {"ok": True, "snapshot": copy.deepcopy(self.store[key])}
 
-    def test_queue_growth_publishes_complete_snapshot_in_verified_bounded_pages(self):
-        state = {"project": "carr-v5", "tasks": {"open": {"title": "Open work", "status": "running"}},
-                 "notes": [{"text": "Keep this note."}]}
-        queue = {"schema": "room-work-queue/v1", "revision": 42,
-                 "items": [{"card_id": f"queue-{i}", "title": f"Queued work {i}", "stage": "review",
-                            "stages": [{"stage": "review", "elapsed": 12, "detail": "Synthetic stage evidence " * 40}],
-                            "last_event": {"at": "2026-10-21T12:00:00Z", "reason": "Review the work"}}
-                           for i in range(450)], "history": [], "omitted": {"finished": 0, "events": 0}}
-        self.path.write_text(json.dumps(state))
-        original = copy.deepcopy(queue)
-        with patch.object(board.work_queue_module(), "board_projection", return_value=queue):
-            result = board.publish_board("carr-v5", costs={"state": "unavailable", "providers": []}, refresh_inventory=False)
-        manifest = self.store["carr-v5"]["snapshot_json"]
-        pages = manifest["pagination"]["pages"]
-        content = []
-        for page in pages:
-            saved = self.call("read-progress-board", {"board_id": page["board_id"]})["snapshot"]
-            self.assertEqual(saved["version"], page["version"])
-            content.append(saved["snapshot_json"]["content"])
-        restored = json.loads("".join(content))
-        self.assertEqual(hashlib.sha256("".join(content).encode()).hexdigest(), manifest["pagination"]["digest"])
-        for page, text in zip(pages, content):
-            self.assertEqual(hashlib.sha256(text.encode()).hexdigest(), page["digest"])
-        self.assertEqual(restored["work_queue"], original)
-        self.assertEqual(restored["notes"], state["notes"])
-        self.assertEqual(restored["tasks"]["open"]["title"], "Open work")
-        self.assertEqual(queue, original)
-        omitted = manifest["pagination"]["omitted"]
-        self.assertEqual(omitted["work_queue.items"], 450 - len(manifest["work_queue"]["items"]))
-        self.assertTrue(any("read-progress-board" in note["text"] for note in manifest["notes"]))
-        self.assertEqual(result["snapshot_version"], 1)
-        self.assertEqual(self.writes[-1], "carr-v5")
-
     def test_huge_unicode_note_is_lossless_and_repeat_tick_reuses_pages(self):
         text = 'Unicode evidence 😀 "quoted"\\\n' * 30000
         state = {"project": "carr-v5", "tasks": {}, "notes": [{"text": text}]}
         self.path.write_text(json.dumps(state))
-        with patch.object(board.work_queue_module(), "board_projection", return_value=None):
-            board.publish_board("carr-v5", costs={}, refresh_inventory=False)
-            first = copy.deepcopy(self.store["carr-v5"])
-            writes = len(self.writes)
-            board.publish_board("carr-v5", costs={}, refresh_inventory=False)
+        board.publish_board("carr-v5", costs={})
+        first = copy.deepcopy(self.store["carr-v5"])
+        writes = len(self.writes)
+        board.publish_board("carr-v5", costs={})
         self.assertEqual(self.store["carr-v5"], first)
         self.assertEqual(self.writes[writes:], ["orchestrator"])
         manifest = first["snapshot_json"]
@@ -334,26 +301,25 @@ class PagedPublicationTests(unittest.TestCase):
     def test_page_outage_never_replaces_previous_manifest_or_its_pages(self):
         state = {"project": "carr-v5", "tasks": {}, "notes": [{"text": "Original evidence " * 30000}]}
         self.path.write_text(json.dumps(state))
-        with patch.object(board.work_queue_module(), "board_projection", return_value=None):
-            board.publish_board("carr-v5", costs={}, refresh_inventory=False)
-            previous = copy.deepcopy(self.store)
-            state["notes"][0]["text"] = "Replacement evidence " * 30000
-            self.path.write_text(json.dumps(state))
-            calls = 0
-            def outage(verb, args):
-                nonlocal calls
-                if verb == "publish-board-snapshot" and "-snapshot-" in args["board_id"]:
-                    calls += 1
-                    if calls == 2:
-                        raise RuntimeError("page outage")
-                return self.call(verb, args)
-            with patch.object(board, "call_verb", side_effect=outage):
-                with self.assertRaisesRegex(RuntimeError, "page outage"):
-                    board.publish_board("carr-v5", costs={}, refresh_inventory=False)
-            self.assertEqual(self.store["carr-v5"], previous["carr-v5"])
-            for page in previous["carr-v5"]["snapshot_json"]["pagination"]["pages"]:
-                self.assertEqual(self.store[page["board_id"]], previous[page["board_id"]])
-            board.publish_board("carr-v5", costs={}, refresh_inventory=False)
+        board.publish_board("carr-v5", costs={})
+        previous = copy.deepcopy(self.store)
+        state["notes"][0]["text"] = "Replacement evidence " * 30000
+        self.path.write_text(json.dumps(state))
+        calls = 0
+        def outage(verb, args):
+            nonlocal calls
+            if verb == "publish-board-snapshot" and "-snapshot-" in args["board_id"]:
+                calls += 1
+                if calls == 2:
+                    raise RuntimeError("page outage")
+            return self.call(verb, args)
+        with patch.object(board, "call_verb", side_effect=outage):
+            with self.assertRaisesRegex(RuntimeError, "page outage"):
+                board.publish_board("carr-v5", costs={})
+        self.assertEqual(self.store["carr-v5"], previous["carr-v5"])
+        for page in previous["carr-v5"]["snapshot_json"]["pagination"]["pages"]:
+            self.assertEqual(self.store[page["board_id"]], previous[page["board_id"]])
+        board.publish_board("carr-v5", costs={})
         current = self.store["carr-v5"]["snapshot_json"]
         restored = json.loads("".join(self.store[p["board_id"]]["snapshot_json"]["content"]
                                      for p in current["pagination"]["pages"]))
@@ -367,18 +333,17 @@ class PagedPublicationTests(unittest.TestCase):
             if verb == "read-progress-board" and "-snapshot-" in args["board_id"]:
                 result["snapshot"] = None
             return result
-        with patch.object(board.work_queue_module(), "board_projection", return_value=None), \
-             patch.object(board, "call_verb", side_effect=no_readback):
+        with patch.object(board, "call_verb", side_effect=no_readback):
             with self.assertRaisesRegex(RuntimeError, "page did not read back"):
-                board.publish_board("carr-v5", costs={}, refresh_inventory=False)
+                board.publish_board("carr-v5", costs={})
         self.assertNotIn("carr-v5", self.store)
 
     def test_small_board_keeps_its_existing_reader_contract(self):
         state = {"project": "carr-v5", "tasks": {"open": {"title": "Open work", "status": "running"}}}
         self.path.write_text(json.dumps(state))
-        with patch.object(board.work_queue_module(), "board_projection", return_value=None):
-            expected = board.board_snapshot(state, costs={})
-            board.publish_board("carr-v5", costs={}, refresh_inventory=False)
+        expected = board.board_snapshot(state, costs={})
+        expected['external_inventory'] = board.publish_external_inventory(self.inventory)
+        board.publish_board("carr-v5", costs={})
         self.assertEqual(self.store["carr-v5"]["snapshot_json"], expected)
         self.assertNotIn("pagination", expected)
 
@@ -387,8 +352,7 @@ class PagedPublicationTests(unittest.TestCase):
             f"task-{i}": {"title": f"Open task {i} " + "details " * 150, "status": "running"}
             for i in range(700)}}
         self.path.write_text(json.dumps(state))
-        with patch.object(board.work_queue_module(), "board_projection", return_value=None):
-            board.publish_board("carr-v5", costs={}, refresh_inventory=False)
+        board.publish_board("carr-v5", costs={})
         manifest = self.store["carr-v5"]["snapshot_json"]
         restored = json.loads("".join(self.store[p["board_id"]]["snapshot_json"]["content"]
                                      for p in manifest["pagination"]["pages"]))

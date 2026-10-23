@@ -52,7 +52,7 @@ function acquired() {
       source: "ops/foundation-assurance-candidate-rehearsal.py --read-foundation-facts" },
     github_checks: FOUNDATION_ASSURANCE_GITHUB_CHECKS.map((name, index) => ({
       name, conclusion: "success", head_sha: bindings.source_sha, run_id: index + 1,
-      url: `https://github.com/jbookout/carr-system/actions/runs/${index + 1}` })),
+      url: `https://github.com/DoctorCRE/carr-system/actions/runs/${index + 1}` })),
     measurements: { schema_version: "doctorcre-v5-benchmark-measurement-set.v1",
       outlier_rule: payload.outlier_rule, p95_aggregation_method: payload.p95_aggregation_method,
       captured_at_ms: Date.parse("2026-09-14T14:00:00.000Z"),

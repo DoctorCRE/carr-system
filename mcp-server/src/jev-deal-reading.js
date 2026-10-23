@@ -1,4 +1,4 @@
-import {cachedSemanticAsk} from "./jev-semantic.js";
+import { TypeSafeClient, TypeSafeError } from "@typesafe-ai/sdk";
 // Bounded, read-only Jev advisory for one authenticated Deal Room record.
 // The record is fetched by the caller through the existing get-deal-room verb.
 // No model answer changes a deal, its ordering, or a partner's next action.
@@ -147,15 +147,15 @@ function probability(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
-export async function readDealWithJev(record, { askJev, now = new Date() } = {}) {
+export async function readDealWithJev(record, { apiKey, client, now = new Date() } = {}) {
   const { evidenceChars, sufficient, state } = dealReadingState(record, now);
   const base = { schema: "carr.jev-deal-reading.v1", advisory_only: true,
     evidence_chars: evidenceChars, evidence_floor: JEV_DEAL_EVIDENCE_FLOOR };
   if (!sufficient)
     return { ...base, judged: false, reason: "insufficient_recorded_evidence" };
-  if (typeof askJev !== "function") return { ...base, judged: false, reason: "jev_unavailable" };
   try {
-    const result = await cachedSemanticAsk(askJev, { model: "jev-1.13.0", state, questions: dealReadingQuestions() }, "deal-reading-v1");
+    const sdk = client || new TypeSafeClient({ apiKey, defaultModel: "jev-latest" });
+    const result = await sdk.systemOne({ state, questions: dealReadingQuestions() });
     const answers = result?.answers;
     const movement = answers?.movement?.score;
     const waiting = answers?.waiting_on?.choice;
@@ -170,6 +170,7 @@ export async function readDealWithJev(record, { askJev, now = new Date() } = {})
       waiting_on_confidence: probability(answers.waiting_on.confidence) ? answers.waiting_on.confidence : null,
       silence_is_bad: silence };
   } catch (error) {
-    return { ...base, judged: false, reason: /semantic answer|resolved model/.test(error?.message ?? "") ? "invalid_jev_answer" : "jev_unavailable" };
+    if (!(error instanceof TypeSafeError)) throw error;
+    return { ...base, judged: false, reason: "jev_unavailable" };
   }
 }

@@ -1,56 +1,7 @@
 #!/bin/zsh
-# sync-rule-admission-prod.sh — the ONE sanctioned door for installing the
-# reviewed rule-admission contract into the PRODUCTION database.
-#
-# WHY THIS EXISTS (2026-08-23). The control-plane roadmap's Phase 1 exit is one
-# named test: ops/rule-admission-audit.py passes clean against Production, with
-# zero rules in needs_revision and no exception list. On 2026-08-23 that audit
-# had never been run against Production by anything. It reported:
-#
-#   total=218 admitted=4 needs_revision=0 missing=214 incomplete=0
-#
-# Zero needs_revision, which is the number the roadmap's status section named —
-# and 214 active rules with no admission row at all, which it did not. The
-# roadmap read "one test owed" and the database read "the contract is very
-# nearly unpopulated". Only four rules had ever been admitted, all four through
-# the admit-rule verb, one rule at a time.
-#
-# The cause was the same structural one bin/sync-control-plane-prod.sh names for
-# Phase 2: tools/sync-rule-admission.py, the bulk backfill that compiles
-# ops/config/rule-enforcement-map.json into the admission shape, had no
-# production caller. There was no door, so there was no drift to notice —
-# production simply never received the contract.
-#
-# Usage:
-#   ./bin/sync-rule-admission-prod.sh           # read-only: where does production stand?
-#   ./bin/sync-rule-admission-prod.sh --apply   # backfill, then prove it landed
-#   ./bin/sync-rule-admission-prod.sh --export  # write ops/config/rule-admission-export.v1.json
-#
-# RAILS, in order:
-#   1. An uncommitted enforcement map REFUSES to apply — the map is a REVIEWED
-#      inventory and production takes reviewed, committed configuration only.
-#      (Read-only runs are always allowed.)
-#   2. --apply always re-runs ops/rule-admission-audit.py against production
-#      afterwards and takes ITS exit code as the verdict, never the backfill's.
-#      The backfill's own output counts what it was asked to write; the audit
-#      reads production back (rule a9ecd5b4).
-#   3. The backfill REFUSES on any active rule absent from the reviewed map,
-#      by design — a rule taught after the map was last extended is a coverage
-#      gap, and this door reports it rather than inventing a contract for it.
-#   4. Every invocation logs to out/sync-rule-admission-prod.log with outcome.
-#   5. The DSN is derived inside this process and never reaches a command line,
-#      a terminal or a transcript.
-#
-# --EXPORT (WR-000019 slice S10, part 3). Writes
-# ops/config/rule-admission-export.v1.json — a committed snapshot of the
-# DATABASE's own enforcement_class per active admitted rule. It is the ONLY
-# thing that reads production for this purpose; ops/rule-classification-
-# parity-check.py compares that export against ops/config/rule-enforcement-
-# map.json's classification with no database access of its own, the same way
-# every other CI inventory check in this repo works. --export runs AFTER
-# --apply lands in the normal flow (the backfill changes what the export would
-# read), but stands alone as its own mode: it takes no --apply action and never
-# refuses on an uncommitted map, because it only READS production.
+# Inspect admission and delivery audits, export classifications, or install delivery tags.
+# --apply installs reviewed delivery tags and reads both audits back.
+# --export refreshes the admission-classification snapshot without a backfill.
 
 set -eu
 REPO="${0:A:h:h}"
@@ -85,7 +36,7 @@ if (( APPLY )); then
   fi
 fi
 
-# Same non-interactive auth and same project pin as bin/migrate-prod.sh.
+# Same non-interactive auth and same project pin as the GitHub production deployment workflow.
 if [ -z "${NEON_API_KEY:-}" ] && [ -f "$HOME/.config/carr/db.env" ]; then
   . "$REPO"/bin/routine-credential-env.sh
   carr_require_sourceable_db_env "sync-rule-admission-prod" || exit $?
@@ -150,7 +101,7 @@ if (( ! APPLY )); then
     print "  missing        = active rules with no admission row at all"
     print "  needs_revision = admitted with a control that is not installed"
     print "  incomplete     = admitted without applicability/projection/reachability"
-    print "Re-run with --apply once $MAP covers every active rule."
+    print "Admission backfill is retired; inspect the rule records for the gaps above."
   fi
   print ""
   print "== read-only: ops/rule-delivery-audit.py against production =="
@@ -165,7 +116,7 @@ if (( ! APPLY )); then
     stamp "BLOCKED read-only delivery: the delivery tables are absent"
     print ""
     print "the delivery tables are not in this database yet, so there is nothing"
-    print "to audit. Apply migration 0291 (./bin/migrate-prod.sh), then re-run."
+    print "to audit. Apply migration 0291 (./the GitHub production deployment workflow), then re-run."
   else
     stamp "GAP read-only delivery rc=$drc"
     print ""
@@ -184,26 +135,6 @@ if (( ! APPLY )); then
   exit $rc
 fi
 
-print "== backfilling the reviewed enforcement map into production =="
-set +e
-DATABASE_URL="$DSN" "$PY" "$REPO/tools/sync-rule-admission.py"
-rc=$?
-set -e
-if (( rc != 0 )); then
-  stamp "FAIL backfill rc=$rc"
-  print -u2 "the backfill refused or failed; production is unchanged."
-  print -u2 "if it named an active rule absent from the reviewed enforcement map,"
-  print -u2 "that rule is the finding: extend $MAP with its"
-  print -u2 "category and control, have the entry reviewed, commit, and re-run."
-  exit $rc
-fi
-
-# THE DELIVERY HALF, added 2026-08-23 with the rules council's load-layer tags.
-# It rides THIS door rather than a second one for the reason this door exists at
-# all: the enforcement half spent months with no production caller and nobody
-# noticed, because a missing door produces no drift to see. Two doors for one
-# reviewed file would reopen exactly that gap on the half nobody happened to run.
-print ""
 print "== installing the reviewed delivery tags (layer0 / control / pack) =="
 set +e
 DATABASE_URL="$DSN" "$PY" "$REPO/tools/sync-rule-load-layers.py"
@@ -211,7 +142,7 @@ rc=$?
 set -e
 if (( rc != 0 )); then
   stamp "FAIL delivery tags rc=$rc"
-  print -u2 "the delivery tags refused or failed; the admission half above DID land."
+  print -u2 "the delivery tags refused or failed; the delivery tags did not complete."
   print -u2 "if it named an active rule with no reviewed delivery tag, that rule is"
   print -u2 "the finding: extend rule_load_layers in $MAP, have it"
   print -u2 "reviewed, commit, and re-run."
@@ -225,11 +156,11 @@ DATABASE_URL="$DSN" "$PY" "$REPO/ops/rule-admission-audit.py"
 rc=$?
 set -e
 if (( rc == 0 )); then
-  stamp "OK applied and verified"
-  print "every active rule in production now carries a complete admission contract."
+  stamp "OK admission readback"
+  print "every active rule in production carries a complete admission contract."
 else
-  stamp "FAIL applied but audit rc=$rc"
-  print -u2 "THE BACKFILL RAN AND THE AUDIT STILL DISAGREES. Read the counts above:"
+  stamp "FAIL admission audit rc=$rc"
+  print -u2 "The admission audit reports gaps. Read the counts above:"
   print -u2 "they name which of the four failure shapes is left."
 fi
 

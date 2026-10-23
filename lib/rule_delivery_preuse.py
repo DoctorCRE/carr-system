@@ -15,8 +15,7 @@ SANCTIONED_LOCAL_SPONSORS = {"joe-local": "joe", "dell-local": "dell"}
 DELIVERY_SOURCE_PATHS = (
     "hooks/rule-pack-preuse-reselection.py", "lib/rule_delivery_preuse.py",
     "lib/rule_scope_lookup.py", "lib/rule_operations.py", "lib/rule_routes.py",
-    "lib/rule_boot_gate.py", "lib/hook_runtime.py", "ops/jev_verdict_cache.py",
-    "ops/jev_semantic.py", "ops/typesafe_client.py", "ops/config/jev-call-sites.v1.json",
+    "lib/rule_boot_gate.py", "lib/hook_runtime.py",
     "ops/config/hooks.json", "ops/config/codex-hooks.json",
 )
 LOOKUP_RECEIPT_KEYS = frozenset({"schema", "client", "session_id", "turn_id", "tool_use_id",
@@ -25,16 +24,6 @@ LOOKUP_RECEIPT_KEYS = frozenset({"schema", "client", "session_id", "turn_id", "t
     "unresolved", "models", "complete", "instruction", "receipt_id"})
 # Optional receipt field: at most three rule cards, each with its acknowledgement.
 CARD_KEYS = frozenset({"id", "title", "wording", "acknowledgement"})
-POSTWRITE_RECEIPT_SCHEMA = "jev-post-write-review/v2"
-POSTWRITE_RECEIPT_KEYS = frozenset({
-    "schema", "receipt_id", "client", "session_id", "turn_id", "tool_use_id",
-    "tool_name", "tool_input_sha256", "configuration_digest",
-    "reviewer_digest", "status", "paths", "findings", "models", "reason",
-    "instruction",
-})
-
-def file_sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def source_sha256(repo: Path) -> str:
@@ -48,73 +37,6 @@ def source_sha256(repo: Path) -> str:
         hasher.update(str(len(payload)).encode("ascii") + b"\0")
         hasher.update(payload)
     return hasher.hexdigest()
-
-
-def postwrite_reviewer_digest(repo: Path) -> str:
-    return digest({
-        relative: file_sha256(repo / relative)
-        for relative in (
-            "hooks/lint-gate.py", "ops/jev_code_review.py", "ops/jev_semantic.py",
-            "ops/typesafe_client.py",
-        )
-    })
-
-
-def validate_postwrite_receipt(row: object, *, repo: Path) -> bool:
-    if not isinstance(row, dict) or set(row) != POSTWRITE_RECEIPT_KEYS:
-        return False
-    if (row.get("schema") != POSTWRITE_RECEIPT_SCHEMA
-            or row.get("client") not in {"claude", "codex"}
-            or row.get("status") not in {"reviewed", "skipped", "unavailable"}):
-        return False
-    if not all(_nonempty(row.get(key)) for key in (
-            "receipt_id", "session_id", "tool_use_id", "tool_name",
-            "tool_input_sha256", "configuration_digest", "reviewer_digest")):
-        return False
-    turn_id = row.get("turn_id")
-    if ((row["client"] == "codex" and not _nonempty(turn_id))
-            or (row["client"] == "claude" and turn_id is not None)):
-        return False
-    expected_config = digest({
-        relative: file_sha256(repo / relative)
-        for relative in ("ops/config/hooks.json", "ops/config/codex-hooks.json")
-    })
-    if (row["configuration_digest"] != expected_config
-            or row["reviewer_digest"] != postwrite_reviewer_digest(repo)):
-        return False
-    if (not isinstance(row.get("paths"), list) or
-            any(not isinstance(path, dict) for path in row["paths"]) or
-            not isinstance(row.get("findings"), list)):
-        return False
-    if (not isinstance(row.get("models"), list)
-            or any(not _nonempty(model) for model in row["models"])):
-        return False
-    if row["status"] == "reviewed":
-        if (not row["models"] or row.get("reason") is not None
-                or row.get("instruction") is not None
-                or not any(isinstance(path, dict) and path.get("status") == "jev_reviewed"
-                           for path in row["paths"])):
-            return False
-    elif row["status"] == "skipped":
-        if (row["models"] or row["findings"] or row.get("reason") not in
-                {"no_jev_candidate", "no_supported_code_paths", "outside_repo"}
-                or row.get("instruction") is not None
-                or any(isinstance(path, dict) and path.get("status") == "jev_reviewed"
-                       for path in row["paths"])):
-            return False
-        if (row["reason"] == "no_supported_code_paths" and
-                any(path.get("status") != "not_reviewed" or
-                    path.get("reason") != "unsupported_extension"
-                    for path in row["paths"])):
-            return False
-        if (row["reason"] == "outside_repo" and
-                any(path.get("status") != "not_reviewed" or
-                    path.get("reason") != "outside_repo"
-                    for path in row["paths"])):
-            return False
-    elif not _nonempty(row.get("reason")) or not _nonempty(row.get("instruction")):
-        return False
-    return row["receipt_id"] == receipt_id(row)
 
 
 def canonical(value: Any) -> bytes:
@@ -212,7 +134,7 @@ def validate_lookup_receipt(row: object, *, repo: Path) -> bool:
         return False
     original = row
     mode = row.get('selection_mode')
-    if mode is not None and mode not in ('deterministic', 'judged'):
+    if mode is not None and mode != 'deterministic':
         return False
     if mode == 'deterministic' and row.get('complete') is True:
         if any(key in row for key in ('unresolved', 'unresolved_count', 'data_defects', 'models')):
@@ -240,7 +162,7 @@ def validate_lookup_receipt(row: object, *, repo: Path) -> bool:
             or row['event_name'] not in {'PreToolUse', 'UserPromptSubmit', 'Stop'}
             or not _nonempty(row['session_id']) or not valid_local_identity(row['identity'])
             or type(row['complete']) is not bool or not isinstance(row['models'], list)
-            or any(model != 'jev-1.13.0' for model in row['models'])
+            or row['models']
             or row['instruction'] != (LOOKUP_COMPLETE_INSTRUCTION if mode and row['complete'] else LOOKUP_INSTRUCTION)):
         return False
     if ((row['client'] == 'codex' and not _nonempty(row['turn_id']))
@@ -279,9 +201,9 @@ def receipt_from_envelope(record: object) -> dict | None:
         row = _json_text(content[0]) if isinstance(content, list) and len(content) == 1 else None
         if not row or row.get('client') != 'claude' or attachment.get('type') != 'hook_additional_context':
             return None
-        event = row.get('event_name') if row.get('schema') == LOOKUP_RECEIPT_SCHEMA else 'PostToolUse'
+        event = row.get('event_name')
         tool_event = event in {'PreToolUse', 'PostToolUse'}
-        if (row.get('schema') in {LOOKUP_RECEIPT_SCHEMA, POSTWRITE_RECEIPT_SCHEMA}
+        if (row.get('schema') == LOOKUP_RECEIPT_SCHEMA
                 and record.get('sessionId') == row.get('session_id')
                 and attachment.get('hookEvent') == event
                 and attachment.get('hookName') == (f"{event}:{row.get('tool_name')}" if tool_event else event)
@@ -333,7 +255,7 @@ def preuse_delivery(record: dict, prior_records: list[dict], *, repo: Path):
 
 
 def contains_receipt_marker(value: object) -> bool:
-    schemas = {LOOKUP_RECEIPT_SCHEMA, POSTWRITE_RECEIPT_SCHEMA}
+    schemas = {LOOKUP_RECEIPT_SCHEMA}
     if isinstance(value, dict):
         return any(contains_receipt_marker(v) for v in value.values())
     if isinstance(value, list):

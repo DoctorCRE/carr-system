@@ -1,21 +1,6 @@
 #!/usr/bin/env python3
 # ci: db-gate
-"""Read back the canonical ledger registry and compare every tracked contract.
-
-WIRED 2026-08-21. This gate was written, was correct, and had no caller: no
-marker, no invocation anywhere in the repository. ops/ci.sh has been naming it
-in the clear on every push since the db-gate loop was built — "db-gates without
-the `# ci: db-gate` marker: control-plane-registry-gate.py" — and nobody read
-the line. The control-plane roadmap's Phase 2 exit asks that every scheduled
-run have an auditable owner independent of the AI provider's scheduler; this is
-the check that asserts it, so Phase 2 could not exit while it sat unrun
-(rule ab814a26 — a rule ships with its enforcement, and recitation is not
-enforcement).
-
-It needs nothing but the throwaway database the migration class already stands
-up: verified passing there on 2026-08-21 against the committed schema, 25
-workflows and 8 cognition contracts exact, zero legacy cutovers.
-"""
+"""Read back shared workflow contracts used by native observations and engineering claims."""
 from __future__ import annotations
 
 import json
@@ -128,17 +113,10 @@ def compare(cur: Any, manifest: dict[str, Any], *, resolve_managed_enabled: bool
         if not resolve_managed_enabled and identity == MANAGED_ENABLED_IDENTITY:
             comparisons.pop("enabled")
         failures.extend(f"{identity[0]} {name} differs" for name,(got,want) in comparisons.items() if got!=want)
-    cur.execute("select key,version,canonical_write_authority from ops.cognition_job")
-    live_cognition = {(r[0],r[1]):r[2] for r in cur.fetchall()}
-    expected_cognition = {(c["key"],c["version"]) for c in manifest["cognition_jobs"]}
-    if set(live_cognition) != expected_cognition:
-        failures.append("cognition job keys differ")
-    if any(live_cognition.values()):
-        failures.append("a cognition job has canonical-write authority")
     cur.execute("select count(*) from ops.job_definition where legacy_disabled_at is not null")
     if fetchone_required(cur.fetchone(), "legacy schedule cutover count")[0]:
         failures.append("a legacy schedule was disabled before acceptance")
-    return failures, len(expected), len(expected_cognition), not_checked
+    return failures, len(expected), 0, not_checked
 
 
 def main() -> int:
@@ -152,7 +130,7 @@ def main() -> int:
     if failures:
         print("control-plane-registry-gate FAILED: " + "; ".join(failures), file=sys.stderr)
         return 1
-    print(f"control-plane-registry-gate passed: {workflows} workflows and {cognition} cognition contracts exact; zero legacy cutovers")
+    print(f"control-plane-registry-gate passed: {workflows} shared workflow contracts exact; zero legacy cutovers")
     return 0
 
 

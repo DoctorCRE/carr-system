@@ -19,6 +19,8 @@ spec = importlib.util.spec_from_file_location("cac_hold", ROOT / "ops/config-as-
 assert spec is not None and spec.loader is not None
 cac = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cac)
+# LaunchAgent cases do not deploy administrator-owned client policy.
+setattr(cac, "managed_safety_plan", lambda: [])
 
 
 class HoldTests(unittest.TestCase):
@@ -161,10 +163,6 @@ class HoldTests(unittest.TestCase):
         body = self.body.replace("<plist", "<!-- carr-launchd-definition-only: unused -->\n<plist", 1)
         self.assertEqual(cac.install_launchd_plist(self.dest.name, str(self.dest), body, False), "loaded")
 
-    def test_fleet_has_no_separate_hold_command_or_baseline_mode(self):
-        self.assertNotIn("launchd-held", (ROOT / "bin/fleet-sync.sh").read_text())
-        self.assertNotIn("CARR_TEST_" + "HOLD_BASELINE", Path(__file__).read_text())
-
     def test_full_install_reconciles_held_plist_once(self):
         config = self.home / "hooks.json"
         config.write_text('{"hooks": {}}')
@@ -181,10 +179,6 @@ class HoldTests(unittest.TestCase):
         patch.object(cac, "codex_configuration_state", return_value="absent").start()
         patch.object(cac, "tracked_scheduled_task_paths", return_value={}).start()
         patch.object(cac, "scheduled_task_install_plan", return_value={"modified": [], "exact": []}).start()
-        patch.object(cac.continuity_config, "load", return_value=None).start()
-        patch.object(cac.continuity_config, "read_mode", return_value=None).start()
-        patch.object(cac, "claude_continuity_state", return_value=(None, None)).start()
-        patch.object(cac.continuity_config, "render_effective_hooks", return_value={}).start()
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(cac.cmd_install(True), 0)
@@ -242,39 +236,7 @@ class HoldTests(unittest.TestCase):
                 self.assertEqual(cac.install_launchd_plist(self.dest.name, str(self.dest), self.body, True), "failed")
                 self.assertFalse(any(c[1] in {"load", "bootstrap", "kickstart"} for c in self.calls))
 
-    def test_health_row_propagates_warning_and_record_call(self):
-        from lib import launchd_hold_health
-        from types import SimpleNamespace
-        tree = ast.parse((ROOT / "tools/health-check.py").read_text())
-        block = next(node for node in tree.body if isinstance(node, ast.Try) and any(
-            isinstance(child, ast.ImportFrom) and any(alias.name == "launchd_hold_health" for alias in child.names)
-            for child in ast.walk(node)))
-        calls = []
-        def checked(home, verb):
-            verb("add-loop", {"fixture": True})
-            return "WARN launchd holds fixture alarm", 1
-        scope = {"sys": sys, "os": os, "REPO_ROOT": str(ROOT), "rc": 0,
-                 "_jev_outage": SimpleNamespace(call_verb=lambda name, payload, **kwargs: calls.append(name))}
-        with patch.object(launchd_hold_health, "check", side_effect=checked):
-            exec(compile(ast.Module(body=[block], type_ignores=[]), "health-row", "exec"), scope)
-        self.assertEqual(scope["rc"], 1)
-        self.assertEqual(calls, ["add-loop"])
 
-    def test_health_row_fallback_names_the_same_owner(self):
-        from lib import launchd_hold_health
-        from types import SimpleNamespace
-        tree = ast.parse((ROOT / "tools/health-check.py").read_text())
-        block = next(node for node in tree.body if isinstance(node, ast.Try) and any(
-            isinstance(child, ast.ImportFrom) and any(alias.name == "launchd_hold_health" for alias in child.names)
-            for child in ast.walk(node)))
-        scope = {"sys": sys, "os": os, "REPO_ROOT": str(ROOT), "rc": 0,
-                 "_jev_outage": SimpleNamespace(call_verb=lambda *args, **kwargs: {})}
-        output = io.StringIO()
-        with patch.object(launchd_hold_health, "check", side_effect=RuntimeError("fixture failure")):
-            with contextlib.redirect_stdout(output):
-                exec(compile(ast.Module(body=[block], type_ignores=[]), "health-row", "exec"), scope)
-        self.assertEqual(scope["rc"], 1)
-        self.assertIn("owner claude (Platform Engineer)", output.getvalue())
 
     def test_definition_only_check_uses_plist_label(self):
         self.hold.write_text("")
@@ -285,7 +247,7 @@ class HoldTests(unittest.TestCase):
 
     def test_detached_guard_reads_the_same_definition_registry(self):
         patch.stopall()
-        label = "com.carr.repo-hygiene-janitor"
+        label = "com.carr.resource-collector"
         fake = self.home / "launchctl-fixture"
         fake.write_text("#!/bin/sh\ncase \"$1\" in\n"
                         "print) echo 'Could not find service \"" + label + "\"'; exit 113;;\n"
@@ -367,8 +329,6 @@ class HoldTests(unittest.TestCase):
                      "refused_launchd_templates", "pending_launchd_reloads"):
             patch.object(cac, name, return_value=[]).start()
         patch.object(cac, "PREREQUISITE_CHECK", return_value=[]).start()
-        patch.object(cac.continuity_config, "load", return_value={}).start()
-        patch.object(cac.continuity_config, "read_mode", return_value=None).start()
         patch.object(cac, "git_hooks_path_report", return_value="fixture hooks").start()
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
@@ -386,12 +346,9 @@ class HoldTests(unittest.TestCase):
         self.assertTrue(self.disabled)
         self.assertFalse(self.loaded)
 
-    def test_fleet_sync_logs_hold_and_does_not_enable(self):
+    def test_delayed_reload_respects_hold(self):
+        import json
         patch.stopall()
-        fleet_spec = importlib.util.spec_from_file_location("fleet_hold_fixture", ROOT / "ops/fleet-sync-selftest.py")
-        fleet = importlib.util.module_from_spec(fleet_spec)
-        fleet_spec.loader.exec_module(fleet)
-        clone = fleet.build(str(self.home))
         fake_dir = self.home / "stubs"
         fake_dir.mkdir()
         state = self.home / "state.json"
@@ -413,21 +370,6 @@ else: s['disabled']=False; s['loaded']=True
 p.write_text(json.dumps(s)); sys.exit(rc)
 ''')
         fake.chmod(0o755)
-        installer = Path(clone) / "ops/config-as-code.py"
-        installer.write_text(f'''import importlib.util, sys
-s=importlib.util.spec_from_file_location('real_cac',{str(ROOT / 'ops/config-as-code.py')!r})
-m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
-sys.exit(0 if m.install_launchd_plist({self.dest.name!r},{str(self.dest)!r},{self.body!r},True)=='held' else 1)
-''')
-        result = fleet.run_sync(clone, {"HOME": str(self.home), "PATH": str(fake_dir)+os.pathsep+os.environ["PATH"]})
-        import json
-        actual = json.loads(state.read_text())
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("HELD " + self.label, result.stdout)
-        self.assertTrue(actual["disabled"])
-        self.assertFalse(actual["loaded"])
-        self.assertFalse(any(c[0] in {"enable", "load", "bootstrap", "kickstart"} for c in actual["calls"]))
-
         staged = self.home / "staged.plist"
         staged.write_text(self.body)
         import hashlib
@@ -455,8 +397,9 @@ class DeclaredDisabledTests(unittest.TestCase):
         sys.path.insert(0, str(ROOT / "lib"))
         sys.path.insert(0, str(ROOT / "ops"))
         import scheduled_jobs
-        declared_off = {j["label"] for j in scheduled_jobs.native_manifest(ROOT)["jobs"]
-                        if j["scheduler"] == "launchd" and not j["expected_installed"]}
+        with patch.object(scheduled_jobs.launchd_hold, "read_holds", return_value={}):
+            declared_off = {j["label"] for j in scheduled_jobs.native_manifest(ROOT)["jobs"]
+                            if j["scheduler"] == "launchd" and not j["expected_installed"]}
         self.assertIn("com.carr.resource-collector", declared_off)
         for label in sorted(declared_off):
             if not label.startswith("com.carr."):

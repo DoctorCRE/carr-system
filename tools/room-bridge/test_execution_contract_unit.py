@@ -14,8 +14,6 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
 
 import execution_contract as contract  # noqa: E402
-import dispatch  # noqa: E402
-import bridge  # noqa: E402
 import evaluation_kernel  # noqa: E402
 import spatial_surface  # noqa: E402
 
@@ -35,8 +33,6 @@ def envelope(surface="codex_desktop"):
     raw = json.loads((FIXTURES / f"{surface}.execution-envelope.v1.json").read_text())
     contract.validate_execution_envelope(raw)
     return raw
-
-
 
 
 def expect_refusal(fn, contains):
@@ -60,21 +56,11 @@ def schemas_are_versioned_and_fail_closed():
     assert legacy["x-carr-migration"]["canonical_schema"] == "carr-evaluation-kernel.v1.schema.json"
 
 
-
-
-
-
-
-
 def digest_is_canonical_and_deterministic():
     first = envelope()
     second = json.loads(json.dumps(first, sort_keys=True))
     assert contract.execution_envelope_digest(first) == contract.execution_envelope_digest(second)
     assert contract.execution_envelope_digest(first).startswith("sha256:")
-
-
-
-
 
 
 def server_issued_repository_write_capability_is_closed_and_bounded():
@@ -97,30 +83,12 @@ def server_issued_repository_write_capability_is_closed_and_bounded():
     expect_refusal(lambda: contract.validate_execution_envelope(mismatched), "write authority")
 
 
-
-
-
-
 def phase_binding_preserves_native_sessions_and_reserves_evaluation_arms():
     value = envelope()
     assert value["phase_binding"]["native_session_transfer"] == "semantic_state_only"
     assert value["evaluation_context"]["experiment_arm"] == "same_pair_audited_state"
     value["phase_binding"]["switch_conditions"] = ["phase_boundary"]
     expect_refusal(lambda: contract.validate_execution_envelope(value), "verified_checkpoint")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def spatial_surface_separates_layout_from_canonical_state_and_rejects_stale_views():
@@ -148,8 +116,6 @@ def telemetry_truth_does_not_cross_convert_or_turn_unavailable_into_zero():
     expect_refusal(lambda: spatial_surface.validate_telemetry_measurement(unavailable), "never zero")
     tokens = copy.deepcopy(base); tokens["measurement_id"] = "metric:tokens"; tokens["metric_kind"] = "session_tokens"; tokens["unit"] = "quota_tokens"
     expect_refusal(lambda: spatial_surface.validate_telemetry_measurement(tokens), "masquerade")
-
-
 
 
 def visual_extensions_are_inspectable_but_untrusted_or_unsafe_packages_are_refused():
@@ -335,14 +301,6 @@ def required_rungs_only_accept_active_golden_membership():
         {"from": "triaged", "to": "retired", "evidence_ref": "evidence:invalid-shortcut"},
     ]
     expect_refusal(lambda: evaluation_kernel.admission_decision(triaged_retirement), "lifecycle transition")
-
-
-
-
-
-
-
-
 
 
 if __name__ == "__main__":

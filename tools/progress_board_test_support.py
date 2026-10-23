@@ -2,7 +2,7 @@
 import json
 
 
-def exercise_fields(source="1" * 40, repo="jbookout/carr-system"):
+def exercise_fields(source="1" * 40, repo="DoctorCRE/carr-system"):
     return {"repo": repo, "pr_phase": "Merged", "merge_sha": source,
             "delivery_source_sha": source,
             "delivery_target": "https://exercise.example.invalid/target",

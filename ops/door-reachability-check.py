@@ -29,7 +29,7 @@ WALK_SKIP = {".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cach
 MAX_BYTES = 2 << 20
 
 PRODUCTION_FILES = ("ops/ci.sh", "run.sh", "ops/config/hooks.json", "ops/config/codex-hooks.json",
-                    "ops/config/delegation-gate-hook.json", ".claude/settings.json")
+                    "ops/config/hook-script-policy.json", ".claude/settings.json")
 DB_GATE_MARKER = re.compile(r"^# ci: db-gate", re.M)
 DB_GATE_GLOB = re.compile(r"ops/[^/]+-gate\.py")
 PROSE_NAMES = ("AGENTS.md", "CLAUDE.md", "README.md")
@@ -129,7 +129,7 @@ SKILL_FORM = re.compile(r"(?<![\w-])(skills/|/|`|\*\*)([\w-]+)(`|\*\*)?")
 
 def imported_modules(text: str) -> set[str]:
     """Module names a Python file imports, at any length: `from lib.pgrow import
-    fetch_one` and `from lib import dot_relay` are unambiguous where a bare
+    fetch_one` and `from lib import record_call` are unambiguous where a bare
     five-letter word in prose is not."""
     found: set[str] = set()
     for frm, names, plain in PY_IMPORT.findall(text):

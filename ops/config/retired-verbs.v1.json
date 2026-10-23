@@ -55,6 +55,53 @@
       "verbs": [
         "review-heavy-build-plan"
       ]
+    },
+    {
+      "reference": "Joe 2026-10-22 direction: delete Jev gateway wrappers and ask-jev; migration 0935_retire_jev_gateway.sql",
+      "verbs": [
+        "ask-jev",
+        "read-jev-call-receipt-integrity",
+        "read-jev-call-receipts"
+      ]
+    },
+    {
+      "reference": "Joe approved machinery reset; audit-mcp.md section 4 slices 1-3 and audit-review.md conditions (2026-10-22)",
+      "verbs": [
+        "activate-context-bundle",
+        "bot-brief",
+        "cadence-status",
+        "claude-checkpoint",
+        "claude-read-recovery",
+        "close-defect",
+        "raise-delivery-cadence-alert",
+        "read-action-class-gate",
+        "read-action-class-successors",
+        "read-attempt-reliability",
+        "read-benchmark-manifest",
+        "read-context-activation",
+        "read-execution-environment-providers",
+        "read-journey-one-clock",
+        "read-model-role",
+        "record-cadence-receipt",
+        "register-action-class-successor",
+        "render-context-activation"
+      ]
+    },
+    {
+      "reference": "Joe approved machinery reset; audit-mcp.md section 4 slice 7 and audit-review.md conditions (2026-10-22)",
+      "verbs": [
+        "accept-workflow",
+        "activate-guidance-registry",
+        "activate-rule",
+        "admit-rule",
+        "amend-rule",
+        "approve-rule",
+        "deactivate-guidance-registry",
+        "decide-guidance-import-batch",
+        "disable-legacy-schedule",
+        "retire-rule",
+        "teach"
+      ]
     }
   ]
 }

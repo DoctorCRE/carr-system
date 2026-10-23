@@ -6,7 +6,7 @@
   "scope_ref": "carr-internal",
   "source_artifacts": {
     "section_index": "CARR AI/Automation/section-index.tsv",
-    "doctrine_fts": "evals/retrieval/baselines/doctrine-fts.2026-08-15.v1.json",
+    "doctrine_fts": "https://github.com/DoctorCRE/carr-system/blob/f4b7565d/evals/retrieval/baselines/doctrine-fts.2026-08-15.v1.json",
     "doctrine_generation": 423
   },
   "summary": {

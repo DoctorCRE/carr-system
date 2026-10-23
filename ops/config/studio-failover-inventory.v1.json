@@ -3,7 +3,7 @@
   "captured_at": "2026-10-05T19:11:36.942524+00:00",
   "source_sha": "8d5f00b6a81b0cc0a3756989a1f7226efff1b7f7",
   "manifest_source": {
-    "repository": "jbookout/carr-system",
+    "repository": "DoctorCRE/carr-system",
     "ref": "origin/codex/job-manifest-drift",
     "captured_machine_role": "secondary",
     "source_sha": "c5c4520b57302d0064560d0a1849813aa5443f06",
@@ -84,32 +84,6 @@
         "PATH"
       ],
       "schedule_source": "~/Library/LaunchAgents/com.carr.cutover-watch.plist",
-      "classification": "leader-job",
-      "macbook_installed": false,
-      "macbook_missing": [],
-      "schedule_expectation": {
-        "scheduler": "launchd",
-        "expected_enabled": false,
-        "expected_installed": false
-      }
-    },
-    {
-      "label": "com.carr.delivery-cadence-a05-sweep",
-      "path": "~/Library/LaunchAgents/com.carr.delivery-cadence-a05-sweep.plist",
-      "executables": [
-        "/bin/zsh"
-      ],
-      "dependencies": [
-        "~/carr-system/bin/run-scheduled.sh",
-        "~/carr-system/.venv/bin/python",
-        "~/carr-system/ops/delivery-cadence-a05-sweep.py"
-      ],
-      "disabled": false,
-      "environment_names": [
-        "CARR_REPO",
-        "PATH"
-      ],
-      "schedule_source": "~/Library/LaunchAgents/com.carr.delivery-cadence-a05-sweep.plist",
       "classification": "leader-job",
       "macbook_installed": false,
       "macbook_missing": [],
@@ -262,58 +236,6 @@
       }
     },
     {
-      "label": "com.carr.release-pipeline",
-      "path": "~/Library/LaunchAgents/com.carr.release-pipeline.plist",
-      "executables": [
-        "/bin/zsh"
-      ],
-      "dependencies": [
-        "~/carr-system/bin/run-scheduled.sh",
-        "~/carr-system/.venv/bin/python",
-        "~/carr-system/ops/release-pipeline.py"
-      ],
-      "disabled": false,
-      "environment_names": [
-        "PATH"
-      ],
-      "schedule_source": "~/Library/LaunchAgents/com.carr.release-pipeline.plist",
-      "classification": "leader-job",
-      "macbook_installed": false,
-      "macbook_missing": [],
-      "schedule_expectation": {
-        "scheduler": "launchd",
-        "expected_enabled": false,
-        "expected_installed": false
-      }
-    },
-    {
-      "label": "com.carr.room-bridge",
-      "path": "~/Library/LaunchAgents/com.carr.room-bridge.plist",
-      "executables": [
-        "/bin/zsh"
-      ],
-      "dependencies": [
-        "~/carr-system/bin/run-scheduled.sh",
-        "~/carr-system/.venv/bin/python",
-        "~/carr-system/tools/room-bridge/bridge.py"
-      ],
-      "disabled": false,
-      "environment_names": [
-        "CARR_ENGINEERING_DISPATCH_ENABLED",
-        "CARR_ROOM_BRIDGE_ROOM",
-        "PATH"
-      ],
-      "schedule_source": "~/Library/LaunchAgents/com.carr.room-bridge.plist",
-      "classification": "leader-job",
-      "macbook_installed": false,
-      "macbook_missing": [],
-      "schedule_expectation": {
-        "scheduler": "launchd",
-        "expected_enabled": false,
-        "expected_installed": false
-      }
-    },
-    {
       "label": "com.carr.rules-refresh",
       "path": "~/Library/LaunchAgents/com.carr.rules-refresh.plist",
       "executables": [
@@ -427,23 +349,6 @@
       "macbook_missing": [
         "~/src/ds4-main/ds4-server",
         "~/.ds4/server-kv"
-      ],
-      "schedule_expectation": null
-    },
-    {
-      "label": "local.flash-desk",
-      "path": "~/Library/LaunchAgents/local.flash-desk.plist",
-      "executables": [
-        "~/.local/bin/flash-desk-start"
-      ],
-      "dependencies": [],
-      "disabled": false,
-      "environment_names": [],
-      "schedule_source": "~/Library/LaunchAgents/local.flash-desk.plist",
-      "classification": "leader-job",
-      "macbook_installed": false,
-      "macbook_missing": [
-        "~/.local/bin/flash-desk-start"
       ],
       "schedule_expectation": null
     }
@@ -671,10 +576,6 @@
     },
     {
       "path": "~/.config/carr/tokens.env",
-      "macbook_present": true
-    },
-    {
-      "path": "~/.config/carr/typesafe.env",
       "macbook_present": true
     },
     {
@@ -1420,24 +1321,8 @@
       "macbook_present": true
     },
     {
-      "path": "~/carr-system/out/jev-calls.jsonl.daily-cap.sqlite3",
-      "macbook_present": true
-    },
-    {
-      "path": "~/carr-system/out/jev-judge-cache.sqlite3",
-      "macbook_present": true
-    },
-    {
       "path": "~/carr-system/out/run-spool.sqlite3",
       "macbook_present": true
-    },
-    {
-      "path": "~/carr-system/out/wt-dot-job3/.git-recovery.qiybFN/repo/out/jev-judge-cache.sqlite3",
-      "macbook_present": false
-    },
-    {
-      "path": "~/carr-system/out/wt-dot-job3/out/jev-judge-cache.sqlite3",
-      "macbook_present": false
     }
   ],
   "state_search_roots": [
@@ -1508,5 +1393,7 @@
     "errors": [
       "/Library/LaunchDaemons/com.microsoft.teams.TeamsUpdaterDaemon.plist: unreadable plist"
     ]
-  }
+  },
+  "status": "historical_capture",
+  "purpose": "Frozen machine capture at captured_at and source_sha. Installed, disabled and missing fields describe that capture only; they are not current operational facts."
 }
