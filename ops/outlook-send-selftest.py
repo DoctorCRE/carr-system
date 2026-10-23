@@ -264,6 +264,20 @@ class SendTests(unittest.TestCase):
         path = self.out / send_mod.LEDGER
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
+    def test_flag_only_mail_never_presses_send(self):
+        h = Harness(self.out)
+        result = h.send()
+        self.assertEqual(h.fake.presses(), 0)
+        self.assertEqual(result.state, State.REFUSED)
+        self.assertEqual(result.reason, 'approval_required')
+
+    def test_flag_only_invitation_never_presses_save(self):
+        h = Harness(self.out)
+        result = event(h)
+        self.assertEqual(h.fake.presses(), 0)
+        self.assertEqual(result.state, State.REFUSED)
+        self.assertEqual(result.reason, 'approval_required')
+
     def test_default_call_prepares_a_draft_without_pressing_send(self):
         h = Harness(self.out)
         result = h.send(send_requested=None)
