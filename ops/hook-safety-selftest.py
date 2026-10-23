@@ -28,7 +28,7 @@ class ShellSafety(unittest.TestCase):
                      'CARR_HOOK_GUARD_LOG': str(Path(tmp) / 'guard.log')})
         self.assertEqual(result.returncode, 2, result.stderr)
 
-    def verdict(self, command, expected, tool='Bash'):
+    def verdict(self, command, expected, tool='Bash', script='guard-unattended.py'):
         value = {'command': command}
         if tool == 'exec_command':
             value = {'cmd': command, 'workdir': str(REPO)}
@@ -36,7 +36,7 @@ class ShellSafety(unittest.TestCase):
             value = 'await tools.exec_command({cmd: ' + json.dumps(command) + '});'
         with tempfile.TemporaryDirectory() as tmp:
             result = subprocess.run(
-                [sys.executable, str(REPO / 'hooks/guard-unattended.py')],
+                [sys.executable, str(REPO / 'hooks' / script)],
                 input=json.dumps({'hook_event_name': 'PreToolUse', 'tool_name': tool,
                                   'cwd': str(REPO), 'session_id': 'selftest',
                                   'tool_input': value}),
@@ -61,6 +61,20 @@ class ShellSafety(unittest.TestCase):
     def test_new_workflow_dispatches_stay_denied_while_job_retries_are_allowed(self):
         self.verdict('gh workflow run release.yml', 2)
         self.verdict('gh run rerun 123 --job 456', 0)
+
+    def test_configured_merge_checks_do_not_require_a_local_approval_wrapper(self):
+        command = 'gh pr merge 123 --repo DoctorCRE/carr-system --squash'
+        for config in ('hooks', 'codex-hooks'):
+            document = json.loads((REPO / f'ops/config/{config}.json').read_text())
+            groups = document.get('hooks', document)['PreToolUse']
+            scripts = {name + '.py' for group in groups for hook in group['hooks']
+                       for name in re.findall(r'/hooks/(guard-unattended|github-burst-guard)\.py',
+                                              hook['command'])}
+            self.assertIn('guard-unattended.py', scripts)
+            for script in sorted(scripts):
+                for tool in ('Bash', 'exec_command', 'functions.exec'):
+                    with self.subTest(config=config, script=script, tool=tool):
+                        self.verdict(command, 0, tool, script)
 
     def test_sensitive_path_reads(self):
         for tool in ('Bash', 'exec_command', 'functions.exec'):
