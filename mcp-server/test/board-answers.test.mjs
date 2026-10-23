@@ -57,6 +57,79 @@ test("board snapshot publication is tenant scoped and refuses stale versions", a
   assert.ok(params.includes("carr-internal"));
 });
 
+test("board reads overlap independent queries and batch links at every board size", async () => {
+  for (const count of [1, 1000]) {
+    const tasks = Object.fromEntries(Array.from({ length: count }, (_, i) =>
+      [`task-${i}`, { title: `Task ${i}`, work_request: `WR-${i}` }]));
+    let releaseSnapshot;
+    const snapshotReady = new Promise(resolve => { releaseSnapshot = resolve; });
+    const fake = new Fake({
+      "from board_snapshot": [{ board_id: "project", version: "7", snapshot_json: { tasks } }],
+      "from board_question q": [{ question_id: "q1", revision: "1", status: "Sent", answer_version: "1" }],
+      "from ops.work_request": [{ ref: "WR-0", title: "Readable request" }],
+    });
+    const query = fake.query.bind(fake);
+    fake.query = async (sql, params) => {
+      if (sql.includes("from board_snapshot")) await snapshotReady;
+      return query(sql, params);
+    };
+    const reading = TOOLS["read-progress-board"].handler(fake, joe, { board_id: "project" });
+    try {
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(fake.calls.length, 1, "questions must start before the snapshot returns");
+      assert.match(fake.calls[0][0], /from board_question q/);
+    } finally {
+      releaseSnapshot();
+      await reading;
+    }
+    const result = await reading;
+    assert.equal(fake.calls.length, 3, "two board queries and one batched link query");
+    for (const [, params] of fake.calls) assert.deepEqual(params.slice(0, 2), ["carr-internal", "joe"]);
+    const links = fake.calls.find(([sql]) => sql.includes("from ops.work_request"));
+    assert.equal(links[1][2].length, count);
+    assert.equal(result.snapshot.version, 7);
+    assert.equal(Object.keys(result.snapshot.snapshot_json.tasks).length, count);
+    assert.equal(result.snapshot.snapshot_json.tasks['task-0'].linkage.references[0].title, "Readable request");
+    assert.deepEqual(result.questions, [{ question_id: "q1", revision: 1, status: "Sent", answer_version: 1 }]);
+  }
+});
+
+test("board publication bounds database payload work and replays the complete snapshot", async () => {
+  for (const base_version of [0, 7]) {
+    const snapshot = { schema: "carr-progress-board.v4", tasks: Object.fromEntries(
+      Array.from({ length: 1000 }, (_, i) => [`task-${i}`, { title: `Task ${i}` }])) };
+    const metadata = { id: "board-1", organization_tenant_id: "carr-internal",
+      sponsoring_human_slug: "joe", board_id: "project", version: String(base_version + 1), updated_at: "2026-10-01T00:00:00Z" };
+    const fake = new Fake({
+      [base_version ? "update board_snapshot" : "insert into board_snapshot"]: [metadata],
+    });
+    const args = { board_id: "project", base_version, snapshot, idempotency_key: `publish-${base_version}` };
+    const result = await TOOLS["publish-board-snapshot"].handler(fake, sponsoredRobot, args);
+    const [sql, params] = fake.calls.find(([sql]) => /insert into board_snapshot|update board_snapshot/.test(sql));
+    assert.doesNotMatch(sql.split(/returning/i)[1], /snapshot_json/, "RETURNING must have size independent of the board");
+    assert.equal(fake.calls.length, 5, "one lock, replay read, snapshot write, event and receipt");
+    assert.deepEqual(JSON.parse(params[base_version ? 0 : 3]), snapshot);
+    assert.deepEqual(result.snapshot, { ...metadata, version: base_version + 1, snapshot_json: snapshot });
+    const receipt = fake.calls.find(([sql]) => sql.includes("insert into tool_call"));
+    assert.deepEqual(JSON.parse(receipt[1][4]), { ok: true, snapshot: { ...metadata, version: base_version + 1 } });
+    assert.ok(receipt[1][4].length < 512, "receipt storage must stay bounded as the board grows");
+    const replay = new Fake({ "select request_hash, response": [{
+      request_hash: receipt[1][3], response: JSON.parse(receipt[1][4]),
+    }] });
+    const retried = await TOOLS["publish-board-snapshot"].handler(replay, sponsoredRobot, args);
+    assert.deepEqual(retried, { replayed: true, ...result });
+    assert.equal(replay.calls.length, 2, "replay only locks and reads the bounded receipt");
+    const legacyReplay = new Fake({ "select request_hash, response": [{
+      request_hash: receipt[1][3], response: result,
+    }] });
+    assert.deepEqual(await TOOLS["publish-board-snapshot"].handler(legacyReplay, sponsoredRobot, args),
+      { replayed: true, ...result }, "existing full receipts remain readable");
+    await assert.rejects(() => TOOLS["publish-board-snapshot"].handler(replay, sponsoredRobot,
+      { ...args, snapshot: { ...snapshot, title: "Different publication" } }),
+    error => error.payload?.error === "key_reuse");
+  }
+});
+
 test("concurrent same-key board writes replay the first result", async () => {
   let receipt = null, snapshot = null, unlock = null;
   let firstRead;
