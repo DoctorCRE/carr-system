@@ -58,7 +58,6 @@ COPIES = [
     "tools/flash_install.py",
     "tools/flashlib.py",
     "ops/launchd/local.ds4-flash-next.plist",
-    "ops/launchd/local.flash-desk.plist",
     "ops/launchd/com.carr.flash-idle-stop.plist",
     "ops/git_env.py",
     "ops/githooks/pre-push",
@@ -155,8 +154,6 @@ def build_fixture(root, email, actor_slug=None, behind=True, dirty=False,
     write_exec(os.path.join(repo, "bin", "run-scheduled.sh"), "#!/bin/zsh\nexit 0\n")
     write_exec(os.path.join(repo, "tools", "dictation-rig", "bin", "consent-watch.sh"),
                "#!/bin/zsh\nexit 0\n")
-    write_exec(os.path.join(repo, "tools", "room-bridge", "dispatch.py"),
-               "#!/usr/bin/env python3\n")
     with open(os.path.join(repo, "README.md"), "w", encoding="utf-8") as fh:
         fh.write("fixture\n")
 
@@ -397,7 +394,7 @@ def case_marker_primary_noop(tmp):
 def case_flash_is_explicit(tmp):
     repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell")
     agents = Path(home) / "Library/LaunchAgents"
-    labels = ("local.ds4-flash-next", "local.flash-desk")
+    labels = ("local.ds4-flash-next",)
     for label in labels:
         (agents / (label + ".plist")).write_bytes(plistlib.dumps({
             "Label": label, "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False}}))

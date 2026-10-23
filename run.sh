@@ -55,7 +55,6 @@ registry_audit(){ shift; "$PY" "$REPO/tools/registry-audit.py" "$@"; }
 # They run on the repo venv because they speak to Neon through psycopg.
 review_queue() { shift; "$REPO/.venv/bin/python" "$REPO/pipelines/review_queue.py" "$@"; }
 brief_pack()   { shift; "$REPO/.venv/bin/python" "$REPO/pipelines/brief_pack.py" "$@"; }
-verify_emails(){ python3 "$REPO/tools/verify-emails.py" "$@"; }
 # The restore rehearsal (2026-08-02). Proves backups/*.sql.age can come BACK:
 # throwaway Neon branch, decrypt, load, reconcile row counts, delete the branch.
 # It writes NOTHING to production and needs the age PRIVATE key, which this repo
@@ -95,7 +94,6 @@ case "${1:-}" in
   registry-audit) registry_audit "$@" ;;
   review-queue) review_queue "$@" ;;
   brief-pack)   brief_pack "$@" ;;
-  verify-emails) shift; verify_emails "$@" ;;
   restore-rehearse) restore_rehearse "$@" ;;
   key-recovery-test) shift; key_recovery_test "$@" ;;
   call)         call_verb "$@" ;;
@@ -156,5 +154,5 @@ case "${1:-}" in
   rule-approvals) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import rule_approval_worklist as w; sys.exit(w.main(sys.argv[1:]))' "$@" ;;
   outlook-send) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["send", *sys.argv[1:]]))' "$@" ;;
   outlook-event) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["event", *sys.argv[1:]]))' "$@" ;;
-  *) echo "usage: run.sh deal-room|lead-board|lead-promote [--count N] [--county X] [--segment X]|renewal-feed|all|corroborate|graph|graph-system|graph-health [--verbose]|section-index [each supports --recovery --reason WHY [--vault PATH]]|space-search <folder>|salesforce-diff [--apply]|registry-audit [--verbose] [--recovery --reason WHY [--vault PATH]]|review-queue [--fixture f.json]|brief-pack [--section all|one-thing|prebriefs|capacity|monday-agenda|renewal-shortlist] [--quiet] [--recovery [--vault PATH]]|verify-emails [--source registry|vendors|roster] [--segment X] [--out f.csv]|retrieve [--recovery [--vault PATH]] <question>|health [--act] [--recovery --reason WHY [--vault PATH]]|cloudflare-spend-guard run/fast/restore/check-e2e/health/map-services/loop-watch|config [check|pull|install] [--apply]|lint <file> [--surface email|social|proposal|web]|restore-rehearse [--preflight] [--verify-only] [--date YYYYMMDD] [--identity PATH] [--keep-branch]|key-recovery-test|migrate [--apply] [--yes]|export [--only <target>] [--bootstrap]|call [--branch <name>] <verb> '<json args>'|call-mode [serve|state|start|stop]|next [--all] [--domain X]|local-db-ci [--class migration|strict] [--port N]|rule-approvals [--json] [--apply [--limit N]] [--runtime-root PATH]|regen [--pr N] [--list]|worktree <name> [--from B]|--list|--remove <name|path>"; exit 2 ;;
+  *) echo "usage: run.sh deal-room|lead-board|lead-promote [--count N] [--county X] [--segment X]|renewal-feed|all|corroborate|graph|graph-system|graph-health [--verbose]|section-index [each supports --recovery --reason WHY [--vault PATH]]|space-search <folder>|salesforce-diff [--apply]|registry-audit [--verbose] [--recovery --reason WHY [--vault PATH]]|review-queue [--fixture f.json]|brief-pack [--section all|one-thing|prebriefs|capacity|monday-agenda|renewal-shortlist] [--quiet] [--recovery [--vault PATH]]|retrieve [--recovery [--vault PATH]] <question>|health [--act] [--recovery --reason WHY [--vault PATH]]|cloudflare-spend-guard run/fast/restore/check-e2e/health/map-services/loop-watch|config [check|pull|install] [--apply]|lint <file> [--surface email|social|proposal|web]|restore-rehearse [--preflight] [--verify-only] [--date YYYYMMDD] [--identity PATH] [--keep-branch]|key-recovery-test|migrate [--apply] [--yes]|export [--only <target>] [--bootstrap]|call [--branch <name>] <verb> '<json args>'|call-mode [serve|state|start|stop]|next [--all] [--domain X]|local-db-ci [--class migration|strict] [--port N]|rule-approvals [--json] [--apply [--limit N]] [--runtime-root PATH]|regen [--pr N] [--list]|worktree <name> [--from B]|--list|--remove <name|path>"; exit 2 ;;
 esac

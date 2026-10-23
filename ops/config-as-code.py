@@ -1713,8 +1713,8 @@ def install_launchd_plist(filename, dest, body, body_matches, *, timeout=15):
 def cmd_install_progress_board(apply=False, repo=None):
     """Migrate the existing board agent to the repository wrapper, then read
     launchd's arguments back. This does not create a new schedule or label.
-    Runtime and state belong to the canonical main checkout maintained by
-    bin/fleet-sync.sh. --repo may name that checkout explicitly, but cannot
+    Runtime and state belong to the canonical main checkout.
+    --repo may name that checkout explicitly, but cannot
     select a feature tree even for pre-merge verification.
     """
     label = "local.carr-progress-board"
@@ -2043,7 +2043,7 @@ def cmd_install(apply):
     if apply:
         os.makedirs(LAUNCHD_SRC, exist_ok=True)
     for f in sorted(os.listdir(LAUNCHD_REPO)) if os.path.isdir(LAUNCHD_REPO) else []:
-        if f in {"local.ds4-flash-next.plist", "local.flash-desk.plist", "com.carr.flash-idle-stop.plist"}:
+        if f in {"local.ds4-flash-next.plist", "com.carr.flash-idle-stop.plist"}:
             continue
         source = read(launchd_repo_path(f))
         if (launchd_calendar.plist_label(source or "") or f.removesuffix(".plist")) in held_labels:

@@ -377,23 +377,6 @@
         "~/.ds4/server-kv"
       ],
       "schedule_expectation": null
-    },
-    {
-      "label": "local.flash-desk",
-      "path": "~/Library/LaunchAgents/local.flash-desk.plist",
-      "executables": [
-        "~/.local/bin/flash-desk-start"
-      ],
-      "dependencies": [],
-      "disabled": false,
-      "environment_names": [],
-      "schedule_source": "~/Library/LaunchAgents/local.flash-desk.plist",
-      "classification": "leader-job",
-      "macbook_installed": false,
-      "macbook_missing": [
-        "~/.local/bin/flash-desk-start"
-      ],
-      "schedule_expectation": null
     }
   ],
   "credential_files": [
