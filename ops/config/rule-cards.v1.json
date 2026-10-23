@@ -1239,7 +1239,7 @@
           },
           {
             "event": "PostToolUse",
-            "tool_name_regex": "^(mcp__carr__|mcp__[0-9a-f-]{36}__)(ask-jev|read-room-latest|read-room|read-dispatch-history)$",
+            "tool_name_regex": "^(mcp__carr__|mcp__[0-9a-f-]{36}__)(read-room-latest|read-room|read-dispatch-history)$",
             "input_regex": ".*"
           }
         ]

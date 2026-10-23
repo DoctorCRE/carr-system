@@ -83,10 +83,13 @@ class BusinessDispatchTests(unittest.TestCase):
         for block in blocks('brief-footer.md'):
             self.assertNotIn(block, task)
 
-    def test_engineering_brief_is_unchanged_by_default(self):
+    def test_engineering_brief_keeps_its_footer_and_adds_required_skills(self):
         self.assertEqual(self.send(['send', 'coder', 'Fix the build.', '--card-id', 'e1']).returncode, 0)
-        expected = 'Fix the build.' + ''.join('\n\n' + b for b in blocks('brief-footer.md'))
-        self.assertEqual(self.task('e1'), expected)
+        task = self.task('e1')
+        self.assertTrue(task.startswith('Fix the build.'))
+        self.assertEqual(task.count('## Required skills'), 1)
+        for block in blocks('brief-footer.md'):
+            self.assertIn(block, task)
 
     def test_briefs_and_desks_must_pair(self):
         wrong = self.send(['send', 'coder', 'Draft a reply.', '--brief', 'business', '--card-id', 'x1'])

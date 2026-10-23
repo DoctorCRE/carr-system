@@ -60,12 +60,9 @@ source = {
     "OPENAI_API_KEY": "secret",
     "ANTHROPIC_API_KEY": "secret",
     "SAFE_LOCAL_FLAG": "must-not-cross",
-    "CARR_JEV_OFFLINE_REPLAY": "1",
 }
 clean = mod.scrub_cloud_environment(source)
 check("required local environment survives", clean["PATH"] == source["PATH"] and clean["HOME"] == source["HOME"])
-check("explicit offline CI mode survives credential scrubbing",
-      clean.get("CARR_JEV_OFFLINE_REPLAY") == "1")
 check("unregistered ambient values are scrubbed", "SAFE_LOCAL_FLAG" not in clean)
 check("owner DSN is scrubbed", "DATABASE_URL" not in clean)
 check("routine DB DSNs are scrubbed", "CARR_DB_JOBS_URL" not in clean)

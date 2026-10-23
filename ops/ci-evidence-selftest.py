@@ -22,7 +22,7 @@ class HostedVerdict(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             summary = pathlib.Path(directory) / 'summary'
             needs = {'scope': {'result': 'success', 'outputs': {'full': 'true'}},
-                     'classes': {'result': 'success'},
+                     'fallow': {'result': 'success'}, 'classes': {'result': 'success'},
                      'migration-fixtures': {'result': 'success'}}
             with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
                             GITHUB_REPOSITORY='DoctorCRE/carr-system',
@@ -32,10 +32,22 @@ class HostedVerdict(unittest.TestCase):
                 self.assertEqual(evidence.hosted_verdict(), 0)
             self.assertIn('classes: PASSED', summary.read_text())
 
+    def test_fallow_failure_cannot_pass_the_required_aggregate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for result in ('failure', 'cancelled', 'skipped', 'success'):
+                with self.subTest(result=result):
+                    needs = {'scope': {'result': 'success', 'outputs': {'full': 'false'}},
+                             'classes': {'result': 'success'},
+                             'migration-fixtures': {'result': 'skipped'},
+                             'fallow': {'result': result}}
+                    with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
+                                    GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
+                        self.assertEqual(evidence.hosted_verdict(), 0 if result == 'success' else 1)
+
     def test_failed_scope_cannot_authorize_skipping_fixtures(self):
         with tempfile.TemporaryDirectory() as directory:
             needs = {'scope': {'result': 'failure', 'outputs': {'full': 'false'}},
-                     'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
+                     'fallow': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
             with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
                             GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
                 self.assertEqual(evidence.hosted_verdict(), 1)
@@ -56,7 +68,7 @@ class HostedVerdict(unittest.TestCase):
             for full, classes, fixtures, draft, expected in cases:
                 with self.subTest(full=full, classes=classes, fixtures=fixtures, draft=draft):
                     needs = {'scope': {'result': 'success', 'outputs': {'full': full}},
-                             'classes': {'result': classes}, 'migration-fixtures': {'result': fixtures}}
+                             'fallow': {'result': 'success'}, 'classes': {'result': classes}, 'migration-fixtures': {'result': fixtures}}
                     result = subprocess.run([sys.executable, str(ROOT / 'ops/ci-evidence.py'), 'verdict'],
                         env={**os.environ, 'CI_NEEDS': json.dumps(needs), 'CI_DRAFT': str(draft).lower(),
                              'GITHUB_STEP_SUMMARY': str(pathlib.Path(directory) / 'summary')},

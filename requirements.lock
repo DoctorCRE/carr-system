@@ -4,15 +4,21 @@
 # human-facing declaration with its environment markers; this is its
 # resolved output. Regenerate after changing requirements.txt:
 #     ops/ci-dep-check.py --write-lock
-# requirements.txt sha256: 43e062e6b74abfabfd942feb82ba5314aaa166d9fc8f07b57e80b78a8237bbd7
+# requirements.txt sha256: 4c3be56e80c1b71c62e5e12f84814412d2a012e3ac2e35fabcd4924e24a62e6b
 
 PyJWT==2.15.1
 PyYAML==6.0.3
 Pygments==2.20.0
+annotated-types==0.8.0
+anyio==4.15.1
 ast_serialize==0.7.0 ; python_version >= "3.10"
 cffi==2.1.1
 cryptography==50.0.2
 et_xmlfile==2.0.0
+h11==0.16.0
+httpcore2==2.16.0
+httpx2==2.16.0
+idna==3.20
 iniconfig==2.3.0
 librt==0.14.0 ; python_version >= "3.10"
 lxml==6.1.1
@@ -27,11 +33,17 @@ pluggy==1.6.0
 psycopg-binary==3.3.4
 psycopg==3.3.4
 pycparser==3.0
+pydantic==2.14.1
+pydantic_core==2.50.1
 pymupdf==1.28.2
 pyobjc-core==12.2.2 ; sys_platform == "darwin"
 pyobjc-framework-Cocoa==12.2.2 ; sys_platform == "darwin"
 pyobjc-framework-EventKit==12.2.2 ; sys_platform == "darwin"
 pytest==9.1.1
 python-docx==1.2.0
+tenacity==9.2.1
 tomlkit==0.15.1
+truststore==0.10.5
+typesafe-sdk==0.7.5
+typing-inspection==0.4.4
 typing_extensions==4.16.0

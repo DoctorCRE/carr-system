@@ -262,31 +262,6 @@
       }
     },
     {
-      "label": "com.carr.release-pipeline",
-      "path": "~/Library/LaunchAgents/com.carr.release-pipeline.plist",
-      "executables": [
-        "/bin/zsh"
-      ],
-      "dependencies": [
-        "~/carr-system/bin/run-scheduled.sh",
-        "~/carr-system/.venv/bin/python",
-        "~/carr-system/ops/release-pipeline.py"
-      ],
-      "disabled": false,
-      "environment_names": [
-        "PATH"
-      ],
-      "schedule_source": "~/Library/LaunchAgents/com.carr.release-pipeline.plist",
-      "classification": "leader-job",
-      "macbook_installed": false,
-      "macbook_missing": [],
-      "schedule_expectation": {
-        "scheduler": "launchd",
-        "expected_enabled": false,
-        "expected_installed": false
-      }
-    },
-    {
       "label": "com.carr.rules-refresh",
       "path": "~/Library/LaunchAgents/com.carr.rules-refresh.plist",
       "executables": [
@@ -644,10 +619,6 @@
     },
     {
       "path": "~/.config/carr/tokens.env",
-      "macbook_present": true
-    },
-    {
-      "path": "~/.config/carr/typesafe.env",
       "macbook_present": true
     },
     {
@@ -1393,24 +1364,8 @@
       "macbook_present": true
     },
     {
-      "path": "~/carr-system/out/jev-calls.jsonl.daily-cap.sqlite3",
-      "macbook_present": true
-    },
-    {
-      "path": "~/carr-system/out/jev-judge-cache.sqlite3",
-      "macbook_present": true
-    },
-    {
       "path": "~/carr-system/out/run-spool.sqlite3",
       "macbook_present": true
-    },
-    {
-      "path": "~/carr-system/out/wt-dot-job3/.git-recovery.qiybFN/repo/out/jev-judge-cache.sqlite3",
-      "macbook_present": false
-    },
-    {
-      "path": "~/carr-system/out/wt-dot-job3/out/jev-judge-cache.sqlite3",
-      "macbook_present": false
     }
   ],
   "state_search_roots": [

@@ -63,7 +63,7 @@ for (const file of files) {
     event.event.pull_request.draft = true;
     const draft = policy(workflow, event);
     assert.equal(draft.triggers, true);
-    assert.deepEqual(draft.runnable, file === "ci.yml" ? ["scope", "classes", "checks"] : file === "doc-drift.yml" ? ["check"] : []);
+    assert.deepEqual(draft.runnable, file === "ci.yml" ? ["test-first", "scope", "classes", "fallow", "checks"] : file === "doc-drift.yml" ? ["check"] : []);
   });
   test(`${file}: cancellation is scoped to the workflow and PR`, () => {
     const current = policy(workflow, context());
@@ -96,6 +96,14 @@ test("expensive proof jobs survive scope failure but stop when superseded", () =
   const ci = read("ci.yml");
   assert.deepEqual(policy(ci, context(), false).runnable, ["classes", "migration-fixtures", "checks"]);
   assert.deepEqual(policy(ci, context(), true, { shard_trial: false }, true).runnable, ["checks"]);
+});
+
+test("test-first installs the shell required by changed nightly tests", () => {
+  const steps = read("ci.yml").jobs["test-first"].steps;
+  const install = steps.findIndex(step => step.run === "ops/ci-zsh.sh");
+  const prove = steps.findIndex(step => step.run?.includes("ops/ci.sh --test-first"));
+  assert.ok(install >= 0 && install < prove, "install zsh before running changed shell tests");
+  assert.equal(steps[install].env?.ZSH_ARCHIVE_DIR, "${{ runner.temp }}/zsh-debs");
 });
 
 test("only unit fixtures provision the shared PostgreSQL service", () => {
@@ -132,24 +140,31 @@ test("metadata edits start no validation workflow, so no skipped suite replaces 
 test("strict aggregate runs after failed classes and requires complete successful evidence", () => {
   const ci = read("ci.yml"), gate = ci.jobs.checks;
   assert.equal(gate.name, "ops/ci.sh --strict", "the required context name must be a literal");
-  assert.deepEqual(gate.needs, ["scope", "classes", "migration-fixtures"]);
+  assert.deepEqual(gate.needs, ["scope", "classes", "migration-fixtures", "fallow", "test-first"]);
   assert.ok(policy(ci, context(), false).runnable.includes("checks"), "always() must override implicit success()");
   const step = gate.steps.find(step => step.name === "Fail unless every class group succeeded");
+  const footprint = gate.steps.find(step => step.name === "Require test-first footprint");
+  assert.equal(footprint.env.TEST_FIRST_RESULT, "${{ needs.test-first.result }}");
   assert.match(step.run, /python3 ops\/ci-evidence.py verdict/);
   const fixture = mkdtempSync(join(tmpdir(), "ci-verdict-test-"));
   try {
     assert.equal(step.env.CI_NEEDS, "${{ toJSON(needs) }}");
     for (const classes of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
       for (const fixtures of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
-        const output = spawnSync("bash", ["-e", "-c", step.run], {
-          cwd: new URL("../../", import.meta.url),
-          env: { PATH: process.env.PATH, CI_DRAFT: "false",
-            CI_NEEDS: JSON.stringify({ scope: { result: "success", outputs: { full: "true" } },
-              classes: { result: classes }, "migration-fixtures": { result: fixtures } }),
-            GITHUB_STEP_SUMMARY: join(fixture, "summary") },
-          encoding: "utf8", timeout: 5000 });
-        assert.ifError(output.error);
-        assert.equal(output.status === 0, classes === "success" && fixtures === "success", output.stdout + output.stderr);
+        for (const fallow of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
+          for (const testFirst of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
+            const output = spawnSync("bash", ["-e", "-c", `${footprint.run}\n${step.run}`], {
+              cwd: new URL("../../", import.meta.url),
+              env: { PATH: process.env.PATH, CI_DRAFT: "false", TEST_FIRST_RESULT: testFirst,
+                CI_NEEDS: JSON.stringify({ scope: { result: "success", outputs: { full: "true" } },
+                  classes: { result: classes }, "migration-fixtures": { result: fixtures },
+                  fallow: { result: fallow }, "test-first": { result: testFirst } }),
+                GITHUB_STEP_SUMMARY: join(fixture, "summary") },
+              encoding: "utf8", timeout: 5000 });
+            assert.ifError(output.error);
+            assert.equal(output.status === 0, classes === "success" && fixtures === "success" && fallow === "success" && testFirst === "success", output.stdout + output.stderr);
+          }
+        }
       }
     }
   } finally { rmSync(fixture, { recursive: true, force: true }); }
@@ -162,4 +177,23 @@ test("running Worker canary remains independent from subscribed validation event
   for (const file of files) for (const event of [context(), context("schedule"), context("workflow_dispatch")]) {
     assert.notEqual(policy(read(file), event).group, canary.concurrency.group);
   }
+});
+
+
+test("test-first comparisons provide the same isolated PostgreSQL service as unit checks", () => {
+  const ci = read("ci.yml"), footprint = ci.jobs["test-first"];
+  const unit = ci.jobs.classes.services.postgres;
+  const postgres = footprint.services?.postgres;
+  assert.ok(postgres, "changed database tests must run on head, not fail for missing PostgreSQL");
+  assert.ok(unit.image.includes(postgres.image), "use the same pinned PostgreSQL image as unit checks");
+  assert.deepEqual(postgres.env, unit.env);
+  assert.deepEqual(postgres.ports, unit.ports);
+  assert.equal(postgres.options, unit.options);
+  const proof = footprint.steps.find(step => step.name === "Prove changed tests distinguish the base and head code");
+  const dsn = new URL(proof.env.CARR_CI_DATABASE_URL);
+  assert.equal(dsn.hostname, "localhost");
+  assert.equal(dsn.port, "5432");
+  assert.equal(dsn.username, postgres.env.POSTGRES_USER);
+  assert.equal(dsn.password, postgres.env.POSTGRES_PASSWORD);
+  assert.equal(dsn.pathname, `/${postgres.env.POSTGRES_DB}`);
 });

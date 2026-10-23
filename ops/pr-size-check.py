@@ -8,9 +8,6 @@ one that mixes a refactor with a behavior change, gets a decomposition warning
 at the pre-push floor. Warning, not block, until the weekly numbers show what
 the distribution actually is.
 
-  * The numbers are the escalation router's own (ops/jev_intake.py
-    ROUTE_MAX_DIFF_LINES and ROUTE_MAX_FILES), imported, never copied, so a
-    rebase of the threshold happens in one place.
   * Test evidence uses lib/review_tiers.py classification and is reported
     separately from code lines and files. It remains reviewable.
   * Changed lines are added plus deleted, from `git diff -M --numstat` over the
@@ -29,7 +26,6 @@ the distribution actually is.
 """
 from __future__ import annotations
 
-import importlib.util
 import os
 import subprocess
 import sys
@@ -71,13 +67,8 @@ TOP_FILES = 5
 
 
 def thresholds() -> tuple[int, int]:
-    """(max changed lines, max files), read from the escalation router."""
-    spec = importlib.util.spec_from_file_location(
-        "jev_intake_thresholds", os.path.join(HERE, "jev_intake.py"))
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.ROUTE_MAX_DIFF_LINES, module.ROUTE_MAX_FILES
+    """The warn-only review size from engineering-workflow-sop section 15."""
+    return 300, 5
 
 
 def is_excluded(path: str) -> str | None:
