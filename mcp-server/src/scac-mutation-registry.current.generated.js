@@ -3035,7 +3035,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "today-triage": {
     "ingress_key": "mcp-tool:today-triage",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
+    "schema_digest": "c23d0abc10107890b9ea09f17b6d81b1572d32dc42844de24362eb63d9a3743c",
     "write": false,
     "human_only": false,
     "authority_only": false,
