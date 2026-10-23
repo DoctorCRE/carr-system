@@ -993,13 +993,13 @@ def test_hosted_draft_lifecycle():
             ctx = {**context(), "cancelled": True}
             check(f"{filename}: cancelled run still evaluates its required verdict",
                   evaluate(verdict["if"], ctx))
-            result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=REPO,
-                env={**scrubbed_env(), "CI_NEEDS": json.dumps(needs), "CI_DRAFT": "false",
-                     "CI_CANCELLED": str(evaluate(step["env"].get("CI_CANCELLED", "false"), ctx)).lower(),
-                     "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary")},
-                text=True, capture_output=True, timeout=10)
+            # Status functions are valid in step conditions, not step env.
+            guard = next((st for st in verdict['steps'] if st.get('if') == '${{ cancelled() }}'), {})
+            result = subprocess.run(["bash", "-e", "-c", guard.get("run", "true")], cwd=REPO,
+                                    text=True, capture_output=True, timeout=10)
             check(f"{filename}: cancellation after successful lanes cannot green the verdict",
-                  result.returncode != 0)
+                  bool(guard) and evaluate(guard["if"], ctx) and result.returncode != 0
+                  and verdict['steps'].index(guard) < verdict['steps'].index(step))
         if filename == "ci.yml":
             matrix = jobs["classes"]["strategy"]["matrix"]
             check("ready matrix exclusions are static and cannot trim classes on draft state",

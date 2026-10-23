@@ -67,12 +67,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Reject a cancelled run
+        if: ${{ cancelled() }}
+        run: |
+          echo "CI verdict: run cancelled; no full-suite evidence"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Require completed instruction-drift work
         env:
           CI_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
-          CI_CANCELLED: ${{ cancelled() }}
           CI_NEEDS: ${{ toJSON(needs) }}
         run: python3 ops/ci-evidence.py drift-verdict

@@ -44,9 +44,6 @@ def class_jobs(root=ROOT):
 
 def hosted_verdict(*, drift=False):
     """Use the scheduler's terminal results, never the eventually consistent jobs API."""
-    if os.environ.get('CI_CANCELLED') == 'true':
-        print('CI verdict: run cancelled; no full-suite evidence')
-        return 1
     if os.environ.get('CI_DRAFT') != 'false':
         message = 'Draft: deferred; no full-suite evidence'
         print(message)
