@@ -3,6 +3,7 @@ from pathlib import Path
 import ast
 import re
 import shlex
+import shutil
 import subprocess
 import unittest
 
@@ -45,6 +46,8 @@ class RecoveryRunbookTest(unittest.TestCase):
         for block in blocks:
             for shell in ("bash", "zsh"):
                 with self.subTest(shell=shell, block=block):
+                    if shell == "zsh" and shutil.which(shell) is None:
+                        self.skipTest("zsh is not installed; bash syntax checks remain required")
                     result = subprocess.run([shell, "-n"], input=block, text=True, capture_output=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
             for line in block.replace("\\\n", " ").strip().splitlines():
