@@ -121953,7 +121953,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0937_retire_deleted_hook_control_projections.sql	dcd518923d1a6a052060f87ae1797e17a7270fb660fc7a208e97b9944234bcaf	1970-01-01 00:00:00+00
 0938_j102_engagement_fields.sql	2f3496d3249138c9860c021510ae611d01324ef48d9d94c51386e8df4edb0629	1970-01-01 00:00:00+00
 0940_codex_job_delegation_control_refs.sql	9402a4057ee309d9a4959257e9d5a9a4c41451536f57d3def2201f02fd6741ab	1970-01-01 00:00:00+00
-0941_lead_workspace_set_reads.sql	687e444a25754aa975adcbcf45b92b5ab6f763a5c7c1a20a3b571aca4e10e28e	1970-01-01 00:00:00+00
+0943_lead_workspace_set_reads.sql	687e444a25754aa975adcbcf45b92b5ab6f763a5c7c1a20a3b571aca4e10e28e	1970-01-01 00:00:00+00
 \.
 
 
