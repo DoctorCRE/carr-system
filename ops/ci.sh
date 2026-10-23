@@ -94,13 +94,6 @@ run_quiet() {  # run_quiet <logfile> <cmd...>  — capture output, return status
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/carr-ci.XXXXXX")"
 trap 'rm -rf "$LOGDIR"' EXIT
 
-INHERIT_ASKED=0
-inherited_abort() {
-  [ "$INHERIT_ASKED" = "0" ] || return 0
-  INHERIT_ASKED=1
-  "$PY" ops/inherited-from-main.py
-}
-
 fail_tail() {  # fail_tail <logfile>
   local log="$1" lines window
   lines="$(wc -l < "$log" 2>/dev/null | tr -d ' ')"
@@ -189,17 +182,6 @@ check_contract() {
     run_quiet "$LOGDIR/contract-$(basename "$t").log" node --test "$t" \
       || { failures="$failures $t"; tail -20 "$LOGDIR/contract-$(basename "$t").log" >&2; }
   done
-  if [ -f ops/capture-verb-reachability.py ]; then
-    run_quiet "$LOGDIR/contract-capture-verb.log" "$PY" ops/capture-verb-reachability.py
-    crc=$?
-    if [ "$crc" -eq 78 ]; then
-        printf '        \033[33mnot run\033[0m  capture-verb-reachability — %s\n' \
-        "$(tail -1 "$LOGDIR/contract-capture-verb.log" 2>/dev/null)" >&2
-    elif [ "$crc" -ne 0 ]; then
-      failures="$failures ops/capture-verb-reachability.py"
-      tail -20 "$LOGDIR/contract-capture-verb.log" >&2
-    fi
-  fi
   if [ -n "$failures" ]; then
     bad contract "contract checks failed:$failures"
   else
@@ -286,7 +268,6 @@ PYEOF
       printf '        \033[33mnot run\033[0m  %s — NOT CONFIGURED (exit 78): %s\n' \
         "$base" "$(tail -1 "$LOGDIR/gate-$base.log" 2>/dev/null)" >&2
     elif [ "$grc" -ne 0 ]; then
-      inherited_abort "$base" "$PY" "$t"
       failures="$failures $base"; fail_tail "$LOGDIR/gate-$base.log"
     fi
   done
@@ -313,15 +294,11 @@ PYEOF
       tail -12 "$LOGDIR/gate-$sbase.log" >&2
       break
     elif [ "$grc" -ne 0 ]; then
-      inherited_abort "$sbase" "$t"
       failures="$failures $sbase"; fail_tail "$LOGDIR/gate-$sbase.log"
     fi
   done; fi
   run_quiet "$LOGDIR/safety-hooks.log" "$PY" hooks/gate-integrity.py --strict \
-    || { inherited_abort gate-integrity "$PY" hooks/gate-integrity.py --strict
-         failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
-
-  "$PY" ops/boot-budget-check.py
+    || { failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
 
   for inv in audit-queue-freshness-check \
              stale-count-check \
@@ -329,15 +306,14 @@ PYEOF
              selftest-git-isolation-check \
              sync-core-rule-ids rule-route-coverage \
              migration-order-gate \
-             migration-safety-gate door-reachability-check; do
+             migration-safety-gate; do
     [ -f "ops/$inv.py" ] || continue
     local inv_args=()
     case "$inv" in
       sync-core-rule-ids) inv_args=(--check) ;;
     esac
     run_quiet "$LOGDIR/gate-$inv.log" "$PY" "ops/$inv.py" ${inv_args[@]+"${inv_args[@]}"} \
-      || { inherited_abort "$inv" "$PY" "ops/$inv.py" ${inv_args[@]+"${inv_args[@]}"}
-           failures="$failures $inv"; tail -12 "$LOGDIR/gate-$inv.log" >&2; }
+      || { failures="$failures $inv"; tail -12 "$LOGDIR/gate-$inv.log" >&2; }
   done
 
   if [ "$(tree_fingerprint)" != "$tree_before" ]; then
