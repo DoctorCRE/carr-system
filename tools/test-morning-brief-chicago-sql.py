@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +35,7 @@ create role carr_reader;
 create role carr_writer;
 create role carr_jobs;
 create role carr_exporter;
+create role carr_authority;
 create table actor(id int, slug text);
 create table next_action(id int,subject_type text,subject_id int,owner_id int,
   description text,due_on date,hold_until date,status text);
@@ -99,6 +101,7 @@ class ChicagoCalendar(unittest.TestCase):
         type(self).zone = zone
         self.sql(f"set timezone='{zone}'; create or replace function fixture_now() returns timestamptz language sql immutable as $$select '{instant}'::timestamptz$$;")
         text = '\n'.join(definition(name, source) for name, source in SOURCES.items())
+        text += '\ngrant select on ' + ','.join(SOURCES) + ' to carr_reader;'
         if MIGRATION.exists():
             text += '\n' + MIGRATION.read_text()
         text = re.sub(r'\bcurrent_date\b', '(fixture_now()::date)', text, flags=re.I)
@@ -147,7 +150,8 @@ class ChicagoCalendar(unittest.TestCase):
                     self.assertEqual(self.sql('select id from v_today_triage order by id'),['1','4','6','8','10'])
                     self.assertEqual(self.sql("select due_on,business_days_overdue from v_today_triage where id=10"),[day+'|0'])
                     self.assertEqual(self.sql('select days_to_window from v_claim_card'),['5'])
-                    self.assertEqual(self.sql('select count(*) from v_renewal_decision_queue'),['2'])
+                    expected_renewals = [str(date.fromisoformat(day) + timedelta(days=offset)) for offset in [-90,548]]
+                    self.assertEqual(self.sql('select est_lease_event from v_renewal_decision_queue order by est_lease_event'), expected_renewals)
                     self.assertEqual(self.sql('select distinct last_touch from v_last_touch'),[day])
                     self.assertEqual(self.sql('select count(*) from v_last_touch'),['4'])
 
@@ -157,6 +161,9 @@ class ChicagoCalendar(unittest.TestCase):
         self.assertFalse(set(columns) & {'id','lease_id','deal_id','client_id','party_id','evidence_ref','source','email','phone','address'})
         if MIGRATION.exists():
             self.assertEqual(self.sql("set role carr_reader;select carr_business_date('2026-10-24T01:00:00Z');reset role;"),['2026-10-23'])
+            for name in SOURCES:
+                self.assertEqual(self.sql(f'set role carr_reader;select count(*) from {name};reset role;'), ['0' if name != 'v_renewal_decision_queue_status' else '2'])
+            self.assertEqual(self.sql("select count(*) from pg_proc p, lateral aclexplode(p.proacl) a where p.oid='public.carr_business_date(timestamptz)'::regprocedure and a.grantee=0 and a.privilege_type='EXECUTE'"), ['0'])
 
 
 if __name__ == '__main__':
