@@ -2066,8 +2066,8 @@ def record_publication_stage(project: str, phase: str, outcome: str, elapsed: fl
 
 def run_publication_stage(project: str, phase: str, action: Callable[[], Any]) -> Exception | None:
     started = time.monotonic()
-    error = None
-    reporting_error = None
+    error: Exception | None = None
+    reporting_error: Exception | None = None
     outcome = "failed"
     try:
         with publication_stage(project, phase):
@@ -2104,7 +2104,7 @@ def call_verb(verb: str, args: dict[str, Any]) -> dict[str, Any]:
     started = time.monotonic()
     context = f"board={stage.board} phase={stage.phase}" if stage else f"board={safe_project(args.get('board_id') or 'unscheduled')} phase=record"
     for attempt in range(2):
-        timeout = RECORD_TIMEOUT_SECONDS
+        timeout = float(RECORD_TIMEOUT_SECONDS)
         if stage is not None:
             timeout = min(timeout, stage.deadline - time.monotonic())
             if timeout <= 0:
@@ -2133,13 +2133,13 @@ def reconcile_board_write(verb: str, args: dict[str, Any]) -> str:
     if verb == "publish-board-snapshot":
         remote = observed.get("snapshot")
         version = int(remote["version"]) if remote else 0
-        if version == base + 1 and as_published(remote) == args["snapshot"]:
+        if remote is not None and version == base + 1 and as_published(remote) == args["snapshot"]:
             return "committed"
     else:
         remote = next((q for q in observed.get("questions", []) if q["question_id"] == args["question_id"]), None)
         version = int(remote["revision"]) if remote else 0
         fields = ("prompt", "choices", "allow_free_text", "default_answer", "asker_ref")
-        if version == base + 1 and all(remote.get(key) == args.get(key) for key in fields):
+        if remote is not None and version == base + 1 and all(remote.get(key) == args.get(key) for key in fields):
             return "committed"
     return "unchanged" if version == base else "conflict"
 

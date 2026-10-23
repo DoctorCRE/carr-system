@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-BIN_DIR = Path(__file__).resolve().parents[1] / "bin"
+BIN_DIR = Path(__file__).resolve().parent / "dictation-rig" / "bin"
 sys.path.insert(0, str(BIN_DIR))
 SPEC = importlib.util.spec_from_file_location("capture_outcomes_bridge", BIN_DIR / "capture-bridge.py")
 assert SPEC and SPEC.loader
