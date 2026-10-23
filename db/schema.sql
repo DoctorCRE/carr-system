@@ -83857,9 +83857,13 @@ CREATE TABLE public.capture_post_call_action (
     status text DEFAULT 'open'::text NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     completed_at timestamp with time zone,
+    item_title text,
+    item_bullets jsonb DEFAULT '[]'::jsonb NOT NULL,
+    source_ref text,
     CONSTRAINT capture_post_call_action_check CHECK ((((status = 'done'::text) AND (completed_at IS NOT NULL)) OR ((status = ANY (ARRAY['open'::text, 'dropped'::text])) AND (completed_at IS NULL)))),
     CONSTRAINT capture_post_call_action_description_check CHECK ((btrim(description) <> ''::text)),
-    CONSTRAINT capture_post_call_action_status_check CHECK ((status = ANY (ARRAY['open'::text, 'done'::text, 'dropped'::text])))
+    CONSTRAINT capture_post_call_action_status_check CHECK ((status = ANY (ARRAY['open'::text, 'done'::text, 'dropped'::text]))),
+    CONSTRAINT capture_post_call_item_shape CHECK (((item_title IS NULL) OR (((cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) >= 2) AND (cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) <= 4)) AND (source_ref IS NOT NULL) AND (btrim(source_ref) <> ''::text) AND (jsonb_typeof(item_bullets) = 'array'::text))))
 );
 
 
@@ -85899,6 +85903,10 @@ CREATE TABLE public.next_action (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by uuid,
     hold_until date,
+    item_title text,
+    item_bullets jsonb DEFAULT '[]'::jsonb NOT NULL,
+    source_ref text,
+    CONSTRAINT next_action_item_shape CHECK (((item_title IS NULL) OR ((subject_type = 'deal'::text) AND ((cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) >= 2) AND (cardinality(regexp_split_to_array(btrim(item_title), '\s+'::text)) <= 4)) AND (source_ref IS NOT NULL) AND (btrim(source_ref) <> ''::text) AND (jsonb_typeof(item_bullets) = 'array'::text)))),
     CONSTRAINT next_action_status_check CHECK ((status = ANY (ARRAY['open'::text, 'done'::text, 'dropped'::text]))),
     CONSTRAINT next_action_subject_type_check CHECK ((subject_type = ANY (ARRAY['deal'::text, 'client'::text, 'lead'::text, 'vendor'::text])))
 );
@@ -89243,7 +89251,7 @@ CREATE VIEW public.v_deal_room_board AS
     d.next_date,
     COALESCE(( SELECT n.description
            FROM public.next_action n
-          WHERE ((n.subject_type = 'deal'::text) AND (n.subject_id = d.id) AND (n.status = 'open'::text))
+          WHERE ((n.subject_type = 'deal'::text) AND (n.subject_id = d.id) AND (n.status = 'open'::text) AND (n.item_title IS NULL))
           ORDER BY n.updated_at DESC, n.id DESC
          LIMIT 1), ( SELECT n.text
            FROM public.deal_note n
@@ -89331,7 +89339,11 @@ CREATE VIEW public.v_deal_room_action AS
     n.due_on,
     n.status,
     n.updated_at,
-    n.hold_until
+    n.hold_until,
+    n.item_title,
+    n.item_bullets,
+    n.source_ref,
+    n.created_at AS created_order
    FROM (public.next_action n
      JOIN public.actor a ON ((a.id = n.owner_id)))
   WHERE (n.subject_type = 'deal'::text)
@@ -89343,7 +89355,11 @@ UNION ALL
     pca.due_on,
     pca.status,
     pca.updated_at,
-    NULL::date AS hold_until
+    NULL::date AS hold_until,
+    pca.item_title,
+    pca.item_bullets,
+    pca.source_ref,
+    pca.accepted_at AS created_order
    FROM (public.capture_post_call_action pca
      JOIN public.actor a ON ((a.id = pca.owner_id)));
 
@@ -101973,6 +101989,13 @@ CREATE INDEX deal_conflict_open_idx ON public.deal_conflict USING btree (deal_id
 
 
 --
+-- Name: deal_item_source_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX deal_item_source_unique ON public.next_action USING btree (subject_id, source_ref, item_title) WHERE ((subject_type = 'deal'::text) AND (item_title IS NOT NULL));
+
+
+--
 -- Name: deal_note_thread_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -102340,7 +102363,7 @@ CREATE INDEX negotiation_claim_type_idx ON public.negotiation_claim USING btree 
 -- Name: one_open_next_action_per_owner; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX one_open_next_action_per_owner ON public.next_action USING btree (subject_type, subject_id, owner_id) WHERE (status = 'open'::text);
+CREATE UNIQUE INDEX one_open_next_action_per_owner ON public.next_action USING btree (subject_type, subject_id, owner_id) WHERE ((status = 'open'::text) AND (item_title IS NULL));
 
 
 --
@@ -122691,6 +122714,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0933_source_merge_projection_control_refs.sql	8e7a69d8ca622e59de97b8cdee76186694bbe88b99c4c26195c21340e7d14f85	1970-01-01 00:00:00+00
 0934_retire_generic_scheduler_control_projections.sql	20e15e33b237e887a29577876821d622972d0bfc4fb9f4d372c5a72503c70c92	1970-01-01 00:00:00+00
 0935_retire_jev_gateway.sql	82dd8e9023b31cb5d56eedce2d5029fad1d93318d44ce4e1a996dce1e0210cdf	1970-01-01 00:00:00+00
+0936_deal_alert_items.sql	469f722bb5005547378d43bed510fb1b4edc98c1fc146ea8d50ae423b0275bb3	1970-01-01 00:00:00+00
 \.
 
 
