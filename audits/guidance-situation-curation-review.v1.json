@@ -207,7 +207,7 @@
   "reviewed_base_inventory": {
     "excluded_rule_surface": "intro_politics",
     "path": "ops/config/rule-enforcement-map.json",
-    "sha256": "c246e77c495625a4c62ca1a479e631db3604b41010ceb76e42d47c9e9e5ea454",
+    "sha256": "7108a6907924e650c353ac2f04ced936feff45d02c17c3b57ca41a71dae5ae39",
     "standing_source_count": 190
   },
   "reviewed_source_manifest": {
@@ -217,5 +217,6 @@
   "schema": "guidance-situation-curation-review/v1",
   "_repin_note_2026_10_16_reply_gates": "PR #1801 removes 19 automated gates under Joe's 2026-10-15 purge ruling and reclassifies their 42 rules as judgment_ambient prose guidance; all active rule IDs are preserved. The reviewed migration manifest gained one row per rule, appended as an orchestrator-approved batch with no human review recorded. The doctrine situation mappings are unchanged; these digests identify the updated inventory and manifest without approving any proposed rule or mapping.",
   "_repin_note_2026_10_17_heavy_build_retirement": "Remove retired 1fcaa63a and include admitted sizing rule 8400cd3d in the current inventory and procedure manifest. Doctrine mappings and proposed review status are unchanged.",
-  "_repin_note_2026_10_17_retired_rule_reselection": "PR #1859 removes 18 retired or pending-retirement rule IDs from the active inventory and procedure manifest. The proposed doctrine guidance for retired 0f38532e and the proposed constitution entries for retired 0f38532e and 1fddcffb leave with their source rules. Replacements chosen mechanically (coordinator rule, 2026-10-17): step 1, an existing candidate ranking in this review or the manifest, found none; step 2, core rule cards in ops/config/rule-cards.v1.json by core_rank then source_rule_ids order, taking the first two rules active in the pruned enforcement map, outside the #1857 retirement set (204391be, 4a77c35d) and not already proposed, selected K01 rules df8f1da0 and 179be4b8 (rule-df8f1da0-whole-v1, rule-179be4b8-whole-v1). Every other doctrine mapping and the proposed review status are unchanged."
+  "_repin_note_2026_10_17_retired_rule_reselection": "PR #1859 removes 18 retired or pending-retirement rule IDs from the active inventory and procedure manifest. The proposed doctrine guidance for retired 0f38532e and the proposed constitution entries for retired 0f38532e and 1fddcffb leave with their source rules. Replacements chosen mechanically (coordinator rule, 2026-10-17): step 1, an existing candidate ranking in this review or the manifest, found none; step 2, core rule cards in ops/config/rule-cards.v1.json by core_rank then source_rule_ids order, taking the first two rules active in the pruned enforcement map, outside the #1857 retirement set (204391be, 4a77c35d) and not already proposed, selected K01 rules df8f1da0 and 179be4b8 (rule-df8f1da0-whole-v1, rule-179be4b8-whole-v1). Every other doctrine mapping and the proposed review status are unchanged.",
+  "_repin_note_2026_10_22_agent_ceremony": "Joe approved deleting the boot, delegation, executor-tier, and automatic checkpoint machinery on 2026-10-22. The inventory retains the four delegation procedures as native guidance without registering replacement controls. Rule classifications, doctrine mappings, and proposed review status are unchanged. This digest identifies the source inventory and grants no approval or activation."
 }

@@ -2,7 +2,7 @@
  "schema_version": "review-tier-vectors.v1",
  "generated_by": "ops/sync-review-tiers.py",
  "source": "ops/config/review-tiers.v1.json",
- "map_digest": "sha256:731c9b99162294ba83c76c03cf9cfc095e6f3d3b45f39595ccfd5a96ad57fb6a",
+ "map_digest": "sha256:5a812deb9a65809e46d1d3798dd732f67a4c46ea405b9cb57c1b8fdfb3a939e1",
  "vectors": [
   {
    "path": ".github/CODEOWNERS",
@@ -1735,7 +1735,7 @@
     "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "policy_revision": "cccccccccccccccccccccccccccccccccccccccc",
     "diff_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "policy_digest": "sha256:c1aaaa88f502b3d004405eb33e2e627d8f5466ad6e76077ce86023e22c25785b",
+    "policy_digest": "sha256:e55b0f858b02af9518c8d36c82b48d35d48ed8256b136ec55a6aa9d2dd091504",
     "changed_paths": [
      "lib/example.py",
      "tests/test_example.py"
@@ -1779,7 +1779,7 @@
     "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "policy_revision": "cccccccccccccccccccccccccccccccccccccccc",
     "diff_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "policy_digest": "sha256:c1aaaa88f502b3d004405eb33e2e627d8f5466ad6e76077ce86023e22c25785b",
+    "policy_digest": "sha256:e55b0f858b02af9518c8d36c82b48d35d48ed8256b136ec55a6aa9d2dd091504",
     "changed_paths": [
      "tests/test_example.py"
     ],
@@ -1820,7 +1820,7 @@
     "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "policy_revision": "cccccccccccccccccccccccccccccccccccccccc",
     "diff_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "policy_digest": "sha256:c1aaaa88f502b3d004405eb33e2e627d8f5466ad6e76077ce86023e22c25785b",
+    "policy_digest": "sha256:e55b0f858b02af9518c8d36c82b48d35d48ed8256b136ec55a6aa9d2dd091504",
     "changed_paths": [
      "ops/example-selftest.py"
     ],
@@ -1838,5 +1838,5 @@
    }
   }
  ],
- "policy_digest": "sha256:c1aaaa88f502b3d004405eb33e2e627d8f5466ad6e76077ce86023e22c25785b"
+ "policy_digest": "sha256:e55b0f858b02af9518c8d36c82b48d35d48ed8256b136ec55a6aa9d2dd091504"
 }

@@ -8,7 +8,7 @@
       "status": "review",
       "executor": "Anthropic Claude Opus 5.5 medium (cloud credit)",
       "pr": null,
-      "repo": "jbookout/carr-system",
+      "repo": "DoctorCRE/carr-system",
       "note": "PR 1408 CI green, awaiting independent review",
       "created_at": "2026-09-29T15:17:58+00:00",
       "updated_at": "2026-09-29T19:19:28+00:00",
@@ -25,7 +25,7 @@
       "status": "review",
       "executor": "gpt-6.1-sol high (Codex)",
       "pr": null,
-      "repo": "jbookout/carr-system",
+      "repo": "DoctorCRE/carr-system",
       "note": "Opened carr-system PR 1448; tracked on its PR row",
       "created_at": "2026-10-01T14:25:30+00:00",
       "updated_at": "2026-10-01T14:25:30+00:00",
@@ -49,7 +49,7 @@
       "status": "review",
       "executor": "gpt-6.1-sol high (Codex)",
       "pr": null,
-      "repo": "jbookout/carr-system",
+      "repo": "DoctorCRE/carr-system",
       "note": "Opened carr-system PR 1454; tracked on its PR row",
       "created_at": "2026-10-01T14:25:30+00:00",
       "updated_at": "2026-10-01T14:25:30+00:00",
@@ -73,7 +73,7 @@
       "status": "review",
       "executor": "gpt-6.1-sol high (Codex)",
       "pr": null,
-      "repo": "jbookout/carr-system",
+      "repo": "DoctorCRE/carr-system",
       "note": "Opened doctorcre-app PR 116; tracked on its PR row",
       "created_at": "2026-10-01T14:25:30+00:00",
       "updated_at": "2026-10-01T14:25:30+00:00",
@@ -97,7 +97,7 @@
       "status": "review",
       "executor": "the Dot (ChatGPT, free)",
       "pr": null,
-      "repo": "jbookout/carr-system",
+      "repo": "DoctorCRE/carr-system",
       "note": "Report saved: report-A.md, report-C.md, report-B.md",
       "created_at": "2026-10-01T14:28:27+00:00",
       "updated_at": "2026-10-01T14:28:27+00:00",
@@ -121,7 +121,7 @@
       "status": "review",
       "executor": "the Dot (ChatGPT, free)",
       "pr": null,
-      "repo": "jbookout/carr-system",
+      "repo": "DoctorCRE/carr-system",
       "note": "Report saved: report.md",
       "created_at": "2026-10-01T14:28:28+00:00",
       "updated_at": "2026-10-01T14:28:28+00:00",
@@ -145,7 +145,7 @@
       "status": "review",
       "executor": "the Dot (ChatGPT, free)",
       "pr": null,
-      "repo": "jbookout/carr-system",
+      "repo": "DoctorCRE/carr-system",
       "note": "Report saved: report-I.md",
       "created_at": "2026-10-01T15:20:27+00:00",
       "updated_at": "2026-10-01T15:32:52+00:00",
@@ -201,7 +201,7 @@
       "status": "running",
       "executor": "Codex gpt-6-sol high x2",
       "pr": null,
-      "repo": "jbookout/carr-system",
+      "repo": "DoctorCRE/carr-system",
       "note": null,
       "created_at": "2026-09-29T13:48:55+00:00",
       "updated_at": "2026-09-29T14:12:49+00:00",
@@ -222,7 +222,7 @@
       "status": "review",
       "executor": "the Dot (ChatGPT, free)",
       "pr": null,
-      "repo": "jbookout/carr-system",
+      "repo": "DoctorCRE/carr-system",
       "note": "Report saved: reports/002-AF-carr-system-1461.txt",
       "created_at": "2026-10-01T18:54:35+00:00",
       "updated_at": "2026-10-01T19:47:09+00:00",
@@ -246,7 +246,7 @@
       "status": "review",
       "executor": "gpt-6.1-sol high (Codex)",
       "pr": null,
-      "repo": "jbookout/carr-system",
+      "repo": "DoctorCRE/carr-system",
       "note": "Opened carr-system PR 1460; tracked on its PR row",
       "created_at": "2026-10-01T15:20:25+00:00",
       "updated_at": "2026-10-01T15:30:45+00:00",
@@ -267,7 +267,7 @@
     }
   },
   "github": {
-    "jbookout/carr-system#1408": {
+    "DoctorCRE/carr-system#1408": {
       "closedAt": "2026-09-29T19:54:45Z",
       "mergeCommit": {
         "oid": "97dbfbac28a72dd0c20e63766678588091c65c39"
@@ -276,18 +276,18 @@
       "number": 1408,
       "state": "MERGED",
       "title": "Structural partition pilot for the Jev code review",
-      "url": "https://github.com/jbookout/carr-system/pull/1408"
+      "url": "https://github.com/DoctorCRE/carr-system/pull/1408"
     },
-    "jbookout/carr-system#1448": {
+    "DoctorCRE/carr-system#1448": {
       "closedAt": "2026-10-18T11:07:03Z",
       "mergeCommit": null,
       "mergedAt": null,
       "number": 1448,
       "state": "CLOSED",
       "title": "Fix database design defects found by the Dot's schema review",
-      "url": "https://github.com/jbookout/carr-system/pull/1448"
+      "url": "https://github.com/DoctorCRE/carr-system/pull/1448"
     },
-    "jbookout/carr-system#1454": {
+    "DoctorCRE/carr-system#1454": {
       "closedAt": "2026-10-01T17:38:16Z",
       "mergeCommit": {
         "oid": "d85f1bc7d160997d715d54a3e8526dce357f9b0d"
@@ -296,7 +296,7 @@
       "number": 1454,
       "state": "MERGED",
       "title": "Doc V0: a ChatGPT plugin and Claude connector endpoint over the record layer",
-      "url": "https://github.com/jbookout/carr-system/pull/1454"
+      "url": "https://github.com/DoctorCRE/carr-system/pull/1454"
     },
     "jbookout/doctorcre-app#116": {
       "closedAt": "2026-10-01T12:47:53Z",
@@ -309,16 +309,16 @@
       "title": "Fix Tour defects found by the Dot's V0 Tour review",
       "url": "https://github.com/jbookout/doctorcre-app/pull/116"
     },
-    "jbookout/carr-system#1461": {
+    "DoctorCRE/carr-system#1461": {
       "closedAt": "2026-10-01T20:56:08Z",
       "mergeCommit": null,
       "mergedAt": null,
       "number": 1461,
       "state": "CLOSED",
       "title": "Fix forward: renumber Progress directory migration 0757 -> 0764 so it sorts after applied 0759",
-      "url": "https://github.com/jbookout/carr-system/pull/1461"
+      "url": "https://github.com/DoctorCRE/carr-system/pull/1461"
     },
-    "jbookout/carr-system#1460": {
+    "DoctorCRE/carr-system#1460": {
       "closedAt": "2026-10-03T18:43:22Z",
       "mergeCommit": {
         "oid": "211e557cbc999e91b708a7f672d812c80cd0a585"
@@ -327,18 +327,18 @@
       "number": 1460,
       "state": "MERGED",
       "title": "Harden the shared OAuth layer: consent, audience binding, PKCE challenge, Origin check",
-      "url": "https://github.com/jbookout/carr-system/pull/1460"
+      "url": "https://github.com/DoctorCRE/carr-system/pull/1460"
     }
   },
   "proof_cutover": {
-    "pr": "https://github.com/jbookout/carr-system/pull/1940",
+    "pr": "https://github.com/DoctorCRE/carr-system/pull/1940",
     "merge_sha": "2f372d5e59e489e60efb402d372694b1c234f339",
     "merged_at": "2026-10-19T09:33:08Z"
   },
   "source_note_corrections": {
     "build-r-oauth-hardening": {
       "original": "Opened carr-system PR 1454; tracked on its PR row",
-      "corrected_pr": "https://github.com/jbookout/carr-system/pull/1460",
+      "corrected_pr": "https://github.com/DoctorCRE/carr-system/pull/1460",
       "basis": "Card title exactly matches PR 1460; PR 1454 is the Doc plugin"
     }
   }

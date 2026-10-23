@@ -30,7 +30,7 @@ def main() -> int:
     branch = subprocess.run(['git', 'branch', '--show-current'], cwd=ROOT, capture_output=True,
                             text=True, check=True).stdout.strip()
     config = json.loads((ROOT / 'ops/config/local-jobs.json').read_text())
-    canonical = Path(config['repository_roots']['jbookout/carr-system']).expanduser().resolve()
+    canonical = Path(config['repository_roots']['DoctorCRE/carr-system']).expanduser().resolve()
     if sys.platform != 'darwin' or branch != 'main' or ROOT != canonical:
         parser.error('--apply requires macOS and the canonical main checkout')
     directory = Path.home() / '.config/carr/salesforce-refresh'

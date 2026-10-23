@@ -5,8 +5,6 @@ No Playwright/Puppeteer dependency is required: Chrome's built-in DevTools
 Protocol drives a temporary, loopback-only rendered artifact.  A missing or
 unlaunchable browser emits a valid ``browser_unavailable`` report whose
 critical gates are ``not_verified``; it never guesses a pass from source code.
-``--model-room`` measures the real Model Room bundle plus one synthetic typed
-wire turn from ``model_room_preview_server`` instead of a single artifact file.
 """
 from __future__ import annotations
 
@@ -298,12 +296,6 @@ def serving_target(args: argparse.Namespace) -> Iterator[str]:
             server.shutdown()
             server.server_close()
 
-    if args.model_room:
-        import model_room_preview_server
-
-        with _loopback(model_room_preview_server.PreviewHandler) as server:
-            yield f"http://127.0.0.1:{server.server_port}/room.html"
-        return
     artifact = Path(args.artifact).resolve()
     if not artifact.is_file():
         raise FileNotFoundError(f"artifact does not exist: {artifact}")
@@ -402,16 +394,11 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Capture exact-bound real-browser CARR visual gate evidence")
-    target = parser.add_mutually_exclusive_group(required=True)
-    target.add_argument("--artifact", type=Path)
-    target.add_argument("--model-room", action="store_true",
-                        help="serve the real Model Room bundle plus one synthetic typed wire turn from "
-                             "tools/room-bridge/model_room_preview_server.py on an ephemeral loopback port "
-                             "(test-only; never writes a room turn)")
+    parser.add_argument("--artifact", type=Path, required=True)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--kernel", default=ROOT / "design" / "carr-design-kernel.v1.json", type=Path)
     parser.add_argument("--intent", default="intent:job-passport")
-    parser.add_argument("--surface-family", default="model-room")
+    parser.add_argument("--surface-family", default="artifact")
     parser.add_argument("--work-request-id", required=True)
     parser.add_argument("--projection-digest", required=True)
     parser.add_argument("--adapter-id", default="adapter:job-passport-html")

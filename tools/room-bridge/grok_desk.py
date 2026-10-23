@@ -8,17 +8,10 @@ from pathlib import Path
 
 from desks import DEFAULT_REGISTRY, Registry
 from grok_wire import EFFORT
-import registry_ext
 
 
 def install(registry: Registry, cwd: str) -> dict:
-    # Leave every other desk untouched and retain existing room metadata.
-    old = registry.entries().get("grok-desk", {})
     registry.register("grok-desk", "grok-cli", effort=EFFORT, cwd=cwd)
-    registry_ext.set_seat("grok-desk", "grok", path=registry.path)
-    registry_ext.set_room_listen("grok-desk", "mention", path=registry.path)
-    if old.get("profile"):
-        registry_ext.set_profile("grok-desk", old["profile"], path=registry.path)
     return registry.resolve("grok-desk")
 
 

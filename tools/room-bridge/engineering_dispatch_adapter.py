@@ -41,7 +41,7 @@ class DispatchRefusal(ValueError):
 def validate_job(job: dict) -> dict:
     if not isinstance(job, dict) or set(job) != {"repository", "revision", "permitted_work", "checks"}:
         raise DispatchRefusal("job requires repository, revision, permitted_work and checks")
-    if job["repository"] != "jbookout/carr-system" or not re.fullmatch(r"[0-9a-f]{40}", str(job["revision"])):
+    if job["repository"] != "DoctorCRE/carr-system" or not re.fullmatch(r"[0-9a-f]{40}", str(job["revision"])):
         raise DispatchRefusal("job repository or revision is invalid")
     scope = job["permitted_work"]
     if (not isinstance(scope, dict) or not isinstance(scope.get("objective"), str)

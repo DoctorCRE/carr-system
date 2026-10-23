@@ -47,10 +47,21 @@ class WatchdogTests(unittest.TestCase):
     def test_missing_job_cannot_clear_its_previous_failed_run(self):
         failed = {"jobs": [{"label": "com.carr.fixture", "exit_code": 7, "log_line": "failed"}], "disk_free_percent": 50}
         absent = {"jobs": [], "disk_free_percent": 50}
-        with patch.object(watchdog, "collect", side_effect=[failed, absent]):
+        with patch.object(watchdog, "SOURCE", self.source), \
+             patch.object(watchdog, "collect", side_effect=[failed, absent]):
             self.assertEqual(watchdog.scan(self.root, self.config), 0)
             self.assertEqual(watchdog.scan(self.root, self.config), 0)
         self.assertIn("com.carr.fixture exit 7", watchdog.digest(self.root, self.config))
+
+    def test_deleted_job_definition_clears_its_failure(self):
+        failed = {"jobs": [{"label": "com.carr.fixture", "exit_code": 2, "log_line": "script removed"}], "disk_free_percent": 50}
+        absent = {"jobs": [], "disk_free_percent": 50}
+        with patch.object(watchdog, "SOURCE", self.source), \
+             patch.object(watchdog, "collect", side_effect=[failed, absent]):
+            watchdog.scan(self.root, self.config)
+            (self.plists / "com.carr.fixture.plist").unlink()
+            watchdog.scan(self.root, self.config)
+        self.assertEqual(watchdog.digest(self.root, self.config), "")
 
     def test_repeated_failure_updates_one_cause_and_success_clears_it(self):
         def facts(code, line):

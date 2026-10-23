@@ -6,12 +6,12 @@ from migration_claims import claims
 class ClaimsTests(unittest.TestCase):
     def test_earlier_pr_owns_slot_and_all_peer_slots_block_allocation(self):
         data = {
-            'repos/jbookout/carr-system/pulls?state=open&per_page=100': [
+            'repos/DoctorCRE/carr-system/pulls?state=open&per_page=100': [
                 [{'number': 7}, {'number': 9}, {'number': 11}]],
-            'repos/jbookout/carr-system/pulls/7/files?per_page=100': [[
+            'repos/DoctorCRE/carr-system/pulls/7/files?per_page=100': [[
                 {'filename': 'migrations/0891_earlier.sql', 'status': 'added'},
                 {'filename': 'migrations/0800_history.sql', 'status': 'modified'}]],
-            'repos/jbookout/carr-system/pulls/11/files?per_page=100': [[
+            'repos/DoctorCRE/carr-system/pulls/11/files?per_page=100': [[
                 {'filename': 'migrations/0892_later.sql', 'status': 'renamed'}]],
         }
         result = claims(9, data.__getitem__)

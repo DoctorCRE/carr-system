@@ -15,7 +15,40 @@ from statistics import median
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'ops'))
-from jev_spend_health import _loop_lock, _save_state, USAGE_LOG, FACTORY_USAGE_LOG, LOOP_STATE, ACTION
+import fcntl
+import tempfile
+from contextlib import contextmanager
+
+def _save_state(path, state):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=path.name + ".", delete=False) as handle:
+        tmp = Path(handle.name)
+        try:
+            json.dump(state, handle, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+
+@contextmanager
+def _loop_lock(path):
+    lock = Path(str(path) + ".lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with lock.open("a+") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+
+ACTION = ("on breach: open/update one deduplicated loop per provider; owner orchestrator; "
+          "remediation inspect the named billing driver; verify the next complete day stays within budget; "
+          "auto-clear after all checks pass with complete coverage")
 from credential_env import load_carr_tokens
 from lib import record_call
 
@@ -71,52 +104,8 @@ def normalize(provider, response, rates=None):
     return {'state': 'ready', 'rows': rows}
 
 
-def jev_usage(path, price, start=None, through=None):
-    rows, unknown = [], 0
-    with Path(path).open() as handle:
-        for line in handle:
-            try:
-                item = json.loads(line)
-                if not isinstance(item, dict):
-                    raise ValueError('invalid usage receipt')
-                if item.get('cache_hit') is True:
-                    continue
-                if item.get('ok') is False and not (200 <= (item.get('http_status') or 0) < 300):
-                    continue
-                stamp = datetime.fromisoformat(item['ts'].replace('Z', '+00:00'))
-                if stamp.tzinfo is None:
-                    raise ValueError('missing timezone')
-                day = stamp.astimezone(timezone.utc).date()
-                if (start and day < start) or (through and day > through):
-                    continue
-                tokens = item['usage']['input_tokens']
-                rows.append({'day': day.isoformat(),
-                             'usd': float(amount(tokens) * amount(price) / 1000000),
-                             'driver': str(item.get('caller') or item.get('call_site') or 'unattributed')})
-            except (ValueError, KeyError, TypeError, ArithmeticError, AttributeError):
-                unknown += 1
-    return {'state': 'partial' if unknown else 'ready', 'reason': f'{unknown} unreadable/missing usage receipts' if unknown else None,
-            'rows': rows, 'estimated': True}
 
 
-def jev_sources(local, price, start, through, extra_logs=(FACTORY_USAGE_LOG,)):
-    rows, reasons, seen = [], [], set()
-    for path in (local, *extra_logs):
-        path = Path(path).resolve()
-        if path in seen:
-            continue
-        seen.add(path)
-        try:
-            source = jev_usage(path, price, start=start, through=through)
-            rows.extend(source['rows'])
-            if source.get('reason'):
-                reasons.append(source['reason'])
-        except (OSError, UnicodeError):
-            reasons.append('Local/factory Jev ledger unavailable')
-    # The current Worker verb exposes only today's aggregate. It cannot
-    # establish the closed-day history needed for projections or clearing.
-    reasons.append('Worker historical receipts unavailable; local/factory spend is a known lower bound')
-    return {'state': 'partial', 'rows': rows, 'reason': '; '.join(reasons), 'estimated': True}
 
 
 def summarize(config, sources, through, observed_at=None, month=None):
@@ -171,16 +160,10 @@ def summarize(config, sources, through, observed_at=None, month=None):
             reasons.append('subscription plan/price unconfirmed')
         elif fixed > 0 and state == 'unavailable':
             state = 'partial'
-        sites = defaultdict(float)
-        if provider == 'jev':
-            for row in current:
-                for site, usd in row['drivers'].items():
-                    if site != 'Fixed subscription (daily accrual)':
-                        sites[site] += usd
         view = {'provider': provider, 'label': plan['label'], 'plan': plan['plan'],
                 'mtd_usd': round(mtd, 6), 'projection_usd': round(projection, 6),
                 'budget_usd': plan.get('budget_usd'), 'state': state, 'reason': '; '.join(reasons) or None,
-                'estimated': source.get('estimated', False), 'daily': series, 'call_sites': dict(sites)}
+                'estimated': source.get('estimated', False), 'daily': series}
         providers.append(view)
         if series:
             today = series[-1]
@@ -252,14 +235,13 @@ def load_snapshot(path=ROOT / 'out/system-costs.json', now=None):
             for key in ('mtd_usd', 'projection_usd', 'budget_usd'):
                 clean[key] = float(amount(row[key])) if row.get(key) is not None else None
             clean['daily'] = []
-            if len(row['daily']) > 62 or len(row['call_sites']) > 500:
+            if len(row['daily']) > 62:
                 raise ValueError('invalid daily size')
             for day in row['daily']:
                 if not isinstance(day['drivers'], dict) or len(day['drivers']) > 500:
                     raise ValueError('invalid drivers size')
                 clean['daily'].append({'day': date.fromisoformat(day['day']).isoformat(), 'usd': float(amount(day['usd'])),
                                        'drivers': {text(k): float(amount(v)) for k, v in day['drivers'].items()}})
-            clean['call_sites'] = {text(k): float(amount(v)) for k, v in row['call_sites'].items()}
             result['providers'].append(clean)
         result['months'] = [{'month': date.fromisoformat(row['month'] + '-01').strftime('%Y-%m'),
                              'usd': float(amount(row['usd'])), 'providers': {text(k): float(amount(v)) for k, v in row['providers'].items()}}
@@ -294,7 +276,7 @@ def cost_verb(name, payload):
     return answer
 
 
-def reconcile(report, path, run_verb=cost_verb, *, legacy_path=None):
+def reconcile(report, path, run_verb=cost_verb):
     """Serialize durable intents; uncertain outcomes replay, refusals re-decide."""
     with _loop_lock(path):
         try:
@@ -302,19 +284,6 @@ def reconcile(report, path, run_verb=cost_verb, *, legacy_path=None):
         except FileNotFoundError:
             state = {'open': {}, 'episodes': {}, 'pending': None, 'revision': 0}
         state.setdefault('revision', 0)
-        if legacy_path is not None and not state.get('legacy_imported'):
-            with _loop_lock(legacy_path):
-                try:
-                    legacy = json.loads(Path(legacy_path).read_text())
-                except FileNotFoundError:
-                    legacy = {}
-                if legacy.get('loop_id') and 'jev' not in state['open']:
-                    state['open']['jev'] = {'loop_id': legacy['loop_id'], 'fingerprint': '',
-                                            'through': legacy.get('day', report['through'])}
-                    state['episodes'].setdefault('jev', 1)
-                state['legacy_imported'] = True
-                _save_state(path, state)
-
         def complete_pending():
             pending = state.get('pending')
             if not pending:
@@ -439,7 +408,7 @@ def get_json(url, headers):
         return json.load(response)
 
 
-def collect(config, tokens, fetch=get_json, now=None, jev_path=None):
+def collect(config, tokens, fetch=get_json, now=None):
     now = now or datetime.now(timezone.utc)
     through = now.date() - timedelta(days=1)
     first = now.date().replace(day=1)
@@ -451,12 +420,7 @@ def collect(config, tokens, fetch=get_json, now=None, jev_path=None):
         token = tokens.get(name)
         source = {'state': 'unavailable', 'reason': f'Missing {name}', 'rows': []}
         try:
-            if provider == 'jev':
-                guard = json.loads((ROOT / 'ops/config/jev-cost-guard.v1.json').read_text())
-                config = {**config, 'providers': {**config['providers'], 'jev': {
-                    **config['providers']['jev'], 'daily_warning_usd': guard['daily_warning_usd']}}}
-                source = jev_sources(jev_path or USAGE_LOG, guard['price_usd_per_million_input_tokens'], start, through)
-            elif provider == 'neon' and token:
+            if provider == 'neon' and token:
                 cfg = config['neon']
                 neon_start = max(start, now.date() - timedelta(days=60))
                 base = {'from': neon_start.isoformat() + 'T00:00:00Z', 'to': end_iso, 'granularity': 'daily', 'org_id': cfg['org_id'],
@@ -543,13 +507,12 @@ def main(argv=None):
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, default=ROOT / 'ops/config/system-costs.v1.json')
-    parser.add_argument('--jev-log', type=Path)
     parser.add_argument('--output', type=Path, default=ROOT / 'out/system-costs.json')
     parser.add_argument('--publish', action='store_true')
     parser.add_argument('--alerts', action='store_true')
     args = parser.parse_args(argv)
     config = json.loads(args.config.read_text())
-    report = collect(config, read_tokens(), jev_path=args.jev_log)
+    report = collect(config, read_tokens())
     coordinator = ROOT / 'out/system-cost-collector.json'
     with _loop_lock(coordinator):
         try:
@@ -569,7 +532,7 @@ def main(argv=None):
         _save_state(args.output, report)
         _save_state(coordinator, {key: report[key] for key in ('through', 'observed_at')})
         loops_path = ROOT / 'out/system-cost-loops.json'
-        loop_result = reconcile(report, loops_path, legacy_path=LOOP_STATE) if args.alerts else 'disabled'
+        loop_result = reconcile(report, loops_path) if args.alerts else 'disabled'
         refusals = json.loads(loops_path.read_text()).get('refusals', {}) if args.alerts and loops_path.exists() else {}
         if refusals:
             loop_result = f"{loop_result} open; refused providers {', '.join(sorted(refusals))}"

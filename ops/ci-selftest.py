@@ -37,7 +37,7 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/ci-quarantine.py", "ops/node_test_summary.py",
+            "ops/ci.sh", "ops/node_test_summary.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
             "ops/hook-deletion-check.py", "ops/githooks/path-hygiene-check.py",
@@ -55,7 +55,6 @@ def ci_fixture():
             (root / name).mkdir()
             if name not in {"migrations", "mcp-server"}:
                 (root / name / (name.replace("-", "_") + "_fixture.py")).write_text("value: int = 1\n")
-        (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         requirements = "synthetic-package>=1\n"
         (root / "requirements.txt").write_text(requirements)
@@ -109,9 +108,7 @@ def test_freshness_checks_the_tree_without_requiring_main_ancestry():
         root = pathlib.Path(directory)
         (root / "ops/config").mkdir(parents=True)
         (root / "ops/ci.sh").write_bytes(CI.read_bytes())
-        shutil.copy2(REPO / "ops/ci-quarantine.py", root / "ops/ci-quarantine.py")
         shutil.copy2(REPO / "ops/node_test_summary.py", root / "ops/node_test_summary.py")
-        (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         env = fixture_env()
         def git(*args):
@@ -177,11 +174,10 @@ def test_gates_build_hxprobe_before_parallel_selftests():
         (root / "ops/config").mkdir(parents=True)
         (root / "vendor/hxprobe").mkdir(parents=True)
         (root / "bin").mkdir()
-        for name in ("ci.sh", "ci-quarantine.py", "node_test_summary.py", "git_env.py",
+        for name in ("ci.sh", "node_test_summary.py", "git_env.py",
                      "ci-secret-scan.py", "pii_guard.py"):
             shutil.copy2(REPO / "ops" / name, root / "ops" / name)
         shutil.copy2(REPO / "bin/with-timeout.py", root / "bin/with-timeout.py")
-        (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         (root / "vendor/hxprobe/Cargo.toml").touch()
         (root / "ops/probe-selftest.py").write_text(
@@ -223,10 +219,9 @@ def test_hxprobe_runs_locked_checks_and_propagates_failures():
         (root / "ops/config").mkdir(parents=True)
         (root / "vendor/hxprobe").mkdir(parents=True)
         (root / "bin").mkdir()
-        for rel in ("ops/ci.sh", "ops/ci-quarantine.py", "ops/node_test_summary.py",
+        for rel in ("ops/ci.sh", "ops/node_test_summary.py",
                     "ops/ci-secret-scan.py", "ops/pii_guard.py"):
             shutil.copy2(REPO / rel, root / rel)
-        (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         cargo = root / "bin/cargo"
         cargo.write_text("#!/usr/bin/env python3\n"
@@ -312,9 +307,6 @@ def test_database_scope_receipts():
 
 def test_hosted_migration_ownership():
     wf = _hosted_workflow()
-    db = _hosted_workflow("db-acceptance.yml")
-    check("only required CI runs PR database proof", "pull_request" not in db["on"]
-          and "schedule" not in db["on"])
     runner = next(st for st in wf["jobs"]["classes"]["steps"] if st.get("name") == "Run this group's check classes")
     check("PR slot claims run before entering the credential-scrubbed database lane",
           runner["run"].index("python3 ops/migration-open-pr-gate.py") < runner["run"].index("python ops/local-pg-ci.py")
@@ -326,9 +318,6 @@ def test_hosted_migration_ownership():
     check("required aggregate waits for independent fixtures", "migration-fixtures" in wf["jobs"]["checks"]["needs"])
     aggregate = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Fail unless every class group succeeded")
     with tempfile.TemporaryDirectory() as directory:
-        fake = pathlib.Path(directory) / "python3"
-        fake.write_text("#!/bin/sh\nexit 0\n")
-        fake.chmod(0o755)
         for full, fixtures, classes, draft, expected in (
             ("true", "success", "success", "false", 0), ("false", "skipped", "success", "false", 0),
             ("", "skipped", "success", "false", 1), ("true", "failure", "success", "false", 1),
@@ -338,8 +327,12 @@ def test_hosted_migration_ownership():
             ("true", "skipped", "success", "false", 1),
         ):
             result = subprocess.run(["bash", "-e", "-c", aggregate["run"]], capture_output=True, text=True,
-                                    env={**scrubbed_env(), "PATH": directory + os.pathsep + os.environ["PATH"],
-                                         "DB_FULL": full, "CI_DRAFT": draft, "FIXTURES_RESULT": fixtures, "CLASSES_RESULT": classes})
+                                    env={**scrubbed_env(), "PATH": str(pathlib.Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
+                                         "CI_DRAFT": draft, "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary"),
+                                         "CI_NEEDS": json.dumps({"scope": {"result": "success", "outputs": {"full": full}},
+                                                                 "classes": {"result": classes},
+                                                                 "fallow": {"result": "success"},
+                                                                 "migration-fixtures": {"result": fixtures}})})
             check(f"aggregate scope={full!r} fixtures={fixtures} classes={classes}", result.returncode == expected)
     record = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Record the tested tree and class contract")
     check("not-applicable proof cannot be reused as full main evidence", "full != 'false'" in record.get("if", ""))
@@ -351,7 +344,9 @@ def test_migration_partitions_execute_complete_inventory():
         root = pathlib.Path(directory)
         shim = root / "program"
         shim.write_text('#!/bin/bash\necho "$*" >> "$CALLS"\n'
-                        '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && exit 9\nexit 0\n')
+                        '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && exit 9\n'
+                        'if [[ "$*" == *"ci-migration-gates.py"* && "$*" != *"--sql-proof"* '
+                        '&& ! -f "$SERVICE_CATALOG" ]]; then exit 9; fi\nexit 0\n')
         shim.chmod(0o755)
         (root / "psql").symlink_to(shim)
         body = _ci_function_body("check_migration_fixtures", "check_binding")
@@ -360,15 +355,18 @@ def test_migration_partitions_execute_complete_inventory():
             "bad() { FAILED=1; }", "ok() { :; }", "skip() { FAILED=1; }",
             'run_quiet() { local log="$1"; shift; echo "$*" >> "$CALLS"; '
             '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && return 9; '
+            '[[ "$*" == *"tools/ops-record.py sync-registry"* ]] && touch "$SERVICE_CATALOG"; '
             'printf "r03_recovered_health\\njoe,3,3,3,0,0,0,0,1,0,0,0,0,0,No open\\n'
             'r03_actor_mismatch_health\\njoe,4,3,3,0,1,1,1,1,0,0,0,0,0,On missing\\n" > "$log"; }'))
         def run(part, fail=""):
             calls = root / "calls"
             calls.write_text("")
+            (root / "service-catalog").unlink(missing_ok=True)
             result = subprocess.run(["bash", "-c", prefix + f"\nMIGRATION_PART={part}\n" + body +
                                      '\ncheck_migration; exit "$FAILED"'], cwd=REPO,
                 env={**scrubbed_env(), "PATH": directory + os.pathsep + os.environ["PATH"],
                      "CALLS": str(calls), "CARR_CI_DATABASE_URL": "postgres://ci@127.0.0.1:55432/ci",
+                     "SERVICE_CATALOG": str(root / "service-catalog"),
                      "FAIL_PROGRAM": fail}, capture_output=True, text=True)
             return result.returncode, set(calls.read_text().splitlines())
         fixtures = {}
@@ -391,6 +389,9 @@ def test_migration_partitions_execute_complete_inventory():
               "node --test" in call or "ci-migration-gates.py --logdir" in call
               for call in fixtures["acceptance"]))
         check("a failing partition fails the migration verdict", run("reconstruction", "schema-reconstruction-selftest.py")[0] == 1)
+        rc, calls = run("gates-serial", "tools/ops-record.py sync-registry")
+        check("service-catalog bootstrap failure stops database gates", rc == 1 and not any(
+              "ci-migration-gates.py --logdir" in call for call in calls))
 
 
 def test_gate_shards_execute_a_disjoint_complete_inventory():
@@ -404,16 +405,14 @@ def test_gate_shards_execute_a_disjoint_complete_inventory():
             (root / path).write_text("")
         (root / "hooks/gate-integrity.py").write_text("")
         (root / "ops/boot-budget-check.py").write_text("")
-        (root / "ops/ci-quarantine.py").write_text(
-            "import os,pathlib,sys\n"
-            "if sys.argv[1] == 'snapshot': print('{}');sys.exit(0)\n"
-            "path=sys.argv[sys.argv.index('--test')+1]\n"
+        (root / "timeout.py").write_text(
+            "import os,sys\n"
+            "path=sys.argv[-1]\n"
             "with open(os.environ['CALLS'],'a') as out: out.write(path+'\\n')\n"
-            "pathlib.Path(sys.argv[sys.argv.index('--log')+1]).write_text('fixture')\n"
             "sys.exit(7 if path==os.environ.get('FAIL_TEST') else 0)\n")
         prefix = "\n".join(("set -uo pipefail", f"PY={shlex.quote(sys.executable)}",
                               f"LOGDIR={shlex.quote(str(root / 'logs'))}", "FAILED=0",
-                              "CI_SELFTEST_TIMEOUT_SECONDS=1", "CI_TIMEOUT_HELPER=unused",
+                              "CI_SELFTEST_TIMEOUT_SECONDS=1", f"CI_TIMEOUT_HELPER={shlex.quote(str(root / 'timeout.py'))}",
                               "tree_fingerprint() { echo static; }", "ok() { :; }",
                               "bad() { FAILED=1; }", "inherited_abort() { :; }",
                               'run_quiet() { local log="$1"; shift; "$@" >"$log" 2>&1; }',
@@ -519,41 +518,7 @@ def test_types_class_catches_a_seeded_type_error():
     check("removing the seed turns the types class green again", rc == 0,
           f"rc={rc} out={out[-400:]}")
 
-def test_no_env_claims_a_production_hostname():
-    import subprocess as sp
-    toml = REPO / "mcp-server" / "wrangler.toml"
-    checker = REPO / "ops" / "deploy-attachment-check.py"
-    if not toml.exists() or not checker.exists():
-        return
-    src = toml.read_text()
-    envs = re.findall(r"^\[env\.([A-Za-z0-9_-]+)\]", src, re.M)
-    for env in sorted(set(envs)):
-        r = sp.run([sys.executable, str(checker), str(toml), env],
-                   capture_output=True, text=True)
-        check(f"env '{env}' claims no production hostname", r.returncode == 0,
-              (r.stdout + r.stderr).strip()[:120])
-
-    import tempfile as tf
-    broken = "\n".join(l for l in src.splitlines() if l.strip() != "routes = []")
-    with tf.NamedTemporaryFile("w", suffix=".toml", delete=False) as fh:
-        fh.write(broken)
-        path = fh.name
-    try:
-        r = sp.run([sys.executable, str(checker), path, "staging"],
-                   capture_output=True, text=True)
-        check("removing `routes = []` is REFUSED, not silently allowed",
-              r.returncode == 1, f"rc={r.returncode}")
-    finally:
-        os.unlink(path)
-
 UNCOLLECTED_BY_DECISION = {
-    "tools/link-model-bakeoff/pg18-selftest.py":
-        "Requires PostgreSQL 18 binaries and an owned disposable socket-only "
-        "database. The repository-content gates pool has no PostgreSQL 18 "
-        "contract. Run LC_ALL=C .venv/bin/python tools/link-model-bakeoff/pg18-selftest.py "
-        "before changing this harness; it executes regression_sql.py and the "
-        "normal integration workload. Offline failure-path and collection "
-        "regressions run in tools/test-linkfork.py through the gates pool.",
     "tools/room-bridge/test_claude_desk_live.py":
         "LIVE, and deliberately not offline. Its own docstring says it asserts "
         "against no mock: it boots a REAL Claude Code session on a labelled "
@@ -586,12 +551,7 @@ UNCOLLECTED_BY_DECISION = {
         "unittest package under tools/dictation-rig/tests/ that this lane did "
         "not run or vouch for. Named here so it is a known gap with an owner "
         "rather than an invisible one; collecting it is a follow-up that must "
-        "run it first. Same status as tools/partner-line/tests/test_watch.py.",
-    "tools/partner-line/tests/test_watch.py":
-        "Offline and correct, but not evaluated by this unit — see the "
-        "tools/dictation-rig entry. Its docstring claims no live socket and no "
-        "network, so it is a good candidate to collect; this lane owned "
-        "ops/ci.sh and ops/ci-selftest.py only and did not run it.",
+        "run it first.",
     "tools/doc-convo/bin/test-brain-stream.sh":
         "Not evaluated by this unit. It lives in a bin/ directory beside the "
         "convo server rather than in a tests/ directory, and the three "
@@ -1236,7 +1196,6 @@ def main(argv=None):
                test_secret_scanner_catches_and_respects_allow,
                test_dep_check_detects_a_stale_lock,
                test_types_class_catches_a_seeded_type_error,
-               test_no_env_claims_a_production_hostname,
                test_every_test_file_in_the_tree_is_collected,
                test_each_class_runs_in_exactly_one_hosted_group,
                test_the_walk_prunes_named_roots_only,

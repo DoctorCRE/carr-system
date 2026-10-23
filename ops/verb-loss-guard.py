@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Validate registry names from stdin against the committed retirement ledger.
-
-Called by verb-count.sh --check-retirements for both CI and deploy. Compare
-against the name set reconstructed from the deployment ledger's exact source.
-Only names present in that deployment can be excused by the retirement ledger.
-No shrink override is accepted here. Typed staging recovery remains a separate
-database-bound authorization in deploy-worker.sh.
-"""
+"""Validate registry names against the base commit and committed retirements."""
 from __future__ import annotations
 
 import json

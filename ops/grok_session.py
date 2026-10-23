@@ -9,7 +9,47 @@ import sys
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from jev_spend_health import ROOT, _run_verb, _state, _save_state
+import json
+import os
+import tempfile
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib import record_call
+
+ROOT = Path(__file__).resolve().parents[1]
+
+def _run_verb(name, payload):
+    result = record_call.call_verb(name, payload, timeout=35)
+    if result.kind not in (record_call.OK, record_call.REFUSED):
+        raise RuntimeError(result.describe())
+    answer = result.reply
+    if not result.ok or not isinstance(answer, dict) or (name != "read-loop" and answer.get("ok") is not True):
+        raise RuntimeError(f"{name} did not confirm the write")
+    return answer
+
+
+def _state(path):
+    try:
+        result = json.loads(Path(path).read_text(encoding="utf-8"))
+        return result if isinstance(result, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_state(path, state):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=path.name + ".", delete=False) as handle:
+        tmp = Path(handle.name)
+        try:
+            json.dump(state, handle, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+
+
 
 AUTH = Path.home() / ".grok" / "auth.json"
 STATE = ROOT / "out" / "grok-session-alert.json"

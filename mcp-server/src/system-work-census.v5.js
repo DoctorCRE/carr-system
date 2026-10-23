@@ -115,7 +115,7 @@ export const SYSTEM_WORK_LEGS = [
     false as cancelled,jsonb_build_object('board_id',b.board_id,'task_id',t.key) as identity
     from public.board_snapshot b,jsonb_each(coalesce(b.snapshot_json->'tasks','{}'::jsonb)) t
     where b.organization_tenant_id=$1 and b.sponsoring_human_slug=$2
-    and t.value->>'repo' in ('jbookout/carr-system','jbookout/doctorcre-app','jbookout/software-factory')
+    and t.value->>'repo' in ('DoctorCRE/carr-system','jbookout/doctorcre-app','jbookout/software-factory')
     and t.value->>'domain'='system'
     and (t.value->>'status' is distinct from 'done' or t.value->>'stage' in ('live','measured'))`),
 ];
@@ -159,7 +159,7 @@ const navigationFor=(row,kind)=>{
  }
  if(kind==='progress_task' && row.identity?.board_id)
   return {state:'available',link:`/progress-board.html?board=${encodeURIComponent(row.identity.board_id)}`,identity:row.identity};
- if(['pull_request','remote_branch'].includes(kind) && typeof row.link==='string' && /^https:\/\/github\.com\/jbookout\/(carr-system|doctorcre-app)\//.test(row.link))
+ if(['pull_request','remote_branch'].includes(kind) && typeof row.link==='string' && /^https:\/\/github\.com\/(DoctorCRE\/carr-system|jbookout\/doctorcre-app)\//.test(row.link))
   return {state:'available',link:row.link,identity:{id:row.id}};
  return {state:'unavailable',link:null,reason:'owning_workflow_has_no_supported_record_navigation',identity:row.identity??{}};
 };

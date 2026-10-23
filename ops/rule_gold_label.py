@@ -1,4 +1,4 @@
-"""Sampled semantic label proposals, cached once per bounded case. Exact universal policy labels stay in code; omitted candidates are explicitly unjudged. Independent adjudication supplies gold, not model self-agreement."""
+"""Offline rule-label adjudication, fixture building, and intake validation."""
 
 import hashlib
 from pathlib import Path
@@ -12,38 +12,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 YES_AT = 0.75
 NO_AT = 0.35
-STATEMENT_CHARS = 1500
-LABEL_CAP = 20
 TEST_FRACTION = 0.30
 DEFAULT_SEED = "rule-delivery-eval-v2"
 RULE_CLASSES = ("always_on", "action_point", "topic", "gate_named")
-
-SYSTEM_NOTE = ("An AI assistant (Claude Code) works for the two partners of a small "
-               "healthcare commercial real estate brokerage. It works in the firm's own "
-               "software repository and record layer (deals, clients, tours, rules), and "
-               "can run tools. `turn` is ONE turn: the message it received (from a partner, "
-               "or a machine notification) and the tool calls it made in reply.")
-
-
-# ------------------------------------------------------------------ the question
-
-def _clip(text, limit):
-    text = " ".join((text or "").split())
-    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
-
-
-def call_line(call):
-    """One readable line for a tool call: its name and its salient input."""
-    name = call.get("tool_name") or "?"
-    inp = call.get("tool_input") or {}
-    if isinstance(inp, dict):
-        for key in ("command", "file_path", "url", "description", "prompt", "query", "action"):
-            if isinstance(inp.get(key), str) and inp[key].strip():
-                return f"{name}: {_clip(inp[key], 240)}"
-        if inp:
-            return f"{name}: {_clip(json.dumps(inp, sort_keys=True), 240)}"
-    return name
-
 
 def audience(case):
     """Who reads the prose this turn ends with. A subagent brief opens a
@@ -59,45 +30,11 @@ def opens_session(case):
     return case.get("origin") == "subagent-brief"
 
 
-def case_state(case):
-    is_machine = case["prompt"].lstrip().startswith("<task-notification>")
-    turn = {"from": ("machine notification" if is_machine else
-                     "orchestrating agent (a subagent brief)" if opens_session(case) else
-                     "partner"),
-            "message": case["prompt"][:6000],
-            "tool_calls": [call_line(c) for c in (case.get("tool_calls") or [])[:20]]}
-    if "origin" in case:
-        turn["reply_read_by"] = audience(case)
-        turn["opens_a_session"] = opens_session(case)
-    return {"system": SYSTEM_NOTE, "turn": turn}
-
-
-# THE STRICT QUESTION (the gold standard since the 2026-09-27 re-label). The
-# first labelling asked whether a rule "binds on the turn"; a stricter
-# re-judgment of a sample put 97 of 263 gold pairs at p <= 0.35, so the gold
-# leaned padded, and padded gold would tune the system to over-deliver. The
-# question now asks about the ACTION: is the rule's trigger met by what this
-# turn asks for or does, so that doing this turn while ignoring the rule would
-# violate it?
-def rule_question(tsc, rule, limit=STATEMENT_CHARS):
-    text = _clip(rule["statement"], limit)
-    return tsc.noul(
-        "A standing rule for the assistant:\n<<<\n" + text + "\n>>>\n\n"
-        "Does this rule bind the ACTION taken in `turn`? Answer yes only if the rule's own "
-        "trigger is met by what this turn asks for or does (its message, its tool calls, "
-        "and the reply it ends with, read by `reply_read_by`), so that handling exactly "
-        "this turn while ignoring the rule would VIOLATE it. Topical overlap, general "
-        "relevance, or a rule that would bind some later or different action does not "
-        "count.",
-        true="The rule's trigger is met by this turn's action; ignoring it here would violate it.",
-        false="Ignoring this rule on this turn would not violate it; its trigger is not met here.")
-
-
 # RULES WITH A UNIVERSAL TRIGGER get one written policy, applied uniformly,
 # instead of a per-case judgment (the first labelling was inconsistent across
 # cases: gold on about half the partner turns and on a third to all of the
 # subagent briefs). {rule id: (predicate name, reason)}. The label is the
-# predicate's value; Jev is not asked about these rules.
+# predicate's value; these labels are deterministic.
 UNIVERSAL_POLICY = {
     "5be2f462": ("partner_prose", "binds every session's prose to a partner; a partner-session "
                                   "turn ends in prose the partner reads, a subagent brief's "
@@ -123,131 +60,11 @@ def policy_labels(case):
             for rid, (pred, _reason) in UNIVERSAL_POLICY.items()}
 
 
-def _semantic():
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("jev_semantic", os.path.join(REPO, "ops", "jev_semantic.py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def roster_binding(rules):
-    material = sorted((r["id"], r["statement"]) for r in rules)
-    return hashlib.sha256(json.dumps(material, ensure_ascii=False).encode()).hexdigest()
-
-def label_case(case, rules, tsc, *, calls_log, timeout=120.0):
-    """{rule id: probability} for one bounded case in one request. Rules settled by UNIVERSAL_POLICY are not asked: they get 1.0 or
-    0.0 from the policy. Returns (probabilities, usage) with usage
-    {"input_tokens", "output_tokens", "requests"}."""
-    probs, usage = {}, {"input_tokens": 0, "output_tokens": 0, "requests": 0}
-    state = case_state(case)
-    for rid, value in policy_labels(case).items():
-        if any(r["id"] == rid for r in rules):
-            probs[rid] = 1.0 if value else 0.0
-    rules = [r for r in rules if r["id"] not in UNIVERSAL_POLICY]
-    words = set(re.findall(r"[a-z]{3,}", str(state).lower()))
-    ranked = sorted(rules, key=lambda r: (-len(words & set(re.findall(r"[a-z]{3,}", r["statement"].lower()))), r["id"]))
-    part = ranked[:LABEL_CAP]
-    usage["unjudged"] = [r["id"] for r in ranked[LABEL_CAP:]]
-    if part:
-        answer = _semantic().ask(state, {r["id"]: rule_question(tsc, r) for r in part},
-                                 client=tsc, caller="rule_gold_label", version="case-v2",
-                                 calls_log=calls_log, timeout=timeout, facets=["evidence_matching"])
-        for rid, row in answer["answers"].items():
-            probs[rid] = round(float(row["noul"]), 4)
-        usage.update({"input_tokens": 0, "output_tokens": 0} if answer.get("cache_hit") else answer.get("usage") or {})
-        usage["cached_observation"] = answer.get("cached_observation") or (answer.get("usage") if answer.get("cache_hit") else None)
-        usage["requests"] = 0 if answer.get("cache_hit") else 1
-    return probs, usage
-
-
-def second_pass(rule, cases, tsc, *, calls_log, timeout=120.0):
-    """The other side of the question: the rule is the state and each borderline
-    case is a noul, worded more strictly. {case id: probability}, usage."""
-    state = {"system": SYSTEM_NOTE, "rule": {"id": rule["id"],
-                                             "statement": _clip(rule["statement"], 6000)}}
-    questions = {}
-    for case in cases:
-        s = case_state(case)["turn"]
-        calls = "; ".join(s["tool_calls"]) or "none"
-        reader = s.get("reply_read_by")
-        questions[case["id"]] = tsc.noul(
-            f"Turn from {s['from']}:\n<<<\n{_clip(s['message'], 1800)}\n>>>\n"
-            f"Tool calls made in reply: {calls}\n"
-            + (f"The reply this turn ends with is read by: {reader}.\n" if reader else "")
-            + "\nDoes `rule` bind the ACTION taken in this turn — is its trigger actually met "
-            "by what the turn asks for or does, so that handling this turn while ignoring "
-            "the rule would violate it? Topical overlap, or a rule that would bind a later "
-            "or different action, is not enough.",
-            true="The rule's trigger is met by this turn's action; ignoring it here would violate it.",
-            false="The rule's trigger is not met by this turn's action.")
-    answer = _semantic().ask(state, questions, client=tsc, caller="rule_gold_label", version="second-pass-v1", calls_log=calls_log, timeout=timeout,
-                     facets=["evidence_matching"])
-    u = {} if answer.get("cache_hit") else answer.get("usage") or {}
-    return ({cid: round(float(row["noul"]), 4) for cid, row in (answer.get("answers") or {}).items()},
-            {"input_tokens": int(u.get("input_tokens") or 0),
-             "output_tokens": int(u.get("output_tokens") or 0), "requests": 0 if answer.get("cache_hit") else 1,
-             "cached_observation": answer.get("cached_observation") or (answer.get("usage") if answer.get("cache_hit") else None)})
-
-
 # ------------------------------------------------------------------ doctrine (second target)
 #
 # Lexical search selects bounded sections. Documents and sections share one
 # speculative question set; every proposed label needs independent adjudication.
 SECTION_CHARS = 1200
-
-
-def document_question(tsc, doc):
-    return tsc.noul(
-        f"A doctrine document of the firm (standing procedure, playbook or reference):\n"
-        f"<<<\nTitle: {_clip(doc.get('title') or '', 200)}\n"
-        f"Opening: {_clip(doc.get('opening') or '', 400)}\n>>>\n\n"
-        "Does this document GOVERN `turn` — would an assistant handling exactly this turn need "
-        "to follow or consult a section of it to act correctly? General topical relevance "
-        "is not enough.",
-        true="A section of this document governs how this turn must be handled.",
-        false="This document does not govern this turn.")
-
-
-def section_question(tsc, section):
-    return tsc.noul(
-        f"A section of the firm's doctrine ({_clip(section.get('doc_title') or section['doc'], 160)}"
-        f" — {_clip(section.get('title') or '', 160)}):\n<<<\n"
-        f"{_clip(section.get('text') or '', SECTION_CHARS)}\n>>>\n\n"
-        "Does this section GOVERN `turn`: does it state a procedure, constraint or standard "
-        "that an assistant handling exactly this turn must follow or check to act correctly? "
-        "Background that is merely on the same topic does not govern.",
-        true="This section governs how this turn must be handled.",
-        false="This section does not govern this turn.")
-
-
-def doctrine_label_case(case, documents, sections, tsc, *, calls_log, search_refs=(),
-                        timeout=120.0):
-    """({doc id: p}, {section ref: p}, usage) in one cached question set. `documents` rows carry id, title,
-    opening; `sections` rows carry ref, doc, doc_title, title, text. Refs and
-    doc ids are opaque store ids (slugs carry names; see the CLI catalog)."""
-    state = case_state(case)
-    words = set(re.findall(r"[a-z]{3,}", str(state).lower()))
-    by_ref = {row["ref"]: row for row in sections}
-    ranked = sorted(sections, key=lambda row: (-len(words & set(re.findall(r"[a-z]{3,}", str(row).lower()))), row["ref"]))
-    refs = list(dict.fromkeys([ref for ref in search_refs if ref in by_ref]+[row["ref"] for row in ranked]))[:LABEL_CAP]
-    picked = [by_ref[ref] for ref in refs]
-    qs = {"s"+str(i): section_question(tsc,row) for i,row in enumerate(picked)}
-    doc_ids = {row["doc"] for row in picked}
-    docs = sorted([d for d in documents if d["id"] in doc_ids], key=lambda d:d["id"])
-    qs.update({"d"+str(i): document_question(tsc,row) for i,row in enumerate(docs)})
-    if not qs:
-        return {}, {}, {"input_tokens":0,"requests":0,"shortlist":0}
-    answer = _semantic().ask(state, qs, client=tsc, caller="rule_gold_label", version="doctrine-case-v2",
-                            calls_log=calls_log, timeout=timeout)
-    bodies = answer["answers"]
-    doc_p = {d["id"]:float(bodies["d"+str(i)]["noul"]) for i,d in enumerate(docs)}
-    sec_p = {row["ref"]:float(bodies["s"+str(i)]["noul"]) for i,row in enumerate(picked)}
-    usage = {"input_tokens":0 if answer.get("cache_hit") else int((answer.get("usage") or {}).get("input_tokens") or 0),
-             "requests":0 if answer.get("cache_hit") else 1, "shortlist":len(picked),
-             "unjudged": [row["ref"] for row in sections if row["ref"] not in refs]}
-
-    return doc_p, sec_p, usage
 
 
 # ------------------------------------------------------------------ bands and gold
@@ -292,7 +109,7 @@ def borderlines(probs, yes_at=YES_AT, no_at=NO_AT):
 # rate published; a sample above 10% gold lowers the floor again. The floors
 # and every sample's gold rate are committed in review-floors.v2.json.
 # A pair in the review set is gold iff its written adjudication says so;
-# outside it, not gold. Jev (strict second pass) is evidence only: it scored
+# outside it, not gold. Recorded model scores are evidence only: it scored
 # some clearly binding pairs at 0.12-0.18, so it never decides.
 
 REVIEW_LOW = 0.25
@@ -433,7 +250,7 @@ def adjudication_case_binding(case):
 
     The independent output must echo this binding. Excluding gold/probabilities
     prevents circular evidence; excluding split keeps adjudication blind to the
-    held-out partition. Full tool inputs are included, not call_line's preview.
+    held-out partition. Full tool inputs are included.
     """
     evidence = {"case_id": case["id"], "prompt": case.get("prompt", ""),
                 "origin": case.get("origin"), "tool_calls": case.get("tool_calls") or []}
@@ -765,7 +582,7 @@ def _string_leaves(obj):
 def validate_intake(doc, case_id, missed_rule, *, live_rules, prompt=None, stratum=None,
                     tool_calls=None, source_text=None, extra_names=()):
     """Every refusal the intake makes, run BEFORE anything leaves the machine
-    (the Jev labelling pass comes after this returns). Returns (prompt,
+    Returns (prompt,
     stratum, tool_calls, new case id); raises ValueError naming the kind of
     problem, never echoing a caught name or the live turn's words.
 
@@ -826,7 +643,7 @@ def intake_case(doc, case_id, missed_rule, *, live_rules, prompt=None, stratum=N
     common, nothing scrub_findings() refuses.
 
     `missed_rule` is gold by observation. Copied gold remains explicit source
-    evidence; every additional Jev proposal is disputed pending adjudication.
+    evidence; every additional proposal is disputed pending adjudication.
     Numeric confidence never promotes an intake label."""
 
     existing = {c["id"]: c for c in doc.get("cases") or []}

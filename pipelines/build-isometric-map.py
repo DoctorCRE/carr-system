@@ -123,8 +123,8 @@ MODULES: dict[str, dict[str, Any]] = {
         note="The store is database-backed; the file count describes implementation code, not rows."),
     "CT": dict(name="Control plane", grid=(7.5, 2.5), foot=(1.15, 1.15), shape="block",
         glob=["lib/control_plane*.py", "mcp-server/src/engineering-runtime.js"],
-        blurb="Deterministic scheduling, budgets, proposal validation and the Engineering Passport admission seam keep runtime work bounded and auditable.",
-        cites=["lib/control_plane.py", "lib/control_plane_runner.py", "mcp-server/src/engineering-runtime.js"],
+        blurb="Native schedulers launch recurring jobs. Engineering Passport admission keeps on-demand engineering work bounded and auditable.",
+        cites=["tools/workflow-registry.py", "mcp-server/src/engineering-runtime.js"],
         note="Provider adapters propose; the control plane owns validation and state boundaries."),
     "PX": dict(name="Pipelines & generators", grid=(2.1, 7.4), foot=(1.3, 1.3), shape="prisms",
         glob=["pipelines/*.py", "generators/*.py"],
@@ -171,10 +171,10 @@ FLOWS: list[dict[str, Any]] = [
     dict(
         id="control", name="Bounded runtime job", view="control",
         tagline="Operator or schedule → pipeline → deterministic control plane → ledger.",
-        body="An operator or scheduled entrypoint launches a pipeline. The control-plane kernel selects due work, validates proposals and budgets, and keeps provider adapters from becoming a second authority before recording the outcome.",
+        body="An operator or scheduled entrypoint launches a pipeline. The native scheduler selects due work. On-demand engineering separately uses the Engineering Passport and records its outcome.",
         steps=[("RS", "flow"), ("PX", "flow"), ("CT", "flow"), ("DB", "flow")],
         back=[("CT", "DB", "retry")],
-        sources=["run.sh", "lib/control_plane.py", "lib/control_plane_runner.py",
+        sources=["run.sh", "tools/workflow-registry.py",
                  "migrations/0149_control_plane_jobs.sql"],
         payload="validated proposal envelope → job ledger row",
         caveat="Provider adapters propose; the control plane owns validation and state transitions. The map does not imply a specific installed scheduler.",
@@ -198,7 +198,7 @@ HONESTY: list[str] = [
     "The hook directory contains both helpers and blocking gates. Registration is a separate configuration fact, so a filename alone is not evidence that a hook runs.",
     "The MCP transport, identity layer and tool registry are separate buildings even though they are shipped in one Worker bundle; this keeps authority and dispatch visible.",
     "Doctrine and guidance are store-backed. A markdown export or a prototype contract is a projection and must not be read as canonical state.",
-    "The control-plane runtime validates schedules and proposals, but a provider adapter or local script is not thereby a production scheduler.",
+    "Native schedulers own recurrence. The workflow registry supplies shared contracts for engineering claims and native observations.",
     "This is a runtime map, not the vault document graph emitted by pipelines/build-system-graph.py. Its altitude is intentionally small enough to discuss with an assistant.",
 ]
 # ─────────────────────────────────────────────────────────────────────────────
@@ -580,7 +580,7 @@ ul.h li{{margin-bottom:11px}}
 
 <div class="top">
   <div class="cell"><div class="k">REPOSITORY</div>
-    <div class="v">jbookout/carr-system</div>
+    <div class="v">DoctorCRE/carr-system</div>
     <div class="sub">{esc(model["branch"]).upper()} · {esc(model["commit"])}{dirty}</div></div>
   <div class="cell"><div class="k">RUNTIME FLOWS</div>
     <div class="v">{len(model["flows"])}</div></div>

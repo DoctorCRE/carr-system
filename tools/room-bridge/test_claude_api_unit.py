@@ -385,9 +385,10 @@ async def query(*, prompt, options):
         binary = self.root / 'bin'
         binary.mkdir()
         gh = binary / 'gh'
-        gh.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*" > gh-call.txt\n')
+        gh.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*" > "$GH_FIXTURE_CALL"\n')
         gh.chmod(0o755)
         self.env['PATH'] = str(binary) + os.pathsep + self.env['PATH']
+        self.env['GH_FIXTURE_CALL'] = str(self.root / 'gh-call.txt')
         code = (self.sdk / '__init__.py').read_text().replace(
             "    yield SimpleNamespace(model=options.model)", """
     import pathlib, subprocess
@@ -414,13 +415,15 @@ async def query(*, prompt, options):
                                     results_path=results, env=self.env,
                                     checkout='new:api-job', writes=['done.txt'])
         self.assertEqual(row['status'], 'completed', row)
+        self.assertFalse(Path(row['checkout_workspace']).exists())
+        self.assertEqual(row['checkout_cleanup']['status'], 'deleted')
         self.assertEqual(git('show', 'api-job:done.txt', cwd=origin), 'built')
-        self.assertEqual(git('log', '-1', '--format=%ae', cwd=row['checkout_path']),
+        self.assertEqual(git('log', '-1', '--format=%ae', 'api-job', cwd=origin),
                          'jbookout@users.noreply.github.com')
         self.assertFalse((source / 'done.txt').exists())
         self.assertEqual(json.loads(results.read_text())['cost_usd'], 0.01)
         self.assertEqual(row['model'], 'claude-sonnet-5-5')
-        self.assertIn('pr create --title Fixture build', (Path(row['checkout_path']) / 'gh-call.txt').read_text())
+        self.assertIn('pr create --title Fixture build', (self.root / 'gh-call.txt').read_text())
 
     def test_api_checkout_stays_exclusive_without_declared_paths(self):
         REAL_RUN(['git', 'init', '-q', str(self.root)], env=fixture_env(), check=True)

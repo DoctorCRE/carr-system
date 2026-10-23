@@ -12,8 +12,7 @@
 # there — the directory is now gitignored, not deleted), and now also uploads
 # to the R2 archive via bin/backup-archive-r2.py, which reuses
 # lib/r2_archive.py's quota-guarded uploader (ORDER 20) rather than a second
-# implementation. See ops/order42b-history-purge.md for the git-history purge
-# of the dumps already committed under the old scheme.
+# implementation. ORDER 42b also purged dumps committed under the old scheme.
 # pipefail ADDED 2026-08-07, and it is half of a fix for a night this script
 # reported success on a 200-byte backup. See the guard block below for the whole
 # story; the short version is that in `pg_dump | age > f` the pipeline's exit
