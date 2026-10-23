@@ -20,6 +20,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -229,7 +230,7 @@ class Harness:
         with patch.object(send_mod, 'account', lambda: ACCOUNT), patch.object(ui, 'cua', self.transport or self.fake), patch.object(ui, 'outlook_pid', lambda: 42), \
                 patch.object(send_mod, '_mailto_handler', lambda: self.handler), \
                 patch.object(send_mod, '_open_url', self.fake.open_url), \
-                patch.object(send_mod, '_idle_seconds', lambda: self.front_idle), patch.object(send_mod, '_frontmost', lambda: self.frontmost()), \
+                patch.object(send_mod, '_idle_seconds', lambda: self.front_idle() if callable(self.front_idle) else self.front_idle), patch.object(send_mod, '_frontmost', lambda: self.frontmost()), \
                 patch.object(send_mod, '_activate', lambda bundle: self.fake.calls.append(('activate', bundle))), \
                 patch.object(send_mod.time, 'sleep', lambda s: None):
             return send_mod.send(spec['to'], spec['cc'], spec['bcc'], spec['subject'], spec['body'],
@@ -273,6 +274,7 @@ class SendTests(unittest.TestCase):
         self.assertEqual(h.fake.presses(), 0)
         self.assertEqual(len(h.fake.forms), 1)
         self.assertEqual(self.ledger(), [])
+        self.dialog.assert_not_called()
 
     def test_cancel_confirmation_leaves_draft_without_dispatch(self):
         self.dialog.return_value.stdout = 'false\n'
@@ -283,6 +285,85 @@ class SendTests(unittest.TestCase):
         self.assertEqual(len(h.fake.forms), 1)
         self.assertEqual(self.ledger(), [])
         self.assertFalse(any(verb == 'log-activity' for verb, _ in h.carr_calls))
+
+    def test_confirmation_failures_leave_drafts_for_mail_and_events(self):
+        for i, failure in enumerate((subprocess.CalledProcessError(1, 'osascript'),
+                subprocess.TimeoutExpired('osascript', 125), OSError('dialog unavailable'))):
+            for dispatch in (lambda h: h.send(), lambda h: event(h)):
+                with self.subTest(failure=type(failure).__name__, dispatch=dispatch):
+                    h = Harness(self.out / f'{i}-{id(dispatch)}')
+                    self.dialog.side_effect = failure
+                    self.assertEqual(dispatch(h).state, State.DRAFT)
+                    self.assertEqual(h.fake.presses(), 0)
+                    self.assertEqual(len(h.fake.forms), 1)
+                    self.assertFalse((h.ports.out / send_mod.LEDGER).exists())
+
+    def test_dialog_timeout_or_unrecognized_reply_never_dispatches(self):
+        for i, reply in enumerate(('false\n', '', 'Send', 'true\nfalse')):
+            with self.subTest(reply=reply):
+                self.dialog.return_value.stdout = reply
+                h = Harness(self.out / str(i))
+                self.assertEqual(h.send().state, State.DRAFT)
+                self.assertEqual(h.fake.presses(), 0)
+                self.assertEqual(len(h.fake.forms), 1)
+
+    def test_approval_shows_exact_account_recipients_and_subject_before_send(self):
+        h = Harness(self.out)
+        subject = 'Synthetic "quote" \\ path café'
+        def approve(command, **kwargs):
+            self.assertEqual(command, ['osascript', '-'])
+            self.assertEqual(kwargs['timeout'], 125)
+            script = kwargs['input']
+            message = json.loads(script.split('display dialog ', 1)[1].split(' with title ', 1)[0])
+            self.assertEqual(message, 'Account: sender@example.test\nTo: person-a@example.test\n'
+                             'Cc: copy@carr.us\nBcc: blind@carr.us\nSubject: ' + subject)
+            self.assertIn('buttons {"Cancel", "Send"} default button "Cancel"', script)
+            self.assertIn('cancel button "Cancel" giving up after 120', script)
+            self.assertIn('not (gave up of answer)', script)
+            self.assertIn('button returned of answer is "Send"', script)
+            self.assertEqual(h.fake.presses(), 0)
+            self.assertEqual(next(iter(h.fake.forms.values())), dict(to=['person-a@example.test'],
+                cc=['copy@carr.us'], bcc=['blind@carr.us'], subject=subject, body=MAIL['body']))
+            return subprocess.CompletedProcess(command, 0, 'true\n', '')
+        self.dialog.side_effect = approve
+        self.assertEqual(h.send(subject=subject, cc=['copy@carr.us'], bcc=['blind@carr.us']).state, State.DONE)
+        self.assertEqual(h.fake.presses(), 1)
+        self.dialog.assert_called_once()
+
+    def test_edit_during_confirmation_invalidates_approval(self):
+        for field, value in (('subject', 'changed'), ('body', 'changed'), ('to', ['other@example.test'])):
+            with self.subTest(field=field):
+                h = Harness(self.out / field)
+                def approve(command, **kwargs):
+                    next(iter(h.fake.forms.values()))[field] = value
+                    return subprocess.CompletedProcess(command, 0, 'true\n', '')
+                self.dialog.side_effect = approve
+                self.assertEqual(h.send().state, State.DRAFT)
+                self.assertEqual(h.fake.presses(), 0)
+
+    def test_approval_click_allows_fallback_but_later_input_blocks_it(self):
+        sleep = time.sleep
+        for resumed in (False, True):
+            with self.subTest(resumed=resumed):
+                h = Harness(self.out / str(resumed))
+                def approve(command, **kwargs):
+                    clicked = time.monotonic()
+                    def idle():
+                        sampled = time.monotonic() - clicked
+                        sleep(0.01)
+                        return sampled
+                    h.front_idle = idle
+                    return subprocess.CompletedProcess(command, 0, 'true\n', '')
+                self.dialog.side_effect = approve
+                original = h.fake.__call__
+                def transport(tool, args):
+                    if resumed and tool == 'bring_to_front':
+                        h.front_idle = 0
+                    return original(tool, args)
+                h.transport = transport
+                result = h.send()
+                self.assertEqual(result.state, State.NOT_IDLE if resumed else State.DONE)
+                self.assertEqual(h.fake.presses(), 0 if resumed else 1)
 
 
     def test_eleventh_requested_send_is_refused_by_daily_cap(self):
