@@ -16,6 +16,7 @@ certifies itself with itself would pass even if both halves drifted together.
 import contextlib
 import io
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -233,6 +234,43 @@ def test_documented_import_line_works_from_a_suite():
                    p.stdout.rstrip("\n").splitlines()[-1:] == [tail], repr(p.stdout))
 
 
+def test_product_helpers_without_hook_runtime():
+    with tempfile.TemporaryDirectory(prefix="harness-product-selftest-") as root:
+        lib = os.path.join(root, "lib")
+        os.mkdir(lib)
+        shutil.copyfile(os.path.join(REPO, "lib", "selftest_harness.py"),
+                        os.path.join(lib, "selftest_harness.py"))
+        for module, search_path in (("selftest_harness", lib),
+                                    ("lib.selftest_harness", root)):
+            body = (
+                "import sys, pathlib\n"
+                f"sys.path.insert(0, {search_path!r})\n"
+                f"from {module} import temporary_directory, Checker\n"
+                "path = pathlib.Path(temporary_directory())\n"
+                "assert path.is_dir()\n"
+                "(path / 'fixture').write_text('product fixture')\n"
+                "assert Checker().ok\n"
+                "print(path)\n"
+            )
+            process = subprocess.run([sys.executable, "-I", "-c", body],
+                                     capture_output=True, text=True, timeout=30)
+            expect(f"{module}: product helpers work without hook files",
+                   process.returncode == 0, process.stderr)
+            if process.returncode == 0:
+                expect(f"{module}: escaping temporary directory is cleaned on exit",
+                       not os.path.exists(process.stdout.strip()))
+
+
+def test_hook_result_streams_and_envelopes():
+    result = H.HookResult(2, 'plain text\n{"decision":"block"}\n[]\n{bad json\n',
+                          "refused\n")
+    expect("hook results retain the exit code and original streams",
+           result.code == 2 and result.stdout.startswith("plain text\n")
+           and result.stderr == "refused\n")
+    expect("hook results expose only JSON object envelopes",
+           result.envelopes == [{"decision": "block"}])
+
+
 def main() -> int:
     print("selftest-harness-selftest: lib/selftest_harness.py against the legacy boilerplate")
     for t in (test_check_and_summary_are_byte_identical,
@@ -241,7 +279,9 @@ def main() -> int:
               test_load_module,
               test_fixture_dir,
               test_hook_env,
-              test_documented_import_line_works_from_a_suite):
+              test_documented_import_line_works_from_a_suite,
+              test_product_helpers_without_hook_runtime,
+              test_hook_result_streams_and_envelopes):
         print(f"\n[{t.__name__}]")
         t()
     failed = [name for name, ok, _ in results if not ok]
