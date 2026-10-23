@@ -15,7 +15,7 @@
 # Env:
 #   CARR_RECORDINGS_DIR  — override the recordings root (default: ~/Recordings)
 #
-# Exit code is always 0, matching consent-watch.sh / capture-watch.sh.
+# Empty queues succeed. Failed children remain visible after the full sweep.
 #
 # Never touches vendor/quill, ~/.config/quill, launchd, or git.
 
@@ -45,17 +45,17 @@ main() {
 
     if [ ! -f "$BRIDGE_PY" ]; then
         log_line "ERROR capture-bridge.py missing at $BRIDGE_PY"
-        exit 0
+        exit 1
     fi
 
     local PYTHON_BIN
     PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
     if [ -z "$PYTHON_BIN" ]; then
         log_line "ERROR python3 not found on PATH"
-        exit 0
+        exit 1
     fi
 
-    local dir
+    local dir scan_rc=0 child_rc
     for dir in "$RECORDINGS_DIR"/*/; do
         [ -d "$dir" ] || continue
         dir="${dir%/}"
@@ -64,9 +64,13 @@ main() {
         [ -f "$dir/ingested.json" ] && continue
 
         "$PYTHON_BIN" "$BRIDGE_PY" poll "$dir"
+        child_rc=$?
+        if [ "$child_rc" -ne 0 ] && { [ "$scan_rc" -eq 0 ] || [ "$scan_rc" -eq 78 ]; }; then
+            scan_rc="$child_rc"
+        fi
     done
 
-    exit 0
+    exit "$scan_rc"
 }
 
 main "$@"

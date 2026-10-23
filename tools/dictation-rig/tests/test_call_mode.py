@@ -941,6 +941,22 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         self.assertEqual(report["deal_updates"][0]["candidate_id"], "update-id")
         self.assertEqual(stat.S_IMODE((self.session / post_call.PUSH_FILE).stat().st_mode), 0o600)
 
+    def test_publish_status_failure_does_not_mask_successful_sibling_batches(self) -> None:
+        def request(_method, url, _body, _headers):
+            if url.endswith("/capture/status"):
+                return 503, {}
+            if url.endswith("/capture/post-call/candidates"):
+                return 200, {"candidate_ids": ["action-id", "draft-id"]}
+            if url.endswith("/capture/candidates"):
+                return 200, {"candidate_ids": ["update-id"]}
+            raise AssertionError(url)
+
+        with patch.object(capture_bridge, "http_request", side_effect=request):
+            self.assertEqual(capture_bridge.publish_cmd(self.cfg, self.session), 1)
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        self.assertEqual(report["joe_tasks"][0]["candidate_id"], "action-id")
+        self.assertEqual(report["deal_updates"][0]["candidate_id"], "update-id")
+
     def test_poll_syncs_all_lanes_files_report_then_marks_purge_safe(self) -> None:
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
         assert report is not None
@@ -997,7 +1013,7 @@ class CaptureBridgePostCallTests(unittest.TestCase):
             raise AssertionError(url)
 
         with patch.object(capture_bridge, "http_request", side_effect=request):
-            self.assertEqual(capture_bridge.poll_cmd(self.cfg, self.session), 0)
+            self.assertEqual(capture_bridge.poll_cmd(self.cfg, self.session), 1)
         self.assertFalse(any(url.endswith("/capture/session") for url in calls))
         self.assertFalse(any(url.endswith("/capture/post-call/report") for url in calls))
         self.assertTrue((self.session / ".capture.json").exists())
