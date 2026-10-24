@@ -268,6 +268,12 @@
       "sha256": "7fef2e4a5aa5f1eb6662212cee2d628d36eb8d60f255d55edac10f689758950a",
       "rule": "pii-address",
       "reason": "Historical synthetic fixture in PR #2120 uses an invented example address; current fixture uses a synthetic location marker. Exact historical file bytes only, retained because force-push is forbidden."
+    },
+    {
+      "path": "ops/outlook-send-selftest.py",
+      "sha256": "0621a833ac8d0592d8d884985786331ff90c7c91348688d2fcaa3eacaf71847a",
+      "rule": "pii-email",
+      "reason": "Invented Cc and Bcc fixture recipients in c190c248, replaced by reserved example.test addresses in 05b41df3; offline fake Outlook test only. Bound to the historical blob because PR CI scans every introduced commit."
     }
   ]
 }

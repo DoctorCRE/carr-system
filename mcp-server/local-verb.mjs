@@ -200,26 +200,44 @@ async function runViaWorker(verbName, verbArgs) {
   }
   console.error(`local-verb identity -> ${credential.identityNotice} -> ${CARR_MCP_URL}`);
 
+  const deadlineText = process.env.CARR_RECORD_DEADLINE_MS;
+  const deadline = deadlineText === undefined ? Date.now() + 120_000 : Number(deadlineText);
+  if (!Number.isSafeInteger(deadline) || deadline < 0) {
+    console.error("invalid record call deadline");
+    process.exit(2);
+  }
+  const controller = new AbortController();
+  const timer = deadline === 0 ? null :
+    setTimeout(() => controller.abort(), Math.max(0, deadline - Date.now()));
   let res;
+  let bodyText;
   try {
+    if (deadline !== 0 && deadline <= Date.now()) controller.abort();
     res = await fetch(CARR_MCP_URL, {
       method: "POST",
+      signal: controller.signal,
       headers: { "content-type": "application/json", authorization: `Bearer ${credential.token}` },
       body: JSON.stringify({
         jsonrpc: "2.0", id: 1, method: "tools/call",
         params: { name: verbName, arguments: verbArgs },
       }),
     });
+    bodyText = await res.text();
   } catch (e) {
+    if (controller.signal.aborted) {
+      console.error("could not reach the deployed Worker: record call deadline exceeded");
+      process.exit(1);
+    }
     console.error(
       `could not reach the deployed Worker at ${CARR_MCP_URL}: ${e.message}\n` +
       "The default path fails here rather than silently opening a direct database connection. " +
       "For a genuine outage, break glass explicitly — see this file's header for the envelope."
     );
     process.exit(1);
+  } finally {
+    clearTimeout(timer);
   }
 
-  const bodyText = await res.text();
   let body;
   try {
     body = JSON.parse(bodyText);

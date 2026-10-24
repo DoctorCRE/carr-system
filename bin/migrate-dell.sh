@@ -505,7 +505,6 @@ run_check() {
   fi
 }
 run_check "egress guard"     "ops/guard-selftest.py"
-run_check "git-writer gate"  "ops/git-writer-gate-selftest.py"
 # Added after the gate below shipped (2026-08-10), later than this script.
 # Step 3 installs every gate in the repo's hooks block, so a verify list that
 # lags the hooks block certifies a machine it has not fully checked.

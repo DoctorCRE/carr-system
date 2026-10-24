@@ -19,15 +19,14 @@
 # claim without consent proof.
 #
 # Backlog guard: session directories older than BACKLOG_AGE_SECONDS are
-# skipped outright, so a Mac that was asleep for a week (or a rig that was
-# offline) never wakes up and mass-claims a pile of old sessions in one
+# skipped unless a prior claim attempt is still pending, so a sleeping Mac
+# never wakes up and mass-claims a pile of old sessions in one
 # WatchPaths firing.
 #
 # Env:
 #   CARR_RECORDINGS_DIR  — override the recordings root (default: ~/Recordings)
 #
-# Exit code is always 0 on a normal scan (matches consent-watch.sh), so
-# launchd never treats "nothing to claim yet" as a failure.
+# Empty queues succeed. Failed children remain visible after the full sweep.
 #
 # Never touches vendor/quill, ~/.config/quill, launchd, or git.
 
@@ -82,20 +81,20 @@ main() {
 
     if [ ! -f "$BRIDGE_PY" ]; then
         log_line "ERROR capture-bridge.py missing at $BRIDGE_PY"
-        exit 0
+        exit 1
     fi
 
     local PYTHON_BIN
     PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
     if [ -z "$PYTHON_BIN" ]; then
         log_line "ERROR python3 not found on PATH"
-        exit 0
+        exit 1
     fi
 
     local now_epoch
     now_epoch="$(date -u '+%s')"
 
-    local dir
+    local dir scan_rc=0 child_rc
     for dir in "$RECORDINGS_DIR"/*/; do
         [ -d "$dir" ] || continue
         dir="${dir%/}"
@@ -107,7 +106,7 @@ main() {
         [ -n "$epoch" ] || continue   # not a recognizable session dir
 
         local age=$((now_epoch - epoch))
-        if [ "$age" -gt "$BACKLOG_AGE_SECONDS" ]; then
+        if [ "$age" -gt "$BACKLOG_AGE_SECONDS" ] && [ ! -f "$dir/.capture-request.json" ] && [ ! -f "$dir/.capture-claim-pending" ]; then
             continue
         fi
 
@@ -115,14 +114,28 @@ main() {
         [ -f "$dir/ingested.json" ] && continue
 
         if ! wait_for_announcement "$dir"; then
-            log_line "SKIP claim no-announcement session=$name (waited 20s)"
+            log_line "ERROR claim no-announcement session=$name (waited 20s)"
+            scan_rc=1
             continue
         fi
 
+        # A failed prerequisite has no consented request/nonce yet.
+        if ! touch "$dir/.capture-claim-pending"; then
+            log_line "ERROR claim could not preserve retry session=$name"
+            scan_rc=1
+            continue
+        fi
         "$PYTHON_BIN" "$BRIDGE_PY" claim "$dir"
+        child_rc=$?
+        if [ "$child_rc" -eq 0 ]; then
+            rm -f "$dir/.capture-claim-pending" || child_rc=1
+        fi
+        if [ "$child_rc" -ne 0 ] && { [ "$scan_rc" -eq 0 ] || [ "$scan_rc" -eq 78 ]; }; then
+            scan_rc="$child_rc"
+        fi
     done
 
-    exit 0
+    exit "$scan_rc"
 }
 
 main "$@"

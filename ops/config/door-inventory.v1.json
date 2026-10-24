@@ -193,6 +193,12 @@
       "class": "hand_tool",
       "reason": "Manually renders the fixed-base context-hook comparison report; it is not a runtime or scheduled entrypoint.",
       "evidence": "evals/context-hooks/make_report.py main() binds its baseline and writes the evaluation report."
+    },
+    {
+      "path": "hooks/turn_origin.py",
+      "class": "inert",
+      "reason": "Retained transcript-origin classifier has no executable caller after PR #2195 retires weekend-quiet-gate.py. It remains hash-protected with the retained hook inventory.",
+      "evidence": "WR-000284 post-purge door inventory; PR #2195 deletes the last caller hooks/weekend-quiet-gate.py. The fixed retirement scope retains this hash-protected classifier as inert."
     }
   ]
 }

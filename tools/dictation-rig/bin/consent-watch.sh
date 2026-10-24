@@ -15,8 +15,8 @@
 #   CARR_RECORDINGS_DIR  — override the recordings root (default: ~/Recordings)
 #
 # Exit code is always 0 on a normal scan (nothing to announce, or several
-# announced) so launchd never treats a quiet run as a failure. Only a hard
-# internal error (e.g. the clip asset is missing) exits non-zero.
+# announced). Playback and proof-marker failures return nonzero after all
+# sessions have been attempted.
 
 set -u
 set -o pipefail
@@ -31,7 +31,7 @@ TOOL_DIR="$(cd "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)"
 CLIP_PATH="$TOOL_DIR/assets/now-recording.aiff"
 
 RECORDINGS_DIR="${CARR_RECORDINGS_DIR:-$HOME/Recordings}"
-LOG_FILE="/Users/booko/carr-system/out/dictation-consent.log"
+LOG_FILE="$HOME/Library/Logs/dictation-consent.log"
 
 AFPLAY_BIN="/usr/bin/afplay"
 OSASCRIPT_BIN="/usr/bin/osascript"
@@ -76,13 +76,17 @@ announce_session() {
     # Write to a temp file then rename into place — the closest we get to an
     # atomic write with plain shell, so a half-written announcement.json is
     # never mistaken for a completed one.
-    {
+    if ! {
         printf '{\n'
         printf '  "announcement_fired_at": "%s",\n' "$fired_at"
         printf '  "clip": "now-recording.aiff",\n'
         printf '  "played_by": "consent-watch"\n'
         printf '}\n'
-    } > "$tmp_marker"
+    } > "$tmp_marker"; then
+        log_line "ERROR could not write announcement.json for session=$session_name"
+        rm -f "$tmp_marker" 2>/dev/null || true
+        return 1
+    fi
 
     if ! mv -f "$tmp_marker" "$marker"; then
         log_line "ERROR could not write announcement.json for session=$session_name"
@@ -167,7 +171,7 @@ main() {
         exit 1
     fi
 
-    local dir
+    local dir scan_rc=0
     for dir in "$RECORDINGS_DIR"/*/; do
         # Glob with no matches leaves the literal pattern; guard against that.
         [ -d "$dir" ] || continue
@@ -189,10 +193,10 @@ main() {
             continue
         fi
 
-        announce_session "$dir"
+        announce_session "$dir" || scan_rc=1
     done
 
-    exit 0
+    exit "$scan_rc"
 }
 
 main "$@"

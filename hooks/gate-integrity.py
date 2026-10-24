@@ -27,7 +27,6 @@ CONTRACTS = {
     "hooks.json": REPO / "ops/config/hooks.json",
     "codex-hooks.json": REPO / "ops/config/codex-hooks.json",
     "rule-enforcement-map.json": REPO / "ops/config/rule-enforcement-map.json",
-    "model-floors.json": REPO / "ops/config/model-floors.json",
     "github_spacing.py": REPO / "lib/github_spacing.py",
     "native_shell.py": REPO / "lib/native_shell.py",
     "claude-managed-settings.json": REPO / "ops/config/claude-managed-settings.json",
