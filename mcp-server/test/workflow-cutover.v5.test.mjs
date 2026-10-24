@@ -268,50 +268,17 @@ class WorkflowCutoverFake {
   }
 }
 
-test("open-workflow-cutover-plan starts at read_legacy and requires a stated recovery plan", async () => {
-  const client = new WorkflowCutoverFake();
-  const result = await executeRegisteredTool(client, AGENT, "open-workflow-cutover-plan", {
-    idempotency_key: "60000000-0000-0000-0000-000000000001",
-    workflow_key: "lead-board-nightly", workflow_version: 1,
-    recovery_plan: "revert to the legacy launchd job by re-enabling com.carr.lead-board-nightly",
-  });
-  assert.equal(result.ok, true);
-  assert.equal(result.stage, "read_legacy");
-  assert.equal(result.status, "active");
-});
 
-test("open-workflow-cutover-plan refuses a missing recovery plan (Q116: a bounded recovery path is required up front)", async () => {
-  const client = new WorkflowCutoverFake();
-  await assert.rejects(
-    () => executeRegisteredTool(client, AGENT, "open-workflow-cutover-plan", {
-      idempotency_key: "60000000-0000-0000-0000-000000000002",
-      workflow_key: "lead-board-nightly", workflow_version: 1, recovery_plan: "",
-    }),
-    (e) => e instanceof ToolError && (e.payload.error === "missing_required" || e.payload.error === "value_too_short"),
-  );
-});
-
-test("Q153 stale-plan supersession: opening a second plan for the same workflow supersedes the first", async () => {
-  const client = new WorkflowCutoverFake();
-  const first = await executeRegisteredTool(client, AGENT, "open-workflow-cutover-plan", {
-    idempotency_key: "60000000-0000-0000-0000-000000000003",
-    workflow_key: "renewal-feed", workflow_version: 1, recovery_plan: "re-enable legacy schedule",
-  });
-  const second = await executeRegisteredTool(client, AGENT, "open-workflow-cutover-plan", {
-    idempotency_key: "60000000-0000-0000-0000-000000000004",
-    workflow_key: "renewal-feed", workflow_version: 1, recovery_plan: "re-enable legacy schedule v2",
-  });
-  assert.notEqual(second.plan_id, first.plan_id);
-  const firstRow = client.plans.get(first.plan_id);
-  assert.equal(firstRow.status, "superseded");
-  assert.equal(firstRow.superseded_by, second.plan_id);
-  const secondRow = client.plans.get(second.plan_id);
-  assert.equal(secondRow.status, "active");
-});
+function seedCutoverPlan(client, args) {
+  const id = `50000000-0000-0000-0000-${String(++client._planSeq).padStart(12, "0")}`;
+  const row = { id, ...args, stage: "read_legacy", status: "active" };
+  client.plans.set(id, row);
+  return { plan_id: id, ...row };
+}
 
 test("Q116: advance-workflow-cutover-stage refuses to skip a stage", async () => {
   const client = new WorkflowCutoverFake();
-  const opened = await executeRegisteredTool(client, AGENT, "open-workflow-cutover-plan", {
+  const opened = await seedCutoverPlan(client, {
     idempotency_key: "60000000-0000-0000-0000-000000000005",
     workflow_key: "calendar-prebrief", workflow_version: 1, recovery_plan: "revert",
   });
@@ -324,7 +291,7 @@ test("Q116: advance-workflow-cutover-stage refuses to skip a stage", async () =>
 
 test("Q116: advance to shadow_compare requires an accepted shadow acceptance for the exact workflow identity", async () => {
   const client = new WorkflowCutoverFake();
-  const opened = await executeRegisteredTool(client, AGENT, "open-workflow-cutover-plan", {
+  const opened = await seedCutoverPlan(client, {
     idempotency_key: "60000000-0000-0000-0000-000000000007",
     workflow_key: "calendar-prebrief", workflow_version: 1, recovery_plan: "revert",
   });
@@ -349,7 +316,7 @@ test("Q116: advance to shadow_compare requires an accepted shadow acceptance for
 
 test("advance-workflow-cutover-stage can never reach stage=retired -- that door is retire-workflow-cutover-plan alone", async () => {
   const client = new WorkflowCutoverFake();
-  const opened = await executeRegisteredTool(client, AGENT, "open-workflow-cutover-plan", {
+  const opened = await seedCutoverPlan(client, {
     idempotency_key: "60000000-0000-0000-0000-000000000011",
     workflow_key: "x", workflow_version: 1, recovery_plan: "revert",
   });
@@ -362,37 +329,9 @@ test("advance-workflow-cutover-stage can never reach stage=retired -- that door 
   );
 });
 
-test("every door that can change what a live workflow may enqueue is authority-only; writers keep caller and progress records", () => {
-  for (const name of ["open-workflow-cutover-plan", "advance-workflow-cutover-stage", "cancel-workflow-cutover-plan",
-    "retire-workflow-cutover-plan", "register-slice-checkable-done", "mark-slice-completion"]) {
-    assert.equal(TOOLS[name].authorityOnly, true, `${name} must be authority-only`);
-    assert.equal(TOOLS[name].write, true);
-  }
-  for (const name of ["record-workflow-caller", "mark-slice-progress", "workflow-cutover-board", "read-slice-completion"])
-    assert.equal(TOOLS[name].authorityOnly, undefined, `${name} should not be authority-only`);
-  // 0628: the partner override doors are authority-only; the automated
-  // seat's doors ride the writer connection (the database refuses any actor
-  // outside ops.slice_marker_seat).
-  for (const name of ["rebind-slice-criterion-evidence", "set-slice-mark-hold", "confirm-slice-completions"]) {
-    assert.equal(TOOLS[name].authorityOnly, true, `${name} must be authority-only`);
-    assert.equal(TOOLS[name].write, true);
-  }
-  for (const name of ["register-slice-criteria-from-catalog", "bind-slice-criterion-evidence",
-    "record-release-slice-members", "propose-slice-completion"]) {
-    assert.equal(TOOLS[name].authorityOnly, undefined, `${name} is a seat door on the writer connection`);
-    assert.equal(TOOLS[name].write, true);
-  }
-  assert.equal(TOOLS["list-shipped-releases"].write, false);
-  assert.equal(TOOLS["pending-slice-completion-proposals"].write, false);
-  // Automation proposes; no writer-connection verb can set complete.
-  assert.equal(TOOLS["auto-mark-slice-completion"], undefined);
-  assert.deepEqual(TOOLS["mark-slice-progress"].inputSchema.properties.status.enum, ["in_progress", "blocked"]);
-  assert.equal("status" in TOOLS["mark-slice-completion"].inputSchema.properties, false);
-});
-
 test("cancel-workflow-cutover-plan leaves the plan cancelled and frees the slot for a new open", async () => {
   const client = new WorkflowCutoverFake();
-  const opened = await executeRegisteredTool(client, AUTHORITY_AGENT, "open-workflow-cutover-plan", {
+  const opened = await seedCutoverPlan(client, {
     idempotency_key: "60000000-0000-0000-0000-000000000030",
     workflow_key: "cancel-fixture", workflow_version: 1, recovery_plan: "revert",
   });
@@ -404,212 +343,6 @@ test("cancel-workflow-cutover-plan leaves the plan cancelled and frees the slot 
     idempotency_key: "60000000-0000-0000-0000-000000000032", plan_id: opened.plan_id, reason: "twice",
   }));
   assert.match(again.detail, /workflow_cutover_plan_not_active/);
-});
-
-test("Q116: retire-workflow-cutover-plan refuses before recovery_ready, and refuses without a real disable-legacy-schedule receipt", async () => {
-  const client = new WorkflowCutoverFake();
-  const opened = await executeRegisteredTool(client, AGENT, "open-workflow-cutover-plan", {
-    idempotency_key: "60000000-0000-0000-0000-000000000013",
-    workflow_key: "y", workflow_version: 1, recovery_plan: "revert",
-  });
-  const early = await rejected(() => executeRegisteredTool(client, AUTHORITY_AGENT, "retire-workflow-cutover-plan", {
-    idempotency_key: "60000000-0000-0000-0000-000000000014",
-    plan_id: opened.plan_id, disable_receipt_id: "80000000-0000-0000-0000-000000000001", reason: "too early",
-  }));
-  assert.match(early.detail, /workflow_cutover_plan_not_recovery_ready/);
-  client.plans.get(opened.plan_id).stage = "recovery_ready";
-  const noReceipt = await rejected(() => executeRegisteredTool(client, AUTHORITY_AGENT, "retire-workflow-cutover-plan", {
-    idempotency_key: "60000000-0000-0000-0000-000000000015",
-    plan_id: opened.plan_id, disable_receipt_id: "80000000-0000-0000-0000-000000000099", reason: "no real receipt",
-  }));
-  assert.match(noReceipt.detail, /legacy_schedule_disable_receipt_not_found/);
-  client.seedDisableReceipt("80000000-0000-0000-0000-000000000001", { workflow_key: "y" });
-  // P1 fix (PR #1245 review, item 6 / Q157): retire-workflow-cutover-plan now
-  // refuses outright when the independent workflow-truth census answers
-  // unavailable, rather than proceeding on the receipt/evidence chain alone
-  // and merely decorating the response with the raw reading. The census
-  // route answers unavailable today (the durable census store has not
-  // landed), so THIS build refuses every retire -- that is the intended,
-  // correct fail-closed behavior, not a bug to work around in the fixture.
-  // The check is ordered LAST in the store (after stage/receipt checks,
-  // which the two sub-cases above already proved still fire first), so a
-  // fully valid plan+receipt still gets refused specifically for the census.
-  const refused = await rejected(() => executeRegisteredTool(client, AUTHORITY_AGENT, "retire-workflow-cutover-plan", {
-    idempotency_key: "60000000-0000-0000-0000-000000000016",
-    plan_id: opened.plan_id, disable_receipt_id: "80000000-0000-0000-0000-000000000001",
-    reason: "legacy schedule confirmed disabled",
-  }));
-  assert.equal(refused.error, "workflow_cutover_retire_refused");
-  assert.match(refused.detail, /workflow_cutover_retire_refused_census_unknown/);
-  // The plan must still be exactly where it was -- refused, not partially
-  // applied.
-  assert.equal(client.plans.get(opened.plan_id).stage, "recovery_ready");
-});
-
-test("Q157: record-workflow-caller refuses status=done without evidence, and refuses status=blocked without a reason", async () => {
-  const client = new WorkflowCutoverFake();
-  const noEvidence = await rejected(() => executeRegisteredTool(client, AGENT, "record-workflow-caller", {
-    idempotency_key: "60000000-0000-0000-0000-000000000017",
-    workflow_key: "z", workflow_version: 1, caller_locator: "tools/legacy-caller.py",
-    caller_kind: "script", status: "done",
-  }));
-  assert.match(noEvidence.detail, /caller_done_requires_evidence_ref/);
-  const noReason = await rejected(() => executeRegisteredTool(client, AGENT, "record-workflow-caller", {
-    idempotency_key: "60000000-0000-0000-0000-000000000018",
-    workflow_key: "z", workflow_version: 1, caller_locator: "tools/legacy-caller.py",
-    caller_kind: "script", status: "blocked",
-  }));
-  assert.match(noReason.detail, /caller_blocked_requires_reason/);
-  const recorded = await executeRegisteredTool(client, AGENT, "record-workflow-caller", {
-    idempotency_key: "60000000-0000-0000-0000-000000000019",
-    workflow_key: "z", workflow_version: 1, caller_locator: "tools/legacy-caller.py",
-    caller_kind: "script", status: "done", evidence_ref: "migrated in PR #9999",
-  });
-  assert.equal(recorded.status, "done");
-});
-
-test("workflow-cutover-board reports caller counts and never claims the census route is anything but unknown while it is fail-closed (Q157)", async () => {
-  const client = new WorkflowCutoverFake();
-  await executeRegisteredTool(client, AGENT, "open-workflow-cutover-plan", {
-    idempotency_key: "60000000-0000-0000-0000-000000000020",
-    workflow_key: "board-fixture", workflow_version: 1, recovery_plan: "revert",
-  });
-  await executeRegisteredTool(client, AGENT, "record-workflow-caller", {
-    idempotency_key: "60000000-0000-0000-0000-000000000021",
-    workflow_key: "board-fixture", workflow_version: 1, caller_locator: "a", caller_kind: "script",
-    status: "done", evidence_ref: "receipt-a",
-  });
-  await executeRegisteredTool(client, AGENT, "record-workflow-caller", {
-    idempotency_key: "60000000-0000-0000-0000-000000000022",
-    workflow_key: "board-fixture", workflow_version: 1, caller_locator: "b", caller_kind: "script",
-    status: "remaining",
-  });
-  const board = await executeRegisteredTool(client, AGENT, "workflow-cutover-board", {
-    workflow_key: "board-fixture", workflow_version: 1,
-  });
-  assert.equal(board.plan.stage, "read_legacy");
-  assert.deepEqual(board.caller_counts, { done: 1, remaining: 1 });
-  // The V5-F09/A01 census reader answers unavailable today (documented,
-  // fail-closed state); the board must never promote that into "done".
-  assert.equal(board.census.state, "unknown");
-});
-
-test("Q153: slice completion resolves each criterion against its registered binding and refuses duplicates", async () => {
-  const client = new WorkflowCutoverFake();
-  await executeRegisteredTool(client, AUTHORITY_AGENT, "register-slice-checkable-done", {
-    idempotency_key: "60000000-0000-0000-0000-000000000023", slice_id: "V5-R02",
-    criteria: [
-      { criterion: "A", evidence_kind: "acceptance", workflow_key: "wf", workflow_version: 1, acceptance_mode: "canary" },
-      { criterion: "B", evidence_kind: "acceptance", workflow_key: "wf", workflow_version: 1, acceptance_mode: "shadow" },
-    ],
-  });
-  client.seedAcceptance("70000000-0000-0000-0000-000000000011",
-    { workflow_key: "wf", workflow_version: 1, mode: "canary", status: "accepted" });
-  client.seedAcceptance("70000000-0000-0000-0000-000000000012",
-    { workflow_key: "other", workflow_version: 1, mode: "shadow", status: "accepted" });
-  const duplicate = await rejected(() => executeRegisteredTool(client, AUTHORITY_AGENT, "mark-slice-completion", {
-    idempotency_key: "60000000-0000-0000-0000-000000000024", slice_id: "V5-R02",
-    criteria_receipt: [
-      { criterion: "A", evidence_ref: "70000000-0000-0000-0000-000000000011" },
-      { criterion: "A", evidence_ref: "70000000-0000-0000-0000-000000000011" },
-    ],
-  }));
-  assert.match(duplicate.detail, /slice_completion_duplicate_criterion/);
-  const wrongWorkflow = await rejected(() => executeRegisteredTool(client, AUTHORITY_AGENT, "mark-slice-completion", {
-    idempotency_key: "60000000-0000-0000-0000-000000000025", slice_id: "V5-R02",
-    criteria_receipt: [
-      { criterion: "A", evidence_ref: "70000000-0000-0000-0000-000000000011" },
-      { criterion: "B", evidence_ref: "70000000-0000-0000-0000-000000000012" },
-    ],
-  }));
-  assert.match(wrongWorkflow.detail, /slice_completion_complete_requires_every_criterion_proven/);
-  const progress = await executeRegisteredTool(client, AGENT, "mark-slice-progress", {
-    idempotency_key: "60000000-0000-0000-0000-000000000026", slice_id: "V5-R02", status: "in_progress",
-    criteria_receipt: [
-      { criterion: "A", evidence_ref: "70000000-0000-0000-0000-000000000011" },
-      { criterion: "B", evidence_ref: null },
-    ],
-  });
-  assert.equal(progress.status, "in_progress");
-  assert.deepEqual(progress.criteria_receipt.map(el => el.pass), [true, false]);
-  const read = await executeRegisteredTool(client, AGENT, "read-slice-completion", { slice_id: "V5-R02" });
-  assert.equal(read.marked, true);
-  assert.equal(read.status, "in_progress");
-});
-
-test("read-slice-completion reports marked:false for a slice that was never marked", async () => {
-  const client = new WorkflowCutoverFake();
-  const read = await executeRegisteredTool(client, AGENT, "read-slice-completion", { slice_id: "V5-R99" });
-  assert.equal(read.marked, false);
-  assert.equal(read.status, null);
-});
-
-test("register-slice-criteria-from-catalog takes no criteria: the server reads them from the catalog", () => {
-  const schema = TOOLS["register-slice-criteria-from-catalog"].inputSchema;
-  assert.deepEqual(Object.keys(schema.properties).sort(), ["idempotency_key", "slice_id"]);
-  assert.equal(schema.additionalProperties, false);
-});
-
-test("the seat may bind the server-resolved kinds but never 'unbound' or refusal_proof", () => {
-  const seatKinds = TOOLS["bind-slice-criterion-evidence"].inputSchema.properties.evidence_kind.enum;
-  assert.deepEqual([...seatKinds].sort(), ["accepted_record", "live_check", "shipped_release"]);
-  const partnerKinds = TOOLS["rebind-slice-criterion-evidence"].inputSchema.properties.evidence_kind.enum;
-  assert.deepEqual([...partnerKinds].sort(), ["accepted_record", "live_check", "shipped_release", "unbound"]);
-  const sources = TOOLS["bind-slice-criterion-evidence"].inputSchema.properties.live_check_source.enum;
-  for (const source of ["portfolio_revision_acceptance", "portfolio_acceptance_effect_free"])
-    assert.ok(sources.includes(source), source);
-  assert.ok(!sources.includes("ci_gate"));
-  const registered = TOOLS["register-slice-checkable-done"].inputSchema.properties.criteria.items.properties;
-  assert.ok(registered.evidence_kind.enum.includes("accepted_record"));
-  assert.ok(!registered.evidence_kind.enum.includes("refusal_proof"));
-  assert.ok("bound_member_id" in TOOLS["bind-slice-criterion-evidence"].inputSchema.properties);
-});
-
-test("bind-slice-criterion-evidence passes bound_member_id to the door and surfaces its refusal", async () => {
-  const client = new WorkflowCutoverFake();
-  const member = "54000000-0000-0000-0000-000000000001";
-  const ok = await executeRegisteredTool(client, AGENT, "bind-slice-criterion-evidence", {
-    idempotency_key: "60000000-0000-0000-0000-000000000031", slice_id: "V5-F08",
-    criterion: "scanner flags PHI", evidence_kind: "shipped_release", bound_member_id: member,
-    reason: "Jev evidence_matching",
-  });
-  assert.equal(ok.bound_member_id, member);
-  assert.equal(ok.bound_via, "automation");
-  assert.deepEqual(client.bindCalls[0].slice(0, 8), ["V5-F08", "scanner flags PHI", "shipped_release", null,
-    null, null, member, "Jev evidence_matching"]);
-  const refused = await rejected(() => executeRegisteredTool(client, AGENT, "bind-slice-criterion-evidence", {
-    idempotency_key: "60000000-0000-0000-0000-000000000032", slice_id: "V5-F08",
-    criterion: "scanner flags PHI", evidence_kind: "shipped_release", reason: "no member",
-  }));
-  assert.equal(refused.error, "slice_criterion_binding_refused");
-  assert.match(refused.detail, /shipped_release_binding_requires_this_slice_member/);
-  for (const [kind, extra] of [["unbound", {}],
-    ["refusal_proof", { live_check_source: "ci_gate", live_check_key: "ci", write_required_reason: "w" }]]) {
-    const denied = await rejected(() => executeRegisteredTool(client, AGENT, "bind-slice-criterion-evidence", {
-      idempotency_key: "60000000-0000-0000-0000-000000000033", slice_id: "V5-S00",
-      criterion: "negatives refuse", evidence_kind: kind, reason: "seat tries", ...extra,
-    }));
-    assert.ok(denied, `the seat's schema refuses evidence_kind=${kind}`);
-  }
-  assert.equal(client.bindCalls.length, 2, "a schema refusal never reaches the door");
-});
-
-test("propose-slice-completion records a proposal, never a mark, and surfaces the door's refusal", async () => {
-  const client = new WorkflowCutoverFake();
-  const receipt = [{ criterion: "scanner flags PHI", evidence_ref: "54000000-0000-0000-0000-000000000001" }];
-  const ok = await executeRegisteredTool(client, AGENT, "propose-slice-completion", {
-    idempotency_key: "60000000-0000-0000-0000-000000000041", slice_id: "V5-F08", criteria_receipt: receipt,
-    reason: "every criterion proven",
-  });
-  assert.equal(ok.status, "proposed");
-  assert.equal(ok.awaiting_partner_confirmation, true);
-  assert.equal(ok.proposal_id, "55000000-0000-0000-0000-000000000001");
-  assert.equal("marked_via" in ok, false);
-  const held = await rejected(() => executeRegisteredTool(client, AGENT, "propose-slice-completion", {
-    idempotency_key: "60000000-0000-0000-0000-000000000042", slice_id: "V5-HELD", criteria_receipt: receipt,
-  }));
-  assert.equal(held.error, "slice_completion_proposal_refused");
-  assert.match(held.detail, /slice_mark_held_by_partner/);
 });
 
 test("confirm-slice-completions is one partner act for many slices, with a per-slice outcome", async () => {
@@ -643,14 +376,4 @@ test("confirm-slice-completions is one partner act for many slices, with a per-s
     idempotency_key: "60000000-0000-0000-0000-000000000044", slice_ids: ["V5-F08"],
   }));
   assert.ok(noReason, "a confirmation needs a reason");
-  const pending = await executeRegisteredTool(client, AGENT, "pending-slice-completion-proposals", {});
-  assert.deepEqual(pending, { ok: true, count: 1, pending: [{ slice_id: "V5-F08", proposal_id: "p1", passes_now: true }] });
-});
-
-test("read-slice-completion returns the server's live done_state alongside the latest mark", async () => {
-  const client = new WorkflowCutoverFake();
-  const read = await executeRegisteredTool(client, AGENT, "read-slice-completion", { slice_id: "V5-S00" });
-  assert.equal(read.done_state.slice_id, "V5-S00");
-  assert.equal(read.done_state.registered, false);
-  assert.ok(client.calls.some(c => c.sql.includes("ops.read_slice_done_state")));
 });

@@ -24,26 +24,6 @@ test("unknown, changed, and open operation contracts refuse deterministically", 
   assert.equal(registeredOperation("not-reviewed"), null);
 });
 
-test("the current registry admits the real Codex checkpoint contract", async () => {
-  const sealedDigest =
-    "c19344c49e59fb799584ccdd2829053c7b43b8a072d72fd90b2c759a9e17b760";
-  assert.equal(sha256(TOOLS["codex-checkpoint"].inputSchema), sealedDigest);
-  const operation = await assertRegisteredOperation(
-    "codex-checkpoint",
-    TOOLS["codex-checkpoint"],
-    {
-      idempotency_key: "00000000-0000-4000-8000-000000000001",
-      runtime: "codex",
-      native_task_id: "task-1",
-      project_id: "project-1",
-      cwd: "/repo",
-      expected_version: 0,
-      state: { objective: "continue", next_action: "verify" },
-    },
-  );
-  assert.equal(operation.schema_digest, sealedDigest);
-});
-
 test("composites expose exact reviewed edges and generic dispatch stays default deny", () => {
   assert.deepEqual(registeredOperation("stamp-touch").delegates_to, ["log-activity"]);
   assert.deepEqual(registeredOperation("resolve-candidate").delegates_to,

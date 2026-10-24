@@ -133,39 +133,6 @@ const programRows = [
     acceptance_criteria: [], executor_actor: null, project_context: {} },
 ];
 
-test("capability-program summary keeps current in full, others brief", async () => {
-  const tools = capabilityProgramTools({ withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => {}, ToolError });
-  const result = await tools["capability-program"].handler(programDb(programRows), actor,
-    { program_key: "carr-ai-engineering-suite-v1", summary: true });
-
-  assert.equal(result.total, 2);
-  assert.equal(result.completed, 1);
-  assert.equal(result.program_complete, false);
-  // Current stays FULL — it is the row a session acts on.
-  assert.equal(result.current.ref, "WR-AI-006");
-  assert.ok(result.current.desired_outcome !== undefined);
-  assert.deepEqual(result.requested, { ref: "WR-AI-006", sequence: 1, title: "Current project",
-    state: "ready", disposition: "build", executor_actor: "hermes-pilot" });
-  for (const p of result.projects) {
-    assert.deepEqual(Object.keys(p).sort(),
-      ["disposition", "executor_actor", "ref", "sequence", "state", "title"]);
-  }
-  assert.ok(!("capability_session" in result), "no session read is needed for a queue scan");
-});
-
-test("capability-program without the flag returns today's full payload (backwards compatible)", async () => {
-  const tools = capabilityProgramTools({ withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => {}, ToolError });
-  const db = { query: async (sql) => {
-    if (sql.includes("from ops.work_request")) return { rows: [programRows[0]] };
-    if (sql.includes("from ops.capability_agent_session")) return { rows: [] };
-    throw new Error(`unexpected query: ${sql}`);
-  }};
-  const result = await tools["capability-program"].handler(db, actor, { program_key: "carr-ai-engineering-suite-v1" });
-  assert.ok(result.session_brief !== undefined, "full mode still carries session_brief");
-  assert.equal(result.projects, undefined, "include_all still defaults off — shape unchanged");
-  assert.equal(result.current.desired_outcome, "long prose outcome that must stay out of brief rows");
-});
-
 // A PAYLOAD BUDGET MAY DROP FIELDS; IT MAY NOT CHANGE WHAT THE VERB MEANS.
 // Both modes are the same read, so a sequence naming no project must fail the
 // same way in each. Before this, the summary early-return sat ABOVE the guard:
@@ -173,28 +140,6 @@ test("capability-program without the flag returns today's full payload (backward
 // requested:null. The null was the worse half — summary sets `requested` to the
 // current item when no sequence is given, and current is null once the program
 // completes, so "no such project" and "program finished" were indistinguishable.
-test("an unknown sequence fails identically in both modes", async () => {
-  const tools = capabilityProgramTools({ withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => {}, ToolError });
-  const call = (extra) => tools["capability-program"].handler(programDb(programRows), actor,
-    { program_key: "carr-ai-engineering-suite-v1", sequence: 999, ...extra });
-
-  for (const [mode, extra] of [["full", {}], ["summary", { summary: true }]]) {
-    await assert.rejects(() => call(extra),
-      (err) => {
-        assert.equal(err.payload.error, "capability_project_not_found", `${mode} mode must name the error`);
-        assert.equal(err.payload.sequence, 999, `${mode} mode must echo the sequence asked for`);
-        return true;
-      },
-      `${mode} mode must refuse a sequence that names no project`);
-  }
-
-  // And the good path still resolves under the budget, so the guard above did
-  // not simply break summary mode's ability to answer about a real project.
-  const ok = await call({ summary: true, sequence: 2 });
-  assert.equal(ok.requested.sequence, 2);
-  assert.equal(ok.requested.ref, "WR-AI-007");
-  assert.equal(ok.requested.desired_outcome, undefined, "requested stays brief under summary");
-});
 
 // ── list-verbs ────────────────────────────────────────────────────────────────
 

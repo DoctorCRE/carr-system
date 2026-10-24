@@ -103,30 +103,19 @@ test("dispatch forces the hermes profile and ignores ?profile=", () => {
   }
 });
 
-test("the hermes business-write set is a strict subset of capture", () => {
-  // The set is written out rather than spread from capture, so a verb added to
-  // capture never lands in a persistent daemon's hands unreviewed. This is the
-  // assertion that keeps the two honest in the other direction: hermes may
-  // never hold a verb capture does not.
-  const runtimeOnly = new Set(["project-room-queue", "record-dispatch-link"]);
+test("Hermes business writes stay within capture except server-bound dispatch linkage", () => {
   for (const verb of PROFILES.hermes) {
-    if (runtimeOnly.has(verb)) continue;
-    assert.ok(PROFILES.capture.has(verb),
-      `${verb} is in hermes but not in capture — hermes must never exceed the additive set`);
+    if (verb === "record-dispatch-link") continue;
+    assert.ok(PROFILES.capture.has(verb), verb);
   }
-  assert.ok(PROFILES.hermes.size - runtimeOnly.size < PROFILES.capture.size,
-    "strict subset: hermes deliberately excludes the investigation verbs");
-  assert.equal(allowedIn("hermes", "project-room-queue", WRITE), true,
-    "the server-bound projector door is an allowed runtime write");
-  assert.equal(allowedIn("hermes", "record-dispatch-link", WRITE), true,
-    "the server-bound dispatch-link door is an allowed runtime write");
+  assert.equal(allowedIn("hermes", "record-dispatch-link", WRITE), true);
 });
 
 test("the investigation verbs stay out of the hermes set", () => {
   // An investigation is a chain of reasoning a human is steering. A runtime
   // dropping evidence into one mid-flight changes what the adjudicator sees.
   for (const verb of ["record-signal", "record-branch-evidence"]) {
-    assert.ok(PROFILES.capture.has(verb), `${verb} should still be in capture`);
+    assert.ok(!PROFILES.capture.has(verb), `${verb} is retired from capture`);
     assert.equal(allowedIn("hermes", verb, WRITE), false, `${verb} must refuse under hermes`);
   }
 });
@@ -192,10 +181,9 @@ test("the granted additive verbs are allowed", () => {
   }
 });
 
-test("raw room writing stays out while the shape-checked projector door is allowed", () => {
-  assert.equal(allowedIn("hermes", "add-room-turn", WRITE), false,
-    "the unattended runtime must not gain an arbitrary transcript writer");
-  assert.equal(allowedIn("hermes", "project-room-queue", WRITE), true);
+test("raw room writing and the retired projector door remain unavailable", () => {
+  assert.equal(allowedIn("hermes", "add-room-turn", WRITE), false);
+  assert.equal(allowedIn("hermes", "project-room-queue", WRITE), false);
 });
 
 test("close-loop is excluded even though add-loop is granted", () => {
