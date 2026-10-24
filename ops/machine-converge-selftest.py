@@ -62,7 +62,6 @@ COPIES = [
     "ops/githooks/pre-push",
     "ops/config/hooks.json",
     "ops/config/claude-managed-settings.json",
-    "ops/config/codex-requirements.toml",
     "ops/launchd/com.carr.dictation-consent.plist",
 ]
 
@@ -133,8 +132,7 @@ def build_fixture(root, email, actor_slug=None, behind=True, dirty=False,
     source = installer.read_text()
     entry = '\nif __name__ == "__main__":'
     assert entry in source
-    destinations = ('\nCLAUDE_MANAGED_SETTINGS = os.path.join(HOME, "managed-claude.json")\n'
-                    'CODEX_REQUIREMENTS = os.path.join(HOME, "codex-requirements.toml")\n')
+    destinations = ('\nCLAUDE_MANAGED_SETTINGS = os.path.join(HOME, "managed-claude.json")\n')
     installer.write_text(source.replace(entry, destinations + entry))
 
     # The PR #555 install guard requires this fixture repo to carry the scripts
@@ -300,7 +298,7 @@ def case_secondary_converges(tmp):
             os.path.isfile(os.path.join(home, ".claude", "settings.json")),
         "managed policies stay inside the fixture HOME":
             all(Path(home, name).is_file() for name in
-                ("managed-claude.json", "codex-requirements.toml")),
+                ("managed-claude.json",)),
         "no ~/.codex created on a Claude-only machine":
             not os.path.exists(os.path.join(home, ".codex")),
         "brief line reports the apply": "re-applied" in r.stdout,

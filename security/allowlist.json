@@ -90,12 +90,6 @@
       "reason": "Historical generated SCAC v114 source-contract manifest at 710845781. Line 161 serializes ingress identifiers, schema and handler digests, and job routing metadata, not authentication material. Retained in PR history after the successor was removed; exception binds only these exact immutable SQL bytes and this generic detector."
     },
     {
-      "path": "ops/config/studio-failover-inventory.v1.json",
-      "sha256": "f8aa2ba34a17e57ac18a33b7f2796504e62fbb90a7972bbe86bce658e18f108a",
-      "rule": "pii-phone",
-      "reason": "Machine inventory value (a RAM byte count), not a phone number; no record-layer or client data."
-    },
-    {
       "path": "ops/config/studio-failover.v1.json",
       "sha256": "2babac885eb2cdb5d84d6279131a15c208cc107e0af32712a5cffc70bc5c0758",
       "rule": "pii-email",
