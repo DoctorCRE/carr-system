@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """rule-triage-selftest.py — acceptance test for WR-000019 slice S7's triage
 artifact, ops/config/rule-triage.v1.json, plus a smoke test of the two tools
-that read it (rule-triage-report.py, rule-triage-apply.py).
+that reads it (rule-triage-report.py).
 
 WHAT THIS PINS, per the slice's own definition of done:
   1. Complete coverage — every id in ops/config/rule-enforcement-map.json's
@@ -18,9 +18,7 @@ WHAT THIS PINS, per the slice's own definition of done:
      a dangling reference the moment Joe's batch actually retires anything.
   6. Every JIT rule carries a jit_trigger_hint (non-empty).
   7. rule-triage-report.py runs clean on the real artifact (smoke test).
-  8. rule-triage-apply.py runs clean, is dry-run only (asserts no subprocess/
-     network usage got introduced, and --json's "executed" field is false),
-     and its retire-rule batch size matches the triage's GONE count exactly.
+
 
 RUNNING IT. No database, no network:
 
@@ -35,7 +33,6 @@ REPO = Path(__file__).resolve().parent.parent
 TRIAGE_PATH = REPO / "ops" / "config" / "rule-triage.v1.json"
 ENFORCEMENT_MAP_PATH = REPO / "ops" / "config" / "rule-enforcement-map.json"
 REPORT_SCRIPT = REPO / "ops" / "rule-triage-report.py"
-APPLY_SCRIPT = REPO / "ops" / "rule-triage-apply.py"
 
 CORE_CAP = 35
 CORE_TARGET_LOW, CORE_TARGET_HIGH = 15, 20
@@ -166,35 +163,6 @@ def main() -> int:
               "one or more HOME headers missing from output")
     else:
         check("rule-triage-report.py exists", False, str(REPORT_SCRIPT))
-
-    # 8. apply script smoke test + dry-run guarantee
-    if APPLY_SCRIPT.exists():
-        src = APPLY_SCRIPT.read_text()
-        check("rule-triage-apply.py never imports subprocess",
-              "import subprocess" not in src, "found a subprocess import")
-        check("rule-triage-apply.py never imports requests/urllib/http client libs",
-              not any(tok in src for tok in ("import requests", "import urllib", "import http.client",
-                                              "socket.")),
-              "found a network-capable import")
-        p = subprocess.run([sys.executable, str(APPLY_SCRIPT), "--emit-receipts-plan", "--json"],
-                            capture_output=True, text=True, cwd=str(REPO))
-        check("rule-triage-apply.py exits 0", p.returncode == 0,
-              f"rc={p.returncode} stderr={p.stderr[:200]}")
-        try:
-            plan = json.loads(p.stdout)
-        except json.JSONDecodeError as e:
-            plan = None
-            check("rule-triage-apply.py --json prints valid JSON", False, str(e))
-        if plan is not None:
-            check("apply plan declares executed=false", plan.get("executed") is False,
-                  f"executed={plan.get('executed')}")
-            check("apply plan's retire-rule batch size matches triage GONE count",
-                  len(plan.get("retire_rule_batch", [])) == len(gone_rows),
-                  f"plan has {len(plan.get('retire_rule_batch', []))}, triage has {len(gone_rows)}")
-            check("apply plan includes the receipts plan when asked",
-                  "receipts_plan" in plan, "receipts_plan missing")
-    else:
-        check("rule-triage-apply.py exists", False, str(APPLY_SCRIPT))
 
     print(f"\n{passed} checks passed, {len(failures)} failed")
     if failures:

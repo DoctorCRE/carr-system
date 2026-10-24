@@ -20,8 +20,8 @@
 // TYPED OBSERVATION THE CALLER SUPPLIES — in production, the receipt
 // bin/restore-rehearse.sh writes (tools/restore-watermark.py computes the exact
 // watermark and hash it carries, and reads the recorded digest back from the
-// producer's own Check, never from an operator) and the RPO block
-// tools/pitr-restore-proof.py recomputes from production and the provider.
+// producer's own Check, never from an operator). RPO evidence is unavailable
+// after retirement of the standalone point-in-time producer.
 // A `pass` here says the registered checks did not fire on the facts as
 // reported; every result carries V5_NO_EFFECTS.
 //
@@ -41,8 +41,7 @@
 // (produced_at, started_at, finished_at, probe write instants) against the
 // caller's clock. There is no field for a configured retention window or a
 // vendor's advertised RPO; "point-in-time restore is enabled" is not a recovery
-// point; a point-in-time branch that provably holds a probe the proof itself
-// wrote, and provably lacks one it wrote later, is (bin/pitr-restore-proof.sh).
+// point. Provider recovery settings alone cannot establish measured RPO.
 //
 // CELLS ARE INDEPENDENT. Each cell reads only its own evidence block. A cell
 // with no evidence is `no_evidence`, which is not a pass, and it changes no
@@ -121,6 +120,7 @@ export const V5_RESTORE_EXERCISE_CHECKS = Object.freeze([
   "artifact_hash_exact",
   "watermark_exact",
   "restore_interval_well_formed",
+  "security_parity_exact",
 ]);
 
 export const V5_CHECK_STATES = Object.freeze(["pass", "fail", "not_reached"]);
@@ -134,30 +134,7 @@ export const V5_RECOVERY_MATRIX_CELLS = Object.freeze([
 
 export const V5_CELL_STATES = Object.freeze(["pass", "fail", "no_evidence", "indeterminate"]);
 
-/**
- * How a recovery point was OBSERVED. Configuration is deliberately absent, and
- * so is a copy's bare production instant: a timestamp alone proves nothing is
- * restorable to it.
- *
- * `pitr_branch_proof` (bin/pitr-restore-proof.sh -> tools/pitr-restore-proof.py):
- * the proof writes a POSITIVE probe row (ops.pitr_probe, server-side nonce and
- * clock) at least V5_PITR_PROBE_MARGIN_SECONDS before an instant T, then a
- * NEGATIVE probe at least V5_PITR_NEGATIVE_MARGIN_SECONDS after T. It asks the
- * provider's API for a disposable branch whose parent is the production branch
- * AT T, reads the branch back (parent id, the resolved parent timestamp, which
- * must lie between the positive probe's write and T, and the resolved LSN), and
- * requires the positive probe present with its exact nonce and write instant
- * and the negative probe ABSENT — the negative control that proves the branch
- * is production at T rather than at some later point. The provider exposes no
- * "latest restorable point" field, so the point is PROVEN rather than read:
- * exposure is measured from the positive probe's write instant, never from T.
- */
-export const V5_RECOVERY_POINT_SOURCES = Object.freeze(["pitr_branch_proof"]);
-
-/** A probe written this close before T might not have committed by T; it proves nothing. */
-export const V5_PITR_PROBE_MARGIN_SECONDS = 60;
-/** A negative probe written this close after T could fall inside the provider's resolution of T. */
-export const V5_PITR_NEGATIVE_MARGIN_SECONDS = 5;
+export const V5_RECOVERY_POINT_SOURCES = Object.freeze([]);
 
 /**
  * After a restore, an item whose last send attempt is this recent may still be
@@ -182,16 +159,12 @@ export const V5_OUTBOUND_SETTLE_WINDOW_SECONDS = 15 * 60;
  */
 export const V5_EVIDENCE_VERIFIERS = Object.freeze({
   restore_exercise: "tools/restore-watermark.py verify-restore",
-  record_layer_rpo: "tools/pitr-restore-proof.py prove",
   outbound_census: "tools/restore-watermark.py outbound-census",
 });
 export const V5_REVERIFY_MAX_AGE_SECONDS = 15 * 60;
 
 /** The persisted outbound queues a census may be read from (the restored database's). */
 export const V5_OUTBOUND_CENSUS_SOURCES = Object.freeze(["ops.notification_delivery:device"]);
-
-/** Where the point-in-time proof ran. Production is registered so it can be refused by name. */
-export const V5_PITR_PROOF_TARGET_KINDS = Object.freeze(["disposable_branch", "production", "unstated"]);
 
 /** Outbound queue item states at the moment of restore. */
 export const V5_OUTBOUND_ITEM_STATES = Object.freeze([
@@ -224,9 +197,6 @@ export const V5_RECOVERY_MATRIX_REASON_IDS = Object.freeze([
 ]);
 
 const SHA256_REF = /^sha256:[0-9a-f]{64}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const NONCE = /^[0-9a-f]{32}$/;
-const LSN = /^[0-9A-F]{1,8}\/[0-9A-F]{1,8}$/;
 const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:+/-]{0,255}$/;
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
 // schema.table as both producers write it: the unquoted catalog names joined by
@@ -288,18 +258,6 @@ function instant(value, path) {
   const ms = Date.parse(value);
   if (!Number.isFinite(ms)) fail("invalid_instant", `${path} is not a real instant`, { path });
   return ms;
-}
-
-/**
- * A UTC instant in epoch MICROseconds. The database stamps probe rows to the
- * microsecond and Date.parse keeps only milliseconds, so a margin compared in
- * milliseconds could pass a probe written a few microseconds inside it.
- * Epoch microseconds stay well inside Number's exact-integer range.
- */
-function instantUs(value, path) {
-  instant(value, path);
-  const fraction = /\.(\d{1,6})Z$/.exec(value)?.[1] ?? "";
-  return Date.parse(`${value.slice(0, 19)}Z`) * 1000 + Number(fraction.padEnd(6, "0"));
 }
 
 function nonNegativeInteger(value, path) {
@@ -425,7 +383,7 @@ function positiveInteger(value, path) {
 }
 
 export function normalizeRestoreExerciseReceipt(receipt) {
-  closed(receipt, [...RECEIPT_KEYS, "target_point"], "receipt", RECEIPT_KEYS);
+  closed(receipt, [...RECEIPT_KEYS, "target_point", "security_parity"], "receipt", RECEIPT_KEYS);
   if (receipt.receipt_kind !== V5_RESTORE_EXERCISE_RECEIPT_KIND) {
     fail("unknown_state", `receipt.receipt_kind must be "${V5_RESTORE_EXERCISE_RECEIPT_KIND}"`, { path: "receipt.receipt_kind" });
   }
@@ -434,6 +392,7 @@ export function normalizeRestoreExerciseReceipt(receipt) {
   const targetKind = enumValue(receipt.target_kind, V5_RESTORE_TARGET_KINDS, "receipt.target_kind");
   const point = targetPoint(receipt);
   return deepFreeze({
+    security_parity: receipt.security_parity ?? null,
     receipt_kind: V5_RESTORE_EXERCISE_RECEIPT_KIND,
     target_kind: targetKind,
     ...(point ? { target_point: point } : {}),
@@ -458,6 +417,19 @@ export function normalizeRestoreExerciseReceipt(receipt) {
     started_at: (instant(receipt.started_at, "receipt.started_at"), receipt.started_at),
     finished_at: (instant(receipt.finished_at, "receipt.finished_at"), receipt.finished_at),
   });
+}
+
+function validSecurityParity(parity) {
+  const roles = ["app_writer", "carr_writer", "app_reader", "carr_reader"];
+  return parity?.verdict === "PASS"
+    && /^[0-9a-f]{40}$/.test(parity.schema_revision)
+    && /^[0-9a-f]{40}$/.test(parity.schema_blob)
+    && Array.isArray(parity.mismatches) && parity.mismatches.length === 0
+    && roles.every(role => {
+      const counts = parity.roles?.[role];
+      return [counts?.positive, counts?.negative, counts?.operations]
+        .every(value => Number.isSafeInteger(value) && value > 0);
+    });
 }
 
 function watermarkDiff(artifact, restored) {
@@ -495,6 +467,7 @@ export function evaluateRestoreExercise(receiptInput, clock) {
     () => r.observed_artifact_digest !== r.copy.recorded_artifact_digest ? "artifact_hash_mismatch" : null,
     () => mismatches.length ? "watermark_mismatch" : null,
     () => !(finishedMs >= startedMs && startedMs >= Date.parse(r.copy.produced_at)) ? "restore_interval_invalid" : null,
+    () => !validSecurityParity(r.security_parity) ? "security_parity_mismatch" : null,
   ];
   let failIndex = -1;
   let reason = "restore_exercise_exact";
@@ -515,6 +488,7 @@ export function evaluateRestoreExercise(receiptInput, clock) {
     recorded_digest_source: r.copy.recorded_digest_source,
     artifact_digest: r.observed_artifact_digest,
     tables_compared: Object.keys(r.artifact_watermark).length,
+    security_parity: r.security_parity,
     target_point: r.target_point ?? null,
     watermark_mismatches: mismatches,
     restore_seconds: Math.round((finishedMs - startedMs) / 1000),
@@ -530,15 +504,6 @@ export function evaluateRestoreExercise(receiptInput, clock) {
 // No `observed_at`: the instant a matrix is judged at is the caller's clock.
 const MATRIX_KEYS = Object.freeze(["business_calendar", "cells"]);
 const CELL_BLOCK_KEYS = Object.freeze([...V5_RECOVERY_MATRIX_CELLS]);
-const RPO_PITR_KEYS = Object.freeze([
-  "branch_core_table_rows", "branch_operations", "branch_id", "branch_parent_id", "branch_parent_lsn", "verification",
-  "branch_parent_timestamp", "history_retention_seconds", "negative_probe", "negative_present_on_branch",
-  "positive_on_branch", "positive_probe", "production_branch_id", "production_readback", "project_id",
-  "proof_target_kind", "requested_parent_timestamp", "retention_read_at", "source",
-]);
-const PROBE_KEYS = Object.freeze(["id", "nonce", "written_at"]);
-const BRANCH_OPERATION_KEYS = Object.freeze(["create", "delete"]);
-const READBACK_BLOCK_KEYS = Object.freeze(["negative", "positive", "read_at"]);
 const DAILY_KEYS = Object.freeze(["newest_copy", "restore_exercise"]);
 const NEWEST_COPY_KEYS = Object.freeze([
   "custody_domain", "independent_store_readback_digest", "primary_domain", "produced_at",
@@ -550,107 +515,6 @@ const ADAPTER_RECOVERY_KEYS = Object.freeze(["adapter_id", "outage_started_at", 
 
 function cell(state, detail) {
   return { state, ...detail };
-}
-
-function booleanValue(value, path) {
-  if (typeof value !== "boolean") fail("invalid_shape", `${path} must be a boolean`, { path });
-  return value;
-}
-
-function probeRow(value, path) {
-  closed(value, PROBE_KEYS, path);
-  if (typeof value.id !== "string" || !UUID.test(value.id)) fail("invalid_identifier", `${path}.id must be a lower-case uuid`, { path: `${path}.id` });
-  if (typeof value.nonce !== "string" || !NONCE.test(value.nonce)) fail("invalid_identifier", `${path}.nonce must be 32 lower-case hex digits`, { path: `${path}.nonce` });
-  return { id: value.id, nonce: value.nonce, written_at: value.written_at, us: instantUs(value.written_at, `${path}.written_at`) };
-}
-
-function optionalProbeRow(value, path) {
-  return value === null ? null : probeRow(value, path);
-}
-
-/** Same row: id, server-made nonce and server-stamped write instant all equal. */
-function sameProbe(a, b) {
-  return a !== null && b !== null && a.id === b.id && a.nonce === b.nonce && a.written_at === b.written_at;
-}
-
-function isFreshReadback(readMs, nowMs) {
-  return readMs <= nowMs && nowMs - readMs <= V5_RPO_MAX_SECONDS * 1000;
-}
-
-function rpoCell(block, nowMs) {
-  const at = "cells.record_layer_rpo";
-  closed(block, RPO_PITR_KEYS, at);
-  enumValue(block.source, V5_RECOVERY_POINT_SOURCES, `${at}.source`);
-  enumValue(block.proof_target_kind, V5_PITR_PROOF_TARGET_KINDS, `${at}.proof_target_kind`);
-  for (const key of ["project_id", "production_branch_id", "branch_id", "branch_parent_id"]) stableId(block[key], `${at}.${key}`);
-  if (typeof block.branch_parent_lsn !== "string" || (block.branch_parent_lsn !== "" && !LSN.test(block.branch_parent_lsn))) {
-    fail("invalid_shape", `${at}.branch_parent_lsn must be an LSN like 0/1A2B3C4D, or empty when the provider returned none`, { path: `${at}.branch_parent_lsn` });
-  }
-  const requestedUs = instantUs(block.requested_parent_timestamp, `${at}.requested_parent_timestamp`);
-  const parentUs = instantUs(block.branch_parent_timestamp, `${at}.branch_parent_timestamp`);
-  const nowUs = nowMs * 1000;
-  const positive = probeRow(block.positive_probe, `${at}.positive_probe`);
-  const negative = probeRow(block.negative_probe, `${at}.negative_probe`);
-  const onBranch = optionalProbeRow(block.positive_on_branch, `${at}.positive_on_branch`);
-  const negativePresent = booleanValue(block.negative_present_on_branch, `${at}.negative_present_on_branch`);
-  const ops = closed(block.branch_operations, BRANCH_OPERATION_KEYS, `${at}.branch_operations`);
-  for (const key of BRANCH_OPERATION_KEYS) {
-    if (ops[key] !== null) stableId(ops[key], `${at}.branch_operations.${key}`);
-  }
-  const isReverified = reverified(block, "record_layer_rpo", nowMs, at);
-  if (!isPlainObject(block.branch_core_table_rows)) fail("invalid_shape", `${at}.branch_core_table_rows must be a plain object`, { path: `${at}.branch_core_table_rows` });
-  const coreRows = Object.entries(block.branch_core_table_rows).map(([table, rows]) => {
-    if (!TABLE_NAME.test(table)) fail("invalid_identifier", `${at}.branch_core_table_rows key "${table}" must be schema.table`, { path: `${at}.branch_core_table_rows` });
-    return [table, nonNegativeInteger(rows, `${at}.branch_core_table_rows.${table}`)];
-  });
-  if (coreRows.length === 0) fail("missing_field", `${at}.branch_core_table_rows must name at least one table`, { path: `${at}.branch_core_table_rows` });
-  const retention = nonNegativeInteger(block.history_retention_seconds, `${at}.history_retention_seconds`);
-  const retentionReadMs = instant(block.retention_read_at, `${at}.retention_read_at`);
-  const rb = closed(block.production_readback, READBACK_BLOCK_KEYS, `${at}.production_readback`);
-  const rbPositive = optionalProbeRow(rb.positive, `${at}.production_readback.positive`);
-  const rbNegative = optionalProbeRow(rb.negative, `${at}.production_readback.negative`);
-  const rbReadMs = instant(rb.read_at, `${at}.production_readback.read_at`);
-
-  // The proven point is the positive probe's write instant, never the requested T.
-  const exposure = Math.floor((nowUs - positive.us) / 1e6);
-  const failures = [];
-  if (!isReverified) failures.push("evidence_not_reverified");
-  if (block.proof_target_kind !== "disposable_branch") failures.push("proof_target_not_disposable");
-  if (block.branch_id === block.production_branch_id) failures.push("proof_target_is_production");
-  if (block.branch_parent_id !== block.production_branch_id) failures.push("branch_parent_not_production");
-  // The provider resolves T to the latest timestamped WAL record at or before
-  // it and reports THAT record's time (observed live: T 22:29:16 -> 22:29:00),
-  // so the readback is not an echo of T. It must lie between the positive
-  // probe's write and T; the probes themselves are what prove the point.
-  if (parentUs < positive.us || parentUs > requestedUs) failures.push("branch_parent_timestamp_outside_probe_window");
-  if (block.branch_parent_lsn === "") failures.push("branch_parent_lsn_missing");
-  if (positive.us > requestedUs - V5_PITR_PROBE_MARGIN_SECONDS * 1e6) failures.push("positive_probe_not_before_point");
-  if (negative.us < requestedUs + V5_PITR_NEGATIVE_MARGIN_SECONDS * 1e6) failures.push("negative_probe_not_after_point");
-  if (requestedUs > nowUs) failures.push("restorable_point_after_observation");
-  if (!sameProbe(onBranch, positive)) failures.push("positive_probe_absent_on_branch");
-  if (negativePresent) failures.push("negative_control_present_on_branch");
-  if (coreRows.some(([, rows]) => rows === 0)) failures.push("core_table_empty_on_branch");
-  if (!sameProbe(rbPositive, positive) || !sameProbe(rbNegative, negative)) failures.push("probe_not_recomputed_from_production");
-  if (!isFreshReadback(rbReadMs, nowMs)) failures.push("production_readback_stale");
-  // Create and delete are confirmed from the provider's operations log (a
-  // finished create_branch / delete_timeline operation on this branch id), not
-  // from a 404, which an invented branch id also returns.
-  if (ops.create === null) failures.push("branch_create_not_confirmed");
-  if (ops.delete === null) failures.push("branch_delete_not_confirmed");
-  if (exposure > V5_RPO_MAX_SECONDS) failures.push("exposure_exceeds_rpo");
-  if (retention < exposure) failures.push("retention_does_not_cover_exposure");
-  if (!isFreshReadback(retentionReadMs, nowMs)) failures.push("retention_readback_stale");
-  return cell(failures.length ? "fail" : "pass", {
-    failures,
-    source: block.source,
-    measured_seconds: exposure,
-    bound_seconds: V5_RPO_MAX_SECONDS,
-    proven_restorable_point: positive.written_at,
-    requested_parent_timestamp: block.requested_parent_timestamp,
-    branch_id: block.branch_id,
-    branch_parent_lsn: block.branch_parent_lsn,
-    history_retention_seconds: retention,
-  });
 }
 
 function dailyCopyCell(block, nowMs) {
@@ -822,7 +686,7 @@ function adapterRtoCell(block, calendar) {
 }
 
 const CELL_EVALUATORS = Object.freeze({
-  record_layer_rpo: (block, nowMs) => rpoCell(block, nowMs),
+  record_layer_rpo: () => cell("no_evidence", { reason: "evidence_producer_unavailable" }),
   independent_daily_restorable_copy: (block, nowMs) => dailyCopyCell(block, nowMs),
   core_rto: (block, nowMs) => coreRtoCell(block, nowMs),
   adapter_rto: (block, _nowMs, calendar) => adapterRtoCell(block, calendar),
@@ -1059,14 +923,6 @@ export function v5RecoveryMatrixPolicyPreimage() {
     closes_seams: [V5_OUTBOUND_RECONCILIATION_SEAM, V5_RESTORE_AND_RECOVERY_MATRIX_SEAM].sort(),
     business_calendar_digest: V5_BUSINESS_CALENDAR_DIGEST,
     business_day_rule: "recovered_by_same_wall_clock_time_on_next_business_day",
-    pitr_probe_margin_seconds: V5_PITR_PROBE_MARGIN_SECONDS,
-    pitr_negative_margin_seconds: V5_PITR_NEGATIVE_MARGIN_SECONDS,
-    pitr_negative_control_required: true,
-    pitr_branch_parent_must_be: "production_branch_resolved_between_positive_probe_and_requested_timestamp_with_lsn",
-    pitr_production_readback_required: true,
-    pitr_proof_target_kinds: [...V5_PITR_PROOF_TARGET_KINDS].sort(),
-    rpo_measured_from: "proven_probe_write_instant_not_requested_point",
-    retention_must_cover: "measured_exposure",
     clock_source: "caller_clock_option_never_evidence",
     recorded_digest_source_kinds: [...V5_RECORDED_DIGEST_SOURCE_KINDS].sort(),
     independent_recorded_digest_sources: [...V5_INDEPENDENT_RECORDED_DIGEST_SOURCES].sort(),
@@ -1078,7 +934,6 @@ export function v5RecoveryMatrixPolicyPreimage() {
     evidence_verifiers: { ...V5_EVIDENCE_VERIFIERS },
     reverify_max_age_seconds: V5_REVERIFY_MAX_AGE_SECONDS,
     reverify_binding_is_signature: false,
-    pitr_branch_lifecycle_confirmed_by: "provider_operations_log_finished_create_branch_and_delete_timeline",
     outbound_empty_census_is_reconciled: false,
     // Bound by reference so a change to the admission half moves this digest too.
     backup_quarantine_policy_digest: v5BackupQuarantinePolicyDigest(),

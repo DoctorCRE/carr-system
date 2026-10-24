@@ -35,6 +35,7 @@
 # since 2026-08-10. This hook is the half that makes the recommendation bite.
 
 PROTECTED="main"
+hookdir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 # ── a staged credential never reaches a commit (2026-08-23 gates council) ────
 # THE BIND-MOMENT WAS WRONG, and this is the fix. ops/ci-secret-scan.py without

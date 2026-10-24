@@ -16,10 +16,8 @@ somebody wondering why staging behaves oddly.
 WHY THIS RUNS IN CI RATHER THAN NIGHTLY. It compares two things that both live
 in the repository — the matrix and mcp-server/wrangler.toml plus the project map
 in tools/db-tap.py — so it needs no credential and no network, and ops/ci.sh
-picks it up automatically as a *-selftest.py. The nightly gates
-(p1-environment-gate, p1-rebuild-gate) ask the live environments the questions
-that need live answers. These are the questions a change can be checked against
-before it merges.
+picks it up automatically as a *-selftest.py. These are the questions a change
+can be checked against before it merges.
 
 THE ASSERTIONS.
 

@@ -436,9 +436,11 @@ def main():
     # 53 -> 50, preference 24 -> 23 on 2026-10-17 (PR #1859): 18 retired or
     # pending-retirement rules left the active map, each one whole compiled
     # item; none was a split and nothing was reclassified.
+    # PR #2195 moves five constraints and one surfacing procedure into
+    # four procedures, one rubric and one preference; all six rules remain.
     reviewed_counts = {
-        "constraint": 33, "procedure": 83, "doctrine": 11, "rubric": 50,
-        "preference": 24, "precedent": 3, "example": 0,
+        "constraint": 28, "procedure": 86, "doctrine": 11, "rubric": 51,
+        "preference": 25, "precedent": 3, "example": 0,
     }
     split_compile_pass = (
         not reviewed_errors and not reviewed_compile_errors
@@ -475,7 +477,7 @@ def main():
         "source_manifest_provenance": {
             "path": "audits/guidance-migration-manifest.v1.tsv", "sha256": "a" * 64,
             "manifest": "carr-guidance-migration", "schema_version": "1.0.0",
-            "source_classification": "judgment_ambient", "entry_count": 138,
+            "source_classification": "judgment_ambient", "entry_count": 144,
         },
         "base_inventory": {
             "path": "ops/config/rule-enforcement-map.json", "sha256": "b" * 64,

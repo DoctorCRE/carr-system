@@ -28,7 +28,7 @@ import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # ops/git-isolation-check: confine git in the fixture builder (see the
-# canonical-edit-gate selftest for the same guard and why).
+# hook-env-isolation selftest for the same guard and why).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from git_env import fixture_env  # noqa: E402
 FIXTURE_ENV = fixture_env()

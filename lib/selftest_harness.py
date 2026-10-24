@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+from dataclasses import dataclass
 import importlib.util
 import json
 import os
@@ -42,14 +43,7 @@ import subprocess
 import sys
 import tempfile
 from types import ModuleType
-from typing import TYPE_CHECKING, Iterator, List, Optional
-
-if TYPE_CHECKING:
-    from lib.hook_runtime import Verdict
-elif __package__:
-    from .hook_runtime import Verdict
-else:
-    from hook_runtime import Verdict
+from typing import Iterator, List, Optional
 
 __all__ = ["Checker", "load_module", "load_hook", "fixture_dir", "hook_env",
            "HookSandbox", "HookResult", "temporary_directory"]
@@ -173,8 +167,13 @@ def load_hook(name: str, *, repo=REPO) -> ModuleType:
     return load_module(Path(repo) / "hooks" / (name.removesuffix(".py") + ".py"))
 
 
-class HookResult(Verdict):
-    """The hook's exit code, original streams and parsed verdict."""
+@dataclass(frozen=True)
+class HookResult:
+    """The hook's exit code, original streams and JSON envelopes."""
+
+    code: int = 0
+    stdout: str = ""
+    stderr: str = ""
 
     @property
     def envelopes(self):

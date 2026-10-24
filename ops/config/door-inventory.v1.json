@@ -21,18 +21,6 @@
       "evidence": "tools/test-flash-on-demand.py verifies immediate revocation and shutdown"
     },
     {
-      "path": "bin/cutoff-doctrine.sh",
-      "class": "one_shot",
-      "reason": "Ended the vault's markdown era at the 2026-08-19 cutoff; the exporter flag it flips stays flipped, so it has no second run.",
-      "evidence": "a93eea45 (The cutoff fired, 2026-08-19)"
-    },
-    {
-      "path": "bin/r2-forget.py",
-      "class": "hand_tool",
-      "reason": "Remedy a person runs by name to remove a bad object from the R2 archive and its ledger after a failed nightly dump.",
-      "evidence": "bin/r2-forget.py docstring (added b621455d after the 2026-08-07 empty-backup night)"
-    },
-    {
       "path": "evals/rule-delivery/freeze_split.py",
       "class": "one_shot",
       "reason": "Wrote the frozen train/test split once at baseline; rerunning it would defeat the freeze it exists to create.",
@@ -43,12 +31,6 @@
       "class": "hand_tool",
       "reason": "The controller runs it on a DoctorCRE build bundle before acceptance so the citation trace check actually executes.",
       "evidence": "ops/accept-doctorcre-bundle.sh header (added 7c75c878, #853)"
-    },
-    {
-      "path": "ops/atomic-rule-approval-authority-probe.py",
-      "class": "one_shot",
-      "reason": "Disposable-local rollback proof that enforced-only human rule approval is atomic, run once when that approval path landed.",
-      "evidence": "905dd380 (Make rule approval atomically enforced)"
     },
     {
       "path": "ops/check-pdf.py",
@@ -177,40 +159,10 @@
       "evidence": "39778c41 (#1590); security/bundle.json pins its bytes"
     },
     {
-      "path": "tools/apply-graph-colors.py",
-      "class": "hand_tool",
-      "reason": "A person runs it with Obsidian closed to add Graph-System area colours to the vault's graph settings.",
-      "evidence": "tools/apply-graph-colors.py docstring Usage line (added 5a5e9181)"
-    },
-    {
       "path": "tools/dictation-rig/bin/install-capture-bridge.sh",
       "class": "hand_tool",
       "reason": "The orchestrator runs it under supervision to install the WO-4 capture-bridge LaunchAgents on the dictation rig.",
       "evidence": "tools/dictation-rig/bin/install-capture-bridge.sh header (added 21442140)"
-    },
-    {
-      "path": "tools/prove-order40-windowing.py",
-      "class": "one_shot",
-      "reason": "Proved ORDER 40's two decision-history done-tests on the rehearsal branch before the personal set went to records.",
-      "evidence": "f163962f (ORDER 40, rehearsed)"
-    },
-    {
-      "path": "tools/rehearse-dossier-render.py",
-      "class": "one_shot",
-      "reason": "ORDER 36 rehearsal driver that ran the dossier exporters against a Neon branch, draft-only.",
-      "evidence": "70cdfc02 (ORDER 36 Phase B)"
-    },
-    {
-      "path": "tools/rehearse-order40-renders.py",
-      "class": "one_shot",
-      "reason": "Rehearsed ORDER 40's three renders on a Neon branch before the decision history moved to records.",
-      "evidence": "f163962f (ORDER 40, rehearsed)"
-    },
-    {
-      "path": "tools/stamp-doctrine-ownership.py",
-      "class": "one_shot",
-      "reason": "Applied ORDER 38's doctrine-ownership stamp to ORDER 30 phase 2's file set; the stamped markdown is retired.",
-      "evidence": "f163962f (ORDER 40); gated behind recovery in e2b6f3ff (#519)"
     },
     {
       "path": "pipelines/radar/build-license-pool.py",
@@ -243,22 +195,16 @@
       "evidence": "evals/context-hooks/make_report.py main() binds its baseline and writes the evaluation report."
     },
     {
-      "path": "evals/model-routing/make_report.py",
-      "class": "hand_tool",
-      "reason": "Manually renders the model-routing evaluation report; it is not a runtime or scheduled entrypoint.",
-      "evidence": "evals/model-routing/make_report.py main() consumes evaluation fixtures and writes report artifacts."
-    },
-    {
       "path": "bin/github-app-key-intake.sh",
       "class": "hand_tool",
       "reason": "Manual GitHub App key intake remains owned by the credential/release lane outside this library reset.",
       "evidence": "lib/github_app_config.py documents the retained manual intake script; this declaration grants no new credential access."
     },
     {
-      "path": "tools/reconcile.py",
-      "class": "hand_tool",
-      "reason": "Manual workbook reconciliation utility remains outside the library and evaluation reset scope.",
-      "evidence": "tools/reconcile.py is the retained reconciliation CLI; deleting the stale registry writer documentation removed its prose-only reference."
+      "path": "hooks/turn_origin.py",
+      "class": "inert",
+      "reason": "Retained transcript-origin classifier has no executable caller after PR #2195 retires weekend-quiet-gate.py. It remains hash-protected with the retained hook inventory.",
+      "evidence": "WR-000284 post-purge door inventory; PR #2195 deletes the last caller hooks/weekend-quiet-gate.py. The fixed retirement scope retains this hash-protected classifier as inert."
     }
   ]
 }
