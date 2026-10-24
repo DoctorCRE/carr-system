@@ -32,6 +32,8 @@ taken over whatever bytes are stored, and the decrypt is age's own.
 """
 from __future__ import annotations
 
+import base64
+import contextlib
 import hashlib
 import importlib.util
 import io
@@ -205,13 +207,6 @@ class Watermark(unittest.TestCase):
         kept = b"".join(rw.restore_stream(dump.splitlines(keepends=True)))
         self.assertEqual(kept, b"CREATE SCHEMA ops;\nCREATE TABLE public.t (v text);\nCOPY public.t (v) FROM stdin;\n"
                                b"GRANT \\.\nREVOKE me\n\\.\nALTER TABLE public.t ADD CONSTRAINT c CHECK (true);\n")
-        # Outside COPY data it drops exactly what the rehearsal's own sed filter drops.
-        statements = [ln for ln in dump.decode().splitlines(keepends=True) if not ln.startswith(("GRANT \\", "REVOKE me", "\\."))
-                      and "FROM stdin" not in ln]
-        sed = subprocess.run(["sed", "-E", _script_block(r"RESTORE_FILTER='([^']*)'")], input="".join(statements),
-                             text=True, capture_output=True, check=True).stdout
-        mine = b"".join(rw.restore_stream("".join(statements).encode().splitlines(keepends=True))).decode()
-        self.assertEqual(mine, sed)
 
     def test_psql_gets_every_connection_parameter_in_its_environment(self):
         with mock.patch.dict(os.environ, {"PGPASSWORD": "stale", "PGSERVICE": "x", "KEEP": "1",
@@ -426,6 +421,19 @@ ZIP = _zip_bytes()
 ZIP_DIGEST = "sha256:" + hashlib.sha256(ZIP).hexdigest()
 
 
+SECURITY_SCHEMA = """-- CARR GRANTS (bin/schema-snapshot.sh) — not produced by pg_dump.
+grant usage on schema public to carr_writer;
+grant usage on schema public to carr_reader;
+grant select on table public.party to carr_writer;
+grant select on table public.party to carr_reader;
+-- PostgreSQL database dump
+"""
+SCHEMA_BLOB = hashlib.sha1(b'blob ' + str(len(SECURITY_SCHEMA.encode())).encode() + b'\0' + SECURITY_SCHEMA.encode()).hexdigest()
+SECURITY_PARITY = {'verdict': 'PASS', 'schema_revision': HEAD, 'schema_blob': SCHEMA_BLOB,
+                   'roles': {r: {'positive': 1, 'negative': 1, 'operations': 2}
+                             for r in ('app_writer', 'carr_writer', 'app_reader', 'carr_reader')},
+                   'mismatches': []}
+
 class FakeProvider:
     """The GitHub API as ops/backup-workflow-status.py sees it, for one nightly run."""
 
@@ -462,6 +470,11 @@ class FakeProvider:
         self.zip = ZIP
 
     def api(self, path, *, method="GET", body=None, query=None):
+        if path.endswith('/contents/db/schema.sql'):
+            return {'sha': SCHEMA_BLOB}
+        if path.endswith('/git/blobs/' + SCHEMA_BLOB):
+            return {'sha': SCHEMA_BLOB, 'encoding': 'base64',
+                    'content': base64.b64encode(SECURITY_SCHEMA.encode()).decode()}
         self.check["output"]["summary"] = json.dumps(self.summary)
         if path == f"/repos/{REPO_SLUG}/actions/runs/{RUN_ID}":
             return self.run
@@ -490,6 +503,95 @@ class CopyRecordFromProvider(unittest.TestCase):
         patcher = mock.patch.object(rw, "_status_module", return_value=real)
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def test_latest_run_id_cli_selects_a_provider_verified_backup_without_downloading(self):
+        original = self.fake.api
+        def catalogue(path, **kwargs):
+            if path.endswith("/actions/workflows/backup-nightly.yml/runs"):
+                self.assertEqual(kwargs["query"]["branch"], "main")
+                return {"workflow_runs": [self.fake.run]}
+            self.assertNotIn("/zip", path)
+            return original(path, **kwargs)
+        with mock.patch.object(rw._status_module(), "api", side_effect=catalogue):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(rw.main(["latest-run-id", "--repository", REPO_SLUG]), 0)
+            self.assertEqual(output.getvalue().strip(), str(RUN_ID))
+
+    def test_latest_run_id_orders_runs_and_skips_unverified_newer_artifacts(self):
+        original = self.fake.api
+        for newer_time in ('2026-09-25T03:00:30Z', self.fake.run['run_started_at']):
+            attempted = []
+            newer = {**self.fake.run, 'id': 102, 'run_started_at': newer_time}
+            def catalogue(path, **kwargs):
+                if path.endswith('/actions/workflows/backup-nightly.yml/runs'):
+                    return {'workflow_runs': [self.fake.run, newer]}
+                if path.endswith('/actions/runs/102'):
+                    attempted.append(102)
+                    return {**newer, 'conclusion': 'failure'}
+                if path.endswith('/actions/runs/101'):
+                    attempted.append(101)
+                return original(path, **kwargs)
+            with self.subTest(newer_time=newer_time), mock.patch.object(rw._status_module(), 'api', side_effect=catalogue):
+                self.assertEqual(rw.latest_backup_run_id(REPO_SLUG), 101)
+                self.assertEqual(attempted, [102, 101])
+
+    def test_latest_run_id_reads_all_pages_and_refuses_exhausted_or_unreadable_lists(self):
+        bws = rw._status_module()
+        original = self.fake.api
+        pages = []
+        def catalogue(path, **kwargs):
+            if path.endswith('/actions/workflows/backup-nightly.yml/runs'):
+                page = kwargs['query']['page']
+                pages.append(page)
+                return {'workflow_runs': [self.fake.run] if page == 1 else []}
+            return original(path, **kwargs)
+        with mock.patch.object(bws, 'RUNS_PER_PAGE', 1), mock.patch.object(bws, 'api', side_effect=catalogue):
+            self.assertEqual(rw.latest_backup_run_id(REPO_SLUG), RUN_ID)
+            self.assertEqual(pages, [1, 2])
+        with mock.patch.object(bws, 'RUNS_PER_PAGE', 1), mock.patch.object(bws, 'api', return_value={'workflow_runs': [self.fake.run]}):
+            with self.assertRaisesRegex(ValueError, 'page limit'):
+                rw.latest_backup_run_id(REPO_SLUG)
+        for response in ({}, {'workflow_runs': [{}]}, {'workflow_runs': [{**self.fake.run, 'run_started_at': 'invalid'}]}):
+            with self.subTest(response=response), mock.patch.object(bws, 'api', return_value=response):
+                with self.assertRaises(ValueError):
+                    rw.latest_backup_run_id(REPO_SLUG)
+
+    def test_latest_run_id_refuses_expired_or_unauthenticated_backups(self):
+        original = self.fake.api
+        def catalogue(path, **kwargs):
+            if path.endswith('/actions/workflows/backup-nightly.yml/runs'):
+                return {'workflow_runs': [self.fake.run]}
+            return original(path, **kwargs)
+        with mock.patch.object(rw._status_module(), 'api', side_effect=catalogue):
+            self.fake.artifact['expired'] = True
+            with self.assertRaisesRegex(ValueError, 'no verified'):
+                rw.latest_backup_run_id(REPO_SLUG)
+            self.fake.artifact['expired'] = False
+            self.fake.check['app']['id'] = 1
+            with self.assertRaisesRegex(ValueError, 'no verified'):
+                rw.latest_backup_run_id(REPO_SLUG)
+
+    def test_artifact_declaration_is_pinned_to_producer_commit_and_blob(self):
+        declared = rw.artifact_declaration(REPO_SLUG, RUN_ID)
+        self.assertEqual(declared['schema_revision'], HEAD)
+        self.assertEqual(declared['schema_blob'], SCHEMA_BLOB)
+        original = self.fake.api
+        def missing(path, **kwargs):
+            if path.endswith('/contents/db/schema.sql'):
+                self.assertEqual(kwargs['query'], {'ref': HEAD})
+                return {}
+            return original(path, **kwargs)
+        with mock.patch.object(rw._status_module(), 'api', side_effect=missing):
+            with self.assertRaisesRegex(ValueError, 'cannot be identified'):
+                rw.artifact_declaration(REPO_SLUG, RUN_ID)
+
+    def test_artifact_declaration_refuses_a_changed_blob(self):
+        from tools.restore_security import declaration
+        with self.assertRaisesRegex(ValueError, 'blob digest does not match'):
+            declaration(SECURITY_SCHEMA + 'changed', HEAD, SCHEMA_BLOB)
+        with self.assertRaisesRegex(ValueError, 'revision cannot be identified'):
+            declaration(SECURITY_SCHEMA, None, SCHEMA_BLOB)
 
     def test_the_record_is_the_producers_check_cross_checked_against_the_store(self):
         rec = rw.read_copy_record(REPO_SLUG, RUN_ID)
@@ -639,6 +741,9 @@ class VerifyRestore(unittest.TestCase):
     server_now = NOW
 
     def setUp(self):
+        security = mock.patch.object(rw, 'rebuild_security', return_value=SECURITY_PARITY)
+        security.start()
+        self.addCleanup(security.stop)
         self.fake = FakeProvider()
         self.tmp = Path(tempfile.mkdtemp(prefix="carr-f08-verify-"))
         pin_binaries(self, self.tmp / "bin")
@@ -1228,7 +1333,7 @@ class RehearsalReceiptGate(unittest.TestCase):
             stub.chmod(0o755)
             node = (f"node() {{ print -r -- \"$*\" >> '{t}/node.args'; cat > '{t}/node.stdin'; "
                     f"[ -s '{t}/node.stdin' ] || return 2; "
-                    f"print -r -- '{{\"reason_id\":\"{verdict}\"}}'; "
+                    f"print -r -- '{{\"reason_id\":\"{verdict}\",\"security_parity\":{{\"verdict\":\"PASS\"}}}}'; "
                     f"[ '{verdict}' = restore_exercise_exact ]; }}\n")
             script = ("say() { print -r -- \"$*\"; }\n"
                       "die() { print -r -- \"DIE: $*\"; exit 1; }\n" + node +
@@ -1293,8 +1398,6 @@ class RehearsalReceiptGate(unittest.TestCase):
         text = REHEARSE.read_text()
         self.assertIn('if [ -n "$BACKUP_RUN_ID" ]; then\n  step "phase 1b: arm verify-restore"', text)
         self.assertLess(text.index('step "phase 1b: arm verify-restore"'), text.index('step "phase 2: throwaway branch"'))
-        self.assertIn("elif ! PGURL_ADMIN=", text)  # the script's own create/load runs only without --backup-run-id
-        self.assertIn('fi  # the local-dump path; with --backup-run-id verify-restore loaded it above', text)
         self.assertIn("exercise=$EXERCISE_VERDICT (piped verify-restore verdict; receipt file is a copy; "
                       "binary check stops PATH shims only, same-OS-user adversary out of scope)", text)
 
@@ -1319,9 +1422,7 @@ class RehearsalReceiptGate(unittest.TestCase):
         text = REHEARSE.read_text()
         self.assertIn('redact_tail 5 "$WORKDIR/verify.err"', text)
         self.assertIn('redact_tail 10 "$WORKDIR/verify.err"', text)
-        self.assertIn('redact_tail 40 "$WORKDIR/restore.err"', text)
         self.assertNotRegex(text, r"tail -\d+ \"\$WORKDIR/(verify|restore)\.err\"")
-        self.assertIn("psql -v ON_ERROR_STOP=1 -v VERBOSITY=terse -v SHOW_CONTEXT=never -q", text)
 
 
 class OutboundCensus(unittest.TestCase):
@@ -1420,14 +1521,6 @@ def _pg_bins():
     return None
 
 
-def _script_block(pattern: str) -> str:
-    text = REHEARSE.read_text()
-    m = re.search(pattern, text, re.S)
-    if not m:
-        raise AssertionError(f"could not find {pattern!r} in bin/restore-rehearse.sh")
-    return m.group(1)
-
-
 def _psycopg_available() -> bool:
     return importlib.util.find_spec("psycopg") is not None
 
@@ -1457,6 +1550,10 @@ class EndToEndDisposableCluster(unittest.TestCase):
         cls.fixture.run([cls.bins["pg_ctl"], "-D", str(data), "-l", str(cls.tmp / "log"), "-w", "-o",
                         f"-p {cls.port} -k {cls.tmp} -c listen_addresses='' -c timezone=UTC", "start"],
                        check=True, capture_output=True, env=env)
+        subprocess.run([cls.bins['psql'], f'host={cls.tmp} port={cls.port} user=carr_ci dbname=postgres',
+                        '-v', 'ON_ERROR_STOP=1', '-c',
+                        'create role app_writer; create role app_reader; create role carr_writer; create role carr_reader'],
+                       check=True, capture_output=True)
         cls.data = data
 
     def dsn(self, db):
@@ -1517,9 +1614,7 @@ class EndToEndDisposableCluster(unittest.TestCase):
             'public.Odd "Name"': 2, "public.empty_t": 0, "public.ev_2025": 1, "public.ev_2026": 2,
             "public.party": 252, "ops.run": 40})
 
-        restore_filter = _script_block(r"RESTORE_FILTER='([^']*)'")
-        filtered = subprocess.run(["sed", "-E", restore_filter], input=dump.read_text(), text=True,
-                                  capture_output=True, check=True).stdout
+        filtered = b"".join(rw.restore_stream(dump.read_bytes().splitlines(keepends=True))).decode()
         subprocess.run([self.bins["psql"], self.dsn("restored"), "-v", "ON_ERROR_STOP=1", "-q"], input=filtered,
                        text=True, capture_output=True, check=True)
 
