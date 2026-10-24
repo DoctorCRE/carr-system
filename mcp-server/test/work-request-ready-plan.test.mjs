@@ -250,11 +250,15 @@ test("migration 0492 rebases proposal, acceptance, and both 0333 outcome guards 
   assert.match(acceptOutcome, /where x\.slug=actor_slug and x\.active and x\.kind='human' for share;/, "0333 human acceptance survives");
 });
 
-test("catalog failure rolls back its savepoint and leaves proposal audit writes committable", async () => {
+test("catalog failure rolls back its savepoint and leaves proposal audit writes committable", async t => {
+  const logs = [];
+  t.mock.method(console, "error", line => logs.push(JSON.parse(line)));
   const db = new PlanFake({ registryError: new Error("synthetic registry unavailable") });
   const out = await executeRegisteredTool(db, JOE, "propose-ready-plan", structuredClone(PROPOSE));
   assert.equal(out.rule_delivery_source.status, "unavailable");
   assert.equal(out.rule_delivery_source.reason, "rule_delivery_registry_unavailable");
+  assert.match(out.rule_delivery_source.correlation_id, /^[a-f0-9-]{36}$/);
+  assert.ok(logs.some(log => log.correlation_id === out.rule_delivery_source.correlation_id));
   assert.ok(db.calls.some(call => /^rollback to savepoint siep02_rule_delivery_source/i.test(call.sql)));
   assert.ok(db.calls.some(call => call.sql.startsWith("insert into event")));
   assert.ok(db.calls.some(call => call.sql.startsWith("insert into tool_call")));

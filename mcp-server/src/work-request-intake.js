@@ -5,6 +5,7 @@ import { WORK_REQUEST_PROJECTION_STATE, WORK_REQUEST_READ_STATES, readableWorkRe
 import { searchDoctrineSituations } from "./situation-retrieval.js";
 import { authorizationClassForActor, organizationTenantForActor } from "./identity.js";
 import { deriveRuleDeliverySource, normalizeRuleMapDigest } from "./rule-delivery-source.js";
+import { publicError } from "./public-errors.js";
 
 const FIELDS = new Set(["idempotency_key", "situation", "title", "desired_outcome", "acceptance_criteria"]);
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
@@ -56,8 +57,9 @@ async function deliverySourceForPlan(c, actor, row, args) {
   } catch (error) {
     await c.query("rollback to savepoint siep02_rule_delivery_source");
     await c.query("release savepoint siep02_rule_delivery_source");
+    const failure = publicError(error, { env: { CORRELATION_ID: actor.correlation_id } });
     return { schema_version: "rule-delivery-source.v1", status: "unavailable",
-      reason: "rule_delivery_registry_unavailable", detail: String(error?.message || error).slice(0, 160) };
+      reason: "rule_delivery_registry_unavailable", correlation_id: failure.correlation_id };
   }
   try {
     const state = registry.rows[0] || {};
@@ -87,8 +89,9 @@ async function deliverySourceForPlan(c, actor, row, args) {
       mapDigest: digest,
     });
   } catch (error) {
+    const failure = publicError(error, { env: { CORRELATION_ID: actor.correlation_id } });
     return { schema_version: "rule-delivery-source.v1", status: "unavailable",
-      reason: "rule_delivery_source_invalid", detail: String(error?.message || error).slice(0, 160) };
+      reason: "rule_delivery_source_invalid", correlation_id: failure.correlation_id };
   }
 }
 function validate(args, ToolError) {
