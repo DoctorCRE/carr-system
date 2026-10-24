@@ -113,14 +113,16 @@ DATA_DEPENDENT_MIGRATIONS: dict[str, tuple[str, str]] = {
 # SQL bodies and both immutable ledger rows commit together, and the deferred
 # trigger observes only the final v11 state. A caller may not cut this group in
 # half with --through.
-# 0940 cannot refresh an approved control under the old guard. An earlier
+# 0940 cannot refresh an approved control under the old guard, and 0944
+# cannot retire a control with its stale binding. An earlier
 # filename would invalidate ledgers that already applied 0940/0944. Run the
-# exact forward repair first, but commit its pending suffix as one complete
+# exact forward repairs first, but commit the pending suffix as one complete
 # lexical ledger prefix. Existing 0940/0944 receipts remain valid history.
 APPROVED_CONTROL_RECOVERY_GROUP = (
     '0940_codex_job_delegation_control_refs.sql',
     '0944_retire_orphan_control_inventory.sql',
     '0947_allow_approved_control_evidence_refresh.sql',
+    '0948_remove_retired_workflow_manifest_binding.sql',
 )
 ATOMIC_MIGRATION_GROUPS = (('0480_codex_continuity.sql', '0481_codex_continuity_registry_activation.sql'),
  ('0485_claude_continuity.sql', '0486_claude_continuity_registry_activation.sql'),
@@ -566,7 +568,7 @@ def migration_batches(
     A complete pending reviewed group is one batch. A suffix whose earlier
     member is already in the immutable ledger remains individually resumable;
     this is the recovery shape for a database that predated the group rule.
-    The approved-control recovery suffix alone runs its repair first and
+    The approved-control recovery suffix alone runs its repairs first and
     commits all its SQL and ledger rows together.
     """
     by_first: dict[str, tuple[str, ...]] = {group[0]: group for group in ATOMIC_MIGRATION_GROUPS}
@@ -574,6 +576,7 @@ def migration_batches(
         name: APPROVED_CONTROL_RECOVERY_GROUP[offset:]
         for offset, name in enumerate(APPROVED_CONTROL_RECOVERY_GROUP)
     }
+    recovery_order = (*APPROVED_CONTROL_RECOVERY_GROUP[2:], *APPROVED_CONTROL_RECOVERY_GROUP[:2])
     by_first.update(recovery_suffixes)
     batches: list[list[tuple[str, str, str]]] = []
     i = 0
@@ -583,7 +586,7 @@ def migration_batches(
             candidate = pending[i:i + len(group)]
             if tuple(item[0] for item in candidate) == group:
                 if group in recovery_suffixes.values():
-                    candidate = [candidate[-1], *candidate[:-1]]
+                    candidate = sorted(candidate, key=lambda item: recovery_order.index(item[0]))
                 batches.append(candidate)
                 i += len(group)
                 continue
