@@ -77,6 +77,9 @@ const O = (req, clock) => (clock && typeof clock.now_ms === "number"
 
 function receipt() {
   return {
+    security_parity: { verdict: "PASS", schema_revision: "a".repeat(40), schema_blob: "b".repeat(40),
+      roles: Object.fromEntries(["app_writer", "carr_writer", "app_reader", "carr_reader"]
+        .map(role => [role, { positive: 1, negative: 1, operations: 2 }])), mismatches: [] },
     receipt_kind: "restore-exercise-receipt.v1",
     target_kind: "disposable_branch",
     copy: {
@@ -769,6 +772,16 @@ test("CLI: restore, outbound, degraded and policy exit 0/1/2 by verdict", () => 
   assert.equal(cli(["degraded", "edge_unavailable"]).status, 0);
   assert.equal(JSON.parse(cli(["policy"]).stdout).policy_digest, v5RecoveryMatrixPolicyDigest());
   assert.equal(cli(["bogus"]).status, 2);
+});
+
+test("restore refuses missing security evidence and dropped grants", () => {
+  for (const parity of [undefined, { ...receipt().security_parity, verdict: "FAIL" },
+    { ...receipt().security_parity, mismatches: ["app_writer:table:public.party:select"] }]) {
+    const r = receipt();
+    r.security_parity = parity;
+    if (parity === undefined) delete r.security_parity;
+    assertRefused(R(r, NOW), "security_parity_mismatch", "security_parity_exact");
+  }
 });
 
 test("RPO evidence is unavailable after the standalone producer is retired", () => {

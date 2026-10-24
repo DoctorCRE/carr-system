@@ -591,6 +591,14 @@ check_migration_fixtures() {
       return
     fi
   fi
+  if [[ "$MIGRATION_PART" = all ]]; then
+    if ! run_quiet "$LOGDIR/migration-restore-security.log" \
+         "$PY" ops/restore-rehearse-record-selftest.py --postgres; then
+      tail -30 "$LOGDIR/migration-restore-security.log" >&2
+      bad migration "restore security parity failed against the disposable PostgreSQL fixture"
+      return
+    fi
+  fi
   if [[ "$MIGRATION_PART" = all || "$MIGRATION_PART" = fixtures || "$MIGRATION_PART" = shadow ]]; then
     local shadow_rc=0 shadow_note
     "$PY" ops/migration-shadow.py ${CARR_SHADOW_ARTIFACT_DIR:+--artifact-dir "$CARR_SHADOW_ARTIFACT_DIR"} \

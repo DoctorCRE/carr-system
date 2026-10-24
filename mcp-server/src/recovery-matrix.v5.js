@@ -120,6 +120,7 @@ export const V5_RESTORE_EXERCISE_CHECKS = Object.freeze([
   "artifact_hash_exact",
   "watermark_exact",
   "restore_interval_well_formed",
+  "security_parity_exact",
 ]);
 
 export const V5_CHECK_STATES = Object.freeze(["pass", "fail", "not_reached"]);
@@ -382,7 +383,7 @@ function positiveInteger(value, path) {
 }
 
 export function normalizeRestoreExerciseReceipt(receipt) {
-  closed(receipt, [...RECEIPT_KEYS, "target_point"], "receipt", RECEIPT_KEYS);
+  closed(receipt, [...RECEIPT_KEYS, "target_point", "security_parity"], "receipt", RECEIPT_KEYS);
   if (receipt.receipt_kind !== V5_RESTORE_EXERCISE_RECEIPT_KIND) {
     fail("unknown_state", `receipt.receipt_kind must be "${V5_RESTORE_EXERCISE_RECEIPT_KIND}"`, { path: "receipt.receipt_kind" });
   }
@@ -391,6 +392,7 @@ export function normalizeRestoreExerciseReceipt(receipt) {
   const targetKind = enumValue(receipt.target_kind, V5_RESTORE_TARGET_KINDS, "receipt.target_kind");
   const point = targetPoint(receipt);
   return deepFreeze({
+    security_parity: receipt.security_parity ?? null,
     receipt_kind: V5_RESTORE_EXERCISE_RECEIPT_KIND,
     target_kind: targetKind,
     ...(point ? { target_point: point } : {}),
@@ -415,6 +417,19 @@ export function normalizeRestoreExerciseReceipt(receipt) {
     started_at: (instant(receipt.started_at, "receipt.started_at"), receipt.started_at),
     finished_at: (instant(receipt.finished_at, "receipt.finished_at"), receipt.finished_at),
   });
+}
+
+function validSecurityParity(parity) {
+  const roles = ["app_writer", "carr_writer", "app_reader", "carr_reader"];
+  return parity?.verdict === "PASS"
+    && /^[0-9a-f]{40}$/.test(parity.schema_revision)
+    && /^[0-9a-f]{40}$/.test(parity.schema_blob)
+    && Array.isArray(parity.mismatches) && parity.mismatches.length === 0
+    && roles.every(role => {
+      const counts = parity.roles?.[role];
+      return [counts?.positive, counts?.negative, counts?.operations]
+        .every(value => Number.isSafeInteger(value) && value > 0);
+    });
 }
 
 function watermarkDiff(artifact, restored) {
@@ -452,6 +467,7 @@ export function evaluateRestoreExercise(receiptInput, clock) {
     () => r.observed_artifact_digest !== r.copy.recorded_artifact_digest ? "artifact_hash_mismatch" : null,
     () => mismatches.length ? "watermark_mismatch" : null,
     () => !(finishedMs >= startedMs && startedMs >= Date.parse(r.copy.produced_at)) ? "restore_interval_invalid" : null,
+    () => !validSecurityParity(r.security_parity) ? "security_parity_mismatch" : null,
   ];
   let failIndex = -1;
   let reason = "restore_exercise_exact";
@@ -472,6 +488,7 @@ export function evaluateRestoreExercise(receiptInput, clock) {
     recorded_digest_source: r.copy.recorded_digest_source,
     artifact_digest: r.observed_artifact_digest,
     tables_compared: Object.keys(r.artifact_watermark).length,
+    security_parity: r.security_parity,
     target_point: r.target_point ?? null,
     watermark_mismatches: mismatches,
     restore_seconds: Math.round((finishedMs - startedMs) / 1000),
