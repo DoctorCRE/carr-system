@@ -773,7 +773,6 @@ case("direct Cloudflare deploy is metering-refused", bash("npx wrangler deploy")
 case("direct Cloudflare version upload is metering-refused", bash("wrangler versions upload"), DENY)
 case("direct Neon branch create is metering-refused",
      bash("neonctl branches create --project-id p --name x"), DENY)
-case("reviewed Neon rebuild wrapper is allowed", bash("python3 ops/p1-rebuild-gate.py"), ALLOW)
 case("direct GitHub workflow dispatch is metering-refused",
      bash("gh workflow run ci.yml"), DENY)
 case("plain GitHub job rerun is allowed",

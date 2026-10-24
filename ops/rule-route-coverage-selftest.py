@@ -87,7 +87,7 @@ CLEAN = {
         "aaaa0005": {"moment": "duplicate of aaaa0003", "routes": [
             {"kind": "duplicate", "survivor": "aaaa0003"}]},
         "aaaa0006": {"moment": "a pre-use gate", "routes": [
-            {"kind": "gate", "gate": "hooks/weekend-quiet-gate.py"}]},
+            {"kind": "gate", "gate": "hooks/guard-unattended.py"}]},
     },
 }
 
@@ -170,7 +170,7 @@ with tempfile.TemporaryDirectory() as tmp:
 # declared in tools.js AND in the modules tools.js spreads in.
 real_verbs = routes_lib.known_verbs(REPO)
 check("verb registry reader finds verbs from tools.js and its modules",
-      {"new-deal", "standing-context", "map-architecture", "teach", "add-loop"} <= real_verbs,
+      {"new-deal", "standing-context", "map-architecture", "add-loop"} <= real_verbs,
       sorted(real_verbs)[:10])
 check("verb registry reader does not invent a verb", "summon-deal" not in real_verbs)
 

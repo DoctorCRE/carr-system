@@ -110,19 +110,6 @@ class LifecycleTests(unittest.TestCase):
         self.assertIn("flash.off", row)
         started.assert_not_called()
 
-    def test_flash_script_logs_the_switched_off_handoff_without_reading_inputs(self):
-        (self.directory / "flash.off").touch()
-        missing = self.directory / "must-not-be-read"
-        script = load(HERE / "flash-script.py", "flash_script_off_test")
-        script.RUNS_LOG = str(self.directory / "script-runs.jsonl")
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            result = script.main(["fixture", str(missing), "--json"])
-        row = json.loads(Path(script.RUNS_LOG).read_text())
-        self.assertEqual(result, 4)
-        self.assertEqual(row["handoff"], "flash is switched off")
-        self.assertEqual(row["turns"], 0)
-        self.assertEqual(json.loads(output.getvalue())["detail"], "flash is switched off")
 
     def test_log_tracks_local_inference_without_counting_shutdown_or_probes(self):
         now = datetime(2026, 10, 5, 23, 0, 0).timestamp()

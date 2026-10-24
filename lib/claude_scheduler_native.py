@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from lib.control_plane_scheduler_cutover import CutoverRefusal
+class NativeSchedulerError(ValueError):
+    """Native scheduler state is unavailable or does not match its definition."""
 
 
 def _canonical(value: Any) -> bytes:
@@ -18,7 +19,7 @@ def discover_snapshot(home: Path) -> Path:
     root = home / "Library" / "Application Support" / "Claude" / "claude-code-sessions"
     matches = sorted(root.glob("*/*/scheduled-tasks.json"))
     if len(matches) != 1 or not matches[0].is_file():
-        raise CutoverRefusal("Claude native scheduled-task snapshot is absent or ambiguous")
+        raise NativeSchedulerError("Claude native scheduled-task snapshot is absent or ambiguous")
     return matches[0]
 
 
@@ -44,17 +45,17 @@ def system_timezone(localtime_path: Path = Path("/etc/localtime")) -> str:
     try:
         resolved = str(localtime_path.resolve(strict=True))
     except OSError as exc:
-        raise CutoverRefusal("Claude scheduler host timezone is unavailable") from exc
+        raise NativeSchedulerError("Claude scheduler host timezone is unavailable") from exc
     parts = resolved.split("/")
     zone_index = next(
         (i for i in range(len(parts) - 1, -1, -1) if parts[i] == "zoneinfo" or parts[i].startswith("zoneinfo.")),
         None,
     )
     if zone_index is None or zone_index == len(parts) - 1:
-        raise CutoverRefusal("Claude scheduler host timezone is not an IANA zone")
+        raise NativeSchedulerError("Claude scheduler host timezone is not an IANA zone")
     zone = "/".join(parts[zone_index + 1:])
     if not zone:
-        raise CutoverRefusal("Claude scheduler host timezone is empty")
+        raise NativeSchedulerError("Claude scheduler host timezone is empty")
     return zone
 
 
@@ -62,7 +63,7 @@ def render_task_definition(portable: bytes, *, repo: Path, home: Path, cwd: str 
     """Render the tracked task using observed installation paths."""
     text = portable.decode('utf-8')
     if '{{VAULT}}' in text and not cwd:
-        raise CutoverRefusal('vault definition requires a retained disabled native row for path provenance')
+        raise NativeSchedulerError('vault definition requires a retained disabled native row for path provenance')
     for token, value in (('{{REPO}}', str(repo)), ('{{HOME}}', str(home)), ('{{VAULT}}', cwd or '')):
         text = text.replace(token, value)
     return text
@@ -78,35 +79,35 @@ def read_native_task(*, home: Path, repo: Path, locator: str, expected_cron: str
         raw = path.read_bytes()
         document = json.loads(raw)
     except (OSError, json.JSONDecodeError) as exc:
-        raise CutoverRefusal("Claude native scheduled-task snapshot is unreadable") from exc
+        raise NativeSchedulerError("Claude native scheduled-task snapshot is unreadable") from exc
     tasks = document.get("scheduledTasks") if isinstance(document, dict) else None
     if not isinstance(tasks, list):
-        raise CutoverRefusal("Claude native scheduled-task snapshot has no task list")
+        raise NativeSchedulerError("Claude native scheduled-task snapshot has no task list")
     rows = [row for row in tasks if isinstance(row, dict) and row.get("id") == locator]
     if len(rows) != 1:
-        raise CutoverRefusal("Claude native scheduler task identity is absent or ambiguous")
+        raise NativeSchedulerError("Claude native scheduler task identity is absent or ambiguous")
     row = rows[0]
     if row.get("cronExpression") != expected_cron or type(row.get("enabled")) is not bool:
-        raise CutoverRefusal("Claude native scheduler recurrence/state does not match the registered contract")
+        raise NativeSchedulerError("Claude native scheduler recurrence/state does not match the registered contract")
     resolved_host_timezone = host_timezone if host_timezone is not None else system_timezone()
     if resolved_host_timezone != expected_timezone:
-        raise CutoverRefusal("Claude scheduler host timezone does not match the registered contract")
+        raise NativeSchedulerError("Claude scheduler host timezone does not match the registered contract")
     expected_file = home / ".claude" / "scheduled-tasks" / locator / "SKILL.md"
     if row.get("filePath") != str(expected_file):
-        raise CutoverRefusal("Claude native scheduler definition path is not the registered task path")
+        raise NativeSchedulerError("Claude native scheduler definition path is not the registered task path")
     portable = repo / "ops" / "scheduled-tasks" / f"{locator}.SKILL.md"
     try:
         portable_bytes = portable.read_bytes()
         live_text = expected_file.read_text(encoding="utf-8")
     except OSError as exc:
-        raise CutoverRefusal("Claude scheduled-task definition is unavailable") from exc
+        raise NativeSchedulerError("Claude scheduled-task definition is unavailable") from exc
     if hashlib.sha256(portable_bytes).hexdigest() != portable_definition_sha256:
-        raise CutoverRefusal("checked-in scheduler definition changed after contract sync")
+        raise NativeSchedulerError("checked-in scheduler definition changed after contract sync")
     cwd = row.get("cwd")
     if not isinstance(cwd, str) or not cwd:
-        raise CutoverRefusal("Claude native scheduler task has no working-directory provenance")
+        raise NativeSchedulerError("Claude native scheduler task has no working-directory provenance")
     if live_text != render_task_definition(portable_bytes, repo=repo, home=home, cwd=cwd):
-        raise CutoverRefusal("Claude live scheduled-task definition does not match the tracked portable source")
+        raise NativeSchedulerError("Claude live scheduled-task definition does not match the tracked portable source")
     projection = {
         "id": locator, "cronExpression": row["cronExpression"], "enabled": row["enabled"],
         "filePath": row["filePath"], "cwd": cwd, "createdAt": row.get("createdAt"),
