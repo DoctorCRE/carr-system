@@ -86,7 +86,7 @@ class ApprovedControlMigrationTests(unittest.TestCase):
                 uuid_tail='000000009445')
 
     def runner(self, *args):
-        return subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'), '--apply', '--yes', *args],
+        return subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'), '--apply', '--yes', '--through', REPAIR, *args],
                               cwd=ROOT, env={**self.child, 'DATABASE_URL': self.dsn},
                               capture_output=True, text=True, timeout=120)
 
