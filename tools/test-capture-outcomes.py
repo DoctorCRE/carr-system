@@ -169,6 +169,21 @@ class CaptureOutcomesTests(unittest.TestCase):
                 for marker in (".capture-request.json", ".capture.json", ".capture-health.json"):
                     (self.session / marker).unlink()
 
+    def test_claim_freezes_server_shaped_timestamps(self) -> None:
+        # Python accepts compact ISO forms the capture server's Date.parse rejects.
+        (self.session / ".capture.json").unlink()
+        (self.session / "call-context.json").write_text('{"mode":"other_call"}')
+        (self.session / "announcement.json").write_text('{"announcement_fired_at":"20260105T120000Z"}')
+        (self.session / "meta.json").write_text('{"started":"2026-01-05 06:00:00-06:00"}')
+        with patch.object(bridge, "http_request", side_effect=[
+            (200, {"session_token": "fixture-session", "ttl_seconds": 60}),
+            (200, {"ok": True}),
+        ]):
+            self.assertEqual(bridge.claim_cmd(self.cfg, self.session), bridge.Outcome.VERIFIED)
+        body = json.loads((self.session / ".capture-request.json").read_text())
+        self.assertEqual(body["started_at"], "2026-01-05T12:00:00Z")
+        self.assertEqual(body["consent"]["announced_at"], "2026-01-05T12:00:00Z")
+
     def test_existing_malformed_capture_marker_is_unavailable(self) -> None:
         for marker in ("not-json", "{}"):
             with self.subTest(marker=marker), patch.object(bridge, "http_request", side_effect=AssertionError("invalid marker reached HTTP")):

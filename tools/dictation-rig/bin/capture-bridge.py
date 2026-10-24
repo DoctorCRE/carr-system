@@ -260,9 +260,12 @@ def claim_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         return Outcome.UNAVAILABLE
     started_at = started_at.strip()
 
+    # Freeze the server's timestamp shape, not whatever Python's parser accepts.
     try:
-        datetime.fromisoformat(announced_at.replace("Z", "+00:00"))
-        datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        announced_at, started_at = (
+            datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+            .isoformat().replace("+00:00", "Z")
+            for value in (announced_at, started_at))
     except ValueError:
         log_line(f"ERROR claim invalid prerequisite timestamp session={name}")
         return Outcome.UNAVAILABLE
