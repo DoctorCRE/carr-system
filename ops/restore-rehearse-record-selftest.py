@@ -326,7 +326,7 @@ def postgres_parity():
     from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
     from restore_security import declaration, apply_grants, check_parity
 
-    bins = Path(os.environ.get('CARR_TEST_POSTGRES_BIN', '/opt/homebrew/opt/postgresql@17/bin'))
+    bins = Path(os.environ.get('CARR_TEST_POSTGRES_BIN') or os.environ.get('CARR_LOCAL_PG_BIN_DIR') or '/opt/homebrew/opt/postgresql@17/bin')
     schema = """-- CARR GRANTS (bin/schema-snapshot.sh) — not produced by pg_dump.
 revoke all on function public.private_action() from public;
 grant usage on schema public to carr_writer;
