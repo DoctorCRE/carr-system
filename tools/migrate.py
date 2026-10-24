@@ -132,7 +132,7 @@ SCAC_CATALOG_RECOVERY_GROUP = (
     '0953_morning_brief_chicago_calendar.sql',
     '0954_lead_workspace_set_reads.sql',
     '0955_retrieval_concept_question_matching.sql',
-    '0956_retire_scac_catalog_commit_check.sql',
+    '0957_retire_scac_catalog_commit_check.sql',
 )
 RECOVERY_MIGRATION_ORDERS = {
     APPROVED_CONTROL_RECOVERY_GROUP: (

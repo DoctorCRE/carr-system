@@ -121975,12 +121975,12 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0944_retire_orphan_control_inventory.sql	ab7c35cfc581268b40bab5b29399e315286b24ba1c3c8c86bc0b9c49673def37	1970-01-01 00:00:00+00
 0947_allow_approved_control_evidence_refresh.sql	b051840f87086cdfcfbe21abae004df2f7023907f081851f95c22a7e017f8800	1970-01-01 00:00:00+00
 0950_remove_retired_workflow_manifest_binding.sql	87c2d7f9aba676b4b0e0d7262b024fe20f4ee1e7a7ced5ced4dcce19267d9a41	1970-01-01 00:00:00+00
-0956_retire_scac_catalog_commit_check.sql	5e19ed9254f8150d789d81882a008c80eeb9b645a4dd0ca2c8dcd0c54f5899eb	1970-01-01 00:00:00+00
 0951_deal_vendor_assignments.sql	f9053aa57b13351da64416e35e49dc38d8d8da0fb118122b2652778bf9eda7eb	1970-01-01 00:00:00+00
 0952_deal_vendor_grant_retirements.sql	6ab6b3dbe76dbb395a8b739eea002aeb2ac4661f2efeefbf53c52b2fd69fd902	1970-01-01 00:00:00+00
 0953_morning_brief_chicago_calendar.sql	b6a1c2d4666a7fe2ba645d3048b2f874014f47f97e88a3144e07bd6079f6903d	1970-01-01 00:00:00+00
 0954_lead_workspace_set_reads.sql	687e444a25754aa975adcbcf45b92b5ab6f763a5c7c1a20a3b571aca4e10e28e	1970-01-01 00:00:00+00
 0955_retrieval_concept_question_matching.sql	885f3cefb3b4359c20f242534750ef9ebd883cda93e0592119b504e9f407e0c1	1970-01-01 00:00:00+00
+0957_retire_scac_catalog_commit_check.sql	5e19ed9254f8150d789d81882a008c80eeb9b645a4dd0ca2c8dcd0c54f5899eb	1970-01-01 00:00:00+00
 \.
 
 

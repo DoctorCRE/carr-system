@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION_SOURCE = '7f6055b112e103e8af9e2568eca23796e2332ff2'
 MAIN_SOURCE = 'fd3c46a45a7d0cc2e08c4e9b3268c73ec8a14e17'
 BLOCKED = '0951_deal_vendor_assignments.sql'
-REPAIR = '0956_retire_scac_catalog_commit_check.sql'
+REPAIR = '0957_retire_scac_catalog_commit_check.sql'
 PENDING = (
     BLOCKED,
     '0952_deal_vendor_grant_retirements.sql',
@@ -50,7 +50,7 @@ class ScacRecoveryOrderingTests(unittest.TestCase):
                 migrate.migrations_through(files, files, name)
 
     def test_future_mutation_needs_no_successor(self):
-        future = ('0957_future_mutation.sql', 'select 1;', 'synthetic')
+        future = ('0999_future_mutation.sql', 'select 1;', 'synthetic')
         self.assertEqual(migrate.migration_batches([future]), [[future]])
 
 
@@ -159,7 +159,7 @@ class ScacRetirementMigrationTests(unittest.TestCase):
                 language sql security definer set search_path=pg_catalog as 'select 1';
                 revoke all on function public.scac_retirement_future_mutation() from public;
                 grant execute on function public.scac_retirement_future_mutation() to carr_writer;'''
-            future = ('0957_future_mutation.sql', future_sql, hashlib.sha256(future_sql.encode()).hexdigest())
+            future = ('0999_future_mutation.sql', future_sql, hashlib.sha256(future_sql.encode()).hexdigest())
             with patch.object(migrate, 'load_migrations', return_value=[*migrate.load_migrations(), future]):
                 result, output, error = self.runner()
             self.assertEqual(result, 0, output + error)
@@ -168,7 +168,7 @@ class ScacRetirementMigrationTests(unittest.TestCase):
             conn.execute('update doctrine_meta set generation=generation+1 where id=1')
             for statement, message in (
                 ("update schema_migrations set sha256=repeat('f',64) where filename=(select min(filename) from schema_migrations)", 'schema ledger prefix rewrite refused'),
-                ("delete from schema_migrations where filename='0957_future_mutation.sql'", 'schema ledger rollback refused'),
+                ("delete from schema_migrations where filename='0999_future_mutation.sql'", 'schema ledger rollback refused'),
                 ('update doctrine_meta set generation=generation-1 where id=1', 'doctrine generation rollback refused'),
                 ('delete from ops.rule_load_layer where rule_id=(select rule_id from ops.rule_load_layer limit 1)', 'rule delivery projection is not activation-safe'),
             ):
