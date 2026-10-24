@@ -186,7 +186,13 @@ test("shared engineering doors are retired while app readers remain registered",
     const direct = await rpc("tools/call", { name, arguments: {} });
     const delegated = await rpc("tools/call", { name: "call-verb", arguments: { verb: name, args: {} } });
     assert.equal(JSON.parse(direct.result.content[0].text).error, "unknown_tool", name);
-    assert.deepEqual(delegated.result, direct.result, name);
+    const directError = JSON.parse(direct.result.content[0].text);
+    const delegatedError = JSON.parse(delegated.result.content[0].text);
+    assert.ok(directError.correlation_id, name);
+    assert.ok(delegatedError.correlation_id, name);
+    delete directError.correlation_id;
+    delete delegatedError.correlation_id;
+    assert.deepEqual(delegatedError, directError, name);
   }
   for (const name of ["engineering-passport", "read-portfolio", "list-my-codex-sessions",
     "recall-memory", "cancel-capability-session", "list-shipped-releases", "read-work-shape",

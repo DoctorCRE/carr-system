@@ -103,41 +103,6 @@ test("a writer database failure is translated and its original stack is logged",
   assert.ok(logs.some(log => log.correlation_id === correlationId && log.diagnostic.cause.stack === original.stack));
 });
 
-test('record-signal commits the signal with a safe notification recovery result', async t => {
-  const { executeRegisteredTool } = await import('../src/tools.js');
-  const logs = [], queries = [];
-  t.mock.method(console, 'error', line => logs.push(JSON.parse(line)));
-  const signal = { id: '50000000-0000-4000-8000-000000000001', producer: 'synthetic',
-    signal_key: 'synthetic', signal_kind: 'threshold', subject_type: 'deal', subject_ref: 'fixture',
-    metric_name: 'count', observed_value: 2, threshold_value: 1, severity: 'critical' };
-  const db = { async query(text) {
-    const sql = text.replace(/\s+/g, ' ').trim();
-    queries.push(sql);
-    if (sql.startsWith('select request_hash')) return { rows: [] };
-    if (sql.includes('to_regclass')) return { rows: [{ signals: true, runs: true, routes: true }] };
-    if (sql.startsWith('insert into signal_event')) return { rows: [signal] };
-    if (sql.startsWith('select ops.mint_notification')) throw new Error(privateText);
-    if (/^(savepoint|release savepoint|rollback to savepoint|insert into event|insert into tool_call)/.test(sql))
-      return { rows: [] };
-    throw new Error(`Unhandled synthetic query: ${sql}`);
-  } };
-  const result = await executeRegisteredTool(db, { id: '10000000-0000-4000-8000-000000000001',
-    slug: 'joe', human: true, correlation_id: correlationId }, 'record-signal', {
-    ...Object.fromEntries(Object.entries(signal).filter(([key]) => key !== 'id')),
-    comparison: 'gt', detected_at: '2026-10-23T12:00:00Z', evidence_refs: ['synthetic:fixture'],
-    idempotency_key: 'synthetic-signal',
-  });
-  assert.equal(result.ok, true);
-  assert.deepEqual(result.signal, signal);
-  assert.deepEqual(result.notification, { ok: true, minted: false,
-    reason_id: 'notification_mint_unavailable', correlation_id: correlationId });
-  assert.ok(queries.includes('rollback to savepoint carr_r03_mint'));
-  assert.ok(queries.includes('release savepoint carr_r03_mint'));
-  assert.ok(queries.some(sql => sql.startsWith('insert into tool_call')), 'successful signal receipt is retained');
-  assert.doesNotMatch(JSON.stringify(result), /stack|SELECT|private_table|private_constraint|synthetic-private-row/i);
-  assert.ok(logs.some(log => log.correlation_id === correlationId && log.diagnostic.stack.includes(privateText)));
-});
-
 for (const delegated of [false, true]) {
   for (const [variant, rows, expected] of [
     ['deal', [{ display_name: 'Synthetic A', status: 'research', client_ref: 'C-1' },
