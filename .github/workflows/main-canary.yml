@@ -57,7 +57,7 @@ jobs:
 
     services:
       postgres:
-        image: mirror.gcr.io/library/postgres:17@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
+        image: pgvector/pgvector:0.8.7-pg17-trixie@sha256:7a7e9f22015b67edb4bef5c59daeebcd7e74bfa570df6ce60ae01237c8648a84
         env:
           POSTGRES_USER: carr_ci
           POSTGRES_PASSWORD: carr_ci
@@ -120,7 +120,7 @@ jobs:
         run: ops/ci-zsh.sh
 
       - name: Install PostgreSQL 17
-        if: contains(matrix.classes, 'gates') || matrix.classes == 'migration'
+        if: contains(matrix.classes, 'unit') || contains(matrix.classes, 'gates') || matrix.classes == 'migration'
         run: |
           set -euo pipefail
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -129,7 +129,7 @@ jobs:
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-17
+          sudo apt-get install -y -qq postgresql-17 postgresql-17-pgvector
           /usr/lib/postgresql/17/bin/initdb --version
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
@@ -148,7 +148,7 @@ jobs:
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-18
+          sudo apt-get install -y -qq postgresql-18 postgresql-18-pgvector
           /usr/lib/postgresql/18/bin/initdb --version
 
       - name: Create the Neon admin role the migrations expect

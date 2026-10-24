@@ -8,7 +8,7 @@ install_postgres() {
   echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
     | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
   sudo apt-get update -qq
-  sudo apt-get install -y -qq postgresql-17 postgresql-18 postgresql-client-18
+  sudo apt-get install -y -qq postgresql-17 postgresql-18 postgresql-client-18 postgresql-17-pgvector postgresql-18-pgvector
   /usr/lib/postgresql/17/bin/initdb --version
   /usr/lib/postgresql/18/bin/initdb --version
   echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"

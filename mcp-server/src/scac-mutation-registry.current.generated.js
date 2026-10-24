@@ -420,6 +420,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "backfill-doctrine-embeddings": {
+    "ingress_key": "mcp-tool:backfill-doctrine-embeddings",
+    "source_locator": "mcp-server/src/doctrine.js",
+    "schema_digest": "313f638109e6fe6f072ded06610647962890be10f7151431ab6e705f334ab23b",
+    "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "bind-rule-context-contract": {
     "ingress_key": "mcp-tool:bind-rule-context-contract",
     "source_locator": "mcp-server/src/rule-context-runtime.v5.js",

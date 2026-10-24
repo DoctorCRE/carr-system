@@ -768,6 +768,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     // a refused write killed the answer (migration 0223). Anything using this
     // must treat the write as optional: losing it costs a record, never a reply.
     const client = {
+      ai: env.AI,
       query: async (text, params = []) => ({ rows: await sql.query(text, params) }),
       sideWrite: env?.DATABASE_URL_WRITER
         ? (text, params = []) => {
@@ -802,6 +803,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
   const connectionString = needsAuthority ? authorityDsnForActor(env, actor) : env.DATABASE_URL_WRITER;
   const pool = new Pool({ connectionString });
   const client = await pool.connect();
+  client.ai = env.AI;
   const writerRead = tool.writerConnection === true && !tool.write;
   let readOk = true, readErrorKind = null;
   try {

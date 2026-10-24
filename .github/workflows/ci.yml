@@ -75,7 +75,7 @@ jobs:
 
     services:
       postgres:
-        image: ${{ contains(matrix.classes, 'unit') && 'mirror.gcr.io/library/postgres:17@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3' || '' }}
+        image: ${{ contains(matrix.classes, 'unit') && 'pgvector/pgvector:0.8.7-pg17-trixie@sha256:7a7e9f22015b67edb4bef5c59daeebcd7e74bfa570df6ce60ae01237c8648a84' || '' }}
         env:
           POSTGRES_USER: carr_ci
           POSTGRES_PASSWORD: postgres
@@ -161,7 +161,7 @@ jobs:
         run: ops/ci-zsh.sh
 
       - name: Install PostgreSQL 17
-        if: contains(matrix.classes, 'gates') || (matrix.classes == 'migration' && steps.scope.outputs.full != 'false')
+        if: contains(matrix.classes, 'unit') || contains(matrix.classes, 'gates') || (matrix.classes == 'migration' && steps.scope.outputs.full != 'false')
         timeout-minutes: 5
         run: bash ops/ci-postgres.sh
 
