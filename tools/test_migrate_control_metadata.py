@@ -98,7 +98,7 @@ class ApprovedControlMigrationTests(unittest.TestCase):
                 from rule where id=%s""", (ORPHAN_CONTROL, ORPHAN_RULE))
 
     def runner(self, *args):
-        return subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'), '--apply', '--yes', '--through', REPAIR, *args],
+        return subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'), '--apply', '--yes', '--through', BINDING_REPAIR, *args],
                               cwd=ROOT, env={**self.child, 'DATABASE_URL': self.dsn},
                               capture_output=True, text=True, timeout=120)
 
