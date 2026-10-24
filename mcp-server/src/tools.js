@@ -3388,7 +3388,7 @@ export const TOOLS = {
 
   "morning-brief": {
     write: false,
-    description: "The record-native morning brief for the authenticated Joe or Dell context. It composes live triage, claim-card, deal-room, loop-board, the redacted renewal decision queue, and published system costs. Costs reports ready, partial, or unavailable; other sections report ready, empty, or unavailable. Unavailable is never rewritten as empty. Takes no audience, sponsor, or partner argument.",
+    description: "The record-native morning brief for the authenticated Joe or Dell context. It composes Needs Joe when applicable, live triage, claim-card, deal-room, loop-board, the redacted renewal decision queue, assurance cadence, and published system costs. Sections preserve ready, empty, partial, or unavailable. Coverage names every required section, points to its response content, and counts returned rows only, never queue totals. Unavailable is never rewritten as empty. Takes no audience, sponsor, or partner argument.",
     inputSchema: { type: "object", properties: {} },
     handler: async (c, actor, args) => {
       // This is an audience boundary, not a convenience filter.  A shared-only
@@ -3424,7 +3424,12 @@ export const TOOLS = {
           if (owner_partner === undefined) continue;
           items.push({ ...row, owner_partner });
         }
-        return { ...value, items };
+        return { ...value, items, item_kinds: Object.entries({
+          next_action: "Next actions",
+          post_call_action: "Post-call actions",
+          critical_date: "Critical dates including upcoming deadlines",
+          ingest: "Inbox awaiting triage",
+        }).map(([kind, label]) => ({ kind, label, count: items.filter(row => row.item_kind === kind).length })) };
       });
       const claimCard = await section(async () => {
         const value = await executeRegisteredTool(c, actor, "claim-card", { limit: 5, include_needs_contact: false });
@@ -3436,8 +3441,9 @@ export const TOOLS = {
         // deal-room-board is shared by design; the personal morning composite is
         // not.  Account ownership is therefore filtered from authenticated
         // sponsor scope exactly as deal ownership is, never from caller input.
-        return { items: value.deals.filter(ownOrShared),
-          accounts: value.accounts.filter((row) => String(row?.account_owner || "").toLowerCase() === scope.sponsor) };
+        const items = value.deals.filter(ownOrShared);
+        const accounts = value.accounts.filter((row) => String(row?.account_owner || "").toLowerCase() === scope.sponsor);
+        return { state: items.length || accounts.length ? "ready" : "empty", items, accounts };
       });
       const loops = await section(async () => {
         // loop-board is a shared read that already accepts owner 'joe' or
@@ -3506,9 +3512,10 @@ export const TOOLS = {
       // with nothing in it is unavailable, never empty: a failed source could be
       // hiding the item he needs to see.
       const needsJoe = scope.sponsor === "joe" ? await section(async () => {
-        const { state: list_state, ...list } = (await executeRegisteredTool(c, actor, "governance-queue", {})).needs_joe;
-        if (list_state === "partial" && !list.items.length) throw new Error("needs-joe sources unavailable");
-        return { ...list, list_state };
+        const list = (await executeRegisteredTool(c, actor, "governance-queue", {})).needs_joe;
+        if (list.state === "partial" && !list.items.length)
+          return { ...list, state: "unavailable", reason: "source_unavailable" };
+        return list;
       }) : null;
       const costs = { ...morningCostSnapshot(undefined), ...await section(async () => {
         // Existing carr_reader grant and authenticated scope, like read-progress-board.
@@ -3521,12 +3528,25 @@ export const TOOLS = {
       }) };
       const sections = { ...(needsJoe ? { needs_joe: needsJoe } : {}),
         today, claim_card: claimCard, deals, loops, renewals, assurance_cadence: assuranceCadence, costs };
+      const coverage = {
+        schema: "morning-brief-coverage.v1", count_scope: "returned_rows_only",
+        required_sections: Object.entries(sections).map(([key, value]) => ({
+          key, path: `/sections/${key}`, state: value.state,
+          counts: Object.fromEntries(["items", "accounts", "providers"]
+            .filter(name => Array.isArray(value[name]))
+            .map(name => [name, value.state === "unavailable" ? null : value[name].length])),
+          incomplete_sources: Object.entries(value.sources || {})
+            .filter(([, source]) => source.state !== "ready")
+            .map(([key, source]) => ({ key, state: source.state })),
+        })),
+      };
       return {
         state: Object.values(sections).some((value) => value.state === "unavailable")
           ? "unavailable"
           : Object.values(sections).some((value) => value.state === "partial") ? "partial" : "ready",
         sponsor: scope.sponsor,
         sections,
+        coverage,
       };
     },
   },
