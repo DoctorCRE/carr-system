@@ -157,7 +157,7 @@ All steps below are required for this route.
      --identity /secure/recovery/identity.txt --keep-branch
    ```
 
-4. Require successful exact count and row-content watermark verification before accepting the restored data.
+4. Require exact count, row-content watermark, and app-role security parity verification before accepting the restored data.
 5. Record the returned branch ID, target host, and recovered database name `restore_rehearse`.
 6. Complete Security bootstrap and Service cutover before restoring traffic.
 
@@ -176,9 +176,9 @@ without production counts. It still needs a trusted cluster-role catalog before
 loading policies. A complete role and ACL bootstrap is not implemented.
 
 No complete outage recovery is established until that prerequisite and role tests
-can be proven. The wrapper's local ciphertext route still requires production and
-has a SQL-prefix filter defect for COPY text rows. There is no equivalent supported
-isolated-target CLI for arbitrary R2 copies. Use a separately reviewed procedure
+can be proven. Local ciphertext paths are refused because they cannot identify
+the artifact's pinned schema. There is no equivalent supported isolated-target
+CLI for arbitrary R2 copies. Use a separately reviewed procedure
 for those cases. Do not bypass workflow-identity checks, invent receipts, or call
 staged rows a restored service.
 
@@ -210,8 +210,11 @@ See [the rebuild contract](migrations/README.md#rebuild-contract-wr-000385).
 ## Security bootstrap
 
 Database-only backups exclude cluster roles, passwords, ownership, and ACLs.
-The loaders omit privilege and ownership statements. Pending migrations do not
-replay already-applied permission history. Data equality is not authorization.
+The artifact verifier replays object grants from the authenticated producer's
+pinned `db/schema.sql` and checks effective app-role privileges, including allowed
+and denied operations. It does not reconstruct cluster roles, memberships, or ownership.
+Pending migrations do not replay already-applied permission history.
+Data equality alone is not authorization.
 
 All steps below are required. Step 1 is a prerequisite to loading a data backup.
 
@@ -272,10 +275,11 @@ production cutover during a documentation change or offline review.
 
 ## Proving it still works, before you need it
 
-- The weekly task definition selects a local dump, not a cloud run ID. That path
-  emits no provider-bound restore receipt. Registration and a fresh successful
-  outcome must be checked separately. Routine dispatch payloads are refused for
-  full recovery. Do not assume the scheduler can obtain recovery capability.
+- The weekly task definition selects `--backup-run-id latest`. The selector pins
+  one verified numeric cloud run ID before restoring its artifact. Registration
+  and a fresh successful outcome must be checked separately. Routine dispatch
+  payloads are refused for full recovery. Do not assume the scheduler can obtain
+  recovery capability.
 - Cloud-artifact restore verification binds the producer's workflow identity.
   Changing workflow bytes can reject historical artifacts that remain decryptable.
   Preserve those checks. Historical producer support needs separately reviewed
@@ -287,8 +291,9 @@ production cutover during a documentation change or offline review.
 - Off-Mac backup creation and off-Mac freshness observation are different controls.
   The configured freshness observer is Mac-local. An independent off-Mac alert and
   a scoped cloud-artifact restore drill remain unverified prerequisites.
-- `./run.sh key-recovery-test --backup /secure/recovery/selected.sql.age` tests an
-  identified surviving copy with the paper identity. It reads input silently,
+- `./run.sh key-recovery-test --backup-run-id RUN` tests an authenticated cloud
+  artifact with the paper identity. Omitting the option selects `latest`.
+  It reads input silently,
   checks the derived recipient, and uses restricted temporary storage with cleanup
   on exit and interrupts. It can contact Neon and attempt an ops receipt. Run it
   only as an authorized incident or drill after the recovery prerequisites exist.
@@ -327,8 +332,8 @@ and size-floor checks, and atomic promotion that preserves prior acknowledged fi
 Recovery retains fresh-target isolation, target-host and default-branch guards,
 cleanup limited to the returned branch ID, exact counts and content hashes,
 COPY-aware streaming in the cloud loader, `psql -X` with `ON_ERROR_STOP=1`, and
-error redaction. These controls must remain intact; the local SQL-prefix filter
-defect still needs separate remediation. No runtime behavior changes with this guide.
+error redaction. These controls must remain intact. Artifact verification also
+requires the pinned schema grants and app-role security parity before completion.
 
 ## Worker recovery
 
