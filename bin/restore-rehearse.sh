@@ -17,17 +17,17 @@
 #   3. An unrestorable dump is indistinguishable from a good one until the day
 #      you need it, which is the worst possible day to find out.
 #
-# WHAT IT DOES. Creates a throwaway Neon branch, restores the newest
-# backups/*.sql.age into a brand-new database ON that branch, compares row
+# WHAT IT DOES. Creates a throwaway Neon branch, restores
+# the --backup-run-id artifact into a brand-new database ON that branch, compares row
 # counts table-by-table against production, reports PASS/FAIL loudly, and
 # deletes the branch. Re-runnable: the branch name carries a UTC timestamp, so
 # two runs never collide, and teardown runs from a trap so it happens even on
 # a failure or a Ctrl-C.
 #
-#   ./run.sh restore-rehearse                  # the full rehearsal
-#   ./run.sh restore-rehearse --preflight      # checks only; creates nothing
-#   ./run.sh restore-rehearse --identity path  # where the age private key is
-#   ./run.sh restore-rehearse --keep-branch    # leave the branch for debugging
+#   ./run.sh restore-rehearse --backup-run-id RUN # the full rehearsal
+#   ./run.sh restore-rehearse --preflight --backup-run-id latest # checks only; creates nothing
+#   ./run.sh restore-rehearse --backup-run-id RUN --identity path # where the age private key is
+#   ./run.sh restore-rehearse --backup-run-id RUN --keep-branch # leave the branch for debugging
 #
 # THE PRIVATE KEY IS NOT OPTIONAL AND NOT STORED HERE. backups-public-key.txt in
 # the repo can only ENCRYPT. Decryption needs ~/.config/carr/age-key.txt (600,
@@ -128,8 +128,6 @@ MIN_DUMP_BYTES="${CARR_MIN_DUMP_BYTES:-1048576}"
 PREFLIGHT_ONLY=0
 KEEP_BRANCH=0
 VERIFY_ONLY=0
-WANT_DATE=""
-WANT_DUMP=""
 BACKUP_RUN_ID=""
 BACKUP_REPOSITORY="DoctorCRE/carr-system"
 COPYDIR=""
@@ -146,21 +144,7 @@ while [ $# -gt 0 ]; do
     # pg_dump ends with an explicit completion footer, so a truncated dump is
     # provable in seconds, with no branch created and nothing charged for.
     --verify-only) VERIFY_ONLY=1; shift ;;
-    # --date ADDED the same day. `ls -t` picks the newest, which is right for the
-    # nightly drill and useless for the actual question that came up: are the
-    # 2026-07-30 and 2026-07-31 dumps (138K and 1.2M, against 15-17M from 08-02
-    # onward) genuine early-buildout snapshots or truncated ones.
-    --date)        [ $# -ge 2 ] || { echo "FAIL: --date needs YYYYMMDD" >&2; exit 2; }
-                   WANT_DATE="$2"; shift 2 ;;
-    # --dump ADDED 2026-08-14, consolidating bin/verify-key-custody.sh into this
-    # path rather than leaving two scripts doing one job. Both --date and the
-    # `ls -t` default look ONLY in backups/, which is the copy that dies with
-    # this Mac. The question that actually matters for recovery is whether an
-    # OFF-MAC copy restores — the R2 archive object, or the GitHub Actions
-    # artifact — and neither of those lands in backups/. This takes an arbitrary
-    # path so the drill can be run against the copy that would survive.
-    --dump)        [ $# -ge 2 ] || { echo "FAIL: --dump needs a path" >&2; exit 2; }
-                   WANT_DUMP="$2"; shift 2 ;;
+    --date|--dump) echo "FAIL: artifact schema revision cannot be identified from a local path; use --backup-run-id" >&2; exit 2 ;;
     --identity)    [ $# -ge 2 ] || { echo "FAIL: --identity needs a path" >&2; exit 2; }
                    IDENTITY="$2"; shift 2 ;;
     # --backup-run-id ADDED 2026-09-24 (V5-F08 item 4). Restore the copy the
@@ -171,8 +155,6 @@ while [ $# -gt 0 ]; do
     # (tools/restore-watermark.py fetch-copy). Nothing about the copy is typed
     # in by whoever runs this. Only then does phase 5 write a typed
     # restore-exercise-receipt.v1, and it re-reads the provider to verify it.
-    # Without it the exact watermark still gates; no receipt is written, because
-    # a local backups/ file has no independently recorded digest to hold it to.
     #
     # RUNBOOK NOTE (review H2): a run counts only while the
     # .github/workflows/backup-nightly.yml at its commit is byte-identical to
@@ -182,7 +164,7 @@ while [ $# -gt 0 ]; do
     # that run id. Only backup-nightly.yml may hold `checks: write`
     # (tools/test_workflow_checks_write_grant.py fails CI otherwise).
     --backup-run-id) [ $# -ge 2 ] || { echo "FAIL: --backup-run-id needs a workflow run id" >&2; exit 2; }
-                   case "$2" in (*[!0-9]*|'') echo "FAIL: --backup-run-id must be a number" >&2; exit 2 ;; esac
+                   case "$2" in (latest) ;; (*[!0-9]*|'') echo "FAIL: --backup-run-id must be a number or latest" >&2; exit 2 ;; esac
                    BACKUP_RUN_ID="$2"; shift 2 ;;
     -h|--help)     sed -n '2,60p' "$0"; exit 0 ;;
     *)             echo "FAIL: unknown argument '$1'" >&2; exit 2 ;;
@@ -230,6 +212,7 @@ REST_PCT=""
 REST_ROWS=""
 REST_TABLES=""
 EXERCISE_VERDICT=""
+SECURITY_PARITY='{"verdict":"NOT_RUN"}'
 
 BRANCH_ID=""
 WORKDIR=""
@@ -366,6 +349,7 @@ record_rehearsal() {                      # record_rehearsal <exit-code>
   # content — and nothing here is either, only a filename, a byte count, a
   # percentage and a duration.
   detail="${detail[1,400]}"
+  [ -n "$SECURITY_PARITY" ] && detail="security_parity=$SECURITY_PARITY; $detail"
 
   # THE PROVENANCE LINE IS THE TESTED SURFACE (same discipline as
   # bin/run-scheduled.sh's out/run-scheduled.log line). Printed BEFORE the call
@@ -435,12 +419,26 @@ if [ -n "${CARR_RESTORE_REHEARSE_SELFTEST:-}" ]; then
   REHEARSE_SUMMARY="${CARR_RESTORE_REHEARSE_SELFTEST_SUMMARY:-}"
   parse_rehearse_summary
   DIE_REASON="${CARR_RESTORE_REHEARSE_SELFTEST_DIE_REASON:-}"
+  SECURITY_PARITY="${CARR_RESTORE_REHEARSE_SELFTEST_SECURITY_PARITY:-}"
+  if [ "$RECORD_REHEARSAL" -eq 1 ] && [ -n "$SECURITY_PARITY" ]; then
+    print -r -- "$SECURITY_PARITY" | "$PY" -c 'import json,sys; sys.exit(json.load(sys.stdin).get("verdict") != "PASS")' \
+      || die "security parity failed"
+  fi
   exit "${CARR_RESTORE_REHEARSE_SELFTEST_EXIT:-0}"
+fi
+
+if [ "$RECORD_REHEARSAL" -eq 1 ]; then
+  rm -f "$REPO/out/restore-exercise-receipt.json"
 fi
 
 # ── PHASE 0: preflight. Nothing is created and nothing is charged for until
 #    every one of these passes. Ordered cheapest-and-most-likely-missing first.
 step "phase 0: preflight"
+[ -n "$BACKUP_RUN_ID" ] || die "artifact schema revision cannot be identified without --backup-run-id"
+if [ "$BACKUP_RUN_ID" = latest ]; then
+  BACKUP_RUN_ID="$("$PY" "$REPO/tools/restore-watermark.py" latest-run-id --repository "$BACKUP_REPOSITORY")" \
+    || die "no verified backup workflow run could be selected"
+fi
 
 for tool in age psql neonctl; do
   case "$tool" in
@@ -462,8 +460,8 @@ if [ ! -f "$IDENTITY" ]; then
   print -r -- "  an offline copy per secrets-inventory.md." >&2
   print -r -- "" >&2
   print -r -- "  Supply it one of two ways:" >&2
-  print -r -- "    ./run.sh restore-rehearse --identity /path/to/age-key.txt" >&2
-  print -r -- "    CARR_AGE_IDENTITY=/path/to/age-key.txt ./run.sh restore-rehearse" >&2
+  print -r -- "    ./run.sh restore-rehearse --backup-run-id $BACKUP_RUN_ID --identity /path/to/age-key.txt" >&2
+  print -r -- "    CARR_AGE_IDENTITY=/path/to/age-key.txt ./run.sh restore-rehearse --backup-run-id $BACKUP_RUN_ID" >&2
   print -r -- "" >&2
   print -r -- "  If NO copy of that key can be found, the dumps in backups/ are already" >&2
   print -r -- "  unrecoverable and that is the emergency, not this message." >&2
@@ -485,7 +483,6 @@ if [ -n "$BACKUP_RUN_ID" ]; then
   # The off-Mac copy the cloud workflow produced, fetched from the store with
   # its producer's record (see --backup-run-id). Encrypted bytes only; the
   # directory is a mktemp removed by the teardown trap.
-  [ -z "$WANT_DUMP$WANT_DATE" ] || die "--backup-run-id names the copy; do not combine it with --dump or --date"
   COPYDIR="$(mktemp -d "${TMPDIR:-/tmp}/carr-restore-copy.XXXXXX")"
   "$PY" "$REPO/tools/restore-watermark.py" fetch-copy --repository "$BACKUP_REPOSITORY" \
       --run-id "$BACKUP_RUN_ID" --out-dir "$COPYDIR" > "$COPYDIR/fetched.json" \
@@ -494,23 +491,6 @@ if [ -n "$BACKUP_RUN_ID" ]; then
   COPY_ARCHIVE="$COPYDIR/artifact.zip"
   [ -f "$DUMP" ] && [ -f "$COPY_ARCHIVE" ] || die "fetch-copy reported no dump"
   say "  ok    selected dump: $(basename "$DUMP") (--backup-run-id $BACKUP_RUN_ID, fetched from the artifact store)"
-elif [ -n "$WANT_DUMP" ]; then
-  # An explicit path, which is how an OFF-MAC copy gets tested: the R2 object or
-  # the GitHub artifact, downloaded anywhere. Named loudly in the output because
-  # a rehearsal against a copy that would survive this Mac is a different and
-  # stronger claim than one against backups/, and the transcript should say which
-  # was run.
-  DUMP="$WANT_DUMP"
-  [ -f "$DUMP" ] || die "no such dump: $DUMP"
-  say "  ok    selected dump: $DUMP (--dump, an explicit path rather than backups/)"
-elif [ -n "$WANT_DATE" ]; then
-  DUMP="$REPO/backups/carr-$WANT_DATE.sql.age"
-  [ -f "$DUMP" ] || die "no dump for $WANT_DATE. Present: $(ls "$REPO"/backups/carr-*.sql.age 2>/dev/null | xargs -n1 basename 2>/dev/null | tr '\n' ' ')"
-  say "  ok    selected dump: $(basename "$DUMP") (--date $WANT_DATE)"
-else
-  DUMP="$(ls -t "$REPO"/backups/carr-*.sql.age 2>/dev/null | head -1)"
-  [ -n "$DUMP" ] || die "no backups/carr-*.sql.age files exist. Run ./bin/backup-dump.sh first."
-  say "  ok    newest dump: $(basename "$DUMP")"
 fi
 
 # Size, in exact bytes. `du -h` used to report this and floors at the 4K block
@@ -575,9 +555,7 @@ else
   fi
 fi
 DUMP_AGE_H=$(( ( $(date +%s) - DUMP_EPOCH ) / 3600 ))
-if [ -n "$WANT_DATE" ]; then
-  say "  ok    dump is ${DUMP_AGE_H}h old (freshness not gated: --date asked for this one)"
-elif [ "$DUMP_AGE_H" -gt "$STALE_HOURS" ]; then
+if [ "$DUMP_AGE_H" -gt "$STALE_HOURS" ]; then
   say "  WARN  newest dump is ${DUMP_AGE_H}h old (>${STALE_HOURS}h). The nightly chain is"
   say "        skipped whenever the Mac sleeps through 2am — check out/nightly.log."
 else
@@ -760,6 +738,11 @@ hand_over_to_verify_restore() {
   wait "$VERIFY_PID" || rc=$?
   VERIFY_PID=""
   EXERCISE_VERDICT="$(exercise_reason)"
+  SECURITY_PARITY="$("$PY" -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["security_parity"],sort_keys=True,separators=(",",":")))' "$WORKDIR/exercise-verdict.json" 2>/dev/null)"
+  if [ -z "$SECURITY_PARITY" ]; then
+    SECURITY_PARITY='{"verdict":"NOT_RUN"}'
+    rc=1
+  fi
   return $rc
 }
 if [ -n "$BACKUP_RUN_ID" ]; then
@@ -810,110 +793,14 @@ if [ -n "$BACKUP_RUN_ID" ]; then
     redact_tail 10 "$WORKDIR/verify.err"
     die "verify-restore did not restore and verify the artifact ($EXERCISE_VERDICT). THIS IS THE FINDING."
   fi
+  print -r -- "$SECURITY_PARITY" | "$PY" -c 'import json,sys; sys.exit(json.load(sys.stdin).get("verdict") != "PASS")' \
+    || die "security parity failed"
+  say "  SECURITY PARITY: PASS"
   say "  ok    verify-restore restored the artifact into $RESTORE_DB and the piped verdict passed: $EXERCISE_VERDICT"
   RESTORE_URL="$("$NEONCTL" connection-string "$BRANCH_ID" --project-id "$PROJECT_ID" \
                  --role-name neondb_owner --database-name "$RESTORE_DB" 2>/dev/null)"
   [ -n "$RESTORE_URL" ] || die "could not obtain the $RESTORE_DB connection string"
-elif ! PGURL_ADMIN="$BRANCH_ADMIN_URL" "$PY" "$PGX" PGURL_ADMIN \
-     psql -v ON_ERROR_STOP=1 -q -c "create database $RESTORE_DB" >/dev/null 2>"$WORKDIR/createdb.err"; then
-  say "$(cat "$WORKDIR/createdb.err")" >&2
-  die "could not create the $RESTORE_DB database on the branch"
 fi
-if [ -z "$BACKUP_RUN_ID" ]; then
-RESTORE_URL="$("$NEONCTL" connection-string "$BRANCH_ID" --project-id "$PROJECT_ID" \
-               --role-name neondb_owner --database-name "$RESTORE_DB" 2>/dev/null)"
-[ -n "$RESTORE_URL" ] || die "could not obtain the $RESTORE_DB connection string"
-say "  ok    empty database $RESTORE_DB created on the branch"
-
-# SCOPED DUMPS DO NOT CARRY CLUSTER EXTENSIONS. backup-dump.sh deliberately
-# selects only the application-owned public and ops schemas. PostgreSQL
-# extensions are cluster/database objects outside that selection, even though
-# the functions they install live in public. The 2026-08-17 recovery drill
-# proved the consequence: the dump reached a guidance view using public.digest
-# and failed because pgcrypto had never been installed in the new database.
-# These are the exact two extension prerequisites declared by the migration
-# tree (0001 and 0135). Install them in the throwaway target before loading;
-# production is untouched and every application object still comes from the
-# encrypted artifact.
-if ! PGURL_RESTORE="$RESTORE_URL" "$PY" "$PGX" PGURL_RESTORE psql -v ON_ERROR_STOP=1 -q \
-    -c "create extension if not exists pg_trgm; create extension if not exists pgcrypto;" \
-    >/dev/null 2>"$WORKDIR/extensions.err"; then
-  say "$(cat "$WORKDIR/extensions.err")" >&2
-  die "could not install the dump's pg_trgm and pgcrypto prerequisites"
-fi
-say "  ok    pg_trgm and pgcrypto prerequisites installed in the throwaway database"
-
-# THE DECRYPT. Piped straight into psql: the plaintext dump exists only in a
-# pipe, never as a file, so there is nothing to forget to delete.
-#
-# BOTH sides of the pipe append to the SAME stderr file, and that is not tidiness.
-# The first run of this script (2026-08-02, with a deliberately wrong identity)
-# captured psql's stderr only, so age's "unknown identity type" scrolled past
-# while the diagnostic tail printed an empty file — the script reported a failure
-# and then showed nothing about it. The single most useful line this can ever
-# print is age's "no identity matched any of the recipients", so it goes where
-# the tail will find it.
-#
-# pipefail matters just as much: without it the pipeline's status is psql's, and
-# psql exits 0 on an empty stdin. A failed decrypt would have loaded nothing and
-# passed.
-# THE PORTABILITY FILTER, and why it is a filter rather than ON_ERROR_STOP=0.
-#
-# FOUND BY THE FIRST REAL RUN, 2026-08-02: the restore died on
-#   ERROR: permission denied to change default privileges
-# `bin/backup-dump.sh` calls plain `pg_dump` with no --no-owner/--no-acl, so
-# every dump carries ALTER DEFAULT PRIVILEGES / GRANT / REVOKE / OWNER TO
-# statements naming the role that owned the source database. Restoring into a
-# fresh database on a branch, those roles are not ours to act for, so the first
-# one errors and ON_ERROR_STOP=1 abandons the whole load. The DATA was never the
-# problem; the permission grammar wrapped around it was.
-#
-# backup-dump.sh is fixed so future dumps carry none of this. That does NOT help
-# the dumps we already hold, and those are the only backups that exist — which is
-# exactly the situation a restore has to survive. So the stream is filtered here.
-#
-# ON_ERROR_STOP STAYS 1. Dropping it would have been one word and would have made
-# every future failure silent — a restore that skips a broken COPY and reports
-# success is worse than one that fails loudly, and is the same false-comfort
-# defect this whole drill was built to expose. Filtering removes exactly the
-# statement classes we know cannot apply and leaves every other error fatal.
-#
-# FOUND AGAIN BY THE 2026-08-17 PRE-ACTIVATION RECOVERY DRILL: scoped plain-SQL
-# dumps now include `CREATE SCHEMA public;`, while a newly created PostgreSQL
-# database already owns that schema. ON_ERROR_STOP correctly refused the
-# duplicate before loading a table. `public` is the only pre-created schema;
-# `CREATE SCHEMA ops;` must remain and every table/COPY error stays fatal. Strip
-# exactly that one idempotent declaration, not CREATE SCHEMA generally.
-#
-# The count assertion in phase 4 is what proves the filter did not eat data: ACL
-# statements move no rows, so if stripping them changed a single count, the
-# comparison fails.
-RESTORE_FILTER='/^(CREATE SCHEMA public;|ALTER DEFAULT PRIVILEGES|GRANT |REVOKE |ALTER .* OWNER TO |COMMENT ON EXTENSION )/d'
-
-# EVIDENCE (Program 4): the RTO clock for "how long does restore take" starts
-# HERE — right before the actual decrypt+load — not at branch-create above, so
-# a slow Neon provisioning call never inflates the number a human reads as
-# restore time. Read by record_rehearsal() in the EXIT trap once the script
-# actually exits, which is after phase 4's verification has also completed.
-RESTORE_START_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-RESTORE_START_EPOCH="$(date +%s)"
-say "  decrypting and loading (this is the slow step) ..."
-say "  note: stripping the pre-created public schema declaration and ownership/ACL statements (see comment)"
-set -o pipefail
-if ! age --decrypt -i "$IDENTITY" "$DUMP" 2>>"$WORKDIR/restore.err" \
-     | sed -E "$RESTORE_FILTER" \
-     | PGURL_RESTORE="$RESTORE_URL" "$PY" "$PGX" PGURL_RESTORE \
-         psql -v ON_ERROR_STOP=1 -v VERBOSITY=terse -v SHOW_CONTEXT=never -q \
-         >"$WORKDIR/restore.out" 2>>"$WORKDIR/restore.err"; then
-  set +o pipefail
-  say ""
-  say "  --- decrypt/restore errors (last 40, row data redacted) ---" >&2
-  redact_tail 40 "$WORKDIR/restore.err"
-  die "the dump did not decrypt and load. THIS IS THE FINDING — a backup that will not restore is not a backup."
-fi
-set +o pipefail
-say "  ok    dump decrypted and loaded"
-fi  # the local-dump path; with --backup-run-id verify-restore loaded it above
 
 # ── PHASE 4: the assertion. This is the whole point; everything above is setup.
 step "phase 4: row counts, restored vs production"
