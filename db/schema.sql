@@ -39479,6 +39479,36 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[])",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[]):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[])",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[]):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
     }
   ],
   "retired_secdef_execute": [
@@ -39661,6 +39691,17 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
+    }
+  ],
+  "relation_dml": [
+    {
+      "grantee": "carr_writer",
+      "relation": "public.doctrine_embedding",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.doctrine_embedding:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
     }
   ]
 }$current_grants$::jsonb $_$;
@@ -41157,7 +41198,7 @@ begin
     count(*) filter (where row in (select value from jsonb_array_elements(current_grants->'secdef_execute')))
     into observed_count,observed_digest,registered_count from observed;
   if registered_count<>jsonb_array_length(current_grants->'secdef_execute') then return false; end if;
-  if observed_count<>1269 or observed_digest<>'sha256:bfaf0d3af69f2ad229d9523c2a6660825c0ef6e60d539c832ac00ad787191d77' then return false; end if;
+  if observed_count<>1267 or observed_digest<>'sha256:587e762e80c6691d4a07c5b35e48a259c7b8bdf885d8595ffd0c14928c657efa' then return false; end if;
   with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper), runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper), capabilities as (select n.nspname,c.relname,c.relkind,c.relowner,acl.grantee,acl.privilege_type,acl.is_grantable from pg_class c join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) acl where n.nspname not in ('pg_catalog','information_schema') and c.relkind in ('r','p','v','m','f')), observed as (select 'db-relation-acl:'||nspname||'.'||relname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type) ingress_key,jsonb_build_object('ingress_key','db-relation-acl:'||nspname||'.'||relname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type),'ingress_kind','db_relation_acl','relation',nspname||'.'||relname,'relation_kind',relkind,'grantee',coalesce(r.rolname,'public'),'privilege',lower(privilege_type),'grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE') and grantee<>relowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
   select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
   if observed_count<>322 or observed_digest<>'sha256:e8f392451cfe7190d0cdd0ef44c86578cc675452137d8117b39c5ac0d89e51d8' then return false; end if;
@@ -122205,7 +122246,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0944_retire_orphan_control_inventory.sql	ab7c35cfc581268b40bab5b29399e315286b24ba1c3c8c86bc0b9c49673def37	1970-01-01 00:00:00+00
 0947_allow_approved_control_evidence_refresh.sql	b051840f87086cdfcfbe21abae004df2f7023907f081851f95c22a7e017f8800	1970-01-01 00:00:00+00
 0950_remove_retired_workflow_manifest_binding.sql	87c2d7f9aba676b4b0e0d7262b024fe20f4ee1e7a7ced5ced4dcce19267d9a41	1970-01-01 00:00:00+00
-0956_doctrine_embeddings.sql	8b1f75ddf5eb2657d4e5f7c6ddd62dc7a5885add879d6b13cee0d696fa0d96b6	1970-01-01 00:00:00+00
+0956_doctrine_embeddings.sql	42b0bc24820b51c08364f9edba82ba8cd03e40d8130d921d2b8469b5177678cb	1970-01-01 00:00:00+00
 \.
 
 
