@@ -1,8 +1,8 @@
 export async function readBriefAssurance(c, sponsor) {
   if (sponsor !== 'joe' && sponsor !== 'dell') throw new Error('assurance_partner_required');
   const recipient = (await c.query(
-    "select id from public.actor where slug=$1 and kind='human' and active", [sponsor])).rows[0];
-  if (!recipient) throw new Error('assurance_active_partner_required');
+    "select public.retrieval_visibility_actor_id($1) as id", [sponsor])).rows[0];
+  if (!recipient?.id) throw new Error('assurance_active_partner_required');
   return (await c.query(`
     select n.id as notification_id, n.reason, n.severity, n.subject_type, n.subject_ref,
            n.deep_link, n.created_at, s.signal_kind as reason_id

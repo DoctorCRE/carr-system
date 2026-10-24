@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import pg from 'pg';
+import { readMigration } from './migration-source.testhelper.mjs';
 import { readBriefAssurance } from '../src/brief-assurance.js';
 import { executeRegisteredTool, ToolError, TOOLS } from '../src/tools.js';
 import { connectionRouteForTool } from '../src/mcp.js';
@@ -41,6 +42,10 @@ before(async () => {
       ('${id(3)}','codex','automation',true);
     insert into signal_event values ('${id(1)}','v5-a05-delivery-cadence','synthetic-alert'),
       ('${id(2)}','unrelated-producer','synthetic-other');`);
+  const resolver = readMigration(new URL('../../migrations/0223_doctrine_search_reads_without_writing_or_reading_actor.sql', import.meta.url).pathname)
+    .match(/create or replace function retrieval_visibility_actor_id[\s\S]*?\$\$;/i)[0];
+  await db.query(resolver);
+  await db.query('grant execute on function retrieval_visibility_actor_id(text) to carr_writer');
 });
 after(async () => { await db?.end(); await fixture?.close(); await release?.(); });
 beforeEach(async () => {

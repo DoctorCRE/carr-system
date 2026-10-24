@@ -52,7 +52,7 @@ test("composites expose exact reviewed edges and generic dispatch stays default 
   assert.deepEqual(registeredOperation("prepare-conversation").delegates_to,
     ["find-and-catch-up", "who-do-we-know"]);
   assert.deepEqual(registeredOperation("morning-brief").delegates_to,
-    ["claim-card", "deal-room-board", "loop-board", "today-triage"]);
+    ["claim-card", "deal-room-board", "morning-brief-queue", "today-triage"]);
   assert.deepEqual(registeredOperation("call-verb").delegates_to, ["*registered_operation"]);
   assert.match(readFileSync(new URL("../src/tools.js", import.meta.url), "utf8"),
     /executeRegisteredTool\(c, actor, "log-activity"/);
