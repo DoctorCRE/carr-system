@@ -1,27 +1,9 @@
-import { readFileSync, existsSync } from 'node:fs';
-import path from 'node:path';
-import pg from 'pg';
-import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './disposable-postgres.mjs';
+import { readFileSync } from 'node:fs';
+import { postgresDatabase } from './postgres-database.mjs';
 
 export async function doctrineRoutingFixture() {
-  const bin = ['/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/18/bin', '/usr/lib/postgresql/17/bin']
-    .find(candidate => existsSync(path.join(candidate, 'initdb')));
-  if (!bin) throw new Error('PostgreSQL server binaries are required for routing acceptance');
-  const release = await acquirePostgresFixtureGroup();
-  let fixture, client;
-  const close = async () => {
-    try { await client?.end(); } finally {
-      try { await fixture?.close(); } finally { await release(); }
-    }
-  };
+  const { client, close } = await postgresDatabase('doctrine-routing-');
   try {
-    fixture = await acquireDisposablePostgres({ prefix: 'doctrine-routing-', pgCtl: path.join(bin, 'pg_ctl') });
-    const data = path.join(fixture.root, 'data');
-    await fixture.run(path.join(bin, 'initdb'), ['-D', data, '-U', 'fixture', '--auth=trust', '--no-locale']);
-    await fixture.run(path.join(bin, 'pg_ctl'), ['-D', data, '-l', path.join(fixture.root, 'server.log'),
-      '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
-    client = new pg.Client({ host: fixture.root, user: 'fixture', database: 'postgres' });
-    await client.connect();
     await client.query(`
       create extension pg_trgm;
       create table doctrine_document(id uuid primary key default gen_random_uuid(), slug text unique, title text,
