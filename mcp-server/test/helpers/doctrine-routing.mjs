@@ -32,7 +32,7 @@ export async function doctrineRoutingFixture() {
     const qualified = readFileSync(new URL('../../../migrations/0856_qualify_security_definer_dependencies.sql', import.meta.url), 'utf8');
     const start = qualified.indexOf('CREATE OR REPLACE FUNCTION public.search_doctrine_situations(');
     await client.query(qualified.slice(start, qualified.indexOf('$function$;', start) + 11));
-    await client.query(readFileSync(new URL('../../../migrations/0951_retrieval_concept_question_matching.sql', import.meta.url), 'utf8'));
+    await client.query(readFileSync(new URL('../../../migrations/0955_retrieval_concept_question_matching.sql', import.meta.url), 'utf8'));
     return {
       client, close,
       async insert(section, document = {}) {
