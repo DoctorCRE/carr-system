@@ -165,8 +165,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the refusal names the offending file",
           "0787_feature.sql" in r.stdout + r.stderr, r.stdout + r.stderr)
     check("the refusal names the base maximum", "0789" in r.stdout + r.stderr, r.stdout + r.stderr)
-    check("the refusal names the move (reserve-migration)",
-          "reserve-migration" in r.stdout + r.stderr, r.stdout + r.stderr)
+    check("the refusal names the move (git mv)",
+          "git mv" in r.stdout + r.stderr, r.stdout + r.stderr)
 
     # The update-branch path: main merged INTO the branch, exactly what the
     # merge queue's update-branch call and the pull_request merge ref build.
