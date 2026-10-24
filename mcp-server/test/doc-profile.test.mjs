@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dispatch, allowedIn, profileForActor, mcpApiHandler } from "../src/mcp.js";
+import { dispatch, allowedIn, profileForActor, mcpApiHandler, callTool } from "../src/mcp.js";
 import { TOOLS } from "../src/tools.js";
 import { authenticatedIdentity } from "../src/identity.js";
 import { Pool } from "@neondatabase/serverless";
 
 const READS = ["catch-me-up", "today-triage", "find", "find-and-catch-up",
-  "deal-board", "get-deal-room", "who-do-we-know", "counterparty-history",
+  "deal-board", "get-deal-room", "vendor-assignment-context", "who-do-we-know", "counterparty-history",
   "lead-board", "schedule-board", "search-tour-properties", "read-doctrine",
   "search-doctrine", "recall-memory"];
 const WRITES = ["add-deal-note", "log-activity", "set-next-step", "add-critical-date", "log-capture"];
@@ -174,4 +174,23 @@ test("the Doc OAuth adapter requires a resolved partner grant, never a purpose-b
   assert.equal((await mcpApiHandler.fetch(request(), {}, { props: { slug: "codex" } })).status, 403);
   assert.equal((await mcpApiHandler.fetch(request(), {}, { props: { slug: "codex", human: false } })).status, 403);
   assert.equal((await mcpApiHandler.fetch(request(), {}, { props: { slug: "synthetic-unknown" } })).status, 401);
+});
+
+
+test('vendor assignments are admitted only through the full and Doc profiles', async () => {
+  const connect = Pool.prototype.connect;
+  let connections = 0;
+  Pool.prototype.connect = async () => { connections++; throw new Error('synthetic_database_boundary_reached'); };
+  const args = {idempotency_key:'synthetic-vendor-call',ref:'Synthetic',kind:'call',summary:'Synthetic update',
+    vendor_assignments:[{vendor_id:'aa000000-0000-4000-8000-000000000022',base_version:1,role:'lender',
+      company_party_id:'aa000000-0000-4000-8000-000000000020',contact_party_id:'aa000000-0000-4000-8000-000000000021'}]};
+  try {
+    for (const profile of ['capture','away','probe']) {
+      await assert.rejects(callTool({},actor(),'log-activity',args,profile),error=>error.payload?.error==='not_in_profile');
+      assert.equal(connections,0);
+    }
+    const {result} = await rpc('/doc/mcp','tools/call',{name:'log-activity',arguments:args});
+    assert.equal(JSON.parse(result.content[0].text).error,'unhandled_verb_failure');
+    assert.equal(connections,1,'Doc reaches the writer after contract and profile checks');
+  } finally { Pool.prototype.connect = connect; }
 });
