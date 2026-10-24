@@ -691,7 +691,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         return withEnvelope(c, actor, "backfill-doctrine-embeddings", args, async () => {
           const actorId = await retrievalVisibilityActorId(c, actor);
           const result = await backfillDoctrineEmbeddings(c, actorId, limit);
-          await writeEvent(c, actor, "backfill-doctrine-embeddings", "doctrine_revision", null,
+          await writeEvent(c, actor, "backfill-doctrine-embeddings", "actor", actor.id,
             { new: { embedded: result.embedded, remaining: result.remaining }, idempotency_key: args.idempotency_key });
           return result;
         });

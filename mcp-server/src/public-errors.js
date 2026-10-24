@@ -110,6 +110,11 @@ export function publicError(error, { env, inputSchema, fallback = "unhandled_ver
       ...(Array.isArray(payload?.fields) ? payload.fields : []),
       ...(Array.isArray(payload?.columns) ? payload.columns : [])];
     result.fields = [...new Set(candidates.filter(field => allowed.has(field)))];
+    if (code === "invalid_field_value" && result.fields.length === 0) {
+      result.error = "database_refused_the_statement";
+      result.hint = PUBLIC_ERRORS.get(result.error);
+      delete result.fields;
+    }
   }
   return result;
 }
