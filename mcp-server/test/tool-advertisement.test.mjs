@@ -17,17 +17,12 @@ test("ordinary client registrations advertise a compact core with unchanged sche
   assert.ok(result.tools.length <= 40, `startup advertised ${result.tools.length} tools`);
   const names = new Set(result.tools.map(t => t.name));
   for (const name of ["standing-context", "list-verbs", "call-verb", "find", "add-loop", "report-problem",
-    "record-defect", "teach", "activate-rule", "engineering-passport-source", "doctrine-sections", "map-architecture"])
+    "record-defect", "engineering-passport-source", "doctrine-sections", "map-architecture"])
     assert.ok(names.has(name), `${name} must remain directly reachable`);
   for (const tool of result.tools) assert.deepEqual(tool.inputSchema, TOOLS[tool.name].inputSchema);
   const settings = JSON.parse(fs.readFileSync(new URL("../../.claude/settings.json", import.meta.url)));
   for (const name of settings.permissions.allow.filter(n => n.startsWith("mcp__carr__")))
     assert.ok(names.has(name.slice("mcp__carr__".length)), `${name} keeps its existing allowlist route`);
-  for (const file of ["engineering_dispatch_adapter.py"]) {
-    const source = fs.readFileSync(new URL(`../../tools/room-bridge/${file}`, import.meta.url), "utf8");
-    for (const match of source.matchAll(/tools\.mcp__carr__([a-z_]+)/g))
-      assert.ok(names.has(match[1].replaceAll("_", "-")), `${file}: preserve the Model Room source route`);
-  }
 });
 
 test("name-specific CARR hook routes remain advertised without editing security settings", async () => {
@@ -92,4 +87,24 @@ test("retired Jev gateway verbs are absent from discovery and refuse execution",
     assert.equal(direct.result.isError, true);
     assert.equal(JSON.parse(direct.result.content[0].text).error, "unknown_tool");
   }
+});
+
+test("retired machinery verbs are absent from discovery and refuse execution", async () => {
+  const full = await TOOLS["list-verbs"].handler(null, {}, {});
+  for (const name of ["cadence-status", "record-cadence-receipt", "raise-delivery-cadence-alert",
+    "bot-brief", "read-execution-environment-providers", "activate-context-bundle",
+    "read-context-activation", "render-context-activation", "read-attempt-reliability",
+    "claude-checkpoint", "claude-read-recovery", "close-defect", "read-benchmark-manifest",
+    "read-model-role", "read-journey-one-clock", "register-action-class-successor",
+    "read-action-class-successors", "read-action-class-gate",
+    "teach", "admit-rule", "approve-rule", "activate-rule", "accept-workflow",
+    "disable-legacy-schedule", "activate-guidance-registry", "decide-guidance-import-batch",
+    "deactivate-guidance-registry", "retire-rule", "amend-rule"]) {
+    assert.equal(TOOLS[name], undefined, name);
+    assert.equal(full.verbs.some(verb => verb.name === name), false, name);
+    const direct = await rpc("tools/call", { name, arguments: {} });
+    assert.equal(JSON.parse(direct.result.content[0].text).error, "unknown_tool", name);
+  }
+  for (const name of ["list-my-codex-sessions", "recall-memory", "engineering-passport-source", "read-resource-dashboard"])
+    assert.ok(TOOLS[name], `${name} remains registered`);
 });

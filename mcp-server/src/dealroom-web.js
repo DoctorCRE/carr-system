@@ -21,8 +21,6 @@ import { COMMAND_CENTER_PATH } from "./workspace-command-center.js";
 import { neon } from "@neondatabase/serverless";
 import { readWorkInventoryCensus, WORK_INVENTORY_PATH } from "./work-inventory-census.v5.js";
 import { ATLAS_GRAPH_PATH, readAtlasInventoryGraph } from "./atlas-inventory-graph.v5.js";
-import { PROGRAM_CONTROLLER_PATH, readProgramControllerCensus } from "./program-controller-census.v5.js";
-import { METERING_PATH, readMeteringProjection } from "./cost-ledger-projection.v5.js";
 import {
   BUSINESS_ASSET_PATH, CLIENTS_ROUTE, VENDORS_ROUTE,
   createWorkspaceBusinessReader, isBusinessApiPath,
@@ -597,30 +595,16 @@ async function roomQueue(_request, env, _session, dependencies) {
  *
  * ATTRIBUTION IS SERVER-DERIVED AND THE SEAT IS FIXED. The body is the only
  * thing read off the request: seat is always "human", kind always "turn", the
- * sponsor comes from the verified session, and the idempotency/msg id is minted
- * here.  A request that supplies seat, sponsor, kind, room or msg_id is not
+ * sponsor comes from the verified session, and the message id is derived here
+ * from the caller's retained operation key and that verified session. A request that supplies seat, sponsor, kind, room or msg_id is not
  * rejected — those fields are simply never consulted, which is the same refusal
  * add-room-turn makes and the reason the panel has no seat selector.
  */
-// The composer promises the reader that a retry cannot double-post. A random
-// id per request does NOT deliver that: the failure this guards is a response
-// the browser never saw, where the turn landed and the reader presses retry.
-//
-// So the id is minted server-side and DETERMINISTICALLY, from the session, the
-// exact body, and a one-minute bucket — the room's own msg_id uniqueness then
-// collapses the retry into a dedup instead of a second turn. Nothing about it
-// comes from the request body's own fields, so this is not a caller-supplied
-// id wearing a different hat.
-//
-// THE DELIBERATE TRADE: the same person posting the same exact text twice
-// inside the same minute lands once. That is the case worth collapsing — it is
-// a double-submit far more often than it is intent — and a minute is short
-// enough that a genuine repeat a moment later still goes through.
-const ROOM_DEDUP_WINDOW_MS = 60_000;
-
-export async function roomMessageId(sessionKey, body, now) {
-  const bucket = Math.floor(now / ROOM_DEDUP_WINDOW_MS);
-  const digest = await sha256(`room-turn\n${sessionKey}\n${bucket}\n${body}`);
+// A browser owns one UUID per reviewed action, including retries after a lost
+// reply. The server scopes it to the verified session and actor; payload reuse
+// is checked by the room append against its durable row, not a Worker cache.
+export async function roomMessageId(sessionKey, actorSlug, operationKey) {
+  const digest = await sha256(`room-turn.v2\n${sessionKey}\n${actorSlug}\n${operationKey}`);
   return [digest.slice(0, 8), digest.slice(8, 12), digest.slice(12, 16),
     digest.slice(16, 20), digest.slice(20, 32)].join("-");
 }
@@ -649,6 +633,9 @@ async function roomTurnPost(request, env, session, dependencies) {
   }
   if (!body.trim()) return json({ error: "body_required" }, 400);
   if (body.length > ROOM_BODY_MAX) return json({ error: "body_too_long", limit: ROOM_BODY_MAX, got: body.length }, 413);
+  const operationKey = guard.value?.idempotency_key;
+  if (typeof operationKey !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(operationKey))
+    return json({ error: "idempotency_key_required", hint: "Use one UUID for this action and retain it for every retry." }, 400);
 
   const scope = personalScopeForActor(session.actor);
   if (scope.status !== "personal") {
@@ -659,13 +646,13 @@ async function roomTurnPost(request, env, session, dependencies) {
   try {
     posted = await dependencies.roomWriteFn(env, {
       sponsor: scope.sponsor, seat: "human", kind, body,
-      msgId: await roomMessageId(session.key, body, dependencies.now()),
+      msgId: await roomMessageId(session.key, session.actor.slug, operationKey.toLowerCase()),
       originChannel: "browser-human", originActor: session.actor.slug,
     });
   } catch (error) {
     return json({ error: "wire_unavailable", detail: String(error?.message || error).slice(0, 200) }, 503);
   }
-  if (!posted || posted.ok !== true) return json({ error: posted?.error || "wire_unavailable" }, 503);
+  if (!posted || posted.ok !== true) return json({ error: posted?.error || "wire_unavailable" }, posted?.error === "key_reuse" ? 409 : 503);
   return json(posted);
 }
 
@@ -963,114 +950,6 @@ async function atlasGraphResponse(request, env, session, dependencies) {
   }
 }
 
-// Default metering reader. Same client factory as the census routes above --
-// neon() over DATABASE_URL_READER, wrapped so .query() returns { rows } -- so
-// this route carries no database knowledge of its own and no write credential
-// can reach it. The WRITER path of the cost ledger is not mounted here at all.
-async function defaultMeteringReader(env, actor, correlationId, params = {}) {
-  const sql = neon(env.DATABASE_URL_READER);
-  const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
-  return readMeteringProjection({
-    client, actor, correlationId: correlationId || env.CORRELATION_ID,
-    tree_ref: params.tree_ref, period: params.period,
-  });
-}
-
-/**
- * GET /api/v1/metering -- the WR-000111 producer cost projection.
- *
- * Mounted exactly like the Atlas graph: same feature flag, same typed
- * error-to-status map, same dependency-injected reader. The two query
- * parameters are handed to the reader unparsed -- the reader owns bounding and
- * refusal so the semantics keep ONE definition.
- */
-async function meteringResponse(request, env, session, dependencies) {
-  if (!workspaceCommandCenterEnabled(env)) return json({ error: "not_found" }, 404);
-  const url = new URL(request.url);
-  const allowed = new Set(["tree_ref", "period"]);
-  if ([...url.searchParams.keys()].some((key) => !allowed.has(key))) {
-    return json({ error: "AUTHORIZATION_REFUSED" }, 403);
-  }
-  if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: { allow: "GET, HEAD, OPTIONS", "cache-control": "no-store" } });
-  }
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    return new Response(JSON.stringify({ error: "METHOD_NOT_ALLOWED" }), {
-      status: 405, headers: { ...JSON_HEADERS, allow: "GET, HEAD, OPTIONS" },
-    });
-  }
-  const reader = typeof dependencies.meteringReader === "function"
-    ? dependencies.meteringReader : defaultMeteringReader;
-  try {
-    const payload = await reader(env, session.actor, env.CORRELATION_ID, {
-      tree_ref: url.searchParams.get("tree_ref"),
-      period: url.searchParams.get("period"),
-    });
-    if (request.method === "HEAD") return new Response(null, { status: 200, headers: JSON_HEADERS });
-    return json(payload);
-  } catch (error) {
-    const code = ["AUTHORIZATION_REFUSED", "TENANT_SCOPE_REFUSED", "FRESHNESS_UNKNOWN", "DEPENDENCY_UNAVAILABLE", "INTERNAL_ERROR"].includes(error?.code) ? error.code : "INTERNAL_ERROR";
-    const status = code === "AUTHORIZATION_REFUSED" ? 403 : code === "TENANT_SCOPE_REFUSED" ? 404 : code === "FRESHNESS_UNKNOWN" ? 409 : code === "DEPENDENCY_UNAVAILABLE" ? 503 : 500;
-    return json({ error: code }, status);
-  }
-}
-
-// Default program-controller reader. Same client factory as the two census
-// routes above — neon() over DATABASE_URL_READER, wrapped so .query() returns
-// { rows } — so this route carries no database knowledge of its own and no
-// write credential can reach it.
-async function defaultProgramControllerReader(env, actor, correlationId, params = {}) {
-  const sql = neon(env.DATABASE_URL_READER);
-  const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
-  return readProgramControllerCensus({
-    client, actor, correlationId: correlationId || env.CORRELATION_ID,
-    program_ref: params.program_ref, slice_ref: params.slice_ref, release_ref: params.release_ref,
-  });
-}
-
-/**
- * GET /api/v1/program-controller — the V5-F02 program-controller census.
- *
- * Mounted exactly like the atlas graph: same feature flag, same typed
- * error-to-status map, same dependency-injected reader.
- *
- * THE ADMITTED PARAMETER SET IS EXACTLY THREE, and `auto_release_requested` is
- * deliberately absent. It is a stated invariant in the census reader, not a
- * store and not a caller input, so asking for it here is an unknown parameter
- * and refuses 403 — a gated party may not ask for its own auto release.
- */
-async function programControllerResponse(request, env, session, dependencies) {
-  if (!workspaceCommandCenterEnabled(env)) return json({ error: "not_found" }, 404);
-  const url = new URL(request.url);
-  const allowed = new Set(["program_ref", "slice_ref", "release_ref"]);
-  if ([...url.searchParams.keys()].some((key) => !allowed.has(key))) {
-    return json({ error: "AUTHORIZATION_REFUSED" }, 403);
-  }
-  if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: { allow: "GET, HEAD, OPTIONS", "cache-control": "no-store" } });
-  }
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    return new Response(JSON.stringify({ error: "METHOD_NOT_ALLOWED" }), {
-      status: 405, headers: { ...JSON_HEADERS, allow: "GET, HEAD, OPTIONS" },
-    });
-  }
-  const reader = typeof dependencies.programControllerReader === "function"
-    ? dependencies.programControllerReader : defaultProgramControllerReader;
-  try {
-    const payload = await reader(env, session.actor, env.CORRELATION_ID, {
-      program_ref: url.searchParams.get("program_ref"),
-      slice_ref: url.searchParams.get("slice_ref"),
-      release_ref: url.searchParams.get("release_ref"),
-    });
-    if (request.method === "HEAD") return new Response(null, { status: 200, headers: JSON_HEADERS });
-    return json(payload);
-  } catch (error) {
-    const code = ["AUTHORIZATION_REFUSED", "TENANT_SCOPE_REFUSED", "FRESHNESS_UNKNOWN", "DEPENDENCY_UNAVAILABLE", "INTERNAL_ERROR"].includes(error?.code) ? error.code : "INTERNAL_ERROR";
-    const status = code === "AUTHORIZATION_REFUSED" ? 403 : code === "TENANT_SCOPE_REFUSED" ? 404 : code === "FRESHNESS_UNKNOWN" ? 409 : code === "DEPENDENCY_UNAVAILABLE" ? 503 : 500;
-    return json({ error: code }, status);
-  }
-}
-
 /**
  * GET /api/v1/business/{clients,vendors}[/<uuid>] — the Journey 1 business read.
  *
@@ -1184,12 +1063,10 @@ async function handleRequest(request, env, ctx, dependencies) {
       if (url.pathname.startsWith("/api/v1/") && url.pathname !== COMMAND_CENTER_PATH &&
           url.pathname !== JEV_DEAL_READING_PATH &&
           url.pathname !== WORK_INVENTORY_PATH && url.pathname !== ATLAS_GRAPH_PATH &&
-          url.pathname !== PROGRAM_CONTROLLER_PATH && url.pathname !== METERING_PATH &&
           !isBusinessApiPath(url.pathname)) return json({ error: "not_found" }, 404);
       // Home, Clients and Vendors are one workspace surface and share its flag.
       if ((url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
-           url.pathname === ATLAS_GRAPH_PATH || url.pathname === PROGRAM_CONTROLLER_PATH ||
-           url.pathname === METERING_PATH ||
+           url.pathname === ATLAS_GRAPH_PATH ||
            isBusinessApiPath(url.pathname) ||
            BUSINESS_VIEW_PATHS.has(url.pathname) || url.pathname === BUSINESS_ASSET_PATH ||
            APP_DOCUMENT_PATHS.has(url.pathname)) &&
@@ -1213,8 +1090,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       if (!session) {
         if (url.pathname === "/auth/session") return json({ error: "unauthorized", state: "sign_in_required" }, 401);
         if (url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
-            url.pathname === ATLAS_GRAPH_PATH || url.pathname === PROGRAM_CONTROLLER_PATH ||
-            url.pathname === METERING_PATH ||
+            url.pathname === ATLAS_GRAPH_PATH ||
             isBusinessApiPath(url.pathname)) {
           return json({ error: "AUTHENTICATION_REQUIRED" }, 401);
         }
@@ -1252,6 +1128,14 @@ async function handleRequest(request, env, ctx, dependencies) {
         if (!sameOrigin(request, env)) {
           return json({ error: "forbidden", reason: "origin_mismatch" }, 403);
         }
+        // S2 callers retain the session's synchronizer token with the operation.
+        // The cookie can change after their fresh session read but before this
+        // request arrives; refuse that race before selecting an actor for MCP.
+        // Legacy clients/readers may omit the header during coordinated rollout.
+        if (request.headers.has("x-carr-csrf") &&
+            !equalStrings(request.headers.get("x-carr-csrf"), session.csrfToken)) {
+          return json({ error: "forbidden", reason: "csrf_mismatch" }, 403);
+        }
         response = await dependencies.mcpHandler(request, env, ctx, session.actor);
       }
       else if (url.pathname === "/pipeline/changes") response = await dependencies.pipelineHandler(request, env, ctx, session.actor);
@@ -1263,10 +1147,6 @@ async function handleRequest(request, env, ctx, dependencies) {
         response = await workInventoryResponse(request, env, session, dependencies);
       } else if (url.pathname === ATLAS_GRAPH_PATH) {
         response = await atlasGraphResponse(request, env, session, dependencies);
-      } else if (url.pathname === PROGRAM_CONTROLLER_PATH) {
-        response = await programControllerResponse(request, env, session, dependencies);
-      } else if (url.pathname === METERING_PATH) {
-        response = await meteringResponse(request, env, session, dependencies);
       } else if (isBusinessApiPath(url.pathname)) {
         response = await businessResponse(request, env, session, dependencies);
       } else if (url.pathname.startsWith("/api/v1/")) {

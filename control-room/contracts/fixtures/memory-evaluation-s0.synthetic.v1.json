@@ -74,7 +74,7 @@
     {
       "resource_ref": "resource:legacy-inventory",
       "revision_ref": "revision:3",
-      "content_digest": "sha256:5e0d59d65adbca3fa70f8c25b027f96299df4fc3a77798056d23b011999989ff"
+      "content_digest": "sha256:da6678390ece0552f011fbd36271d8f12dc1787329ec596db0d2625ce5419f71"
     }
   ],
   "source_lock": {
@@ -140,7 +140,7 @@
           "observed_at": "2026-08-27T00:00:00Z",
           "max_age_days": 30,
           "status": "fresh",
-        "verification_ref": "https://github.com/volcengine/OpenViking/blob/499995f3ed2e7f551a715179c4053772c51ff819/docs/en/concepts/03-context-layers.md"
+          "verification_ref": "https://github.com/volcengine/OpenViking/blob/499995f3ed2e7f551a715179c4053772c51ff819/docs/en/concepts/03-context-layers.md"
         }
       },
       {
@@ -1547,9 +1547,9 @@
     {
       "inventory_id": "hermes-native-memory",
       "status": "legacy",
-      "truthful_current_behavior": "Current bot assembly leaves Hermes native memory enabled as non-authoritative, and the checked-in drift predicate can detect its second-store steering risk but cannot neutralize it.",
+      "truthful_current_behavior": "The custom bot-brief assembly is retired. The checked-in Hermes drift predicate can still detect native memory as a second-store steering risk but cannot neutralize it.",
       "evidence_refs": [
-        "repo:mcp-server/src/bot-brief.js",
+        "repo:mcp-server/src/tools.js",
         "repo:ops/hermes-memory-check.py"
       ],
       "gap": "Native memory and CARR's Neon-backed memory are not yet mutually exclusive, and the CARR MemoryProvider bridge is not implemented.",
@@ -1561,12 +1561,12 @@
     {
       "inventory_id": "standing-context",
       "status": "current",
-      "truthful_current_behavior": "Standing context is the canonical governed doctrine opening route; scoped context-bundle activation is the accepted-plan execution route.",
+      "truthful_current_behavior": "Standing context remains the canonical governed doctrine opening route; custom context-bundle activation MCP doors are retired.",
       "evidence_refs": [
         "repo:AGENTS.md",
-        "repo:mcp-server/src/bot-brief.js"
+        "repo:mcp-server/src/tools.js"
       ],
-      "gap": "The operator surface does not yet explain the complete learning loop or replace either canonical route.",
+      "gap": "The operator surface does not yet explain the complete learning loop or replace the retained canonical route.",
       "owning_slice_ref": "slice:learning-control-room-v2",
       "executable_gate_ref": "check:S10-1",
       "authority_class": "canonical",
@@ -1743,7 +1743,7 @@
         "test:hermes-authority-separation"
       ],
       "evidence_refs": [
-        "repo:mcp-server/src/bot-brief.js"
+        "repo:mcp-server/src/tools.js"
       ],
       "baseline_gate_ref": "gate:S0-3-evidence-ownership"
     },
@@ -1909,5 +1909,5 @@
       "evidence_requirement": "redacted_evidence_required"
     }
   ],
-  "artifact_digest": "sha256:2e5e535a4d9671b6efb4482b017b36e844e4721b6c0cbf48a0e3f4d0a6a0a542"
+  "artifact_digest": "sha256:d2e46a2968d80e5ca4b77a0fd913ff59ad995ef6a40194e9848e0f2646b2ceb8"
 }

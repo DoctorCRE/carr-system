@@ -163,7 +163,7 @@ def render_xml(entries: list[dict], indent: str) -> str:
     lines = [f"{indent}<key>StartCalendarInterval</key>", f"{indent}<array>"]
     for entry in entries:
         body = "".join(f"<key>{k}</key><integer>{entry[k]}</integer>"
-                       for k in ("Hour", "Minute") if k in entry)
+                       for k in ("Weekday", "Hour", "Minute") if k in entry)
         lines.append(f"{inner}<dict>{body}</dict>")
     lines.append(f"{indent}</array>")
     return "\n".join(lines) + "\n"

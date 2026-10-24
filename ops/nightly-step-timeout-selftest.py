@@ -30,10 +30,10 @@ class NightlyTests(unittest.TestCase):
                                     env={"HOME": str(root), "PATH": os.environ["PATH"],
                                          "CARR_LOCK_DIR": str(root / "locks")},
                                     text=True, capture_output=True, timeout=20)
-            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.returncode, 7, result.stderr)
             rows = (root / "out/attempts").read_text().splitlines()
             self.assertTrue(any("nightly.encrypted-backup" in row for row in rows))
-            self.assertTrue(any("nightly.credential-health" in row for row in rows))
+            self.assertFalse(any("nightly.credential-" in row for row in rows))
             self.assertTrue(any("nightly.cadence-engine" in row for row in rows))
             self.assertTrue(all("bin/with-timeout.py" in row for row in rows))
             self.assertFalse((root / "out/nightly-runs").exists())
@@ -129,8 +129,8 @@ class HealthcheckTests(unittest.TestCase):
                             if "example.test/chain" in row or "example.test/worker" in row))
 
     def test_failed_job_alarms_chain_and_later_jobs_still_run(self):
-        result = self.run_script("nightly.sh", CARR_TEST_FAIL_STEP="nightly.credential-health")
-        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.run_script("nightly.sh", CARR_TEST_FAIL_STEP="nightly.recovery-point")
+        self.assertEqual(result.returncode, 7, result.stderr)
         self.assertIn("step nightly.verb-probe", self.calls())
         self.assertEqual(self.ping_urls(), ["https://example.test/backup",
                                           "https://example.test/chain/fail",
@@ -144,7 +144,7 @@ class HealthcheckTests(unittest.TestCase):
 
     def test_backup_failure_alarms_backup_and_chain(self):
         result = self.run_script("nightly.sh", CARR_TEST_FAIL_STEP="nightly.encrypted-backup")
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 7, result.stderr)
         self.assertIn("step nightly.verb-probe", self.calls())
         self.assertEqual(self.ping_urls(), ["https://example.test/backup/fail",
                                           "https://example.test/chain/fail",
@@ -152,7 +152,7 @@ class HealthcheckTests(unittest.TestCase):
 
     def test_ping_delivery_failure_keeps_nightly_jobs_running(self):
         result = self.run_script("nightly.sh", CARR_TEST_PING_RC="7")
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("step nightly.verb-probe", self.calls())
         self.assertEqual(self.ping_urls(), ["https://example.test/backup",
                                           "https://example.test/chain/fail",

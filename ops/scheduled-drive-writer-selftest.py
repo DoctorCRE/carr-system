@@ -109,16 +109,6 @@ def main() -> int:
         check("dashboard recovery requires a nonblank reason", recovery.returncode != 0 and
               "nonblank --reason" in recovery.stderr)
 
-        hard = subprocess.run(["/bin/sh", str(ROOT / "bin" / "routine-canonical-seam-refusal.sh"),
-                               "record-backed dashboard destination"], text=True, capture_output=True,
-                              check=False)
-        admin = subprocess.run(["/bin/sh", str(ROOT / "bin" / "routine-admin-refusal.sh"),
-                                "backup capability unavailable"], text=True, capture_output=True,
-                               check=False)
-        check("missing canonical seams are hard failures, distinct from admin skips",
-              hard.returncode == 69 and "MISSING_CANONICAL_SEAM" in hard.stderr
-              and admin.returncode == 78 and "routine capability refused" in admin.stderr)
-
         nightly = (ROOT / "bin" / "nightly.sh").read_text(encoding="utf-8")
         normal = nightly[nightly.index('unset CARR_VAULT CARR_EXPORT_LIVE'):]
         check("nightly clears ambient Drive before launching jobs",

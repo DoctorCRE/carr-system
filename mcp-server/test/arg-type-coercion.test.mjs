@@ -95,78 +95,12 @@ test("a free-form object with no declared properties is a no-op, not a crash", (
 });
 
 
-test("teach's REAL inputSchema still declares personal as a boolean", () => {
-  assert.equal(TOOLS["teach"].inputSchema.properties.personal.type, "boolean");
-});
-
-test("REGRESSION — teach through the choke point stores SHARED when personal is \"false\"", async () => {
-  const inserts = [];
-  const client = { query: async (text, params = []) => {
-    if (/insert into rule/i.test(text)) {
-      inserts.push(params);
-      return { rows: [{ id: "r1", personal_to: params[4] }] };
-    }
-    return { rows: [] };
-  } };
-  const actor = { id: "actor-joe", slug: "joe", human: true };
-
-  const out = await executeRegisteredTool(client, actor, "teach", {
-    idempotency_key: "k1", statement: "a rule", human_quote: "teach it", personal: "false",
-    enforcement_home: "core",
-  });
-
-  assert.equal(inserts[0][4], null, "a shared rule must not be stored with a personal_to actor");
-  assert.equal(out.scope_applied, "shared");
-  assert.equal(out.personal_requested, false);
-  assert.equal(out.scope_applied === "shared", out.personal_requested === false);
-});
-
-test("teach with a genuine personal:true still stores PERSONAL", async () => {
-  const inserts = [];
-  const client = { query: async (text, params = []) => {
-    if (/insert into rule/i.test(text)) {
-      inserts.push(params);
-      return { rows: [{ id: "r1", personal_to: params[4] }] };
-    }
-    return { rows: [] };
-  } };
-  const actor = { id: "actor-joe", slug: "joe", human: true };
-
-  for (const val of [true, "true"]) {
-    inserts.length = 0;
-    const out = await executeRegisteredTool(client, actor, "teach", {
-      idempotency_key: "k2", statement: "a rule", human_quote: "teach it", personal: val,
-      enforcement_home: "core",
-    });
-    assert.equal(inserts[0][4], "actor-joe", `personal:${JSON.stringify(val)} must store personal_to`);
-    assert.equal(out.scope_applied, "personal:joe");
-    assert.equal(out.personal_requested, true);
-  }
-});
-
-test("teach with personal omitted defaults to SHARED", async () => {
-  const inserts = [];
-  const client = { query: async (text, params = []) => {
-    if (/insert into rule/i.test(text)) {
-      inserts.push(params);
-      return { rows: [{ id: "r1", personal_to: params[4] }] };
-    }
-    return { rows: [] };
-  } };
-  const out = await executeRegisteredTool(client, { id: "actor-joe", slug: "joe", human: true }, "teach", {
-    idempotency_key: "k3", statement: "a rule", human_quote: "teach it",
-    enforcement_home: "core",
-  });
-  assert.equal(inserts[0][4], null);
-  assert.equal(out.scope_applied, "shared");
-});
-
 test("the choke point rejects a garbage boolean before the handler runs", async () => {
   let handlerRan = false;
   const client = { query: async () => { handlerRan = true; return { rows: [] }; } };
   await assert.rejects(
-    () => executeRegisteredTool(client, { id: "a", slug: "joe", human: true }, "teach", {
-      idempotency_key: "k4", statement: "s", human_quote: "q", personal: "maybe",
+    () => executeRegisteredTool(client, { id: "a", slug: "joe", human: true }, "set-notification-preference", {
+      idempotency_key: "k4", base_version: 1, device_opt_in: "maybe",
     }),
     (e) => e instanceof ToolError && e.payload.error === "invalid_boolean");
   assert.equal(handlerRan, false, "nothing should have touched the DB");

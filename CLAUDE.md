@@ -6,6 +6,7 @@ before declaring anything absent.
 
 ## Always-on rules
 
+<!-- Generated from ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
 These twelve core cards are loaded natively with this file. No boot fetch is required.
 Before acting when a card applies, answer one line with applies yes/no and the action or reason.
 
@@ -21,7 +22,7 @@ Before acting when a card applies, answer one line with applies yes/no and the a
 
 [K06] Resolve source conflicts openly: When sources disagree, follow Joe's live direction, then the current store record, then the newer dated ruling, and say there was a conflict. Archives and backups are evidence, not authority.
 
-[K12] Capture durable corrections now: When a partner corrects or overrules you, or states a preference that would recur, propose it through teach this turn with the trade-off; proposals bind nobody yet. A how-to the same partner explains twice: quote both, offer a skill.
+[K12] Capture durable corrections now: When a partner corrects or overrules you, or states a preference that would recur, propose an edit to the relevant guidance file (CLAUDE.md, AGENTS.md or a skill) in a PR this turn with the trade-off; proposals bind nobody until merged. A how-to the same partner explains twice: quote both, offer a skill.
 
 [K08] End with one action or one decision: When ending a reply, do the doable steps yourself and leave at most one human action or decision, asked directly (approve or decline) in the question box. No closing menus or scripted replies.
 
@@ -92,10 +93,9 @@ For any request to recommend, design, build, revise, review, or publish a map,
 GIS analysis, route, day trip, or Tour surface, call the live `map-architecture`
 verb first. It returns the current doctrine and machine-contract pointer.
 
-## Rule lifecycle evidence
+## Guidance changes
 
-Before operating a rule lifecycle, load
-[the preflight and prepared-admission pointer](AGENTS.md#rule-lifecycle-evidence).
+Follow [the guidance-file PR route](AGENTS.md#guidance-changes).
 
 ## PR design and debt
 
@@ -103,7 +103,7 @@ Read and follow [the required PR policy](AGENTS.md#before-every-pr-design-and-de
 
 ## Agent skills
 
-Use `tools/approve-merge.sh <owner/repo> <pr> <approved_sha>` for GitHub native auto-merge, `tools/open-prs.sh` for open PRs across jbookout repos, and `tools/room-bridge/briefs/{builder,staging-score}.md` for dispatch briefs.
+Use `gh pr merge --auto --squash <pr>` for GitHub native auto-merge, `gh pr list` for open PRs, and `tools/room-bridge/briefs/{builder,staging-score}.md` for dispatch briefs.
 
 ### Issue tracker
 

@@ -791,8 +791,8 @@ def _live_jobs(snap):
 def _legacy_scheduled_definitions(snap):
     """Enabled definitions whose LEGACY scheduler is still the executor.
 
-    Until ``disable-legacy-schedule`` fires for a key, launchd or the Claude
-    scheduler runs it and the Control Plane ledger holds nothing — so a due
+    Until the native scheduler is disabled and its readback verified, launchd
+    or the Claude scheduler runs it and the Control Plane ledger holds nothing — so a due
     window with no ledger row is the cutover working, not a missed run.  The
     default is fail-closed: a definition that does not declare itself legacy
     is still held to every due window.
@@ -996,7 +996,6 @@ _GREEN_EVIDENCE: dict = {}
 PROVISIONING_PENDING = {
     "production_uptime": "carr-uptime monitor unreachable (Worker/secrets not provisioned)",
     "system_costs": "billing readers unavailable (cost collector not provisioned)",
-    "cloudflare_spend": "Cloudflare spend guard not yet run (token and schedule held for review)",
 }
 
 
@@ -1085,22 +1084,6 @@ def _host_liveness_rows():
     return module.rows(live, config)
 
 
-def _cloudflare_spend_row():
-    """(line, failed, not_run) from the Cloudflare spend guard's local receipt; no network.
-
-    A guard that has never run is provisioning-pending (soft); a STOP, RUNAWAY or
-    UNKNOWN it did report is hard."""
-    try:
-        spec = importlib.util.spec_from_file_location(
-            "cloudflare_spend_guard", os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                                   "cloudflare_spend_guard.py"))
-        guard = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(guard)
-        return guard.health_row(guard.load_config())
-    except Exception as exc:
-        return (f"UNKNOWN cloudflare spend · health row unavailable ({type(exc).__name__}) · on breach: owner joe "
-                "· fix: restore tools/cloudflare_spend_guard.py · verify: rerun health "
-                "· auto-clear: next readable receipt"), True, False
 
 
 def _tailscale_row():
@@ -1319,23 +1302,6 @@ def _canonical_health():
         rc = _canonical_contradiction_alarm() or rc
 
     if CANONICAL_SECTION in ("all", "registry"):
-        feature_command = [sys.executable, os.path.join(REPO_ROOT, "tools/feature-switch-health.py")]
-        if CANONICAL_FIXTURE:
-            feature_command += ["--fixture", CANONICAL_FIXTURE]
-        try:
-            feature_result = subprocess.run(feature_command, cwd=REPO_ROOT, text=True, capture_output=True, timeout=35)
-            print(feature_result.stdout.rstrip())
-            if feature_result.returncode == 1:
-                rc = _red("feature_switch_retirement", feature_result.stdout.strip())
-            elif feature_result.returncode == 3:
-                rc = _red("feature_switch_pending_deploy", feature_result.stdout.strip())
-            elif feature_result.returncode:
-                rc = _red("feature_switch_unreadable", feature_result.stdout.strip(), hard_error=True)
-        except (OSError, subprocess.TimeoutExpired):
-            detail = "UNKNOWN feature switches · on breach: retry record check; owner claude; retire overdue switch; verify list-feature-switches; auto-clear on successful check"
-            print(detail)
-            rc = _red("feature_switch_unreadable", detail, hard_error=True)
-    if CANONICAL_SECTION in ("all", "registry"):
         print("Registry integrity — canonical v_export_leads")
         p = subprocess.run(
             [sys.executable, os.path.join(REPO_ROOT, "tools/registry-audit.py")],
@@ -1467,132 +1433,6 @@ def _canonical_health():
                 else:
                     rc = _red("cloudflare_token", token_row["line"], subject=token_row["subject"],
                               status=token_row["status"])
-        # ── credential health (added 2026-09-24) ────────────────────────────
-        # Daily liveness lane for every credential CARR needs to run
-        # unattended — wrangler/Cloudflare, Neon, the two MCP machine-bearer
-        # tokens, gh, the Claude and Codex CLI logins, and the Google OAuth
-        # client behind the Worker's sign-in. Joe is replacing interactive
-        # logins with long-lived scoped tokens (CLOUDFLARE_API_TOKEN, `claude
-        # setup-token`, a fine-grained gh PAT, …); this is the lane that tells
-        # him BEFORE one of them lapses rather than after a nightly chain goes
-        # dark for want of a re-auth prompt nobody was there to answer.
-        # ops/config/credential-inventory.v1.json is the data (one entry per
-        # credential — adding one later is a config edit, not a code change)
-        # and ops/credential-health.py is the runner. Same delegate pattern as
-        # rules-live and forgetting elsewhere in this file: stdlib parent,
-        # venv-or-system child, first line of the child's stdout is the
-        # summary this row prints, everything else the child printed is
-        # discarded here exactly like those rows discard theirs.
-        #
-        # PLACED INSIDE _canonical_health(), NOT the legacy Drive-projection
-        # WATCH/GATES block below this function. That block only runs under
-        # `--recovery --reason <why>` (see `if not RECOVERY_MODE: sys.exit(
-        # _canonical_health())` just below this function) — it is recovery
-        # evidence now, not the everyday surface, since the 2026-08-19 cutoff
-        # retired the Drive .md renders it was built to watch. `run.sh health`
-        # with no flags — what actually runs daily — calls only this
-        # function, so a lane that has to run daily belongs in it.
-        #
-        # The child's own contract (see its docstring) is what actually keeps
-        # this safe: every probe reads an exit status or an HTTP status code,
-        # never a command's output or a response body beyond one named,
-        # non-secret field, and out/credential-health.jsonl carries names and
-        # statuses only. On a failed or expiring_soon credential the child
-        # files exactly one deduplicated CARR loop per credential through the
-        # allowlisted `./run.sh call add-loop` Bash door (CLAUDE.md: "A
-        # capture-verb denial has a fallback door" — this call carries no
-        # credential of its own) — the loop IS the bound action a health row
-        # must name, filed by the child, not left for a human reading this
-        # line to remember to do.
-        try:
-            _chc = os.path.join(REPO_ROOT, "ops", "credential-health.py")
-            if not os.path.exists(_chc):
-                print(f"  -- {'credential health':<18} ops/credential-health.py not present; skipped")
-            else:
-                _venv = os.path.join(REPO_ROOT, ".venv", "bin", "python")
-                _py = _venv if os.path.exists(_venv) else sys.executable
-                _p = subprocess.run([_py, _chc], capture_output=True, text=True, timeout=180)
-                _lines = (_p.stdout or "").strip().splitlines()
-                _first = _lines[0] if _lines else (
-                    f"(no output; stderr: {(_p.stderr or '').strip().splitlines()[-1]})"
-                    if (_p.stderr or "").strip() else "(no output, no stderr)")
-                if _first.startswith("SKIP"):
-                    print(f"  -- {'credential health':<18} {_first.split(': ', 1)[-1]}")
-                elif _p.returncode == 0:
-                    print(f"  OK {'credential health':<18} {_first.split('— ', 1)[-1]}")
-                else:
-                    _detail = _first.split("— ", 1)[-1]
-                    print(f"  ⚠︎ {'credential health':<18} {_detail}  · "
-                          f"see out/credential-health.jsonl and the loop(s) filed for detail")
-                    # ops/credential-health.py's first line, when it needs
-                    # attention, is "N of M credential(s) need attention
-                    # (failed=F expiring_soon=E unverifiable=U
-                    # unconfigured=C ok=O)". Point 5 of the third round of
-                    # review: each non-ok status is its OWN (key, subject),
-                    # not one bundled "credential_health" finding — a rise
-                    # in any ONE status (say expiring_soon 1 -> 2, while
-                    # failed stays 0) must show as a regression on its own
-                    # subject, not get averaged away inside one shared
-                    # count. `failed` is the only one that stays hard_error
-                    # — an actually-broken credential, unlike one that is
-                    # merely expiring, unverifiable, or unconfigured, which
-                    # are counted findings same as any other standing-debt
-                    # count (point 2 of the second round of review). A line
-                    # that does not match this module's own summary shape
-                    # at all (a crash, a format this file has never seen)
-                    # falls back to one hard_error finding on an empty
-                    # subject — this can never let a REAL failure through
-                    # as a mere count just because it didn't parse.
-                    _m = re.search(r"failed=(\d+)\s+expiring_soon=(\d+)\s+unverifiable=(\d+)\s+"
-                                   r"unconfigured=(\d+)", _detail)
-                    if _m:
-                        _failed, _expiring, _unverifiable, _unconfigured = (int(g) for g in _m.groups())
-                        # A `for` loop, not four independent sibling `if`s —
-                        # same reasoning as the doctrine/rule-gaps section
-                        # above (point 3 of the third round of review): a
-                        # `for` loop's body is understood to run
-                        # unconditionally once reached, so this is directly
-                        # verifiable by the AST check, where four un-elsed
-                        # sibling `if`s covering this dict's guaranteed
-                        # match are not.
-                        #
-                        # `rc = _red(...)` lives HERE, as this for-loop's own
-                        # direct sibling, rather than after the whole `if _m:
-                        # ... else: ...` (point 1 of round 4 of an independent
-                        # review of PR #1237): a bare loop is only trusted to
-                        # cover a sibling statement that shares its own
-                        # accumulator, in the SAME block, not a statement
-                        # outside the branch the loop lives in — the same
-                        # reasoning the jobs section above follows too.
-                        # (Round 9 correction: an earlier round of this
-                        # comment additionally claimed this closed "a real
-                        # latent gap" where all four counts could be zero
-                        # here and a bare `rc = 1` after the loop would have
-                        # gone red unrecorded. The coordinator confirmed that
-                        # claim was wrong — ops/credential-health.py's child
-                        # process cannot exit nonzero while reporting
-                        # failed=0 expiring_soon=0 unverifiable=0
-                        # unconfigured=0, so this branch was never reachable
-                        # with all four counts at zero, and no such gap ever
-                        # existed to close. Folding the assignment into the
-                        # loop is kept purely for the same-block-sibling
-                        # reasoning above, not for a gap that was never
-                        # real.)
-                        for _count, _subject, _hard in (
-                            (_failed, "failed", True),
-                            (_expiring, "expiring_soon", False),
-                            (_unverifiable, "unverifiable", False),
-                            (_unconfigured, "unconfigured", False),
-                        ):
-                            if _count:
-                                rc = _red("credential_health", _detail, subject=_subject,
-                                          count=_count, hard_error=_hard)
-                    else:
-                        rc = _red("credential_health", _detail, hard_error=True)
-        except Exception as e:
-            print(f"  ⚠︎ {'credential health':<18} check failed ({type(e).__name__}: {e})")
-            rc = _red("credential_health", f"check failed ({type(e).__name__}: {e})", hard_error=True)
-
 
     if CANONICAL_SECTION in ("all", "uptime") and not CANONICAL_FIXTURE:
         line, failed = _uptime.row()
@@ -1602,12 +1442,6 @@ def _canonical_health():
                               and "monitor unreachable" in line)
             rc = _red("production_uptime", line, subject="carr-uptime", hard_error=not _unprovisioned)
 
-    if CANONICAL_SECTION == "all" and not CANONICAL_FIXTURE:
-        line, failed, not_run = _cloudflare_spend_row()
-        print("  " + line)
-        if failed:
-            rc = _red("cloudflare_spend", line, subject="cloudflare-account",
-                      hard_error=not (not_run and "cloudflare_spend" in PROVISIONING_PENDING))
 
     if CANONICAL_SECTION in ("all", "tailscale"):
         try:
@@ -2893,7 +2727,7 @@ try:
                 print(f"  {'OK' if _j['remaining'] == 0 else '→︎'} migration-coverage   "
                       f"{_j['remaining']} corpus files not yet in a verified batch "
                       f"({_docs} docs, generation {_gen}) · on breach: run the next bounded "
-                      f"batch through bin/import-doctrine.sh")
+                      f"batch through the authenticated record verbs")
 except Exception as e:
     print(f"  ⚠︎ doctrine store check failed ({type(e).__name__}: {e})")
     rc = 1

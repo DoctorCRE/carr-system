@@ -4,9 +4,8 @@
 //   node mcp-server/bin/recovery-matrix-evaluate.mjs restore  <restore-exercise-receipt.json | ->
 //   node mcp-server/bin/recovery-matrix-evaluate.mjs rpo      <rpo-evidence.json | ->
 //
-// WHAT IS AUTHORITY (review K3): a restore or RPO verdict counts only when its
-// input is the verifier's stdout PIPED in ("-") — `restore-watermark.py
-// verify-restore | ... restore -` or `pitr-restore-proof.py prove | ... rpo -`.
+// A restore verdict counts only when its input is the verifier's stdout
+// piped in ("-") through `restore-watermark.py verify-restore | ... restore -`.
 // A verdict computed on a saved file is a replay for the operator's eyes: the
 // binding is not a signature, so nothing proves the file is what the verifier
 // printed.
@@ -19,12 +18,8 @@
 // are judged at Date.now(); an evidence file that carries its own observed_at
 // is refused (exit 2), so a stale proof cannot be replayed as a fresh one.
 //
-// `rpo` evaluates one RPO evidence block — in production the block
-// `tools/pitr-restore-proof.py prove` reads itself from production, the
-// branch and the provider, binds, and pipes in on stdin ("-"). `matrix` supplies the repository's
-// sealed business calendar (ops/config/business-calendar.us-federal.json) when
-// the evidence does not carry one; the evaluator refuses any calendar but the
-// pinned one.
+// `rpo` reports unavailable evidence after retirement of its producer.
+// `matrix` uses the pinned business calendar when evidence omits one.
 //
 // Read-only: it reads local files or stdin and prints the verdict. Exit 0 when
 // the verdict is pass / reconciled, 1 when it is not, 2 when the evidence cannot

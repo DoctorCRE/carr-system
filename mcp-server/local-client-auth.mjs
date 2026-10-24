@@ -21,11 +21,6 @@ const CLIENT_PROFILES = Object.freeze({
     identityNotice: "Codex continuity actor (via codex-continuity-token)",
     workerSecret: "CODEX_CONTINUITY_TOKENS",
   }),
-  "claude-continuity": Object.freeze({
-    tokenVariable: "CARR_CLAUDE_CONTINUITY_MCP_TOKEN",
-    identityNotice: "Claude continuity actor (via claude-continuity-token)",
-    workerSecret: "CLAUDE_CONTINUITY_TOKENS",
-  }),
   "hermes-projector": Object.freeze({
     tokenVariable: "CARR_HERMES_MCP_TOKEN",
     identityNotice: "Hermes queue projector (via hermes-token)",

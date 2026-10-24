@@ -105,7 +105,7 @@ class Fake:
     def carr(self, verb, args):
         self.calls.append((verb, args))
         if verb in self.fail_verbs:
-            raise intake.CarrError(f'{verb} refused')
+            raise intake.CarrError()
         if verb == 'find':
             return {'parties': self.parties.get(args['query'], []), 'deals': []}
         if verb == 'catch-me-up':
@@ -188,6 +188,172 @@ class IntakeTest(unittest.TestCase):
 
     def report_text(self):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
+
+    def test_transient_backoff_and_blocked_requests_preserve_frozen_payloads(self):
+        m = mail('pat@example.test', -timedelta(hours=1))
+        self.fake.fail_verbs.add('log-activity')
+        self.assertEqual(self.run_intake([m]).reason, 'writes_failed')
+        self.assertEqual(self.run_intake([m], touch=False).reason, 'writes_deferred')
+        self.assertEqual(len(self.fake.writes()), 1)
+        self.fake.now += timedelta(seconds=60)
+        self.assertEqual(self.run_intake([m], touch=False).reason, 'writes_failed')
+        state = json.loads((self.out() / intake.STATE).read_text())
+        [request] = state['requests'].values()
+        self.assertEqual(request['attempts'], 2)
+        self.assertEqual(request['retry_at'], int(self.fake.now.timestamp()) + 120)
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(seconds=120)
+        self.assertEqual(self.run_intake([m], touch=False).state, 'succeeded')
+        self.assertTrue(all(args == self.fake.writes()[0][1] for _, args in self.fake.writes()))
+        shutil.rmtree(self.out())
+        original = self.fake.carr
+        def refuse(verb, args):
+            if verb in intake.WRITE_VERBS:
+                raise intake.CarrError(code='invalid_request')
+            return original(verb, args)
+        self.fake.carr = refuse
+        self.assertEqual(self.run_intake([m]).reason, 'writes_failed')
+        self.fake.now += timedelta(hours=1)
+        self.assertEqual(self.run_intake([m], touch=False).reason, 'request_blocked')
+        [request] = json.loads((self.out() / intake.STATE).read_text())['requests'].values()
+        self.assertEqual(request['attempts'], 1)
+        self.assertFalse(request['acknowledged'])
+
+    def test_partial_calendar_keeps_successes_across_failed_and_ambiguous_participants(self):
+        e = event('partial', -timedelta(hours=3), attendees=[('Pat', 'pat@example.test'), ('Lee', 'lee@example.test'), ('New', 'new@example.test')])
+        self.fake.contacts_rows += [intake.Contact('new@example.test', 'C-903', ''), intake.Contact('new@example.test', 'L-904', '')]
+        original = self.fake.carr
+        def server(verb, args):
+            result = original(verb, args)
+            if verb == 'log-activity' and args['ref'] == 'L-902' and self.fake.now == NOW:
+                raise intake.CarrError()
+            return result
+        self.fake.carr = server
+        self.run_intake(events=[e])
+        self.fake.now += timedelta(days=30)
+        self.fake.contacts_rows.pop()
+        self.run_intake(events=[e], touch=False)
+        self.assertEqual([a['ref'] for _, a in self.fake.writes('log-activity')], ['C-901', 'L-902', 'L-902', 'C-903'])
+        self.assertEqual(json.loads((self.out() / intake.STATE).read_text())['calendar_unresolved'], {})
+
+    def test_duplicate_recipients_and_aliases_are_resolved_once(self):
+        self.fake.contacts_rows.append(intake.Contact('alias@example.test', 'C-901', 'Pat'))
+        result = self.run_intake([mail(OWNER, -timedelta(hours=1), recipients='pat@example.test,pat@example.test,alias@example.test')])
+        self.assertEqual(result.counts['unmatched'], 0)
+        self.assertEqual(result.counts['unresolved_addresses'], 0)
+        self.assertEqual(len(self.fake.writes()), 1)
+
+    def test_main_emits_monitoring_receipt_from_the_actual_outcome(self):
+        from io import StringIO
+        outcome = intake.Outcome('failed', 'writes_failed', {'writes_failed': 3})
+        with patch.object(intake, 'run', return_value=outcome), patch('sys.stdout', new_callable=StringIO) as stdout:
+            self.assertEqual(intake.main(), 1)
+        receipt = stdout.getvalue().split('outlook-intake-receipt ', 1)[1]
+        self.assertEqual(json.loads(receipt), {'state': 'failed', 'reason': 'writes_failed', 'counts': {'writes_failed': 3}})
+
+    def test_contact_failures_have_safe_distinct_reasons(self):
+        from types import SimpleNamespace
+        for rows, code in (([], 'contacts_empty'), (ValueError('PRIVATE-SENTINEL'), 'contacts_read_failed')):
+            with self.subTest(code=code):
+                def read_view(view):
+                    if isinstance(rows, Exception):
+                        raise rows
+                    return [], rows
+                exporter = SimpleNamespace(RECORD_VIEWS=[('fake', 'id', 'name', 'org')], read_view=read_view)
+                with patch('lib.loadpy.load_module_from_path', return_value=exporter):
+                    self.fake.contacts = intake._contacts(self.repo)
+                    result = self.run_intake([])
+                self.assertEqual(result.reason, code)
+                self.assertNotIn('PRIVATE-SENTINEL', intake.status_line(result))
+
+    def test_partial_preview_recovery_refreshes_every_completed_participant(self):
+        m = mail(OWNER, -timedelta(hours=1), recipients='pat@example.test,new@example.test', kind='preview')
+        self.run_intake([m])
+        self.fake.contacts_rows.append(intake.Contact('new@example.test', 'L-908', 'New Example'))
+        self.run_intake([m], touch=False)
+        self.run_intake([{**m, 'body_kind': 'full', 'body': 'Full synthetic body'}])
+        notes = [a for _, a in self.fake.writes('log-activity') if a['kind'] == 'note']
+        self.assertEqual({a['ref'] for a in notes}, {'C-901', 'L-908'})
+
+    def test_mapping_diagnostics_count_sources_and_distinct_addresses_with_reasons(self):
+        self.fake.contacts_rows += [intake.Contact('ambiguous@example.test', 'C-903', ''),
+                                   intake.Contact('ambiguous@example.test', 'L-904', ''),
+                                   intake.Contact('unsupported@example.test', 'D-905', '')]
+        m = mail(OWNER, -timedelta(hours=1), recipients='pat@example.test, pat@example.test, missing@example.test, ambiguous@example.test, unsupported@example.test')
+        e = event('unmapped', -timedelta(hours=3), attendees=[('Missing', 'missing@example.test')])
+        result = self.run_intake([m], [e])
+        self.assertEqual(result.counts['unresolved_messages'], 1)
+        self.assertEqual(result.counts['unresolved_addresses'], 3)
+        self.assertEqual(result.counts['unresolved_calendar'], 1)
+        self.assertEqual([result.counts['mapping_' + reason] for reason in ('missing', 'ambiguous', 'unsupported')], [1, 1, 1])
+        self.assertEqual(result.counts['unmatched'], 3)
+        for reason in ('missing', 'ambiguous', 'unsupported'):
+            self.assertIn(reason, self.report_text())
+        self.assertNotIn('missing@example.test', self.report_text())
+
+    def test_write_failures_keep_only_safe_codes_attempts_and_retry_disposition(self):
+        m = mail('pat@example.test', -timedelta(hours=1), body='PRIVATE-SENTINEL')
+        cases = [
+            ('timeout', subprocess.TimeoutExpired('fake', 120)),
+            ('auth_refused', subprocess.CompletedProcess([], 1, '', 'RPC ERROR "unauthorized"')),
+            ('key_reuse', subprocess.CompletedProcess([], 1, '', 'TOOL ERROR {"error":"key_reuse","detail":"PRIVATE-SENTINEL"}')),
+            ('transport_oversized', OSError(errno.E2BIG, 'PRIVATE-SENTINEL')),
+            ('no_acknowledgement', subprocess.CompletedProcess([], 0, '{"ok":false}', 'PRIVATE-SENTINEL')),
+        ]
+        for expected, response in cases:
+            with self.subTest(code=expected):
+                shutil.rmtree(self.out(), ignore_errors=True)
+                carr = intake._carr(self.repo)
+                def fake_carr(verb, args):
+                    if verb not in intake.WRITE_VERBS:
+                        return {'timeline': []}
+                    options = {'side_effect': response} if isinstance(response, Exception) else {'return_value': response}
+                    with patch('subprocess.run', **options):
+                        return carr(verb, args)
+                self.fake.carr = fake_carr
+                result = self.run_intake([m])
+                self.assertEqual(result.state, 'failed')
+                state = json.loads((self.out() / intake.STATE).read_text())
+                request = state['requests'][intake.key('log-activity', 'C-901', ident(m))]
+                self.assertEqual(request['error_code'], expected)
+                self.assertEqual(result.counts['error_' + expected], 1)
+                self.assertEqual(request['attempts'], 1)
+                self.assertEqual(request['disposition'], 'blocked' if expected in ('key_reuse', 'transport_oversized') else 'retry')
+                self.assertNotIn('PRIVATE-SENTINEL', json.dumps({k:v for k,v in request.items() if k != 'payload'}))
+                self.assertNotIn('PRIVATE-SENTINEL', self.report_text())
+                self.assertNotIn('PRIVATE-SENTINEL', intake.status_line(result))
+                self.assertTrue(request['retry_at'] is None or request['retry_at'] > self.fake.now.timestamp())
+
+    def test_unmatched_calendar_recovers_on_mapping_change_without_store_change_after_horizon(self):
+        e = event('unmapped', -timedelta(hours=3), attendees=[('New Example', 'new@example.test')])
+        self.run_intake(events=[e])
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertNotIn('unmapped|' + str(e['start_unix']), state['events_logged'])
+        self.fake.now += timedelta(days=30)
+        self.fake.contacts_rows.append(intake.Contact('new@example.test', 'L-908', 'New Example'))
+        self.run_intake(events=[e], touch=False)
+        self.assertEqual([a['ref'] for _, a in self.fake.writes('log-activity')], ['L-908'])
+        self.assertEqual(json.loads((self.out() / intake.STATE).read_text())['calendar_unresolved'], {})
+
+    def test_partial_mail_recovers_new_participant_after_mapping_change_outside_horizon(self):
+        m = mail(OWNER, -timedelta(hours=1), recipients='pat@example.test, new@example.test')
+        self.run_intake([m])
+        self.assertIn(ident(m), json.loads((self.out() / intake.STATE).read_text())['mail_unresolved'])
+        self.assertEqual([a['ref'] for _, a in self.fake.writes('log-activity')], ['C-901'])
+        self.fake.now += timedelta(days=30)
+        self.fake.contacts_rows.append(intake.Contact('new@example.test', 'L-908', 'New Example'))
+        self.run_intake([m], touch=False)
+        self.assertEqual([a['ref'] for _, a in self.fake.writes('log-activity')], ['C-901', 'L-908'])
+        self.assertEqual(json.loads((self.out() / intake.STATE).read_text())['mail_unresolved'], {})
+
+    def test_carr_large_payload_uses_stdin_without_client_content_in_argv(self):
+        args = {'detail': 'PRIVATE-SENTINEL-' + 'x' * 300000}
+        with patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0, '{"ok":true}', '')) as call:
+            self.assertEqual(intake._carr(self.repo)('log-activity', args), {'ok': True})
+        argv = call.call_args.args[0]
+        self.assertEqual(argv, [str(self.repo / 'run.sh'), 'call', 'log-activity', '-'])
+        self.assertEqual(json.loads(call.call_args.kwargs['input']), args)
+        self.assertNotIn('PRIVATE-SENTINEL', str(argv))
 
     def test_inbound_mail_from_a_known_address_logs_email_in_with_a_uuid5_key(self):
         m = mail('pat@example.test', -timedelta(hours=1), name='Pat Example')
@@ -373,7 +539,7 @@ class IntakeTest(unittest.TestCase):
         before = (self.out() / intake.STATE).read_bytes()
         decodes = self.fake.decodes
         def down():
-            raise intake.CarrError('contacts unavailable')
+            raise intake.CarrError()
         self.fake.contacts = down
         result = self.run_intake([m], touch=False)
         self.assertEqual((result.state, result.reason), ('failed', 'carr_unreachable'))
@@ -389,6 +555,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.run_intake([m], touch=False).reason, 'writes_failed')
         self.assertIn(ident(m), json.loads((self.out() / intake.STATE).read_text())['mail_unresolved'])
         self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=30)
         self.assertEqual(self.run_intake([m], touch=False).state, 'succeeded')
         writes = self.fake.writes('log-activity')
         self.assertEqual(len(writes), 2)
@@ -486,7 +653,7 @@ class IntakeTest(unittest.TestCase):
             accepted[request_key] = payload
             result = original(verb, args)
             if args.get('kind') == 'email_in':
-                raise intake.CarrError('committed, acknowledgement lost')
+                raise intake.CarrError()
             return result
 
         self.fake.carr = server
@@ -644,12 +811,14 @@ class IntakeTest(unittest.TestCase):
         self.fake.fail_verbs = {'set-next-action'}
         for _ in range(2):
             self.assertEqual(self.run_intake(mails).state, 'failed')
+            self.fake.now += timedelta(minutes=30)
         self.fake.model_reply = RuntimeError('model down')
         self.assertEqual(self.run_intake(mails).state, 'failed')
         fourth = self.run_intake(mails, touch=False)
         self.assertEqual(fourth.state, 'failed', 'an unacknowledged action cannot become nothing_new')
         self.assertNotIn('high_water', json.loads((self.out() / intake.STATE).read_text()))
         self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=30)
         recovered = self.run_intake([], touch=False)
         self.assertEqual(recovered.state, 'succeeded', 'frozen actions no longer need the source or model')
         self.assertEqual(self.fake.writes('set-next-action')[-1][1]['description'], 'Send the floor plan')
@@ -849,7 +1018,7 @@ class IntakeTest(unittest.TestCase):
 
     def test_unreachable_contacts_fail_loudly(self):
         def down():
-            raise intake.CarrError('views unreachable')
+            raise intake.CarrError()
         ports = self.fake.ports()
         ports.contacts = down
         write_db(self.fake.fixture, [mail('pat@example.test', -timedelta(hours=1))])
