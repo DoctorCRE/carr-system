@@ -38,6 +38,7 @@ before(async () => {
       blocker_class text, blocker_detail text, unblocks text, created_at timestamptz, title text, body text,
       due_on date, version integer, since_text text);
     create schema ops;
+    create function ops.read_governance_queue() returns jsonb language sql as $$select '{}'::jsonb$$;
     create table ops.work_request (ref text, title text, blocker_detail text, updated_at timestamptz,
       state text, organization_tenant_id text);
     create table board_question (board_id text, question_id text, prompt text, asked_at timestamptz,
@@ -71,11 +72,12 @@ test('loop queue puts due work before 61 future or undated low numbered loops ac
     ...Array.from({ length: 61 }, (_, i) => [String(i), 'joe', i % 2 ? null : '2027-01-01']),
     ['999', 'joe', '2026-01-01'], ['agent', 'claude', '2025-01-01'],
   ]);
-  const first = await call({ queue: 'loops', limit: 1 });
+  const brief = await executeRegisteredTool(db, JOE, 'morning-brief', {});
+  const first = brief.sections.loops;
   assert.equal(first.items[0].number, '999');
   assert.equal(first.items[0].owner_partner, 'joe');
   assert.equal(first.total, 62);
-  assert.equal(first.remaining, 61);
+  assert.equal(first.remaining, 12);
   const all = [...first.items];
   let page = first;
   while (page.has_more) {
@@ -102,4 +104,18 @@ test('queue rejects audience selection, unknown context and malformed cursors be
     { queue: 'loops', cursor: 'not-a-cursor' }]) await assert.rejects(call(args), ToolError);
   await assert.rejects(executeRegisteredTool(db, { slug: 'claude', human: false },
     'morning-brief-queue', { queue: 'loops' }), ToolError);
+});
+
+test('Needs Joe pages after exclusions and duplicate collapse, preserving partial source evidence', async () => {
+  await seedLoops(Array.from({ length: 51 }, (_, i) => [`decision-${i}`, 'joe', null]));
+  const first = await call({ queue: 'needs_joe' });
+  assert.equal(first.total, 51);
+  assert.equal(first.returned, 50);
+  assert.equal(first.remaining, 1);
+  const last = await call({ queue: 'needs_joe', cursor: first.next_cursor });
+  assert.equal(last.items.length, 1);
+  assert.equal(new Set([...first.items, ...last.items].map(row => row.key)).size, 51);
+  assert.equal(last.remaining, 0);
+  assert.equal(first.state, 'partial');
+  assert.equal(first.total_scope, 'available_sources');
 });
