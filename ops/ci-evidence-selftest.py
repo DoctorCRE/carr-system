@@ -56,7 +56,7 @@ class HostedVerdict(unittest.TestCase):
         cases = [
             ('true', 'success', 'success', False, 0),
             ('false', 'success', 'skipped', False, 0),
-            ('true', 'success', 'skipped', True, 0),
+            ('true', 'success', 'skipped', True, 1),
             ('', 'success', 'skipped', False, 1),
             ('true', 'success', 'skipped', False, 1),
         ]
@@ -85,7 +85,7 @@ class Reuse(unittest.TestCase):
         self.tree = 'a' * 40
         self.run = {'id': 42, 'run_attempt': 2, 'head_sha': 'b' * 40, 'status': 'completed',
                     'conclusion': 'success', 'event': 'pull_request', 'name': 'CI'}
-        self.receipt = {'schema': 'carr-ci-evidence/v1', 'run_id': 42, 'run_attempt': 2,
+        self.receipt = {'event': 'pull_request', 'draft': False, 'schema': 'carr-ci-evidence/v1', 'run_id': 42, 'run_attempt': 2,
                         'head_sha': 'b' * 40, 'tested_sha': 'c' * 40,
                         'tree_sha': self.tree, 'contract': 'd' * 64,
                         'groups': ['gates', 'migration']}
@@ -99,9 +99,44 @@ class Reuse(unittest.TestCase):
                                   groups=['gates', 'migration'])
     def test_exact_tree_success_records_source_run(self):
         self.assertTrue(self.eligible())
+
+    def test_draft_record_refuses_even_when_called_directly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            event = pathlib.Path(directory) / 'event.json'
+            event.write_text(json.dumps({'pull_request': {'draft': True}}))
+            output = pathlib.Path(directory) / 'receipt.json'
+            result = subprocess.run([sys.executable, str(ROOT / 'ops/ci-evidence.py'),
+                                     'record', '--output', str(output)],
+                env={**os.environ, 'GITHUB_EVENT_NAME': 'pull_request',
+                     'GITHUB_EVENT_PATH': str(event), 'GITHUB_RUN_ID': '42',
+                     'GITHUB_RUN_ATTEMPT': '1'}, capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(output.exists())
+
+    def test_ready_receipt_binds_event_head_tree_contract_and_attempt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            event = pathlib.Path(directory) / 'event.json'
+            event.write_text(json.dumps({'action': 'ready_for_review', 'pull_request': {
+                'draft': False, 'head': {'sha': 'b' * 40}}}))
+            output = pathlib.Path(directory) / 'receipt.json'
+            subprocess.run([sys.executable, str(ROOT / 'ops/ci-evidence.py'),
+                            'record', '--output', str(output)],
+                env={**os.environ, 'GITHUB_EVENT_NAME': 'pull_request',
+                     'GITHUB_EVENT_PATH': str(event), 'GITHUB_RUN_ID': '42',
+                     'GITHUB_RUN_ATTEMPT': '2'}, capture_output=True, text=True, check=True, timeout=10)
+            receipt = json.loads(output.read_text())
+            self.assertEqual((receipt['event'], receipt['action'], receipt['draft']),
+                             ('pull_request', 'ready_for_review', False))
+            self.assertEqual((receipt['run_id'], receipt['run_attempt'], receipt['head_sha']),
+                             (42, 2, 'b' * 40))
+            self.assertEqual(receipt['tested_sha'], evidence.git('HEAD'))
+            self.assertEqual(receipt['tree_sha'], evidence.git('HEAD^{tree}'))
+            self.assertEqual(receipt['contract'], evidence.contract_digest())
+            self.assertEqual(receipt['groups'], evidence.class_groups())
+
     def test_every_evidence_binding_is_required(self):
         for key,value in [('tree_sha','e'*40),('contract','e'*64),('run_id',99),
-                          ('run_attempt',1),('head_sha','e'*40),('groups',['gates']),('schema','unknown')]:
+                          ('run_attempt',1),('head_sha','e'*40),('groups',['gates']),('schema','unknown'),('draft',True),('event','workflow_dispatch')]:
             with self.subTest(key=key):
                 previous=copy.deepcopy(self.receipt)
                 self.receipt[key]=value
@@ -141,8 +176,9 @@ class Reuse(unittest.TestCase):
         gh = GH()
         result = evidence.resolve(gh, 'f'*40, self.tree, 'd'*64, ['gates','migration'])
         self.assertEqual(result['source_run_id'], 42)
-        gh.runs = [self.run, dict(self.run, id=43, conclusion='failure')]
-        self.assertEqual(evidence.resolve(gh,'f'*40,self.tree,'d'*64,['gates','migration']), {'reused':False})
+        for conclusion in ('failure', 'cancelled', 'skipped'):
+            gh.runs = [self.run, dict(self.run, id=43, conclusion=conclusion)]
+            self.assertEqual(evidence.resolve(gh,'f'*40,self.tree,'d'*64,['gates','migration']), {'reused':False})
 
     def test_unavailable_github_evidence_runs_classes_without_disclosing_credentials(self):
         root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "ci-evidence-selftest"

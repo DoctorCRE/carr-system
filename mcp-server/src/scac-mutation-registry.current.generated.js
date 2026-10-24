@@ -2862,7 +2862,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "set-market-agent": {
     "ingress_key": "mcp-tool:set-market-agent",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "3e1c3511972550b5865776b540f2651473cd31a4a5928e0eecd2c7dc873d2b16",
+    "schema_digest": "f9e8c7d9c0c0b1debc14f97989a118bb416dff94a907db3fc6dfabbc96388d28",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -2871,7 +2871,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "set-national-account-owner": {
     "ingress_key": "mcp-tool:set-national-account-owner",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "952571938c04acc7c129ef100a43a6093cf1efd349d54174d1a0c890f8fb46ed",
+    "schema_digest": "1f6d231c7854c81b9e53c6d78ae482be5a9b15ea990dd557ca328a5b62ff5873",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -2889,7 +2889,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "set-next-step": {
     "ingress_key": "mcp-tool:set-next-step",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "b1ba0421038e02c36f264592ea5907c0dce56a87ccf036d93db05458bca513be",
+    "schema_digest": "b7da2861fae485e929321835e645da97fc426991aeba3e90d7a2347f5d7cd8f5",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -3035,7 +3035,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "today-triage": {
     "ingress_key": "mcp-tool:today-triage",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
+    "schema_digest": "c23d0abc10107890b9ea09f17b6d81b1572d32dc42844de24362eb63d9a3743c",
     "write": false,
     "human_only": false,
     "authority_only": false,

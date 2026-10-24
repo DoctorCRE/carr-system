@@ -124,6 +124,14 @@ def check_parity(conn, declared):
                 join pg_namespace n on n.oid=c.relnamespace
                 where n.nspname in ('public','ops') and c.relkind in ('r','p')
             """).fetchall()}
+            writable_columns = {row[0] for row in conn.execute("""
+                select n.nspname||'.'||c.relname||'('||a.attname||')'
+                from pg_class c join pg_namespace n on n.oid=c.relnamespace
+                join pg_attribute a on a.attrelid=c.oid
+                where n.nspname in ('public','ops') and c.relkind in ('r','p')
+                  and a.attnum>0 and not a.attisdropped
+                  and a.attgenerated='' and a.attidentity=''
+            """).fetchall()}
             probes = set()
             for kind, identity, privilege, observed in rows:
                 wanted = expected(declared, role, kind, identity, privilege)
@@ -134,6 +142,8 @@ def check_parity(conn, declared):
                 # application functions, or data-changing statements.
                 key = (privilege, wanted)
                 if kind != 'column' or privilege not in ('select', 'insert', 'update') or key in probes:
+                    continue
+                if privilege in ('insert', 'update') and identity not in writable_columns:
                     continue
                 relation, column = identity[:-1].rsplit('(', 1)
                 if relation not in probe_tables:
