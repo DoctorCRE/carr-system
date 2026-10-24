@@ -57,7 +57,7 @@ comment on function ops.policy_integrity_snapshot() is
   'Deferred source integrity without retired SCAC seal or mutation-catalog validation. Registry fields retain historical epoch format only.';
 
 create or replace function ops.scac_policy_epoch_refresh() returns trigger
-language plpgsql security definer set search_path=pg_catalog,public,ops as $fn$
+language plpgsql security definer set search_path=pg_catalog,public,ops,pg_temp as $fn$
 declare source jsonb; source_digest text; prior ops.scac_policy_epoch%rowtype; next_epoch bigint; created timestamptz:=clock_timestamp(); epoch_digest text; prefix_digest text; bootstrap_health record; settlement_key text;
 begin
   settlement_key:=txid_current()::text||':'||extract(epoch from statement_timestamp())::text;
