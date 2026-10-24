@@ -1,9 +1,11 @@
+-- rollback: restore public.search_doctrine_situations from 0856 in a new migration.
+-- expand-contract: extend approved FTS phrase containment without changing stored curation or the search interface.
+-- lock-review: replace one stable SQL function; retain its signature, owner, grants, and visibility joins.
 -- Approved situation phrases can occur inside a longer natural question.
 -- Existing query-subset matches retain their score. The additional containment
 -- direction is disabled for websearch operators, whose exclusions and quoted
 -- phrases must retain the original query semantics. No curation is changed.
 
-begin;
 
 CREATE OR REPLACE FUNCTION public.search_doctrine_situations(p_query text, p_actor_id uuid, p_content_classes text[] DEFAULT NULL::text[], p_limit integer DEFAULT 20, p_policy_id text DEFAULT NULL::text, p_allow_fallback boolean DEFAULT false)
  RETURNS TABLE(section_id uuid, section_key text, title text, doc_slug text, content_class text, rank double precision, snippet text, lexical_score double precision, concept_score double precision, final_score double precision, provenance jsonb)
@@ -167,4 +169,3 @@ select l.section_id, l.section_key, l.section_title, l.doc_slug, l.content_class
  order by l.final_score desc, l.concept_score desc, l.lexical_score desc, l.section_key asc
 $function$;
 
-commit;

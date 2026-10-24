@@ -70047,7 +70047,7 @@ $$;
 CREATE FUNCTION public.search_doctrine_situations(p_query text, p_actor_id uuid, p_content_classes text[] DEFAULT NULL::text[], p_limit integer DEFAULT 20, p_policy_id text DEFAULT NULL::text, p_allow_fallback boolean DEFAULT false) RETURNS TABLE(section_id uuid, section_key text, title text, doc_slug text, content_class text, rank double precision, snippet text, lexical_score double precision, concept_score double precision, final_score double precision, provenance jsonb)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
-    AS $$
+    AS $_$
 with
   normalized as materialized (
     select public.normalize_retrieval_phrase(p_query) as q
@@ -70085,6 +70085,11 @@ with
                when to_tsvector('english', p.normalized_phrase) @@ websearch_to_tsquery('english', n.q)
                then least(1.0, ts_rank_cd(to_tsvector('english', p.normalized_phrase),
                                          websearch_to_tsquery('english', n.q))::double precision)
+               when n.q !~ '["-]'
+                and n.q !~ '(^|[[:space:]])or([[:space:]]|$)'
+                and to_tsvector('english', n.q) @@ plainto_tsquery('english', p.normalized_phrase)
+               then least(1.0, ts_rank_cd(to_tsvector('english', n.q),
+                                         plainto_tsquery('english', p.normalized_phrase))::double precision)
                else 0.0 end
              when 'trgm' then case when public.similarity(p.normalized_phrase, n.q) >= p.min_similarity
                then public.similarity(p.normalized_phrase, n.q) else 0.0 end
@@ -70111,8 +70116,6 @@ with
       from concept_evidence group by section_id
   ),
   unioned as materialized (
-    -- Coalesce FIRST, cap second: least(1.0, NULL) is 1.0 in PostgreSQL
-    -- (nulls are ignored), which is the whole defect this migration removes.
     select c.*, least(1.0, coalesce(l.raw_score, 0))::double precision as lexical_score,
            least(1.0, coalesce(ce.concept_score, 0))::double precision as concept_score,
            l.snippet, coalesce(ce.phrase_ids, '{}') as phrase_ids,
@@ -70199,7 +70202,7 @@ select l.section_id, l.section_key, l.section_title, l.doc_slug, l.content_class
                else '{}'::jsonb end
   from limited l
  order by l.final_score desc, l.concept_score desc, l.lexical_score desc, l.section_key asc
-$$;
+$_$;
 
 
 --
@@ -121935,6 +121938,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0940_codex_job_delegation_control_refs.sql	9402a4057ee309d9a4959257e9d5a9a4c41451536f57d3def2201f02fd6741ab	1970-01-01 00:00:00+00
 0944_retire_orphan_control_inventory.sql	ab7c35cfc581268b40bab5b29399e315286b24ba1c3c8c86bc0b9c49673def37	1970-01-01 00:00:00+00
 0947_allow_approved_control_evidence_refresh.sql	b051840f87086cdfcfbe21abae004df2f7023907f081851f95c22a7e017f8800	1970-01-01 00:00:00+00
+0951_retrieval_concept_question_matching.sql	2bc95d602cf471a0dafe85db15e0a69eae612a8d38e93d1a785ad66981316628	1970-01-01 00:00:00+00
 \.
 
 
