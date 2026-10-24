@@ -10,9 +10,12 @@ from policy_epoch_fixture import analyze_rule_projection
 REPO = Path(__file__).resolve().parents[1]
 
 
-def seed_reviewed_rule_projection(cur, *, slug: str, title: str, rule_label: str, uuid_tail: str) -> None:
+def seed_reviewed_rule_projection(cur, *, slug: str, title: str, rule_label: str, uuid_tail: str,
+                                 rule_ids: dict[str, str] | None = None) -> None:
     """Construct a full reviewed map; bootstrap once through the restored observer."""
     def uuid_for(short: str) -> str:
+        if rule_ids and short in rule_ids:
+            return rule_ids[short]
         return f"{short}-0000-4000-8000-{uuid_tail}"
 
     raw = (REPO / "ops/config/rule-enforcement-map.json").read_bytes()
