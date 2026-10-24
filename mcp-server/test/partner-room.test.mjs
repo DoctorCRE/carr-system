@@ -13,7 +13,6 @@ import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-
 import { TOOLS } from "../src/tools.js";
 import { readRoomQueue, queueProjectionEventFromTurn, queueProjectionHealthFromTurn } from "../src/partner-room.js";
 
@@ -238,111 +237,6 @@ test("add-room-turn: a malformed msg_id is refused", async () => {
 });
 
 // ── project-room-queue ─────────────────────────────────────────────────────
-
-test("project-room-queue: fixes reader provenance server-side", async () => {
-  const db = new RoomFake();
-  const out = await TOOLS["project-room-queue"].handler(db, hermes, {
-    idempotency_key: "k-project-1", body: HEALTH_BODY, msg_id: MSG,
-    room: "other-room", seat: "joe", kind: "turn", sponsor: "dell",
-  });
-  assert.deepEqual({ room: out.room, sponsor: out.sponsor, seat: out.seat, kind: out.kind,
-    origin_channel: out.origin_channel, origin_actor: out.origin_actor, msg_id: out.msg_id }, {
-    room: "partner-line", sponsor: "joe", seat: "hermes", kind: "receipt",
-    origin_channel: "mcp", origin_actor: "hermes-pilot", msg_id: MSG,
-  });
-  assert.deepEqual(db.inserted[0], ["partner-line", "joe", "hermes", "receipt",
-    HEALTH_BODY, MSG, "mcp", "hermes-pilot"]);
-  const accepted = queueProjectionHealthFromTurn({
-    at: out.at, sponsor: out.sponsor, seat: out.seat, kind: out.kind, body: HEALTH_BODY,
-    origin_channel: out.origin_channel, origin_actor: out.origin_actor,
-  });
-  assert.equal(accepted?.event_cursor, 42,
-    "the append response itself must satisfy the production reader's parser");
-});
-
-test("project-room-queue: joe-local and arbitrary Hermes prose both fail closed", async () => {
-  const db = new RoomFake();
-  await assert.rejects(
-    TOOLS["project-room-queue"].handler(db, dellLocal, {
-      idempotency_key: "k-project-2", body: HEALTH_BODY, msg_id: MSG,
-    }),
-    (err) => err.payload?.error === "queue_projector_identity_required",
-  );
-  await assert.rejects(
-    TOOLS["project-room-queue"].handler(db, hermes, {
-      idempotency_key: "k-project-3", body: "ordinary room prose", msg_id: MSG,
-    }),
-    (err) => err.payload?.error === "queue_projection_receipt_invalid",
-  );
-  assert.equal(db.inserted.length, 0);
-});
-
-test("project-room-queue: a dedup row with rejected provenance is not healthy", async () => {
-  const db = new RoomFake({ msgIdTaken: MSG, rows: [{
-    msg_id: MSG, id: 42, room_id: "partner-line", sponsor: "joe", seat: "hermes",
-    kind: "receipt", body: HEALTH_BODY, at: "2026-08-20T01:00:00+00:00",
-    origin_channel: "mcp", origin_actor: "joe-local",
-  }] });
-  await assert.rejects(
-    TOOLS["project-room-queue"].handler(db, hermes, {
-      idempotency_key: "k-project-4", body: HEALTH_BODY, msg_id: MSG,
-    }),
-    (err) => err.payload?.error === "queue_projection_provenance_rejected",
-  );
-  assert.equal(db.inserted.length, 0);
-});
-
-test("project-room-queue: replaying a durable event whose task moved state still dedups", async () => {
-  const dupMsg = "dddddddd-eeee-4fff-8000-111111111111";
-  const EVENT_READY = JSON.stringify({ queue_event: {
-    v: 1, board: "carr-build", event_id: 1302, event: "task.updated", task_id: "t_abc123",
-    card: { title: "x", target: "joe", effective_model: "sonnet", status: "ready",
-      priority: "p2", cap: "production", updated_at: "2026-09-01T04:08:19Z", source_seq: 1 },
-    summary: "task ready, created.", projected_at: "2026-09-01T04:08:19Z",
-  } });
-  const EVENT_BLOCKED = JSON.stringify({ queue_event: {
-    v: 1, board: "carr-build", event_id: 1302, event: "task.updated", task_id: "t_abc123",
-    card: { title: "x", target: "joe", effective_model: "sonnet", status: "blocked",
-      priority: "p2", cap: "production", updated_at: "2026-09-19T00:00:00Z", source_seq: 1 },
-    summary: "task is blocked.", projected_at: "2026-09-19T00:00:00Z",
-  } });
-
-  // 1. append event 1302's receipt.
-  const db = new RoomFake();
-  const first = await TOOLS["project-room-queue"].handler(db, hermes, {
-    idempotency_key: "k-project-5", body: EVENT_READY, msg_id: dupMsg,
-  });
-  assert.equal(first.ok, true);
-  assert.equal(db.inserted.length, 1);
-
-  // 2. mutate the task's durable row: receipt_for now renders a different body
-  // (status ready -> blocked) for the SAME event id, so the durable row on
-  // disk no longer equals what this cycle would recompute.
-  db.msgIdTaken = dupMsg;
-  db.rows.push({ msg_id: dupMsg, id: first.seq, room_id: "partner-line", sponsor: "joe",
-    seat: "hermes", kind: "receipt", body: EVENT_BLOCKED, at: "2026-09-01T04:08:19+00:00",
-    origin_channel: "mcp", origin_actor: "hermes-pilot" });
-
-  // 3. replay the same event id (same msg_id). Before the fix this threw
-  // queue_projection_provenance_rejected because observed.body (blocked) no
-  // longer matched the freshly recomputed body (ready).
-  const replay = await TOOLS["project-room-queue"].handler(db, hermes, {
-    idempotency_key: "k-project-6", body: EVENT_READY, msg_id: dupMsg,
-  });
-  assert.equal(replay.ok, true);
-  assert.equal(replay.deduplicated, true);
-  assert.equal(db.inserted.length, 1, "the replay must not append a second row");
-
-  // A fresh msg_id (no durable row yet) must still take the insert path —
-  // proving the dedup branch, not the guard, is what changed.
-  const freshMsg = "22222222-3333-4444-8555-666666666666";
-  const fresh = await TOOLS["project-room-queue"].handler(db, hermes, {
-    idempotency_key: "k-project-7", body: EVENT_BLOCKED, msg_id: freshMsg,
-  });
-  assert.equal(fresh.ok, true);
-  assert.equal(fresh.deduplicated, undefined);
-  assert.equal(db.inserted.length, 2);
-});
 
 // ── read-room ───────────────────────────────────────────────────────────────
 

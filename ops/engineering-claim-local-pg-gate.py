@@ -78,7 +78,6 @@ def canonical_digest(value) -> str:
     return "sha256:" + hashlib.sha256(canonical_json(value).encode()).hexdigest()
 
 
-
 def assert_non_codex_admission_refused(cur):
     """Direct envelope admission must reject a human executor before currentness."""
     cur.execute("savepoint non_codex_engineering_envelope_admission")
@@ -421,7 +420,6 @@ def assert_static_lock_contract():
     repo = Path(__file__).resolve().parents[1]
     currentness = read_migration(repo, "0335_engineering_controller_currentness.sql")
     successor = read_migration(repo, "0319_engineering_envelope_writer_successor.sql")
-    runtime = (repo / "mcp-server/src/engineering-runtime.js").read_text()
     compact_currentness = re.sub(r"\s+", " ", currentness)
     compact_successor = re.sub(r"\s+", " ", successor)
     if not re.search(r"hashtextextended\(\s*'engineering-envelope:' \|\| e\.slice_plan_id::text \|\| ':' \|\| e\.slice_ref", compact_currentness):
@@ -430,8 +428,6 @@ def assert_static_lock_contract():
         raise RuntimeError("successor path lost the engineering lineage advisory-lock key")
     if "from ops.capability_agent_session where id=e.agent_session_id for update" not in compact_currentness:
         raise RuntimeError("receipt path lost the capability-session row lock")
-    if "update ops.capability_agent_session set state='cancelled'" not in runtime:
-        raise RuntimeError("admission cancellation path no longer updates the capability session")
     binding = currentness[
         currentness.index("create or replace function ops.engineering_controller_binding("):
         currentness.index("-- These are intentionally private predicate helpers")
@@ -448,20 +444,6 @@ def assert_static_lock_contract():
         or "Engineering job definition currentness is reserved by a live scoped lease" not in currentness
     ):
         raise RuntimeError("live Engineering job-definition reservation guard is missing")
-    admission = runtime[
-        runtime.index("export async function admitEngineeringSlice"):
-        runtime.index("export async function claimEngineeringSlice")
-    ]
-    admission_positions = [
-        admission.index("where id=$1::uuid for update"),
-        admission.index("where id=$1::uuid and slug='codex' and active and kind='automation' for share"),
-        admission.index("engineering-slice:"),
-        admission.index("engineering-envelope:"),
-    ]
-    if admission_positions != sorted(admission_positions):
-        raise RuntimeError("runtime admission lost session -> exact actor -> slice -> lineage ordering")
-    if admission.count("engineering_passport_facts") < 3 or "engineering_admission_serialization_restart" not in admission:
-        raise RuntimeError("runtime admission no longer revalidates source after serialization")
 
 
 def assert_blocked_by_lock(cur, query, params, blocker_query, blocker_params, dsn, label):

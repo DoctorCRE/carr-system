@@ -48,10 +48,7 @@ test("0310's receipt insertion requires the claimed lease and concrete attempt",
   assert.match(migration, /create or replace function ops\.engineering_record_slice_receipt/);
   assert.match(migration, /attempt_row\.lease_token=p_lease_token and attempt_row\.state='running'/);
   assert.match(migration, /job_attempt_id uuid not null unique references ops\.job_attempt\(id\)/);
-  assert.match(runtime, /engineering_finalize_slice_receipt/);
-  assert.match(runtime, /engineering_claim_slice/);
-  const submit = runtime.slice(runtime.indexOf("export async function submitEngineeringReceipt"), runtime.indexOf("function controllerActor"));
-  assert.doesNotMatch(submit, /ops\.(?:complete_job|fail_job)\(/, "the runtime must not finalize a job after receipt persistence");
+
 });
 
 test("0310 admits dependent slices from the reviewer fact's bound attempt", () => {
@@ -172,7 +169,6 @@ test("0335 makes controller eligibility current, safe to parse, and receipt-race
   assert.match(currentnessRepair, /create or replace function ops\.guard_engineering_envelope_supersession\(\)\s+returns trigger language plpgsql security definer set search_path=pg_catalog,ops,public/i);
   assert.match(currentnessRepair, /grant execute on function ops\.engineering_claim_slice\(text,integer,integer\),[\s\S]*?ops\.engineering_retire_permanently_ineligible_jobs\(\)[\s\S]*?to carr_jobs/i);
   assert.match(currentnessRepair, /'ops\.engineering_fail_claim\(uuid,uuid,text,text\)',[\s\S]*?'ops\.engineering_retire_permanently_ineligible_jobs\(\)'[\s\S]*?scoped Engineering controller ACL is widened or incomplete/i);
-  assert.match(runtime, /ops\.reap_expired_jobs\(\)[\s\S]*?ops\.engineering_retire_permanently_ineligible_jobs\(\)[\s\S]*?claimEngineeringSlice/i);
   assert.doesNotMatch(currentnessRepair, /grant execute on function ops\.engineering_envelope_is_executable\(uuid,uuid,integer\)/i);
   assert.match(currentnessRepair, /ops\.engineering_envelope_is_executable\(e\.id,j\.id\)/);
   assert.match(currentnessRepair, /create or replace function ops\.engineering_finalize_slice_receipt[\s\S]*ops\.engineering_record_slice_receipt[\s\S]*update ops\.job set state='succeeded'/i);
@@ -219,24 +215,8 @@ test("reviewer lineage is pinned to the immutable receipt and unique leaf genera
     "runtime reviewer admission must use the exact receipt identifier");
 });
 
-test("the reviewed control-plane inventory carries the exact engineering job contract", () => {
-  const workflow = registry.workflows.find(item => item.key === "engineering-slice" && item.version === 1);
-  assert.ok(workflow);
-  assert.equal(workflow.enabled, true);
-  assert.equal(workflow.risk, "yellow");
-  assert.deepEqual(workflow.execution, { kind: "deterministic", entrypoint: "mcp-server/src/engineering-runtime.js", export: "runEngineeringWorker", args: ["room-bridge-engineering-controller"], shadow_args: [], canary: { enabled: false, reason: "fresh native Codex execution has no isolated canary adapter" } });
-  assert.equal(workflow.inventory.trigger, "MCP admission only; no scheduler");
-  assert.equal(workflow.inventory.current_completion_signal, "lease-bound typed receipt plus independent reviewer fact");
-  assert.deepEqual(workflow.recurrence, { kind: "on_demand", schedule: null, cron: null, timezone: "America/Chicago", source: "MCP admit-engineering-slice only" });
-  assert.deepEqual(workflow.routing, { key: "facts.all_true", spec: { all_of: ["capability.candidate_admitted", "runner.identity_bound"] }, description: "an accepted capability candidate and bound runner identity admit the slice" });
-  assert.deepEqual(workflow.filtering, { key: "facts.all_true", spec: { all_of: ["command.registered_args_selected"] }, description: "only the registered fresh Codex adapter is selected" });
-  assert.deepEqual(workflow.validation, { key: "facts.all_true", spec: { all_of: ["command.exit_zero", "command.workflow_marker_valid"] }, description: "the bounded adapter succeeds and returns its typed workflow marker" });
-  assert.deepEqual(workflow.retry, { max_attempts: 2, backoff: "constant", base_seconds: 30, cap_seconds: 300, timeout_seconds: 1800 });
-  assert.equal(workflow.inventory.authority, "server-derived sponsored Codex execution with a closed repository action allowlist; no caller-selected identity, authority, model, action, or native session");
-  assert.deepEqual(workflow.inventory.external_dependencies, ["room-bridge lease-bound controller", "Codex Desktop fresh-native-session adapter"]);
-  assert.deepEqual(workflow.deduplication, { key_template: "engineering-slice:{plan_digest}:{work_request}:{slice_ref}:generation:{generation}" });
-  assert.deepEqual(workflow.completion, { key: "facts.all_true", spec: { all_of: ["command.receipt_persisted", "command.execution_evidence_reconciles"] }, description: "lease-bound typed receipt persists and reconciles to the issued envelope", receipt_kind: "engineering_slice" });
-  assert.deepEqual(workflow.legacy_schedule, { provider: "none", status: "disabled", disable_requires: "no scheduler exists; on-demand MCP admission only" });
+test("the control-plane inventory no longer dispatches the removed engineering worker", () => {
+  assert.equal(registry.workflows.some(item => item.key === "engineering-slice"), false);
 });
 
 test("0312 binds the controller to the issued session and closes PUBLIC execution", () => {

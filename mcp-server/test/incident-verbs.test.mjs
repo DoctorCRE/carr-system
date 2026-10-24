@@ -326,57 +326,28 @@ test("a recurrence clears readiness for both board and close; a later recovery c
 // ── 7. THE REGISTRY ENTRIES THEMSELVES ──────────────────────────────────────
 
 test("the incident verbs include bounded triage", () => {
-  for (const name of ["incident-board", "get-incident", "open-incident",
-                      "triage-incident", "close-incident", "adjudicate-incident"])
+  for (const name of ["incident-board", "get-incident", "triage-incident"])
     assert.ok(TOOLS[name], `${name} is missing from the registry`);
 });
 
 test("the reads are reads and the writes are writes", () => {
   assert.equal(TOOLS["incident-board"].write, false);
   assert.equal(TOOLS["get-incident"].write, false);
-  for (const name of ["open-incident", "triage-incident", "close-incident", "adjudicate-incident"])
+  for (const name of ["triage-incident"])
     assert.equal(TOOLS[name].write, true, `${name} must run the write envelope`);
 });
 
-test("close and adjudicate are humanOnly; open and the reads are not", () => {
-  assert.equal(TOOLS["close-incident"].humanOnly, true);
-  assert.equal(TOOLS["adjudicate-incident"].humanOnly, true);
-  assert.ok(!TOOLS["open-incident"].humanOnly,
-    "automation must be able to say that something broke");
-  assert.ok(!TOOLS["triage-incident"].humanOnly,
-    "bounded triage is an actionable workflow step for sponsored automation");
-  assert.ok(!TOOLS["incident-board"].humanOnly);
-});
-
 test("every write verb requires an idempotency key", () => {
-  for (const name of ["open-incident", "triage-incident", "close-incident", "adjudicate-incident"])
+  for (const name of ["triage-incident"])
     assert.ok(TOOLS[name].inputSchema.required.includes("idempotency_key"), name);
-});
-
-test("the descriptions draw the line against the two adjacent verbs", () => {
-  // codex's chair asked for this in words: "do not leave three ways to mint
-  // parallel unresolved records." The boundary has to be readable by the model
-  // choosing a verb, which means it lives in the description.
-  const open = TOOLS["open-incident"].description;
-  assert.match(open, /record-defect/);
-  assert.match(open, /report-problem/);
-  assert.match(TOOLS["incident-board"].description, /record-defect/);
-});
-
-test("close-incident's description names the break-glass path it replaces", () => {
-  const d = TOOLS["close-incident"].description;
-  assert.match(d, /CARR_BREAK_GLASS/, "a replacement has to say what it replaces");
-  assert.match(d, /break-glass stays for emergencies/i,
-    "and it must not read as a retirement of the emergency path");
-  assert.match(d, /Joe or Dell/);
 });
 
 // ── 8. PROFILES ─────────────────────────────────────────────────────────────
 
-test("an unattended seat may open an incident and may not close one", () => {
+test("an unattended seat keeps incident triage and loses retired incident writers", () => {
   for (const profile of ["capture", "away"]) {
-    assert.ok(PROFILES[profile].has("open-incident"),
-      `${profile} is the seat most likely to see a failure first`);
+    assert.ok(!PROFILES[profile].has("open-incident"),
+      `${profile} cannot reach the retired incident writer`);
     assert.ok(PROFILES[profile].has("triage-incident"),
       `${profile} can record a next step without claiming a root cause`);
     assert.ok(!PROFILES[profile].has("close-incident"), `${profile} must not close`);
@@ -410,43 +381,6 @@ const refuse = async (fn) => {
   }
   throw new Error("expected a refusal and got none");
 };
-
-test("close-incident refuses an unsponsored runtime before it reads anything", async () => {
-  const fake = new Fake();
-  const payload = await refuse(() => TOOLS["close-incident"].handler(fake, probe,
-    { idempotency_key: "k", ref: "INC-20260823-01", root_cause: "x" }));
-  assert.equal(payload.error, "partner_authority_required");
-  assert.deepEqual(fake.sql, [],
-    "the boundary must close before the transaction touches the ledger at all");
-});
-
-test("adjudicate-incident refuses the same door", async () => {
-  const fake = new Fake();
-  const payload = await refuse(() => TOOLS["adjudicate-incident"].handler(fake, probe,
-    { idempotency_key: "k", ref: "INC-20260823-01", severity: "SEV-1" }));
-  assert.equal(payload.error, "partner_authority_required");
-  assert.deepEqual(fake.sql, []);
-});
-
-test("open-incident refuses a service the ledger has never heard of", async () => {
-  const fake = new Fake({ "from tool_call where idempotency_key": [] });
-  const payload = await refuse(() => TOOLS["open-incident"].handler(fake, joe, {
-    idempotency_key: "k1", service: "typo-service", environment: "production",
-    operation: "nightly.thing", failure_class: "exit_1",
-  }));
-  assert.equal(payload.error, "no_such_service");
-  assert.match(payload.hint, /never heard of/);
-});
-
-test("open-incident refuses an environment it was not given", async () => {
-  const fake = new Fake({ "from tool_call where idempotency_key": [] });
-  const payload = await refuse(() => TOOLS["open-incident"].handler(fake, joe, {
-    idempotency_key: "k2", service: "carr-mcp", environment: "prod",
-    operation: "nightly.thing", failure_class: "exit_1",
-  }));
-  assert.equal(payload.error, "invalid_environment");
-  assert.match(payload.hint, /never guessed at/);
-});
 
 test("triage moves one detected incident and returns fields visible in both reads", async () => {
   const before = { id: "inc-1", ref: "INC-20260823-01", state: "detected",
@@ -531,209 +465,6 @@ test("triage same-key retry replays the receipt before attempting another transi
   assert.ok(!fake.sql.some(([sql]) => sql.startsWith("update ops.incident")));
 });
 
-test("the allocated 100th incident ref is accepted for triage", async () => {
-  const allocator = new Fake({
-    "from tool_call where idempotency_key": [],
-    "from ops.service where key": [{ id: "svc-1", key: "carr-mcp" }],
-    "coalesce(max(substring(ref": [{ day: "20260823", seq: 100 }],
-    "insert into ops.incident (": [{ id: "inc-100" }],
-    "as occurrences from ops.incident": [{ occurrences: 1 }],
-  });
-  const opened = await TOOLS["open-incident"].handler(allocator, agent, {
-    idempotency_key: "open-100", service: "carr-mcp", environment: "production",
-    operation: "run-100", failure_class: "exit_1",
-  });
-  const ref = opened.ref;
-  assert.equal(ref, "INC-20260823-100", "the allocator grows past two digits at 100");
-  const shape = new RegExp(TOOLS["triage-incident"].inputSchema.properties.ref.pattern);
-  const linkShape = new RegExp(TOOLS["link-incident-work-request"].inputSchema.properties.incident_ref.pattern);
-  assert.equal(shape.test("INC-20260823-01"), true);
-  assert.equal(shape.test("INC-20260823-99"), true);
-  assert.equal(shape.test(ref), true, "allocator pads to a minimum of two digits, not exactly two");
-  assert.equal(linkShape.test(ref), true, "the adjacent incident-link door uses the same ref contract");
-  for (const invalid of ["INC-20260823-00", "INC-20260823-001", "INC-20260823-1", "INC-20260823-100x"])
-    assert.equal(shape.test(invalid), false, invalid);
-  const fake = new Fake({
-    "from tool_call where idempotency_key": [],
-    "update ops.incident set state = 'triaged'": [{ id: "inc-100", ref, state: "triaged",
-      next_action: "inspect run", business_impact: "unknown" }],
-  });
-  const out = await TOOLS["triage-incident"].handler(fake, agent, {
-    idempotency_key: "triage-100", ref, next_action: "inspect run", impact_assessment: "unknown",
-  });
-  assert.equal(out.ref, ref);
-});
-
-test("a repeat of an OPEN fingerprint attaches instead of minting a second row", async () => {
-  const fake = new Fake({
-    "from tool_call where idempotency_key": [],
-    "from ops.service where key": [{ id: "svc-1", key: "carr-mcp" }],
-    "from ops.incident where signature": [{ id: "inc-1", ref: "INC-20260823-01",
-      severity: "SEV-2", state: "monitoring", owner_actor: "joe" }],
-    "as occurrences from ops.incident": [{ occurrences: 29 }],
-  });
-  const out = await TOOLS["open-incident"].handler(fake, joe, {
-    idempotency_key: "k3", service: "carr-mcp", environment: "production",
-    operation: "mcp:tools/call:search-doctrine", failure_class: "verb_internal_error",
-    observed: "the verb timed out again",
-  });
-  assert.equal(out.opened, false);
-  assert.equal(out.ref, "INC-20260823-01");
-  assert.equal(out.occurrences, 29);
-  assert.equal(out.state, "detected",
-    "a new failure during monitoring must immediately stop reading as recovered");
-  assert.equal(out.severity, "SEV-2", "an attach never re-reads severity off the caller's argument");
-  assert.match(out.note, /already open/);
-
-  const statements = fake.sql.map(([s]) => s);
-  assert.ok(!statements.some((s) => s.startsWith("insert into ops.incident (")),
-    "a repeat must not mint a second incident");
-  assert.ok(statements.some((s) => s.includes("insert into ops.incident_fact")),
-    "the occurrence still has to be recorded, or the repeat count never grows");
-  assert.ok(statements.some((s) => s.includes("set observed_at = now()")),
-    "an attach bumps freshness so the row does not read as stale");
-  const recurrence = statements.find((s) => s.includes("set observed_at = now()"));
-  assert.match(recurrence, /state = case when state = 'monitoring' then 'detected'/);
-  assert.match(recurrence, /recovery_evidence_ref = case when state = 'monitoring' then null/);
-  assert.match(recurrence, /monitoring_until = case when state = 'monitoring' then null/);
-  assert.doesNotMatch(recurrence, /resolved_at|root_cause|then 'resolved'|then 'reviewed'/,
-    "open-incident may invalidate recovery but remains structurally unable to close");
-});
-
-test("the same correlation observed twice records one occurrence, not two", async () => {
-  const fake = new Fake({
-    "from tool_call where idempotency_key": [],
-    "from ops.service where key": [{ id: "svc-1", key: "carr-mcp" }],
-    "from ops.incident where signature": [{ id: "inc-1", ref: "INC-20260823-01",
-      severity: "SEV-3", state: "detected", owner_actor: "joe" }],
-    "from ops.incident_fact where incident_id": [{ "?column?": 1 }],
-    "as occurrences from ops.incident": [{ occurrences: 4 }],
-  });
-  const out = await TOOLS["open-incident"].handler(fake, joe, {
-    idempotency_key: "k4", service: "carr-mcp", environment: "production",
-    operation: "mcp:tools/call:close-loop", failure_class: "verb_internal_error",
-  });
-  assert.equal(out.occurrence_recorded, false);
-  assert.ok(!fake.sql.some(([s]) => s.includes("insert into ops.incident_fact")),
-    "never grow the list on a retry — trace.js's rule, and the reason the count means anything");
-  assert.ok(!fake.sql.some(([s]) => s.includes("update ops.incident set observed_at")),
-    "the same replay boundary must also prevent invalidating recovery evidence");
-});
-
-test("open-incident takes the same ref-allocation lock the Python writer takes", async () => {
-  const fake = new Fake({
-    "from tool_call where idempotency_key": [],
-    "from ops.service where key": [{ id: "svc-1", key: "carr-mcp" }],
-    "as occurrences from ops.incident": [{ occurrences: 1 }],
-    "coalesce(max(substring(ref": [{ day: "20260823", seq: 7 }],
-    "insert into ops.incident (": [{ id: "inc-new" }],
-  });
-  const out = await TOOLS["open-incident"].handler(fake, joe, {
-    idempotency_key: "k5", service: "carr-mcp", environment: "production",
-    operation: "mcp:tools/call:find", failure_class: "verb_internal_error",
-  });
-  assert.equal(out.opened, true);
-  assert.equal(out.ref, "INC-20260823-07",
-    "the day and the sequence both come from the query — a client-formatted date is how every " +
-    "incident in a timezone gap ends up numbered 01");
-
-  // DOUBLE-CHECKED: look, then lock, then look again. The lock is the same one
-  // ops-record.py holds to transaction end, so an unconditional take would put
-  // every attach behind the nightly assessment's whole run.
-  const lock = fake.sql.findIndex(([s]) => s.includes("ops.incident.ref-allocation"));
-  const looks = fake.sql.map(([s], i) => [s, i])
-    .filter(([s]) => s.includes("from ops.incident where signature")).map(([, i]) => i);
-  assert.ok(lock >= 0, "without the lock two writers both observe absence and both mint");
-  assert.equal(looks.length, 2, "a miss must re-ask under the lock, or the lock protects nothing");
-  assert.ok(looks[0] < lock && lock < looks[1],
-    "the first look is unlocked, the second is the one the lock protects");
-});
-
-test("the attach locks the incident it reads, so a close that commits first sends the recurrence to a fresh incident", async () => {
-  // The race: a recurrence read the open incident, then close-incident
-  // (which holds the same row FOR UPDATE) reviewed it, and the recurrence's
-  // fact landed on the closed incident. The lookup now locks the row; once the
-  // close commits, PostgreSQL re-checks the state filter on the new row
-  // version, the reviewed incident drops out, and the recurrence mints.
-  let looks = 0;
-  const fake = new Fake({
-    "from tool_call where idempotency_key": [],
-    "from ops.service where key": [{ id: "svc-1", key: "carr-mcp" }],
-    // the locked lookup waited out the close: no open incident remains
-    "from ops.incident where signature": () => { looks += 1; return []; },
-    "as occurrences from ops.incident": [{ occurrences: 1 }],
-    "coalesce(max(substring(ref": [{ day: "20260823", seq: 2 }],
-    "insert into ops.incident (": [{ id: "inc-new" }],
-  });
-  const out = await TOOLS["open-incident"].handler(fake, joe, {
-    idempotency_key: "k-race", service: "carr-mcp", environment: "production",
-    operation: "mcp:tools/call:find", failure_class: "verb_internal_error",
-  });
-  const lookups = fake.sql.filter(([s]) => s.includes("from ops.incident where signature")).map(([s]) => s);
-  assert.equal(looks, 2);
-  for (const s of lookups)
-    assert.match(s, /state not in \('resolved','reviewed'\) limit 1 for update$/,
-      "every lookup an attach can act on holds the row against a concurrent close");
-  assert.equal(out.opened, true, "the recurrence opens a fresh incident instead of joining the closed one");
-  assert.equal(out.ref, "INC-20260823-02");
-  const fact = fake.sql.find(([s]) => s.includes("insert into ops.incident_fact"));
-  assert.equal(fact[1][0], "inc-new", "the fact lands on the new incident, never on the reviewed one");
-});
-
-test("an attach never takes the global mint lock", async () => {
-  // The liveness half. ops-record.py's assess holds this lock for its whole
-  // transaction; an unattended run recording a repeat must not queue behind it
-  // for a row it was never going to insert.
-  const fake = new Fake({
-    "from tool_call where idempotency_key": [],
-    "from ops.service where key": [{ id: "svc-1", key: "carr-mcp" }],
-    "from ops.incident where signature": [{ id: "inc-1", ref: "INC-20260823-01",
-      severity: "SEV-3", state: "detected", owner_actor: "joe" }],
-    "as occurrences from ops.incident": [{ occurrences: 2 }],
-  });
-  await TOOLS["open-incident"].handler(fake, joe, {
-    idempotency_key: "k9", service: "carr-mcp", environment: "production",
-    operation: "mcp:tools/call:find", failure_class: "verb_internal_error",
-  });
-  assert.ok(!fake.sql.some(([s]) => s.includes("ops.incident.ref-allocation")),
-    "the attach path must not serialize itself against the nightly collector");
-});
-
-test("a partner's close writes the outcome and refuses to leave the row bare", async () => {
-  const fake = new Fake({
-    "from tool_call where idempotency_key": [],
-    "from ops.incident i left join": [{ id: "inc-1", ref: "INC-20260823-01", state: "monitoring",
-      recovery_evidence_ref: "ops.run:green", monitoring_until: "2026-08-22T00:00:00.000Z",
-      duplicate_of: null, db_now: NOW }],
-  });
-  const out = await TOOLS["close-incident"].handler(fake, joe, {
-    idempotency_key: "k6", ref: "INC-20260823-01",
-    root_cause: "the credential rotated and the job kept the old one",
-  });
-  assert.equal(out.state, "resolved");
-  assert.equal(out.next_action, "review and record a followup disposition");
-  const update = fake.sql.find(([s]) => s.includes("update ops.incident set state = 'resolved'"));
-  assert.ok(update, "the close has to actually write");
-  assert.ok(update[0].includes("state not in ('resolved','reviewed')"),
-    "the update is guarded so a race cannot close an already-closed row a second time");
-});
-
-test("a partner's close is still refused by the same guard the CLI uses", async () => {
-  const fake = new Fake({
-    "from tool_call where idempotency_key": [],
-    "from ops.incident i left join": [{ id: "inc-1", ref: "INC-20260823-01", state: "detected",
-      recovery_evidence_ref: null, monitoring_until: null, duplicate_of: null, db_now: NOW }],
-  });
-  const payload = await refuse(() => TOOLS["close-incident"].handler(fake, joe, {
-    idempotency_key: "k7", ref: "INC-20260823-01", root_cause: "it stopped",
-  }));
-  assert.equal(payload.error, "close_refused");
-  assert.match(payload.reason, /no recovery evidence/);
-  assert.match(payload.hint, /same refusal tools\/ops-record\.py resolve gives/,
-    "partner authority buys the door, never a weaker guard behind it");
-  assert.ok(!fake.sql.some(([s]) => s.includes("update ops.incident")));
-});
-
 // ── 10. THE DISPATCHER'S OWN GATES, not just the handler's ──────────────────
 //
 // The handler tests above prove requirePartner refuses. These prove the two
@@ -743,46 +474,8 @@ test("a partner's close is still refused by the same guard the CLI uses", async 
 // profile). A boundary held by exactly one mechanism is a boundary one refactor
 // from being held by none.
 
-test("the registry gate no longer refuses any door on authority", async () => {
-  // INVERTED (Joe's ruling 2026-08-26, decision dc57f62d). This used to prove
-  // the dispatcher refused the probe and local-token doors before a handler ran.
-  // It now proves the opposite for every door, sponsored or not, because that
-  // is what the ruling bought and it deserves a test rather than a comment.
-  //
-  // WHAT STILL GUARDS close-incident, and why removing this is not the same as
-  // removing the protection: requirePartner inside the handler still refuses,
-  // the database grants still withhold ops.incident.resolved_at and root_cause
-  // from the job role, and the receipted break-glass path is untouched. The
-  // dispatcher's authority check was the outermost of several, not the only one.
-  for (const machine of [agent, probe, localMachine]) {
-    const payload = await refuse(() => executeRegisteredTool(new Fake(), machine, "close-incident",
-      { idempotency_key: "k", ref: "INC-20260823-01", root_cause: "x" }));
-    assert.notEqual(payload.error, "human_only", `${machine.slug} must not be refused on authority`);
-  }
-});
-
-test("a narrowed profile refuses the close by name, and still allows the open", async () => {
-  const blocked = await refuse(() => callTool({}, joe, "close-incident",
-    { idempotency_key: "k", ref: "INC-1", root_cause: "x" }, "capture"));
-  assert.equal(blocked.error, "not_in_profile");
-  assert.equal(blocked.verb, "close-incident");
-
-  // The positive half. open-incident must clear the profile gate — if it did
-  // not, an unattended run could not file what it saw, which is the whole
-  // reason it is in that profile. It fails LATER, on the absent writer
-  // credential, and that is the proof it got past the gate.
-  let reached = false;
-  try {
-    await callTool({}, joe, "open-incident", { idempotency_key: "k", service: "carr-mcp",
-      environment: "production", operation: "x", failure_class: "y" }, "capture");
-  } catch (e) {
-    reached = !(e instanceof ToolError && e.payload?.error === "not_in_profile");
-  }
-  assert.ok(reached, "open-incident must clear the capture profile's gate");
-});
-
 test("no incident verb accepts a caller-claimed authority field", async () => {
-  for (const name of ["incident-board", "open-incident", "close-incident", "adjudicate-incident"]) {
+  for (const name of ["incident-board", "triage-incident"]) {
     const payload = await refuse(() => executeRegisteredTool(new Fake(), joe, name,
       { idempotency_key: "k", ref: "INC-1", sponsor: "joe" }));
     assert.equal(payload.error, "caller_authority_field_forbidden", name);

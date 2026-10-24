@@ -122,61 +122,6 @@ test("shape validation refuses fake variety, thin recon, invalid scores, and loo
   assert.equal(shapeDecisionError({ ...base, builder_brief: { ...base.builder_brief, text: "too short" } }).error, "work_shape_invalid");
 });
 
-test("the registry exposes a model-agnostic append and read surface", () => {
-  assert.equal(TOOLS["read-work-shape"].write, false);
-  assert.equal(TOOLS["write-work-shape"].write, true);
-  assert.equal(TOOLS["set-work-shape-disposition"].write, true);
-  assert.equal(TOOLS["read-work-shape"].fullOnly, true);
-  assert.notEqual(TOOLS["write-work-shape"].humanOnly, true);
-  assert.notEqual(TOOLS["set-work-shape-disposition"].humanOnly, true);
-  assert.equal(TOOLS["write-work-shape"].inputSchema.required.includes("base_version"), true);
-  assert.equal(TOOLS["write-work-shape"].inputSchema.required.includes("work_request_base_version"), true);
-  assert.equal(TOOLS["write-work-shape"].inputSchema.required.includes("idempotency_key"), true);
-  assert.equal(TOOLS["write-work-shape"].inputSchema.additionalProperties, false);
-  const routing = fs.readFileSync(path.join(REPO, "mcp-server/src/mcp.js"), "utf8");
-  assert.match(routing, /if \(tool\.fullOnly\) return false;[\s\S]*if \(!tool\.write\) return true;/,
-    "fullOnly operational reads must be refused before the general read-profile allowance");
-});
-
-test("write-work-shape appends one revision and refuses a stale base version", async () => {
-  const work = { id: "22222222-2222-4222-8222-222222222222", ref: "WR-TEST-1", title: "Shape test", state: "ready", version: 7, shape_disposition: "required", shape_rationale: "Requirements leave multiple viable surfaces." };
-  const existing = { id: "33333333-3333-4333-8333-333333333333", work_request_id: work.id, work_request_version: 7, version: 2, ...validShape() };
-  const inserts = [];
-  const db = { query: async (sql, params = []) => {
-    if (sql.includes("from ops.work_request") && sql.includes("for update")) return { rows: [work] };
-    if (sql.includes("from ops.work_shape_revision") && sql.includes("limit 1")) return { rows: [existing] };
-    if (sql.includes("insert into ops.work_shape_revision")) {
-      inserts.push(params);
-      return { rows: [{ ...existing, id: "44444444-4444-4444-8444-444444444444", version: 3 }] };
-    }
-    throw new Error(`unexpected query: ${sql}`);
-  }};
-  const events = [];
-  const tools = workShapeTools({
-    withEnvelope: async (_c, _a, _v, _args, fn) => fn(),
-    writeEvent: async (...args) => events.push(args),
-    ToolError,
-  });
-
-  await assert.rejects(
-    tools["write-work-shape"].handler(db, actor, { idempotency_key: "stale", work_request: work.ref, base_version: 1, work_request_base_version: 7, ...validShape() }),
-    error => error instanceof ToolError && error.payload.error === "version_conflict" && error.payload.current_version === 2,
-  );
-  assert.equal(inserts.length, 0);
-
-  await assert.rejects(
-    tools["write-work-shape"].handler(db, actor, { idempotency_key: "stale-work", work_request: work.ref, base_version: 2, work_request_base_version: 6, ...validShape() }),
-    error => error instanceof ToolError && error.payload.error === "work_request_version_conflict" && error.payload.current_version === 7,
-  );
-  const result = await tools["write-work-shape"].handler(db, actor, { idempotency_key: "fresh", work_request: work.ref, base_version: 2, work_request_base_version: 7, ...validShape() });
-  assert.equal(result.shape.version, 3);
-  assert.equal(result.shape.work_request_version, 7);
-  assert.equal(inserts.length, 1);
-  assert.equal(events.length, 1);
-  assert.equal(events[0][2], "write-work-shape");
-  assert.equal(events[0][3], "ops_work_request");
-});
-
 test("shape disposition is explicit and not_required must cite the fixed surface", () => {
   assert.equal(shapeDispositionError({ disposition: "required", rationale: "The surface is open." }), null);
   assert.equal(shapeDispositionError({ disposition: "not_required", fixed_surface_ref: "mcp-server/src/tools.js#verb", rationale: "The request explicitly extends this verb." }), null);
@@ -329,39 +274,6 @@ test("read-work-shape exposes sourced lineage through the narrow projection and 
   assert.equal(unsourcedCalls.some(sql => sql.includes("read_sourced")), false);
 });
 
-test("write-work-shape requires the effective receipt-backed required disposition for sourced requests only", async () => {
-  const sourced = { ...SOURCED_WORK, version: 4, shape_disposition: "required", shape_rationale: "Heavy work needs a Shape." };
-  const build = lineage => {
-    const calls = [];
-    const db = { query: async (sql, params = []) => {
-      calls.push({ sql, params });
-      if (sql.includes("from ops.work_request") && sql.includes("for update")) return { rows: [sourced] };
-      if (sql.includes("read_sourced_work_request_shape_disposition_lineage")) return { rows: [{ lineage }] };
-      if (sql.includes("from ops.work_shape_revision") && sql.includes("limit 1")) return { rows: [] };
-      if (sql.includes("insert into ops.work_shape_revision")) return { rows: [{ id: "44444444-4444-4444-8444-444444444444", work_request_id: sourced.id, work_request_version: 4, version: 1, ...validShape() }] };
-      throw new Error(`unexpected query: ${sql}`);
-    }};
-    const tools = workShapeTools({ withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => {}, ToolError });
-    return { db, calls, tools };
-  };
-  const args = { idempotency_key: "s1", work_request: sourced.ref, base_version: 0, work_request_base_version: 4, ...validShape() };
-  const backed = build(SOURCED_LINEAGE);
-  const written = await backed.tools["write-work-shape"].handler(backed.db, actor, args);
-  assert.equal(written.shape.version, 1);
-  assert.match(backed.calls[0].sql, /capture_idempotency_key/);
-
-  const stale = build({ ...SOURCED_LINEAGE, backs_current_version: false });
-  await assert.rejects(
-    stale.tools["write-work-shape"].handler(stale.db, actor, args),
-    error => error instanceof ToolError && error.payload.error === "work_shape_not_required" && error.payload.disposition_lineage.backs_current_version === false,
-  );
-  assert.equal(stale.calls.some(call => call.sql.includes("insert into ops.work_shape_revision")), false);
-
-  const unbacked = build({ status: "none", effective: null, original: null, correction: null, backs_current_version: false });
-  await assert.rejects(unbacked.tools["write-work-shape"].handler(unbacked.db, actor, args),
-    error => error instanceof ToolError && error.payload.error === "work_shape_not_required");
-});
-
 test("migration 0492 admits one linked forward correction behind the exact sourced setter", () => {
   const sql = readMigration(FORWARD_CORRECTION_MIGRATION);
   assert.doesNotMatch(sql, /^\s*(begin|commit)\s*;\s*$/im, "0339+ migrations use the runner's single transaction");
@@ -396,11 +308,11 @@ test("migration 0492 admits one linked forward correction behind the exact sourc
   assert.match(sql, /or not exists \(select 1 from ops\.effective_sourced_work_request_shape_disposition\(w\) e\n                     where e\.disposition = 'required'\) then\n    raise exception 'a sourced Work Shape revision requires the exact current receipt-backed required disposition'/);
 });
 
-test("both shape writes serialize identical idempotency keys before replay lookup", () => {
+test("shape disposition serializes identical idempotency keys before replay lookup", () => {
   const source = fs.readFileSync(path.join(REPO, "mcp-server/src/tools.js"), "utf8");
   const body = source.slice(source.indexOf("async function withEnvelope"), source.indexOf("async function writeEvent"));
   const lock = body.indexOf("pg_advisory_xact_lock");
   const replayRead = body.indexOf("select request_hash, response");
   assert.ok(lock >= 0 && lock < replayRead, "the same-key transaction lock must precede replay lookup");
-  assert.match(body, /verb === "write-work-shape" \|\| verb === "set-work-shape-disposition"/);
+  assert.match(body, /verb === "set-work-shape-disposition"/);
 });
