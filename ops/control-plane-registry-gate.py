@@ -87,8 +87,10 @@ def compare(cur: Any, manifest: dict[str, Any], *, resolve_managed_enabled: bool
                 cur.fetchone(), "Joe calendar prebrief activation receipt")[0])
     # Sync disables a superseded version and keeps its row for the jobs that
     # reference it; that history is not drift while its key is still declared.
+    # Retired source identities retain their historical database metadata.
     declared = {key for key, _ in expected}
-    extra = sorted(i for i in set(live) - set(expected) if live[i][2] or (i[0] not in declared and i not in RETIRED_WORKFLOW_IDENTITIES))
+    extra = sorted(i for i in set(live) - set(expected)
+                   if i not in RETIRED_WORKFLOW_IDENTITIES and (live[i][2] or i[0] not in declared))
     missing = sorted(set(expected) - set(live))
     if missing or extra:
         failures.append(f"workflow keys differ missing={missing} extra={extra}")
