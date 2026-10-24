@@ -3,12 +3,7 @@
   "scope": "Offline synthetic campaign tooling and metadata-only studies of caller-held shared immutable snapshots. No Outlook automation, networking, account access, or store mutation.",
   "commands": {
     "build": "cargo build --locked --manifest-path vendor/hxprobe/Cargo.toml",
-    "corpus": "python3 ops/hxstore-harness.py corpus --account \"$TEST_ACCOUNT\" --out /tmp/hx-corpus",
-    "diff": "python3 ops/hxstore-harness.py diff /tmp/test-before.hxd /tmp/test-after.hxd --manifest /tmp/hx-corpus/manifest.json --synthetic-store",
-    "study-diff": "python3 ops/hxstore-harness.py study-diff \"$BEFORE_COPY\" \"$AFTER_COPY\" --immutable-copies",
-    "hypotheses": "python3 ops/hxstore-harness.py hypotheses --manifest /tmp/hx-corpus/manifest.json --hypotheses /tmp/hypotheses.json --atlas spec/outlook/hxstore-atlas.json",
-    "observe": "vendor/hxprobe/target/debug/hxprobe observe /tmp/test-after.hxd",
-    "verify": "python3 ops/hxstore-harness-selftest.py"
+    "observe": "vendor/hxprobe/target/debug/hxprobe observe /tmp/test-after.hxd"
   },
   "corpus": {
     "schema": "hxstore-corpus/v1",

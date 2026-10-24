@@ -179,39 +179,8 @@ def compare(root):
               'scheduled_manifest': manifest, 'jobs': jobs,
               'manual_roles': [{'name': n, 'prerequisite': p} for n, p in manual], 'rehearsal_max_age_days': 35}
     config['hosts']['studio']['ssh'] = 'booko@mac-studio.tailc8cc93.ts.net'
-    ml = {j['label']: j for j in m['launchd']}
-    roles = [{**{k: v for k, v in j.items() if k != 'schedule'}, 'schedule_source': j['path'],
-              'classification': 'leader-job' if j['label'] in labels else
-              'manual-runtime' if j['label'].startswith(('com.carr.', 'local.')) else 'device-vendor',
-              'macbook_installed': j['label'] in ml,
-              'macbook_missing': [p for p in j['executables'] + j['dependencies'] if not m['path_presence'].get(p)],
-              'schedule_expectation': next(({k: v[k] for k in ('scheduler', 'expected_enabled', 'expected_installed')}
-                  for v in scheduled['jobs'] if v['label'] == j['label']), None)}
-             for j in s['launchd'] if j['label'] not in ml or j['label'] in labels]
-    creds = [p for p in s['credential_paths'] if (p.endswith(('.env', '.pem', '.connection', '.key')) or
-              p.endswith(('age-key.txt', 'client-api-key', 'management-key')) or p.startswith('~/.ssh/'))
-             and '/._' not in p and 'backup' not in p]
-    report = {'schema': 'carr-studio-failover-inventory/v1', 'captured_at': s['captured_at'],
-              'source_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
-              'manifest_source': manifest, 'roles': roles,
-              'credential_files': [{'path': p, 'macbook_present': p in m['credential_paths']} for p in creds],
-              'listeners': [{**v, 'macbook_same_endpoint': any(v['command'] == b['command'] and v['listen'] == b['listen']
-                  for b in m['listeners']), 'required_action': 'classify dependency and verify replacement endpoint before takeover'}
-                  for v in s['listeners']],
-              'local_databases': [{'path': p, 'macbook_present': p in m['local_databases']} for p in s['local_databases'] if '/.mypy_cache/' not in p],
-              'state_search_roots': s['state_search_roots'],
-              'hardware': {'studio_memory_bytes': s['memory_bytes'], 'macbook_memory_bytes': m['memory_bytes'],
-                           'required_action': 'verify model weights and context fit target memory; do not assume equivalent capacity'},
-              'ssh_roles': {'studio_aliases': s['ssh_aliases'], 'macbook_aliases': m['ssh_aliases'],
-                            'tailscale_app_studio': s['tailscale_app'], 'tailscale_app_macbook': m['tailscale_app'],
-                            'required_action': 'verify target ingress and repoint callers pinned to Studio'},
-              'collections': {'launchd': 'all user agents and readable /Library/LaunchDaemons',
-                              'cron': {'studio_entries': s['cron_entries'], 'macbook_entries': m['cron_entries']},
-                              'claude': {'studio_definitions': s['scheduled_tasks'], 'macbook_definitions': m['scheduled_tasks']},
-                              'errors': s['errors'] + m['errors']}}
-    for name, data in [('studio-failover.v1', config), ('studio-failover-inventory.v1', report)]:
-        (root / ('ops/config/' + name + '.json')).write_text(json.dumps(data, indent=2) + '\n')
-    print('Generated path-only inventory and transfer declaration')
+    (root / 'ops/config/studio-failover.v1.json').write_text(json.dumps(config, indent=2) + '\n')
+    print('Generated transfer declaration')
 
 
 if __name__ == '__main__':

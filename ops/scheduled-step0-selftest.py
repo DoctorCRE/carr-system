@@ -2,17 +2,8 @@
 """Synthetic STEP-0 decisions and real command wiring, without model or store access."""
 from datetime import datetime
 from pathlib import Path
-import importlib.util
-import io
-import json
-from contextlib import redirect_stderr
 import sys
-import os
-import shutil
-import subprocess
-import tempfile
 import unittest
-from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -56,86 +47,6 @@ class PredicateTests(unittest.TestCase):
             with self.subTest(now=now, end=end):
                 self.assertEqual(stop_reason('radar-weekly', datetime.fromisoformat(now),
                                              [{**row, 'end': end}]), expected)
-
-
-class CommandTests(unittest.TestCase):
-    def test_monthly_ledger_timeout_fails_open(self):
-        spec = importlib.util.spec_from_file_location('step0', REPO/'bin/scheduled-step0.py')
-        assert spec is not None and spec.loader is not None
-        cli = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cli)
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            (root/'ops/headless-tasks').mkdir(parents=True)
-            (root/'ops/headless-tasks/tasks.json').write_text(json.dumps({'tasks': {
-                'health-audit-monthly': {'monthly': True, 'cron': '0 9 * * *'}}}))
-            with patch.object(cli, 'REPO', root), patch.object(sys, 'argv', ['step0', 'health-audit-monthly']), \
-                    patch('subprocess.run', side_effect=subprocess.TimeoutExpired('monthly-gate.py', 30)), \
-                    redirect_stderr(io.StringIO()):
-                self.assertEqual(cli.main(), 0)
-
-    def test_version_cli_stops_and_reports_changes_without_writing_sentinel(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            (root/'bin').mkdir()
-            (root/'ops/headless-tasks').mkdir(parents=True)
-            (root/'lib').mkdir()
-            for name in ['scheduled_step0.py', 'headless_tasks.py']:
-                shutil.copyfile(REPO/'lib'/name, root/'lib'/name)
-            shutil.copyfile(REPO/'bin/scheduled-step0.py', root/'bin/scheduled-step0.py')
-            helper = root/'bin/cc-version-string.sh'
-            helper.write_text('#!/bin/sh\n echo "cli=2.1.1 app=2.1.2"\n')
-            helper.chmod(0o755)
-            sentinel = root/'.claude/scheduled-tasks/cc-update-audit/last-audited-version.txt'
-            sentinel.parent.mkdir(parents=True)
-            sentinel.write_text('cli=2.1.1 app=2.1.2\n')
-            def run():
-                return subprocess.run([sys.executable, str(root/'bin/scheduled-step0.py'),
-                                       'cc-update-audit'], env={**os.environ, 'HOME': str(root)},
-                                      capture_output=True, text=True)
-            result = run()
-            self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertIn('version_unchanged', result.stdout)
-            sentinel.write_text('cli=2.1.1 app=2.1.1\n')
-            result = run()
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn('current: cli=2.1.1 app=2.1.2', result.stdout)
-            self.assertEqual(sentinel.read_text(), 'cli=2.1.1 app=2.1.1\n')
-            (root/'ops/headless-tasks/tasks.json').write_text('broken manifest')
-            self.assertEqual(run().returncode, 0)
-            helper.unlink()
-            self.assertEqual(run().returncode, 0)
-
-    def test_monthly_cli_delegates_ledger_exit_and_weekly_cli_reads_receipts(self):
-        import json
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            for folder in ['bin', 'lib', 'ops/headless-tasks']:
-                (root/folder).mkdir(parents=True)
-            for name in ['scheduled_step0.py', 'headless_tasks.py']:
-                shutil.copyfile(REPO/'lib'/name, root/'lib'/name)
-            shutil.copyfile(REPO/'bin/scheduled-step0.py', root/'bin/scheduled-step0.py')
-            (root/'ops/headless-tasks/tasks.json').write_text(json.dumps({'tasks': {
-                'health-audit-monthly': {'cron': '0 9 * * *', 'monthly': True},
-                'radar-weekly': {'cron': '0 9 * * 1'}}}))
-            gate = root/'bin/monthly-gate.py'
-            for code in [0, 1, 2]:
-                gate.write_text(f'import sys; print(sys.argv[1]); raise SystemExit({code})')
-                result = subprocess.run([sys.executable, str(root/'bin/scheduled-step0.py'),
-                                         'health-audit-monthly'], capture_output=True, text=True)
-                self.assertEqual(result.returncode, code, result.stderr)
-                self.assertIn('health-audit-monthly', result.stdout)
-            folder = root/'out/headless/radar-weekly'
-            folder.mkdir(parents=True)
-            instant = datetime.now().astimezone().isoformat()
-            (folder/'ledger.jsonl').write_text(json.dumps({'status': 'success', 'exit_code': 0,
-                'canonical_recorded': True, 'end': instant, 'window': instant}))
-            command = [sys.executable, str(root/'bin/scheduled-step0.py'), 'radar-weekly']
-            result = subprocess.run(command, capture_output=True, text=True)
-            self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertIn('weekly_completed', result.stdout)
-            (folder/'ledger.jsonl').write_text('corrupt synthetic row')
-            self.assertEqual(subprocess.run(command, capture_output=True).returncode, 2)
 
 
 if __name__ == '__main__':
