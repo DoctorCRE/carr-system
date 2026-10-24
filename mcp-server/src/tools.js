@@ -1,3 +1,4 @@
+import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.js";
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.js";
 import { invoiceTrackerTools } from "./invoice-tracker.js";
@@ -328,7 +329,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if (["set-next-step", "set-market-agent", "set-national-account-owner"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if (verb === "update-vendor" || verb === "log-activity" || ["set-next-step", "set-market-agent", "set-national-account-owner"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
@@ -3575,6 +3576,7 @@ export const TOOLS = {
       // base", never as a base of null-meaning-anything.
       const deals = await c.query(
         `select b.id, b.name, b.type, b.phase, b.owner, b.attention, r.base_version,
+                ${dealVendorCards("b")} as vendors,
                 to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step,
                 '${DEAL_ITEMS_SCHEMA}'::text as item_schema_version,
                 coalesce((select jsonb_agg(jsonb_build_object('id',i.id,'title',i.item_title,
@@ -3614,6 +3616,7 @@ export const TOOLS = {
         [workspace, args.account_client_id || null, [...DEAL_ROOM_FIELDS]]);
       const closedDeals = await c.query(
         `select b.id, b.name, b.client_ref, b.client_name, b.deal_type as type,
+                ${dealVendorCards("b")} as vendors,
                 b.phase, b.outcome, b.lead_owner as owner,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on,
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
@@ -4005,6 +4008,10 @@ export const TOOLS = {
       occurred_at: { type: "string", description: "ISO timestamp; omit for now" },
       owed: { type: "string", description: "what is missing (a figure, a name) — recorded as owed" },
       human_quote: { type: "string", description: "the human's literal words, if dictated" },
+      vendor_assignments: {type:'array',minItems:1,maxItems:30,description:'Update explicit vendor roles atomically with this deal call or update. Exact vendor UUID, current vendor base_version and shared party assignment_base_version required.',items:{
+        ...DEAL_ASSIGNMENTS_SCHEMA.items,properties:{...Object.fromEntries(Object.entries(DEAL_ASSIGNMENTS_SCHEMA.items.properties).filter(([k])=>k!=='deal_id')),
+          vendor_id:{type:'string',format:'uuid'},base_version:{type:'integer'},assignment_base_version:{type:'integer',minimum:1}},
+        required:['vendor_id','base_version','assignment_base_version','role','company_party_id','contact_party_id']}},
       links: { type: "array", maxItems: 10, description:
         "[ORDER 34] introductions carried by this touch become intro-graph edges NOW, atomically. REFS ONLY (L-/C-/V-/T-), never names — ambiguity is find's job, before this call.",
         items: { type: "object", properties: {
@@ -4046,6 +4053,31 @@ export const TOOLS = {
                   "carries a dated obligation on a deal." });
       }
       const s = await resolveSubject(c, args.ref);
+      const assignments = [];
+      if (args.vendor_assignments !== undefined) {
+        if (s.type !== 'deal' || !Array.isArray(args.vendor_assignments) || !args.vendor_assignments.length || args.vendor_assignments.length > 30)
+          throw new ToolError({error:'deal_assignment_invalid'});
+        await lockDealAssignments(c,args.vendor_assignments);
+        const seen = new Set(), versions = new Map(), states = new Map();
+        for (const assignment of args.vendor_assignments) {
+          const {vendor_id,base_version,assignment_base_version,...entry} = assignment || {};
+          if (typeof vendor_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(vendor_id) || Object.hasOwn(entry,'deal_id'))
+            throw new ToolError({error:'deal_assignment_invalid'});
+          const identity = `${vendor_id.toLowerCase()}:${entry.role}`;
+          if (seen.has(identity)) throw new ToolError({error:'deal_assignment_invalid'});
+          seen.add(identity);
+          const vendorId = vendor_id.toLowerCase();
+          if (versions.has(vendorId)) {
+            if (versions.get(vendorId) !== base_version) throw new ToolError({error:'deal_assignment_invalid'});
+          } else {
+            await versionGuard(c,'vendor',vendorId,base_version);
+            versions.set(vendorId,base_version);
+          }
+          assignments.push(...await writeDealAssignments(c,actor,vendorId,[{...entry,deal_id:s.id}],writeEvent,args.idempotency_key,'log-activity',assignment_base_version,{states,human_quote:args.human_quote}));
+        }
+        for (const vendorId of versions.keys())
+          await c.query('update vendor set updated_by=$1 where id=$2',[actor.id,vendorId]);
+      }
       const r = await c.query(
         `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source)
          values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated') returning id, occurred_at`,
@@ -4055,6 +4087,7 @@ export const TOOLS = {
       const links = args.links && args.links.length
         ? await writeLinks(c, actor, args.links, args.idempotency_key) : [];
       return { ok: true, activity_id: r.rows[0].id, subject: s,
+               ...(assignments.length ? {vendor_assignments:assignments} : {}),
                ...(links.length ? { links } : {}) };
     }),
   },
@@ -5191,6 +5224,26 @@ export const TOOLS = {
     }),
   },
 
+  "vendor-assignment-context": {
+    write: false,
+    description: "Read a live vendor's exact ID, base_version, assignment_version, company and existing contact party IDs before updating a deal assignment. Company can be null and contacts can be empty. Never creates identities or infers a role. Use find to resolve an ambiguous name first.",
+    inputSchema: {type:'object',additionalProperties:false,properties:{vendor:{type:'string'}},required:['vendor']},
+    handler: async (c,_actor,args) => {
+      const subject = await resolveSubject(c,args.vendor);
+      if (subject.type !== 'vendor') throw new ToolError({error:'not_a_vendor'});
+      const vendor = (await c.query('select * from public.v_vendor_assignment_context where id=$1',[subject.id])).rows[0];
+      if (!vendor) throw new ToolError({error:'vendor_not_live'});
+      return {vendor};
+    },
+  },
+
+  "vendor-duplicate-report": {
+    write: false,
+    description: "Read-only duplicate detection, counts only. Excludes merged vendor rows and merged/deleted parties. Same-party groups are vendor-row candidates; matching normalized email or name plus exact company across different parties are identity-review candidates. Groups overlap. Never selects a survivor or merges records. No names, refs or contact data returned.",
+    inputSchema: {type:'object',additionalProperties:false,properties:{}},
+    handler: async c => ({dry_run:true,counts:(await c.query('select * from public.v_vendor_duplicate_report')).rows[0]}),
+  },
+
   "new-vendor": {
     write: true,
     description: "Create a vendor over a party; sets vendor stage; mints V-<CODE>-### (pass the category code explicitly: CPA, LEN, GC...). A Claude-found vendor enters at the prospect stage until a real call happens — that is a standing rule, not a suggestion.",
@@ -5221,14 +5274,19 @@ export const TOOLS = {
 
   "update-vendor": {
     write: true,
-    description: "Field-level change to a vendor (stage, seeking, offers, referral_active, territory, out_of_market). stage takes a vendor_stage SLUG, not the label; a wrong one comes back with the full valid list. base_version required.",
+    description: "Field-level change to a vendor (stage, seeking, offers, referral_active, territory, out_of_market). fields.deal_assignments upserts explicit deal roles with exact deal_id, role, company_party_id and contact_party_id; active:false retires a role. assignment_base_version from the shared party assignment_version is required with deal_assignments. Never infer assignments from a general intro edge. stage takes a vendor_stage SLUG, not the label; a wrong one comes back with the full valid list. base_version required.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, vendor: { type: "string" },
-      base_version: { type: "integer" }, fields: { type: "object" } },
+      base_version: { type: "integer" }, assignment_base_version: {type:"integer",minimum:1,description:"Shared party assignment_version from vendor-assignment-context; required with deal_assignments."}, fields: { type: "object", properties: {deal_assignments: DEAL_ASSIGNMENTS_SCHEMA} } },
       required: ["idempotency_key","vendor","base_version","fields"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "update-vendor", args, async () => {
       const s = await resolveSubject(c, args.vendor);
       if (s.type !== "vendor") throw new ToolError({ error: "not_a_vendor", resolved: s });
+      if (Object.hasOwn(args.fields,'deal_assignments')) {
+        if (!Array.isArray(args.fields.deal_assignments) || !args.fields.deal_assignments.length || args.fields.deal_assignments.length>30)
+          throw new ToolError({error:'deal_assignment_invalid'});
+        await lockDealAssignments(c,args.fields.deal_assignments.map(entry=>({...entry,vendor_id:s.id})));
+      }
       await versionGuard(c, "vendor", s.id, args.base_version);
       // [0069] category_slug + verticals joined the list — the columns existed since
       // 0001/0050 but no verb could reach them, which left the 63 null-category
@@ -5237,7 +5295,7 @@ export const TOOLS = {
       // profession, and reopening it here would reopen that defect.
       const allowed = ["stage","seeking","offers","referral_active","territory","rivalry_group","out_of_market","intro_notes","category_slug","verticals","loan_programs","trust_override","deal_evidence"];
       const keys = Object.keys(args.fields).filter(k => allowed.includes(k));
-      if (!keys.length && !Object.hasOwn(args.fields,"deal_evidence") && !Object.hasOwn(args.fields,"verify_deal_history")) throw new ToolError({ error: "no_updatable_fields", allowed });
+      if (!keys.length && !Object.hasOwn(args.fields,"deal_assignments") && !Object.hasOwn(args.fields,"deal_evidence") && !Object.hasOwn(args.fields,"verify_deal_history")) throw new ToolError({ error: "no_updatable_fields", allowed });
       // Pre-validate rather than letting the FK abort the transaction: a poisoned
       // transaction cannot even fetch the slug list to explain itself.
       if (keys.includes("category_slug") && args.fields.category_slug !== null) {
@@ -5277,6 +5335,8 @@ export const TOOLS = {
       } else if (Object.hasOwn(args.fields, "deal_evidence")) {
         args.fields.deal_history_verified_at = null; keys.push("deal_history_verified_at");
       }
+      const assignments = Object.hasOwn(args.fields,'deal_assignments')
+        ? await writeDealAssignments(c,actor,s.id,args.fields.deal_assignments,writeEvent,args.idempotency_key,'update-vendor',args.assignment_base_version) : [];
       const old = keys.length ? (await c.query(`select ${keys.join(",")} from vendor where id=$1`, [s.id])).rows[0] : {};
       const sets = keys.map((k, i) => `${k}=$${i + 2}`).join(", ");
       await c.query(`update vendor set ${sets ? sets + ", " : ""}updated_by=$1 where id=$${keys.length + 2}`,
@@ -5284,7 +5344,7 @@ export const TOOLS = {
       for (const k of keys)
         await writeEvent(c, actor, "update-vendor", "vendor", s.id,
           { field: k, old: { [k]: old[k] }, new: { [k]: args.fields[k] }, idempotency_key: args.idempotency_key });
-      return { ok: true, updated: keys };
+      return { ok: true, updated: [...keys,...(assignments.length ? ['deal_assignments'] : [])] };
     }),
   },
 
@@ -6085,6 +6145,7 @@ export const TOOLS = {
               or exists(select 1 from vendor v where v.id=a.vendor_id and v.party_id=$1)
               or exists(select 1 from deal d join client cl on cl.id=d.client_id
                         where d.id=a.deal_id and cl.party_id=$1)
+         union all select 'vendor_assignment', count(*)::int from public.deal_vendor_assignment where $1::uuid in (party_id,company_party_id,contact_party_id)
          union all select 'deal_participant', count(*)::int from deal_participant where party_id=$1
          union all select 'record_flag', count(*)::int from record_flag where subject_type='party' and subject_id=$1
          union all select 'child_party', count(*)::int from party where org_id=$1`, [merg.partyId]);
@@ -6092,6 +6153,10 @@ export const TOOLS = {
       // Moving role rows cannot preserve graph endpoints or the broker. Until
       // an attachment-preserving merge handles duplicate and self edges, refuse
       // this pair before any write instead of retiring a still-cited party.
+      const assignmentCount = sweep.rows.find(row => row.attachment === 'vendor_assignment')?.count;
+      if (Number(assignmentCount) > 0)
+        throw new ToolError({error:'merge_vendor_assignments_require_resolution',party_id:merg.partyId,count:Number(assignmentCount),
+          hint:'reconcile the losing party, company and contact assignment references in a reviewed follow-up before merging'});
       const graphCount = sweep.rows.find(row => row.attachment === "party_link")?.count;
       if (Number(graphCount) > 0)
         throw new ToolError({ error: "merge_graph_attachments_require_resolution",
@@ -8673,6 +8738,7 @@ registerTools({
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
       let deal = await c.query(
         `select b.id, b.name, b.phase, b.owner, b.type, b.market as city, b.segment, b.attention,
+                ${dealVendorCards("b")} as vendors,
                 to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step,
                 (b.next_step is null or b.next_date is null) as next_step_required, b.client_id, b.client_ref, b.client_name,
                 b.account_client_id, b.account_client_ref, b.account_name, b.account_owner,
@@ -8692,6 +8758,7 @@ registerTools({
           where b.id=$1`, [s.id]);
       if (!deal.rows.length) deal = await c.query(
         `select b.id, b.name, b.phase, b.lead_owner as owner, b.deal_type as type,
+                ${dealVendorCards("b")} as vendors,
                 b.client_ref, b.client_name, b.client_id, a.account_client_id,
                 case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on,
