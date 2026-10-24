@@ -3,6 +3,9 @@
 # ci: db-gate-before-isolated — creates and keeps the carr_authority_* login roles the isolated SIEP gates assert against
 """Disposable local-PG adversarial proof for calendar-prebrief projection 0229."""
 import os
+import json
+import runpy
+from pathlib import Path
 import uuid
 from datetime import datetime, timedelta
 from threading import Thread
@@ -140,6 +143,10 @@ with psycopg.connect(dsn) as conn, conn.cursor() as cur:
                          and data_path == "/var/lib/postgresql/data")
     if database_name != "carr_ci" or role_name != "carr_ci" or is_superuser is not True or not (local_disposable or hosted_disposable):
         raise RuntimeError("calendar prebrief acceptance requires a dedicated disposable carr_ci database")
+    fixture = Path(__file__).resolve().parent / "fixtures/calendar-prebrief-workflows.v1.json"
+    sync = runpy.run_path(str(fixture.parents[2] / "tools/workflow-registry.py"))["sync_registry"]
+    sync.__globals__["connect"] = lambda: psycopg.connect(dsn)
+    sync(json.loads(fixture.read_text()))
     cur.execute("begin")
     cur.execute(
         """do $$ begin
