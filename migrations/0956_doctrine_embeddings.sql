@@ -427,7 +427,11 @@ LANGUAGE sql IMMUTABLE SET search_path=pg_catalog AS $fn$ SELECT $current_grants
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
     }
-  ]
+  ],
+  "runtime_dml_grants": {
+    "count": 337,
+    "digest": "sha256:2df8bdb030bdf0da8f13e135d4fd1ad310c928156fce245d1481ef60e71f2d7b"
+  }
 }$current_grants$::jsonb $fn$;
 
 CREATE OR REPLACE FUNCTION ops.scac_mutation_catalog_v118_current()

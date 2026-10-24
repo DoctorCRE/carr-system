@@ -39703,7 +39703,11 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
     }
-  ]
+  ],
+  "runtime_dml_grants": {
+    "count": 337,
+    "digest": "sha256:2df8bdb030bdf0da8f13e135d4fd1ad310c928156fce245d1481ef60e71f2d7b"
+  }
 }$current_grants$::jsonb $_$;
 
 
@@ -122246,7 +122250,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0944_retire_orphan_control_inventory.sql	ab7c35cfc581268b40bab5b29399e315286b24ba1c3c8c86bc0b9c49673def37	1970-01-01 00:00:00+00
 0947_allow_approved_control_evidence_refresh.sql	b051840f87086cdfcfbe21abae004df2f7023907f081851f95c22a7e017f8800	1970-01-01 00:00:00+00
 0950_remove_retired_workflow_manifest_binding.sql	87c2d7f9aba676b4b0e0d7262b024fe20f4ee1e7a7ced5ced4dcce19267d9a41	1970-01-01 00:00:00+00
-0956_doctrine_embeddings.sql	42b0bc24820b51c08364f9edba82ba8cd03e40d8130d921d2b8469b5177678cb	1970-01-01 00:00:00+00
+0956_doctrine_embeddings.sql	d0316e4064633e8c7d9be28d743154b612efd3412327c73b07802c730ef768f2	1970-01-01 00:00:00+00
 \.
 
 

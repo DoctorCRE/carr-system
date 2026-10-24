@@ -65,8 +65,8 @@ PREDECESSOR_LIVE_AT_SEAL_NAME = (
 # A grant projection that did NOT move here would mean it had stopped seeing
 # relation grants at all.
 # Measured on a disposable loopback PostgreSQL 17, never predicted.
-# v37 owns the post-0539 grant projection. Read its measured value from the
-# sealed catalog row below; the v36 predecessor remains pinned separately.
+# The current grant contract records later DML additions; historical registry
+# rows below remain pinned separately.
 
 # WR-000048 mutation test fixtures. NARROWED_ROLE_AUTHORITY_SCOPE is the
 # portable census scope this repair cascade installs (verbatim from the
@@ -919,13 +919,14 @@ def main() -> int:
                     f"{LIVE_REGISTRY_VERSION} registry is absent or authority-expanding: {registry!r}"
                 )
             validate_current_catalog(cur)
-            expected_grant_snapshot = registry[3].get("runtime_dml_grants")
+            current_grants = cur.execute("select ops.scac_current_grant_contract()").fetchone()[0]
+            expected_grant_snapshot = current_grants["runtime_dml_grants"]
             if not isinstance(expected_grant_snapshot, dict) or \
                set(expected_grant_snapshot) != {"count", "digest"} or \
                not isinstance(expected_grant_snapshot.get("count"), int) or \
                not isinstance(expected_grant_snapshot.get("digest"), str):
                 raise RuntimeError(
-                    f"{LIVE_REGISTRY_VERSION} grant projection is not exact: {registry[3]!r}"
+                    f"current grant projection is not exact: {current_grants!r}"
                 )
             # The successor is registry-only, so it must ADD the v21 seal and leave
             # v20 exactly as 0494 sealed it. Pin the historical row by digest and

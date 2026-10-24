@@ -3524,5 +3524,9 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
     }
-  ]
+  ],
+  "runtime_dml_grants": {
+    "count": 337,
+    "digest": "sha256:2df8bdb030bdf0da8f13e135d4fd1ad310c928156fce245d1481ef60e71f2d7b"
+  }
 });

@@ -119,6 +119,10 @@ class ApprovedControlMigrationTests(unittest.TestCase):
     def test_semantic_grants_preserve_catalog_closure_and_refuse_extra_authority(self):
         with self.psycopg.connect(self.dsn, autocommit=True) as conn:
             self.assertTrue(conn.execute('select ops.scac_mutation_catalog_v118_current()').fetchone()[0])
+            expected = conn.execute("select ops.scac_current_grant_contract()->'runtime_dml_grants'").fetchone()[0]
+            actual = conn.execute('select ops.scac_runtime_dml_grant_snapshot()').fetchone()[0]
+            self.assertEqual(actual, {'schema_version': 'scac-runtime-dml-grants.v1',
+                                     'entry_count': expected['count'], 'grant_digest': expected['digest']})
             for statement in (
                 'grant update on public.doctrine_embedding to carr_writer',
                 'grant execute on function public.search_doctrine_semantic(text,uuid,text[],integer,text,vector[]) to public',
