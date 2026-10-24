@@ -29,8 +29,8 @@ class ScheduledRunTests(unittest.TestCase):
         self.env = {"HOME": str(self.root), "PATH": os.environ["PATH"],
                     "CARR_RUN_SPOOL_DB": str(self.spool)}
 
-    def invoke(self, code):
-        return subprocess.run(["/bin/zsh", str(self.root / "bin/run-scheduled.sh"),
+    def invoke(self, code, options=()):
+        return subprocess.run(["/bin/zsh", str(self.root / "bin/run-scheduled.sh"), *options,
                                "test-service", "launchd.run", "/bin/sh", "-c",
                                f"printf child-out; printf child-err >&2; exit {code}"],
                               cwd=self.root, env=self.env, text=True, capture_output=True, timeout=15)
@@ -114,11 +114,22 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertEqual(args[args.index("--failure-class") + 1], "exit_7")
 
     def test_configuration_skip_and_timeout_keep_their_meaning(self):
-        for code, state in ((78, "skipped"), (124, "timed_out"), (143, "cancelled")):
+        for code, state in ((78, "skipped"), (124, "timed_out"), (137, "timed_out"), (143, "cancelled")):
             with self.subTest(code=code):
                 result = self.invoke(code)
                 self.assertEqual(result.returncode, code)
                 self.assertEqual(self.rows()[-1][2], state)
+
+    def test_success_heartbeat_throttles_only_recording_and_failure_resets_it(self):
+        options = ("--heartbeat-interval", "3600")
+        self.assertEqual(self.invoke(0, options).returncode, 0)
+        again = self.invoke(0, options)
+        self.assertEqual((again.returncode, again.stdout), (0, "child-out"))
+        self.assertEqual(len(self.rows()), 1)
+        self.assertEqual(self.invoke(7, options).returncode, 7)
+        self.assertEqual(self.rows()[-1][2], "failed")
+        self.assertEqual(self.invoke(0, options).returncode, 0)
+        self.assertEqual(len(self.rows()), 3)
 
 
 if __name__ == "__main__":

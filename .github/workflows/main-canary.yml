@@ -102,7 +102,7 @@ jobs:
           path: ${{ runner.temp }}/zsh-debs/*.deb
           key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh') }}
       - name: Install zsh
-        # bin/review-council-runner.sh has a #!/bin/zsh shebang and its test
+        # bin/run-scheduled.sh has a #!/bin/zsh shebang and its test
         # invokes it by that interpreter. Use the runner's installed shell
         # when available; otherwise try its indexes before refreshing them.
         # The download is the only step that depends on the Ubuntu mirror, so
