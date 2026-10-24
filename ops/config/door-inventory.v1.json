@@ -199,6 +199,12 @@
       "class": "hand_tool",
       "reason": "Manual GitHub App key intake remains owned by the credential/release lane outside this library reset.",
       "evidence": "lib/github_app_config.py documents the retained manual intake script; this declaration grants no new credential access."
+    },
+    {
+      "path": "hooks/turn_origin.py",
+      "class": "inert",
+      "reason": "Retained transcript-origin classifier has no executable caller after PR #2195 retires weekend-quiet-gate.py. It remains hash-protected with the retained hook inventory.",
+      "evidence": "WR-000284 post-purge door inventory; PR #2195 deletes the last caller hooks/weekend-quiet-gate.py. The fixed retirement scope retains this hash-protected classifier as inert."
     }
   ]
 }

@@ -1,0 +1,34 @@
+create table party(id uuid primary key,name text,kind text default 'person',org_id uuid,merged_into uuid,deleted_at timestamptz,contact_state text default 'active',specialty text,city text,county text,state text);
+create table actor(id uuid primary key,slug text,display_name text);
+create table client(id uuid primary key,party_id uuid,merged_into uuid,roster_ref text);
+create table lead(id uuid primary key,party_id uuid,client_id uuid,registry_ref text,lane text,stage text default 'new',score numeric,segment text,suppressed boolean default false,est_lease_event date,event_confidence text,last_touch timestamptz,next_action_date date,owner_id uuid,owner_label text,version integer default 1,created_at timestamptz,updated_at timestamptz,score_reason text);
+create table deal(id uuid primary key,client_id uuid);
+create table lead_stage(slug text primary key,label text,sort integer);
+insert into lead_stage values('new','New',10),('qualified','Qualified',20),('do_not_contact','Do not contact',100);
+create table lead_stage_move(id uuid,lead_id uuid,from_stage text,to_stage text,reason text,evidence_ref text,status text,created_at timestamptz,undone_at timestamptz,undone_by uuid);
+create table v_last_touch(subject_type text,subject_id uuid,last_touch timestamptz);
+create table v_lead_stage_transition(event_id uuid,lead_id uuid,mutation_order bigint,occurred_at timestamptz,prior_stage text,stage text,automatic boolean,reason text,idempotency_key text,stage_review jsonb);
+insert into party(id,name) select md5('party-'||n)::uuid,'Synthetic party '||n from generate_series(1,1480)n;
+insert into lead(id,party_id,registry_ref,created_at,updated_at) select md5('lead-'||n)::uuid,md5('party-'||n)::uuid,'L-'||n,'2026-01-01Z','2026-01-01Z' from generate_series(1,375)n;
+insert into client(id,party_id,roster_ref) select md5('client-'||n)::uuid,md5('party-'||n)::uuid,'C-'||n from generate_series(501,900)n;
+update party set name='Synthetic ambiguous' where id=md5('party-1')::uuid;
+update party set name=' SYNTHETIC AMBIGUOUS ' where id=md5('party-501')::uuid;
+update party set name='synthetic ambiguous' where id=md5('party-502')::uuid;
+update party set name='Synthetic ambiguous',merged_into=md5('party-501')::uuid where id=md5('party-503')::uuid;
+update party set name='Synthetic ambiguous',deleted_at='2026-01-01Z' where id=md5('party-504')::uuid;
+update party set name='Synthetic ambiguous' where id=md5('party-505')::uuid;
+update client set merged_into=md5('client-501')::uuid where id=md5('client-505')::uuid;
+update lead set suppressed=true where registry_ref='L-2';
+update party set merged_into=md5('party-1')::uuid where id=md5('party-3')::uuid;
+update party set deleted_at='2026-01-01Z' where id=md5('party-4')::uuid;
+update party set contact_state='do_not_contact' where id=md5('party-5')::uuid;
+insert into client values(md5('client-6')::uuid,md5('party-6')::uuid,null,'C-6');
+update lead set client_id=md5('client-501')::uuid where registry_ref='L-7';
+insert into deal values(md5('deal-7')::uuid,md5('client-501')::uuid);
+update party set org_id=md5('party-501')::uuid where id=md5('party-8')::uuid;
+update lead set client_id=md5('client-505')::uuid where registry_ref='L-9';
+insert into v_lead_stage_transition(event_id,lead_id,mutation_order,occurred_at,prior_stage,stage,automatic) values
+(md5('event-1')::uuid,md5('lead-10')::uuid,1,'2026-01-02Z','new','engaged',true),
+(md5('event-2')::uuid,md5('lead-10')::uuid,2,'2026-01-01Z','engaged','qualified',true);
+update party set contact_state=null where id=md5('party-11')::uuid;
+analyze;

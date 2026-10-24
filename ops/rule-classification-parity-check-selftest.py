@@ -188,6 +188,22 @@ def case_offline_retirement_prune():
 
 
 def main() -> int:
+    retired_controls = {
+        "236ca227": "weekend_quiet", "25fab860": "weekly_social_route",
+        "4a53ff82": "canonical_edit", "5d44d3f3": "verification_status",
+        "5e89c211": "control-plane-workflow-manifest", "f5d97b4a": "costar_lane",
+    }
+    retirement_cases = []
+    for rid, control in retired_controls.items():
+        detail = {"category": "judgment_advisory", "enforcement_class": "judgment_ambient",
+                  "retired_control": control}
+        retirement_cases.append(mod.removed_gate_reclassification(detail, rid))
+        retirement_cases.append(not mod.removed_gate_reclassification(detail, "unknown"))
+        retirement_cases.append(not mod.removed_gate_reclassification(
+            {**detail, "retired_control": "other"}, rid))
+        retirement_cases.append(not mod.removed_gate_reclassification(
+            {**detail, "control": control}, rid))
+    print(f"{'PASS' if all(retirement_cases) else 'FAIL'}  exact post-purge control retirements")
     partial_map = copy.deepcopy(MAP_BASE)
     partial_controls = partial_map["rule_controls"]
     assert isinstance(partial_controls, dict)
@@ -226,6 +242,7 @@ def main() -> int:
     assert isinstance(unrelated_controls, dict)
     unrelated_controls["dddddddd"] = unrelated_controls.pop("17ffd587")
     cases = [
+        all(retirement_cases),
         case_unit_buckets(),
         case("the WR-000003 retirement may lead the frozen admission export",
              retrofit_map, retrofit_export, expect_ok=True, expect_compared=3),

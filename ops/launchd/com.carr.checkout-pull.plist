@@ -15,8 +15,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>-c</string>
-    <string>for repo in {{HOME}}/carr-system {{HOME}}/doctorcre-app; do /usr/bin/git -C "$repo" pull --ff-only --quiet || echo "checkout-pull: $repo did not fast-forward"; done</string>
+    <string>{{HOME}}/carr-system/bin/checkout-pull.sh</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>

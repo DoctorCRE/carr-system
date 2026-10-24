@@ -6,7 +6,7 @@
     {
       "root": "out/",
       "why": "receipts, run records and program artifacts; load-bearing and written by design. Also in .gitignore.",
-      "authority": "canonical-edit-gate allowance 2; .gitignore"
+      "authority": "Repository .gitignore; untracked output allowance (retired hook is not enforcement)"
     },
     {
       "root": ".venv/",
@@ -20,7 +20,7 @@
     },
     {
       "root": ".claude/worktrees/",
-      "why": "registered worktrees — each is a live CHECKOUT of this repo carrying its own .git file, not content of it. Also in .gitignore.",
+      "why": "registered worktrees \u2014 each is a live CHECKOUT of this repo carrying its own .git file, not content of it. Also in .gitignore.",
       "authority": ".gitignore; registered nested-checkout sweep boundary"
     },
     {

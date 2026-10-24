@@ -214,12 +214,17 @@ export async function appendRoomTurn(c, { room, sponsor, seat, kind, body, msgId
   );
   if (!ins.rows.length) {
     const prior = await c.query(
-      "select id, room_id, sponsor, seat, kind, origin_channel, origin_actor from partner_room_turn where msg_id=$1 /* partner-room:dedup-read */",
+      "select id, room_id, sponsor, seat, kind, origin_channel, origin_actor, body, to_jsonb(at)#>>'{}' as at from partner_room_turn where msg_id=$1 /* partner-room:dedup-read */",
       [msgId],
     );
     if (!prior.rows.length) return { ok: false, error: "dedup_row_vanished", msg_id: msgId };
     const p = prior.rows[0];
-    return { ok: true, deduplicated: true, room: p.room_id, seq: p.id,
+    // Browser operation identity is stable even if its text changes. Refuse
+    // altered material rather than quietly returning the first command's receipt.
+    if ((originChannel === "browser-human" || p.origin_channel === "browser-human") &&
+      (p.room_id !== room || p.sponsor !== sponsor || p.seat !== seat || p.kind !== kind || p.body !== body ||
+       p.origin_channel !== originChannel || p.origin_actor !== originActor)) return { ok: false, error: "key_reuse" };
+    return { ok: true, deduplicated: true, room: p.room_id, seq: p.id, at: p.at,
       sponsor: p.sponsor, seat: p.seat, kind: p.kind, origin_channel: p.origin_channel,
       origin_actor: p.origin_actor, msg_id: msgId };
   }

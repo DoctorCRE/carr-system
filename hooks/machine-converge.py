@@ -12,8 +12,7 @@ Mac did exactly that for a week after the 2026-08-11 migration.
 WHAT IT DOES, on a secondary machine only:
   1. Fast-forwards the CANONICAL checkout's main from origin — ff-only, so a
      diverged tree fails LOUDLY in the session brief instead of merging.
-     The refusals mirror bin/fleet-sync.sh (PR #333): never over local
-     tracked changes, never off main, never a merge/rebase/reset.
+     Refuse local tracked changes, work off main, and any merge/rebase/reset.
   2. Re-applies machine config with `ops/config-as-code.py install --apply`,
      but only when the pull moved HEAD or `check` reports drift — so an
      already-converged machine boots silently and its launchd jobs are not
@@ -45,7 +44,7 @@ machine door in mcp-server/src/identity.js maps the same partners server-side,
 PR #334). slug "joe" → this is the primary machine and the hook is a NO-OP:
 Joe's canonical tree is a shared work surface for live sessions, an unbidden
 pull at session start can interleave with another session's push/reconcile,
-and the scheduled fleet-sync job covers his staleness case. Any other slug →
+and the native checkout-pull job refreshes his checkout. Any other slug →
 converge. When the file is absent (Dell's door provisioning was still owed in
 PR #334), fall back to the determinant config-as-code itself uses for
 per-machine ownership: git user.email against OWNER_EMAIL in
@@ -170,8 +169,8 @@ def converge():
         head = git("rev-parse", "HEAD").stdout.strip()
         remote = git("rev-parse", "origin/main").stdout.strip()
         if head and remote and head != remote:
-            # The three fleet-sync refusals, in its order. Tracked changes
-            # only: untracked scratch is a session's business.
+            # Refuse tracked changes and divergence; untracked scratch is a
+            # session's business.
             dirty = git("status", "--porcelain", "--untracked-files=no").stdout.strip()
             if dirty:
                 say("SKIP pull — local changes present, refusing to fast-forward "
