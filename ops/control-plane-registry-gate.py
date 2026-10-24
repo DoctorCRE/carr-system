@@ -25,7 +25,16 @@ def fetchone_required(row: tuple[Any, ...] | None, context: str) -> tuple[Any, .
     return row
 
 
-RETIRED_WORKFLOW_IDENTITIES = {("engineering-slice", 1)}
+RETIRED_WORKFLOW_IDENTITIES = {
+    ("calendar-prebrief-projection-joe-daily", 1),
+    ("calendar-prebrief-projection-dell-daily", 1),
+    ("calendar-prebrief-canary-joe-daily", 1),
+    ("calendar-prebrief-canary-dell-daily", 1),
+    ("renewal-radar-source-daily", 1),
+}
+
+
+HISTORICAL_WORKFLOW_IDENTITIES = {("engineering-slice", 1)}
 
 
 MANAGED_ENABLED_IDENTITY = ("calendar-prebrief-projection-joe-daily", 1)
@@ -87,10 +96,10 @@ def compare(cur: Any, manifest: dict[str, Any], *, resolve_managed_enabled: bool
                 cur.fetchone(), "Joe calendar prebrief activation receipt")[0])
     # Sync disables a superseded version and keeps its row for the jobs that
     # reference it; that history is not drift while its key is still declared.
-    # Retired source identities retain their historical database metadata.
     declared = {key for key, _ in expected}
     extra = sorted(i for i in set(live) - set(expected)
-                   if i not in RETIRED_WORKFLOW_IDENTITIES and (live[i][2] or i[0] not in declared))
+                   if i not in HISTORICAL_WORKFLOW_IDENTITIES
+                   and (live[i][2] or (i[0] not in declared and i not in RETIRED_WORKFLOW_IDENTITIES)))
     missing = sorted(set(expected) - set(live))
     if missing or extra:
         failures.append(f"workflow keys differ missing={missing} extra={extra}")
