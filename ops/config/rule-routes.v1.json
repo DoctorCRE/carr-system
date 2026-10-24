@@ -284,12 +284,8 @@
    ]
   },
   "236ca227": {
-   "moment": "weekend_quiet deny_gate - before a partner-facing send",
+   "moment": "Task guidance before partner-facing communication",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/weekend-quiet-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -356,7 +352,7 @@
    "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "25fab860": {
-   "moment": "weekly social batch proposal validation",
+   "moment": "Weekly social planning guidance",
    "routes": [
     {
      "kind": "trigger",
@@ -364,15 +360,7 @@
       "mcp__*__create_scheduled_task"
      ],
      "verbs": [],
-     "bash_patterns": [
-      "\\bsocial-batch-candidates\\b"
-     ]
-    },
-    {
-     "kind": "path_rule",
-     "path_globs": [
-      "*social-batch-candidates.py"
-     ]
+     "bash_patterns": []
     }
    ]
   },
@@ -813,12 +801,8 @@
    ]
   },
   "4a53ff82": {
-   "moment": "canonical_edit gate, first write to tracked canonical files",
+   "moment": "Task guidance before repository edits",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/canonical-edit-gate.py"
-    },
     {
      "kind": "trigger",
      "verbs": [],
@@ -1163,7 +1147,7 @@
    ]
   },
   "5e89c211": {
-   "moment": "registering or dispatching a cognition workflow",
+   "moment": "Automation and cognition task guidance",
    "routes": [
     {
      "kind": "trigger",
@@ -1184,7 +1168,6 @@
       "\\bgrok\\b",
       "\\bcodex\\s+exec\\b",
       "\\blaunchctl\\b",
-      "\\bcontrol[-_]plane\\b",
       "\\bgit\\s+(?:commit|push)\\b",
       "\\bgh\\s+pr\\s+(?:create|edit|view)\\b"
      ]
@@ -1192,8 +1175,7 @@
     {
      "kind": "path_rule",
      "path_globs": [
-      "*ops/scheduled-tasks/*",
-      "*lib/control_plane_runner.py"
+      "*ops/scheduled-tasks/*"
      ]
     }
    ],
@@ -3149,12 +3131,8 @@
    ]
   },
   "f5d97b4a": {
-   "moment": "costar_lane deny_gate - Chrome-extension tool call targeting costar.com",
+   "moment": "Task guidance before CoStar browsing",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/costar-lane-gate.py"
-    },
     {
      "kind": "trigger",
      "verbs": [],

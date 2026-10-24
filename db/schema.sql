@@ -36050,9 +36050,15 @@ CREATE FUNCTION ops.refuse_live_approved_control_rewrite() RETURNS trigger
 begin
   if exists (
     select 1 from ops.rule_approval_receipt ar
-     join rule r on r.id=ar.rule_id and r.status='active'
+     join public.rule r on r.id=ar.rule_id and r.status='active'
     where old.control_key=any(ar.requested_control_keys)
   ) then
+    if tg_op='UPDATE'
+       and (to_jsonb(new)-array['implementation_ref','test_ref','verified_at','updated_at'])
+           is not distinct from
+           (to_jsonb(old)-array['implementation_ref','test_ref','verified_at','updated_at']) then
+      return new;
+    end if;
     raise exception 'control % backs an active approved rule and is immutable',old.control_key;
   end if;
   return case when tg_op='DELETE' then old else new end;
@@ -69314,23 +69320,6 @@ $$;
 
 
 --
--- Name: carr_business_date(timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.carr_business_date(instant timestamp with time zone DEFAULT CURRENT_TIMESTAMP) RETURNS date
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
-    SET search_path TO 'pg_catalog'
-    AS $$ select (instant at time zone 'America/Chicago')::date $$;
-
-
---
--- Name: FUNCTION carr_business_date(instant timestamp with time zone); Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON FUNCTION public.carr_business_date(instant timestamp with time zone) IS 'CARR calendar day in America/Chicago, independent of session timezone. Date-only facts stay dates.';
-
-
---
 -- Name: carr_business_days(date, date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -86193,8 +86182,7 @@ CREATE VIEW public.v_last_touch AS
             a.source,
             a.version,
             a.updated_at,
-            a.updated_by,
-            a.connected
+            a.updated_by
            FROM (public.activity a
              JOIN public.activity_kind k ON ((k.slug = a.kind)))
           WHERE (k.is_contact OR ((a.kind = 'note'::text) AND (a.summary = 'last-touch stamp (imported)'::text)) OR ((a.kind = 'note'::text) AND (a.summary ~~ 'Last touch carried from%'::text)))
@@ -86212,27 +86200,27 @@ CREATE VIEW public.v_last_touch AS
         )
  SELECT 'deal'::text AS subject_type,
     deal_contact.deal_id AS subject_id,
-    public.carr_business_date(max(deal_contact.occurred_at)) AS last_touch
+    (max(deal_contact.occurred_at))::date AS last_touch
    FROM deal_contact
   GROUP BY deal_contact.deal_id
 UNION ALL
  SELECT 'client'::text AS subject_type,
     contact.client_id AS subject_id,
-    public.carr_business_date(max(contact.occurred_at)) AS last_touch
+    (max(contact.occurred_at))::date AS last_touch
    FROM contact
   WHERE (contact.client_id IS NOT NULL)
   GROUP BY contact.client_id
 UNION ALL
  SELECT 'lead'::text AS subject_type,
     contact.lead_id AS subject_id,
-    public.carr_business_date(max(contact.occurred_at)) AS last_touch
+    (max(contact.occurred_at))::date AS last_touch
    FROM contact
   WHERE (contact.lead_id IS NOT NULL)
   GROUP BY contact.lead_id
 UNION ALL
  SELECT 'vendor'::text AS subject_type,
     contact.vendor_id AS subject_id,
-    public.carr_business_date(max(contact.occurred_at)) AS last_touch
+    (max(contact.occurred_at))::date AS last_touch
    FROM contact
   WHERE (contact.vendor_id IS NOT NULL)
   GROUP BY contact.vendor_id;
@@ -86698,7 +86686,7 @@ CREATE VIEW public.v_claim_card AS
     dup_basis,
     (((email IS NOT NULL) AND (email <> ''::text)) OR ((phone IS NOT NULL) AND (phone <> ''::text))) AS has_channel,
     (NOT (((email IS NOT NULL) AND (email <> ''::text)) OR ((phone IS NOT NULL) AND (phone <> ''::text)))) AS needs_contact,
-    (est_lease_event - public.carr_business_date()) AS days_to_window,
+    (est_lease_event - CURRENT_DATE) AS days_to_window,
     created_at
    FROM public.candidate_pool cp
   WHERE ((status = 'pool'::text) AND (NOT dup_do_not_contact));
@@ -88913,11 +88901,11 @@ CREATE VIEW public.v_today_triage AS
     na.due_on,
     COALESCE(r.display_name, r.org_name) AS subject_name,
     r.ref AS subject_ref,
-    public.carr_business_days(na.due_on, public.carr_business_date()) AS business_days_overdue
+    public.carr_business_days(na.due_on, CURRENT_DATE) AS business_days_overdue
    FROM ((public.next_action na
      JOIN public.actor owner ON ((owner.id = na.owner_id)))
      LEFT JOIN public.v_ref_index r ON (((r.subject_id = na.subject_id) AND (r.subject_type = na.subject_type))))
-  WHERE ((na.status = 'open'::text) AND (na.due_on IS NOT NULL) AND (na.due_on <= public.carr_business_date()) AND ((na.hold_until IS NULL) OR (na.hold_until <= public.carr_business_date())))
+  WHERE ((na.status = 'open'::text) AND (na.due_on IS NOT NULL) AND (na.due_on <= CURRENT_DATE) AND ((na.hold_until IS NULL) OR (na.hold_until <= CURRENT_DATE)))
 UNION ALL
  SELECT 'post_call_action'::text AS item_kind,
     pca.id,
@@ -88928,11 +88916,11 @@ UNION ALL
     pca.due_on,
     COALESCE(r.display_name, r.org_name) AS subject_name,
     r.ref AS subject_ref,
-    public.carr_business_days(pca.due_on, public.carr_business_date()) AS business_days_overdue
+    public.carr_business_days(pca.due_on, CURRENT_DATE) AS business_days_overdue
    FROM ((public.capture_post_call_action pca
      JOIN public.actor owner ON ((owner.id = pca.owner_id)))
      LEFT JOIN public.v_ref_index r ON (((r.subject_id = pca.deal_id) AND (r.subject_type = 'deal'::text))))
-  WHERE ((pca.status = 'open'::text) AND (pca.due_on IS NOT NULL) AND (pca.due_on <= public.carr_business_date()))
+  WHERE ((pca.status = 'open'::text) AND (pca.due_on IS NOT NULL) AND (pca.due_on <= CURRENT_DATE))
 UNION ALL
  SELECT 'critical_date'::text AS item_kind,
     cd.id,
@@ -88943,10 +88931,10 @@ UNION ALL
     cd.due_on,
     COALESCE(r.display_name, r.org_name) AS subject_name,
     r.ref AS subject_ref,
-    public.carr_business_days(cd.due_on, public.carr_business_date()) AS business_days_overdue
+    public.carr_business_days(cd.due_on, CURRENT_DATE) AS business_days_overdue
    FROM (public.critical_date cd
      LEFT JOIN public.v_ref_index r ON (((r.subject_id = cd.deal_id) AND (r.subject_type = 'deal'::text))))
-  WHERE ((cd.status = 'open'::text) AND (cd.due_on <= (public.carr_business_date() + 14)))
+  WHERE ((cd.status = 'open'::text) AND (cd.due_on <= (CURRENT_DATE + 14)))
 UNION ALL
  SELECT 'ingest'::text AS item_kind,
     i.id,
@@ -88954,10 +88942,10 @@ UNION ALL
     i.id AS subject_id,
     NULL::text AS owner,
     COALESCE(NULLIF(TRIM(BOTH FROM (i.payload ->> 'summary'::text)), ''::text), NULLIF(TRIM(BOTH FROM (i.payload ->> 'title'::text)), ''::text), NULLIF(TRIM(BOTH FROM (i.payload ->> 'subject'::text)), ''::text), (i.source || ' item awaiting triage'::text)) AS what,
-    public.carr_business_date(i.received_at) AS due_on,
+    (i.received_at)::date AS due_on,
     NULLIF(TRIM(BOTH FROM (i.payload ->> 'organizer'::text)), ''::text) AS subject_name,
     NULL::text AS subject_ref,
-    public.carr_business_days(public.carr_business_date(i.received_at), public.carr_business_date()) AS business_days_overdue
+    public.carr_business_days((i.received_at)::date, CURRENT_DATE) AS business_days_overdue
    FROM public.ingest_inbox i
   WHERE (i.status = 'new'::text);
 
@@ -90752,7 +90740,7 @@ CREATE VIEW public.v_renewal_decision_queue AS
            FROM public.deal_participant dp
           WHERE ((dp.deal_id = d.id) AND (dp.role = 'lead'::text) AND (dp.to_at IS NULL))
          LIMIT 1), c.created_by)) AND (owner.slug = ANY (ARRAY['joe'::text, 'dell'::text])))))
-  WHERE ((l.status = 'current'::text) AND ((l.expiration_on >= (public.carr_business_date() - 90)) AND (l.expiration_on <= (public.carr_business_date() + 548))) AND (l.evidence_kind = ANY (ARRAY['executed_lease'::text, 'lease_amendment'::text, 'lease_abstract'::text])) AND (NULLIF(btrim(l.evidence_ref), ''::text) IS NOT NULL) AND (NULLIF(btrim(l.source), ''::text) IS NOT NULL));
+  WHERE ((l.status = 'current'::text) AND ((l.expiration_on >= (CURRENT_DATE - 90)) AND (l.expiration_on <= (CURRENT_DATE + 548))) AND (l.evidence_kind = ANY (ARRAY['executed_lease'::text, 'lease_amendment'::text, 'lease_abstract'::text])) AND (NULLIF(btrim(l.evidence_ref), ''::text) IS NOT NULL) AND (NULLIF(btrim(l.source), ''::text) IS NOT NULL));
 
 
 --
@@ -117866,7 +117854,6 @@ revoke all on function ops.write_tour_share_shortlist(p_session_digest text, p_p
 revoke all on function public.action_class_successor_gate(p_action_class text) from public;
 revoke all on function public.assert_situation_retrieval_golden(p_suite_digest text) from public;
 revoke all on function public.capture_call_context(requested_deal_ids uuid[]) from public;
-revoke all on function public.carr_business_date(instant timestamp with time zone) from public;
 revoke all on function public.defect_resolution_evidence_must_resolve() from public;
 revoke all on function public.defect_resolution_is_append_only() from public;
 revoke all on function public.enforce_allocation_tree() from public;
@@ -121301,12 +121288,6 @@ grant execute on function public.action_class_successor_gate(p_action_class text
 grant execute on function public.assert_situation_retrieval_golden(p_suite_digest text) to carr_writer;
 grant execute on function public.capture_call_context(requested_deal_ids uuid[]) to carr_reader;
 grant execute on function public.capture_call_context(requested_deal_ids uuid[]) to carr_writer;
-grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_authority;
-grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_exporter;
-grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_jobs;
-grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_reader;
-grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_writer;
-grant execute on function public.carr_business_date(instant timestamp with time zone) to dot_reader;
 grant execute on function public.current_retrievable_doctrine(p_actor_id uuid, p_content_classes text[]) to carr_reader;
 grant execute on function public.current_retrievable_doctrine(p_actor_id uuid, p_content_classes text[]) to carr_writer;
 grant execute on function public.log_retrieval_query(p_query text, p_result_count integer, p_section_ids uuid[], p_score_bands jsonb, p_policy_id text, p_policy_version bigint, p_explicit_hit boolean, p_scope_ref text) to carr_writer;
@@ -121952,7 +121933,9 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0937_retire_deleted_hook_control_projections.sql	dcd518923d1a6a052060f87ae1797e17a7270fb660fc7a208e97b9944234bcaf	1970-01-01 00:00:00+00
 0938_j102_engagement_fields.sql	2f3496d3249138c9860c021510ae611d01324ef48d9d94c51386e8df4edb0629	1970-01-01 00:00:00+00
 0940_codex_job_delegation_control_refs.sql	9402a4057ee309d9a4959257e9d5a9a4c41451536f57d3def2201f02fd6741ab	1970-01-01 00:00:00+00
-0945_morning_brief_chicago_calendar.sql	b6a1c2d4666a7fe2ba645d3048b2f874014f47f97e88a3144e07bd6079f6903d	1970-01-01 00:00:00+00
+0944_retire_orphan_control_inventory.sql	ab7c35cfc581268b40bab5b29399e315286b24ba1c3c8c86bc0b9c49673def37	1970-01-01 00:00:00+00
+0947_allow_approved_control_evidence_refresh.sql	b051840f87086cdfcfbe21abae004df2f7023907f081851f95c22a7e017f8800	1970-01-01 00:00:00+00
+0950_remove_retired_workflow_manifest_binding.sql	87c2d7f9aba676b4b0e0d7262b024fe20f4ee1e7a7ced5ced4dcce19267d9a41	1970-01-01 00:00:00+00
 \.
 
 
@@ -122455,32 +122438,25 @@ COPY public.vendor_relationship_level (level, label, note) FROM stdin;
 -- never dump arbitrary ops.enforcement_control_catalog rows.
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('calendar_intake','tools/calendar-intake-gate.py; bin/calendar-eventkit-capture.sh','ops/calendar-intake-gate-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('candidate_match','pipelines/import_candidate_pool.py','ops/candidate-match-threshold-selftest.py','judgment_ambient','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('canonical_edit','hooks/canonical-edit-gate.py','ops/canonical-edit-gate-selftest.py','deny_gate','t','2026-09-04T21:37:54.757303Z'::timestamptz,'2026-09-04T21:37:54.757303Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('ci_gates','ops/ci.sh','ops/hermes-autonomy-check-selftest.py','surfacing','t','2026-08-19T03:38:59.844809Z'::timestamptz,'2026-08-22T11:37:19.935580Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('client_asset_packet','lib/client_asset_controls.py; pipelines/build-space-search.py','ops/client-asset-controls-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('control-plane-workflow-manifest','ops/config/control-plane-workflows.v1.json','ops/control-plane-selftest.py; ops/control-plane-db-gate.py','deny_gate','f',NULL::timestamptz,'2026-10-22T19:45:19.592586Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('costar_lane','hooks/costar-lane-gate.py','ops/costar-lane-gate-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('deal_guard','mcp-server/src/tools.js; migrations/0079_deal_room_api.sql; migrations/0091_deal_reconciliation_read.sql','mcp-server/test/dealroom.test.js','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('delegation_names_model_and_effort','bin/codex-job','tools/test-codex-job.py','deny_gate','t','2026-10-23T12:23:51.659721Z'::timestamptz,'2026-10-23T12:23:51.659721Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('draft_export_read','hooks/draft-export-gate.py','ops/draft-export-gate-selftest.py','surfacing','f',NULL::timestamptz,'2026-10-23T02:09:39.137819Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('egress_guard','hooks/guard-unattended.py','ops/guard-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('gate_integrity','hooks/gate-integrity.py','command:python3 hooks/gate-integrity.py --selftest','stop_gate','f',NULL::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('github-burst-guard','hooks/github-burst-guard.py','ops/github-burst-guard-selftest.py','deny_gate','f',NULL::timestamptz,'2026-10-23T02:09:39.137819Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('human_authority_runtime','migrations/0161_control_plane_authority_boundary.sql; mcp-server/src/mcp.js','mcp-server/test/control-plane-authority-boundary.test.mjs; ops/control-plane-authority-runtime-preflight-selftest.py','transactional_schema','t','2026-08-20T15:09:01.704306Z'::timestamptz,'2026-08-20T15:09:01.704306Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('index_upkeep','ops/githooks/index-upkeep-check.py; ops/githooks/pre-commit','ops/path-index-hygiene-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('lead_client_pair','mcp-server/src/tools.js','mcp-server/test/confirm-merge-lead-client.test.mjs','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('loop_guard','migrations/0081_loop_blocker.sql; mcp-server/src/tools.js','ops/loop-guard-selftest.py','transactional_schema','t','2026-10-13T11:50:55.554253Z'::timestamptz,'2026-10-13T11:50:55.554253Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('loop_successor','mcp-server/src/tools.js','mcp-server/test/loop-version-and-marker.test.mjs','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('merge_survivor','mcp-server/src/tools.js','mcp-server/test/confirm-merge-lead-client.test.mjs','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('model_floor','hooks/model-floor-gate.py','external:no dedicated suite yet','deny_gate','f',NULL::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('no_send_worker','mcp-server/src/mcp.js','glob:mcp-server/test/*.test.js','judgment_ambient','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('one_repo','hooks/one-repo-gate.py; hooks/bash-write-gate.py','ops/one-repo-gate-selftest.py; ops/bash-write-gate-selftest.py','deny_gate','f',NULL::timestamptz,'2026-10-23T02:09:39.137819Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('outbound_format','mcp-server/src/tools.js','mcp-server/test/document-outbound-format.test.mjs','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('pack_delivery','hooks/rule-pack-preuse-reselection.py','ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py','stop_gate','t','2026-08-24T16:04:56.103125Z'::timestamptz,'2026-10-16T13:48:30.306057Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('path_hygiene','ops/githooks/path-hygiene-check.py; ops/githooks/pre-commit','ops/path-index-hygiene-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('platform_metering_pre_dispatch','lib/platform_metering.py; ops/platform-metering-gate.py; hooks/guard-unattended.py','ops/platform-metering-gate-selftest.py; ops/platform-metering-policy-selftest.py; ops/guard-selftest.py','deny_gate','t','2026-08-20T15:09:01.704306Z'::timestamptz,'2026-08-20T15:09:01.704306Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('pr_only_main_ruleset','external:GitHub branch ruleset 20824501 on jbookout/carr-system''s main branch — PR-only, direct pushes rejected server-side with required status checks; ops/githooks/pre-commit','ops/main-commit-gate-selftest.py; external:a direct `git push origin main` from a local clone is rejected by GitHub before it reaches the branch','deny_gate','t','2026-08-27T11:28:27.421558Z'::timestamptz,'2026-08-27T11:28:27.421558Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('record_home','hooks/record-home-gate.py; hooks/bash-write-gate.py; hooks/guard-unattended.py; hooks/write-effect-check.py','tools/test-record-home-gate.py; ops/bash-write-gate-selftest.py; ops/guard-selftest.py; ops/write-effect-check-selftest.py','deny_gate','f',NULL::timestamptz,'2026-10-23T02:09:39.137819Z'::timestamptz) on conflict (control_key) do nothing;
+insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('record_home','hooks/record-home-gate.py; hooks/guard-unattended.py','tools/test-record-home-gate.py; ops/guard-selftest.py','deny_gate','t','2026-10-23T17:19:39.896362Z'::timestamptz,'2026-10-23T17:19:39.896362Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('record_research','mcp-server/src/tools.js','mcp-server/test/intake-research-gates.test.mjs','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('scheduled_run_record','hooks/scheduled-run-record.py','ops/scheduled-run-record-selftest.py','stop_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('session_boot','hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js','ops/session-brief-selftest.py; ops/machine-converge-selftest.py','surfacing','t','2026-10-13T11:50:55.554253Z'::timestamptz,'2026-10-13T11:50:55.554253Z'::timestamptz) on conflict (control_key) do nothing;
@@ -122490,10 +122466,7 @@ insert into ops.enforcement_control_catalog (control_key,implementation_ref,test
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('trigger_grant','ops/trigger-grant-check.py','ops/trigger-grant-selftest.py','schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('vault_salvage','ops/vault-drift-watch.py','ops/vault-drift-watch-selftest.py','judgment_ambient','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('vendor_level_drift','ops/vendor-level-drift-check.py; bin/nightly.sh','ops/vendor-level-drift-selftest.py','surfacing','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('verification_status','migrations/0104_reverify_queue_supersession.sql; tools/control-plane.py; lib/control_plane_inputs.py','ops/control-plane-inputs-selftest.py; ops/control-plane-db-gate.py','surfacing','f',NULL::timestamptz,'2026-10-22T19:45:19.592586Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('versioned_record','path:mcp-server/src/tools.js; external:database constraints','glob:mcp-server/test/*.test.js; external:migration probes','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('weekend_quiet','hooks/weekend-quiet-gate.py','ops/weekend-quiet-gate-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('weekly_social_route','lib/control_plane_runner.py; tools/social-batch-candidates.py','ops/control-plane-runner-selftest.py; ops/client-asset-controls-selftest.py','judgment_ambient','f',NULL::timestamptz,'2026-10-22T19:45:19.592586Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('whose_work','bin/whose-work.py; tools/health-check.py','ops/whose-work-selftest.py','surfacing','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 -- CARR RULE DELIVERY POLICY (bin/schema-snapshot.sh) — safe rebuild default.
 -- The bounded vocabulary dump preserves an existing singleton. If the source

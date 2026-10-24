@@ -14,9 +14,9 @@ through the named record-layer verbs:
   becomes a ball when the record has none or only an older one.
 
 A run outside 07:00-19:30 local does nothing. Matching requires one record with
-that exact address; names alone never establish identity. Wholly unmatched mail
-stays unresolved and is retried when the address mappings change, even outside
-the rolling lookback. Records are never created, merged or renamed.
+that exact address; names alone never establish identity. Unmatched participants
+in mail and calendar stay unresolved and are retried when mappings change, even
+outside the rolling lookback. Records are never created, merged or renamed.
 Every write carries uuid5(NAMESPACE_URL, "<verb>|<ref>|<source id>"), so an
 action stays pending in the state file until the verb acknowledges it and the
 retry replays the same key. A run with any write, model or cleanup failure
@@ -92,8 +92,34 @@ def resolve_store(home: Path) -> Path:
     return store
 
 
+ERROR_CODES = frozenset({'timeout', 'auth_refused', 'key_reuse', 'transport_oversized',
+                         'no_acknowledgement', 'reply_unreadable', 'transport_error',
+                         'invalid_request', 'subject_unresolved', 'database_refused',
+                         'setup_failed', 'contacts_empty', 'contacts_read_failed'})
+BLOCKED_ERRORS = frozenset({'key_reuse', 'transport_oversized', 'invalid_request', 'subject_unresolved'})
+
+
+def _reply_error(reply: dict) -> str:
+    error = reply.get('error')
+    if error == 'key_reuse':
+        return error
+    if error in ('unauthorized', 'forbidden'):
+        return 'auth_refused'
+    if error in ('missing_required', 'invalid_field_value', 'missing_idempotency_key', 'unknown_kind'):
+        return 'invalid_request'
+    if error in ('subject_not_found', 'needs_disambiguation', 'ref_not_found', 'not_found'):
+        return 'subject_unresolved'
+    if error == 'database_refused_the_statement':
+        return 'database_refused'
+    return 'no_acknowledgement'
+
+
 class CarrError(RuntimeError):
-    """The record layer refused or could not be reached."""
+    """A safe diagnostic code; never retain request content or raw process errors."""
+
+    def __init__(self, *, code: str = 'transport_error'):
+        self.code = code if code in ERROR_CODES else 'transport_error'
+        super().__init__(self.code)
 
 
 class DecodeError(RuntimeError):
@@ -273,12 +299,25 @@ def _best_copies(mails: list[dict]) -> list[dict]:
 class Matcher:
     def __init__(self, contacts: list):
         self.by_email: dict[str, set] = {}
+        self.unsupported: set[str] = set()
         for c in contacts:
-            if '@' in c.email and not _internal(c.email) and RECORD_REF.match(c.ref):
-                self.by_email.setdefault(c.email.lower(), set()).add(c.ref)
+            if '@' in c.email and not _internal(c.email):
+                if RECORD_REF.match(c.ref):
+                    self.by_email.setdefault(c.email.lower(), set()).add(c.ref)
+                else:
+                    self.unsupported.add(c.email.lower())
 
     def fingerprint(self) -> str:
-        return _hash(json.dumps({a: sorted(refs) for a, refs in self.by_email.items()}, sort_keys=True))
+        return _hash(json.dumps({'supported': {a: sorted(refs) for a, refs in self.by_email.items()},
+                                 'unsupported': sorted(self.unsupported)}, sort_keys=True))
+
+    def reason(self, address: str) -> str | None:
+        refs = self.by_email.get(address.lower(), set())
+        if len(refs) > 1:
+            return 'ambiguous'
+        if not refs:
+            return 'unsupported' if address.lower() in self.unsupported else 'missing'
+        return None
 
     def ref(self, address: str) -> str | None:
         refs = self.by_email.get(address.lower(), set())
@@ -341,9 +380,10 @@ class Run:
         self.today = now.astimezone(LOCAL).date()
         self.counts = {k: 0 for k in ('emails', 'events_past', 'events_upcoming', 'logged', 'preview_only',
                                       'full_text_notes', 'balls_set', 'balls_kept', 'unmatched',
-                                      'model_failed', 'steps_pending', 'writes_failed')}
+                                      'model_failed', 'steps_pending', 'writes_failed',
+                                      'writes_deferred', 'requests_blocked')}
         self.written: list[tuple[str, str, str, str]] = []
-        self.unmatched: set[tuple[str, str]] = set()
+        self.unmatched: set[tuple[str, str, str]] = set()
         self.balls: dict[str, int] = {}
         self.attempted: set[str] = set()
 
@@ -357,14 +397,27 @@ class Run:
             if args['idempotency_key'] in self.attempted:
                 return False
             self.attempted.add(args['idempotency_key'])
+            if request.get('disposition') == 'blocked':
+                self.counts['requests_blocked'] += 1
+                return False
+            if (request.get('retry_at') or 0) > self.now.timestamp():
+                self.counts['writes_deferred'] += 1
+                return False
+            request['attempts'] = request.get('attempts', 0) + 1
+            _save(self.out, self.state)
             try:
                 reply = self.ports.carr(request['verb'], json.loads(request['payload']))
-                if reply.get('ok') is not True:
-                    raise CarrError('write not acknowledged')
-            except CarrError:
+                if not isinstance(reply, dict) or reply.get('ok') is not True:
+                    raise CarrError(code=_reply_error(reply) if isinstance(reply, dict) else 'reply_unreadable')
+            except CarrError as error:
+                blocked = error.code in BLOCKED_ERRORS
+                request.update(error_code=error.code, disposition='blocked' if blocked else 'retry',
+                               retry_at=None if blocked else int(self.now.timestamp()) +
+                               min(1800, 60 * 2 ** min(request['attempts'] - 1, 5)))
                 self.counts['writes_failed'] += 1
+                _save(self.out, self.state)
                 return False
-            request['acknowledged'] = True
+            request.update(acknowledged=True, disposition='acknowledged', retry_at=None, error_code=None)
             _save(self.out, self.state)
         self.written.append((who, args['ref'], verb, note))
         return True
@@ -425,7 +478,7 @@ class Run:
                 m['ident'], m['sent_unix'] = prior
             if (m['sent_unix'] < since and m['ident'] not in unresolved) or m['sent_unix'] > self.now.timestamp() + 300:
                 continue
-            if any(abs(t - m['sent_unix']) <= COPY_WINDOW for t in done.get(m['ck'], [])):
+            if m['ident'] not in unresolved and any(abs(t - m['sent_unix']) <= COPY_WINDOW for t in done.get(m['ck'], [])):
                 continue
             outbound = _internal(m['sender'])
             parties = ([(a, None) for a in _addresses(m['recipients']) if not _internal(a)] if outbound
@@ -438,12 +491,21 @@ class Run:
             for address, name in parties:
                 ref = matcher.ref(address)
                 if ref is None:
-                    self.unmatched.add((name or '(no name)', _domain(address)))
+                    reason = matcher.reason(address)
+                    assert reason is not None
+                    self.unmatched.add((name or '(no name)', _domain(address), reason))
                 elif ref not in refs:
                     refs.append(ref)
-            self.counts['unmatched'] += len(parties) - len(refs)
+            progress = unresolved.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix']})
+            progress['participants'] = {_hash(address): matcher.reason(address) for address, _ in parties
+                                        if matcher.reason(address)}
+            completed = progress.setdefault('completed_refs', [])
+            missing = bool(progress['participants'])
+            refs = [ref for ref in refs if ref not in completed]
             if not refs:
-                unresolved[m['ident']] = {'ck': m['ck'], 'sent': m['sent_unix']}
+                if not missing:
+                    unresolved.pop(m['ident'], None)
+                    done.setdefault(m['ck'], []).append(m['sent_unix'])
                 continue
             who = _clean_name(m['sender_name'], m['subject']) or m['sender'].lower()
             kind = 'email_out' if outbound else 'email_in'
@@ -452,18 +514,21 @@ class Run:
                 pending.setdefault(m['ident'], {'refs': refs, 'ck': m['ck'], 'sent': m['sent_unix'],
                                                 'sender_email': m['sender'].lower(),
                                                 'subject_hash': _hash(m['subject'] or '')})
+                pending[m['ident']]['refs'] = sorted(set(pending[m['ident']]['refs']) | set(refs))
             steps.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0],
                                            'who': who, 'outbound': outbound,
                                            'activity_keys': [key('log-activity', ref, m['ident']) for ref in refs]})
-            ok = all([self.write('log-activity', {
+            results = [self.write('log-activity', {
                 'idempotency_key': key('log-activity', ref, m['ident']), 'ref': ref, 'kind': kind,
                 'summary': f'{label}: {m["subject"] or "(no subject)"}', 'detail': m['text'],
-                'occurred_at': _iso(m['sent_unix'])}, who, '' if m['full'] else 'preview_only') for ref in refs])
-            if not ok:
+                'occurred_at': _iso(m['sent_unix'])}, who, '' if m['full'] else 'preview_only') for ref in refs]
+            completed.extend(ref for ref, ok in zip(refs, results) if ok)
+            if not all(results):
                 continue
             self.counts['logged'] += 1
-            unresolved.pop(m['ident'], None)
-            done.setdefault(m['ck'], []).append(m['sent_unix'])
+            if not missing:
+                unresolved.pop(m['ident'], None)
+                done.setdefault(m['ck'], []).append(m['sent_unix'])
             if not m['full']:
                 self.counts['preview_only'] += 1
 
@@ -523,6 +588,7 @@ class Run:
     def events(self, events: list[dict], matcher: Matcher, since: int) -> None:
         logged = self.state.setdefault('events_logged', {})
         balled = self.state.setdefault('events_balled', {})
+        unresolved = self.state.setdefault('calendar_unresolved', {})
         transitions: list[int] = []
         now = int(self.now.timestamp())
         for e in sorted(events, key=lambda e: e['start_unix']):
@@ -532,9 +598,11 @@ class Run:
             enters = e['start_unix'] - int(UPCOMING.total_seconds())
             if enters > now:
                 transitions.append(enters)
-            past = since <= e['end_unix'] <= now
+            past = e['end_unix'] <= now and (since <= e['end_unix'] or source in unresolved)
             soon = now < e['start_unix'] <= now + UPCOMING.total_seconds()
-            if not (past and source not in logged) and not (soon and source not in balled):
+            if not past and not soon:
+                continue
+            if source not in unresolved and not (past and source not in logged) and not (soon and source not in balled):
                 continue
             people = [(email, name) for name, email in e['attendees'] if email and not _internal(email)]
             org = (e['organizer_email'] or '').lower()
@@ -544,25 +612,39 @@ class Run:
             for email, name in people:
                 ref = matcher.ref(email)
                 if ref is None:
-                    self.unmatched.add((name or '(no name)', _domain(email)))
+                    reason = matcher.reason(email)
+                    assert reason is not None
+                    self.unmatched.add((name or '(no name)', _domain(email), reason))
                 elif ref not in [r for r, _ in refs]:
                     refs.append((ref, name or email))
+            progress = unresolved.setdefault(source, {})
+            progress['participants'] = {_hash(email): matcher.reason(email) for email, _ in people
+                                        if matcher.reason(email)}
+            missing = not refs or bool(progress['participants'])
+            completed = progress.setdefault('logged_refs' if past else 'balled_refs', [])
+            refs = [(ref, name) for ref, name in refs if ref not in completed]
             subject = e['subject'] or 'Meeting'
             if past:
                 self.counts['events_past'] += 1
                 kind = 'tour' if re.search(r'\btour', subject, re.I) else 'call' if re.search(r'\bcall\b', subject, re.I) else 'meeting'
-                if all([self.write('log-activity', {
+                results = [self.write('log-activity', {
                         'idempotency_key': key('log-activity', ref, source), 'ref': ref, 'kind': kind,
                         'summary': f'{kind.capitalize()}: {subject}', 'detail': e['body'] or '',
-                        'occurred_at': _iso(e['start_unix'])}, name) for ref, name in refs]):
+                        'occurred_at': _iso(e['start_unix'])}, name) for ref, name in refs]
+                completed.extend(ref for (ref, _), ok in zip(refs, results) if ok)
+                if not missing and all(results):
                     logged[source] = e['end_unix']
+                    unresolved.pop(source, None)
             else:
                 self.counts['events_upcoming'] += 1
                 start = datetime.fromtimestamp(e['start_unix'], LOCAL)
-                if all([self.ball(ref, name, f'{subject} with {name}, {start:%a %b %-d %-I:%M %p}',
+                results = [self.ball(ref, name, f'{subject} with {name}, {start:%a %b %-d %-I:%M %p}',
                                   start.date().isoformat(), now, f'event|{source}', only_if_none=True)
-                        for ref, name in refs]):
+                        for ref, name in refs]
+                completed.extend(ref for (ref, _), ok in zip(refs, results) if ok)
+                if not missing and all(results):
                     balled[source] = e['start_unix']
+                    unresolved.pop(source, None)
         self.state['calendar_due_at'] = min(transitions, default=None)
         self.state.pop('upcoming', None)
 
@@ -571,8 +653,14 @@ class Run:
         lines += [f'- {k}: {v}' for k, v in sorted(self.counts.items())]
         lines += [f'- needs_refresh_listed: {refresh_count}', '', '## Writes', '']
         lines += [f'- {who} | {ref} | {verb}' + (f' | {note}' if note else '') for who, ref, verb, note in self.written]
+        lines += ['', '## Failed requests', '']
+        for ident, request in self.state.get('requests', {}).items():
+            if not request['acknowledged']:
+                lines.append(f'- {ident} | {request["verb"]} | {request.get("error_code", "pending")} | '
+                             f'attempts={request.get("attempts", 0)} | {request.get("disposition", "retry")} | '
+                             f'retry_at={request.get("retry_at")}')
         lines += ['', '## Unmatched', '']
-        lines += [f'- {name} | {domain}' for name, domain in sorted(self.unmatched)]
+        lines += [f'- {name} | {domain} | {reason}' for name, domain, reason in sorted(self.unmatched)]
         _private_write(out / f'report-{self.now.astimezone(LOCAL):%Y%m%d-%H%M%S}.md', '\n'.join(lines) + '\n')
 
 
@@ -592,6 +680,19 @@ def _refresh_list(out: Path, pending: dict) -> int:
         entries.append(entry)
     _private_write(path, json.dumps(entries, indent=2) + '\n')
     return len(entries)
+
+
+def mapping_counts(state: dict) -> dict:
+    mail = state.get('mail_unresolved', {})
+    calendar = state.get('calendar_unresolved', {})
+    participants = {}
+    for item in [*mail.values(), *calendar.values()]:
+        participants.update(item.get('participants', {}))
+    return {'unresolved_messages': len(mail),
+            'unresolved_calendar': len(calendar), 'unresolved_addresses': len(participants),
+            'unmatched': len(participants),
+            **{'mapping_' + reason: list(participants.values()).count(reason)
+               for reason in ('missing', 'ambiguous', 'unsupported')}}
 
 
 def _prune(state: dict, now: datetime) -> None:
@@ -651,11 +752,11 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     signature = [info.st_mtime_ns, info.st_size]
     now = ports.now()
     matcher = None
-    if state.get('mail_unresolved'):
+    if state.get('mail_unresolved') or state.get('calendar_unresolved'):
         try:
             matcher = Matcher(ports.contacts())
-        except CarrError:
-            return Outcome('failed', 'carr_unreachable')
+        except CarrError as error:
+            return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code)
     contacts_changed = matcher is not None and state.get('contact_map') != matcher.fingerprint()
     pending_writes = any(not r['acknowledged'] for r in state.get('requests', {}).values())
     if state.get('store') == signature and not contacts_changed and not state.get('steps') and not pending_writes and not _calendar_due(state, now):
@@ -663,7 +764,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
             Run(ports, state, now, out).full_text([])
             _refresh_list(out, state['pending_full'])
             _save(out, state)
-        return Outcome('succeeded', 'store_unchanged')
+        return Outcome('succeeded', 'store_unchanged', mapping_counts(state))
     try:
         meta, mails, events = _decode(home, out, ports.decode)
     except FullDiskAccessRequired as error:
@@ -695,14 +796,22 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         work.full_text(mails)
         work.next_steps(mails)
         work.events(events, matcher, since)
-    except CarrError:
+    except CarrError as error:
         _save(out, state)
-        return Outcome('failed', 'carr_unreachable', work.counts)
+        return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code, work.counts)
+    work.counts.update(mapping_counts(state))
+    for code in ERROR_CODES:
+        work.counts['error_' + code] = sum(not r['acknowledged'] and r.get('error_code') == code
+                                          for r in state.get('requests', {}).values())
     refresh = _refresh_list(out, state.get('pending_full', {}))
     if any(work.counts.values()) or work.written:
         work.report(out, refresh)
     counts = {**work.counts, 'needs_refresh_listed': refresh}
-    failed = 'writes_failed' if work.counts['writes_failed'] else 'model_failed' if work.counts['model_failed'] else 'steps_pending' if state.get('steps') else None
+    failed = next((reason for count, reason in (('writes_failed', 'writes_failed'),
+                                               ('requests_blocked', 'request_blocked'),
+                                               ('writes_deferred', 'writes_deferred'),
+                                               ('model_failed', 'model_failed')) if work.counts[count]),
+                  'steps_pending' if state.get('steps') else None)
     if failed:
         _save(out, state)
         return Outcome('failed', failed, counts)
@@ -717,18 +826,32 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
 def _carr(repo: Path) -> Callable[[str, dict], dict]:
     def call(verb: str, args: dict) -> dict:
         try:
-            done = subprocess.run([str(repo / 'run.sh'), 'call', verb, json.dumps(args)], cwd=repo,
+            done = subprocess.run([str(repo / 'run.sh'), 'call', verb, '-'], input=json.dumps(args), cwd=repo,
                                   capture_output=True, text=True, timeout=120)
-        except (OSError, subprocess.TimeoutExpired):
-            raise CarrError(f'{verb} unreachable') from None
+        except subprocess.TimeoutExpired:
+            raise CarrError(code='timeout') from None
+        except OSError as error:
+            raise CarrError(code='transport_oversized' if error.errno == errno.E2BIG else 'transport_error') from None
         if done.returncode:
-            raise CarrError(f'{verb} exit {done.returncode}')
+            code = 'setup_failed' if done.returncode == 2 else 'transport_error'
+            for prefix in ('TOOL ERROR ', 'RPC ERROR '):
+                if prefix in (done.stderr or ''):
+                    try:
+                        payload, _ = json.JSONDecoder().raw_decode(done.stderr.split(prefix, 1)[1].lstrip())
+                        if isinstance(payload, (dict, str)):
+                            code = _reply_error(payload if isinstance(payload, dict) else {'error': payload})
+                    except ValueError:
+                        pass
+                    break
+            raise CarrError(code=code)
         try:
             reply = json.loads(done.stdout)
         except ValueError:
-            raise CarrError(f'{verb} reply unreadable') from None
+            raise CarrError(code='reply_unreadable') from None
+        if not isinstance(reply, dict):
+            raise CarrError(code='reply_unreadable')
         if verb in WRITE_VERBS and reply.get('ok') is not True:
-            raise CarrError(f'{verb} not acknowledged')
+            raise CarrError(code=_reply_error(reply))
         return reply
     return call
 
@@ -747,9 +870,9 @@ def _contacts(repo: Path) -> Callable[[], list]:
                         rows.append(Contact(email, str(r.get(id_col) or '').strip(),
                                             str(r.get(name_col) or r.get(org_col) or '').strip()))
         except (Exception, SystemExit):
-            raise CarrError('record contacts unreachable') from None
+            raise CarrError(code='contacts_read_failed') from None
         if not rows:
-            raise CarrError('record contacts empty')
+            raise CarrError(code='contacts_empty')
         return rows
     return read
 
@@ -773,4 +896,6 @@ def main() -> int:
                   decode=_decoder(home), now=lambda: datetime.now(timezone.utc))
     outcome = run(repo, home, ports)
     print(status_line(outcome))
+    reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
+    print('outlook-intake-receipt ' + json.dumps({'state': outcome.state, 'reason': reason, 'counts': outcome.counts}))
     return EXIT[outcome.state]
