@@ -214,6 +214,7 @@ test('backfill uses the existing envelope for same-key response replay',async()=
     let calls=0;
     const c={query:fixture.client.query.bind(fixture.client),ai:{run:async(_model,{text})=>{calls++;return{data:text.map(()=>unit())};}}};
     await seedSection(c,0);
+    await c.query('alter table event alter column subject_id set not null');
     const runtime={...actor,id:fixtureIds[20]};
     const args={idempotency_key:fixtureIds[21],limit:16};
     await c.query('begin');
@@ -222,6 +223,12 @@ test('backfill uses the existing envelope for same-key response replay',async()=
     assert.equal(first.embedded,1);
     assert.equal(replay.replayed,true);
     assert.equal(calls,1,'same-key retry never calls the model again');
+    const bounded=await TOOLS['backfill-doctrine-embeddings'].handler(c,runtime,
+      {idempotency_key:fixtureIds[22],limit:1});
+    assert.equal(bounded.embedded,0);
+    assert.equal(bounded.remaining,0);
+    const events=await c.query('select subject_type,subject_id from event');
+    assert.deepEqual(events.rows,Array(2).fill({subject_type:'actor',subject_id:runtime.id}));
     await c.query('rollback');
   }finally{await fixture.close();}
 });

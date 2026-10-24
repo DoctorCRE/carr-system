@@ -159,3 +159,13 @@ for (const candidate of [
   assert.deepEqual(payload.retired_aliases, [{ ref: 'P-2', name: 'Retired synthetic' }]);
   assert.doesNotMatch(JSON.stringify(payload), /stack|SELECT|private_table|private_constraint|synthetic-private-row/i);
 });
+
+for (const column of [null, "subject_id"]) test(`MCP does not blame input for an internal constraint on ${column}`, async t => {
+  const error = pgConstraintError(Object.assign(new Error(privateText), {
+    code: "23502", table: "event", column, detail: privateText,
+  }));
+  const payload = await failure(t, error);
+  assert.equal(payload.error, "database_refused_the_statement");
+  assert.equal(payload.fields, undefined);
+  assert.doesNotMatch(payload.hint, /Check the named fields/);
+});
