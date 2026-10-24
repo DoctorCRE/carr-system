@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Validate the closed D2 disposition coverage for derived action-risk gaps.
+"""Validate closed D2 dispositions against the frozen phase-1 risk baseline.
 
 This is intentionally a contract validator, not a dispatcher or policy engine.
 It has no record-layer, network, or client-payload path: it only proves that the
-known baseline NONE rows are owned and that a selected remediation actually
-changed the derived runtime evidence it claims to change.
+known baseline NONE rows are owned and the selected historical remediation is
+bound to that baseline. It does not establish current handler or risk coverage;
+current handler existence belongs to scac-mutation-registry.current.generated.js.
 """
 
 from __future__ import annotations
@@ -90,7 +91,7 @@ def _validate_row(row: Any) -> dict[str, Any]:
 
 
 def validate_dispositions(artifact: Any, registry: Any, registry_bytes: bytes) -> dict[str, Any]:
-    """Validate exact baseline coverage against the current generated registry."""
+    """Validate exact historical coverage against the frozen phase-1 baseline."""
     doc = _exact_object(artifact, ARTIFACT_FIELDS, "disposition artifact fields are invalid")
     if (doc["contract"] != "carr-action-risk-dispositions" or doc["version"] != "1.0.0"
             or doc["status"] != "phase1_guardrails"
@@ -131,7 +132,9 @@ def validate_dispositions(artifact: Any, registry: Any, registry_bytes: bytes) -
                 raise DispositionError("selected base_version protection is invalid")
         elif runtime.get("protection") != "NONE":
             raise DispositionError("unselected runtime protection drifted")
-    return {"status": "valid", "selected_slice": SELECTED_TOOL, "rows": len(validated)}
+    return {"status": "valid", "selected_slice": SELECTED_TOOL, "rows": len(validated),
+            "coverage": "historical_phase1_baseline",
+            "current_handler_inventory": "mcp-server/src/scac-mutation-registry.current.generated.js"}
 
 
 def load_and_validate() -> dict[str, Any]:

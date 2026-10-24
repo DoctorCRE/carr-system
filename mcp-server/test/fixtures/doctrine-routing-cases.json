@@ -1,0 +1,82 @@
+[
+  {
+    "case": "B1",
+    "q": "What should I include in a tenant tour packet?",
+    "gold": "bf12c19b-5095-4750-b1af-1c5f1e0b47fc",
+    "text": "\n\nSearch task phrases: Include a tenant tour packet. Prepare a client-facing tour packet. Assemble tour materials.\n",
+    "title": "B1 procedure",
+    "alias": "Prepare a client-facing tour packet"
+  },
+  {
+    "case": "B2",
+    "q": "What should Dr. CRE's voice sound like?",
+    "gold": "57aab456-5407-4a0b-87d2-7a3b4cbd64ae",
+    "text": "\n\nSearch task phrases: What Dr. CRE's voice should sound like. Write dialogue in Doc's voice. Choose the product persona's tone.\n",
+    "title": "B2 procedure",
+    "alias": "Write dialogue in Doc's voice"
+  },
+  {
+    "case": "B3",
+    "q": "What facts should I extract when abstracting a medical office lease?",
+    "gold": "6325385b-43ec-40f1-9d00-584931733561",
+    "text": "\n\nSearch task phrases: Extract facts when abstracting a medical office lease. Identify lease abstraction fields. Summarize medical lease terms.\n",
+    "title": "B3 procedure",
+    "alias": "Identify lease abstraction fields"
+  },
+  {
+    "case": "B4",
+    "q": "When should I use an RFP versus an LOI?",
+    "gold": "154546ca-fea6-41dd-ba03-fce5cdb2e2aa",
+    "text": "\n\nSearch task phrases: Use an RFP versus an LOI. Choose between a request for proposal and a letter of intent. Select the negotiation document.\n",
+    "title": "B4 procedure",
+    "alias": "Choose between a request for proposal and a letter of intent"
+  },
+  {
+    "case": "B5",
+    "q": "How do I choose which vendor introductions to make?",
+    "gold": "9abf244d-7a97-4cc6-92e2-33166a125a97",
+    "text": "\n\nSearch task phrases: Choose which vendor introductions to make. Decide when an introduction is ripe. Select vendors for a deal stage.\n",
+    "title": "B5 procedure",
+    "alias": "Decide when an introduction is ripe"
+  },
+  {
+    "case": "E1",
+    "q": "How do I safely test and ship a database migration?",
+    "gold": "f6287fac-848d-4d83-bac0-46ccc2ce8515",
+    "text": "\n\nSearch task phrases: Safely test and ship a database migration. Test schema changes before release. Validate database migrations.\n",
+    "title": "E1 procedure",
+    "alias": "Test schema changes before release"
+  },
+  {
+    "case": "E2",
+    "q": "How do I ship a code change from branch through PR and deployment?",
+    "gold": "c1035316-5b4d-4f62-9a3c-84fb7634b639",
+    "text": "\n\nSearch task phrases: Ship a code change from branch through PR and deployment. Deliver a branch through a pull request to production. Follow the GitHub shipping workflow.\n",
+    "title": "Delivery loop: ship a code change from branch through PR and deployment",
+    "alias": "Deliver a branch through a pull request to production"
+  },
+  {
+    "case": "E3",
+    "q": "Which checks should I run before pushing my branch?",
+    "gold": "2740294d-4bfd-4056-8e27-adb47b924432",
+    "text": "\n\nSearch task phrases: Run checks before pushing a branch. Verify a branch before push. Choose the pre-push checks.\n",
+    "title": "E3 procedure",
+    "alias": "Verify a branch before push"
+  },
+  {
+    "case": "E4",
+    "q": "Which repository owns the DoctorCRE app and software factory?",
+    "gold": "3bb51d3e-2661-4ea2-a585-053540545b5d",
+    "text": "\n\nSearch task phrases: Which repository owns the DoctorCRE app and software factory. Locate application and factory code ownership. Choose the authorized code home.\n",
+    "title": "E4 procedure",
+    "alias": "Locate application and factory code ownership"
+  },
+  {
+    "case": "E5",
+    "q": "How should I shape a pull request so it is independently reviewable?",
+    "gold": "5056de45-1032-4f47-9c99-1a6b00446918",
+    "text": "\n\nSearch task phrases: Shape a pull request so it is independently reviewable. Split work into reviewable pull requests. Define a PR with independent value.\n",
+    "title": "E5 procedure",
+    "alias": "Split work into reviewable pull requests"
+  }
+]

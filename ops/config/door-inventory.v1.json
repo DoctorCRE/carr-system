@@ -201,10 +201,10 @@
       "evidence": "lib/github_app_config.py documents the retained manual intake script; this declaration grants no new credential access."
     },
     {
-      "path": "bin/council-lib.sh",
-      "class": "hand_tool",
-      "reason": "Shared helpers for explicitly invoked developer review commands; automatic smoke health use is retired.",
-      "evidence": "bin/council-lib.sh run_precheck and run_grok"
+      "path": "hooks/turn_origin.py",
+      "class": "inert",
+      "reason": "Retained transcript-origin classifier has no executable caller after PR #2195 retires weekend-quiet-gate.py. It remains hash-protected with the retained hook inventory.",
+      "evidence": "WR-000284 post-purge door inventory; PR #2195 deletes the last caller hooks/weekend-quiet-gate.py. The fixed retirement scope retains this hash-protected classifier as inert."
     },
     {
       "path": "bin/grok-run.sh",
@@ -229,18 +229,6 @@
       "class": "hand_tool",
       "reason": "Implementation of the explicitly invoked public source research command; retained with its tools-bin owner.",
       "evidence": "bin/study-sources.sh; bin/study_sources.py main"
-    },
-    {
-      "path": "pipelines/review_findings_ledger.py",
-      "class": "hand_tool",
-      "reason": "Developer review helper used by the explicitly invoked Codex review pipeline; automatic smoke entrypoint is retired.",
-      "evidence": "pipelines/run_codex_review.py imports review_findings_ledger"
-    },
-    {
-      "path": "pipelines/run_codex_review.py",
-      "class": "hand_tool",
-      "reason": "On-demand developer review pipeline retained after its automatic model smoke entrypoint is retired.",
-      "evidence": "pipelines/run_codex_review.py main; bin/council-lib.sh invocation comments"
     },
     {
       "path": "tools/room-bridge/grok_wire.py",

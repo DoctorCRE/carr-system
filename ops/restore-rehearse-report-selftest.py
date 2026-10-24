@@ -16,6 +16,7 @@ PASS = """  ok    newest dump: carr-20261018.sql.age
   ok    dump is 4h old
   ok    created restore-rehearse-20261018T090000Z (br-fixture)
   restored total is 99.5% of production (floor 90%)
+  SECURITY PARITY: PASS
   RESTORE REHEARSAL: PASS
   teardown: decrypted dump removed
   teardown: branch br-fixture deleted

@@ -32,7 +32,7 @@
 # normal mode permission to recreate those retired files or write Drive.
 REPO="$HOME/carr-system"
 LOG="$REPO/out/local-briefs.log"
-[ -f "$HOME/.config/carr/db.env" ] || { echo "$(date -u +%FT%TZ) SKIP no db.env" >> "$LOG"; exit 0; }
+[ -f "$HOME/.config/carr/db.env" ] || { echo "$(date -u +%FT%TZ) SKIP no db.env" >> "$LOG"; exit 78; }
 cd "$REPO" || exit 1
 
 RECOVERY=0

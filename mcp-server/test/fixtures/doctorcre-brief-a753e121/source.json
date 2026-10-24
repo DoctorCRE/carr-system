@@ -1,0 +1,12 @@
+{
+  "repository": "jbookout/doctorcre-app",
+  "commit": "a753e12120ba396339c0e874ba309333348a12eb",
+  "files": {
+    "morning-brief-model.js": "760068ea74cce9ac86805a25a4915ad60350b2466fe9f50b52039b917e9eefb4",
+    "brief-owner-filter.js": "3ded7bb8b87c9d25968d2385a1f492292f7cc8e82ddf9b810fa0806b722118c0",
+    "brief-preferences.js": "889a1ee9d07f1420b96462d3a62080d0fc0f167e6f4d7bfc40bc4a9e960e734c",
+    "owner-filters.js": "19348f5ae10245b65df85a9bf1a725a07731bc050eb3efb781ce21edb8b7fe5d",
+    "change-receipts.mjs": "7189cf11edfd46d4a3126d6859beca88216e1e5cb9a962ed70492f5de47baa18",
+    "calendar-model.js": "88bea23d3ebf69f2e89ffd3b01ba0fc7076be21411e2bc0c165e7895b3442e74"
+  }
+}

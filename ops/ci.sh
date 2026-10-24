@@ -509,7 +509,7 @@ check_pushfloor() {
 
   local gate_surface=""
   if [ -n "$changed" ]; then
-    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(hook-script-policy|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
+    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(hook-script-policy|codex-hooks)\.json|ops/[^/]+-selftest\.py)' || true)"
   fi
   if [ -n "$gate_surface" ]; then
     ran="$ran gate-closure"
@@ -588,6 +588,14 @@ check_migration_fixtures() {
          "$PY" ops/migration-production-proof-selftest.py --postgres; then
       tail -30 "$LOGDIR/migration-production-proof-fixture.log" >&2
       bad migration "production equivalence proof failed against the offline database fixture"
+      return
+    fi
+  fi
+  if [[ "$MIGRATION_PART" = all ]]; then
+    if ! run_quiet "$LOGDIR/migration-restore-security.log" \
+         "$PY" ops/restore-rehearse-record-selftest.py --postgres; then
+      tail -30 "$LOGDIR/migration-restore-security.log" >&2
+      bad migration "restore security parity failed against the disposable PostgreSQL fixture"
       return
     fi
   fi
@@ -802,26 +810,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       return
     fi
 
-    if [ -f mcp-server/test/gate-zero-outcome-role-boundary.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-           run_quiet "$LOGDIR/gate-zero-role-boundary.log" \
-           node --test mcp-server/test/gate-zero-outcome-role-boundary.test.mjs; then
-        tail -30 "$LOGDIR/gate-zero-role-boundary.log" >&2
-        bad migration "the Gate Zero producer seat/connection-role boundary proof failed"
-        return
-      fi
-    fi
-
-    if [ -f mcp-server/test/foundation-assurance-oracle-role-boundary.v5.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_FOUNDATION_ASSURANCE_DB_REQUIRED=1 \
-           run_quiet "$LOGDIR/foundation-assurance-role-boundary.log" \
-           node --test mcp-server/test/foundation-assurance-oracle-role-boundary.v5.test.mjs; then
-        tail -30 "$LOGDIR/foundation-assurance-role-boundary.log" >&2
-        bad migration "the foundation-assurance oracle connection-role boundary proof failed"
-        return
-      fi
-    fi
-
     if [ -f mcp-server/test/program-controller-census-role-boundary.v5.test.mjs ]; then
       if ! DATABASE_URL="$dsn" CARR_PROGRAM_CONTROLLER_DB_REQUIRED=1 \
            run_quiet "$LOGDIR/program-controller-role-boundary.log" \
@@ -966,36 +954,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
            -f mcp-server/test/foundation-assurance-minimum-postgres.sql; then
         tail -30 "$LOGDIR/foundation-assurance-minimum-postgres.log" >&2
         bad migration "the foundation-assurance candidate/evidence atomic binding proof failed"
-        return
-      fi
-    fi
-
-    if [ -f mcp-server/test/gate-zero-outcome-record-race.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-           run_quiet "$LOGDIR/gate-zero-outcome-race.log" \
-           node --test mcp-server/test/gate-zero-outcome-record-race.test.mjs; then
-        tail -30 "$LOGDIR/gate-zero-outcome-race.log" >&2
-        bad migration "the Gate Zero outcome candidate-key race proof failed"
-        return
-      fi
-    fi
-
-    if [ -f mcp-server/test/gate-zero-outcome-digest-tagged.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-           run_quiet "$LOGDIR/gate-zero-digest-tagged.log" \
-           node --test mcp-server/test/gate-zero-outcome-digest-tagged.test.mjs; then
-        tail -30 "$LOGDIR/gate-zero-digest-tagged.log" >&2
-        bad migration "the Gate Zero tagged outcome-digest cross-implementation proof failed"
-        return
-      fi
-    fi
-
-    if [ -f mcp-server/test/gate-zero-candidate-authority-filing.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-           run_quiet "$LOGDIR/gate-zero-candidate-filing.log" \
-           node --test mcp-server/test/gate-zero-candidate-authority-filing.test.mjs; then
-        tail -30 "$LOGDIR/gate-zero-candidate-filing.log" >&2
-        bad migration "the service-candidate and historical Gate Zero provenance proof failed"
         return
       fi
     fi

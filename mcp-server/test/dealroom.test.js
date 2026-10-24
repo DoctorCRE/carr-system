@@ -97,6 +97,7 @@ class FakeClient {
         .map(d => ({ subject_id: d.id, display_name: d.name, status: d.phase, client_ref: "C-1" }));
       return { rows };
     }
+    if (sql.startsWith("select pg_advisory_xact_lock")) return { rows: [] };
     if (sql.includes("dealroom:field-lock")) return { rows: [{}] };
     if (sql.includes("dealroom:status-plan")) {
       const deal = this.deals.get(params[0]);
@@ -737,10 +738,10 @@ test("undo follows a stale patch that records a conflict against its target even
 test("next-step supersede leaves old rows intact and deal thread is stably newest-first", async () => {
   const db = new FakeClient();
   const oldStep = await call("set-next-step", db, actors.joe,
-    { idempotency_key: "step-1", deal: "Deal Alpha", text: "Call landlord", next_date: "2026-08-10" });
+    { base_version: db.deals.get(ids.deal).version, idempotency_key: "step-1", deal: "Deal Alpha", text: "Call landlord", next_date: "2026-08-10" });
   db.tick(1000);
   const newStep = await call("set-next-step", db, actors.dell,
-    { idempotency_key: "step-2", deal: "Deal Alpha", text: "Review counter", next_date: "2026-08-11" });
+    { base_version: db.deals.get(ids.deal).version, idempotency_key: "step-2", deal: "Deal Alpha", text: "Review counter", next_date: "2026-08-11" });
   assert.equal(db.notes.length, 2);
   assert.equal(newStep.supersedes, oldStep.next_step_id);
   assert.deepEqual(db.notes.map(n => n.text), ["Call landlord", "Review counter"]);
@@ -768,7 +769,7 @@ test("undo of a date edit cannot erase a later date set with the next step", asy
   const firstDateEvent = db.events[0].id;
   db.tick(1000);
   await call("set-next-step", db, actors.dell, {
-    idempotency_key: "step-after-date", deal: "Deal Alpha",
+    base_version: db.deals.get(ids.deal).version, idempotency_key: "step-after-date", deal: "Deal Alpha",
     text: "Review counter", next_date: "2026-08-11",
   });
   await assert.rejects(call("revert-deal-field", db, actors.joe, {
@@ -796,7 +797,7 @@ test("date undo reads PostgreSQL dates as calendar text, including after set-nex
       await call(verb, db, actors.joe, { idempotency_key: "date-patch",
         deal: "Deal Alpha", field: "next_date", value: "2026-08-11", base_event_id: null });
     } else {
-      await call(verb, db, actors.joe, { idempotency_key: "date-step",
+      await call(verb, db, actors.joe, { base_version: db.deals.get(ids.deal).version, idempotency_key: "date-step",
         deal: "Deal Alpha", text: "Call landlord", next_date: "2026-08-11" });
     }
     const event = db.events.find(row => row.field === "next_date");
