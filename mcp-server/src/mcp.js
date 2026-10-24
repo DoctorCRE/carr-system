@@ -759,6 +759,8 @@ export async function callTool(env, actor, name, args, profile = "full") {
       Array.isArray(args?.links) && args.links.length)
     throw new ToolError({ error: "not_in_profile", verb: "log-activity (links[])", profile,
       hint: "a narrow profile may log the activity but not assert relationships — drop links[] from this call and file the introduction facts with add-loop for an interactive partner session to link-parties" });
+  if (!['full','doc'].includes(profile) && name === 'log-activity' && args?.vendor_assignments !== undefined)
+    throw new ToolError({error:'not_in_profile',verb:'log-activity (vendor_assignments)',profile});
   if (connectionRouteForTool(tool) === "reader") {
     const sql = neon(env.DATABASE_URL_READER);
     // sideWrite is the ONLY way a read verb may write, and it is deliberately

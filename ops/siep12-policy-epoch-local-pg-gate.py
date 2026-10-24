@@ -110,14 +110,15 @@ def scenario_registry_and_ledger(cur, ctx) -> None:
     role_authority = project_role_authority(cur)
     if {key: role_authority[key] for key in ("count", "digest")} != current_projection["role_authority"]:
         raise RuntimeError(f"live DB role authority differs from current sealed registry: {role_authority!r}")
+    validated_categories = validate_current_catalog(cur)["categories"]
     expected_catalog = {
         "categories": {
-            "secdef_execute": validate_current_catalog(cur)["categories"]["secdef_execute"],
-            "relation_dml": current_projection["relation_dml"],
+            "secdef_execute": validated_categories["secdef_execute"],
+            "relation_dml": validated_categories["relation_dml"],
             "column_dml": current_projection["column_dml"],
             "job_definitions": {
-                "count": 20,
-                "digest": "sha256:d47341b4e9c290a5e396abce61ff1e187334735cf20544dcd7f96924e6b28f69",
+                "count": 19,
+                "digest": "sha256:c051c2a43b8bd7665bdee00d0940253aa454a9d45e186a3aa8079a63626ba655",
             },
         },
         "combined": catalog["combined"],

@@ -1310,7 +1310,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "log-activity": {
     "ingress_key": "mcp-tool:log-activity",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "34415ad0fe56336ee6fde5d9f274e13e6817e654d8d52b6f7f64e058ed097e33",
+    "schema_digest": "f4631b7df0c325de5d0fd0f2f75f2e21265dcedf91c718a789363e38ff920e33",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -2862,7 +2862,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "set-market-agent": {
     "ingress_key": "mcp-tool:set-market-agent",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "3e1c3511972550b5865776b540f2651473cd31a4a5928e0eecd2c7dc873d2b16",
+    "schema_digest": "f9e8c7d9c0c0b1debc14f97989a118bb416dff94a907db3fc6dfabbc96388d28",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -2871,7 +2871,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "set-national-account-owner": {
     "ingress_key": "mcp-tool:set-national-account-owner",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "952571938c04acc7c129ef100a43a6093cf1efd349d54174d1a0c890f8fb46ed",
+    "schema_digest": "1f6d231c7854c81b9e53c6d78ae482be5a9b15ea990dd557ca328a5b62ff5873",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -2889,7 +2889,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "set-next-step": {
     "ingress_key": "mcp-tool:set-next-step",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "b1ba0421038e02c36f264592ea5907c0dce56a87ccf036d93db05458bca513be",
+    "schema_digest": "b7da2861fae485e929321835e645da97fc426991aeba3e90d7a2347f5d7cd8f5",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -3035,7 +3035,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "today-triage": {
     "ingress_key": "mcp-tool:today-triage",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
+    "schema_digest": "c23d0abc10107890b9ea09f17b6d81b1572d32dc42844de24362eb63d9a3743c",
     "write": false,
     "human_only": false,
     "authority_only": false,
@@ -3152,8 +3152,26 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "update-vendor": {
     "ingress_key": "mcp-tool:update-vendor",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "b6aba695eb20b17064ab1c841efb03028ef59deb9801f936251d6499e0bb64fc",
+    "schema_digest": "a46d9164f4f25becd07e3db36d52617a35ada87d78338b7ffd1eab2ce674f0e5",
     "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "vendor-assignment-context": {
+    "ingress_key": "mcp-tool:vendor-assignment-context",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "3afd0eb0414c00a12f982d740b8dc0f1ff5ce42bd9d86ff69820b994da93136f",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "vendor-duplicate-report": {
+    "ingress_key": "mcp-tool:vendor-duplicate-report",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
     "human_only": false,
     "authority_only": false,
     "delegates_to": []
@@ -3474,5 +3492,29 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "function_kind": "f",
       "security_definer": true
     }
-  ]
+  ],
+  "relation_dml": [
+    {
+      "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "public.deal_vendor_assignment",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "public.deal_vendor_assignment",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "update",
+      "grantable": false
+    }
+  ],
+  "runtime_dml_grants": {
+    "count": 338,
+    "digest": "sha256:1d16268baa3cd3bf925281f2c8d2ae29b2bf5abd31e098fe0155cf346213fa8b"
+  }
 });

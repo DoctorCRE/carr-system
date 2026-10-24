@@ -142,19 +142,20 @@ check("the only route is `run.sh call <verb> '<json>'`",
       argv == [str(REPO / "run.sh"), "call", "add-loop", json.dumps({"body": "x"})], argv)
 check("it runs from the repo with stdin closed and the given timeout",
       kwargs.get("cwd") == str(REPO) and kwargs.get("stdin") == subprocess.DEVNULL
-      and kwargs.get("timeout") == 45, kwargs)
+      and kwargs.get("timeout") == 45)
 
 runner = Runner(0, reply({}))
 call_verb("add-loop", {}, env={"HOME": "/h", "PATH": "/p", "CARR_MCP_CLIENT_PROFILE": "x"},
           runner=runner)
 check("an inherited client profile never leaks into the call",
-      runner.calls[0][1]["env"] == {"HOME": "/h", "PATH": "/p"}, runner.calls[0][1]["env"])
+      {k: v for k, v in runner.calls[0][1]["env"].items() if k != record_call.DEADLINE_ENV}
+      == {"HOME": "/h", "PATH": "/p"})
 
 runner = Runner(0, reply({}))
 call_verb("project-room-queue", {}, env={"HOME": "/h"}, profile="hermes-projector", runner=runner)
 check("a profile is selected only by the profile option",
-      runner.calls[0][1]["env"] == {"HOME": "/h", "CARR_MCP_CLIENT_PROFILE": "hermes-projector"},
-      runner.calls[0][1]["env"])
+      {k: v for k, v in runner.calls[0][1]["env"].items() if k != record_call.DEADLINE_ENV}
+      == {"HOME": "/h", "CARR_MCP_CLIENT_PROFILE": "hermes-projector"})
 
 # ── what a failure line may carry ─────────────────────────────────────────
 
