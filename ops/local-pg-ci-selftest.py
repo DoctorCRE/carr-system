@@ -318,7 +318,7 @@ check(
 )
 check(
     "later local gates do not run after calendar failure",
-    not any(event[-1].endswith("ops/nightly-canary-local-pg-acceptance.py") for event in events),
+    not any(event[-1].endswith("ops/renewal-signed-ingress-local-pg-acceptance.py") for event in events),
 )
 
 
