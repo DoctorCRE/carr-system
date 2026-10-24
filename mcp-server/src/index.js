@@ -99,6 +99,7 @@ import { TOOLS } from "./tools.js";
 import { buildRelease } from "./release.js";
 import { readCommandCenterSummary } from "./workspace-command-center.js";
 import { wrapWithCorrelation } from "./correlation.js";
+import { publicError } from "./public-errors.js";
 import { withFailureRecording, scheduleFailureRecord, actorUnresolvedFailureClass } from "./trace.js";
 import { createTourInternalWebHandler } from "./tour-internal-web.js";
 import { createReportsWebHandler, isReportsHostRequest } from "./reports-web.js";
@@ -119,16 +120,7 @@ async function health(env) {
     const rows = await sql`select line from v_integrity_digest`;
     return json({ ok: true, digest_lines: rows.length, ts: new Date().toISOString() });
   } catch (e) {
-    const suspended = /suspend|quota|compute/i.test(String(e));
-    return json(
-      {
-        ok: false,
-        reason: suspended
-          ? "Database compute is suspended (Neon budget). Not an emergency: boards render from last exports. Runbook: DNA/Deal Management/record-layer/runbook.md step 2."
-          : "Database unreachable: " + String(e).slice(0, 200),
-      },
-      503,
-    );
+    return json({ ok: false, ...publicError(e, { env, fallback: "database_unavailable" }) }, 503);
   }
 }
 
@@ -189,7 +181,7 @@ async function ingest(request, env) {
       returning id, (xmax <> 0) as was_duplicate`;
     return json({ ok: true, id: rows[0].id, duplicate: rows[0].was_duplicate });
   } catch (e) {
-    return json({ ok: false, error: String(e).slice(0, 200) }, 503);
+    return json({ ok: false, ...publicError(e, { env, fallback: "database_unavailable" }) }, 503);
   }
 }
 
@@ -220,14 +212,12 @@ const defaultHandler = {
 // pipeline function itself accepts an actor and query client, so the Deal Room
 // session-cookie gate mounts it without changing its contract.
 async function pipelineApi(request, env, actor) {
-  const sql = neon(env.DATABASE_URL_READER);
-  const client = { query: async (text, params = []) => ({ rows: await sql.query(text, params) }) };
   try {
+    const sql = neon(env.DATABASE_URL_READER);
+    const client = { query: async (text, params = []) => ({ rows: await sql.query(text, params) }) };
     return await pipelineChanges(request, client, actor);
   } catch (e) {
-    // Surface the error class, not data: a blind 503 cost a live debugging
-    // round on day one (the real fault was invisible from the client).
-    return json({ error: "database_unavailable", detail: String(e && e.message || e).slice(0, 200) }, 503);
+    return json(publicError(e, { env, fallback: "database_unavailable" }), 503);
   }
 }
 

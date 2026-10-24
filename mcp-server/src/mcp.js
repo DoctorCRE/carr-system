@@ -12,6 +12,7 @@
 // NO SEND CAPABILITY EXISTS OR WILL EXIST IN THIS WORKER.
 
 import { neon, Pool } from "@neondatabase/serverless";
+import { publicError } from "./public-errors.js";
 import { mcpOriginRefusal } from "./oauth-policy.js";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.js";
 import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
@@ -863,6 +864,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
       const refusal = pgConstraintError(e);
       if (refusal) {
         const failure = await describeConstraint(client, refusal);
+        failure.cause = e; // Retain the original driver diagnostics for server logs only.
         if (writerRead && failure instanceof ToolError)
           readErrorKind = String(failure.payload?.error || "tool_error").slice(0, 64);
         throw failure;
@@ -989,69 +991,35 @@ export async function dispatch(request, env, ctx, actor) {
           const result = await callTool(env, scopedActor, rpc.params?.name, rpc.params?.arguments, profile);
           return reply({ content: [{ type: "text", text: JSON.stringify(result) }] });
         } catch (e) {
-          if (e instanceof ToolError)
-            return reply({ isError: true, content: [{ type: "text", text: JSON.stringify(e.payload) }] });
-          // UNMASK IT. Until 2026-08-21 an untyped throw fell through to the
-          // outer handler, which answers -32603 with the literal message
-          // "internal error" and puts the real cause in the JSON-RPC `data`
-          // field — a field MCP clients routinely drop, so the caller saw a
-          // four-word string naming nothing. The detail was already being
-          // recorded to the incident store and already being returned on the
-          // wire; the only thing missing was putting it where a caller reads.
-          //
-          // What that masking cost in one day: the capability queue's close
-          // verb had never once succeeded (a row lock on a table the serving
-          // role may only read) and read as "0 complete of 51" while six
-          // projects were finished; close-loop and update-decision each died
-          // on a short id reaching a uuid column. Three defects, all diagnosed
-          // by reading handler SQL, because the error itself said nothing.
-          //
-          // Still recorded to the incident store, same as before, and the
-          // string is redacted for connection-string shapes on the way out. A
-          // failure a caller can act on is not a leak; a failure nobody can
-          // read is just a longer outage.
-          const cause = String((e && e.stack) || e).slice(0, 600)
-            .replace(/\b\w+:\/\/[^\s'"]+/gi, "[redacted]");
-          scheduleFailureRecord(env, ctx, {
-            routeKey: `mcp:tools/call:${rpc?.params?.name || "unknown"}`,
-            failureClass: rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE, {
-              verb: rpc?.params?.name || null,
-              error: e,
-            }),
-            detail: cause.slice(0, 300),
-          });
-          return reply({ isError: true, content: [{ type: "text", text: JSON.stringify({
-            error: "unhandled_verb_failure",
-            verb: rpc?.params?.name || null,
-            cause,
-            hint: "this is the server's own exception, not a refusal of your arguments — the verb " +
-                  "reached code that threw. Read it before retrying: an unhandled failure repeated " +
-                  "with the same arguments fails the same way. If it names a database fault, the " +
-                  "handler's SQL is the place to look.",
-          }) }] });
+          const name = rpc.params?.name === "call-verb"
+            ? rpc.params?.arguments?.verb : rpc.params?.name;
+          const payload = publicError(e, { env, inputSchema: TOOLS[name]?.inputSchema });
+          if (!(e instanceof ToolError)) {
+            scheduleFailureRecord(env, ctx, {
+              routeKey: `mcp:tools/call:${rpc?.params?.name || "unknown"}`,
+              failureClass: rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE, {
+                verb: rpc?.params?.name || null, error: e,
+              }),
+              detail: `Request failed; correlation_id=${payload.correlation_id}`,
+            });
+          }
+          if (!(e instanceof ToolError) && TOOLS[name]) payload.verb = name;
+          return reply({ isError: true, content: [{ type: "text", text: JSON.stringify(payload) }] });
         }
       }
       default:
         return rpcError(-32601, `method not found: ${rpc.method}`);
     }
   } catch (e) {
-    // Program 4 Gap A2 (2026-08-14, defect cae5be2e): -32603 is the ONLY
-    // JSON-RPC code an uncaught exception can produce on this route (this is
-    // its sole call site), and /mcp always answers HTTP 200 for a JSON-RPC-
-    // level error — see trace.js's file header for why that makes this the
-    // one error code worth recording here. The detail string is the SAME
-    // truncated text already returned to the caller two lines below; nothing
-    // new is exposed by also recording it.
-    const detail = String(e).slice(0, 300);
+    const payload = publicError(e, { env, fallback: "internal_error" });
     scheduleFailureRecord(env, ctx, {
-      routeKey: `mcp:${rpc?.method || "unknown"}${rpc?.params?.name ? ":" + rpc.params.name : ""}`,
+      routeKey: `mcp:${rpc?.method || "unknown"}`,
       failureClass: rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE, {
-        verb: rpc?.params?.name || null,
-        error: e,
+        verb: rpc?.params?.name || null, error: e,
       }),
-      detail,
+      detail: `Request failed; correlation_id=${payload.correlation_id}`,
     });
-    return rpcError(-32603, "internal error", detail);
+    return rpcError(-32603, "internal error", payload);
   }
 }
 

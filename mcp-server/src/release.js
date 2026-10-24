@@ -75,6 +75,7 @@
 // absent value must be visibly absent, per the honesty requirement this was
 // built against.
 
+import { publicError } from "./public-errors.js";
 import { stampedGitSha } from "./build-stamp.js";
 import { mutationManifestIdentity } from "./mutation-registry.js";
 import { program6ActionPosture } from "./program6-feature-flag.js";
@@ -131,7 +132,8 @@ export async function buildRelease({ env, sql, verbCount, now = () => new Date()
         highest_applied_migration: null,
         applied_count: null,
         ledger_sha256: null,
-        reason: "database unreachable: " + String((e && e.message) || e).slice(0, 200),
+        reason: "Database readback is unavailable.",
+        ...publicError(e, { env, fallback: "database_unavailable" }),
       };
     }
   })();
@@ -144,7 +146,8 @@ export async function buildRelease({ env, sql, verbCount, now = () => new Date()
     } catch (e) {
       return {
         value: null,
-        reason: "database unreachable: " + String((e && e.message) || e).slice(0, 200),
+        reason: "Database readback is unavailable.",
+        ...publicError(e, { env, fallback: "database_unavailable" }),
       };
     }
   })();
@@ -190,6 +193,7 @@ export async function buildRelease({ env, sql, verbCount, now = () => new Date()
       applied_count: schema.applied_count,
       ledger_sha256: schema.ledger_sha256,
       reason: schema.reason,
+      ...(schema.error && { error: schema.error, correlation_id: schema.correlation_id, hint: schema.hint }),
       note: "what the tracking table claims, not ground truth; use tools/migrate.py "
           + "to check the immutable migration history and baseline before recovery",
     },
