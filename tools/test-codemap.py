@@ -125,8 +125,7 @@ class CodemapTests(unittest.TestCase):
         checker = self.repo / "ops/ci.sh"
         shutil.copyfile(ROOT / "ops/ci.sh", checker)
         checker.chmod(0o755)
-        for stub in ("hooks/gate-integrity.py", "ops/boot-budget-check.py"):
-            (self.repo / stub).write_text("raise SystemExit(0)\n")
+        (self.repo / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
         self.track("missing.py", "print('missing')\n")
         result = subprocess.run([str(checker), "--strict", "--only", "gates"],
                                 cwd=self.tmp.name, env=self.env, text=True,
