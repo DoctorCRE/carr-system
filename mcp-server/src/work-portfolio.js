@@ -829,8 +829,8 @@ export function portfolioReadback(revision, options = {}) {
  * reads. A caller can name a digest, and the database will only ever compare it
  * against one recomputed from the stored rows.
  */
-export function workPortfolioTools({ withEnvelope, writeEvent, ToolError }) {
-  const digestSchema = { type: "string", pattern: "^sha256:[0-9a-f]{64}$" };
+export function workPortfolioTools({ ToolError }) {
+
   const refuse2 = (error, detail) => { throw new ToolError({ error, ...detail }); };
 
   return {
@@ -849,118 +849,5 @@ export function workPortfolioTools({ withEnvelope, writeEvent, ToolError }) {
       },
     },
 
-    "propose-portfolio-revision": {
-      write: true,
-      description: "Propose one inert DoctorCRE v5 portfolio revision: the 21 master milestones with complete typed metadata, the four child programs with their own versions and applicable accepted source bindings, and the dependency edges. The proposal creates no job, execution envelope, capability session, schedule, deployment or clock. Its proposer is the authenticated writer, never a field in this payload, and both supplied digests are compared against digests recomputed from the stored rows before the transaction may commit.",
-      inputSchema: {
-        type: "object", additionalProperties: false,
-        properties: {
-          idempotency_key: { type: "string" },
-          portfolio_ref: { type: "string" },
-          revision_version: { type: "integer", minimum: 1 },
-          source_digests: { type: "object" },
-          graph_digest: digestSchema,
-          accepted_digest: digestSchema,
-          children: { type: "array", minItems: 4, maxItems: 4 },
-          nodes: { type: "array", minItems: 21, maxItems: 21 },
-          edges: { type: "array" },
-        },
-        required: ["idempotency_key", "portfolio_ref", "revision_version", "source_digests",
-          "graph_digest", "accepted_digest", "children", "nodes", "edges"],
-      },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "propose-portfolio-revision", args, async () => {
-        // Validated in the module first so a malformed revision is refused with
-        // a named clause rather than a database constraint message.
-        const nodeChildRefs = Object.fromEntries(args.nodes.map(node => [node.node_ref, node.child_ref]));
-        const childInputs = Object.fromEntries(args.children.map(child =>
-          [child.child_ref, { child_version: child.child_version,
-            accepted_plan_ref: child.accepted_plan_ref ?? null }]));
-        const view = validatePortfolioRevisionForPersistence(
-          { schema_version: PORTFOLIO_REVISION_SCHEMA_VERSION, revision_version: args.revision_version,
-            portfolio_ref: args.portfolio_ref, source_digests: args.source_digests,
-            child_program_refs: [...CHILD_PROGRAM_REFS],
-            nodes: args.nodes.map(({ child_ref, ...node }) => node), edges: args.edges },
-          nodeChildRefs, childInputs);
-        if (view.graph_digest !== args.graph_digest) {
-          refuse2("portfolio_graph_digest_mismatch",
-            { expected: view.graph_digest, supplied: args.graph_digest });
-        }
-        if (view.accepted_digest !== args.accepted_digest) {
-          refuse2("portfolio_accepted_digest_mismatch",
-            { expected: view.accepted_digest, supplied: args.accepted_digest });
-        }
-        const revisionId = (await c.query(
-          `select ops.portfolio_propose_revision($1::text,$2::integer,$3::uuid,$4::jsonb,
-             $5::text,$6::text,$7::jsonb,$8::jsonb,$9::jsonb) as id`,
-          [args.portfolio_ref, args.revision_version, args.idempotency_key,
-            JSON.stringify(args.source_digests), args.graph_digest, args.accepted_digest,
-            JSON.stringify(view.child_bindings), JSON.stringify(args.nodes),
-            JSON.stringify(args.edges)])).rows[0].id;
-        await writeEvent(c, actor, "propose-portfolio-revision", "portfolio", revisionId,
-          { field: "revision_proposed",
-            new: { portfolio_ref: args.portfolio_ref, revision_version: args.revision_version,
-              accepted_digest: args.accepted_digest },
-            idempotency_key: args.idempotency_key });
-        return { ok: true, revision_id: revisionId, portfolio_ref: args.portfolio_ref,
-          graph_digest: view.graph_digest, accepted_digest: view.accepted_digest,
-          child_bindings: view.child_bindings, accepted: false,
-          effects: { creates_effect: false, jobs: 0, capabilities: 0, execution_envelopes: 0,
-            admissions: 0, schedules: 0, deployments: 0 } };
-      }),
-    },
-
-    "review-portfolio-revision": {
-      write: true,
-      description: "Record one independent review of an exact DoctorCRE v5 portfolio accepted digest. The reviewer is the authenticated writer and is never a field in this payload. A review naming a digest the revision no longer has is refused, and a proposer cannot pass their own revision, so a passing review can never be carried onto different bytes or onto the proposer's own work.",
-      inputSchema: {
-        type: "object", additionalProperties: false,
-        properties: {
-          idempotency_key: { type: "string" }, revision_id: { type: "string" },
-          reviewed_digest: digestSchema, verdict: { type: "string", enum: ["pass", "fail"] },
-          review_summary: { type: "string" },
-        },
-        required: ["idempotency_key", "revision_id", "reviewed_digest", "verdict", "review_summary"],
-      },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "review-portfolio-revision", args, async () => {
-        const reviewId = (await c.query(
-          `select ops.portfolio_review_revision($1::uuid,$2::uuid,$3::text,$4::text,$5::text) as id`,
-          [args.revision_id, args.idempotency_key, args.reviewed_digest, args.verdict,
-            args.review_summary])).rows[0].id;
-        await writeEvent(c, actor, "review-portfolio-revision", "portfolio", args.revision_id,
-          { field: "revision_reviewed",
-            new: { verdict: args.verdict, reviewed_digest: args.reviewed_digest },
-            idempotency_key: args.idempotency_key });
-        return { ok: true, review_id: reviewId, verdict: args.verdict,
-          reviewed_digest: args.reviewed_digest,
-          effects: { creates_effect: false, jobs: 0, capabilities: 0, execution_envelopes: 0,
-            admissions: 0, schedules: 0, deployments: 0 } };
-      }),
-    },
-
-    "accept-portfolio-revision": {
-      write: true, humanOnly: true, authorityOnly: true,
-      description: "HUMAN-ONLY: accept one exact DoctorCRE v5 portfolio accepted digest. The acceptor is derived from the authenticated partner authority session and is never a field in this payload; a writer connection cannot reach this verb at all. Acceptance requires a fresh passing independent review on the same bytes and three distinct identities: the proposer, the reviewer and the acceptor. It makes that revision the current accepted ancestor and creates no job, envelope, capability, schedule, deployment or clock.",
-      inputSchema: {
-        type: "object", additionalProperties: false,
-        properties: {
-          idempotency_key: { type: "string" }, revision_id: { type: "string" },
-          accepted_digest: digestSchema, review_id: { type: "string" },
-        },
-        required: ["idempotency_key", "revision_id", "accepted_digest", "review_id"],
-      },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "accept-portfolio-revision", args, async () => {
-        const receiptId = (await c.query(
-          `select ops.portfolio_accept_revision($1::uuid,$2::uuid,$3::text,$4::uuid) as id`,
-          [args.revision_id, args.idempotency_key, args.accepted_digest, args.review_id])).rows[0].id;
-        await writeEvent(c, actor, "accept-portfolio-revision", "portfolio", args.revision_id,
-          { field: "revision_accepted",
-            new: { accepted_digest: args.accepted_digest },
-            idempotency_key: args.idempotency_key });
-        return { ok: true, receipt_id: receiptId, accepted_digest: args.accepted_digest,
-          accepted: true,
-          effects: { creates_effect: false, jobs: 0, capabilities: 0, execution_envelopes: 0,
-            admissions: 0, schedules: 0, deployments: 0 } };
-      }),
-    },
   };
 }

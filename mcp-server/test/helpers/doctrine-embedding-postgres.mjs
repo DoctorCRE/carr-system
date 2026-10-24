@@ -53,7 +53,7 @@ export async function doctrineEmbeddingDatabase() {
       const end = monitor.indexOf('$fn$;', monitor.indexOf('as $fn$', start) + 8) + '$fn$;'.length;
       await c.query(monitor.slice(start, end));
     }
-    await c.query(readMigration('0956_doctrine_embeddings.sql'));
+    await c.query(readMigration('0958_doctrine_embeddings.sql'));
     return fixture;
   } catch (error) { await fixture.close(); throw error; }
 }

@@ -68,7 +68,7 @@ The CI control selftest passes 7/7 after adding pgvector to disposable PostgreSQ
 
 The existing visibility predicate excludes inactive sections and selects only their current revision, personal owner scope, and requested content classes. The same predicate governs vector retrieval. The baseline has no detector for an instruction withdrawn only in prose while its section remains active. Search results do not establish operative authority.
 
-Revision text and queries use overlapping chunks of at most 480 UTF-8 bytes with up to 96 bytes of overlap and CLS pooling. Every chunk reaches the model in batches of at most 16. Sections score by the best chunk similarity and appear once. The `chunks-v1` preprocessing identity prevents reuse of vectors from a different input policy. Migration 0956 creates this new side table; backfill builds the chunk vectors from current revision text. Blend settings remain uncalibrated until the real post-backfill evaluation. No general paraphrase improvement, latency improvement, green full CI, deployment, or production backfill is claimed here.
+Revision text and queries use overlapping chunks of at most 480 UTF-8 bytes with up to 96 bytes of overlap and CLS pooling. Every chunk reaches the model in batches of at most 16. Sections score by the best chunk similarity and appear once. The `chunks-v1` preprocessing identity prevents reuse of vectors from a different input policy. Migration 0958 creates this new side table; backfill builds the chunk vectors from current revision text. Blend settings remain uncalibrated until the real post-backfill evaluation. No general paraphrase improvement, latency improvement, green full CI, deployment, or production backfill is claimed here.
 
 The focused test command is:
 

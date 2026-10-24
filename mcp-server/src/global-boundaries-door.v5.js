@@ -759,26 +759,5 @@ export function v5BoundaryDoorProjection({ observation: includeObservation = tru
 
 export function globalBoundariesDoorTools({ ToolError }) {
   return {
-    "read-global-boundaries": {
-      description: "Read DoctorCRE v5's settled global boundaries (V5-S01) as the live server evaluates them: the policy digest and the eight decision source-evidence digests; the role matrix (every registered action for Joe and Dell), the representation-scope matrix (tenant/buyer/landlord/seller against expose/structural/activate), the online-first continuity matrix, and the Mac Studio/Hermes platform matrix with the authority answer shown unchanged under every node state; plus the dispatch door's mode (shadow until Joe approves enforcement), its closed verb and field registries, and this Worker isolate's shadow counters. Each matrix is computed from the evaluators at read time, not copied. Pass expected_policy_digest to refuse if the deployed policy differs. Reads no database and accepts nothing.",
-      inputSchema: {
-        type: "object", additionalProperties: false,
-        properties: {
-          expected_policy_digest: { type: "string", description: "sha256:<64 hex>; refuses stale_expected_digest when the deployed policy hashes differently" },
-        },
-      },
-      handler: async (_c, _actor, args) => {
-        if (args.expected_policy_digest !== undefined) {
-          try {
-            v5BoundaryProjection({ expected_policy_digest: args.expected_policy_digest });
-          } catch (error) {
-            if (error instanceof V5BoundaryError)
-              throw new ToolError({ error: error.code, ...(error.detail || {}) });
-            throw error;
-          }
-        }
-        return v5BoundaryDoorProjection();
-      },
-    },
   };
 }

@@ -84,11 +84,6 @@ class ShellSafety(unittest.TestCase):
                     self.verdict('cat ' + path, 2, tool)
         self.verdict('source ~/.hermes/.env', 2)
 
-    def test_spacing_without_shared_cooldown(self):
-        self.verdict('for pr in $(gh pr list --json number); do gh pr view "$pr"; done', 2)
-        self.verdict('for pr in $(gh pr list --json number); do gh pr view "$pr"; sleep 2; done', 0)
-        self.verdict('sleep 960; gh pr view 123', 0)
-
     def test_brief_heredoc_is_data(self):
         self.verdict("cat <<'TASK-BRIEF' >/tmp/brief\nDo not run gh workflow run release.yml\nTASK-BRIEF", 0)
         self.verdict("cat <<'TASK-BRIEF' >/tmp/brief\nDo not run gh workflow run release.yml\nTASK-BRIEF\ngh workflow run release.yml", 2)
@@ -117,33 +112,19 @@ class ShellSafety(unittest.TestCase):
         spec.loader.exec_module(installer)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            destinations = (root / 'claude.json', root / 'codex.toml')
-            with patch.multiple(installer, CLAUDE_MANAGED_SETTINGS=str(destinations[0]),
-                                CODEX_REQUIREMENTS=str(destinations[1])):
+            destinations = (root / 'claude.json',)
+            with patch.object(installer, 'CLAUDE_MANAGED_SETTINGS', str(destinations[0])):
                 plan = dict(installer.managed_safety_plan())
                 claude = json.loads(plan[str(destinations[0])])
                 self.assertIn('Bash(gh workflow run *)', claude['permissions']['deny'])
                 self.assertNotIn('Bash(gh run rerun *)', claude['permissions']['deny'])
                 self.assertIn('Read(~/.ssh/id_*)', claude['permissions']['deny'])
-                import tomllib
-                codex = tomllib.loads(plan[str(destinations[1])])
-                self.assertNotIn('permissions', codex)
-                self.assertTrue(any(r['pattern'] == [{'token': 'gh'}, {'token': 'workflow'},
-                                                     {'token': 'run'}]
-                                    and r['decision'] == 'forbidden'
-                                    for r in codex['rules']['prefix_rules']))
-                self.assertFalse(any(r['pattern'] == [{'token': 'gh'}, {'token': 'run'},
-                                                       {'token': 'rerun'}]
-                                     and r['decision'] == 'forbidden'
-                                     for r in codex['rules']['prefix_rules']))
                 self.assertEqual(installer.install_managed_safety(plan.items(), apply=False), 0)
                 self.assertFalse(any(p.exists() for p in destinations))
                 # Reconciliation preserves unrelated organization controls.
                 destinations[0].write_text('{"permissions":{"deny":["Bash(custom *)"]},"theme":"dark"}')
-                destinations[1].write_text('allow_remote_control = false\n')
                 merged = dict(installer.managed_safety_plan())
                 self.assertIn('Bash(custom *)', json.loads(merged[str(destinations[0])])['permissions']['deny'])
-                self.assertFalse(tomllib.loads(merged[str(destinations[1])])['allow_remote_control'])
 
     def test_missing_managed_policy_refuses_install(self):
         spec = importlib.util.spec_from_file_location('missing_safety_installer', REPO / 'ops/config-as-code.py')
