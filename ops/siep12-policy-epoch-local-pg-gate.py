@@ -118,7 +118,7 @@ def scenario_registry_and_ledger(cur, ctx) -> None:
             "column_dml": current_projection["column_dml"],
             "job_definitions": {
                 "count": 19,
-                "digest": "sha256:c051c2a43b8bd7665bdee00d0940253aa454a9d45e186a3aa8079a63626ba655",
+                "digest": "sha256:68e6cad58118042c4b00680b6a5c6e1e797b57f59591b8794ce4c5ac47076f2a",
             },
         },
         "combined": catalog["combined"],
