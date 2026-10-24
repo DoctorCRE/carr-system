@@ -20,6 +20,10 @@ def report(transcript: str) -> tuple[bool, str]:
     warnings = [line for line in transcript.splitlines()
                 if re.search(r"\bWARN\b|EVIDENCE WARNING:|^\s+(?:was NOT recorded to ops.run|skipped whenever)", line)]
     problems = []
+    security = re.findall(r"^\s*SECURITY PARITY: (.*)$", transcript, re.M)
+    if (security != ["PASS"] or verdicts != ["PASS"]
+            or transcript.find("SECURITY PARITY: PASS") > transcript.find("RESTORE REHEARSAL: PASS")):
+        problems.append("security parity missing or failed")
     if not transcript.endswith("\n"):
         problems.append("transcript incomplete: missing final newline")
     if verdicts != ["PASS"]:
