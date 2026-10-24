@@ -112,30 +112,34 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
       handler: async (c, actor, args) => {
         const board = ref(args.board_id, "board_id");
         version(args.base_version);
-        if (!args.snapshot || Array.isArray(args.snapshot) || typeof args.snapshot !== "object" ||
-            JSON.stringify(args.snapshot).length > (args.snapshot.schema === "carr-progress-board.v4" ? 2097152 : 262144))
+        if (!args.snapshot || Array.isArray(args.snapshot) || typeof args.snapshot !== "object")
+          throw new ToolError({ error: "board_snapshot_invalid" });
+        const snapshotJson = JSON.stringify(args.snapshot);
+        if (snapshotJson.length > (args.snapshot.schema === "carr-progress-board.v4" ? 2097152 : 262144))
           throw new ToolError({ error: "board_snapshot_invalid" });
         const principal = sponsor(actor);
-        return withEnvelope(c, actor, "publish-board-snapshot", args, async () => {
+        // The envelope verifies the request hash on replay; its receipt needs only metadata.
+        const result = await withEnvelope(c, actor, "publish-board-snapshot", args, async () => {
           const tenant = organizationTenantForActor(actor);
           const rows = args.base_version === 0
             ? await c.query(
               `insert into board_snapshot (organization_tenant_id,sponsoring_human_slug,board_id,version,snapshot_json,updated_by_actor_id)
                values ($1,$2,$3,1,$4::jsonb,$5) on conflict do nothing
-               returning id,organization_tenant_id,sponsoring_human_slug,board_id,version,snapshot_json,updated_at`,
-              [tenant, principal, board, JSON.stringify(args.snapshot), actor.id])
+               returning id,organization_tenant_id,sponsoring_human_slug,board_id,version,updated_at`,
+              [tenant, principal, board, snapshotJson, actor.id])
             : await c.query(
               `update board_snapshot set version=version+1,snapshot_json=$1::jsonb,
                  updated_by_actor_id=$2,updated_at=now()
                where organization_tenant_id=$3 and sponsoring_human_slug=$4 and board_id=$5 and version=$6
-               returning id,organization_tenant_id,sponsoring_human_slug,board_id,version,snapshot_json,updated_at`,
-              [JSON.stringify(args.snapshot), actor.id, tenant, principal, board, args.base_version]);
+               returning id,organization_tenant_id,sponsoring_human_slug,board_id,version,updated_at`,
+              [snapshotJson, actor.id, tenant, principal, board, args.base_version]);
           if (!rows.rows.length) throw new ToolError({ error: "board_version_conflict" });
           const snapshot = rows.rows[0];
           await writeEvent(c, actor, "publish-board-snapshot", "board_snapshot", snapshot.id,
             { new: { board_id: board, version: snapshot.version }, idempotency_key: args.idempotency_key });
           return { ok: true, snapshot };
         });
+        return { ...result, snapshot: { ...result.snapshot, snapshot_json: JSON.parse(snapshotJson) } };
       },
     },
 
@@ -227,11 +231,10 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
       handler: async (c, actor, args) => {
         const tenant = organizationTenantForActor(actor), principal = sponsor(actor);
         const board = ref(args.board_id, "board_id");
-        const snapshot = await c.query(
+        const [snapshot, questions] = await Promise.all([c.query(
           `select board_id,version,snapshot_json,updated_at from board_snapshot
             where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`,
-          [tenant, principal, board]);
-        const questions = await c.query(
+          [tenant, principal, board]), c.query(
           `select q.question_id,q.revision,q.prompt,q.choices,q.allow_free_text,q.default_answer,
                   q.asker_ref,q.asked_at,a.id as answer_id,a.answer_text,a.answered_by,
                   a.sent_at,a.received_at,a.applied_at,a.effect_ref,a.version as answer_version,
@@ -241,7 +244,7 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
               and a.sponsoring_human_slug=q.sponsoring_human_slug and a.board_id=q.board_id
               and a.question_id=q.question_id and a.question_revision=q.revision
             where q.organization_tenant_id=$1 and q.sponsoring_human_slug=$2 and q.board_id=$3 and q.current=true
-            order by q.asked_at,q.question_id`, [tenant, principal, board]);
+            order by q.asked_at,q.question_id`, [tenant, principal, board])]);
         return boardResponse({ ok: true, snapshot: (await observeBoardLinkage(c,snapshot.rows,tenant,principal))[0] ?? null, questions: questions.rows });
       },
     },

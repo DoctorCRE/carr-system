@@ -115,6 +115,15 @@ PARTIAL_ADMISSION_RULES = {
     "f673326b",  # no access fences Joe did not ask for
 }
 
+# Source-only retirements from #2181 E2 and #2185 slice 2. Preserve the
+# historical database export; it is not evidence that these controls still run.
+# An exception binds the exact rule/control pair and ends if a control returns.
+RETIRED_CONTROL_RULES = {
+    "236ca227": "weekend_quiet", "25fab860": "weekly_social_route",
+    "4a53ff82": "canonical_edit", "5d44d3f3": "verification_status",
+    "5e89c211": "control-plane-workflow-manifest", "f5d97b4a": "costar_lane",
+}
+
 
 def file_bucket(category: str | None) -> str | None:
     if category == FILE_ADVISORY_CATEGORY:
@@ -210,6 +219,12 @@ def removed_gate_reclassification(detail: dict, rule_id: str) -> bool:
     Joe's 2026-10-15 purge ruling removed the gates; the reviewed map records
     each such rule's why_unenforceable. WR-000003 also retires a checker whose
     generated-file inputs are absent from source CI."""
+    retired = RETIRED_CONTROL_RULES.get(rule_id)
+    if (retired and detail.get("retired_control") == retired
+            and detail.get("category") == "judgment_advisory"
+            and detail.get("enforcement_class") == "judgment_ambient"
+            and not detail.get("control")):
+        return True
     why = detail.get("why_unenforceable") or ""
     return (detail.get("enforcement_class") == "judgment_ambient"
             and why.startswith("Automated gate ")

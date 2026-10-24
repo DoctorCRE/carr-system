@@ -26,7 +26,6 @@ const probe = `
       'node:assert/strict': moduleFor({ default: assert }),
       'node:crypto': moduleFor({ randomUUID }),
       '../src/tools.js': moduleFor({ TOOLS: {}, executeRegisteredTool() {}, ToolError: Error }),
-      '../src/mcp.js': moduleFor({ requiresAuthorityConnection() {} }),
     };
     const pg = moduleFor({ default: { Client: class {
       constructor() { result.constructed++; }
@@ -85,8 +84,8 @@ test('rule database suite retains loopback execution and skips absent configurat
     'postgresql://fixture@localhost:5432/test'];
   const results = probeSuite([...safe, null, '']);
   for (const result of results.slice(0, safe.length)) {
-    assert.equal(result.constructed, 4, result.dsn);
-    assert.equal(result.connected, 4, result.dsn);
+    assert.equal(result.constructed, 3, result.dsn);
+    assert.equal(result.connected, 3, result.dsn);
     assert.equal(result.refusal, null, result.dsn);
   }
   for (const result of results.slice(safe.length)) {

@@ -14,7 +14,7 @@
     "@modelcontextprotocol/sdk": "1.32.1",
     "@openai/mcp-extensions": "0.1.0",
     "decimal.js": "10.6.0",
-    "zod": "4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "ajv": "8.18.0",
@@ -22,5 +22,9 @@
     "miniflare": "5.20261006.1-alpha",
     "playwright-core": "1.63.0",
     "wrangler": "4.149.0"
+  },
+  "overrides": {
+    "ip-address": "10.7.4",
+    "zod": "$zod"
   }
 }

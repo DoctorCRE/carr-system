@@ -51,7 +51,7 @@ class RunnerTests(unittest.TestCase):
         env = {'CARR_MCP_CLIENT_PROFILE': 'unattended',
                'CARR_MCP_LOCAL_TOKEN': 'fixture-local', 'CARR_MCP_UNATTENDED_TOKEN': 'fixture-unattended'}
         transport = self.record_transport(calls)
-        with patch.dict(os.environ, env, clear=True), patch.object(record_call.subprocess, 'run', transport):
+        with patch.dict(os.environ, env, clear=True), patch.object(record_call, '_run_process', transport):
             ctx = runtime.Context('lead-signals-weekly', now=NOW)
             ctx.read('find', {})
             ctx.write('add-loop', {'title': 'Fixture proposal'}, 'proposal')
@@ -68,7 +68,7 @@ class RunnerTests(unittest.TestCase):
                 if operation == 'failure-write':
                     env['CARR_MCP_UNATTENDED_TOKEN'] = 'fixture-unattended'
                 transport = self.record_transport(calls, revoke_after_board=operation == 'failure-write')
-                with patch.dict(os.environ, env, clear=True), patch.object(record_call.subprocess, 'run', transport):
+                with patch.dict(os.environ, env, clear=True), patch.object(record_call, '_run_process', transport):
                     ctx = runtime.Context('lead-signals-weekly', now=NOW)
                     with self.assertRaisesRegex(RuntimeError, 'missing CARR_MCP_UNATTENDED_TOKEN'):
                         if operation == 'read':
@@ -199,8 +199,10 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(value['model_calls'], 0)
 
     def test_judgment_routine_remains_configured(self):
-        from lib.headless_tasks import config
-        self.assertIn('npi-sweep-weekly', config(ROOT)['tasks'])
+        services = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
+        npi = next(row for row in services if row['key'] == 'npi-sweep-weekly')
+        self.assertEqual(npi['runtime'], 'claude-code-scheduled-task')
+        self.assertTrue((ROOT / 'ops/scheduled-tasks/npi-sweep-weekly.SKILL.md').is_file())
 
 
 
