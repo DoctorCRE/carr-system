@@ -49,7 +49,7 @@ filename/checksum ledger with the source. A regression in either side fails CI.
   an exact checked-in filename; it cannot skip an earlier pending dependency
   or hand-pick files out of order.
 - **0001 mirrors the vault schema file.** `0001_init.sql` is the applied copy
-  of `record-layer/schema-draft-2026-07-30.sql` (v2). Until first apply, keep
+  of the vault's original schema draft (v2). Until first apply, keep
   them identical — after first apply, the vault file freezes as the design
   record and changes land here as new migrations.
 - **Every new migration declares its risk in its header** (the comment lines
@@ -82,7 +82,7 @@ filename/checksum ledger with the source. A regression in either side fails CI.
 |---|---|
 | `0001_init.sql` | Full schema v2: tables, triggers, indexes, sequences (addendum §A + §D applied) |
 | `0002_seed.sql` | Actors, reference vocab, system_config thresholds |
-| (build day) `0003_roles_views.sql` | carr_writer / carr_reader roles + the views (v_deal_board, v_export_deals, v_integrity_digest, ...) — needs the Neon project to exist so grants bind to real roles |
+| `0004_roles_views.sql` | carr_writer / carr_reader roles and grants |
 
 ## Two migrations name a file that is not themselves (2026-08-15)
 

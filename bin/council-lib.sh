@@ -1,8 +1,8 @@
 #!/bin/zsh
 # council-lib.sh — the ONE home for outside-model pins and invocations.
 #
-# Sourced by bin/council.sh (the panel) and bin/precheck.sh (the single-seat
-# reviewer). Two copies of a model id and an effort flag is exactly the drift
+# Sourced by ops/codex-hook-smoke.sh and exercised by the council helper
+# selftests. Two copies of a model id and an effort flag is exactly the drift
 # that let a council run at DEFAULT effort on 2026-08-09 while everyone assumed
 # otherwise. Rule a8c55a47: a manual path and an automated path that do the same
 # job must be the same code. Change a pin HERE and nowhere else.

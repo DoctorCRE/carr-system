@@ -1,12 +1,9 @@
 -- census-queries.sql — the five Section-0 census row-sets, adapted to plain SQL.
--- WR-000046, F02 (gated-register-plan.md rev 12, Section 0 and Section 2 Artifacts B/C).
+-- WR-000046, F02 (record-layer gated-register plan rev 12, Section 0 and Section 2 Artifacts B/C).
 --
--- RECONCILED, 2026-09-02: two sibling build seats independently authored this
--- file (Artifact B, for gen-census-matrix.py; Artifact C, for
--- breakglass-run.py). This is the single reconciled version both consumers
--- parse. Full equivalence proof, per-category row counts, and the one
--- textual divergence found (and how it was resolved) live in
--- out/frontier-finding/build-receipts/reconcile-census/equivalence-report.md.
+-- Reconciled on 2026-09-02 for the census research and breakglass_run.py.
+-- The research notes and equivalence proof are retained in the doctrine
+-- document frontier-finding-evidence.
 --
 -- WHY PLAIN SQL: the frontier's own census logic lives inside `ops.*`
 -- functions (ops.scac_mutation_catalog_v10_current(),
@@ -40,31 +37,12 @@
 -- the pinned functions compute, so it does not belong in a query whose whole
 -- purpose is to reproduce that pinned logic standalone).
 --
--- OUTPUT SHAPE. Each block is one SELECT returning exactly two columns —
--- identity_key (text, unique within the block) and row (jsonb) — the same
--- contract breakglass-snapshot.sql documents and that breakglass-run.py's
--- load_snapshot_blocks()/capture_family_snapshot() require. This is Artifact
--- C's shape; Artifact B originally emitted a single `row::text` column for
--- gen-census-matrix.py's db-tap-based tap, and that generator required a
--- small patch (kept alongside this file's receipts as
--- gen-census-matrix.py.patch) to read the two-column, jsonb-typed shape
--- instead: db-tap.py's printer does not re-serialize a jsonb column back to
--- JSON text (psycopg decodes jsonb to a Python object by default, and
--- str(dict) is Python repr, not JSON), so the patched reader accepts either
--- valid JSON or that Python-repr text for the trailing `row` field.
+-- OUTPUT SHAPE. Each block returns identity_key (text, unique within the
+-- block) and row (jsonb), as documented by breakglass-snapshot.sql and consumed
+-- by breakglass_run.py's load_snapshot_blocks()/capture_family_snapshot().
 --
--- FORMAT — deliberately dual-marked so BOTH consumers parse this same file
--- unmodified in its query text:
---   (1) gen-census-matrix.py splits on "-- CATEGORY: <name>" lines, each
---       header bounded above and below by a lone divider line of "-- " plus
---       sixty "=" characters (BLOCK_DIVIDER in that script).
---   (2) breakglass-run.py (and breakglass-snapshot.sql, which this file
---       matches block-for-block in format) scans for "-- @snapshot <name>"
---       / SELECT / "-- @end" triples anywhere in the file. The @snapshot/@end
---       pair sits INSIDE the divider-bounded region for each category, so
---       both parsers resolve to byte-identical executable SQL — proven by
---       running both extractions against the same disposable database (see
---       the equivalence report).
+-- FORMAT. The driver scans for "-- @snapshot <name>" / SELECT / "-- @end"
+-- triples. CATEGORY labels and dividers are retained as query headings.
 --
 -- SHARED SCOPING PREDICATE (repeated per block, not factored into a view,
 -- because the pinned source functions repeat it inline and this file stays a
@@ -74,8 +52,8 @@
 -- superusers (category 4's role/membership enumeration, matching the pinned
 -- source's own connected CTE for that category exactly).
 --
--- CLAIM DISCIPLINE (gated-register-plan.md Section T): this file and its two
--- consumers make no claim of mechanical completeness over any open universe —
+-- CLAIM DISCIPLINE (record-layer gated-register plan Section T): this file and
+-- its driver make no claim of mechanical completeness over any open universe —
 -- not the five categories, not the objects any one category enumerates. It
 -- reports what the queries below actually return against whatever database
 -- they are pointed at.

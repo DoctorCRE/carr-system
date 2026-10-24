@@ -152,8 +152,7 @@ while [ $# -gt 0 ]; do
     # onward) genuine early-buildout snapshots or truncated ones.
     --date)        [ $# -ge 2 ] || { echo "FAIL: --date needs YYYYMMDD" >&2; exit 2; }
                    WANT_DATE="$2"; shift 2 ;;
-    # --dump ADDED 2026-08-14, consolidating bin/verify-key-custody.sh into this
-    # path rather than leaving two scripts doing one job. Both --date and the
+    # --dump accepts an off-Mac backup copy. Both --date and the
     # `ls -t` default look ONLY in backups/, which is the copy that dies with
     # this Mac. The question that actually matters for recovery is whether an
     # OFF-MAC copy restores — the R2 archive object, or the GitHub Actions
@@ -419,9 +418,8 @@ parse_rehearse_summary() {
 # RECORD_REHEARSAL gate, cleanup(), the three-bucket failure logic and the real
 # `tools/ops-record.py run` call all execute for real — with fixture values
 # standing in for the Neon branch, the decrypt and the row-count comparison a
-# test must never actually perform. Same no-mock discipline as
-# bin/refresh-rules.sh's CARR_REFRESH_RULES_EXPORT_CMD: nothing below this
-# guard is reachable without CARR_RESTORE_REHEARSE_SELFTEST set, and no real
+# test must never actually perform. Nothing below this guard is reachable
+# without CARR_RESTORE_REHEARSE_SELFTEST set, and no real
 # invocation ever sets it. Placed AFTER RECORD_REHEARSAL is decided (above) and
 # BEFORE anything is created (below), so a test can combine this with
 # --preflight or --verify-only to prove those two still record nothing even

@@ -42,10 +42,8 @@ else
 fi
 
 MYPY="$REPO/.venv/bin/mypy"
-# A WORKTREE HAS NO .venv OF ITS OWN, and worktrees are now the normal way to
-# push here: hooks/git-writer-gate.py refuses a branch change while the shared
-# canonical checkout carries another session's uncommitted work, which it almost
-# always does. So the second place to look is the COMMON checkout's virtualenv --
+# A worktree may have no .venv of its own. The second place to look is the
+# COMMON checkout's virtualenv --
 # the same repository, the same pinned mypy, one directory up from the shared
 # .git that `git rev-parse --git-common-dir` names.
 #

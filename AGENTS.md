@@ -226,12 +226,12 @@ A failed scheduled publish keeps local notes and questions for the next render.
 and says so. There is no static HTML copy. The launchd job runs
 `ops/progress-board-render.sh` from a repository checkout, which binds
 `CARR_REPO_ROOT` and the repo's `.venv` Python; never run an extracted copy.
-The installer uses fleet sync's canonical main checkout.
+The installer uses the canonical main checkout.
 `install-progress-board --apply` and `verify-progress-board` preserve canonical
 `out/boards`; `--repo` accepts only that checkout. Feature worktrees are refused,
-including pre-merge verification. Fleet sync rebinds the agent after main
-advances. `check-launchd-main-paths` audits installed WorkingDirectory and
-program paths for non-main worktrees without changing plists.
+including pre-merge verification. Run the installer from the canonical checkout
+when its main branch advances. `check-launchd-main-paths` audits installed
+WorkingDirectory and program paths for non-main worktrees without changing plists.
 A `done` card with no PR is Live (complete). A project card with a merged PR
 stays Merged until production shows it: only `--delivery-target worker`
 (carr-system) or `app` (doctorcre-app) completes from the release readback;
