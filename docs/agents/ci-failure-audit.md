@@ -18,14 +18,7 @@ artifacts; the ledger was removed during the machinery purge. Its
 [historical version](https://github.com/DoctorCRE/carr-system/blob/da2ff1eb16d9068c717ec90ecd67802731ee67b7/tools/ci/ci-failure-audit-2026-10-15.json) preserves the collected digests and evidence. The linked
 GitHub runs below remain the source for inspecting individual failures.
 
-Recollect a new window with:
-
-```sh
-python3 tools/ci/ci-failure-audit.py \
-  --repo jbookout/carr-system --repo jbookout/doctorcre-app \
-  --start 2026-10-08T21:05:00Z --end 2026-10-15T21:05:00Z \
-  --cache /private/tmp/ci-failure-audit-new
-```
+Use `gh run list` and `gh run view --log-failed` for new investigations.
 
 The collector keys new entries by repository, run ID, and attempt. Every log
 and metadata request passes the inventoried `--attempt`; returned metadata must

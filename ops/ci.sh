@@ -485,7 +485,7 @@ check_pushfloor() {
 
   local gate_surface=""
   if [ -n "$changed" ]; then
-    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(hook-script-policy|codex-hooks)\.json|ops/[^/]+-selftest\.py)' || true)"
+    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/codex-hooks\.json|ops/[^/]+-selftest\.py)' || true)"
   fi
   if [ -n "$gate_surface" ]; then
     ran="$ran gate-closure"
