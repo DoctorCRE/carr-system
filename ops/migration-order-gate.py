@@ -15,9 +15,8 @@ refuses a reordered ledger in production. A number below an applied one can
 never apply cleanly again. It happened three times in two days — 0757 (fixed by
 #1464), the 0769/0770 pair (#1500) and 0783 (#1498, renumbered to 0800) — and
 each time every worker release stopped at staging-prepare until a human noticed
-and renumbered by hand. The reservation ledger (tools/reserve-migration.py)
-prevents two branches minting the SAME number; nothing stopped a branch merging
-a number main had already moved past. This is that check.
+and renumbered by hand. This check prevents a branch merging a number main
+has already moved past.
 
 WHY THE BASE BRANCH AND NOT THE APPLIED LEDGER. CI has no production credential
 by construction, and db/schema.sql's committed ledger lags production by
@@ -66,8 +65,6 @@ from typing import Iterable, Mapping
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
-# The one slot grammar the allocator and the runner share, so a lettered
-# interstitial slot (0532a_...) is a migration here exactly as it is there.
 from migration_number_contract import SLOT_RE, MigrationNumberError, validate_migration_names  # noqa: E402
 
 from migration_source import migration_names  # noqa: E402
@@ -161,8 +158,8 @@ def main(argv: list[str] | None = None) -> int:
         "  The release pipeline applies migrations in filename order and requires the\n"
         "  source ledger to extend what staging and production already applied; a\n"
         "  number at or below main's maximum can never apply in order.\n"
-        "  Fix: ./run.sh reserve-migration --name <slug>, then git mv each file to the\n"
-        "  reserved number, update every reference to the old filename (tests, SCAC\n"
+        "  Fix: choose a number above main and earlier open PRs, then git mv each file to\n"
+        "  that number, update every reference to the old filename (tests, SCAC\n"
         "  seals, tools/migrate.py atomic groups), and push. Renumbering is safe only\n"
         "  while the file has applied nowhere — this gate exists so that stays true.",
         file=sys.stderr)
