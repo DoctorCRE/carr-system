@@ -14,7 +14,8 @@
 // with the findings in the error payload, precise enough to self-repair.
 
 import { organizationTenantForActor, personalScopeForActor } from "./identity.js";
-import { searchDoctrineSituations } from "./situation-retrieval.js";
+import { embedDoctrineRevisions, backfillDoctrineEmbeddings } from "./doctrine-embeddings.js";
+import { searchDoctrineSituations, retrievalVisibilityActorId } from "./situation-retrieval.js";
 import { CORE_RULE_IDS, CORE_RULE_COUNT, CORE_RULE_TRIAGE_SOURCE } from "./core-rule-ids.js";
 import { ruleBootPage } from "./rule-boot.js";
 import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.js";
@@ -453,13 +454,14 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
            (await c.query(`select p.max_age_days from doctrine_document d
                              left join doctrine_review_policy p on p.id = d.review_policy_id
                             where d.id=$1`, [doc.id])).rows[0].max_age_days]);
+        const semantic = await embedDoctrineRevisions(c, [{ revision_id: rev.rows[0].id, plain_text: args.body_text }]);
         const generation = await bumpGeneration(c);
         await rebuildSnapshot(c, doc.id, generation);
         await writeEvent(c, actor, "write-doctrine-section", "doctrine_section", sec.id,
           { new: { doc: doc.slug, section_key: args.section_key, version: newVersion },
             idempotency_key: args.idempotency_key });
         return { ok: true, section_id: sec.id, version: newVersion,
-                 revision_id: rev.rows[0].id, generation };
+                 revision_id: rev.rows[0].id, generation, semantic };
       }),
     },
 
@@ -675,8 +677,29 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
       },
     },
 
+    "backfill-doctrine-embeddings": {
+      write: true,
+      description: "Embed a bounded batch of visible current doctrine revisions with Workers AI. Already embedded revisions are skipped; repeat with a new idempotency key until remaining is zero. Failed batches can be retried without duplicating vectors.",
+      inputSchema: { type: "object", properties: {
+        idempotency_key: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 16 } },
+        required: ["idempotency_key"] },
+      handler: async (c, actor, args) => {
+        const limit = args.limit ?? 16;
+        safeInteger(limit, "embedding_batch_limit_invalid", { allowString: false, minimum: 1 });
+        if (limit > 16) throw new ToolError({ error: "embedding_batch_limit_invalid" });
+        await c.query("select pg_advisory_xact_lock(hashtextextended($1,0))", [args.idempotency_key]);
+        return withEnvelope(c, actor, "backfill-doctrine-embeddings", args, async () => {
+          const actorId = await retrievalVisibilityActorId(c, actor);
+          const result = await backfillDoctrineEmbeddings(c, actorId, limit);
+          await writeEvent(c, actor, "backfill-doctrine-embeddings", "doctrine_revision", null,
+            { new: { embedded: result.embedded, remaining: result.remaining }, idempotency_key: args.idempotency_key });
+          return result;
+        });
+      },
+    },
+
     "search-doctrine": {
-      description: "Deterministic doctrine search: weighted title/body FTS unioned with human-approved situation concepts. Returns current section text plus reconstructible score provenance; never generated prose. The versioned active default policy row controls ranking. When no section matches every query word, a second any-word pass answers instead: the result then carries fallback:true (top level and per row) and is best-effort leads, not a confident match — and the query is still logged as a miss so curation can learn a phrase from it. A zero-hit result with fallback machinery live means the store genuinely holds nothing nearby.",
+      description: "Search current visible doctrine using lexical text, approved concepts, and Workers AI meaning-based retrieval blended by reciprocal ranks. Score provenance identifies each lane and the blend. Semantic metadata reports model, coverage, and graceful degradation to lexical/concept search. Any-word lexical fallback is marked per row. Results are retrieval leads, never generated prose or a claim of operative authority.",
       inputSchema: { type: "object", properties: {
         q: { type: "string" },
         content_classes: { type: "array", items: { type: "string" } },
@@ -803,6 +826,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
              left join doctrine_review_policy p on p.id = d.review_policy_id
             where d.id=$1`, [doc.id])).rows[0].max_age_days;
         const results = [];
+        const embeddingRevisions = [];
         // Lock in stable section_key order — the deadlock-prevention rule from
         // the council's commit protocol.
         const items = [...args.items].sort((a, b) => a.section_key.localeCompare(b.section_key));
@@ -853,17 +877,19 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
                                         else review_after end
               where id=$1`,
             [sec.id, rev.rows[0].id, newVersion, hash, policyDays]);
+          embeddingRevisions.push({ revision_id: rev.rows[0].id, plain_text: it.body_text });
           results.push({ section_key: it.section_key, section_id: sec.id, version: newVersion });
         }
         await c.query(
           `update doctrine_change_set set state='committed', committed_at=now() where id=$1`,
           [cs.rows[0].id]);
+        const semantic = await embedDoctrineRevisions(c, embeddingRevisions);
         const generation = await bumpGeneration(c);
         await rebuildSnapshot(c, doc.id, generation);
         await writeEvent(c, actor, "change-doctrine-sections", "doctrine_document", doc.id,
           { new: { sections: results.length, keys: results.map(r => r.section_key) },
             idempotency_key: args.idempotency_key });
-        return { ok: true, change_set_id: cs.rows[0].id, sections: results, generation };
+        return { ok: true, change_set_id: cs.rows[0].id, sections: results, generation, semantic };
         });
       },
     },

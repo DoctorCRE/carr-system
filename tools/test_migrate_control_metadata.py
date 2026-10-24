@@ -54,6 +54,25 @@ class ControlRepairOrderingTests(unittest.TestCase):
             migrate.validate_ledger_identities(current, dict(list(current.items())[:count]))
 
 
+class CurrentGrantCatalogTests(unittest.TestCase):
+    def test_exact_new_relation_grant_is_accounted_for_against_the_sealed_baseline(self):
+        sys.path.insert(0, str(ROOT / 'ops'))
+        from scac_mutation_db_inventory import validate_registered_grants
+        categories = ('secdef_execute', 'relation_dml', 'column_dml')
+        baseline = {name: {'count': 0, 'digest':
+            'sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'} for name in categories}
+        grant = {'ingress_key': 'db-relation-acl:public.doctrine_embedding:carr_writer:insert',
+                 'ingress_kind': 'db_relation_acl', 'relation': 'public.doctrine_embedding',
+                 'relation_kind': 'r', 'grantee': 'carr_writer', 'privilege': 'insert', 'grantable': False}
+        contract = {'secdef_execute': [], 'relation_dml': [grant]}
+        projection = {name: [] for name in categories}
+        projection['relation_dml'] = [grant]
+        validate_registered_grants(projection, baseline, contract)
+        for rows in ([], [{**grant, 'grantable': True}], [grant, {**grant, 'privilege': 'update'}]):
+            with self.subTest(rows=rows), self.assertRaises(RuntimeError):
+                validate_registered_grants({**projection, 'relation_dml': rows}, baseline, contract)
+
+
 class ApprovedControlMigrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -96,6 +115,26 @@ class ApprovedControlMigrationTests(unittest.TestCase):
             cur.execute("""insert into ops.rule_control_binding(rule_id,control_key,statement_hash,binding_contract)
                 select id,%s,encode(digest(statement,'sha256'),'hex'),'{"fixture":"retired control"}'
                 from rule where id=%s""", (ORPHAN_CONTROL, ORPHAN_RULE))
+
+    def test_semantic_grants_preserve_catalog_closure_and_refuse_extra_authority(self):
+        with self.psycopg.connect(self.dsn, autocommit=True) as conn:
+            self.assertTrue(conn.execute('select ops.scac_mutation_catalog_v118_current()').fetchone()[0])
+            expected = conn.execute("select ops.scac_current_grant_contract()->'runtime_dml_grants'").fetchone()[0]
+            actual = conn.execute('select ops.scac_runtime_dml_grant_snapshot()').fetchone()[0]
+            self.assertEqual(actual, {'schema_version': 'scac-runtime-dml-grants.v1',
+                                     'entry_count': expected['count'], 'grant_digest': expected['digest']})
+            state = conn.execute('select ops.scac_reference_monitor_state()').fetchone()[0]
+            self.assertEqual(state['grant_state'], 'current')
+            self.assertEqual(state['missing_guard_count'], 0)
+            self.assertEqual(state['guard_state'], 'complete')
+            for statement in (
+                'grant update on public.doctrine_embedding to carr_writer',
+                'grant execute on function public.search_doctrine_semantic(text,uuid,text[],integer,text,vector[]) to public',
+            ):
+                with conn.transaction(force_rollback=True):
+                    conn.execute(statement)
+                    self.assertFalse(conn.execute('select ops.scac_mutation_catalog_v118_current()').fetchone()[0])
+            self.assertTrue(conn.execute('select ops.scac_mutation_catalog_v118_current()').fetchone()[0])
 
     def runner(self, *args):
         return subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'), '--apply', '--yes', '--through', BINDING_REPAIR, *args],

@@ -366,6 +366,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "backfill-doctrine-embeddings": {
+    "ingress_key": "mcp-tool:backfill-doctrine-embeddings",
+    "source_locator": "mcp-server/src/doctrine.js",
+    "schema_digest": "313f638109e6fe6f072ded06610647962890be10f7151431ab6e705f334ab23b",
+    "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "bind-rule-context-contract": {
     "ingress_key": "mcp-tool:bind-rule-context-contract",
     "source_locator": "mcp-server/src/rule-context-runtime.v5.js",
@@ -2719,8 +2728,35 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   }
 });
 export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
-  "registry_version": "scac-mutation-registry.v118",
-  "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
+  "relation_dml": [
+    {
+      "grantee": "carr_writer",
+      "relation": "public.deal_vendor_assignment",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.deal_vendor_assignment",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.doctrine_embedding",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.doctrine_embedding:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    }
+  ],
   "secdef_execute": [
     {
       "config": [
@@ -2796,8 +2832,44 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[])",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[]):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[])",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[]):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
     }
   ],
+  "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
+  "registry_version": "scac-mutation-registry.v118",
+  "runtime_dml_grants": {
+    "count": 339,
+    "digest": "sha256:a210dbda8843ef57aecf1985cb0b97f7ab6fac5e1e99df0926542eb2945254bc"
+  },
   "retired_secdef_execute": [
     {
       "config": [
@@ -2979,29 +3051,5 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "function_kind": "f",
       "security_definer": true
     }
-  ],
-  "relation_dml": [
-    {
-      "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:insert",
-      "ingress_kind": "db_relation_acl",
-      "relation": "public.deal_vendor_assignment",
-      "relation_kind": "r",
-      "grantee": "carr_writer",
-      "privilege": "insert",
-      "grantable": false
-    },
-    {
-      "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:update",
-      "ingress_kind": "db_relation_acl",
-      "relation": "public.deal_vendor_assignment",
-      "relation_kind": "r",
-      "grantee": "carr_writer",
-      "privilege": "update",
-      "grantable": false
-    }
-  ],
-  "runtime_dml_grants": {
-    "count": 338,
-    "digest": "sha256:1d16268baa3cd3bf925281f2c8d2ae29b2bf5abd31e098fe0155cf346213fa8b"
-  }
+  ]
 });

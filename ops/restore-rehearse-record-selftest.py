@@ -193,7 +193,7 @@ def tier1() -> None:
             read_migration(migration.parent.parent, migration.name).lower(),
         ))
     check("restore bootstraps every extension prerequisite declared by migrations",
-          extension_names == migration_extensions == {"pg_trgm", "pgcrypto"},
+          extension_names == migration_extensions == {"pg_trgm", "pgcrypto", "vector"},
           f"restore={sorted(extension_names)} migrations={sorted(migration_extensions)}")
 
     # ── a good run: state=succeeded, no invented failure_class ──────────────
