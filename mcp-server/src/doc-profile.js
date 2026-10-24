@@ -3,7 +3,7 @@
 export const DOC_TOOL_NAMES = Object.freeze([
   "whats-new",
   "catch-me-up", "today-triage", "find", "find-and-catch-up", "deal-board",
-  "get-deal-room", "who-do-we-know", "counterparty-history", "lead-board",
+  "get-deal-room", "vendor-assignment-context", "who-do-we-know", "counterparty-history", "lead-board",
   "schedule-board", "search-tour-properties", "read-doctrine", "search-doctrine",
   "recall-memory", "add-deal-note", "log-activity", "set-next-step", "add-critical-date", "log-capture",
 ]);
@@ -16,7 +16,10 @@ export const DOC_INSTRUCTIONS =
   "so a lost response can be recovered, and present the acknowledgement response itself. " +
   "Doc is CARR's brokerage colleague. Use these tools to find records, catch up on deals, " +
   "review today's priorities, consult doctrine and memory, and record notes, activities, " +
-  "next steps, critical dates or source captures. Use find for names and catch-me-up or get-deal-room " +
+  "next steps, critical dates or source captures. For a vendor role stated during a deal call, " +
+  "read vendor-assignment-context, then use log-activity vendor_assignments with its exact existing IDs and base_version. " +
+  "Never infer a role or create identities. Show the role, company and contact from get-deal-room vendors. " +
+  "Use find for names and catch-me-up or get-deal-room " +
   "before discussing a record. Writes use a fresh idempotency_key for each intended action; " +
   "keep that key on retries and preserve any base_version required by the tool. " +
   "Ask the partner about version_conflict or needs_confirm; never retry them automatically. " +

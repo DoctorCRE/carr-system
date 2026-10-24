@@ -40,6 +40,23 @@ test('shorter existing concept queries retain their score and provenance', async
   });
 });
 
+test('ordinary hyphenated question words preserve complete approved phrase matches', async t => {
+  await withConcept(async fixture => {
+    for (const query of [
+      'How do I follow database service unavailable troubleshooting steps for a read-only replica?',
+      'How do I follow database service unavailable troubleshooting steps step-by-step?',
+    ]) {
+      await t.test(query, async () => {
+        const hits = await fixture.search(query);
+        assert.equal(hits[0]?.section_id, sectionId, query);
+        assert.equal(hits[0].lexical_score, 0);
+        assert.ok(Math.abs(hits[0].concept_score - 0.09) < 0.000001);
+        assert.deepEqual(hits[0].provenance.phrase_ids, [phraseId]);
+      });
+    }
+  });
+});
+
 test('long questions cannot match an approved phrase through partial word overlap', async () => {
   await withConcept(async fixture => {
     assert.deepEqual(await fixture.search('How do I follow database service unavailable payment steps?'), []);
@@ -50,6 +67,8 @@ test('websearch exclusions and quotes do not enter the additional containment pa
   await withConcept(async fixture => {
     for (const query of [
       'How do I follow -database service unavailable troubleshooting steps?',
+      'How do I follow database service unavailable troubleshooting steps -billing?',
+      'How do I follow -database service unavailable troubleshooting steps step-by-step?',
       'How do I follow "database service unavailable troubleshooting steps"?',
       'How do I follow database service unavailable troubleshooting steps OR billing?',
     ]) assert.deepEqual(await fixture.search(query), [], query);

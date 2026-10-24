@@ -50,7 +50,8 @@ with
                when to_tsvector('english', p.normalized_phrase) @@ websearch_to_tsquery('english', n.q)
                then least(1.0, ts_rank_cd(to_tsvector('english', p.normalized_phrase),
                                          websearch_to_tsquery('english', n.q))::double precision)
-               when n.q !~ '["-]'
+               when n.q !~ '"'
+                and websearch_to_tsquery('english', n.q)::text !~ '!'
                 and n.q !~ '(^|[[:space:]])or([[:space:]]|$)'
                 and to_tsvector('english', n.q) @@ plainto_tsquery('english', p.normalized_phrase)
                then least(1.0, ts_rank_cd(to_tsvector('english', n.q),
