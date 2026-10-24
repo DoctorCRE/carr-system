@@ -9,7 +9,7 @@ const REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const BOARD_ANSWER_WRITE_VERBS = new Set([
   "publish-board-snapshot", "ask-board-question", "revise-board-question",
-  "answer-board-question", "acknowledge-board-answer", "record-board-answer-applied",
+  "answer-board-question", "acknowledge-board-answer",
 ]);
 const questionFields = {
   prompt: { type: "string" }, choices: { type: "array", items: { type: "string" } },
@@ -345,33 +345,5 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
       },
     },
 
-    "record-board-answer-applied": {
-      write: true,
-      description: "Mark a Received answer Applied only with a concrete effect reference. The record names who applied it.",
-      inputSchema: { type: "object", properties: {
-        idempotency_key: { type: "string" }, answer_id: { type: "string" },
-        base_version: { type: "integer" }, effect_ref: { type: "string" },
-      }, required: ["idempotency_key", "answer_id", "base_version", "effect_ref"] },
-      handler: async (c, actor, args) => {
-        answerId(args.answer_id); version(args.base_version, 2);
-        const effect = text(args.effect_ref, "effect_ref", 1000);
-        const principal = sponsor(actor);
-        return withEnvelope(c, actor, "record-board-answer-applied", args, async () => {
-          const rows = await c.query(
-            `update board_answer a set applied_at=now(),applied_by_actor_id=$1,
-                 effect_ref=$2,version=version+1
-               where a.organization_tenant_id=$3 and a.sponsoring_human_slug=$4
-                 and a.id=$5 and a.version=$6
-                 and a.received_at is not null and a.applied_at is null
-               returning *, 'Applied' as status`,
-            [actor.id, effect, organizationTenantForActor(actor), principal,
-             args.answer_id, args.base_version]);
-          if (!rows.rows.length) throw new ToolError({ error: "board_version_conflict" });
-          await writeEvent(c, actor, "record-board-answer-applied", "board_answer", args.answer_id,
-            { new: { status: "Applied", effect_ref: effect }, idempotency_key: args.idempotency_key });
-          return { ok: true, answer: rows.rows[0] };
-        });
-      },
-    },
   };
 }

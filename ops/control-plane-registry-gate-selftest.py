@@ -69,8 +69,12 @@ def main() -> int:
         "exact registry passes": failures([row("w", 2, False)]) == [],
         "disabled superseded version passes": failures([row("w", 1, False), row("w", 2, False)]) == [],
         "enabled superseded version fails": failures([row("w", 1, True), row("w", 2, False)]) != [],
+        "retired engineering definition remains disabled history": failures([row("w", 2, False), row("engineering-slice", 1, False)]) == [],
+        "retired engineering metadata is outside source comparison": failures([row("w", 2, False), row("engineering-slice", 1, True)]) == [],
+        "unknown engineering version remains drift": failures([row("w", 2, False), row("engineering-slice", 2, False)]) != [],
         "retired renewal definition remains disabled history": failures([row("w", 2, False), row("renewal-radar-source-daily", 1, False)]) == [],
         "retired renewal definition cannot be enabled": failures([row("w", 2, False), row("renewal-radar-source-daily", 1, True)]) != [],
+
         "undeclared key fails even disabled": failures([row("w", 2, False), row("x", 1, False)]) != [],
         "missing declared version fails": failures([row("w", 1, False)]) != [],
     }

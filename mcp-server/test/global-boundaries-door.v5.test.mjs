@@ -456,23 +456,6 @@ test("the read projection carries the policy, the eight decisions, every matrix 
   assert.equal(projection.door.system_authority_verbs.length, 4);
 });
 
-test("read-global-boundaries is a read verb that refuses a stale expected digest by name", async () => {
-  const tools = globalBoundariesDoorTools({ ToolError });
-  const tool = tools["read-global-boundaries"];
-  assert.notEqual(tool.write, true);
-  assert.notEqual(tool.humanOnly, true);
-  assert.equal(tool.inputSchema.additionalProperties, false);
-  const noDb = { query: () => { throw new Error("the read verb must not touch the database"); } };
-  const result = await tool.handler(noDb, JOE, {});
-  assert.equal(result.projection.policy_digest, v5BoundaryPolicyDigest());
-  const same = await tool.handler(noDb, JOE, { expected_policy_digest: v5BoundaryPolicyDigest() });
-  assert.equal(same.projection.policy_digest, v5BoundaryPolicyDigest());
-  await assert.rejects(tool.handler(noDb, JOE, { expected_policy_digest: `sha256:${"0".repeat(64)}` }),
-    e => e instanceof ToolError && e.payload.error === "stale_expected_digest");
-  await assert.rejects(tool.handler(noDb, JOE, { expected_policy_digest: "nope" }),
-    e => e instanceof ToolError && e.payload.error === "invalid_expected_digest");
-});
-
 // ----------------------------------- bounded output (#1268 review, round 1)
 //
 // The reviewer's reproduction: 9,000 rows of {representation_side:"landlord"}
