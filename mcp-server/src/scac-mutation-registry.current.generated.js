@@ -51,15 +51,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
-  "accept-workflow": {
-    "ingress_key": "mcp-tool:accept-workflow",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "40027d7fa73418abf3158ae56c78305b80850bf3e09a2e70ac48b4ce322c4e89",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
-    "delegates_to": []
-  },
   "acknowledge-board-answer": {
     "ingress_key": "mcp-tool:acknowledge-board-answer",
     "source_locator": "mcp-server/src/board-answers.js",
@@ -91,24 +82,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:acknowledge-ready-plan-amendment",
     "source_locator": "mcp-server/src/work-request-intake.js",
     "schema_digest": "8135fef2d2ee7ba14a894765ffa34621db24796b3114a4ef9c4128f161d90ed4",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "activate-guidance-registry": {
-    "ingress_key": "mcp-tool:activate-guidance-registry",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "77dbe3168fd437060aa0d8f2f50741982858ba6614040249b8cfc1e698de7e8d",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
-    "delegates_to": []
-  },
-  "activate-rule": {
-    "ingress_key": "mcp-tool:activate-rule",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "b01819ab4ea18883102b084c26915392421468f672dc04ae519838820df7cccb",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -231,15 +204,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "admit-rule": {
-    "ingress_key": "mcp-tool:admit-rule",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "afc33dac8d4ece567dedb49bdb1c4eede435db08aae76828586edffa6b538cd2",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
   "advance-leads": {
     "ingress_key": "mcp-tool:advance-leads",
     "source_locator": "mcp-server/src/lead-automation.js",
@@ -265,15 +229,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": false,
     "authority_only": false,
-    "delegates_to": []
-  },
-  "amend-rule": {
-    "ingress_key": "mcp-tool:amend-rule",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "6b3624e7de04d0aac63258144f364b4aa0830def1b3345bae7995fc8c3d3b92d",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
     "delegates_to": []
   },
   "answer-board-question": {
@@ -427,15 +382,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": false,
     "authority_only": false,
-    "delegates_to": []
-  },
-  "approve-rule": {
-    "ingress_key": "mcp-tool:approve-rule",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "32a195235ea549852cde7c9aee68ecf5f55db4f73b89ff18d605bf0324d41237",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
     "delegates_to": []
   },
   "ask-board-question": {
@@ -836,15 +782,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "deactivate-guidance-registry": {
-    "ingress_key": "mcp-tool:deactivate-guidance-registry",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "6676c2b0adb3e0c450bbcb359df6920999ac959c93921548f1f2ea60b16d8774",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
-    "delegates_to": []
-  },
   "deal-board": {
     "ingress_key": "mcp-tool:deal-board",
     "source_locator": "mcp-server/src/tools.js",
@@ -870,15 +807,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": true,
     "authority_only": false,
-    "delegates_to": []
-  },
-  "decide-guidance-import-batch": {
-    "ingress_key": "mcp-tool:decide-guidance-import-batch",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "013869683456d458086584472600b08b8e86002b146d39c1227a6a0c5a7faef6",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
     "delegates_to": []
   },
   "decide-meeting-action": {
@@ -915,15 +843,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": false,
     "authority_only": false,
-    "delegates_to": []
-  },
-  "disable-legacy-schedule": {
-    "ingress_key": "mcp-tool:disable-legacy-schedule",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "01aa29ab4be1a680efd8990e348198b32985aab29e92279de949fe2dea816b66",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
     "delegates_to": []
   },
   "doctrine-index": {
@@ -1391,7 +1310,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "log-activity": {
     "ingress_key": "mcp-tool:log-activity",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "34415ad0fe56336ee6fde5d9f274e13e6817e654d8d52b6f7f64e058ed097e33",
+    "schema_digest": "f4631b7df0c325de5d0fd0f2f75f2e21265dcedf91c718a789363e38ff920e33",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -2742,15 +2661,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "retire-rule": {
-    "ingress_key": "mcp-tool:retire-rule",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "35e2de1ff71a84e1fc2f09769487a2f9a92622f84f23f68af8e86d469b46152f",
-    "write": true,
-    "human_only": false,
-    "authority_only": true,
-    "delegates_to": []
-  },
   "retire-workflow-cutover-plan": {
     "ingress_key": "mcp-tool:retire-workflow-cutover-plan",
     "source_locator": "mcp-server/src/workflow-cutover.v5.js",
@@ -2952,7 +2862,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "set-market-agent": {
     "ingress_key": "mcp-tool:set-market-agent",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "3e1c3511972550b5865776b540f2651473cd31a4a5928e0eecd2c7dc873d2b16",
+    "schema_digest": "f9e8c7d9c0c0b1debc14f97989a118bb416dff94a907db3fc6dfabbc96388d28",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -2961,7 +2871,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "set-national-account-owner": {
     "ingress_key": "mcp-tool:set-national-account-owner",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "952571938c04acc7c129ef100a43a6093cf1efd349d54174d1a0c890f8fb46ed",
+    "schema_digest": "1f6d231c7854c81b9e53c6d78ae482be5a9b15ea990dd557ca328a5b62ff5873",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -2979,7 +2889,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "set-next-step": {
     "ingress_key": "mcp-tool:set-next-step",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "b1ba0421038e02c36f264592ea5907c0dce56a87ccf036d93db05458bca513be",
+    "schema_digest": "b7da2861fae485e929321835e645da97fc426991aeba3e90d7a2347f5d7cd8f5",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -3122,19 +3032,10 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "teach": {
-    "ingress_key": "mcp-tool:teach",
-    "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "ac28ee6aec77dace4d0f7b0493edd9815f1171606bc04a94bcd8a39a735fc8e4",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
   "today-triage": {
     "ingress_key": "mcp-tool:today-triage",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
+    "schema_digest": "c23d0abc10107890b9ea09f17b6d81b1572d32dc42844de24362eb63d9a3743c",
     "write": false,
     "human_only": false,
     "authority_only": false,
@@ -3251,8 +3152,26 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "update-vendor": {
     "ingress_key": "mcp-tool:update-vendor",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "b6aba695eb20b17064ab1c841efb03028ef59deb9801f936251d6499e0bb64fc",
+    "schema_digest": "a46d9164f4f25becd07e3db36d52617a35ada87d78338b7ffd1eab2ce674f0e5",
     "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "vendor-assignment-context": {
+    "ingress_key": "mcp-tool:vendor-assignment-context",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "3afd0eb0414c00a12f982d740b8dc0f1ff5ce42bd9d86ff69820b994da93136f",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "vendor-duplicate-report": {
+    "ingress_key": "mcp-tool:vendor-duplicate-report",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
     "human_only": false,
     "authority_only": false,
     "delegates_to": []
@@ -3573,5 +3492,29 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "function_kind": "f",
       "security_definer": true
     }
-  ]
+  ],
+  "relation_dml": [
+    {
+      "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "public.deal_vendor_assignment",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "public.deal_vendor_assignment",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "update",
+      "grantable": false
+    }
+  ],
+  "runtime_dml_grants": {
+    "count": 338,
+    "digest": "sha256:1d16268baa3cd3bf925281f2c8d2ae29b2bf5abd31e098fe0155cf346213fa8b"
+  }
 });

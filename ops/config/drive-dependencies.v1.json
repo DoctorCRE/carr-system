@@ -81,28 +81,6 @@
       }
     },
     {
-      "id": "scheduled-calendar-ics",
-      "class": "scheduled",
-      "sources": [
-        "bin/pull-gmail-calendar.py"
-      ],
-      "path_pattern": "{{VAULT}}/**",
-      "producer": "calendar legacy ICS reader",
-      "consumers": [
-        "recovery operator"
-      ],
-      "canonicality": "recovery_only",
-      "replacement": {
-        "status": "accepted",
-        "target": "calendar record/event source",
-        "normal_path": "normal_path_refuses_missing_canonical_seam",
-        "accepted_by": "joe",
-        "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
-        "verified": "bin/pull-gmail-calendar.py refuses with MISSING_CANONICAL_SEAM naming the calendar record source (line 491); Drive needs --recovery --reason --recovery-root."
-      }
-    },
-    {
       "id": "scheduled-learning-render",
       "class": "scheduled",
       "sources": [
@@ -192,28 +170,6 @@
       }
     },
     {
-      "id": "normal-control-plane-env",
-      "class": "normal_runtime",
-      "sources": [
-        "tools/control-plane.py"
-      ],
-      "path_pattern": "{{VAULT}}/**",
-      "producer": "control-plane runtime",
-      "consumers": [
-        "deterministic child commands"
-      ],
-      "canonicality": "canonical",
-      "replacement": {
-        "status": "accepted",
-        "target": "minimal non-Drive child environment; retirement acceptance remains outstanding",
-        "normal_path": "normal_path_blocks_ambient_drive_root",
-        "accepted_by": "joe",
-        "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
-        "verified": "tools/control-plane.py contains ZERO references to Drive, vault or CloudStorage; the dependency is gone rather than merely gated."
-      }
-    },
-    {
       "id": "normal-record-source-vault-relative",
       "class": "normal_runtime",
       "sources": [
@@ -287,7 +243,6 @@
         "pipelines/review_queue.py",
         "tools/health-check.py",
         "tools/registry-audit.py",
-        "tools/report-card.py",
         "tools/retrieve.py"
       ],
       "path_pattern": "{{VAULT}}/**",
@@ -303,7 +258,7 @@
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
         "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
-        "verified": "The listed sources fail closed on the normal path. tools/health-check.py (line 103), tools/registry-audit.py (line 67) and tools/report-card.py (line 510) each sit on the same `if recovery: resolve / else: pop the ambient vault root` branch, and health-check additionally strips the variable from every child environment it spawns (lines 571, 604, 676, 1005). pipelines/brief_pack.py resolves a recovery root only when --recovery is passed and errors if --vault arrives without it. tools/retrieve.py resolves Drive only inside recovery_vault(), whose own docstring states it resolves only after the caller has selected recovery mode. pipelines/review_queue.py has ZERO Drive references."
+        "verified": "The retained brief, review, health, registry and retrieval sources use canonical records in normal mode. Drive inputs require explicit recovery; removed report-card and control-plane sources provide no current coverage."
       }
     },
     {
@@ -410,8 +365,6 @@
       "id": "projection-render-tools",
       "class": "projection",
       "sources": [
-        "tools/check.sh",
-        "tools/smoke.sh",
         "ops/renders-verify.py",
         "ops/vault-drift-watch.py",
         "ops/vault-duplicate-sweep.py",
@@ -499,31 +452,6 @@
       }
     },
     {
-      "id": "policy-nightly-canary-drive-capability-guard",
-      "class": "policy_guard",
-      "sources": [
-        "pipelines/availability_matcher.py"
-      ],
-      "path_pattern": "{{VAULT}}/**",
-      "reference_selectors": [
-        {
-          "source": "pipelines/availability_matcher.py",
-          "alias": "{{VAULT}}",
-          "line": 167,
-          "excerpt": "*\"CARR_VAULT\"*"
-        }
-      ],
-      "producer": "nightly availability canary",
-      "consumers": [
-        "canary capability boundary"
-      ],
-      "canonicality": "projection",
-      "replacement": {
-        "status": "not_a_runtime_reader",
-        "target": "canary rejects an ambient Drive capability before it reads a snapshot"
-      }
-    },
-    {
       "id": "inventory-tooling",
       "class": "inventory_tooling",
       "sources": [
@@ -546,8 +474,6 @@
       "class": "test_fixture",
       "sources": [
         "ops/*selftest.py",
-        "ops/bash-write-gate-selftest.py",
-        "ops/control-plane-runtime-selftest.py",
         "ops/learning-credential-boundary-selftest.py",
         "ops/learning-monthly-credential-selftest.py",
         "workspace/test/**"

@@ -32,10 +32,22 @@ LOG="$REPO/out/run-scheduled.log"
 PY="$REPO/.venv/bin/python"
 [ -x "$PY" ] || PY=python3
 
+receipt_file=""
+if [ "$SERVICE" = "outlook-intake" ]; then
+  mkdir -p "$REPO/out" 2>/dev/null
+  receipt_file="$(mktemp "$REPO/out/outlook-intake-receipt.XXXXXX")" || exit 1
+  trap 'rm -f "$receipt_file"' EXIT
+fi
+
 STARTED="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
-"$@"
-rc=$?
+if [ -n "$receipt_file" ]; then
+  "$@" > "$receipt_file" 2>/dev/null
+  rc=$?
+else
+  "$@"
+  rc=$?
+fi
 
 ENDED="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
@@ -51,6 +63,52 @@ fclass=()
 case $state in
   failed|timed_out) fclass=(--failure-class "exit_$rc") ;;
 esac
+
+detail="$RUN_KEY exited $rc"
+if [ -n "$receipt_file" ]; then
+  receipt="$("$PY" - "$receipt_file" "$state" <<'PY_RECEIPT'
+import json
+import sys
+
+reasons = frozenset("outside_window previous_run_active cleanup_failed store_missing carr_unreachable "
+                    "decode_failed store_verification_low calendar_decode_empty store_unchanged "
+                    "writes_failed model_failed steps_pending processed nothing_new writes_deferred "
+                    "request_blocked full_disk_access_required contacts_empty contacts_read_failed timeout auth_refused "
+                    "key_reuse transport_oversized no_acknowledgement reply_unreadable transport_error "
+                    "invalid_request subject_unresolved database_refused setup_failed".split())
+counts = frozenset("emails events_past events_upcoming logged preview_only full_text_notes balls_set "
+                   "balls_kept unmatched model_failed steps_pending writes_failed needs_refresh_listed "
+                   "unresolved_messages unresolved_addresses unresolved_calendar mapping_missing "
+                   "mapping_ambiguous mapping_unsupported writes_deferred requests_blocked error_timeout error_auth_refused "
+                   "error_key_reuse error_transport_oversized error_no_acknowledgement error_reply_unreadable "
+                   "error_transport_error error_invalid_request error_subject_unresolved error_database_refused "
+                   "error_setup_failed error_contacts_empty error_contacts_read_failed".split())
+receipt = None
+with open(sys.argv[1]) as output:
+    for line in output:
+        if line.startswith("outlook-intake-receipt "):
+            try:
+                receipt = json.loads(line[len("outlook-intake-receipt "):])
+            except ValueError:
+                receipt = None
+if (isinstance(receipt, dict) and receipt.get("state") == sys.argv[2]
+        and isinstance(receipt.get("reason"), str) and receipt["reason"] in reasons
+        and isinstance(receipt.get("counts"), dict)
+        and all(k in counts and type(v) is int and 0 <= v <= 1_000_000_000
+                for k, v in receipt["counts"].items())):
+    print(json.dumps({k: receipt[k] for k in ("state", "reason", "counts")}, sort_keys=True))
+    print(receipt["reason"])
+PY_RECEIPT
+)"
+  if [ -n "$receipt" ]; then
+    detail="${receipt%%$'\n'*}"
+    if [ "$state" = failed ] || [ "$state" = timed_out ]; then
+      fclass=(--failure-class "${receipt##*$'\n'}")
+    fi
+    print -r -- "outlook-intake-receipt $detail"
+  fi
+  rm -f "$receipt_file"
+fi
 
 corr=()
 [ -n "${CARR_CORRELATION_ID:-}" ] && corr=(--correlation "$CARR_CORRELATION_ID")
@@ -76,7 +134,7 @@ if [ "$should_record" -eq 1 ]; then
     --service "$SERVICE" --key "$RUN_KEY" --state "$state" \
     --exit-code "$rc" --started-at "$STARTED" --ended-at "$ENDED" \
     --source-kind wrapper --source-ref bin/run-scheduled.sh \
-    --detail "$RUN_KEY exited $rc" "${fclass[@]}" "${corr[@]}"
+    --detail "$detail" "${fclass[@]}" "${corr[@]}"
   "${argv[@]}" >> "$LOG" 2>&1
   recorder_exit=$?
   record_action=recorded

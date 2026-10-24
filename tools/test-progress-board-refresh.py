@@ -2,6 +2,9 @@
 import copy
 import io
 import tempfile
+import time
+import signal
+import json
 import unittest
 from argparse import Namespace
 from pathlib import Path
@@ -12,6 +15,8 @@ import progress_board as board
 
 class ScheduledRefreshTests(unittest.TestCase):
     def setUp(self):
+        self.root = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(patch.dict(board.os.environ, {"PROGRESS_BOARD_ROOT": self.root}))
         self.enterContext(patch.object(board.repo_lib("machine_role"), "read_marker", return_value="primary"))
 
     def test_legacy_size_failure_still_refreshes_and_publishes_facts(self):
@@ -26,9 +31,9 @@ class ScheduledRefreshTests(unittest.TestCase):
                 board.command_render(Namespace(project=board.LAUNCHD_BOARD, publish=True))
         self.assertIs(raised.exception, failure)
         self.assertEqual(events, [('refresh', 'all-repos'), ('publish', 'carr-v5'), ('publish', 'all-repos')])
-        poll.assert_not_called()
-        local.assert_not_called()
-        self.assertIn('legacy snapshot too large', err.getvalue())
+        poll.assert_called_once_with(board.LAUNCHD_BOARD)
+        local.assert_called_once_with()
+        self.assertIn('phase=publication outcome=failed', err.getvalue())
 
     def test_refreshed_facts_and_outages_reach_orchestrator_before_legacy_error(self):
         for outage in ('none', 'partial', 'full'):
@@ -65,7 +70,58 @@ class ScheduledRefreshTests(unittest.TestCase):
                 self.assertEqual(view['sources']['portfolio'], {'state': 'stale' if outage != 'none' else 'observed', 'checked_at': fresh, 'last_success_at': old if outage != 'none' else fresh})
                 self.assertEqual(view['cards'][0]['state'], 'review' if outage != 'none' else 'merged')
                 self.assertEqual([call.args[0] for call in release.call_args_list], [] if outage == 'full' else ['DoctorCRE/carr-system'] if outage == 'partial' else ['DoctorCRE/carr-system', 'jbookout/doctorcre-app'])
-                poll.assert_not_called()
+                poll.assert_called_once_with(board.LAUNCHD_BOARD)
+
+    def test_stalled_answer_stage_is_bounded_and_siblings_still_complete(self):
+        def stall(project):
+            try:
+                time.sleep(0.15)
+            except Exception:
+                pass
+        prior_handler = signal.getsignal(signal.SIGALRM)
+        with patch.object(board, "STAGE_TIMEOUT_SECONDS", 0.03, create=True), patch.object(board, "render"), patch.object(board, "build_all_repos"), patch.object(board, "publish_board") as publish, patch.object(board, "poll_board_answers", side_effect=stall), patch.object(board, "publish_needs_joe_local") as local, patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaisesRegex(RuntimeError, "answers.*timed_out"):
+                board.command_render(Namespace(project=board.LAUNCHD_BOARD, publish=True))
+        local.assert_called_once_with()
+        self.assertEqual([call.args[0] for call in publish.call_args_list], [board.LAUNCHD_BOARD, board.ALL_REPOS_BOARD])
+        self.assertEqual(signal.getsignal(signal.SIGALRM), prior_handler)
+        status = json.loads(Path(self.root, "boards", "carr-v5-answers-publication.json").read_text())
+        self.assertTrue(status["stale"])
+        self.assertIsNone(status["last_verified_at"])
+        self.assertEqual(status["outcome"], "timed_out")
+
+    def test_failed_source_refresh_cannot_suppress_answer_and_list_refresh(self):
+        failure = RuntimeError("synthetic source outage")
+        with patch.object(board, "render", side_effect=failure), patch.object(board, "build_all_repos"), patch.object(board, "publish_board"), patch.object(board, "poll_board_answers") as poll, patch.object(board, "publish_needs_joe_local") as local, patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(RuntimeError) as raised:
+                board.command_render(Namespace(project=board.LAUNCHD_BOARD, publish=True))
+        self.assertIs(raised.exception, failure)
+        poll.assert_called_once_with(board.LAUNCHD_BOARD)
+        local.assert_called_once_with()
+
+    def test_success_then_failure_keeps_last_verified_stage_timestamp(self):
+        common = [patch.object(board, "render"), patch.object(board, "build_all_repos"), patch.object(board, "publish_board"), patch.object(board, "publish_needs_joe_local"), patch("sys.stderr", new_callable=io.StringIO)]
+        for item in common:
+            self.enterContext(item)
+        with patch.object(board, "poll_board_answers"):
+            board.command_render(Namespace(project=board.LAUNCHD_BOARD, publish=True))
+        path = Path(self.root, "boards", "carr-v5-answers-publication.json")
+        success = json.loads(path.read_text())
+        with patch.object(board, "poll_board_answers", side_effect=RuntimeError("synthetic outage")):
+            with self.assertRaisesRegex(RuntimeError, "synthetic outage"):
+                board.command_render(Namespace(project=board.LAUNCHD_BOARD, publish=True))
+        failed = json.loads(path.read_text())
+        self.assertFalse(success["stale"])
+        self.assertTrue(failed["stale"])
+        self.assertEqual(failed["last_verified_at"], success["last_verified_at"])
+
+    def test_diagnostic_write_failure_does_not_prevent_product_work(self):
+        completed = []
+        failure = OSError("synthetic read-only status directory")
+        with patch.object(board, "record_publication_stage", side_effect=failure), patch("sys.stderr", new_callable=io.StringIO):
+            error = board.run_publication_stage("synthetic", "answers", lambda: completed.append("answered"))
+        self.assertEqual(completed, ["answered"])
+        self.assertIs(error, failure)
 
 
 if __name__ == '__main__':

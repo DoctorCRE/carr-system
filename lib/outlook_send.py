@@ -1,7 +1,7 @@
 """Prepare one Outlook mail or calendar draft, or dispatch it when Joe asked.
 
-A default call leaves a field-verified draft open. Explicit send intent permits
-one Send or Save after suppression, the ten-item daily limit, duplicate checks
+A default call leaves a field-verified draft open. Explicit send intent requires
+native confirmation after suppression, the ten-item daily limit, duplicate checks
 and idle checks. A local delivery latch prevents ambiguous effects from being
 repeated. Successful delivery is confirmed against Sent Items or the calendar
 before logging an activity. Diagnostics contain no addresses, subjects or bodies.
@@ -130,7 +130,7 @@ class Form(Protocol):
 
     def read(self) -> dict[str, str]: ...
     def discard(self) -> None: ...
-    def press(self) -> str: ...
+    def press(self, *, approved_at: float | None = None) -> str: ...
     def closed(self) -> bool: ...
 
 
@@ -275,6 +275,23 @@ def _kind(item: Mail | Event) -> str:
     return 'send' if isinstance(item, Mail) else 'event'
 
 
+def _confirm_dispatch(item: Mail | Event) -> bool:
+    try:
+        shown = fields(item)
+        text = (f'Account: {account()}\nTo: {shown.get("to", shown.get("attendees", ""))}\n'
+                f'Cc: {shown.get("cc", "")}\nBcc: {shown.get("bcc", "")}\nSubject: {item.subject}')
+        if isinstance(item, Event):
+            text += f'\nStart: {shown["start"]}\nEnd: {shown["end"]}\nLocation: {item.location}'
+        script = (f'set answer to display dialog {json.dumps(text, ensure_ascii=False)} '
+                  'with title "Confirm Outlook send" buttons {"Cancel", "Send"} '
+                  'default button "Cancel" cancel button "Cancel" giving up after 120\n'
+                  'return (not (gave up of answer)) and (button returned of answer is "Send")')
+        reply = _run(['osascript', '-'], input=script, capture_output=True, text=True, timeout=125)
+        return reply.stdout.strip() == 'true'
+    except (UiFailure, OSError, ValueError):
+        return False
+
+
 def _write_transport(item: Mail | Event, key: str, ports: Ports, record: str | None = None,
                      *, send_requested: bool = False) -> Result:
     """Send one mail or save one event, at most once per key and per mailbox match."""
@@ -332,12 +349,23 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
     idle = ports.idle_seconds()
     if idle is None or idle < IDLE_SECONDS:
         return _discard(form, Result(State.NOT_IDLE, 'user_active'))
+    dialog_started = time.monotonic()
+    if not _confirm_dispatch(item):
+        return Result(State.DRAFT, 'send_not_confirmed')
+    confirmed_at = time.monotonic()
+    idle = _idle_seconds()
+    approved_at = confirmed_at if idle is not None and idle <= confirmed_at - dialog_started else None
+    try:
+        if form.read() != shown:
+            return Result(State.DRAFT, 'approval_fields_changed')
+    except UiFailure:
+        return Result(State.DRAFT, 'approval_fields_unreadable')
 
     kind, print_ = _kind(item), fingerprint(item)
     ledger.append(key, kind, 'pressing', print_, ports.now())
     pressed_at = ports.now()
     try:
-        mode = form.press()
+        mode = form.press(approved_at=approved_at)
     except UserActive:
         return _discard(form, Result(State.NOT_IDLE, 'user_active'))
     except (UiFailure, ui.CuaError, OSError, subprocess.SubprocessError) as exc:
@@ -563,7 +591,7 @@ class Window:
         except (ui.CuaError, UiFailure):
             pass
 
-    def press(self) -> str:
+    def press(self, *, approved_at: float | None = None) -> str:
         """One accepted press. Only an explicit pre-dispatch refusal allows front fallback."""
         target = self._button(self.elements(), self.commit_label)
         try:
@@ -575,22 +603,25 @@ class Window:
             return 'background'
         if refusal.get('code') != 'background_unavailable':
             raise UiFailure('press_refused')
+        required = IDLE_SECONDS if approved_at is None else min(IDLE_SECONDS, time.monotonic() - approved_at)
         idle = _idle_seconds()
-        if idle is None or idle < IDLE_SECONDS:
+        if idle is None or idle < required:
             raise UserActive('user_active')
         previous = _frontmost()
         if previous is None:
             raise UiFailure('frontmost_unreadable')
+        required = IDLE_SECONDS if approved_at is None else min(IDLE_SECONDS, time.monotonic() - approved_at)
         idle = _idle_seconds()
-        if idle is None or idle < IDLE_SECONDS:
+        if idle is None or idle < required:
             raise UserActive('user_active')
         try:
             _cua('bring_to_front', {'pid': self.pid, 'window_id': self.window_id})
             time.sleep(self.waits.settle_seconds)
             if not isinstance(self, ComposeWindow):
                 target = self._button(self.elements(), self.commit_label)
+            required = IDLE_SECONDS if approved_at is None else min(IDLE_SECONDS, time.monotonic() - approved_at)
             idle = _idle_seconds()
-            if idle is None or idle < IDLE_SECONDS:
+            if idle is None or idle < required:
                 raise UserActive('user_active')
             if isinstance(self, ComposeWindow):
                 _cua('invoke_menu', {'pid': self.pid, 'window_id': self.window_id, 'path': ['Draft', 'Send']})

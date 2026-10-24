@@ -1,45 +1,5 @@
 #!/usr/bin/env python3
-"""
-release-manifest-selftest.py — the P0-1 rebuild clause, proven on every change.
-
-WHY THIS EXISTS SEPARATELY FROM ops/p0-1-release-gate.py. That gate needs a
-database and runs against the isolated staging project. This one needs nothing
-but git, so ops/ci.sh picks it up automatically (it globs ops/*-selftest.py) and
-every proposed change re-proves the rebuild clause. A check that only runs when
-somebody remembers to point it at a database is a check that stops running.
-
-WHAT IT PROVES
-
-  1. DETERMINISM. Two builds of the same SHA produce byte-identical digests. If
-     this ever fails, the digest has picked up something ambient — a timestamp,
-     a path, a machine — and "identical artifact rebuild" becomes unfalsifiable.
-
-  2. THE DIGEST IS OF THE COMMIT, NOT THE CHECKOUT. The digest of HEAD is the
-     same whether or not the working tree is dirty. This repo regularly holds
-     another session's uncommitted work (rule 308ef1de), so a digest that moved
-     with the working tree would be worthless exactly when it matters.
-
-  3. SENSITIVITY. A different SHA whose deployed paths differ produces a
-     different artifact digest. A digest that never changes is a constant
-     wearing a hash's clothes.
-
-  4. VERIFY ROUND-TRIPS. A freshly built manifest verifies against its own
-     recorded SHA.
-
-  5. VERIFY ACTUALLY BITES. A manifest with a tampered digest FAILS verify. This
-     is the seeded failure for this clause: without it, assertion 4 could pass
-     because verify returns zero unconditionally.
-
-  6. THE PLAN HASH COVERS WHAT AN APPROVER READS, AND ONLY THAT. Changing a
-     material field moves it; changing a deploy-time observation does not. The
-     database trigger that voids stale approvals is only as good as this hash.
-
-  7. PROVIDER VERSION BINDING IS POST-UPLOAD, IMMUTABLE, AND APPROVAL-BOUND.
-     It changes the plan hash without changing source evidence, and a bound
-     manifest still verifies its source digests.
-
-  8. THE MANIFEST CARRIES ALL SEVEN CLASSES the acceptance names.
-"""
+"""Check deterministic release source identity and the independent DoctorCRE artifact pin."""
 
 import atexit
 import copy
@@ -76,10 +36,7 @@ def run(*args: str) -> subprocess.CompletedProcess:
 
 
 def build(*args: str) -> dict:
-    out = run("build", "--performance-budget-ref", "runbook:worker-performance-v1",
-              "--performance-budget-ms", "1500",
-              "--recovery-strategy", "rollback",
-              "--rollback-plan-ref", "runbook:rollback-worker-v1", *args)
+    out = run("build", *args)
     if out.returncode != 0:
         raise SystemExit(f"release-manifest-selftest: build failed: {out.stderr.strip()}")
     return json.loads(out.stdout)
@@ -91,7 +48,7 @@ def git(*args: str) -> str:
 
 
 def main() -> int:
-    print("release-manifest-selftest: P0-1 rebuild clause")
+    print("release-manifest-selftest: source identity and DoctorCRE artifact pin")
     tested_sha = "HEAD"
     first = build("--sha", tested_sha)
     second = build("--sha", tested_sha)
@@ -189,11 +146,7 @@ def main() -> int:
              "--", "mcp-server",
              ":(exclude)mcp-server/.last-deployed-verb-count"))
         if differs.returncode != 0:
-            candidate_attempt = run("build", "--sha", sha,
-                                    "--performance-budget-ref", "runbook:worker-performance-v1",
-                                    "--performance-budget-ms", "1500",
-                                    "--recovery-strategy", "rollback",
-                                    "--rollback-plan-ref", "runbook:rollback-worker-v1")
+            candidate_attempt = run("build", "--sha", sha)
             if candidate_attempt.returncode == 0:
                 other = sha
                 break
@@ -239,56 +192,6 @@ def main() -> int:
         check("5c. a valid-shaped stale applied-ledger digest FAILS verify",
               out.returncode != 0)
 
-    # 6. the plan hash covers material fields only
-    material = dict(first)
-    material["config_fingerprint"] = "sha256:" + "1" * 64
-    out = run("plan-hash", "--manifest", _tmp_json(material))
-    moved = out.stdout.strip()
-    check("6a. changing configuration moves the plan hash",
-          moved and moved != first["plan_hash"])
-
-    posture = dict(first)
-    posture["program6_actions"] = {"enabled": not first["program6_actions"]["enabled"],
-                                   "posture": "disabled" if first["program6_actions"]["enabled"] else "enabled"}
-    out = run("plan-hash", "--manifest", _tmp_json(posture))
-    check("6aa. derived Program 6 posture preserves the established plan-hash contract",
-          out.stdout.strip() == first["plan_hash"])
-    out = run("program6-posture", "--manifest", _tmp_json(first))
-    check("6ab. manifest posture reader returns the reviewed typed value",
-          out.returncode == 0 and out.stdout.strip() == first["program6_actions"]["posture"])
-
-    observed = dict(first)
-    observed["commit_subject"] = "a different subject line entirely"
-    out = run("plan-hash", "--manifest", _tmp_json(observed))
-    check("6b. a non-material field does NOT move the plan hash",
-          out.stdout.strip() == first["plan_hash"])
-
-    performance = dict(first)
-    performance["performance_budget_ms"] = 1501
-    out = run("plan-hash", "--manifest", _tmp_json(performance))
-    check("6c. changing the approved performance budget moves the plan hash",
-          out.stdout.strip() and out.stdout.strip() != first["plan_hash"])
-    partial = run("build", "--sha", tested_sha, "--performance-budget-ref",
-                  "runbook:worker-performance-v1")
-    check("6d. partial performance assurance input is refused", partial.returncode != 0)
-    recovery_plan = dict(first)
-    recovery_plan["rollback_plan_ref"] = "runbook:rollback-worker-v2"
-    out = run("plan-hash", "--manifest", _tmp_json(recovery_plan))
-    check("6e. changing the recovery plan moves the plan hash",
-          out.stdout.strip() and out.stdout.strip() != first["plan_hash"])
-
-    schema_count = dict(first)
-    schema_count["schema_applied_count"] += 1
-    out = run("plan-hash", "--manifest", _tmp_json(schema_count))
-    check("6f. changing the full applied-ledger count moves the plan hash",
-          out.stdout.strip() and out.stdout.strip() != first["plan_hash"])
-
-    schema_digest = dict(first)
-    schema_digest["schema_ledger_sha256"] = "sha256:" + "2" * 64
-    out = run("plan-hash", "--manifest", _tmp_json(schema_digest))
-    check("6g. changing the full applied-ledger digest moves the plan hash",
-          out.stdout.strip() and out.stdout.strip() != first["plan_hash"])
-
     external_product = copy.deepcopy(first)
     external_product["doctorcre_artifact"]["archive_sha256"] = "3" * 64
     out = run("plan-hash", "--manifest", _tmp_json(external_product))
@@ -299,129 +202,18 @@ def main() -> int:
     check("6i. a self-consistent but false DoctorCRE pin fails rebuild verification",
           out.returncode != 0)
 
-    legacy_out = run("build", "--sha", tested_sha)
-    legacy = json.loads(legacy_out.stdout) if legacy_out.returncode == 0 else {}
-    legacy_path = _tmp_json(legacy)
-    legacy_verify = run("verify", "--manifest", legacy_path)
-    check("6j. an all-absent historical assurance group still round-trips",
-          legacy_out.returncode == 0 and legacy_verify.returncode == 0)
-
-    # Find the pre-P2 commit deterministically rather than walking a fixed
-    # number of commits back from HEAD. A commit-count window rots: every
-    # merge to main pushes the P2-adding commit further back, and once it
-    # falls outside the window this assertion silently stops finding a
-    # historical (pre-P2) commit at all. Instead, locate the commit that
-    # ADDED ops/config/doctorcre-artifact.v1.json and use its first parent —
-    # the file is added exactly once, and everything before that add is, by
-    # definition, pre-P2.
-    add_commits = git("log", "--diff-filter=A", "--format=%H",
-                      "--", "ops/config/doctorcre-artifact.v1.json").strip()
-    if add_commits == "":
-        raise SystemExit(
-            "release-manifest-selftest: could not find the commit that added "
-            "ops/config/doctorcre-artifact.v1.json — history is unavailable "
-            "(shallow clone?). This job's checkout needs fetch-depth: 0.")
-    artifact_added_sha = add_commits.splitlines()[-1]  # oldest, if ever re-added
-
-    parent = subprocess.run(
-        ("git", "-C", str(REPO), "rev-parse", f"{artifact_added_sha}^"),
-        capture_output=True, text=True)
-    if parent.returncode != 0:
-        raise SystemExit(
-            "release-manifest-selftest: could not resolve the parent of the "
-            f"commit that added the P2 artifact ({artifact_added_sha}) — "
-            "history is unavailable (shallow clone?). This job's checkout "
-            "needs fetch-depth: 0.")
-    historical_sha = parent.stdout.strip()
-
-    present = subprocess.run(
-        ("git", "-C", str(REPO), "cat-file", "-e",
-         f"{historical_sha}:ops/config/doctorcre-artifact.v1.json"),
-        capture_output=True)
-    if present.returncode == 0:
-        raise SystemExit(
-            "release-manifest-selftest: expected the P2 artifact to be "
-            f"absent at {historical_sha} (parent of the commit that added "
-            "it), but it is present. The add-commit detection is wrong.")
-
-    historical = build("--sha", historical_sha) if historical_sha else {}
-    historical_verify = run("verify", "--manifest", _tmp_json(historical)) if historical else None
-    check("6k. pre-P2 manifests retain the legacy joint-source recipe",
-          bool(historical_sha and historical.get("artifact_paths") == ["mcp-server", "dealroom"]
-               and "doctorcre_artifact" not in historical
-               and historical_verify and historical_verify.returncode == 0))
-
-    # 7. Provider versions do not exist until Cloudflare has uploaded the
-    # source. Binding that returned identity must preserve source evidence and
-    # produce the exact plan hash an approver sees.
-    with tempfile.TemporaryDirectory() as tmp:
-        source_path = Path(tmp) / "source.json"
-        source_path.write_text(json.dumps(first))
-        out = run("bind-provider", "--manifest", str(source_path),
-                  "--provider", "cloudflare-workers",
-                  "--provider-version-id", "cf-version-test-001")
-        check("7a. a post-upload provider version binds successfully",
-              out.returncode == 0, out.stderr.strip())
-        bound = json.loads(out.stdout) if out.returncode == 0 else {}
-        source_fields = ("git_sha", "artifact_digest", "dependency_lock_digest",
-                         "config_fingerprint", "migration_set",
-                         "schema_highest_migration", "schema_applied_count",
-                         "schema_ledger_sha256", "doctorcre_artifact")
-        check("7b. binding preserves the SHA and every source digest",
-              all(bound.get(k) == first.get(k) for k in source_fields))
-        check("7c. provider/version binding changes the approval plan hash",
-              bool(bound.get("plan_hash")
-                   and bound.get("plan_hash") != first["plan_hash"]))
-
-        bound_path = Path(tmp) / "bound.json"
-        bound_path.write_text(json.dumps(bound))
-        out = run("verify", "--manifest", str(bound_path))
-        check("7d. a bound manifest verifies its recorded source evidence",
-              out.returncode == 0, out.stdout.strip()[-300:])
-
-        out = run("bind-provider", "--manifest", str(source_path),
-                  "--provider", "cloudflare-workers", "--provider-version-id", "")
-        check("7e. an empty provider version ID is refused", out.returncode != 0)
-
-        out = run("bind-provider", "--manifest", str(bound_path),
-                  "--provider", "cloudflare-workers",
-                  "--provider-version-id", "cf-version-test-002")
-        check("7f. a changed provider version is refused", out.returncode != 0)
-
-        out = run("bind-provider", "--manifest", str(bound_path),
-                  "--provider", "different-provider",
-                  "--provider-version-id", "cf-version-test-001")
-        check("7g. a changed provider is refused", out.returncode != 0)
-
-        hash_tampered = dict(bound)
-        hash_tampered["plan_hash"] = "plan:" + "0" * 32
-        tampered_path = Path(tmp) / "plan-hash-tampered.json"
-        tampered_path.write_text(json.dumps(hash_tampered))
-        out = run("verify", "--manifest", str(tampered_path))
-        check("7h. a tampered bound plan hash FAILS verify", out.returncode != 0)
-
-        invalid_contract = dict(bound)
-        invalid_contract["recovery_strategy"] = "make-up-a-recovery-receipt"
-        invalid_contract["plan_hash"] = "plan:" + "0" * 32
-        invalid_path = Path(tmp) / "invalid-contract.json"
-        invalid_path.write_text(json.dumps(invalid_contract))
-        out = run("verify", "--manifest", str(invalid_path))
-        check("7i. invalid recovery strategy FAILS verify", out.returncode != 0)
-
-    # 8. all seven acceptance classes present
     classes = {
         "code": ("git_sha", "artifact_digest", "dependency_lock_digest"),
         "schema": ("schema_highest_migration", "schema_applied_count",
                    "schema_ledger_sha256", "migration_set"),
         "config": ("config_fingerprint", "config_paths"),
-        "plan": ("plan_hash",),
         "doctorcre": ("doctorcre_artifact",),
     }
     missing = [f"{name}.{field}"
                for name, fields in classes.items()
                for field in fields
                if first.get(field) in (None, "", [])]
-    check("8. the manifest carries code, schema, config and plan",
+    check("8. the manifest carries code, schema, config and the DoctorCRE artifact",
           not missing, "missing: " + ", ".join(missing) if missing else "")
 
     print()

@@ -186,7 +186,6 @@ def test_gates_build_hxprobe_before_parallel_selftests():
             "Path('gate-ran').touch()\n")
         (root / "hooks").mkdir()
         (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
-        (root / "ops/boot-budget-check.py").write_text("raise SystemExit(0)\n")
         cargo = root / "bin/cargo"
         cargo.write_text("#!/bin/sh\n"
                          'test "$*" = "build --locked" || exit 9\n'
@@ -323,7 +322,7 @@ def test_hosted_migration_ownership():
             ("", "skipped", "success", "false", 1), ("true", "failure", "success", "false", 1),
             ("true", "cancelled", "success", "false", 1), ("false", "failure", "success", "false", 1),
             ("false", "skipped", "failure", "false", 1),
-            ("true", "skipped", "success", "true", 0),
+            ("true", "skipped", "success", "true", 1),
             ("true", "skipped", "success", "false", 1),
         ):
             result = subprocess.run(["bash", "-e", "-c", aggregate["run"]], capture_output=True, text=True,
@@ -404,7 +403,6 @@ def test_gate_shards_execute_a_disjoint_complete_inventory():
         for path in inventory:
             (root / path).write_text("")
         (root / "hooks/gate-integrity.py").write_text("")
-        (root / "ops/boot-budget-check.py").write_text("")
         (root / "timeout.py").write_text(
             "import os,sys\n"
             "path=sys.argv[-1]\n"
@@ -414,7 +412,7 @@ def test_gate_shards_execute_a_disjoint_complete_inventory():
                               f"LOGDIR={shlex.quote(str(root / 'logs'))}", "FAILED=0",
                               "CI_SELFTEST_TIMEOUT_SECONDS=1", f"CI_TIMEOUT_HELPER={shlex.quote(str(root / 'timeout.py'))}",
                               "tree_fingerprint() { echo static; }", "ok() { :; }",
-                              "bad() { FAILED=1; }", "inherited_abort() { :; }",
+                              "bad() { FAILED=1; }",
                               'run_quiet() { local log="$1"; shift; "$@" >"$log" 2>&1; }',
                               "fail_tail() { :; }"))
         body = _ci_function_body("check_gates", "check_secret")
@@ -589,6 +587,10 @@ def test_each_class_runs_in_exactly_one_hosted_group():
 
 def test_every_test_file_in_the_tree_is_collected():
     ci = (REPO / "ops" / "ci.sh").read_text()
+    guarded = re.findall(r'\[ -f (mcp-server/test/[\w./-]+) \]', ci)
+    missing = sorted(path for path in guarded if not (REPO / path).is_file())
+    check("every conditional migration proof names an existing file", not missing,
+          f"absent files provide no coverage: {', '.join(missing)}")
     patterns: list[str] = []
     for m in re.finditer(r"for t in ([^;]+); do", ci):
         patterns += [tok for tok in m.group(1).split()
@@ -894,6 +896,120 @@ def _hosted_workflow(filename="ci.yml"):
     return json.loads(out.stdout) if out.returncode == 0 else {}
 
 
+def test_hosted_draft_lifecycle():
+    """Execute YAML conditions and verdict commands against same-head event fixtures.
+
+    This models the scheduler inputs, not GitHub's remote check selection. In
+    particular, ready_for_review must schedule fresh lanes without a new SHA.
+    """
+    def evaluate(expression, context):
+        expression = str(expression)
+        if expression.count("${{") > 1:
+            return re.sub(r"\$\{\{(.*?)\}\}",
+                          lambda match: str(evaluate(match.group(1), context)), expression)
+        expression = expression.removeprefix("${{").removesuffix("}}").strip()
+        script = """const [expr, ctx] = JSON.parse(process.argv[1]);
+        const {github, needs, cancelled: stopped = false} = ctx;
+        const always=()=>true, cancelled=()=>stopped, success=()=>!stopped;
+        const fromJSON=JSON.parse;
+        process.stdout.write(JSON.stringify(eval(expr)));"""
+        return json.loads(subprocess.check_output(
+            ["node", "-e", script, json.dumps([expression, context])], text=True))
+
+    for filename, lanes, verdict_name, command in (
+            ("ci.yml", ("scope", "classes", "migration-fixtures", "fallow"),
+             "checks", "verdict"),
+            ("doc-drift.yml", ("check",), "verdict", "drift-verdict")):
+        wf = _hosted_workflow(filename)
+        events = wf["on"]
+        check(f"{filename}: all PR lifecycle triggers survive",
+              set(events["pull_request"]["types"]) == {
+                  "opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft"})
+        check(f"{filename}: all non-PR full-suite triggers survive",
+              {"merge_group", "schedule", "workflow_dispatch"} <= set(events))
+        jobs = wf["jobs"]
+        verdict = jobs.get(verdict_name, {})
+        check(f"{filename}: verdict always evaluates and waits for every lane",
+              verdict.get("if") == "${{ always() }}" and set(verdict.get("needs", [])) == set(lanes))
+        if not verdict:
+            continue
+        step = next(st for st in verdict["steps"] if st.get("run") == f"python3 ops/ci-evidence.py {command}")
+        needs = {name: {"result": "success"} for name in lanes}
+        if "scope" in needs:
+            needs["scope"]["outputs"] = {"full": "true"}
+        def context(event="pull_request", draft=False, action="synchronize", sha="a" * 40):
+            return {"github": {"workflow": wf["name"], "event_name": event,
+                               "run_id": 41, "sha": sha,
+                               "event": {"action": action, "pull_request": {
+                                   "number": 12, "draft": draft, "head": {"sha": sha}}}},
+                    "needs": needs}
+        groups = []
+        with tempfile.TemporaryDirectory() as directory:
+            # No source change between these events. A ready success cannot
+            # turn the following draft or cancelled ready run into success.
+            for draft, action, sha in (
+                    (True, "opened", "a" * 40), (False, "ready_for_review", "a" * 40),
+                    (True, "converted_to_draft", "a" * 40), (False, "ready_for_review", "a" * 40),
+                    (False, "reopened", "a" * 40), (False, "synchronize", "a" * 40),
+                    (False, "synchronize", "b" * 40)):
+                ctx = context(draft=draft, action=action, sha=sha)
+                groups.append(evaluate(wf["concurrency"]["group"], ctx))
+                check(f"{filename}: {action} draft={draft} SHA={sha[:7]} schedules correct lanes",
+                      all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == (not draft)
+                          for name in lanes))
+                result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=REPO,
+                    env={**scrubbed_env(), "CI_NEEDS": json.dumps(needs),
+                         "CI_DRAFT": str(evaluate(step["env"]["CI_DRAFT"], ctx)).lower(),
+                         "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary")},
+                    text=True, capture_output=True, timeout=10)
+                check(f"{filename}: {action} draft={draft} verdict is explicit",
+                      result.returncode == (1 if draft else 0)
+                      and (not draft or "deferred; no full-suite evidence" in result.stdout))
+                if filename == "ci.yml" and draft:
+                    check("draft cannot record or upload a full-suite receipt",
+                          all(not evaluate(st.get("if", "true"), ctx) for st in verdict["steps"]
+                              if "record --output" in st.get("run", "") or st.get("with", {}).get("name") == "ci-tree-evidence"))
+            check(f"{filename}: same PR uses one concurrency group across readiness and synchronize",
+                  len(set(groups + [evaluate(wf["concurrency"]["group"], context(sha="b" * 40))])) == 1
+                  and evaluate(wf["concurrency"]["cancel-in-progress"], context()))
+            check(f"{filename}: different PRs have independent groups",
+                  groups[0] != evaluate(wf["concurrency"]["group"], {
+                      **context(), "github": {**context()["github"], "event": {"pull_request": {"number": 13}}}}))
+            for event in ("merge_group", "schedule", "workflow_dispatch"):
+                ctx = context(event=event, draft=True)
+                check(f"{filename}: {event} runs every lane outside PR cancellation group",
+                      all(evaluate(jobs[name].get("if", "true"), ctx) for name in lanes)
+                      and not evaluate(wf["concurrency"]["cancel-in-progress"], ctx)
+                      and evaluate(wf["concurrency"]["group"], ctx) != groups[0])
+            for lane in lanes:
+                for state in ("failure", "cancelled", "skipped", "timed_out", "missing"):
+                    broken = {name: dict(value) for name, value in needs.items()}
+                    if state == "missing":
+                        broken.pop(lane)
+                    else:
+                        broken[lane]["result"] = state
+                    result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=REPO,
+                        env={**scrubbed_env(), "CI_NEEDS": json.dumps(broken), "CI_DRAFT": "false",
+                             "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary")},
+                        text=True, capture_output=True, timeout=10)
+                    check(f"{filename}: ready {lane}={state} blocks success at same SHA",
+                          result.returncode != 0)
+            ctx = {**context(), "cancelled": True}
+            check(f"{filename}: cancelled run still evaluates its required verdict",
+                  evaluate(verdict["if"], ctx))
+            # Status functions are valid in step conditions, not step env.
+            guard = next((st for st in verdict['steps'] if st.get('if') == '${{ cancelled() }}'), {})
+            result = subprocess.run(["bash", "-e", "-c", guard.get("run", "true")], cwd=REPO,
+                                    text=True, capture_output=True, timeout=10)
+            check(f"{filename}: cancellation after successful lanes cannot green the verdict",
+                  bool(guard) and evaluate(guard["if"], ctx) and result.returncode != 0
+                  and verdict['steps'].index(guard) == len(verdict['steps']) - 1)
+        if filename == "ci.yml":
+            matrix = jobs["classes"]["strategy"]["matrix"]
+            check("ready matrix exclusions are static and cannot trim classes on draft state",
+                  isinstance(matrix["exclude"], list))
+
+
 def test_hosted_zsh_setup_does_not_refresh_working_indexes():
     """PR 1465 spent its entire job budget in apt update before any class ran.
 
@@ -1175,6 +1291,7 @@ def main(argv=None):
                test_gate_shards_execute_a_disjoint_complete_inventory,
                test_migration_partitions_execute_complete_inventory,
                test_hosted_migration_ownership,
+               test_hosted_draft_lifecycle,
                test_database_scope_receipts,
                test_migration_refuses_non_loopback,
                test_migration_fixtures_ignore_hosted_pr_event,

@@ -403,7 +403,7 @@ const PROFILE_NOTICE = {
     "plus exactly update-deal (deal_type, segment, city and lane only) and add-premises against " +
     "existing parties only. Its server-issued door cannot be widened by ?profile= or caller fields. " +
     "It may hand a next action to Joe, its verified sponsor, but never Dell; created_by remains the " +
-    "Hermes runtime. Phase, outcome, close/value, identity, merge, teach, authority-only and send " +
+    "Hermes runtime. Phase, outcome, close/value, identity, merge, authority-only and send " +
     "operations remain refused.</notice>",
 };
 
@@ -473,7 +473,6 @@ export function hermesCosPremisesRefusal(profile, name, args) {
 const CORE_TOOL_NAMES = new Set([
   "standing-context", "list-verbs", "call-verb",
   "report-problem", "record-defect", "add-loop",
-  "teach", "activate-rule",
   "capability-program", "catch-me-up", "find", "loop-board",
   "read-doctrine", "read-loop", "read-room", "search-doctrine",
   "deal-room-board", "get-deal-room", "lead-board", "morning-brief", "today-triage",
@@ -600,13 +599,6 @@ export function authorityDsnForActor(env, runtimeActor) {
 // granted. A read verb whose SQL is granted to carr_writer/carr_authority only
 // (a SECURITY DEFINER door that raises 42501 for anyone else) must declare
 // writerConnection so it lands on "writer_read_only" instead.
-// Active supersession keeps retire-rule's credential boundary. Human teach
-// calls carrying a replacement use authority; machine capture stays writer.
-export function requiresAuthorityConnection(tool, actor, args = {}) {
-  return tool.authorityOnly === true ||
-    (tool === TOOLS["teach"] && actor?.human === true && !!args?.supersedes);
-}
-
 export function connectionRouteForTool(tool) {
   if (!tool.write && !tool.writerConnection) return "reader";
   if (tool.authorityOnly) return "authority";
@@ -707,7 +699,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
   if (!allowedIn(profile, name, tool))
     throw new ToolError({ error: "not_in_profile", verb: name, profile,
       hint: "this session is scoped; report what you would have done and let an interactive partner session do it" });
-  if (requiresAuthorityConnection(tool, actor, args) && !authorityDsnForActor(env, actor))
+  if (tool.authorityOnly === true && !authorityDsnForActor(env, actor))
     throw new ToolError({ error: "authority_connection_unavailable",
       hint: "this partner-authority operation requires a verified Joe/Dell principal or sponsored Codex/Claude identity plus the sponsor-scoped authority database binding" });
   // Payload-aware profile guard (2026-08-05). Name-level gating cannot see that
@@ -767,6 +759,8 @@ export async function callTool(env, actor, name, args, profile = "full") {
       Array.isArray(args?.links) && args.links.length)
     throw new ToolError({ error: "not_in_profile", verb: "log-activity (links[])", profile,
       hint: "a narrow profile may log the activity but not assert relationships — drop links[] from this call and file the introduction facts with add-loop for an interactive partner session to link-parties" });
+  if (!['full','doc'].includes(profile) && name === 'log-activity' && args?.vendor_assignments !== undefined)
+    throw new ToolError({error:'not_in_profile',verb:'log-activity (vendor_assignments)',profile});
   if (connectionRouteForTool(tool) === "reader") {
     const sql = neon(env.DATABASE_URL_READER);
     // sideWrite is the ONLY way a read verb may write, and it is deliberately
@@ -806,7 +800,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
 
   // Writes use the routine writer pool except the two authority operations,
   // which receive a separate DB identity and cannot fall back to writer.
-  const needsAuthority = requiresAuthorityConnection(tool, actor, args);
+  const needsAuthority = tool.authorityOnly === true;
   const connectionString = needsAuthority ? authorityDsnForActor(env, actor) : env.DATABASE_URL_WRITER;
   const pool = new Pool({ connectionString });
   const client = await pool.connect();

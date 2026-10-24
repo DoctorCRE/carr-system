@@ -87,7 +87,7 @@ manufactures cleanup. The bit is earned by a track record this seat does not hav
 
 Commands you may run are read-only ones. Commands you may not run, ever, include anything with
 `--apply`, `--sync`, `--force`, `--prune`, `run.sh migrate --apply`, `run.sh export`,
-`run.sh all`, `run.sh section-index`, `run.sh graph`, the full `run.sh restore-rehearse` without
+`run.sh all`, `run.sh section-index`, `run.sh graph`, the full `run.sh restore-rehearse --backup-run-id RUN` without
 `--preflight`, and any `neonctl branches create`. Several of those are also blocked on Joe's side
 by the permission classifier; do not retry a blocked command, hand it to him.
 
@@ -457,11 +457,11 @@ credential is fine because one consumer can load it.
 ls -la ~/carr-system/backups/
 ```
 
-Dump age comes from the newest `carr-*.sql.age`. Then the rehearsal's own preflight, which
-creates nothing:
+Local dump age alone does not prove an artifact can be identified. The rehearsal's
+preflight selects the latest verified provider backup run and creates nothing:
 
 ```
-cd ~/carr-system && CARR_AGE_IDENTITY=~/.config/carr/age-key.txt ./run.sh restore-rehearse --preflight
+cd ~/carr-system && ./run.sh restore-rehearse --preflight --backup-run-id latest
 ```
 
 The FULL rehearsal creates a throwaway Neon branch, which is infrastructure you do not create.

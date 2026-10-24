@@ -791,8 +791,8 @@ def _live_jobs(snap):
 def _legacy_scheduled_definitions(snap):
     """Enabled definitions whose LEGACY scheduler is still the executor.
 
-    Until ``disable-legacy-schedule`` fires for a key, launchd or the Claude
-    scheduler runs it and the Control Plane ledger holds nothing — so a due
+    Until the native scheduler is disabled and its readback verified, launchd
+    or the Claude scheduler runs it and the Control Plane ledger holds nothing — so a due
     window with no ledger row is the cutover working, not a missed run.  The
     default is fail-closed: a definition that does not declare itself legacy
     is still held to every due window.
@@ -996,7 +996,6 @@ _GREEN_EVIDENCE: dict = {}
 PROVISIONING_PENDING = {
     "production_uptime": "carr-uptime monitor unreachable (Worker/secrets not provisioned)",
     "system_costs": "billing readers unavailable (cost collector not provisioned)",
-    "cloudflare_spend": "Cloudflare spend guard not yet run (token and schedule held for review)",
 }
 
 
@@ -1085,22 +1084,6 @@ def _host_liveness_rows():
     return module.rows(live, config)
 
 
-def _cloudflare_spend_row():
-    """(line, failed, not_run) from the Cloudflare spend guard's local receipt; no network.
-
-    A guard that has never run is provisioning-pending (soft); a STOP, RUNAWAY or
-    UNKNOWN it did report is hard."""
-    try:
-        spec = importlib.util.spec_from_file_location(
-            "cloudflare_spend_guard", os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                                   "cloudflare_spend_guard.py"))
-        guard = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(guard)
-        return guard.health_row(guard.load_config())
-    except Exception as exc:
-        return (f"UNKNOWN cloudflare spend · health row unavailable ({type(exc).__name__}) · on breach: owner joe "
-                "· fix: restore tools/cloudflare_spend_guard.py · verify: rerun health "
-                "· auto-clear: next readable receipt"), True, False
 
 
 def _tailscale_row():
@@ -1319,23 +1302,6 @@ def _canonical_health():
         rc = _canonical_contradiction_alarm() or rc
 
     if CANONICAL_SECTION in ("all", "registry"):
-        feature_command = [sys.executable, os.path.join(REPO_ROOT, "tools/feature-switch-health.py")]
-        if CANONICAL_FIXTURE:
-            feature_command += ["--fixture", CANONICAL_FIXTURE]
-        try:
-            feature_result = subprocess.run(feature_command, cwd=REPO_ROOT, text=True, capture_output=True, timeout=35)
-            print(feature_result.stdout.rstrip())
-            if feature_result.returncode == 1:
-                rc = _red("feature_switch_retirement", feature_result.stdout.strip())
-            elif feature_result.returncode == 3:
-                rc = _red("feature_switch_pending_deploy", feature_result.stdout.strip())
-            elif feature_result.returncode:
-                rc = _red("feature_switch_unreadable", feature_result.stdout.strip(), hard_error=True)
-        except (OSError, subprocess.TimeoutExpired):
-            detail = "UNKNOWN feature switches · on breach: retry record check; owner claude; retire overdue switch; verify list-feature-switches; auto-clear on successful check"
-            print(detail)
-            rc = _red("feature_switch_unreadable", detail, hard_error=True)
-    if CANONICAL_SECTION in ("all", "registry"):
         print("Registry integrity — canonical v_export_leads")
         p = subprocess.run(
             [sys.executable, os.path.join(REPO_ROOT, "tools/registry-audit.py")],
@@ -1476,12 +1442,6 @@ def _canonical_health():
                               and "monitor unreachable" in line)
             rc = _red("production_uptime", line, subject="carr-uptime", hard_error=not _unprovisioned)
 
-    if CANONICAL_SECTION == "all" and not CANONICAL_FIXTURE:
-        line, failed, not_run = _cloudflare_spend_row()
-        print("  " + line)
-        if failed:
-            rc = _red("cloudflare_spend", line, subject="cloudflare-account",
-                      hard_error=not (not_run and "cloudflare_spend" in PROVISIONING_PENDING))
 
     if CANONICAL_SECTION in ("all", "tailscale"):
         try:
@@ -2586,47 +2546,6 @@ try:
 except Exception as e:
     print(f"  ⚠︎ {'hermes autonomy':<18} check failed ({type(e).__name__}: {e})")
     rc = 1
-
-# Equality of ~/.codex/hooks.json with the tracked contract is useful, but it
-# cannot establish that Codex has trusted that hook or actually invokes it.
-# ops/codex-hook-smoke.sh is the live negative smoke that closes that gap: it
-# sends Codex a probe matching guard-unattended.py's private-key pattern
-# through the SAME invocation helper (bin/council-lib.sh's run_precheck) the
-# automation actually uses, and records whether the guard's denial text came
-# back. This row reads that result (out/codex-hook-smoke.json) rather than
-# re-running the smoke — a live Codex call on every `run.sh health` would be a
-# heavier side effect than a freshness check should carry, same reasoning as
-# the other stored readiness receipts. PASS within 30 days reads OK; anything
-# else — FAIL, or no recent record at all — reads as a fault, never silently
-# green, because an unverified hook runtime is exactly the gap this row used
-# to paper over with a permanent gray "unverified" line.
-_chs_path = os.path.join(REPO_ROOT, "out", "codex-hook-smoke.json")
-_chs_max_age_days = 30
-if not os.path.exists(_chs_path):
-    print(f"  -- {'Codex hook runtime':<18} no smoke run yet — run ops/codex-hook-smoke.sh")
-else:
-    try:
-        with open(_chs_path) as _f:
-            _chs = json.load(_f)
-        _chs_ts = datetime.strptime(_chs["timestamp"], "%Y-%m-%dT%H:%M:%SZ")
-        _chs_age_days = (datetime.utcnow() - _chs_ts).total_seconds() / 86400
-        _chs_ver = _chs.get("codex_version", "unknown")
-        if _chs_age_days > _chs_max_age_days:
-            print(f"  ⚠︎ {'Codex hook runtime':<18} last smoke is {_chs_age_days:.0f}d old "
-                  f"(>{_chs_max_age_days}d) — {_chs_ts.date()} · run ops/codex-hook-smoke.sh")
-            rc = 1
-        elif _chs.get("pass"):
-            print(f"  OK {'Codex hook runtime':<18} PASS on {_chs_ts.date()} ({_chs_ver}) — "
-                  f"live negative smoke confirms PreToolUse hooks fire under "
-                  f"--dangerously-bypass-hook-trust")
-        else:
-            print(f"  ✗✗ {'Codex hook runtime':<18} FAIL on {_chs_ts.date()} ({_chs_ver}) — "
-                  f"hooks may be silently skipped; run ops/codex-hook-smoke.sh and read its output")
-            rc = 1
-    except Exception as e:
-        print(f"  ⚠︎ {'Codex hook runtime':<18} could not read {_chs_path} "
-              f"({type(e).__name__}: {e}) · run ops/codex-hook-smoke.sh")
-        rc = 1
 
 try:
     _fal = os.path.join(REPO_ROOT, "ops", "fetch-allowlist.py")

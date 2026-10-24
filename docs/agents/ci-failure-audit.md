@@ -14,7 +14,8 @@ cap. Daily partitions stayed below the cap. Separate `gh run list --status
 failure` queries independently returned the same 207 and 113 failure IDs.
 `gh run view --log-failed` supplied the logs, and `--json jobs` identified failed
 steps. The original ledger and local log cache were historical collection
-artifacts; the ledger was removed during the machinery purge. The linked
+artifacts; the ledger was removed during the machinery purge. Its
+[historical version](https://github.com/DoctorCRE/carr-system/blob/da2ff1eb16d9068c717ec90ecd67802731ee67b7/tools/ci/ci-failure-audit-2026-10-15.json) preserves the collected digests and evidence. The linked
 GitHub runs below remain the source for inspecting individual failures.
 
 Recollect a new window with:

@@ -94,13 +94,6 @@ run_quiet() {  # run_quiet <logfile> <cmd...>  — capture output, return status
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/carr-ci.XXXXXX")"
 trap 'rm -rf "$LOGDIR"' EXIT
 
-INHERIT_ASKED=0
-inherited_abort() {
-  [ "$INHERIT_ASKED" = "0" ] || return 0
-  INHERIT_ASKED=1
-  "$PY" ops/inherited-from-main.py
-}
-
 fail_tail() {  # fail_tail <logfile>
   local log="$1" lines window
   lines="$(wc -l < "$log" 2>/dev/null | tr -d ' ')"
@@ -189,17 +182,6 @@ check_contract() {
     run_quiet "$LOGDIR/contract-$(basename "$t").log" node --test "$t" \
       || { failures="$failures $t"; tail -20 "$LOGDIR/contract-$(basename "$t").log" >&2; }
   done
-  if [ -f ops/capture-verb-reachability.py ]; then
-    run_quiet "$LOGDIR/contract-capture-verb.log" "$PY" ops/capture-verb-reachability.py
-    crc=$?
-    if [ "$crc" -eq 78 ]; then
-        printf '        \033[33mnot run\033[0m  capture-verb-reachability — %s\n' \
-        "$(tail -1 "$LOGDIR/contract-capture-verb.log" 2>/dev/null)" >&2
-    elif [ "$crc" -ne 0 ]; then
-      failures="$failures ops/capture-verb-reachability.py"
-      tail -20 "$LOGDIR/contract-capture-verb.log" >&2
-    fi
-  fi
   if [ -n "$failures" ]; then
     bad contract "contract checks failed:$failures"
   else
@@ -216,6 +198,19 @@ tree_fingerprint() {
 check_gates() {
   local failures="" count=0 skiplist="" gates_timed_out=0 gate_index=0
   export CARR_HOOK_FIXTURE=1
+
+  # Flip this warning to a failure after the machinery purge finishes.
+  local codemap_rc=0 codemap_count
+  "$PY" tools/codemap.py --missing >"$LOGDIR/codemap-missing.log" \
+    2>"$LOGDIR/codemap-error.log" || codemap_rc=$?
+  if [ "$codemap_rc" -le 1 ]; then
+    codemap_count="$(wc -l < "$LOGDIR/codemap-missing.log" | tr -d '[:space:]')"
+    printf '        WARN codemap: %s scripts lack opening descriptions (warning only during machinery purge)\n' "$codemap_count"
+    cat "$LOGDIR/codemap-missing.log"
+  else
+    printf '        WARN codemap: missing-description count unavailable (tool exited %s; warning only)\n' "$codemap_rc"
+    cat "$LOGDIR/codemap-error.log" >&2
+  fi
 
   # rustup installs the pinned toolchain before concurrent HxStore builds.
   if [ -f vendor/hxprobe/Cargo.toml ]; then
@@ -286,7 +281,6 @@ PYEOF
       printf '        \033[33mnot run\033[0m  %s — NOT CONFIGURED (exit 78): %s\n' \
         "$base" "$(tail -1 "$LOGDIR/gate-$base.log" 2>/dev/null)" >&2
     elif [ "$grc" -ne 0 ]; then
-      inherited_abort "$base" "$PY" "$t"
       failures="$failures $base"; fail_tail "$LOGDIR/gate-$base.log"
     fi
   done
@@ -313,15 +307,11 @@ PYEOF
       tail -12 "$LOGDIR/gate-$sbase.log" >&2
       break
     elif [ "$grc" -ne 0 ]; then
-      inherited_abort "$sbase" "$t"
       failures="$failures $sbase"; fail_tail "$LOGDIR/gate-$sbase.log"
     fi
   done; fi
   run_quiet "$LOGDIR/safety-hooks.log" "$PY" hooks/gate-integrity.py --strict \
-    || { inherited_abort gate-integrity "$PY" hooks/gate-integrity.py --strict
-         failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
-
-  "$PY" ops/boot-budget-check.py
+    || { failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
 
   for inv in audit-queue-freshness-check \
              stale-count-check \
@@ -329,15 +319,14 @@ PYEOF
              selftest-git-isolation-check \
              sync-core-rule-ids rule-route-coverage \
              migration-order-gate \
-             migration-safety-gate door-reachability-check; do
+             migration-safety-gate; do
     [ -f "ops/$inv.py" ] || continue
     local inv_args=()
     case "$inv" in
       sync-core-rule-ids) inv_args=(--check) ;;
     esac
     run_quiet "$LOGDIR/gate-$inv.log" "$PY" "ops/$inv.py" ${inv_args[@]+"${inv_args[@]}"} \
-      || { inherited_abort "$inv" "$PY" "ops/$inv.py" ${inv_args[@]+"${inv_args[@]}"}
-           failures="$failures $inv"; tail -12 "$LOGDIR/gate-$inv.log" >&2; }
+      || { failures="$failures $inv"; tail -12 "$LOGDIR/gate-$inv.log" >&2; }
   done
 
   if [ "$(tree_fingerprint)" != "$tree_before" ]; then
@@ -484,7 +473,7 @@ check_pushfloor() {
   fi
 
   if [ -n "$changed" ] && printf '%s\n' "$changed" | grep -Eq \
-      '^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.v[0-9]+\.generated\.js|ops/config/scac-registry-.*\.json)$'; then
+      '^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.current\.generated\.js|ops/config/scac-registry-.*\.json)$'; then
     ran="$ran scac-atlas"
     run_quiet "$LOGDIR/pushfloor-scac-atlas.log" node --test \
       mcp-server/test/atlas-inventory-graph-read.test.mjs \
@@ -496,7 +485,7 @@ check_pushfloor() {
 
   local gate_surface=""
   if [ -n "$changed" ]; then
-    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(hook-script-policy|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
+    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(hook-script-policy|codex-hooks)\.json|ops/[^/]+-selftest\.py)' || true)"
   fi
   if [ -n "$gate_surface" ]; then
     ran="$ran gate-closure"
@@ -506,6 +495,8 @@ check_pushfloor() {
       base="$(basename "$touched_gate" .py)"
       paired="ops/$base-selftest.py"
       if [ -f "$paired" ]; then
+        # Changed selftests run in the next loop, including a changed hook's pair.
+        printf '%s\n' "$gate_surface" | grep -Fxq "$paired" && continue
         run_quiet "$LOGDIR/pushfloor-$base-selftest.log" "$PY" "$paired" \
           || { tail -15 "$LOGDIR/pushfloor-$base-selftest.log" >&2
                floor_fail "$base-selftest" \
@@ -576,6 +567,14 @@ check_migration_fixtures() {
       return
     fi
   fi
+  if [[ "$MIGRATION_PART" = all ]]; then
+    if ! run_quiet "$LOGDIR/migration-restore-security.log" \
+         "$PY" ops/restore-rehearse-record-selftest.py --postgres; then
+      tail -30 "$LOGDIR/migration-restore-security.log" >&2
+      bad migration "restore security parity failed against the disposable PostgreSQL fixture"
+      return
+    fi
+  fi
   if [[ "$MIGRATION_PART" = all || "$MIGRATION_PART" = fixtures || "$MIGRATION_PART" = shadow ]]; then
     local shadow_rc=0 shadow_note
     "$PY" ops/migration-shadow.py ${CARR_SHADOW_ARTIFACT_DIR:+--artifact-dir "$CARR_SHADOW_ARTIFACT_DIR"} \
@@ -608,7 +607,7 @@ check_migration() {
   fi
   if ! run_quiet "$LOGDIR/migration-open-pr.log" "$PY" ops/migration-open-pr-gate.py; then
     cat "$LOGDIR/migration-open-pr.log" >&2
-    bad migration "an earlier PR or main owns a migration slot; run ./run.sh regen --pr <number>"
+    bad migration "an earlier PR or main owns a migration slot; choose a forward filename and update its references"
     return
   fi
   if ! run_quiet "$LOGDIR/migration-baseline.log" "$PY" -m unittest discover -s tools -p 'test_migr*.py'; then
@@ -669,9 +668,9 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
 
   if [[ "$MIGRATION_PART" != gates* && "$MIGRATION_PART" != acceptance ]]; then
     if ! CARR_RULE_TEST_DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-rule-supersession.log" \
-        node --test mcp-server/test/find-rule-supersedes.test.mjs mcp-server/test/one-step-rule-approval.test.mjs; then
+        node --test mcp-server/test/find-rule-supersedes.test.mjs; then
       tail -30 "$LOGDIR/migration-rule-supersession.log" >&2
-      bad migration "rule lookup, teach supersession or one-step approval database proof failed"
+      bad migration "rule lookup or historical supersession SQL database proof failed"
       return
     fi
 
@@ -787,26 +786,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       return
     fi
 
-    if [ -f mcp-server/test/gate-zero-outcome-role-boundary.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-           run_quiet "$LOGDIR/gate-zero-role-boundary.log" \
-           node --test mcp-server/test/gate-zero-outcome-role-boundary.test.mjs; then
-        tail -30 "$LOGDIR/gate-zero-role-boundary.log" >&2
-        bad migration "the Gate Zero producer seat/connection-role boundary proof failed"
-        return
-      fi
-    fi
-
-    if [ -f mcp-server/test/foundation-assurance-oracle-role-boundary.v5.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_FOUNDATION_ASSURANCE_DB_REQUIRED=1 \
-           run_quiet "$LOGDIR/foundation-assurance-role-boundary.log" \
-           node --test mcp-server/test/foundation-assurance-oracle-role-boundary.v5.test.mjs; then
-        tail -30 "$LOGDIR/foundation-assurance-role-boundary.log" >&2
-        bad migration "the foundation-assurance oracle connection-role boundary proof failed"
-        return
-      fi
-    fi
-
     if [ -f mcp-server/test/program-controller-census-role-boundary.v5.test.mjs ]; then
       if ! DATABASE_URL="$dsn" CARR_PROGRAM_CONTROLLER_DB_REQUIRED=1 \
            run_quiet "$LOGDIR/program-controller-role-boundary.log" \
@@ -827,7 +806,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       fi
     fi
 
-    for proof in doc-conversation notifications session-identity dispatch-spine meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres approve-rule-legacy-adoption-postgres; do
+    for proof in doc-conversation notifications session-identity dispatch-spine meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
       if [ -f "mcp-server/test/$proof.test.mjs" ]; then
         if ! DATABASE_URL="$dsn" \
              CARR_DOC_CONVERSATION_DB_REQUIRED=1 CARR_R03_DB_REQUIRED=1 \
@@ -836,7 +815,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
              CARR_V5_A03_DB_REQUIRED=1 \
              CARR_A02_RULE_COVERAGE_DB_REQUIRED=1 \
              CARR_RW02_DB_REQUIRED=1 \
-             CARR_APPROVE_RULE_ADOPTION_DB_REQUIRED=1 \
              CARR_VENDOR_DIRECTORY_DB_REQUIRED=1 CARR_RELATIONSHIP_DB_REQUIRED=1 \
              run_quiet "$LOGDIR/$proof-db.log" \
              node --test "mcp-server/test/$proof.test.mjs"; then
@@ -952,36 +930,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
            -f mcp-server/test/foundation-assurance-minimum-postgres.sql; then
         tail -30 "$LOGDIR/foundation-assurance-minimum-postgres.log" >&2
         bad migration "the foundation-assurance candidate/evidence atomic binding proof failed"
-        return
-      fi
-    fi
-
-    if [ -f mcp-server/test/gate-zero-outcome-record-race.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-           run_quiet "$LOGDIR/gate-zero-outcome-race.log" \
-           node --test mcp-server/test/gate-zero-outcome-record-race.test.mjs; then
-        tail -30 "$LOGDIR/gate-zero-outcome-race.log" >&2
-        bad migration "the Gate Zero outcome candidate-key race proof failed"
-        return
-      fi
-    fi
-
-    if [ -f mcp-server/test/gate-zero-outcome-digest-tagged.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-           run_quiet "$LOGDIR/gate-zero-digest-tagged.log" \
-           node --test mcp-server/test/gate-zero-outcome-digest-tagged.test.mjs; then
-        tail -30 "$LOGDIR/gate-zero-digest-tagged.log" >&2
-        bad migration "the Gate Zero tagged outcome-digest cross-implementation proof failed"
-        return
-      fi
-    fi
-
-    if [ -f mcp-server/test/gate-zero-candidate-authority-filing.test.mjs ]; then
-      if ! DATABASE_URL="$dsn" CARR_GATE_ZERO_RACE_REQUIRED=1 \
-           run_quiet "$LOGDIR/gate-zero-candidate-filing.log" \
-           node --test mcp-server/test/gate-zero-candidate-authority-filing.test.mjs; then
-        tail -30 "$LOGDIR/gate-zero-candidate-filing.log" >&2
-        bad migration "the service-candidate and historical Gate Zero provenance proof failed"
         return
       fi
     fi

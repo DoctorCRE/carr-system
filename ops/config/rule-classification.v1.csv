@@ -22,10 +22,10 @@ id,layer,class,moment
 1f3a7372,control,d,completion_evidence gate
 20d106f1,pack,c,"Joe's development: new builds, predictions, confident direction"
 2271e684,control,d,"completion_evidence gate, terminal technical claim"
-236ca227,control,d,weekend_quiet deny_gate - before a partner-facing send
+236ca227,pack,a,Task guidance before partner-facing communication
 23ea0607,control,d,deal_guard schema (Salesforce reconciliation)
 24e10ee8,control,b,writing a commit message or close-out claiming an act
-25fab860,control,b,weekly social batch proposal validation
+25fab860,pack,a,Weekly social planning guidance
 25fcddee,pack,c,first attempt in new/unfamiliar-territory work
 27277539,layer0,a,any turn discussing technical topics with Joe
 2a3ff869,control,d,update-document-status verb (outbound_format check)
@@ -52,8 +52,8 @@ id,layer,class,moment
 486584d6,pack,b,work needs a web console Joe is signed into on the MacBook
 49533583,pack,b,reading Joe's calendar or mail
 49c627cc,layer0,a,claiming the record layer or verbs cannot do something
-4a53ff82,control,d,"canonical_edit gate, first write to tracked canonical files"
-4a9188f3,pack,b,"the teach verb, at a partner-correction/decision trigger"
+4a53ff82,pack,a,Task guidance before repository edits
+4a9188f3,pack,b,a proposed guidance-file PR at a partner-correction/decision trigger
 4c21d86b,control,d,merge_survivor verb check (confirm-merge)
 4dd44fd7,control,d,update-document-status verb (outbound_format split)
 4e104d4c,control,d,"completion_evidence gate, new-verb deployment claim"
@@ -70,9 +70,9 @@ id,layer,class,moment
 596f7549,layer0,a,any turn - diagnosing a tool error that blames a subsystem
 5be2f462,control,d,chat_lint gate
 5cd8d0f6,layer0,b,a blocked terminal command with a self-serve fix available
-5d44d3f3,pack,b,new-client or bulk record intake
+5d44d3f3,pack,a,new-client or bulk record intake
 5e896ed6,pack,c,Joe feeds a link (article/video/thread)
-5e89c211,control,b,registering or dispatching a cognition workflow
+5e89c211,pack,a,Automation and cognition task guidance
 614c1209,pack,c,assessing deal staleness or follow-up status
 6172e7d5,pack,b,video/image source retrieval (watch-video skill)
 61c64d91,pack,c,creating any new asset (shared vs personal tier)
@@ -127,7 +127,7 @@ a8c55a47,pack,b,"writing a command into a doc, SOP, or instruction"
 a8f159ad,pack,b,building or reviewing a structured CARR surface
 a9ecd5b4,control,d,completion_evidence stop_gate - check-result reporting
 a9fc3f0e,pack,c,running research or a fact-check
-ab814a26,control,d,rule_shape gate (approve-rule)
+ab814a26,control,d,guidance-file PR review and relevant CI checks
 ac0a6579,pack,c,building or reviewing access for a client share-site page
 af7de070,layer0,b,a tool call blocked by a permission classifier
 b01edd26,control,b,committing any source or doc file
@@ -181,7 +181,7 @@ f2d58a30,pack,b,drafting any client-facing recommendation document
 f47a8fe9,control,d,completion_evidence gate
 f5bac101,pack,c,deciding where to spend effort (prospecting vs polish)
 f5beac20,pack,a,encountering useful-but-not-today knowledge
-f5d97b4a,control,d,costar_lane deny_gate - Chrome-extension tool call targeting costar.com
+f5d97b4a,pack,a,Task guidance before CoStar browsing
 f673326b,pack,b,"granting or briefing an agent's access to CARR knowledge, records or tools"
 f92dfab2,control,d,client_asset_packet render (search-packet)
 fa217e48,control,d,completion_evidence gate (completion/file claims)
