@@ -808,6 +808,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
   let readOk = true, readErrorKind = null;
   try {
     await client.query(tool.writerConnection && !tool.write ? "begin read only" : "begin");
+    client.inTransaction = true;
     const a = await client.query("select id from actor where slug=$1", [actor.slug]);
     // Guarded 2026-08-03. Unguarded, a missing actor row made this a raw
     // TypeError on `undefined.id` — a 500 with a stack trace where the real

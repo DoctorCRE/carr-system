@@ -41157,10 +41157,10 @@ begin
     count(*) filter (where row in (select value from jsonb_array_elements(current_grants->'secdef_execute')))
     into observed_count,observed_digest,registered_count from observed;
   if registered_count<>jsonb_array_length(current_grants->'secdef_execute') then return false; end if;
-  if observed_count<>1267 or observed_digest<>'sha256:587e762e80c6691d4a07c5b35e48a259c7b8bdf885d8595ffd0c14928c657efa' then return false; end if;
+  if observed_count<>1269 or observed_digest<>'sha256:bfaf0d3af69f2ad229d9523c2a6660825c0ef6e60d539c832ac00ad787191d77' then return false; end if;
   with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper), runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper), capabilities as (select n.nspname,c.relname,c.relkind,c.relowner,acl.grantee,acl.privilege_type,acl.is_grantable from pg_class c join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) acl where n.nspname not in ('pg_catalog','information_schema') and c.relkind in ('r','p','v','m','f')), observed as (select 'db-relation-acl:'||nspname||'.'||relname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type) ingress_key,jsonb_build_object('ingress_key','db-relation-acl:'||nspname||'.'||relname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type),'ingress_kind','db_relation_acl','relation',nspname||'.'||relname,'relation_kind',relkind,'grantee',coalesce(r.rolname,'public'),'privilege',lower(privilege_type),'grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE') and grantee<>relowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
   select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
-  if observed_count<>321 or observed_digest<>'sha256:2ece3984f1389d78749dd3055ecf72516f02f97e33d260192e66daff062292e0' then return false; end if;
+  if observed_count<>322 or observed_digest<>'sha256:e8f392451cfe7190d0cdd0ef44c86578cc675452137d8117b39c5ac0d89e51d8' then return false; end if;
   with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper), runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper), capabilities as (select n.nspname,c.relname,c.relkind,c.relowner,a.attname,acl.grantee,acl.privilege_type,acl.is_grantable from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(a.attacl) acl where a.attnum>0 and not a.attisdropped and a.attacl is not null and cardinality(a.attacl)>0 and n.nspname not in ('pg_catalog','information_schema') and c.relkind in ('r','p','v','m','f')), observed as (select 'db-column-acl:'||nspname||'.'||relname||'.'||attname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type) ingress_key,jsonb_build_object('ingress_key','db-column-acl:'||nspname||'.'||relname||'.'||attname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type),'ingress_kind','db_column_acl','relation',nspname||'.'||relname,'relation_kind',relkind,'column',attname,'grantee',coalesce(r.rolname,'public'),'privilege',lower(privilege_type),'grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where privilege_type in ('INSERT','UPDATE') and grantee<>relowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
   select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
   if observed_count<>15 or observed_digest<>'sha256:f7a33d14ce431ba588cc07dff07fc9fd91a0dcdb41112de6fecd390fb42dc098' then return false; end if;
@@ -70056,12 +70056,12 @@ $$;
 
 
 --
--- Name: search_doctrine_semantic(text, uuid, text[], integer, text, public.vector); Type: FUNCTION; Schema: public; Owner: -
+-- Name: search_doctrine_semantic(text, uuid, text[], integer, text, public.vector[]); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embedding public.vector) RETURNS jsonb
+CREATE FUNCTION public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings public.vector[]) RETURNS jsonb
     LANGUAGE sql STABLE SECURITY DEFINER
-    SET search_path TO ''
+    SET search_path TO 'pg_catalog', 'pg_temp'
     AS $$
 with policy as materialized (
   select policy_id,version from public.retrieval_ranking_policy
@@ -70075,26 +70075,31 @@ visible as materialized (
     join public.doctrine_section s on s.id=c.section_id
 ),
 coverage as materialized (
-  select count(*)::integer as visible,
-         count(e.revision_id)::integer as embedded
+  select count(distinct v.section_id)::integer as visible,
+         count(distinct e.revision_id)::integer as embedded
     from visible v
     left join public.doctrine_revision r on r.id=v.revision_id and r.section_id=v.section_id
     left join public.doctrine_embedding e on e.revision_id=r.id
-      and e.model='@cf/baai/bge-small-en-v1.5:cls'
+      and e.model='@cf/baai/bge-small-en-v1.5:cls:chunks-v1'
 ),
 lexical as materialized (
   select l.*, row_number() over (
     order by l.final_score desc,l.concept_score desc,l.lexical_score desc,l.section_key,l.section_id) as position
     from public.search_doctrine_situations(p_query,p_actor_id,p_content_classes,100,p_policy_id,true) l
 ),
-nearest as materialized (
-  select v.*, (1 - (e.embedding OPERATOR(public.<=>) p_embedding))::double precision as similarity
+chunk_scores as materialized (
+  select v.section_id,
+         max(1 - (e.embedding OPERATOR(public.<=>) q.embedding))::double precision as similarity
     from visible v
     join public.doctrine_revision r on r.id=v.revision_id and r.section_id=v.section_id
     join public.doctrine_embedding e on e.revision_id=r.id
-      and e.model='@cf/baai/bge-small-en-v1.5:cls'
-   order by e.embedding OPERATOR(public.<=>) p_embedding,v.section_id
-   limit 100
+      and e.model='@cf/baai/bge-small-en-v1.5:cls:chunks-v1'
+    cross join unnest(p_embeddings) as q(embedding)
+   group by v.section_id
+),
+nearest as materialized (
+  select v.*,c.similarity from visible v join chunk_scores c on c.section_id=v.section_id
+   order by c.similarity desc,v.section_id limit 100
 ),
 semantic as (
   select n.*, row_number() over (order by similarity desc,section_id) as position
@@ -70112,7 +70117,7 @@ blended as (
            'lexical_position',l.position,'semantic_position',s.position,
            'lexical_final_score',l.final_score,
            'semantic_similarity',s.similarity,
-           'embedding_model','@cf/baai/bge-small-en-v1.5:cls') as provenance,
+           'embedding_model','@cf/baai/bge-small-en-v1.5:cls:chunks-v1') as provenance,
          coalesce(s.similarity,0) as similarity
     from visible v cross join policy p
     left join lexical l on l.section_id=v.section_id
@@ -84177,11 +84182,13 @@ CREATE TABLE public.doctrine_edge_type (
 
 CREATE TABLE public.doctrine_embedding (
     revision_id uuid NOT NULL,
+    chunk_index integer DEFAULT 0 NOT NULL,
     model text NOT NULL,
     embedding public.vector(384) NOT NULL,
     embedded_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT doctrine_embedding_chunk_index_check CHECK ((chunk_index >= 0)),
     CONSTRAINT doctrine_embedding_embedding_check CHECK ((public.vector_norm(embedding) > (0)::double precision)),
-    CONSTRAINT doctrine_embedding_model_check CHECK ((model = '@cf/baai/bge-small-en-v1.5:cls'::text))
+    CONSTRAINT doctrine_embedding_model_check CHECK ((model = '@cf/baai/bge-small-en-v1.5:cls:chunks-v1'::text))
 );
 
 
@@ -99192,7 +99199,7 @@ ALTER TABLE ONLY public.doctrine_edge_type
 --
 
 ALTER TABLE ONLY public.doctrine_embedding
-    ADD CONSTRAINT doctrine_embedding_pkey PRIMARY KEY (revision_id);
+    ADD CONSTRAINT doctrine_embedding_pkey PRIMARY KEY (revision_id, chunk_index);
 
 
 --
@@ -118069,7 +118076,7 @@ revoke all on function public.read_action_class_successors(p_action_class text) 
 revoke all on function public.resolve_memory_plan_anchor(p_plan_id uuid, p_tenant text) from public;
 revoke all on function public.retire_retrieval_curation(p_target_type text, p_target_id uuid, p_base_version bigint, p_actor_id uuid, p_reason text) from public;
 revoke all on function public.retrieval_visibility_actor_id(p_sponsor_slug text) from public;
-revoke all on function public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embedding public.vector) from public;
+revoke all on function public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings public.vector[]) from public;
 revoke all on function public.search_doctrine_situations(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_allow_fallback boolean) from public;
 revoke all on function public.sparsevec(public.sparsevec, integer, boolean) from public;
 revoke all on function public.sparsevec_cmp(public.sparsevec, public.sparsevec) from public;
@@ -121559,13 +121566,16 @@ grant execute on function public.resolve_memory_plan_anchor(p_plan_id uuid, p_te
 grant execute on function public.retire_retrieval_curation(p_target_type text, p_target_id uuid, p_base_version bigint, p_actor_id uuid, p_reason text) to carr_writer;
 grant execute on function public.retrieval_visibility_actor_id(p_sponsor_slug text) to carr_reader;
 grant execute on function public.retrieval_visibility_actor_id(p_sponsor_slug text) to carr_writer;
-grant execute on function public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embedding public.vector) to carr_reader;
-grant execute on function public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embedding public.vector) to carr_writer;
+grant execute on function public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings public.vector[]) to carr_reader;
+grant execute on function public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings public.vector[]) to carr_writer;
 grant execute on function public.search_doctrine_situations(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_allow_fallback boolean) to carr_reader;
 grant execute on function public.search_doctrine_situations(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_allow_fallback boolean) to carr_writer;
 grant execute on function public.state_as_of(p_type text, p_id uuid, p_at timestamp with time zone) to carr_exporter;
 grant execute on function public.state_as_of(p_type text, p_id uuid, p_at timestamp with time zone) to carr_reader;
 grant execute on function public.state_as_of(p_type text, p_id uuid, p_at timestamp with time zone) to carr_writer;
+grant execute on function public.vector(public.vector, integer, boolean) to carr_reader;
+grant execute on function public.vector(public.vector, integer, boolean) to carr_writer;
+grant execute on function public.vector_norm(public.vector) to carr_writer;
 grant carr_authority to neondb_owner;
 grant carr_calendar_prebrief_attestors to neondb_owner;
 grant carr_calendar_prebrief_canary_jobs to neondb_owner;
@@ -122195,7 +122205,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0944_retire_orphan_control_inventory.sql	ab7c35cfc581268b40bab5b29399e315286b24ba1c3c8c86bc0b9c49673def37	1970-01-01 00:00:00+00
 0947_allow_approved_control_evidence_refresh.sql	b051840f87086cdfcfbe21abae004df2f7023907f081851f95c22a7e017f8800	1970-01-01 00:00:00+00
 0950_remove_retired_workflow_manifest_binding.sql	87c2d7f9aba676b4b0e0d7262b024fe20f4ee1e7a7ced5ced4dcce19267d9a41	1970-01-01 00:00:00+00
-0956_doctrine_embeddings.sql	77e11df4125e8bde4cf0471ae13ba96fd390180a0fee70ec67551859b6423256	1970-01-01 00:00:00+00
+0956_doctrine_embeddings.sql	8b1f75ddf5eb2657d4e5f7c6ddd62dc7a5885add879d6b13cee0d696fa0d96b6	1970-01-01 00:00:00+00
 \.
 
 

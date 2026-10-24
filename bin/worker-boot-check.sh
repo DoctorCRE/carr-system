@@ -73,7 +73,7 @@ trap cleanup EXIT INT TERM
 
 (
   cd "$WORKER_DIR" &&
-  exec "$WRANGLER" dev --port "$PORT" --ip 127.0.0.1 --assets "$ASSETS_DIR"
+  exec "$WRANGLER" dev --local --port "$PORT" --ip 127.0.0.1 --assets "$ASSETS_DIR"
 ) > "$LOG" 2>&1 &
 WRANGLER_PID=$!
 

@@ -31,6 +31,13 @@ export async function doctrineEmbeddingDatabase() {
     const start = baseline.indexOf('CREATE OR REPLACE FUNCTION public.search_doctrine_situations(');
     const end = baseline.indexOf('$function$;', start) + '$function$;'.length;
     await c.query(baseline.slice(start,end));
+    await c.query(`
+      grant usage on schema public to carr_reader,carr_writer;
+      grant select on doctrine_section,doctrine_revision,doctrine_document to carr_writer;
+      grant execute on function current_retrievable_doctrine(uuid,text[]) to carr_writer;
+      grant execute on function search_doctrine_situations(text,uuid,text[],integer,text,boolean) to carr_reader,carr_writer;
+      alter default privileges revoke execute on functions from public;
+    `);
     await c.query(readMigration('0956_doctrine_embeddings.sql'));
     return fixture;
   } catch (error) { await fixture.close(); throw error; }

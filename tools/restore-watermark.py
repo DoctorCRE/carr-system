@@ -745,7 +745,7 @@ def branch_target_start(project_id: str, branch_id: str, admin_dsn: str, databas
 # COPY data lines always pass through unchanged.
 RESTORE_STATEMENT_FILTER = re.compile(
     rb"^(CREATE SCHEMA public;|ALTER DEFAULT PRIVILEGES|GRANT |REVOKE |ALTER .* OWNER TO |COMMENT ON EXTENSION )")
-RESTORE_EXTENSIONS = ("pg_trgm", "pgcrypto")
+RESTORE_EXTENSIONS = ("pg_trgm", "pgcrypto", "vector")
 
 
 def restore_stream(lines: Iterable[bytes]) -> Iterable[bytes]:

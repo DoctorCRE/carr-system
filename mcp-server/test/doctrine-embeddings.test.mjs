@@ -42,7 +42,7 @@ test('real ranker retrieves a meaning-only section with deterministic fake embed
     const before = await searchDoctrineSituations({ query:c.query },actor,{ q:'tenant tour',limit:10 });
     assert.equal(before.hits.length,0);
     await c.query(`insert into doctrine_embedding(revision_id,model,embedding) values ($1,$2,$3::vector)`,
-        [target.revision,'@cf/baai/bge-small-en-v1.5:cls',JSON.stringify(unit())]);
+        [target.revision,'@cf/baai/bge-small-en-v1.5:cls:chunks-v1',JSON.stringify(unit())]);
     const after = await searchDoctrineSituations(c,actor,{ q:'tenant tour',limit:10 });
     assert.equal(after.hits[0]?.section_id,target.section);
     assert.equal(after.semantic.status,'ready');
@@ -63,7 +63,7 @@ test('both evidence lanes blend while personal, retired, class and stale revisio
     const otherClass = await seedSection(c,5,{ contentClass:'sop',body:'tenant tour' });
     const stale = await seedSection(c,6);
     const store = async (revision,vector) => c.query(`insert into doctrine_embedding(revision_id,model,embedding) values($1,$2,$3::vector)`,
-      [revision,'@cf/baai/bge-small-en-v1.5:cls',JSON.stringify(vector)]);
+      [revision,'@cf/baai/bge-small-en-v1.5:cls:chunks-v1',JSON.stringify(vector)]);
     await store(lexical.revision,unit(0,1));
     await store(dual.revision,unit(.8,.6));
     for(const target of [semantic,hidden,retired,otherClass,stale]) await store(target.revision,unit());
@@ -201,7 +201,7 @@ for (const verb of ['write-doctrine-section','change-doctrine-sections'])
       {idempotency_key:'ordinary-write',document:'fixture',...item,items:[item]});
     assert.equal(result.semantic.embedded,1);
     assert.equal(stored[0][0],revision,'embedding follows the revision produced by this write');
-    assert.equal(stored[0][1],'@cf/baai/bge-small-en-v1.5:cls');
+    assert.equal(stored[0][1],'@cf/baai/bge-small-en-v1.5:cls:chunks-v1');
     assert.equal(modelCalls[0].input.pooling,'cls');
     assert.deepEqual(modelCalls[0].input.text,[item.body_text],'mutable titles do not drift revision-keyed vectors');
   });
@@ -244,7 +244,7 @@ test('a vector-query failure returns the lexical answer',async()=>{
   assert.equal(out.semantic.reason,'retrieval_failed');
 });
 
-test('large atomic writes keep provider batches bounded and truncate valid UTF-8 input',async()=>{
+test('large atomic writes batch complete overlapping UTF-8 chunks',async()=>{
   const { embedDoctrineRevisions }=await import('../src/doctrine-embeddings.js');
   const sizes=[],inputs=[];
   const text='🦉'.repeat(200);
@@ -253,13 +253,99 @@ test('large atomic writes keep provider batches bounded and truncate valid UTF-8
     query:async sql=>({rows:sql.startsWith('insert into doctrine_embedding')?[{revision_id:fixtureIds[1]}]:[]}),
   },Array.from({length:17},(_,i)=>({revision_id:fixtureIds[i],plain_text:text})));
   assert.equal(out.embedded,17);
-  assert.deepEqual(sizes,[16,1]);
+  assert.deepEqual(sizes,[16,16,2]);
   assert.ok(inputs.every(input=>new TextEncoder().encode(input).length<=480));
-  assert.ok(inputs.every(input=>text.startsWith(input)),'truncation preserves complete UTF-8 characters');
+  assert.ok(inputs.every(input=>!input.includes('�')),'chunks preserve complete UTF-8 characters');
+  assert.equal(inputs[0].length + inputs[1].length - 48, text.length, 'chunks cover the complete section');
 });
 
 test('blank queries keep lexical abstention without calling the model',async()=>{
   const out=await searchDoctrineSituations({ai:{run:async()=>assert.fail('blank query reached the model')},query:async()=>({rows:[]})},actor,{q:'   '});
   assert.deepEqual(out.hits,[]);
   assert.equal(out.semantic.reason,'empty_query');
+});
+
+
+test('runtime roles can backfill and search under the hardened default function ACL', async () => {
+  const { doctrineEmbeddingDatabase } = await import('./helpers/doctrine-embedding-postgres.mjs');
+  const { backfillDoctrineEmbeddings } = await import('../src/doctrine-embeddings.js');
+  const fixture = await doctrineEmbeddingDatabase();
+  try {
+    const c = { query: fixture.client.query.bind(fixture.client),
+      ai: { run: async (_model, { text }) => ({ data: text.map(() => unit()) }) } };
+    const target = await seedSection(c, 0);
+    await c.query('begin');
+    await c.query('set local role carr_writer');
+    assert.equal((await c.query('select current_user as role')).rows[0].role, 'carr_writer');
+    const out = await backfillDoctrineEmbeddings(c, null, 16);
+    assert.equal(out.semantic.status, 'ready');
+    assert.equal(out.embedded, 1);
+    assert.equal(out.remaining, 0);
+    const writer = await searchDoctrineSituations(c, actor, { q: 'tenant tour' });
+    assert.equal(writer.hits[0]?.section_id, target.section);
+    await c.query('set local role carr_reader');
+    const reader = await searchDoctrineSituations(c, actor, { q: 'tenant tour' });
+    assert.equal(reader.semantic.status, 'ready');
+    assert.equal(reader.hits[0]?.section_id, target.section);
+    await c.query('rollback');
+  } finally { await fixture.close(); }
+});
+
+test('a vector SQL failure preserves lexical fallback and problem capture inside BEGIN', async () => {
+  const { doctrineEmbeddingDatabase } = await import('./helpers/doctrine-embedding-postgres.mjs');
+  const { TOOLS } = await import('../src/tools.js');
+  const fixture = await doctrineEmbeddingDatabase();
+  try {
+    const c = { query: fixture.client.query.bind(fixture.client), inTransaction: true,
+      ai: { run: async () => ({ data: [unit()] }) } };
+    const target = await seedSection(c, 0, { body: 'tenant tour' });
+    await c.query('begin');
+    await c.query(`alter function search_doctrine_semantic(text,uuid,text[],integer,text,vector[])
+      rename to unavailable_semantic_fixture`);
+    const fallback = await searchDoctrineSituations(c, actor, { q: 'tenant tour' });
+    assert.equal(fallback.semantic.reason, 'retrieval_failed');
+    assert.equal(fallback.hits[0]?.section_id, target.section);
+    const captured = await TOOLS['report-problem'].handler(c, { ...actor, id: fixtureIds[20] }, {
+      idempotency_key: fixtureIds[21], situation: 'tenant tour', title: 'Tour packet missing',
+      desired_outcome: 'Prepare the packet', acceptance_criteria: [{ id: 'AC1', text: 'Packet is ready' }],
+    });
+    assert.equal(captured.ok, true);
+    assert.equal((await c.query('select count(*)::int as n from ops.work_request')).rows[0].n, 1);
+    await c.query('commit');
+  } finally { await fixture.close(); }
+});
+
+test('answer text after byte 480 is searchable and sections rank once by their best chunk', async () => {
+  const { doctrineEmbeddingDatabase } = await import('./helpers/doctrine-embedding-postgres.mjs');
+  const { backfillDoctrineEmbeddings } = await import('../src/doctrine-embeddings.js');
+  const fixture = await doctrineEmbeddingDatabase();
+  try {
+    const inputs = [];
+    const intro = 'General introductory material. '.repeat(40);
+    const answer = 'Assemble the site visit packet before departure. '.repeat(30);
+    const c = { query: fixture.client.query.bind(fixture.client), inTransaction: true,
+      ai: { run: async (_model, { text }) => {
+        inputs.push(...text);
+        return { data: text.map(input => input.includes('site visit packet') || input.includes('tenant tour')
+          ? unit() : unit(0, 1)) };
+      } } };
+    const target = await seedSection(c, 0, { body: intro + answer });
+    await seedSection(c, 1, { body: intro + 'Use a sundial to tell the time.' });
+    const before = await searchDoctrineSituations({ query: c.query }, actor, { q: 'tenant tour' });
+    assert.equal(before.hits.length, 0, 'paraphrase shares no lexical terms with the answer');
+    await c.query('begin');
+    const backfill = await backfillDoctrineEmbeddings(c, null, 16);
+    assert.equal(backfill.embedded, 2, 'backfill counts sections rather than chunks');
+    const found = await searchDoctrineSituations(c, actor, { q: 'tenant tour' });
+    assert.equal(found.hits[0]?.section_id, target.section);
+    assert.equal(found.hits.filter(hit => hit.section_id === target.section).length, 1);
+    assert.equal(found.hits[0].provenance.semantic_similarity, 1);
+    assert.equal(found.semantic.visible_sections, 2);
+    assert.equal(found.semantic.embedded_sections, 2);
+    assert.ok(inputs.some(input => input.includes('site visit packet')));
+    const longQuery = await searchDoctrineSituations(c, actor, { q: intro + 'tenant tour' });
+    assert.equal(longQuery.hits[0]?.section_id, target.section, 'query tails also reach the model');
+    assert.equal((await backfillDoctrineEmbeddings(c, null, 16)).embedded, 0);
+    await c.query('rollback');
+  } finally { await fixture.close(); }
 });

@@ -97,8 +97,20 @@ class ApprovedControlMigrationTests(unittest.TestCase):
                 select id,%s,encode(digest(statement,'sha256'),'hex'),'{"fixture":"retired control"}'
                 from rule where id=%s""", (ORPHAN_CONTROL, ORPHAN_RULE))
 
+    def test_semantic_grants_preserve_catalog_closure_and_refuse_extra_authority(self):
+        with self.psycopg.connect(self.dsn, autocommit=True) as conn:
+            self.assertTrue(conn.execute('select ops.scac_mutation_catalog_v118_current()').fetchone()[0])
+            for statement in (
+                'grant update on public.doctrine_embedding to carr_writer',
+                'grant execute on function public.search_doctrine_semantic(text,uuid,text[],integer,text,vector[]) to public',
+            ):
+                with conn.transaction(force_rollback=True):
+                    conn.execute(statement)
+                    self.assertFalse(conn.execute('select ops.scac_mutation_catalog_v118_current()').fetchone()[0])
+            self.assertTrue(conn.execute('select ops.scac_mutation_catalog_v118_current()').fetchone()[0])
+
     def runner(self, *args):
-        return subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'), '--apply', '--yes', *args],
+        return subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'), '--apply', '--yes', '--through', BINDING_REPAIR, *args],
                               cwd=ROOT, env={**self.child, 'DATABASE_URL': self.dsn},
                               capture_output=True, text=True, timeout=120)
 
