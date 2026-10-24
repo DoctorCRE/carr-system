@@ -52700,7 +52700,7 @@ $$;
 
 CREATE FUNCTION ops.scac_policy_epoch_refresh() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'public', 'ops'
+    SET search_path TO 'pg_catalog', 'public', 'ops', 'pg_temp'
     AS $$
 declare source jsonb; source_digest text; prior ops.scac_policy_epoch%rowtype; next_epoch bigint; created timestamptz:=clock_timestamp(); epoch_digest text; prefix_digest text; bootstrap_health record; settlement_key text;
 begin
@@ -121980,7 +121980,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0953_morning_brief_chicago_calendar.sql	b6a1c2d4666a7fe2ba645d3048b2f874014f47f97e88a3144e07bd6079f6903d	1970-01-01 00:00:00+00
 0954_lead_workspace_set_reads.sql	687e444a25754aa975adcbcf45b92b5ab6f763a5c7c1a20a3b571aca4e10e28e	1970-01-01 00:00:00+00
 0955_retrieval_concept_question_matching.sql	885f3cefb3b4359c20f242534750ef9ebd883cda93e0592119b504e9f407e0c1	1970-01-01 00:00:00+00
-0957_retire_scac_catalog_commit_check.sql	5e19ed9254f8150d789d81882a008c80eeb9b645a4dd0ca2c8dcd0c54f5899eb	1970-01-01 00:00:00+00
+0957_retire_scac_catalog_commit_check.sql	1a26b1a8e517c15d62b3a0fbd96b2f59278c1596839e33b3d4e6c423ab9c6a97	1970-01-01 00:00:00+00
 \.
 
 

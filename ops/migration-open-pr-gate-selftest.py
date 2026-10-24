@@ -22,14 +22,14 @@ spec.loader.exec_module(gate)
 class CollisionTests(unittest.TestCase):
     def test_later_pr_gets_clear_renumber_target(self):
         errors = gate.findings({'0890_main.sql'}, {'0891_feature.sql'}, Claims({891}, {891, 892}, {891: 7}))
-        self.assertEqual(errors, ['0891_feature.sql: slot 0891 belongs to PR #7; renumber to 0893_feature.sql with ./run.sh regen --pr <number>'])
+        self.assertEqual(errors, ['0891_feature.sql: slot 0891 belongs to PR #7; rename to 0893_feature.sql and update its references'])
 
     def test_earlier_pr_keeps_its_number(self):
         self.assertEqual(gate.findings({'0890_main.sql'}, {'0891_feature.sql'}, Claims(set(), {891}, {891: 11})), [])
 
     def test_main_always_owns_its_number(self):
         errors = gate.findings({'0891_main.sql'}, {'0891_feature.sql'}, Claims(set(), set(), {}))
-        self.assertIn('renumber to 0892_feature.sql', errors[0])
+        self.assertIn('rename to 0892_feature.sql', errors[0])
 
 
 class StackedBaseTests(unittest.TestCase):

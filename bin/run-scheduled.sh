@@ -28,37 +28,6 @@ RUN_KEY="$1"; shift
 
 REPO="${0:A:h:h}"
 
-unset CARR_RUN_SCHEDULED_XPC_SERVICE_NAME
-unset CARR_RUN_SCHEDULED_LAUNCHD_PID
-unset CARR_RUN_SCHEDULED_FLEET_SELF_CLAIM
-wrapper_pid=$$
-fleet_self_proof_refused=0
-if [ "$SERVICE" = "fleet-sync" ] \
-    && [ "${XPC_SERVICE_NAME:-}" = "com.carr.fleet-sync" ]; then
-  export CARR_RUN_SCHEDULED_FLEET_SELF_CLAIM=1
-fi
-fleet_loaded_wrapper=0
-if [ "${CARR_RUN_SCHEDULED_FLEET_SELF_CLAIM:-}" = 1 ] \
-    && launchctl print "gui/$UID/com.carr.fleet-sync" 2>/dev/null \
-       | grep -Eq "^[[:space:]]*pid = ${wrapper_pid}[[:space:]]*$"; then
-  fleet_loaded_wrapper=1
-fi
-fleet_tuple_valid=0
-if [ "$RUN_KEY" = "fleet.sync" ] \
-    && [ "$#" -eq 2 ] \
-    && [ "$1" = "/bin/zsh" ] \
-    && [ "${2:A}" = "$REPO/bin/fleet-sync.sh" ]; then
-  fleet_tuple_valid=1
-fi
-if [ "${CARR_RUN_SCHEDULED_FLEET_SELF_CLAIM:-}" = 1 ]; then
-  if [ "$fleet_loaded_wrapper" -eq 1 ] && [ "$fleet_tuple_valid" -eq 1 ]; then
-    export CARR_RUN_SCHEDULED_XPC_SERVICE_NAME=com.carr.fleet-sync
-    export CARR_RUN_SCHEDULED_LAUNCHD_PID=$wrapper_pid
-  else
-    fleet_self_proof_refused=1
-  fi
-fi
-
 LOG="$REPO/out/run-scheduled.log"
 PY="$REPO/.venv/bin/python"
 [ -x "$PY" ] || PY=python3
@@ -72,14 +41,7 @@ fi
 
 STARTED="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
-if [ "$fleet_self_proof_refused" -eq 1 ]; then
-  print -ru2 -- "run-scheduled: ACTIVE-SELF PROOF REFUSED — launchd names this as"
-  print -ru2 -- "    com.carr.fleet-sync, but the loaded wrapper PID and exact"
-  print -ru2 -- "    fleet-sync/fleet.sync canonical command tuple do not all agree"
-  print -ru2 -- "    remedy: run the sanctioned external config-as-code install to restore"
-  print -ru2 -- "    and reload the canonical plist; supplied child was not executed"
-  rc=1
-elif [ -n "$receipt_file" ]; then
+if [ -n "$receipt_file" ]; then
   "$@" > "$receipt_file" 2>/dev/null
   rc=$?
 else

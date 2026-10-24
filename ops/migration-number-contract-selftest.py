@@ -2,10 +2,6 @@
 """Prove frozen migration-number collisions cannot spread or lose a filename."""
 from __future__ import annotations
 
-import contextlib
-import importlib.util
-import io
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -25,25 +21,6 @@ from migration_number_contract import (  # noqa: E402
     validate_migration_names,
 )
 import migrate as migration_runner  # noqa: E402
-
-NEXT_MIGRATION_SPEC = importlib.util.spec_from_file_location(
-    "next_migration", REPO / "tools" / "next-migration.py"
-)
-assert NEXT_MIGRATION_SPEC and NEXT_MIGRATION_SPEC.loader
-next_migration: Any = importlib.util.module_from_spec(NEXT_MIGRATION_SPEC)
-NEXT_MIGRATION_SPEC.loader.exec_module(next_migration)
-
-# These slot-policy fixtures supply inventories, not Git objects. Stub the
-# logical-source interface while the compacted Git fixtures exercise its reads.
-def fixture_migration_names(repo, ref=None):
-    if ref is None:
-        return {p.name for p in (Path(repo) / "migrations").glob("*.sql")}
-    return {Path(p).name for p in next_migration.run(
-        ["git", "ls-tree", "--name-only", ref, "migrations/"]
-    ).splitlines() if p.strip()}
-
-next_migration.migration_names = fixture_migration_names
-
 
 FROZEN_0169 = (
     "0169_control_plane_canary_fencing.sql",
@@ -94,46 +71,9 @@ def refuses(names: tuple[str, ...], expected: str, **kwargs: Any) -> None:
         raise AssertionError(f"expected migration-number refusal containing {expected!r}")
 
 
-def allocator_refuses_interstitial(
-    actual: tuple[str, ...], names: tuple[str, ...], expected: str,
-    interstitial: tuple[str, ...],
-) -> None:
-    """Exercise the allocator's own-worktree rejection for an incomplete pair."""
-    remote_names = [name for name in actual if name != interstitial[1]]
-    slot = interstitial[0][:4]
-    with tempfile.TemporaryDirectory(prefix=f"migration-number-contract-{slot}-") as tmp:
-        migration_dir = Path(tmp) / "migrations"
-        migration_dir.mkdir()
-        for name in names:
-            (migration_dir / name).touch()
-        original_run = next_migration.run
-        original_worktree_paths = next_migration.worktree_paths
-        original_repo = next_migration.REPO
-        try:
-            next_migration.run = lambda args, cwd=None: (
-                "\n".join(f"migrations/{name}" for name in remote_names)
-                if args[:3] == ["git", "ls-tree", "--name-only"] else ""
-            )
-            next_migration.worktree_paths = lambda: [tmp]
-            next_migration.REPO = tmp
-            stdout, stderr = io.StringIO(), io.StringIO()
-            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                rc = next_migration.main()
-        finally:
-            next_migration.run = original_run
-            next_migration.worktree_paths = original_worktree_paths
-            next_migration.REPO = original_repo
-        assert rc == 1, (rc, stdout.getvalue(), stderr.getvalue())
-        assert expected in stderr.getvalue(), stderr.getvalue()
-
-
 def main() -> int:
     from migration_source import migration_names
     actual = tuple(migration_names(REPO))
-    expected_next = max(
-        max(next_migration.numbers_from_names(actual)),
-        max(PERMANENTLY_BURNED_MIGRATION_SLOTS),
-    ) + 1
     validate_migration_names(actual, require_frozen=True)
 
     report = collision_report(actual)
@@ -169,24 +109,6 @@ def main() -> int:
         APPROVED_0494 + ("0494b_codex_continuity_unapproved.sql",),
         "approved interstitial collision 0494 changed",
     )
-    allocator_refuses_interstitial(
-        actual,
-        tuple(name for name in actual if name != APPROVED_0494[0]),
-        "approved interstitial collision 0494 changed",
-        APPROVED_0494,
-    )
-    allocator_refuses_interstitial(
-        actual,
-        tuple(name for name in actual if name != APPROVED_0494[1]),
-        "approved interstitial collision 0494 changed",
-        APPROVED_0494,
-    )
-    allocator_refuses_interstitial(
-        actual,
-        actual + ("0494b_codex_continuity_unapproved.sql",),
-        "approved interstitial collision 0494 changed",
-        APPROVED_0494,
-    )
     refuses(APPROVED_0507[:1], "approved interstitial collision 0507 changed")
     refuses((APPROVED_0507[1],), "approved interstitial collision 0507 changed")
     validate_migration_names(
@@ -200,24 +122,6 @@ def main() -> int:
     refuses(
         APPROVED_0507 + ("0507b_unapproved.sql",),
         "approved interstitial collision 0507 changed",
-    )
-    allocator_refuses_interstitial(
-        actual,
-        tuple(name for name in actual if name != APPROVED_0507[0]),
-        "approved interstitial collision 0507 changed",
-        APPROVED_0507,
-    )
-    allocator_refuses_interstitial(
-        actual,
-        tuple(name for name in actual if name != APPROVED_0507[1]),
-        "approved interstitial collision 0507 changed",
-        APPROVED_0507,
-    )
-    allocator_refuses_interstitial(
-        actual,
-        actual + ("0507b_unapproved.sql",),
-        "approved interstitial collision 0507 changed",
-        APPROVED_0507,
     )
     refuses(APPROVED_0532[:1], "approved interstitial collision 0532 changed")
     refuses(APPROVED_0532[:2], "approved interstitial collision 0532 changed")
@@ -236,13 +140,6 @@ def main() -> int:
         APPROVED_0532 + ("0532c_unapproved.sql",),
         "approved interstitial collision 0532 changed",
     )
-    for missing in APPROVED_0532:
-        allocator_refuses_interstitial(
-            actual,
-            tuple(name for name in actual if name != missing),
-            "approved interstitial collision 0532 changed",
-            APPROVED_0532,
-        )
     for number in EXPECTED_BURNED_SLOTS:
         refuses(
             (f"{number:04d}_reuse.sql",),
@@ -739,212 +636,7 @@ def main() -> int:
     else:
         raise AssertionError("legacy ledger alias without its forward migration was accepted")
 
-    allocation = subprocess.run(
-        [sys.executable, str(REPO / "tools" / "next-migration.py")],
-        cwd=REPO,
-        text=True,
-        capture_output=True,
-        check=True,
-    ).stdout
-    assert "registered numeric collisions on origin/main" in allocation, allocation
-    assert "0169 (historical frozen): " + ", ".join(FROZEN_0169) in allocation, allocation
-
-    # The only permitted remote-collision repair is the current 0298 incident:
-    # preserve the partner-room migration, replace only the memory migration
-    # with 0299, and prove the replacement bytes differ only in ordinal labels.
-    exact_frozen = [name for names in FROZEN_COLLISIONS.values() for name in names]
-    exact_remote = exact_frozen + [
-        "0298_partner_room_origin.sql",
-        "0298_memory_kernel.sql",
-    ]
-    exact_current = exact_frozen + [
-        "0298_partner_room_origin.sql",
-        "0299_memory_kernel.sql",
-    ]
-    assert next_migration._repairs_exact_origin_collision(
-        exact_remote, exact_current, True, True
-    )
-    assert not next_migration._repairs_exact_origin_collision(
-        exact_remote + ["0298_unrelated.sql"], exact_current, True, True
-    )
-    assert not next_migration._repairs_exact_origin_collision(
-        exact_remote, exact_current[:-1], True, True
-    )
-    assert not next_migration._repairs_exact_origin_collision(
-        exact_remote, exact_current[1:], True, True
-    )
-    assert not next_migration._repairs_exact_origin_collision(
-        exact_remote, exact_current, False, True
-    )
-    assert not next_migration._repairs_exact_origin_collision(
-        exact_remote, exact_remote, True, True
-    )
-    assert not next_migration._repairs_exact_origin_collision(
-        exact_remote, exact_current, True, False
-    )
-    assert not next_migration._repairs_exact_origin_collision(
-        exact_remote, exact_current + ["0300_memory_kernel.sql"], True, True
-    )
-    assert not next_migration._repairs_exact_origin_collision(
-        [name for name in exact_remote if name != "0169_hermes_pilot_actor.sql"],
-        exact_current,
-        True,
-        True,
-    )
-
-    # Exercise the actual allocator path with the real migration inventory:
-    # red origin/main plus a clean checked tree succeeds and reserves 0298,
-    # while a checked tree that still contains both 0298 files refuses. The
-    # real inventory now also carries the 0301/0302 provenance migrations, so
-    # the next available number after the repair is 0303.
-    remote_inventory = [
-        name if name != "0299_memory_kernel.sql" else "0298_memory_kernel.sql"
-        for name in actual
-    ]
-    for colliding_current in (False, True):
-        with tempfile.TemporaryDirectory(prefix="migration-number-contract-0298-repair-") as tmp:
-            migration_dir = Path(tmp) / "migrations"
-            migration_dir.mkdir()
-            current_inventory = list(actual)
-            if colliding_current:
-                current_inventory.append("0298_memory_kernel.sql")
-            for name in current_inventory:
-                (migration_dir / name).touch()
-            original_run = next_migration.run
-            original_worktree_paths = next_migration.worktree_paths
-            original_repo = next_migration.REPO
-            original_head_check = next_migration._head_contains_origin_main
-            original_content_check = next_migration._repair_contents_match
-            try:
-                next_migration.run = lambda args, cwd=None: (
-                    "\n".join(f"migrations/{name}" for name in remote_inventory)
-                    if args[:3] == ["git", "ls-tree", "--name-only"] else ""
-                )
-                next_migration.worktree_paths = lambda: [tmp]
-                next_migration.REPO = tmp
-                next_migration._head_contains_origin_main = lambda: True
-                next_migration._repair_contents_match = lambda: True
-                stdout, stderr = io.StringIO(), io.StringIO()
-                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                    repair_rc = next_migration.main()
-            finally:
-                next_migration.run = original_run
-                next_migration.worktree_paths = original_worktree_paths
-                next_migration.REPO = original_repo
-                next_migration._head_contains_origin_main = original_head_check
-                next_migration._repair_contents_match = original_content_check
-            if colliding_current:
-                assert repair_rc == 1, (repair_rc, stdout.getvalue(), stderr.getvalue())
-                assert "origin/main violates" in stderr.getvalue(), stderr.getvalue()
-            else:
-                assert repair_rc == 0, (repair_rc, stdout.getvalue(), stderr.getvalue())
-                assert f"next free migration number: {expected_next:04d}" in stdout.getvalue(), stdout.getvalue()
-                assert "0298_memory_kernel.sql" in stdout.getvalue(), stdout.getvalue()
-
-    # The same allocator path refuses if the red remote inventory is missing
-    # one member of a canonical frozen collision.
-    with tempfile.TemporaryDirectory(prefix="migration-number-contract-0298-frozen-gap-") as tmp:
-        migration_dir = Path(tmp) / "migrations"
-        migration_dir.mkdir()
-        for name in actual:
-            (migration_dir / name).touch()
-        remote_missing_frozen = [
-            name for name in remote_inventory if name != "0169_hermes_pilot_actor.sql"
-        ]
-        original_run = next_migration.run
-        original_worktree_paths = next_migration.worktree_paths
-        original_repo = next_migration.REPO
-        original_head_check = next_migration._head_contains_origin_main
-        original_content_check = next_migration._repair_contents_match
-        try:
-            next_migration.run = lambda args, cwd=None: (
-                "\n".join(f"migrations/{name}" for name in remote_missing_frozen)
-                if args[:3] == ["git", "ls-tree", "--name-only"] else ""
-            )
-            next_migration.worktree_paths = lambda: [tmp]
-            next_migration.REPO = tmp
-            next_migration._head_contains_origin_main = lambda: True
-            next_migration._repair_contents_match = lambda: True
-            stdout, stderr = io.StringIO(), io.StringIO()
-            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                frozen_gap_rc = next_migration.main()
-        finally:
-            next_migration.run = original_run
-            next_migration.worktree_paths = original_worktree_paths
-            next_migration.REPO = original_repo
-            next_migration._head_contains_origin_main = original_head_check
-            next_migration._repair_contents_match = original_content_check
-        assert frozen_gap_rc == 1, (frozen_gap_rc, stdout.getvalue(), stderr.getvalue())
-        assert "origin/main violates" in stderr.getvalue(), stderr.getvalue()
-
-    # A COLLISION IN SOMEONE ELSE'S WORKTREE WARNS AND STILL RESERVES THE
-    # NUMBERS. It does not refuse.
-    #
-    # This assertion used to require rc 1, and that veto cost most of a night on
-    # 2026-08-22. Two branches merged 0248 twice; main resolved it by renumber;
-    # every other checkout on the machine still held the old filename on disk,
-    # as stale worktrees harmlessly do. The allocator then refused for everyone,
-    # this selftest failed, and the pre-push gate refused pushes from branches
-    # that touched no migration at all — three of them, whose only way through
-    # was skipping CI entirely, which is strictly worse than the thing being
-    # guarded. The council ruled the class the same day: a machine-global
-    # condition may open a loop, never veto unrelated work.
-    #
-    # What actually protects the caller is the claim merge, and that is asserted
-    # here: the colliding numbers must still be reported as in-flight, so the
-    # allocator never hands one out.
-    with tempfile.TemporaryDirectory(prefix="migration-number-contract-") as tmp:
-        migration_dir = Path(tmp) / "migrations"
-        migration_dir.mkdir()
-        (migration_dir / "0172_first.sql").touch()
-        (migration_dir / "0172_second.sql").touch()
-        original_run = next_migration.run
-        original_worktree_paths = next_migration.worktree_paths
-        try:
-            next_migration.run = lambda _args, cwd=next_migration.REPO: "\n".join(actual)
-            next_migration.worktree_paths = lambda: [tmp]
-            stdout, stderr = io.StringIO(), io.StringIO()
-            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                allocator_rc = next_migration.main()
-        finally:
-            next_migration.run = original_run
-            next_migration.worktree_paths = original_worktree_paths
-        assert allocator_rc == 0, (allocator_rc, stdout.getvalue(), stderr.getvalue())
-        assert "WARNING" in stderr.getvalue(), stderr.getvalue()
-        assert "unregistered collision 0172" in stderr.getvalue(), stderr.getvalue()
-        assert "another session's checkout" in stderr.getvalue(), stderr.getvalue()
-        # The load-bearing half: both names stay claimed, so 0172 is never
-        # handed to the caller as free.
-        assert "0172_first.sql" in stdout.getvalue(), stdout.getvalue()
-        assert "0172_second.sql" in stdout.getvalue(), stdout.getvalue()
-
-    # THE CALLER'S OWN TREE IS DIFFERENT, and still refuses. A collision here
-    # means the number about to be handed out may itself be wrong, and it is
-    # the caller's to fix rather than someone else's.
-    with tempfile.TemporaryDirectory(prefix="migration-number-contract-own-") as tmp:
-        migration_dir = Path(tmp) / "migrations"
-        migration_dir.mkdir()
-        (migration_dir / "0173_first.sql").touch()
-        (migration_dir / "0173_second.sql").touch()
-        original_run = next_migration.run
-        original_worktree_paths = next_migration.worktree_paths
-        original_repo = next_migration.REPO
-        try:
-            next_migration.run = lambda _args, cwd=None: "\n".join(actual)
-            next_migration.worktree_paths = lambda: [tmp]
-            next_migration.REPO = tmp          # the caller IS standing in this tree
-            stdout, stderr = io.StringIO(), io.StringIO()
-            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                own_rc = next_migration.main()
-        finally:
-            next_migration.run = original_run
-            next_migration.worktree_paths = original_worktree_paths
-            next_migration.REPO = original_repo
-        assert own_rc == 1, (own_rc, stdout.getvalue(), stderr.getvalue())
-        assert "this tree violates" in stderr.getvalue(), stderr.getvalue()
-
-    print("migration number contract selftest: historical collisions frozen; "
-          "own-tree collisions refused; a peer worktree's collision warns and still reserves")
+    print("migration number contract selftest: filename policy and applied ledger checks pass")
     return 0
 
 

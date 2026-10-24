@@ -51,11 +51,8 @@ EXIT CODES
 """
 
 import argparse
-import hashlib
-import json
 import os
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -64,138 +61,10 @@ import psycopg
 REPO = Path(__file__).resolve().parent.parent
 OUT = REPO / "out"
 REPORT = OUT / "availability-matches.md"
-CANARY_BASE = REPO / "out" / "canary" / "nightly-record-layer"
 
 KNOWN_KEYS = {"min_sf", "max_sf", "cities", "states", "sub_types",
               "max_rate_sf_yr", "statuses"}
 DEFAULT_STATUSES = ("available",)
-
-
-def _canonical_digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-
-
-def _safe_canary_root(raw):
-    """Accept one real, non-symlinked child of the dedicated canary root."""
-    if not raw:
-        raise RuntimeError("availability matcher canary requires CARR_NIGHTLY_CANARY_ROOT")
-    root = Path(raw)
-    if not root.is_absolute() or any(part in {"", ".", ".."} for part in root.parts):
-        raise RuntimeError("availability matcher canary root is not a simple absolute path")
-    for part in (REPO / "out", REPO / "out" / "canary", CANARY_BASE):
-        if part.is_symlink():
-            raise RuntimeError("availability matcher canary root crosses a symlink")
-    base = CANARY_BASE.resolve(strict=False)
-    try:
-        root.relative_to(base)
-    except ValueError as exc:
-        raise RuntimeError("availability matcher canary root escapes its dedicated directory") from exc
-    if root == base or root.parent != base or root.exists() and root.is_symlink():
-        raise RuntimeError("availability matcher canary root must be one new direct run directory")
-    return root
-
-
-def _read_canary_snapshot():
-    raw = sys.stdin.read()
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("availability matcher canary refused malformed protected snapshot") from exc
-    required = {"source_snapshot_id", "snapshot_digest", "snapshot_preimage"}
-    if not isinstance(value, dict) or set(value) != required:
-        raise RuntimeError("availability matcher canary refused unregistered snapshot shape")
-    if not isinstance(value["source_snapshot_id"], str) or not isinstance(value["snapshot_digest"], str) \
-            or not isinstance(value["snapshot_preimage"], str):
-        raise RuntimeError("availability matcher canary source identity is invalid")
-    preimage = value["snapshot_preimage"]
-    if hashlib.sha256(preimage.encode()).hexdigest() != value["snapshot_digest"]:
-        raise RuntimeError("availability matcher canary protected snapshot bytes do not reconcile")
-    try:
-        source = json.loads(preimage)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("availability matcher canary protected snapshot is not JSON") from exc
-    if not isinstance(source, dict) or set(source) != {"availabilities", "searches"} \
-            or not isinstance(source["availabilities"], list) or not isinstance(source["searches"], list) \
-            or len(value["snapshot_digest"]) != 64 or any(c not in "0123456789abcdef" for c in value["snapshot_digest"]):
-        raise RuntimeError("availability matcher canary snapshot identity is invalid")
-    if not all(isinstance(row, dict) for row in source["availabilities"] + source["searches"]):
-        raise RuntimeError("availability matcher canary snapshot rows are invalid")
-    availability_keys = {"id", "status", "rate_norm", "owed", "available_on", "observed", "source",
-                         "area", "suite", "city", "state", "sub_type", "address", "bname"}
-    search_keys = {"id", "spec", "ref", "name"}
-    if not source["availabilities"] or not source["searches"] \
-            or any(set(row) != availability_keys for row in source["availabilities"]) \
-            or any(set(row) != search_keys or row["spec"] is not None and not isinstance(row["spec"], dict)
-                   for row in source["searches"]):
-        raise RuntimeError("availability matcher canary source is vacuous or has an unregistered row schema")
-    return {"source_snapshot_id": value["source_snapshot_id"], "snapshot_digest": value["snapshot_digest"], **source}
-
-
-def canary_report(snapshot):
-    """Pure, parent-repeatable canary output contract (no filesystem or DB)."""
-    avails, searches = snapshot["availabilities"], snapshot["searches"]
-    matches_count = 0
-    for search in searches:
-        spec = search.get("spec") or {}
-        if not isinstance(spec, dict):
-            raise RuntimeError("availability matcher canary search spec is invalid")
-        for availability in avails:
-            if matches(spec, availability)[0]:
-                matches_count += 1
-    report = {
-        "schema": "nightly-availability-matcher-canary-output-v1",
-        "source_snapshot_id": snapshot["source_snapshot_id"],
-        "availability_count": len(avails), "open_search_count": len(searches),
-        "match_count": matches_count,
-    }
-    report_text = json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n"
-    marker = {"source_snapshot_id": snapshot["source_snapshot_id"],
-              "snapshot_digest": snapshot["snapshot_digest"],
-              "availability_count": len(avails), "open_search_count": len(searches),
-              "match_count": matches_count,
-              "output_digest": hashlib.sha256(report_text.encode()).hexdigest()}
-    return report_text, marker
-
-
-def _run_canary():
-    # This branch deliberately opens neither a database nor a credential file.
-    # The parent provides only a DB-minted canonical snapshot on stdin.
-    if os.environ.get("CARR_CONTROL_PLANE_MODE") != "canary":
-        raise RuntimeError("availability matcher canary requires control-plane canary mode")
-    explicit_capabilities = {
-        "DATABASE_URL", "BACKUP_DATABASE_URL", "CARR_VAULT", "CARR_ONEDRIVE_DEALS",
-        "CARR_EXPORT_LIVE", "CARR_DRIVE_RECOVERY", "CARR_ROUTINE_DB_ENV_FILE",
-        "CARR_INGEST_URL", "CARR_AI_ROUTE_PRIMARY_URL", "CARR_AI_ROUTE_SECONDARY_URL",
-        "CARR_GMAIL_APP_PASSWORD", "CARR_AGE_IDENTITY",
-    }
-    prohibited = [key for key in os.environ
-                  if key.startswith("PG") or key.startswith("CARR_DB_")
-                  or key in explicit_capabilities
-                  or any(marker in key for marker in ("TOKEN", "SECRET", "PASSWORD", "API_KEY", "PROVIDER_URL", "EXPORTER_URL", "BACKUP_URL"))]
-    if prohibited:
-        raise RuntimeError("availability matcher canary refused ambient live capability")
-    snapshot = _read_canary_snapshot()
-    root = _safe_canary_root(os.environ.get("CARR_NIGHTLY_CANARY_ROOT"))
-    root.mkdir(mode=0o700, parents=True, exist_ok=False)
-    if any(part.is_symlink() for part in (REPO / "out", REPO / "out" / "canary", CANARY_BASE)) \
-            or root.is_symlink() or root.resolve().parent != CANARY_BASE.resolve():
-        raise RuntimeError("availability matcher canary root changed during setup")
-    report_text, marker = canary_report(snapshot)
-    path = root / "availability-matches.json"
-    # Write then atomically rename inside the one already-validated directory.
-    # A partial report is not valid canary evidence and is never published.
-    fd, temp_name = tempfile.mkstemp(prefix=".availability-matches-", dir=root, text=True)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(report_text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp_name, path)
-    finally:
-        if os.path.exists(temp_name):
-            os.unlink(temp_name)
-    print("availability-matcher: canary-result " + json.dumps(marker, sort_keys=True, separators=(",", ":")))
-    return 0
 
 
 def lower_set(v):
@@ -247,14 +116,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--all-statuses", action="store_true",
                     help="consider every availability row, not just the newest per space")
-    ap.add_argument("--canary", action="store_true",
-                    help="consume only the parent-minted protected snapshot on stdin")
     a = ap.parse_args()
-
-    if a.canary:
-        if a.all_statuses:
-            raise RuntimeError("availability matcher canary has no live-query modifiers")
-        return _run_canary()
 
     # [ORDER 19a] CARR_DB_JOBS_URL first: one nightly-jobs role for every
     # unattended pipeline. The exporter credential is kept as a fallback because
