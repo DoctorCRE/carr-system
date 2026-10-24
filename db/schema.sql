@@ -122195,7 +122195,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0944_retire_orphan_control_inventory.sql	ab7c35cfc581268b40bab5b29399e315286b24ba1c3c8c86bc0b9c49673def37	1970-01-01 00:00:00+00
 0947_allow_approved_control_evidence_refresh.sql	b051840f87086cdfcfbe21abae004df2f7023907f081851f95c22a7e017f8800	1970-01-01 00:00:00+00
 0950_remove_retired_workflow_manifest_binding.sql	87c2d7f9aba676b4b0e0d7262b024fe20f4ee1e7a7ced5ced4dcce19267d9a41	1970-01-01 00:00:00+00
-0956_doctrine_embeddings.sql	4a24b907ffc30ef47ae1779bd56992eb1a0155d1d7cdad049e1045c9381869b7	1970-01-01 00:00:00+00
+0956_doctrine_embeddings.sql	77e11df4125e8bde4cf0471ae13ba96fd390180a0fee70ec67551859b6423256	1970-01-01 00:00:00+00
 \.
 
 

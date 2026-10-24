@@ -1,3 +1,4 @@
+-- rollback: Drop public.search_doctrine_semantic and public.doctrine_embedding; retain the vector extension and hardened shared visibility function.
 create extension if not exists vector with schema public;
 
 create table public.doctrine_embedding (
