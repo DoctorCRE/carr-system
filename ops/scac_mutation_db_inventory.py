@@ -229,11 +229,11 @@ def summarize(projection: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
 def validate_registered_grants(projection, baseline, contract):
     remaining = {name: list(projection[name]) for name in
                  ("secdef_execute", "relation_dml", "column_dml")}
-    for name in ("secdef_execute", "relation_dml"):
-        for grant in contract.get(name, []):
-            if remaining[name].count(grant) != 1:
+    for category in remaining:
+        for grant in contract.get(category, []):
+            if remaining[category].count(grant) != 1:
                 raise RuntimeError(f"registered grant missing or altered: {grant['ingress_key']}")
-            remaining[name].remove(grant)
+            remaining[category].remove(grant)
     # A retired definition may share its ingress key with the registered grant
     # that replaces it (same function and grantee, new metadata); only an
     # unregistered installed row with that key means the old grant survived.

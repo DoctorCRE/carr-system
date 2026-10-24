@@ -39402,8 +39402,35 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
     LANGUAGE sql IMMUTABLE
     SET search_path TO 'pg_catalog'
     AS $_$ SELECT $current_grants${
-  "registry_version": "scac-mutation-registry.v118",
-  "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
+  "relation_dml": [
+    {
+      "grantee": "carr_writer",
+      "relation": "public.deal_vendor_assignment",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.deal_vendor_assignment",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.doctrine_embedding",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.doctrine_embedding:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    }
+  ],
   "secdef_execute": [
     {
       "config": [
@@ -39511,6 +39538,12 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
       "security_definer": true
     }
   ],
+  "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
+  "registry_version": "scac-mutation-registry.v118",
+  "runtime_dml_grants": {
+    "count": 339,
+    "digest": "sha256:a210dbda8843ef57aecf1985cb0b97f7ab6fac5e1e99df0926542eb2945254bc"
+  },
   "retired_secdef_execute": [
     {
       "config": [
@@ -39692,22 +39725,7 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
       "function_kind": "f",
       "security_definer": true
     }
-  ],
-  "relation_dml": [
-    {
-      "grantee": "carr_writer",
-      "relation": "public.doctrine_embedding",
-      "grantable": false,
-      "privilege": "insert",
-      "ingress_key": "db-relation-acl:public.doctrine_embedding:carr_writer:insert",
-      "ingress_kind": "db_relation_acl",
-      "relation_kind": "r"
-    }
-  ],
-  "runtime_dml_grants": {
-    "count": 337,
-    "digest": "sha256:2df8bdb030bdf0da8f13e135d4fd1ad310c928156fce245d1481ef60e71f2d7b"
-  }
+  ]
 }$current_grants$::jsonb $_$;
 
 
@@ -41204,8 +41222,15 @@ begin
   if registered_count<>jsonb_array_length(current_grants->'secdef_execute') then return false; end if;
   if observed_count<>1267 or observed_digest<>'sha256:587e762e80c6691d4a07c5b35e48a259c7b8bdf885d8595ffd0c14928c657efa' then return false; end if;
   with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper), runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper), capabilities as (select n.nspname,c.relname,c.relkind,c.relowner,acl.grantee,acl.privilege_type,acl.is_grantable from pg_class c join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) acl where n.nspname not in ('pg_catalog','information_schema') and c.relkind in ('r','p','v','m','f')), observed as (select 'db-relation-acl:'||nspname||'.'||relname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type) ingress_key,jsonb_build_object('ingress_key','db-relation-acl:'||nspname||'.'||relname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type),'ingress_kind','db_relation_acl','relation',nspname||'.'||relname,'relation_kind',relkind,'grantee',coalesce(r.rolname,'public'),'privilege',lower(privilege_type),'grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE') and grantee<>relowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
-  select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
-  if observed_count<>322 or observed_digest<>'sha256:e8f392451cfe7190d0cdd0ef44c86578cc675452137d8117b39c5ac0d89e51d8' then return false; end if;
+  select count(*) filter (where row not in (select value from jsonb_array_elements(current_grants->'relation_dml'))),
+    'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(
+      jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C")
+        filter (where row not in (select value from jsonb_array_elements(current_grants->'relation_dml'))),
+      '[]'::jsonb)),'UTF8'),'sha256'),'hex'),
+    count(*) filter (where row in (select value from jsonb_array_elements(current_grants->'relation_dml')))
+    into observed_count,observed_digest,registered_count from observed;
+  if registered_count<>jsonb_array_length(current_grants->'relation_dml') then return false; end if;
+  if observed_count<>321 or observed_digest<>'sha256:2ece3984f1389d78749dd3055ecf72516f02f97e33d260192e66daff062292e0' then return false; end if;
   with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper), runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper), capabilities as (select n.nspname,c.relname,c.relkind,c.relowner,a.attname,acl.grantee,acl.privilege_type,acl.is_grantable from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(a.attacl) acl where a.attnum>0 and not a.attisdropped and a.attacl is not null and cardinality(a.attacl)>0 and n.nspname not in ('pg_catalog','information_schema') and c.relkind in ('r','p','v','m','f')), observed as (select 'db-column-acl:'||nspname||'.'||relname||'.'||attname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type) ingress_key,jsonb_build_object('ingress_key','db-column-acl:'||nspname||'.'||relname||'.'||attname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type),'ingress_kind','db_column_acl','relation',nspname||'.'||relname,'relation_kind',relkind,'column',attname,'grantee',coalesce(r.rolname,'public'),'privilege',lower(privilege_type),'grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where privilege_type in ('INSERT','UPDATE') and grantee<>relowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
   select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
   if observed_count<>15 or observed_digest<>'sha256:f7a33d14ce431ba588cc07dff07fc9fd91a0dcdb41112de6fecd390fb42dc098' then return false; end if;
@@ -84029,6 +84054,24 @@ COMMENT ON TABLE public.deal_type_ref IS 'Deal transaction types (amendment 1). 
 
 
 --
+-- Name: deal_vendor_assignment; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.deal_vendor_assignment (
+    deal_id uuid NOT NULL,
+    party_id uuid NOT NULL,
+    role text NOT NULL,
+    company_party_id uuid NOT NULL,
+    contact_party_id uuid NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    note text,
+    updated_by uuid NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT deal_vendor_assignment_role_check CHECK ((role = ANY (ARRAY['lender'::text, 'contractor'::text, 'architect'::text, 'attorney'::text, 'title'::text, 'inspector'::text, 'landlord_rep'::text])))
+);
+
+
+--
 -- Name: defect; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -85447,6 +85490,7 @@ CREATE TABLE public.party (
     contact_state_set_by uuid,
     contact_state_set_at timestamp with time zone,
     cell text,
+    vendor_assignment_version integer DEFAULT 1 NOT NULL,
     CONSTRAINT party_kind_check CHECK ((kind = ANY (ARRAY['person'::text, 'org'::text])))
 );
 
@@ -89003,6 +89047,27 @@ SELECT
 
 
 --
+-- Name: v_deal_room_vendor; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_deal_room_vendor AS
+ SELECT a.deal_id,
+    a.party_id,
+    a.role,
+    jsonb_build_object('id', company.id, 'name', company.name) AS company,
+    jsonb_build_object('id', contact.id, 'name', contact.name, 'email', contact.email, 'phone', contact.phone) AS contact,
+    a.note,
+    (to_jsonb(a.updated_at) #>> '{}'::text[]) AS updated_at
+   FROM (((public.deal_vendor_assignment a
+     JOIN public.party p ON (((p.id = a.party_id) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL))))
+     JOIN public.party company ON (((company.id = a.company_party_id) AND (company.merged_into IS NULL) AND (company.deleted_at IS NULL))))
+     JOIN public.party contact ON (((contact.id = a.contact_party_id) AND (contact.merged_into IS NULL) AND (contact.deleted_at IS NULL))))
+  WHERE (a.active AND (EXISTS ( SELECT 1
+           FROM public.vendor v
+          WHERE ((v.party_id = a.party_id) AND (v.merged_into IS NULL)))));
+
+
+--
 -- Name: v_defect; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -91204,6 +91269,78 @@ UNION ALL
     e.subject_type
    FROM (public.event e
      JOIN public.actor act ON ((act.id = e.actor_id)));
+
+
+--
+-- Name: v_vendor_assignment_context; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_vendor_assignment_context AS
+ SELECT v.id,
+    v.vendor_ref AS ref,
+    v.version AS base_version,
+    p.vendor_assignment_version AS assignment_version,
+    v.party_id,
+        CASE
+            WHEN (company.id IS NOT NULL) THEN jsonb_build_object('id', company.id, 'name', company.name)
+            ELSE NULL::jsonb
+        END AS company,
+    COALESCE(( SELECT jsonb_agg(jsonb_build_object('id', contact.id, 'name', contact.name) ORDER BY contact.name, contact.id) AS jsonb_agg
+           FROM public.party contact
+          WHERE ((contact.kind = 'person'::text) AND (contact.merged_into IS NULL) AND (contact.deleted_at IS NULL) AND (((p.kind = 'person'::text) AND (contact.id = p.id)) OR ((p.kind = 'org'::text) AND (contact.org_id = p.id))))), '[]'::jsonb) AS contacts
+   FROM ((public.vendor v
+     JOIN public.party p ON ((p.id = v.party_id)))
+     LEFT JOIN public.party company ON (((company.id =
+        CASE
+            WHEN (p.kind = 'org'::text) THEN p.id
+            ELSE p.org_id
+        END) AND (company.kind = 'org'::text) AND (company.merged_into IS NULL) AND (company.deleted_at IS NULL))))
+  WHERE ((v.merged_into IS NULL) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL));
+
+
+--
+-- Name: v_vendor_duplicate_report; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_vendor_duplicate_report AS
+ WITH live AS (
+         SELECT v.id,
+            v.party_id,
+            p.org_id,
+            NULLIF(lower(btrim(p.email)), ''::text) AS email,
+            NULLIF(lower(regexp_replace(btrim(p.name), '\s+'::text, ' '::text, 'g'::text)), ''::text) AS name
+           FROM (public.vendor v
+             JOIN public.party p ON ((p.id = v.party_id)))
+          WHERE ((v.merged_into IS NULL) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL))
+        ), same_party AS (
+         SELECT count(*) AS n
+           FROM live
+          GROUP BY live.party_id
+         HAVING (count(*) > 1)
+        ), email_match AS (
+         SELECT live.email
+           FROM live
+          WHERE (live.email IS NOT NULL)
+          GROUP BY live.email
+         HAVING (count(DISTINCT live.party_id) > 1)
+        ), name_company_match AS (
+         SELECT live.name,
+            live.org_id
+           FROM live
+          WHERE ((live.name IS NOT NULL) AND (live.org_id IS NOT NULL))
+          GROUP BY live.name, live.org_id
+         HAVING (count(DISTINCT live.party_id) > 1)
+        )
+ SELECT ( SELECT (count(*))::integer AS count
+           FROM live) AS live_vendor_rows,
+    ( SELECT (count(*))::integer AS count
+           FROM same_party) AS same_party_groups,
+    ( SELECT (COALESCE(sum((same_party.n - 1)), (0)::numeric))::integer AS "coalesce"
+           FROM same_party) AS extra_vendor_rows,
+    ( SELECT (count(*))::integer AS count
+           FROM email_match) AS email_match_groups,
+    ( SELECT (count(*))::integer AS count
+           FROM name_company_match) AS name_company_match_groups;
 
 
 --
@@ -99097,6 +99234,14 @@ ALTER TABLE ONLY public.deal_type_ref
 
 
 --
+-- Name: deal_vendor_assignment deal_vendor_assignment_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_pkey PRIMARY KEY (deal_id, party_id, role);
+
+
+--
 -- Name: defect defect_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -101426,6 +101571,13 @@ CREATE INDEX deal_review_item_deal_idx ON public.deal_review_item USING btree (d
 --
 
 CREATE UNIQUE INDEX deal_review_one_open_per_actor_workspace ON public.deal_review_session USING btree (started_by, workspace_kind, COALESCE(account_client_id, '00000000-0000-0000-0000-000000000000'::uuid)) WHERE (status = 'open'::text);
+
+
+--
+-- Name: deal_vendor_assignment_active_contact; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX deal_vendor_assignment_active_contact ON public.deal_vendor_assignment USING btree (deal_id, role, contact_party_id) WHERE active;
 
 
 --
@@ -107549,6 +107701,13 @@ CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDAT
 
 
 --
+-- Name: deal_vendor_assignment scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDATE ON public.deal_vendor_assignment FOR EACH ROW EXECUTE FUNCTION ops.scac_reference_monitor_guard();
+
+
+--
 -- Name: defect scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -108463,6 +108622,13 @@ CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.d
 --
 
 CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.deal_review_session FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
+
+
+--
+-- Name: deal_vendor_assignment scac_reference_monitor_guard_truncate; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.deal_vendor_assignment FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
 
 
 --
@@ -114939,6 +115105,46 @@ ALTER TABLE ONLY public.deal
 
 
 --
+-- Name: deal_vendor_assignment deal_vendor_assignment_company_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_company_party_id_fkey FOREIGN KEY (company_party_id) REFERENCES public.party(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_contact_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_contact_party_id_fkey FOREIGN KEY (contact_party_id) REFERENCES public.party(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_deal_id_fkey FOREIGN KEY (deal_id) REFERENCES public.deal(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_party_id_fkey FOREIGN KEY (party_id) REFERENCES public.party(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.actor(id);
+
+
+--
 -- Name: defect defect_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -119359,6 +119565,8 @@ grant select on table public.deal_review_item to dot_reader;
 grant insert, select, update on table public.deal_review_session to carr_writer;
 grant select on table public.deal_review_session to dot_reader;
 grant select on table public.deal_type_ref to dot_reader;
+grant insert, select, update on table public.deal_vendor_assignment to carr_writer;
+grant select on table public.deal_vendor_assignment to dot_reader;
 grant select on table public.defect to carr_exporter;
 grant select on table public.defect to carr_reader;
 grant insert, select on table public.defect to carr_writer;
@@ -119755,6 +119963,9 @@ grant select on table public.v_deal_room_presence to dot_reader;
 grant select on table public.v_deal_room_session to carr_reader;
 grant select on table public.v_deal_room_session to carr_writer;
 grant select on table public.v_deal_room_session to dot_reader;
+grant select on table public.v_deal_room_vendor to carr_reader;
+grant select on table public.v_deal_room_vendor to carr_writer;
+grant select on table public.v_deal_room_vendor to dot_reader;
 grant select on table public.v_decision_entry to carr_exporter;
 grant select on table public.v_decision_entry to carr_reader;
 grant select on table public.v_decision_entry to carr_writer;
@@ -119951,6 +120162,12 @@ grant select on table public.v_subject_timeline to carr_writer;
 grant select on table public.v_subject_timeline to dot_reader;
 grant select on table public.v_today_triage to carr_reader;
 grant select on table public.v_today_triage to dot_reader;
+grant select on table public.v_vendor_assignment_context to carr_reader;
+grant select on table public.v_vendor_assignment_context to carr_writer;
+grant select on table public.v_vendor_assignment_context to dot_reader;
+grant select on table public.v_vendor_duplicate_report to carr_reader;
+grant select on table public.v_vendor_duplicate_report to carr_writer;
+grant select on table public.v_vendor_duplicate_report to dot_reader;
 grant select on table public.v_vendor_level_suggestion to carr_reader;
 grant select on table public.v_vendor_level_suggestion to dot_reader;
 grant select on table public.v_vendor_needs_type to carr_reader;
@@ -122265,7 +122482,9 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0944_retire_orphan_control_inventory.sql	ab7c35cfc581268b40bab5b29399e315286b24ba1c3c8c86bc0b9c49673def37	1970-01-01 00:00:00+00
 0947_allow_approved_control_evidence_refresh.sql	b051840f87086cdfcfbe21abae004df2f7023907f081851f95c22a7e017f8800	1970-01-01 00:00:00+00
 0950_remove_retired_workflow_manifest_binding.sql	87c2d7f9aba676b4b0e0d7262b024fe20f4ee1e7a7ced5ced4dcce19267d9a41	1970-01-01 00:00:00+00
-0956_doctrine_embeddings.sql	cb59223276cbf3accfb6f009a9ede303a3c3cdcac713f44e9ef7c60f242ed352	1970-01-01 00:00:00+00
+0951_deal_vendor_assignments.sql	f9053aa57b13351da64416e35e49dc38d8d8da0fb118122b2652778bf9eda7eb	1970-01-01 00:00:00+00
+0952_deal_vendor_grant_retirements.sql	6ab6b3dbe76dbb395a8b739eea002aeb2ac4661f2efeefbf53c52b2fd69fd902	1970-01-01 00:00:00+00
+0956_doctrine_embeddings.sql	46c23b9e4f9888bdf0f817c06e06d74440b89a5cb5dd1923310a7aa05268ac45	1970-01-01 00:00:00+00
 \.
 
 

@@ -14,6 +14,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import statistics
 import uuid
 
@@ -34,7 +35,7 @@ SEALED_PREDECESSOR_ORDINAL = 117
 SEALED_PREDECESSOR_DIGEST = 'sha256:bba3689ccfaad427b77c3d8295406d5e56c2ac506c5d5ddb1232fa0461315838'
 SEALED_PREDECESSOR_ENTRY_COUNTS = (2801, 1207)
 SEALED_PREDECESSOR_MIGRATION = 'migrations/0869_loop_residue_scac_successor.sql'
-LIVE_REGISTRY_MIGRATION = 'migrations/0956_doctrine_embeddings.sql'
+LIVE_REGISTRY_MIGRATION = 'migrations/0951_deal_vendor_assignments.sql'
 
 LIVE_CATALOG_CURRENT_FN = f"ops.scac_mutation_catalog_v{LIVE_REGISTRY_ORDINAL}_current()"
 LIVE_REGISTRATION_FN = f"ops.scac_mutation_registration_v{LIVE_REGISTRY_ORDINAL}"
@@ -65,8 +66,8 @@ PREDECESSOR_LIVE_AT_SEAL_NAME = (
 # A grant projection that did NOT move here would mean it had stopped seeing
 # relation grants at all.
 # Measured on a disposable loopback PostgreSQL 17, never predicted.
-# The current grant contract records later DML additions; historical registry
-# rows below remain pinned separately.
+# v37 owns the post-0539 grant projection. Read its measured value from the
+# sealed catalog row below; the v36 predecessor remains pinned separately.
 
 # WR-000048 mutation test fixtures. NARROWED_ROLE_AUTHORITY_SCOPE is the
 # portable census scope this repair cascade installs (verbatim from the
@@ -98,21 +99,24 @@ UNNARROWED_ROLE_AUTHORITY_SCOPE = (
 
 
 def current_function_sql(source: str, version: int) -> str:
-    """Extract the exact, currently-installed SCAC catalog current function
-    definition from a migration file's text, start marker through its closing $fn$;."""
+    """Extract the exact SCAC current definition through its dollar terminator."""
     start_marker = f"create or replace function ops.scac_mutation_catalog_v{version}_current()"
-    end_marker = "end $fn$;"
-    start = source.index(start_marker)
-    end = source.index(end_marker, start) + len(end_marker)
+    start = source.lower().index(start_marker)
+    quoted = re.search(r"\bas\s+(\$(?:[a-z_][a-z_0-9]*)?\$)", source[start:], re.I)
+    if quoted is None:
+        raise ValueError("catalog function has no dollar-quoted body")
+    end_marker = quoted[1] + ";"
+    end = source.index(end_marker, start + quoted.end()) + len(end_marker)
     return source[start:end]
 
 
 def function_body(source: str) -> str:
-    """Return the body stored by PostgreSQL for a generated $fn$ function."""
-    start_marker = "as $fn$"
-    end_marker = "$fn$;"
-    start = source.index(start_marker) + len(start_marker)
-    end = source.rindex(end_marker)
+    """Return the body stored by PostgreSQL for a dollar-quoted function."""
+    quoted = re.search(r"\bas\s+(\$(?:[a-z_][a-z_0-9]*)?\$)", source, re.I)
+    if quoted is None:
+        raise ValueError("function has no dollar-quoted body")
+    start = quoted.end()
+    end = source.index(quoted[1], start)
     return source[start:end].strip()
 
 
@@ -919,14 +923,14 @@ def main() -> int:
                     f"{LIVE_REGISTRY_VERSION} registry is absent or authority-expanding: {registry!r}"
                 )
             validate_current_catalog(cur)
-            current_grants = cur.execute("select ops.scac_current_grant_contract()").fetchone()[0]
-            expected_grant_snapshot = current_grants["runtime_dml_grants"]
+            expected_grant_snapshot = cur.execute("select ops.scac_current_grant_contract()").fetchone()[0].get(
+                "runtime_dml_grants", registry[3].get("runtime_dml_grants"))
             if not isinstance(expected_grant_snapshot, dict) or \
                set(expected_grant_snapshot) != {"count", "digest"} or \
                not isinstance(expected_grant_snapshot.get("count"), int) or \
                not isinstance(expected_grant_snapshot.get("digest"), str):
                 raise RuntimeError(
-                    f"current grant projection is not exact: {current_grants!r}"
+                    f"{LIVE_REGISTRY_VERSION} grant projection is not exact: {registry[3]!r}"
                 )
             # The successor is registry-only, so it must ADD the v21 seal and leave
             # v20 exactly as 0494 sealed it. Pin the historical row by digest and

@@ -1319,7 +1319,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "log-activity": {
     "ingress_key": "mcp-tool:log-activity",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "34415ad0fe56336ee6fde5d9f274e13e6817e654d8d52b6f7f64e058ed097e33",
+    "schema_digest": "f4631b7df0c325de5d0fd0f2f75f2e21265dcedf91c718a789363e38ff920e33",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -3161,8 +3161,26 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "update-vendor": {
     "ingress_key": "mcp-tool:update-vendor",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "b6aba695eb20b17064ab1c841efb03028ef59deb9801f936251d6499e0bb64fc",
+    "schema_digest": "a46d9164f4f25becd07e3db36d52617a35ada87d78338b7ffd1eab2ce674f0e5",
     "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "vendor-assignment-context": {
+    "ingress_key": "mcp-tool:vendor-assignment-context",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "3afd0eb0414c00a12f982d740b8dc0f1ff5ce42bd9d86ff69820b994da93136f",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "vendor-duplicate-report": {
+    "ingress_key": "mcp-tool:vendor-duplicate-report",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
     "human_only": false,
     "authority_only": false,
     "delegates_to": []
@@ -3223,8 +3241,35 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   }
 });
 export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
-  "registry_version": "scac-mutation-registry.v118",
-  "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
+  "relation_dml": [
+    {
+      "grantee": "carr_writer",
+      "relation": "public.deal_vendor_assignment",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.deal_vendor_assignment",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.doctrine_embedding",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.doctrine_embedding:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    }
+  ],
   "secdef_execute": [
     {
       "config": [
@@ -3332,6 +3377,12 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "security_definer": true
     }
   ],
+  "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
+  "registry_version": "scac-mutation-registry.v118",
+  "runtime_dml_grants": {
+    "count": 339,
+    "digest": "sha256:a210dbda8843ef57aecf1985cb0b97f7ab6fac5e1e99df0926542eb2945254bc"
+  },
   "retired_secdef_execute": [
     {
       "config": [
@@ -3513,20 +3564,5 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "function_kind": "f",
       "security_definer": true
     }
-  ],
-  "relation_dml": [
-    {
-      "grantee": "carr_writer",
-      "relation": "public.doctrine_embedding",
-      "grantable": false,
-      "privilege": "insert",
-      "ingress_key": "db-relation-acl:public.doctrine_embedding:carr_writer:insert",
-      "ingress_kind": "db_relation_acl",
-      "relation_kind": "r"
-    }
-  ],
-  "runtime_dml_grants": {
-    "count": 337,
-    "digest": "sha256:2df8bdb030bdf0da8f13e135d4fd1ad310c928156fce245d1481ef60e71f2d7b"
-  }
+  ]
 });
