@@ -77,6 +77,8 @@ import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
 import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.js";
 import { partyIdentityTools } from "./party-identity.js";
+import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.js";
+import { readBriefAssurance } from "./brief-assurance.js";
 import { readNeedsJoe } from "./needs-joe.js";
 import { scheduleBoardTools } from "./schedule-board.js";
 export { canExercisePartnerAuthority, partnerAuthoritySlugForActor };
@@ -3386,6 +3388,65 @@ export const TOOLS = {
     },
   },
 
+  "morning-brief-queue": {
+    write: false,
+    description: "Continue a full morning queue. Today uses the partner triage cursor; loops sort due date first, caller first only on tied dates, then kind/number; Needs Joe sorts blocking tier, oldest timestamp to millisecond precision, source/identity fingerprint after exclusions and duplicate collapse. Defaults to 50 rows. Returns total, returned, remaining (loops/Needs Joe), has_more, next_cursor. Pass the cursor and same queue. Cursors bind tenant, sponsor and queue. Live keysets are not snapshots; restart to include rows whose sort keys change before the cursor. Needs Joe totals cover available sources only when partial. No audience argument.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["queue"], properties: {
+      queue: { type: "string", enum: ["today", "loops", "needs_joe"] },
+      limit: { type: "integer", minimum: 1, maximum: 50 },
+      cursor: { type: "string", minLength: 1, maxLength: 8000 },
+    } },
+    handler: async (c, actor, args) => {
+      const scope = personalScopeForActor(actor);
+      if (scope.status !== "personal") throw new ToolError({ error: "morning_brief_requires_partner_scope" });
+      if (args.queue === "today") {
+        const value = await executeRegisteredTool(c, actor, "today-triage", {
+          owners: "partners", ...(args.limit === undefined ? {} : { limit: args.limit }),
+          ...(args.cursor === undefined ? {} : { cursor: args.cursor }),
+        });
+        return { ...value, sponsor: scope.sponsor, returned: value.items.length, items: value.items.map(row => ({ ...row,
+          owner_partner: row.owner ? TODO_OWNER_PARTNER.get(String(row.owner).toLowerCase()) : null })) };
+      }
+      let value, key;
+      if (args.queue === "needs_joe") {
+        if (scope.sponsor !== "joe") throw new ToolError({ error: "needs_joe_not_applicable" });
+        value = (await executeRegisteredTool(c, actor, "governance-queue", {})).needs_joe;
+        key = briefNeedsJoeKey;
+      } else {
+        value = { items: await readBriefLoops(c) };
+        key = briefLoopKey(scope.sponsor);
+      }
+      const page = await briefQueuePage(value.items, { ...args, key, ToolError,
+        scope: JSON.stringify([organizationTenantForActor(actor), scope.sponsor, args.queue]) });
+      return { ...value, ...page, sponsor: scope.sponsor, state: value.state ?? (page.total ? "ready" : "empty"),
+        full_list: { tool: "morning-brief-queue", args: { queue: args.queue } },
+        continuation: page.next_cursor ? { tool: "morning-brief-queue", args: { queue: args.queue, cursor: page.next_cursor } } : null,
+        total_scope: value.state === "partial" ? "available_sources" : "eligible_queue" };
+    },
+  },
+
+  "morning-assurance-queue": {
+    write: false,
+    writerConnection: true,
+    description: "Full assurance cadence queue for the authenticated partner. Read-only writer transaction uses existing notification grants. Includes unread delivery cadence alerts only; active morning holds stay hidden. Failure leads action-required then completion; each severity sorts oldest timestamp then notification UUID. Returns total, returned, remaining, has_more, next_cursor; pass cursor to continue. Live keyset, not a snapshot. No recipient argument.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      limit: { type: "integer", minimum: 1, maximum: 50 },
+      cursor: { type: "string", minLength: 1, maxLength: 8000 },
+    } },
+    handler: async (c, actor, args) => {
+      const scope = personalScopeForActor(actor);
+      if (scope.status !== "personal") throw new ToolError({ error: "morning_brief_requires_partner_scope" });
+      try {
+        return { sponsor: scope.sponsor, ...await briefQueuePage(await readBriefAssurance(c, scope.sponsor), { ...args,
+          key: briefAssuranceKey, ToolError,
+          scope: JSON.stringify([organizationTenantForActor(actor), scope.sponsor, "assurance_cadence"]) }) };
+      } catch (error) {
+        if (error instanceof ToolError) throw error;
+        throw new ToolError({ error: "source_unavailable" });
+      }
+    },
+  },
+
   "morning-brief": {
     write: false,
     description: "The record-native morning brief for the authenticated Joe or Dell context. It composes Needs Joe when applicable, live triage, claim-card, deal-room, loop-board, the redacted renewal decision queue, assurance cadence, and published system costs. Sections preserve ready, empty, partial, or unavailable. Coverage names every required section, points to its response content, and counts returned rows only, never queue totals. Unavailable is never rewritten as empty. Takes no audience, sponsor, or partner argument.",
@@ -3424,7 +3485,9 @@ export const TOOLS = {
           if (owner_partner === undefined) continue;
           items.push({ ...row, owner_partner });
         }
-        return { ...value, items, item_kinds: Object.entries({
+        return { ...value, returned: items.length, full_list: { tool: "morning-brief-queue", args: { queue: "today" } },
+          continuation: value.next_cursor ? { tool: "morning-brief-queue", args: { queue: "today", cursor: value.next_cursor } } : null,
+          items, item_kinds: Object.entries({
           next_action: "Next actions",
           post_call_action: "Post-call actions",
           critical_date: "Critical dates including upcoming deadlines",
@@ -3445,18 +3508,7 @@ export const TOOLS = {
         const accounts = value.accounts.filter((row) => String(row?.account_owner || "").toLowerCase() === scope.sponsor);
         return { state: items.length || accounts.length ? "ready" : "empty", items, accounts };
       });
-      const loops = await section(async () => {
-        // loop-board is a shared read that already accepts owner 'joe' or
-        // 'dell' from any caller, so showing both partners' loops adds no
-        // authority. The caller's own loops lead.
-        const items = [];
-        for (const owner_partner of [scope.sponsor, scope.sponsor === "joe" ? "dell" : "joe"]) {
-          const value = await executeRegisteredTool(c, actor, "loop-board",
-            { kind: "open_loop", status: "open", owner: owner_partner, limit: 60 });
-          items.push(...value.loops.map((row) => ({ ...row, owner_partner })));
-        }
-        return { items };
-      });
+      const loops = await section(async () => executeRegisteredTool(c, actor, "morning-brief-queue", { queue: "loops" }));
       const renewals = await section(async () => {
         const status = await c.query(
           "select t1_candidate_count, source_observed_at, freshness_state from v_renewal_decision_queue_status where owner_slug=$1",
@@ -3506,13 +3558,19 @@ export const TOOLS = {
         const result = await c.query(
           "select ops.v5_a05_assurance_cadence_batch($1) as batch", [scope.sponsor]);
         const batch = result.rows[0]?.batch;
-        return { items: Array.isArray(batch) ? batch : [] };
+        if (!Array.isArray(batch)) throw new Error("invalid assurance batch");
+        const bounded = batch.length >= 50;
+        return { items: batch, returned: batch.length, total: bounded ? null : batch.length,
+          remaining: bounded ? null : 0, has_more: bounded ? null : false, next_cursor: null,
+          ...(bounded ? { state: "partial", reason: "legacy_reader_limit", total_lower_bound: batch.length } : {}),
+          ordered_by: "legacy newest-first summary; full queue has stable severity/oldest/id order",
+          full_list: { tool: "morning-assurance-queue", args: {} } };
       });
       // Joe's brief leads with the one list of what waits on him. A partial list
       // with nothing in it is unavailable, never empty: a failed source could be
       // hiding the item he needs to see.
       const needsJoe = scope.sponsor === "joe" ? await section(async () => {
-        const list = (await executeRegisteredTool(c, actor, "governance-queue", {})).needs_joe;
+        const list = await executeRegisteredTool(c, actor, "morning-brief-queue", { queue: "needs_joe" });
         if (list.state === "partial" && !list.items.length)
           return { ...list, state: "unavailable", reason: "source_unavailable" };
         return list;

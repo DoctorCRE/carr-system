@@ -1415,6 +1415,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "morning-assurance-queue": {
+    "ingress_key": "mcp-tool:morning-assurance-queue",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "f9bc31ea4b7272fe136ea9b4b50b9cefe1c1b8cd70def5e256205d197b500798",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "morning-brief": {
     "ingress_key": "mcp-tool:morning-brief",
     "source_locator": "mcp-server/src/tools.js",
@@ -1425,7 +1434,19 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "delegates_to": [
       "claim-card",
       "deal-room-board",
-      "loop-board",
+      "morning-brief-queue",
+      "today-triage"
+    ]
+  },
+  "morning-brief-queue": {
+    "ingress_key": "mcp-tool:morning-brief-queue",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "311e730892d29b318e416f279a7996e0cb8cda88235581c412e27490dcd8738a",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": [
+      "governance-queue",
       "today-triage"
     ]
   },

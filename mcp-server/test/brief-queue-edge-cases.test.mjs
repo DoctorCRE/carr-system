@@ -31,3 +31,13 @@ test('duplicate decisions retain their oldest record at millisecond precision', 
   assert.equal(list.items[0].key, 'loop:9');
   assert.deepEqual(list.items[0].records, ['loop:9', 'loop:1']);
 });
+
+test('different loop kinds sharing a number remain reachable on tied Needs Joe pages', async () => {
+  const c = client(['open_loop', 'team_loop'].map((kind, i) => ({ number: '7', kind,
+    created_at: new Date('2026-01-01'), owner: 'joe', marker: 'decision', label: `Synthetic decision ${i}` })));
+  const first = await executeRegisteredTool(c, joe, 'morning-brief-queue', { queue: 'needs_joe', limit: 1 });
+  const last = await executeRegisteredTool(c, joe, 'morning-brief-queue',
+    { queue: 'needs_joe', limit: 1, cursor: first.next_cursor });
+  assert.equal(last.items.length, 1);
+  assert.notEqual(first.items[0].title, last.items[0].title);
+});

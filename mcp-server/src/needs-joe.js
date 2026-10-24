@@ -195,7 +195,7 @@ export async function readNeedsJoe(c, actor, governance, { now = Date.now() } = 
            from loop_item
           where status = 'open' and kind in ('action_required', 'open_loop', 'team_loop')
             and (lower(owner) in ('joe', 'joint') or (owner is null and kind = 'action_required'))
-          order by created_at limit 500 /* needs-joe */`)).rows;
+          order by created_at, kind, number /* needs-joe */`)).rows;
       return { items: loopItems(rows, now, exclude) };
     }),
     ...await source(sources, "work_requests", async () => {
@@ -262,8 +262,10 @@ export async function readNeedsJoe(c, actor, governance, { now = Date.now() } = 
     }),
   ];
 
+  const sinceTime = value => value != null && Number.isFinite(new Date(value).getTime())
+    ? new Date(value).getTime() : Infinity;
   const order = (a, b) => TIER_RANK[a.blocks.tier] - TIER_RANK[b.blocks.tier]
-    || (b.age_days ?? -1) - (a.age_days ?? -1) || a.key.localeCompare(b.key);
+    || sinceTime(a.since) - sinceTime(b.since) || a.key.localeCompare(b.key);
   const items = collapseDuplicates(found.sort(order));
   const states = Object.values(sources).map(value => value.state);
   return {
