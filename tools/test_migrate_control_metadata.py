@@ -12,7 +12,7 @@ import migrate
 ROOT = Path(__file__).resolve().parents[1]
 BLOCKED = '0940_codex_job_delegation_control_refs.sql'
 REPAIR = '0947_allow_approved_control_evidence_refresh.sql'
-BINDING_REPAIR = '0948_remove_retired_workflow_manifest_binding.sql'
+BINDING_REPAIR = '0950_remove_retired_workflow_manifest_binding.sql'
 RETIRE = '0944_retire_orphan_control_inventory.sql'
 CONTROL = 'delegation_names_model_and_effort'
 ORPHAN_CONTROL = 'control-plane-workflow-manifest'

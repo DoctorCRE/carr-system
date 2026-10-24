@@ -122,7 +122,7 @@ APPROVED_CONTROL_RECOVERY_GROUP = (
     '0940_codex_job_delegation_control_refs.sql',
     '0944_retire_orphan_control_inventory.sql',
     '0947_allow_approved_control_evidence_refresh.sql',
-    '0948_remove_retired_workflow_manifest_binding.sql',
+    '0950_remove_retired_workflow_manifest_binding.sql',
 )
 ATOMIC_MIGRATION_GROUPS = (('0480_codex_continuity.sql', '0481_codex_continuity_registry_activation.sql'),
  ('0485_claude_continuity.sql', '0486_claude_continuity_registry_activation.sql'),
