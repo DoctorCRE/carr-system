@@ -12,7 +12,11 @@ import migrate
 ROOT = Path(__file__).resolve().parents[1]
 BLOCKED = '0940_codex_job_delegation_control_refs.sql'
 REPAIR = '0947_allow_approved_control_evidence_refresh.sql'
+BINDING_REPAIR = '0948_remove_retired_workflow_manifest_binding.sql'
+RETIRE = '0944_retire_orphan_control_inventory.sql'
 CONTROL = 'delegation_names_model_and_effort'
+ORPHAN_CONTROL = 'control-plane-workflow-manifest'
+ORPHAN_RULE = '5e89c211-996a-4681-b93d-d0226dbf21fa'
 
 spec = importlib.util.spec_from_file_location('control_metadata_shadow', ROOT / 'ops/migration-shadow.py')
 assert spec is not None and spec.loader is not None
@@ -23,18 +27,19 @@ spec.loader.exec_module(shadow)
 
 class ControlRepairOrderingTests(unittest.TestCase):
     def setUp(self):
-        self.names = [BLOCKED, '0944_retire_orphan_control_inventory.sql', REPAIR]
+        self.names = [BLOCKED, RETIRE, REPAIR, BINDING_REPAIR]
         self.files = [(name, 'select 1;', 'synthetic') for name in self.names]
 
     def test_repair_precedes_each_pending_recovery_suffix_in_one_transaction(self):
-        for offset in range(3):
+        for offset in range(len(self.names)):
             with self.subTest(applied=self.names[:offset]):
                 batches = migrate.migration_batches(self.files[offset:])
                 self.assertEqual([[item[0] for item in batch] for batch in batches],
-                                 [[REPAIR, *self.names[offset:-1]]])
+                                 [[name for name in (REPAIR, BINDING_REPAIR, BLOCKED, RETIRE)
+                                   if name in self.names[offset:]]])
 
     def test_through_cannot_commit_a_recovery_prefix_without_the_repair(self):
-        for offset in (0, 1):
+        for offset in range(len(self.names) - 1):
             with self.subTest(through=self.names[offset]):
                 with self.assertRaisesRegex(ValueError, 'atomic migration group'):
                     migrate.migrations_through(self.files, self.files, self.names[offset])
@@ -45,7 +50,7 @@ class ControlRepairOrderingTests(unittest.TestCase):
             migrate.validate_ledger_identities(current, {BLOCKED: 'changed'})
         with self.assertRaisesRegex(migrate.AppliedMigrationLedgerError, 'reordered'):
             migrate.validate_ledger_identities(current, {REPAIR: 'synthetic'})
-        for count in range(4):
+        for count in range(len(self.names) + 1):
             migrate.validate_ledger_identities(current, dict(list(current.items())[:count]))
 
 
@@ -83,7 +88,14 @@ class ApprovedControlMigrationTests(unittest.TestCase):
         with psycopg.connect(cls.dsn) as conn, conn.cursor() as cur:
             seed_reviewed_rule_projection(cur, slug='control-metadata-fixture',
                 title='Control metadata regression', rule_label='Control metadata fixture',
-                uuid_tail='000000009445')
+                uuid_tail='000000009445', rule_ids={'5e89c211': ORPHAN_RULE})
+            cur.execute("""insert into ops.enforcement_control_catalog
+                (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at)
+                values (%s,'deleted-workflow-manifest','deleted-workflow-test','deny_gate',false,null)
+                on conflict (control_key) do nothing""", (ORPHAN_CONTROL,))
+            cur.execute("""insert into ops.rule_control_binding(rule_id,control_key,statement_hash,binding_contract)
+                select id,%s,encode(digest(statement,'sha256'),'hex'),'{"fixture":"retired control"}'
+                from rule where id=%s""", (ORPHAN_CONTROL, ORPHAN_RULE))
 
     def runner(self, *args):
         return subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'), '--apply', '--yes', *args],
@@ -132,6 +144,13 @@ class ApprovedControlMigrationTests(unittest.TestCase):
                 self.assertEqual(approved['policy_status'], 'active')
             receipt = conn.execute('select to_jsonb(ar) from ops.rule_approval_receipt ar where rule_id=%s',
                                    (rule,)).fetchone()
+            orphan_rule = conn.execute('select to_jsonb(r) from rule r where id=%s', (ORPHAN_RULE,)).fetchone()
+            self.assertEqual(orphan_rule[0]['status'], 'active')
+            self.assertEqual(conn.execute('select count(*) from ops.rule_approval_receipt where rule_id=%s',
+                                         (ORPHAN_RULE,)).fetchone()[0], 0)
+            orphan_binding = conn.execute('select to_jsonb(b) from ops.rule_control_binding b where rule_id=%s and control_key=%s',
+                                          (ORPHAN_RULE, ORPHAN_CONTROL)).fetchone()
+            self.assertIsNotNone(orphan_binding)
             before = conn.execute('select * from ops.v_rule_enforcement_status where rule_id=%s', (rule,)).fetchone()
             self.assertEqual(conn.execute('select count(*) from ops.applicable_rules() where rule_id=%s', (rule,)).fetchone()[0], 1)
             guard = conn.execute("select pg_get_functiondef('ops.refuse_live_approved_control_rewrite()'::regprocedure)").fetchone()[0]
@@ -143,9 +162,16 @@ class ApprovedControlMigrationTests(unittest.TestCase):
             self.assertEqual(conn.execute('select count(*) from schema_migrations where filename >= %s', (BLOCKED,)).fetchone()[0], 0)
             self.assertEqual(conn.execute('select implementation_ref from ops.enforcement_control_catalog where control_key=%s', (CONTROL,)).fetchone()[0], 'old-launcher')
             self.assertEqual(conn.execute("select pg_get_functiondef('ops.refuse_live_approved_control_rewrite()'::regprocedure)").fetchone()[0], guard)
+            self.assertEqual(conn.execute('select to_jsonb(b) from ops.rule_control_binding b where rule_id=%s and control_key=%s',
+                                          (ORPHAN_RULE, ORPHAN_CONTROL)).fetchone(), orphan_binding)
             conn.execute('alter table schema_migrations drop constraint control_metadata_failure_fixture')
             result = self.runner()
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(conn.execute('select to_jsonb(r) from rule r where id=%s', (ORPHAN_RULE,)).fetchone(), orphan_rule)
+            self.assertEqual(conn.execute('select count(*) from ops.rule_control_binding where rule_id=%s and control_key=%s',
+                                         (ORPHAN_RULE, ORPHAN_CONTROL)).fetchone()[0], 0)
+            self.assertEqual(conn.execute('select count(*) from ops.enforcement_control_catalog where control_key=%s',
+                                         (ORPHAN_CONTROL,)).fetchone()[0], 0)
             self.assertEqual(conn.execute('select implementation_ref,test_ref,enforcement_class,installed from ops.enforcement_control_catalog where control_key=%s',
                 (CONTROL,)).fetchone(), ('bin/codex-job', 'tools/test-codex-job.py', 'deny_gate', True))
             self.assertEqual(conn.execute('select to_jsonb(ar) from ops.rule_approval_receipt ar where rule_id=%s', (rule,)).fetchone(), receipt)
@@ -157,9 +183,14 @@ class ApprovedControlMigrationTests(unittest.TestCase):
             with self.refused(conn):
                 conn.execute('delete from ops.enforcement_control_catalog where control_key=%s', (CONTROL,))
             self.assertEqual(conn.execute("select tgenabled from pg_trigger where tgname='active_approved_control_immutable'").fetchone()[0], 'O')
+            with self.assertRaisesRegex(self.psycopg.errors.RaiseException, 'contract is immutable'):
+                with conn.transaction():
+                    conn.execute('delete from ops.rule_control_binding where rule_id=%s and control_key=%s', (rule, CONTROL))
+            self.assertEqual(conn.execute("select tgenabled from pg_trigger where tgname='approved_rule_control_binding_immutable'").fetchone()[0], 'O')
             applied = dict(conn.execute('select filename,sha256 from schema_migrations').fetchall())
             migrate.validate_applied_ledger(migrate.load_migrations(), applied, migrate.load_baseline())
             self.assertIn(REPAIR, applied)
+            self.assertIn(BINDING_REPAIR, applied)
             self.assertEqual(self.runner().returncode, 0)
 
 
