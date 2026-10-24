@@ -13,8 +13,7 @@ seeded unwrapped plist gets captured INTO the fixture repo instead of being
 repaired, the live copy stays unwrapped, and this test fails.
 
 Everything runs against throwaway git repos, a throwaway $HOME and a stubbed
-launchctl on $PATH, so nothing here can touch real machine config — the same
-discipline as ops/fleet-sync-selftest.py.
+launchctl on $PATH, so nothing here can touch real machine config.
 """
 import json
 import os

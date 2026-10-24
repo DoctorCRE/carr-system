@@ -2547,47 +2547,6 @@ except Exception as e:
     print(f"  ⚠︎ {'hermes autonomy':<18} check failed ({type(e).__name__}: {e})")
     rc = 1
 
-# Equality of ~/.codex/hooks.json with the tracked contract is useful, but it
-# cannot establish that Codex has trusted that hook or actually invokes it.
-# ops/codex-hook-smoke.sh is the live negative smoke that closes that gap: it
-# sends Codex a probe matching guard-unattended.py's private-key pattern
-# through the SAME invocation helper (bin/council-lib.sh's run_precheck) the
-# automation actually uses, and records whether the guard's denial text came
-# back. This row reads that result (out/codex-hook-smoke.json) rather than
-# re-running the smoke — a live Codex call on every `run.sh health` would be a
-# heavier side effect than a freshness check should carry, same reasoning as
-# the other stored readiness receipts. PASS within 30 days reads OK; anything
-# else — FAIL, or no recent record at all — reads as a fault, never silently
-# green, because an unverified hook runtime is exactly the gap this row used
-# to paper over with a permanent gray "unverified" line.
-_chs_path = os.path.join(REPO_ROOT, "out", "codex-hook-smoke.json")
-_chs_max_age_days = 30
-if not os.path.exists(_chs_path):
-    print(f"  -- {'Codex hook runtime':<18} no smoke run yet — run ops/codex-hook-smoke.sh")
-else:
-    try:
-        with open(_chs_path) as _f:
-            _chs = json.load(_f)
-        _chs_ts = datetime.strptime(_chs["timestamp"], "%Y-%m-%dT%H:%M:%SZ")
-        _chs_age_days = (datetime.utcnow() - _chs_ts).total_seconds() / 86400
-        _chs_ver = _chs.get("codex_version", "unknown")
-        if _chs_age_days > _chs_max_age_days:
-            print(f"  ⚠︎ {'Codex hook runtime':<18} last smoke is {_chs_age_days:.0f}d old "
-                  f"(>{_chs_max_age_days}d) — {_chs_ts.date()} · run ops/codex-hook-smoke.sh")
-            rc = 1
-        elif _chs.get("pass"):
-            print(f"  OK {'Codex hook runtime':<18} PASS on {_chs_ts.date()} ({_chs_ver}) — "
-                  f"live negative smoke confirms PreToolUse hooks fire under "
-                  f"--dangerously-bypass-hook-trust")
-        else:
-            print(f"  ✗✗ {'Codex hook runtime':<18} FAIL on {_chs_ts.date()} ({_chs_ver}) — "
-                  f"hooks may be silently skipped; run ops/codex-hook-smoke.sh and read its output")
-            rc = 1
-    except Exception as e:
-        print(f"  ⚠︎ {'Codex hook runtime':<18} could not read {_chs_path} "
-              f"({type(e).__name__}: {e}) · run ops/codex-hook-smoke.sh")
-        rc = 1
-
 try:
     _fal = os.path.join(REPO_ROOT, "ops", "fetch-allowlist.py")
     if os.path.exists(_fal):

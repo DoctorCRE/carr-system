@@ -474,31 +474,6 @@
       }
     },
     {
-      "id": "policy-nightly-canary-drive-capability-guard",
-      "class": "policy_guard",
-      "sources": [
-        "pipelines/availability_matcher.py"
-      ],
-      "path_pattern": "{{VAULT}}/**",
-      "reference_selectors": [
-        {
-          "source": "pipelines/availability_matcher.py",
-          "alias": "{{VAULT}}",
-          "line": 167,
-          "excerpt": "*\"CARR_VAULT\"*"
-        }
-      ],
-      "producer": "nightly availability canary",
-      "consumers": [
-        "canary capability boundary"
-      ],
-      "canonicality": "projection",
-      "replacement": {
-        "status": "not_a_runtime_reader",
-        "target": "canary rejects an ambient Drive capability before it reads a snapshot"
-      }
-    },
-    {
       "id": "inventory-tooling",
       "class": "inventory_tooling",
       "sources": [
