@@ -403,9 +403,8 @@ parse_rehearse_summary() {
 # RECORD_REHEARSAL gate, cleanup(), the three-bucket failure logic and the real
 # `tools/ops-record.py run` call all execute for real — with fixture values
 # standing in for the Neon branch, the decrypt and the row-count comparison a
-# test must never actually perform. Same no-mock discipline as
-# bin/refresh-rules.sh's CARR_REFRESH_RULES_EXPORT_CMD: nothing below this
-# guard is reachable without CARR_RESTORE_REHEARSE_SELFTEST set, and no real
+# test must never actually perform. Nothing below this guard is reachable
+# without CARR_RESTORE_REHEARSE_SELFTEST set, and no real
 # invocation ever sets it. Placed AFTER RECORD_REHEARSAL is decided (above) and
 # BEFORE anything is created (below), so a test can combine this with
 # --preflight or --verify-only to prove those two still record nothing even

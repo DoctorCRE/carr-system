@@ -91,11 +91,11 @@ begin
   -- THE GATE ZERO PRODUCER SEAT TAKES NO PASSWORD, and that is the difference
   -- between the two machine logins rather than an oversight. 0502 creates it as
   -- `create role carr_gate_zero_producer login` with nothing else, and
-  -- ops/staging-database-login-provision-db-gate.py reads the seat's baseline
-  -- back as (rolcanlogin, rolpassword is null, rolconfig is null) = (t,t,t)
-  -- before it provisions anything — a snapshot that minted the seat with
-  -- carr_jobs' placeholder password failed that gate with (t,f,t). The seat is
-  -- credentialed by the provisioning path the gate exercises, not by this file,
+  -- Its provisioning baseline is
+  -- (rolcanlogin, rolpassword is null, rolconfig is null) = (t,t,t).
+  -- A snapshot that minted the seat with carr_jobs' placeholder password
+  -- violated that baseline with (t,f,t). The seat is
+  -- credentialed by its provisioning path, not by this file,
   -- so reproduce 0502's shape exactly and leave an existing role alone.
   select rolcanlogin into producer_can_login from pg_roles where rolname='carr_gate_zero_producer';
   if not found then

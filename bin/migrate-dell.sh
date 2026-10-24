@@ -134,8 +134,7 @@ if [ "${1:-}" = "--preflight" ]; then
 
   say ""
   say "  gates, as Dell will run them:"
-  for t in guard git-writer-gate \
-           corpus-render-gate config-as-code migrate-dell; do
+  for t in guard corpus-render-gate config-as-code migrate-dell; do
     F="$TMP/home/carr-system/ops/$t-selftest.py"
     [ -f "$F" ] || { print -r -- "    note  $t — not in the clone"; continue; }
     # CARR_VAULT is passed through deliberately. The scratch HOME has no Drive
@@ -271,12 +270,8 @@ command -v $PY  >/dev/null && good "python ($PY)" || bad "python3 missing"
 [ -f "$HOME/.claude/settings.json" ] && good "Claude settings present" \
   || note "no ~/.claude/settings.json yet — install will create the hooks block"
 
-# THE CLONE PATH IS LOAD-BEARING, which was not obvious until the 2026-08-10
-# fresh-machine audit measured it. hooks/git-writer-gate.py:59 resolves
-# ~/carr-system to decide whether the tree is dirty, and gate_paths' protected
-# patterns match on /carr-system/. A clone at ~/dev/carr-system installs, passes
-# its own selftests, and then guards nothing — the green-but-guarding-zero-paths
-# failure this audit found twice. Refuse it here rather than let it pass.
+# Gate path patterns resolve ~/carr-system. Refuse another clone location
+# rather than install gates that do not cover the checkout.
 if [ "$REPO" != "$HOME/carr-system" ]; then
   bad "repo is at $REPO but the gates resolve ~/carr-system — move the clone:"
   say "          mv \"$REPO\" \"$HOME/carr-system\" && \"$HOME/carr-system/bin/migrate-dell.sh\" --apply"
@@ -363,7 +358,7 @@ fi
 # matcher from Bash to Bash|WebFetch". The repo's ops/config/hooks.json already
 # carries the correct matcher plus every gate built since, so installing it
 # replaces that manual edit entirely — and brings the conduct gates, the
-# escalation gate, the git-writer gate and the integrity check with it.
+# escalation gate and the integrity check with it.
 step "3. python environment"
 # THE FRESH-MACHINE BLOCKER, found in the 2026-08-10 audit. bin/nightly.sh runs
 # ./.venv/bin/python explicitly on eight of its steps, two launchd jobs name that
