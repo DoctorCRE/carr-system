@@ -59727,9 +59727,10 @@ begin
   select * into latest from ops.scac_policy_epoch order by epoch desc limit 1;
   select * into registry from ops.scac_mutation_registry_version
     where registry_version=latest.registry_version;
-  grant_state:=case when registry.registry_version='scac-mutation-registry.v118' and
-    (grant_snapshot->>'entry_count')::integer=336 and
-    grant_snapshot->>'grant_digest'='sha256:cd7e5cff7db2ff2d98fb626c15d0109af9af9de91927b7b32e53a2d7147e9ee6'
+  grant_state:=case when registry.registry_version=ops.scac_current_grant_contract()->>'registry_version' and
+    (grant_snapshot->>'entry_count')::integer=
+      (ops.scac_current_grant_contract()->'runtime_dml_grants'->>'count')::integer and
+    grant_snapshot->>'grant_digest'=ops.scac_current_grant_contract()->'runtime_dml_grants'->>'digest'
     then 'current' else 'drifted_or_unbound' end;
   with recursive connected(oid) as (
     select oid from pg_roles where rolname in ('carr_writer','carr_jobs','carr_authority')
@@ -107611,6 +107612,13 @@ CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDAT
 
 
 --
+-- Name: doctrine_embedding scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDATE ON public.doctrine_embedding FOR EACH ROW EXECUTE FUNCTION ops.scac_reference_monitor_guard();
+
+
+--
 -- Name: doctrine_gate_check scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -108518,6 +108526,13 @@ CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.d
 --
 
 CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.doctrine_edge FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
+
+
+--
+-- Name: doctrine_embedding scac_reference_monitor_guard_truncate; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.doctrine_embedding FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
 
 
 --
@@ -122250,7 +122265,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0944_retire_orphan_control_inventory.sql	ab7c35cfc581268b40bab5b29399e315286b24ba1c3c8c86bc0b9c49673def37	1970-01-01 00:00:00+00
 0947_allow_approved_control_evidence_refresh.sql	b051840f87086cdfcfbe21abae004df2f7023907f081851f95c22a7e017f8800	1970-01-01 00:00:00+00
 0950_remove_retired_workflow_manifest_binding.sql	87c2d7f9aba676b4b0e0d7262b024fe20f4ee1e7a7ced5ced4dcce19267d9a41	1970-01-01 00:00:00+00
-0956_doctrine_embeddings.sql	d0316e4064633e8c7d9be28d743154b612efd3412327c73b07802c730ef768f2	1970-01-01 00:00:00+00
+0956_doctrine_embeddings.sql	2426108c25bd4c3c7f5da62556797ead4bcb972540739a7ed43f77eaa28baf3e	1970-01-01 00:00:00+00
 \.
 
 

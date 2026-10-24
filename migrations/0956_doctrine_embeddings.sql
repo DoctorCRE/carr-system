@@ -15,6 +15,10 @@ create index doctrine_embedding_cosine_idx on public.doctrine_embedding
   using hnsw (embedding public.vector_cosine_ops);
 revoke all on public.doctrine_embedding from public;
 grant select, insert on public.doctrine_embedding to carr_writer;
+create trigger scac_reference_monitor_guard_row before insert or update or delete
+  on public.doctrine_embedding for each row execute function ops.scac_reference_monitor_guard();
+create trigger scac_reference_monitor_guard_truncate before truncate
+  on public.doctrine_embedding for each statement execute function ops.scac_reference_monitor_guard();
 
 create or replace function public.current_retrievable_doctrine(
   p_actor_id uuid, p_content_classes text[] default null
@@ -484,4 +488,86 @@ begin
   select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
   if exists (select 1 from pg_auth_members m join pg_roles g on g.oid=m.roleid join pg_roles mem on mem.oid=m.member where mem.rolname~'^carr_' and (g.rolsuper or g.rolname~'^(neon_|pg_)')) then return false; end if;
   return observed_count=13 and observed_digest='sha256:93724fe71ed216afac9b4bf48eee500e693de057cae0b59f59ff8e68cc6a2bc0';
-end $function$
+end $function$;
+
+CREATE OR REPLACE FUNCTION ops.scac_reference_monitor_state() RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'ops', 'pg_temp'
+    AS $$
+declare grant_snapshot jsonb; mode_state jsonb; epoch_chain jsonb;
+        latest ops.scac_policy_epoch%rowtype;
+        registry ops.scac_mutation_registry_version%rowtype; missing_guards integer;
+        unsupported_writable integer;
+        grant_state text; guard_state text;
+begin
+  grant_snapshot:=ops.scac_runtime_dml_grant_snapshot();
+  mode_state:=ops.scac_reference_monitor_mode();
+  epoch_chain:=ops.scac_policy_epoch_chain_state();
+  select * into latest from ops.scac_policy_epoch order by epoch desc limit 1;
+  select * into registry from ops.scac_mutation_registry_version
+    where registry_version=latest.registry_version;
+  grant_state:=case when registry.registry_version=ops.scac_current_grant_contract()->>'registry_version' and
+    (grant_snapshot->>'entry_count')::integer=
+      (ops.scac_current_grant_contract()->'runtime_dml_grants'->>'count')::integer and
+    grant_snapshot->>'grant_digest'=ops.scac_current_grant_contract()->'runtime_dml_grants'->>'digest'
+    then 'current' else 'drifted_or_unbound' end;
+  with recursive connected(oid) as (
+    select oid from pg_roles where rolname in ('carr_writer','carr_jobs','carr_authority')
+  ), writable as (
+    select distinct c.oid from pg_class c join pg_namespace n on n.oid=c.relnamespace
+    cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+    where c.relkind in ('r','p') and a.grantee<>c.relowner
+      and (a.grantee=0 or a.grantee in(select oid from connected))
+      and a.privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE')
+    union
+    select distinct c.oid from pg_attribute att join pg_class c on c.oid=att.attrelid
+    cross join lateral aclexplode(att.attacl) a
+    where c.relkind in ('r','p') and att.attnum>0 and not att.attisdropped
+      and a.grantee<>c.relowner
+      and (a.grantee=0 or a.grantee in(select oid from connected))
+      and a.privilege_type in ('INSERT','UPDATE')
+  )
+  select count(*) into missing_guards from writable w where not exists(
+    select 1 from pg_trigger t where t.tgrelid=w.oid and not t.tgisinternal
+      and t.tgfoid='ops.scac_reference_monitor_guard()'::regprocedure
+      and (t.tgtype & 1)=1);
+  with runtime_roles as (
+    select oid from pg_roles where rolname in ('carr_writer','carr_jobs','carr_authority')
+  ), unsupported as (
+    select distinct c.oid from pg_class c join pg_namespace n on n.oid=c.relnamespace
+    cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+    where n.nspname not in ('pg_catalog','information_schema') and
+      c.relkind in ('v','m','f') and a.grantee<>c.relowner and
+      (a.grantee=0 or a.grantee in(select oid from runtime_roles))
+      and a.privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE')
+    union
+    select distinct c.oid from pg_attribute att join pg_class c on c.oid=att.attrelid
+    join pg_namespace n on n.oid=c.relnamespace
+    cross join lateral aclexplode(att.attacl) a
+    where n.nspname not in ('pg_catalog','information_schema') and
+      c.relkind in ('v','m','f') and att.attnum>0 and not att.attisdropped and
+      a.grantee<>c.relowner and
+      (a.grantee=0 or a.grantee in(select oid from runtime_roles))
+      and a.privilege_type in ('INSERT','UPDATE')
+  ) select count(*) into unsupported_writable from unsupported;
+  guard_state:=case when unsupported_writable>0 then 'unsupported_writable_relation'
+    when missing_guards=0 then 'complete' else 'incomplete' end;
+  return jsonb_build_object('schema_version','scac-reference-monitor-state.v1',
+    'monitor_state',case when grant_state='current' and guard_state='complete'
+      and coalesce((epoch_chain->>'valid')::boolean,false)
+      and (epoch_chain->>'current_epoch')::bigint=latest.epoch
+      and epoch_chain->>'current_epoch_digest'=latest.epoch_digest
+      and mode_state->>'integrity_state'<>'invalid_fail_closed' then 'current'
+      else 'unavailable' end,
+    'grant_state',grant_state,'grant_digest',grant_snapshot->>'grant_digest',
+    'guard_state',guard_state,'missing_guard_count',missing_guards,
+    'unsupported_writable_relation_count',unsupported_writable,
+    'mode',mode_state->>'mode','mode_integrity_state',mode_state->>'integrity_state',
+    'policy_epoch_state',case when coalesce((epoch_chain->>'valid')::boolean,false)
+      and (epoch_chain->>'current_epoch')::bigint=latest.epoch
+      and epoch_chain->>'current_epoch_digest'=latest.epoch_digest
+      then 'current' else 'invalid_or_unavailable' end,
+    'policy_epoch',latest.epoch,'policy_epoch_digest',latest.epoch_digest,
+    'registry_version',latest.registry_version,'registry_digest',latest.registry_digest,
+    'direct_database_grant_cutover',false,'production_enforcement_active',false);
+end $$;

@@ -38,6 +38,21 @@ export async function doctrineEmbeddingDatabase() {
       grant execute on function search_doctrine_situations(text,uuid,text[],integer,text,boolean) to carr_reader,carr_writer;
       alter default privileges revoke execute on functions from public;
     `);
+    await c.query(`
+      create table ops.scac_reference_monitor_receipt(admission_id uuid, backend_pid integer,
+        transaction_id bigint, session_principal name, effect_keys text[]);
+      create table ops.scac_reference_monitor_mode_event(event_no bigint, event_digest text,
+        previous_event_digest text, mode text, reason_digest text, grant_digest text,
+        idempotency_key uuid, production_enforcement_active boolean);
+      create table ops.scac_policy_epoch(epoch bigint, registry_version text, epoch_digest text);
+      create table ops.scac_mutation_registry_version(registry_version text, registry_digest text);
+    `);
+    const monitor = readMigration('0467_siep18_atomic_db_monitor_grants.sql');
+    for (const name of ['scac_runtime_privilege_bundle', 'scac_reference_monitor_mode', 'scac_reference_monitor_guard']) {
+      const start = monitor.indexOf(`create or replace function ops.${name}()`);
+      const end = monitor.indexOf('$fn$;', monitor.indexOf('as $fn$', start) + 8) + '$fn$;'.length;
+      await c.query(monitor.slice(start, end));
+    }
     await c.query(readMigration('0956_doctrine_embeddings.sql'));
     return fixture;
   } catch (error) { await fixture.close(); throw error; }

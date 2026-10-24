@@ -123,6 +123,10 @@ class ApprovedControlMigrationTests(unittest.TestCase):
             actual = conn.execute('select ops.scac_runtime_dml_grant_snapshot()').fetchone()[0]
             self.assertEqual(actual, {'schema_version': 'scac-runtime-dml-grants.v1',
                                      'entry_count': expected['count'], 'grant_digest': expected['digest']})
+            state = conn.execute('select ops.scac_reference_monitor_state()').fetchone()[0]
+            self.assertEqual(state['grant_state'], 'current')
+            self.assertEqual(state['missing_guard_count'], 0)
+            self.assertEqual(state['guard_state'], 'complete')
             for statement in (
                 'grant update on public.doctrine_embedding to carr_writer',
                 'grant execute on function public.search_doctrine_semantic(text,uuid,text[],integer,text,vector[]) to public',
