@@ -78,7 +78,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       if (name === "party") await c.query("alter table party drop column if exists vendor_assignment_version");
     }
     for (const table of ['actor','party','deal']) await c.query(`alter table ${table} add primary key(id)`);
-    await c.query(readMigration('0945_deal_vendor_assignments.sql').split('-- Current catalog reseal')[0]);
+    await c.query(readMigration('0948_deal_vendor_assignments.sql').split('-- Current catalog reseal')[0]);
     const touch = schema.match(/CREATE FUNCTION public\.trg_touch_row\(\) RETURNS trigger[\s\S]*?end \$\$;/)?.[0];
     assert.ok(touch);
     await c.query(touch);
