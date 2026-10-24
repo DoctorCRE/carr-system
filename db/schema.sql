@@ -28780,6 +28780,68 @@ end $$;
 
 
 --
+-- Name: policy_integrity_snapshot(); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.policy_integrity_snapshot() RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'ops', 'pg_temp'
+    AS $$
+declare doctrine_gen bigint; doctrine_digest text; rule_digest text; schema_count integer; schema_highest text; schema_digest text; delivery_health record;
+begin
+  select generation into doctrine_gen from public.doctrine_meta where id=1;
+  if doctrine_gen is null then raise exception 'doctrine generation singleton is unavailable'; end if;
+  doctrine_digest:=ops.scac_doctrine_projection_digest();
+  if doctrine_digest is null then raise exception 'doctrine projection is unavailable'; end if;
+
+  if (select count(*) from ops.rule_delivery_policy where singleton)<>1 then
+    raise exception 'rule delivery policy singleton is unavailable';
+  end if;
+  select * into delivery_health from ops.rule_delivery_audit_counts(35);
+  if delivery_health.total<1 or delivery_health.untagged<>0 or delivery_health.orphaned<>0
+     or delivery_health.wildcarded<>0 or delivery_health.packless<>0
+     or delivery_health.packs<1 or delivery_health.emptypack<>0
+     or delivery_health.scope_mismatch<>0
+     or delivery_health.layer0_shared>delivery_health.layer0_shared_cap
+     or delivery_health.mode not in ('shadow','enforced') then
+    raise exception 'rule delivery projection is not activation-safe: %',to_jsonb(delivery_health);
+  end if;
+
+  select 'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(jsonb_build_object(
+    'active_rules',coalesce((select jsonb_agg(jsonb_build_object(
+      'id',r.id,'statement_digest','sha256:'||encode(public.digest(convert_to(r.statement,'UTF8'),'sha256'),'hex'),
+      'rule_scope',r.scope,'personal_to',r.personal_to,'short_id',l.short_id,
+      'load_layer',l.load_layer,'packs',l.packs,'scope',l.scope,
+      'map_digest',l.map_digest) order by r.id::text collate "C")
+      from public.rule r join ops.rule_load_layer l on l.rule_id=r.id where r.status='active'),'[]'::jsonb),
+    'packs',coalesce((select jsonb_agg(jsonb_build_object('pack',pack,
+      'title_digest','sha256:'||encode(public.digest(convert_to(title,'UTF8'),'sha256'),'hex'),
+      'description_digest','sha256:'||encode(public.digest(convert_to(description,'UTF8'),'sha256'),'hex'),
+      'triggers',triggers,'source_digest','sha256:'||encode(public.digest(convert_to(source,'UTF8'),'sha256'),'hex')) order by pack collate "C")
+      from ops.rule_pack),'[]'::jsonb),
+    'delivery_mode',(select mode from ops.rule_delivery_policy where singleton=true)
+  )),'UTF8'),'sha256'),'hex') into rule_digest;
+  if rule_digest is null then raise exception 'rule delivery projection is unavailable'; end if;
+
+  select count(*)::integer,max(filename collate "C") collate "default",
+    'sha256:'||encode(public.digest(coalesce(string_agg(convert_to(filename,'UTF8')||decode('00','hex')||convert_to(sha256,'UTF8')||decode('0a','hex'),''::bytea order by filename collate "C"),''::bytea),'sha256'),'hex')
+    into schema_count,schema_highest,schema_digest from public.schema_migrations;
+  if schema_count<1 or schema_highest is null then raise exception 'schema migration ledger is unavailable'; end if;
+  return jsonb_build_object('registry_version','scac-mutation-registry.v118','registry_digest','sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d',
+    'doctrine_generation',doctrine_gen,'doctrine_projection_digest',doctrine_digest,
+    'rule_projection_digest',rule_digest,'schema_applied_count',schema_count,
+    'schema_highest_migration',schema_highest,'schema_ledger_digest',schema_digest);
+end $$;
+
+
+--
+-- Name: FUNCTION policy_integrity_snapshot(); Type: COMMENT; Schema: ops; Owner: -
+--
+
+COMMENT ON FUNCTION ops.policy_integrity_snapshot() IS 'Deferred source integrity without retired SCAC seal or mutation-catalog validation. Registry fields retain historical epoch format only.';
+
+
+--
 -- Name: portfolio_accept_revision(uuid, uuid, text, uuid); Type: FUNCTION; Schema: ops; Owner: -
 --
 
@@ -52638,29 +52700,10 @@ $$;
 
 CREATE FUNCTION ops.scac_policy_epoch_refresh() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'public', 'ops', 'pg_temp'
+    SET search_path TO 'pg_catalog', 'public', 'ops'
     AS $$
 declare source jsonb; source_digest text; prior ops.scac_policy_epoch%rowtype; next_epoch bigint; created timestamptz:=clock_timestamp(); epoch_digest text; prefix_digest text; bootstrap_health record; settlement_key text;
 begin
-  -- SETTLEMENT DEDUPE (0476). These are per-row deferred constraint triggers on
-  -- 18 tables, so one settlement ("set constraints all immediate", or commit)
-  -- fires this function once per queued row. Every firing in a settlement sees
-  -- the same final table state: the snapshot below is identical each time, and
-  -- every firing after the first exits at the source_digest early-return — but
-  -- only AFTER paying for ops.scac_policy_epoch_snapshot(), whose catalog scans
-  -- cost ~0.7s each since the v10 registry. Seeding the reviewed rule
-  -- projection queues ~480 rows: 480 firings x 0.7s took the CI migration
-  -- class from 77s to 652s on 2026-09-01 (hosted runs 33451887858 vs
-  -- 33572556612; the db-gate-timing line names siep12/siep18 at ~165s each).
-  -- The key is txid + statement_timestamp: constant across one settlement's
-  -- firings, different for any later settlement in the same transaction, and
-  -- set_config(...,true) is transaction-local so nothing leaks across
-  -- transactions. Known edge, accepted and fail-closed: code that settles
-  -- twice INSIDE one statement with relevant writes between the settlements
-  -- would skip the second append; the chain-state check then reports the
-  -- epoch stale/incompatible (visible refusal, not silent corruption) and the
-  -- next settlement in any later statement appends the missed epoch. No such
-  -- caller exists in this repository today.
   settlement_key:=txid_current()::text||':'||extract(epoch from statement_timestamp())::text;
   if current_setting('carr.scac_epoch_settled',true)=settlement_key then return null; end if;
   perform pg_advisory_xact_lock(hashtextextended('carr-internal:scac-core:policy-epoch',0));
@@ -52671,15 +52714,11 @@ begin
        and bootstrap_health.orphaned=0 and bootstrap_health.wildcarded=0
        and bootstrap_health.packless=0 and bootstrap_health.emptypack=0
        and bootstrap_health.scope_mismatch=0 and bootstrap_health.mode='shadow' then
-      -- A freshly reconstructed database has no rule source until the canonical
-      -- control-plane sync.  Keep the epoch absent (therefore incompatible)
-      -- rather than blessing an empty policy.  The sync's deferred triggers
-      -- bootstrap epoch 1 from its final coherent projection.
       perform set_config('carr.scac_epoch_settled',settlement_key,true);
       return null;
     end if;
   end if;
-  source:=ops.scac_policy_epoch_snapshot();
+  source:=ops.policy_integrity_snapshot();
   source_digest:='sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(source),'UTF8'),'sha256'),'hex');
   if prior.epoch is not null and prior.source_digest=source_digest then
     perform set_config('carr.scac_epoch_settled',settlement_key,true);
@@ -52704,6 +52743,13 @@ begin
   perform set_config('carr.scac_epoch_settled',settlement_key,true);
   return null;
 end $$;
+
+
+--
+-- Name: FUNCTION scac_policy_epoch_refresh(); Type: COMMENT; Schema: ops; Owner: -
+--
+
+COMMENT ON FUNCTION ops.scac_policy_epoch_refresh() IS 'Deferred doctrine, rule delivery and ledger integrity; historical SCAC catalog audit does not gate commits.';
 
 
 --
@@ -116849,6 +116895,7 @@ revoke all on function ops.pending_slice_completion_proposals() from public;
 revoke all on function ops.pending_sourced_work_request_outcome_feedback(p_work_request text, p_organization_tenant_id text) from public;
 revoke all on function ops.pitr_probe_rows_immutable() from public;
 revoke all on function ops.pitr_probe_server_stamp() from public;
+revoke all on function ops.policy_integrity_snapshot() from public;
 revoke all on function ops.portfolio_accept_revision(p_revision_id uuid, p_idempotency_key uuid, p_accepted_digest text, p_review_id uuid) from public;
 revoke all on function ops.portfolio_accepted_digest(p_revision_id uuid) from public;
 revoke all on function ops.portfolio_accepted_preimage(p_revision_id uuid) from public;
@@ -121928,6 +121975,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0944_retire_orphan_control_inventory.sql	ab7c35cfc581268b40bab5b29399e315286b24ba1c3c8c86bc0b9c49673def37	1970-01-01 00:00:00+00
 0947_allow_approved_control_evidence_refresh.sql	b051840f87086cdfcfbe21abae004df2f7023907f081851f95c22a7e017f8800	1970-01-01 00:00:00+00
 0950_remove_retired_workflow_manifest_binding.sql	87c2d7f9aba676b4b0e0d7262b024fe20f4ee1e7a7ced5ced4dcce19267d9a41	1970-01-01 00:00:00+00
+0956_retire_scac_catalog_commit_check.sql	5e19ed9254f8150d789d81882a008c80eeb9b645a4dd0ca2c8dcd0c54f5899eb	1970-01-01 00:00:00+00
 0951_deal_vendor_assignments.sql	f9053aa57b13351da64416e35e49dc38d8d8da0fb118122b2652778bf9eda7eb	1970-01-01 00:00:00+00
 0952_deal_vendor_grant_retirements.sql	6ab6b3dbe76dbb395a8b739eea002aeb2ac4661f2efeefbf53c52b2fd69fd902	1970-01-01 00:00:00+00
 0953_morning_brief_chicago_calendar.sql	b6a1c2d4666a7fe2ba645d3048b2f874014f47f97e88a3144e07bd6079f6903d	1970-01-01 00:00:00+00

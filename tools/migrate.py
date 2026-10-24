@@ -124,6 +124,24 @@ APPROVED_CONTROL_RECOVERY_GROUP = (
     '0947_allow_approved_control_evidence_refresh.sql',
     '0950_remove_retired_workflow_manifest_binding.sql',
 )
+# The deployed ledger ends at 0950. Retire the obsolete SCAC catalog check
+# before executing the unchanged pending files, then commit their lexical prefix.
+SCAC_CATALOG_RECOVERY_GROUP = (
+    '0951_deal_vendor_assignments.sql',
+    '0952_deal_vendor_grant_retirements.sql',
+    '0953_morning_brief_chicago_calendar.sql',
+    '0954_lead_workspace_set_reads.sql',
+    '0955_retrieval_concept_question_matching.sql',
+    '0956_retire_scac_catalog_commit_check.sql',
+)
+RECOVERY_MIGRATION_ORDERS = {
+    APPROVED_CONTROL_RECOVERY_GROUP: (
+        *APPROVED_CONTROL_RECOVERY_GROUP[2:], *APPROVED_CONTROL_RECOVERY_GROUP[:2]
+    ),
+    SCAC_CATALOG_RECOVERY_GROUP: (
+        SCAC_CATALOG_RECOVERY_GROUP[-1], *SCAC_CATALOG_RECOVERY_GROUP[:-1]
+    ),
+}
 ATOMIC_MIGRATION_GROUPS = (('0480_codex_continuity.sql', '0481_codex_continuity_registry_activation.sql'),
  ('0485_claude_continuity.sql', '0486_claude_continuity_registry_activation.sql'),
  ('0502_gate_zero_read_only_outcome.sql', '0503_gate_zero_outcome_and_scac_successor.sql'),
@@ -201,7 +219,7 @@ ATOMIC_MIGRATION_GROUPS = (('0480_codex_continuity.sql', '0481_codex_continuity_
   '0857_dot_hardening_scac_successor.sql'),
  ('0868_loop_blocker_residue_comment.sql', '0869_loop_residue_scac_successor.sql'),
  ('0872_self_closing_records.sql', '0873_self_closing_records_scac_successor.sql'),
- APPROVED_CONTROL_RECOVERY_GROUP)
+ APPROVED_CONTROL_RECOVERY_GROUP, SCAC_CATALOG_RECOVERY_GROUP)
 STRICT_ATOMIC_MIGRATION_GROUPS = (('0532a_canonical_ownership_lease_activation.sql',
   '0532b_ready_plan_amendment_scac_successor.sql'),
  ('0538_canonical_ownership_assurance_binding.sql',
@@ -568,15 +586,18 @@ def migration_batches(
     A complete pending reviewed group is one batch. A suffix whose earlier
     member is already in the immutable ledger remains individually resumable;
     this is the recovery shape for a database that predated the group rule.
-    The approved-control recovery suffix alone runs its repairs first and
-    commits all its SQL and ledger rows together.
+    Recovery suffixes run their repairs first and commit all their SQL and
+    ledger rows together.
     """
     by_first: dict[str, tuple[str, ...]] = {group[0]: group for group in ATOMIC_MIGRATION_GROUPS}
     recovery_suffixes = {
-        name: APPROVED_CONTROL_RECOVERY_GROUP[offset:]
-        for offset, name in enumerate(APPROVED_CONTROL_RECOVERY_GROUP)
+        name: group[offset:]
+        for group in RECOVERY_MIGRATION_ORDERS
+        for offset, name in enumerate(group)
     }
-    recovery_order = (*APPROVED_CONTROL_RECOVERY_GROUP[2:], *APPROVED_CONTROL_RECOVERY_GROUP[:2])
+    recovery_orders = {
+        name: order for group, order in RECOVERY_MIGRATION_ORDERS.items() for name in group
+    }
     by_first.update(recovery_suffixes)
     batches: list[list[tuple[str, str, str]]] = []
     i = 0
@@ -585,8 +606,9 @@ def migration_batches(
         if group is not None:
             candidate = pending[i:i + len(group)]
             if tuple(item[0] for item in candidate) == group:
-                if group in recovery_suffixes.values():
-                    candidate = sorted(candidate, key=lambda item: recovery_order.index(item[0]))
+                if group[0] in recovery_orders:
+                    order = recovery_orders[group[0]]
+                    candidate = sorted(candidate, key=lambda item: order.index(item[0]))
                 batches.append(candidate)
                 i += len(group)
                 continue
