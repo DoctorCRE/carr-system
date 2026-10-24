@@ -472,7 +472,7 @@ Joe still rules first and nothing fires mid-panel. What changes is that "nothing
 stops being a reason to write nothing down.
 
 If a council catch produces a standing lesson ("always spell HVAC responsibility in the first
-draft"), that is the `teach` verb, not a markdown note, and it is proposed the same way.
+draft"), propose an edit to the relevant CLAUDE.md, AGENTS.md or skill in a PR with the trade-off; proposals bind nobody until merged.
 
 ## How this degrades when the record is thin
 

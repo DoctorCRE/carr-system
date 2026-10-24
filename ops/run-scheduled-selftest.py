@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise the scheduled wrapper and durable spool through the real CLI."""
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -34,8 +35,66 @@ class ScheduledRunTests(unittest.TestCase):
                                f"printf child-out; printf child-err >&2; exit {code}"],
                               cwd=self.root, env=self.env, text=True, capture_output=True, timeout=15)
 
+    def invoke_intake(self, receipt, code=1):
+        child = self.root / "child.py"
+        child.write_text("import sys\n"
+                         "print('SYNTHETIC_PRIVATE_BODY')\n"
+                         "print('SYNTHETIC_PRIVATE_ERROR', file=sys.stderr)\n"
+                         f"print({('outlook-intake-receipt ' + json.dumps(receipt))!r})\n"
+                         f"sys.exit({code})\n")
+        return subprocess.run(["/bin/zsh", str(self.root / "bin/run-scheduled.sh"),
+                               "outlook-intake", "outlook.intake", sys.executable, str(child)],
+                              cwd=self.root, env=self.env, text=True, capture_output=True, timeout=15)
+
+    def test_intake_receipt_preserves_reason_and_counts_without_private_output(self):
+        result = self.invoke_intake({"state": "failed", "reason": "writes_failed",
+                                     "counts": {"writes_failed": 3, "unresolved_messages": 2,
+                                                "unresolved_addresses": 4, "unresolved_calendar": 1, "error_timeout": 3}})
+        args = json.loads(self.rows()[0][3])
+        self.assertEqual(args[args.index("--failure-class") + 1], "writes_failed")
+        detail = json.loads(args[args.index("--detail") + 1])
+        self.assertEqual(detail, {"state": "failed", "reason": "writes_failed", "counts": {
+            "writes_failed": 3, "unresolved_messages": 2, "unresolved_addresses": 4,
+            "unresolved_calendar": 1, "error_timeout": 3}})
+        self.assertEqual(result.returncode, 1)
+        observed = (result.stdout + result.stderr + json.dumps(self.rows())
+                    + (self.root / "out/run-scheduled.log").read_text())
+        self.assertNotIn("SYNTHETIC_PRIVATE", observed)
+        self.assertFalse(list((self.root / "out").glob("outlook-intake-receipt.*")))
+
+    def test_intake_invalid_receipts_fail_closed_without_private_output(self):
+        cases = [
+            {"state": "failed", "reason": "SYNTHETIC_PRIVATE_REASON", "counts": {}},
+            {"state": "failed", "reason": ["SYNTHETIC_PRIVATE_REASON"], "counts": {}},
+            {"state": "succeeded", "reason": "processed", "counts": {}},
+            {"state": "failed", "reason": "writes_failed", "counts": {"SYNTHETIC_PRIVATE_KEY": 1}},
+            {"state": "failed", "reason": "writes_failed", "counts": {"writes_failed": "SYNTHETIC_PRIVATE_VALUE"}},
+            {"state": "failed", "reason": "writes_failed", "counts": {"writes_failed": True}},
+            {"state": "failed", "reason": "writes_failed", "counts": {"writes_failed": -1}},
+            {"state": "failed", "reason": "writes_failed", "counts": {"writes_failed": 10**20}},
+            ["SYNTHETIC_PRIVATE_RECEIPT"],
+        ]
+        for receipt in cases:
+            with self.subTest(receipt=receipt):
+                result = self.invoke_intake(receipt)
+                args = json.loads(self.rows()[-1][3])
+                self.assertEqual(args[args.index("--failure-class") + 1], "exit_1")
+                self.assertEqual(args[args.index("--detail") + 1], "outlook.intake exited 1")
+                observed = result.stdout + result.stderr + (self.root / "out/run-scheduled.log").read_text()
+                self.assertNotIn("SYNTHETIC_PRIVATE", observed)
+
+    def test_intake_success_receipt_does_not_change_child_state(self):
+        result = self.invoke_intake({"state": "succeeded", "reason": "processed",
+                                     "counts": {"unresolved_addresses": 2}}, code=0)
+        args = json.loads(self.rows()[0][3])
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self.rows()[0][2], "succeeded")
+        self.assertNotIn("--failure-class", args)
+        self.assertEqual(json.loads(args[args.index("--detail") + 1])["counts"],
+                         {"unresolved_addresses": 2})
+
     def rows(self):
-        with sqlite3.connect(self.spool) as connection:
+        with closing(sqlite3.connect(self.spool)) as connection:
             return connection.execute("select service,run_key,state,argv from spool").fetchall()
 
     def test_success_records_one_result_without_a_second_receipt(self):

@@ -6,6 +6,7 @@ code work happens — booted with no instructions at all.
 
 ## Always-on rules
 
+<!-- Generated from ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
 These twelve core cards are loaded natively with this file. No boot fetch is required.
 Before acting when a card applies, answer one line with applies yes/no and the action or reason.
 
@@ -21,7 +22,7 @@ Before acting when a card applies, answer one line with applies yes/no and the a
 
 [K06] Resolve source conflicts openly: When sources disagree, follow Joe's live direction, then the current store record, then the newer dated ruling, and say there was a conflict. Archives and backups are evidence, not authority.
 
-[K12] Capture durable corrections now: When a partner corrects or overrules you, or states a preference that would recur, propose it through teach this turn with the trade-off; proposals bind nobody yet. A how-to the same partner explains twice: quote both, offer a skill.
+[K12] Capture durable corrections now: When a partner corrects or overrules you, or states a preference that would recur, propose an edit to the relevant guidance file (CLAUDE.md, AGENTS.md or a skill) in a PR this turn with the trade-off; proposals bind nobody until merged. A how-to the same partner explains twice: quote both, offer a skill.
 
 [K08] End with one action or one decision: When ending a reply, do the doable steps yourself and leave at most one human action or decision, asked directly (approve or decline) in the question box. No closing menus or scripted replies.
 
@@ -257,21 +258,18 @@ Several sessions run against this one checkout at the same time.
   `git update-index --chmod=+x <path>` and check the index, not the filesystem.
 - Leave any modified file you did not write, and say so.
 
-## Rule lifecycle evidence
+## Guidance changes
 
-Before teaching, admitting, approving, amending or retiring a rule, run
-`./.venv/bin/python ops/rule-admission-audit.py --preflight` with the existing
-read credential; add `--rule-id <full-rule-UUID>` for its prepared admission.
-It derives the `projection.delivery` keys from the installed writer
-([migration 0482](migrations/0482_rule_delivery_binding_writer.sql)) and reports
-`ready` only when the prepared admission carries every one. Any other status,
-or no connection, is a failed readback, never permission to infer readiness.
-Approval still goes through the record verbs.
+Capture durable corrections as proposed edits to the relevant CLAUDE.md,
+AGENTS.md or skill in a pull request, with the trade-off. Proposals bind nobody
+until merged. Edit generated guidance at its source and regenerate it:
+`python3 ops/sync-core-rule-cards.py` renders the core cards from
+`ops/config/rule-cards.v1.json`. Keep attribution and review in Git history.
 
 ## Writing
 
-Content goes through the record layer's verbs, never into a markdown file — a
-hard gate enforces it. `./run.sh call <verb> '<json>'` reaches any verb.
+Business records go through the record layer's verbs; guidance changes go
+through the pull-request route above. `./run.sh call <verb> '<json>'` reaches any verb.
 This file and the vault's `CLAUDE.md`/`AGENTS.md` are among the few
 exact-path exceptions.
 

@@ -140,9 +140,8 @@ def health_rows(*, transport=on_machine):
             subject = machine + ':' + name
             line = (f'{"OK" if state == "ok" else "WARN"} Cloudflare {machine} {name} {state}'
                     f' · on breach: open/update one deduplicated loop cloudflare-token:{subject}'
-                    ' · owner orchestrator · remediation sync from a machine where it verifies or rotate'
-                    ' with python3 tools/cloudflare-tokens.py sync'
-                    ' · verify rerun python3 tools/cloudflare-tokens.py check'
+                    ' · owner orchestrator · remediation use provider token settings and GitHub Actions secrets'
+                    ' · verify rerun health for this machine and token'
                     ' · auto-clear on successful verification of this machine and token')
             rows.append({'subject': subject, 'status': state, 'line': line})
     return rows

@@ -4,7 +4,7 @@
 This verifier does not manufacture a partner journey, change a device, call a
 write verb, or touch Drive.  It accepts only independently collected evidence
 from each partner's real machine and checks the exact, mechanically knowable
-parts of the contract: identity attribution, the typed read/write/teach paths,
+parts of the contract: identity attribution, the typed read/write/guidance paths,
 Call Mode's two-person labels, device provenance, replacement recovery, and
 Joe's separate retirement authority.  A missing journey is not extrapolated
 from a passing unit test.
@@ -52,7 +52,7 @@ def _accepted(value: Mapping[str, Any], path: str) -> None:
 
 def _partner_evidence(partner: str, raw: Any) -> None:
     row = _obj(raw, f"partners.{partner}")
-    for key in ("read", "write", "teach", "call_mode", "device"):
+    for key in ("read", "write", "guidance", "call_mode", "device"):
         if key not in row:
             raise ContinuityError(f"partners.{partner}.{key} is required")
 
@@ -67,12 +67,15 @@ def _partner_evidence(partner: str, raw: Any) -> None:
         raise ContinuityError(f"partners.{partner}.write must name that partner and a supported typed write verb")
     _text(write.get("readback_ref"), f"partners.{partner}.write.readback_ref")
 
-    teach = _obj(row["teach"], f"partners.{partner}.teach")
-    _accepted(teach, f"partners.{partner}.teach")
-    if teach.get("actor") != partner or teach.get("verb") != "teach":
-        raise ContinuityError(f"partners.{partner}.teach must be that partner's teach receipt")
-    if teach.get("resulting_rule_status") != "proposed":
-        raise ContinuityError(f"partners.{partner}.teach must prove proposed-only, never automatic authority")
+    guidance = _obj(row["guidance"], f"partners.{partner}.guidance")
+    _accepted(guidance, f"partners.{partner}.guidance")
+    if guidance.get("actor") != partner:
+        raise ContinuityError(f"partners.{partner}.guidance must identify the proposing partner")
+    if guidance.get("path") not in {"CLAUDE.md", "AGENTS.md"} and not str(guidance.get("path", "")).endswith("/SKILL.md"):
+        raise ContinuityError(f"partners.{partner}.guidance must name CLAUDE.md, AGENTS.md or a skill")
+    if guidance.get("proposal_status") != "proposed":
+        raise ContinuityError(f"partners.{partner}.guidance must prove proposed-only, never automatic authority")
+    _text(guidance.get("pull_request_ref"), f"partners.{partner}.guidance.pull_request_ref")
 
     call = _obj(row["call_mode"], f"partners.{partner}.call_mode")
     _accepted(call, f"partners.{partner}.call_mode")
@@ -143,7 +146,7 @@ def main() -> int:
         print(f"NOT READY: {exc}")
         return 2
     status = result["drive_status"]
-    print(f"partner continuity evidence: Joe + Dell read/write/teach/call-mode/device accepted; Drive={status}")
+    print(f"partner continuity evidence: Joe + Dell read/write/guidance/call-mode/device accepted; Drive={status}")
     if status == "READY_FOR_JOE_APPROVAL" and not args.allow_waiting_joe_approval:
         print("NOT READY: only Joe's explicit retirement approval and then the verified legacy-disable receipt remain")
         return 2

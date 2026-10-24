@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import subprocess
 import unittest
 from unittest import mock
 
@@ -13,6 +14,18 @@ from lib.rule_cards import CardSelector, load_cards
 
 
 class CardTests(unittest.TestCase):
+    def test_durable_corrections_use_guidance_pull_requests(self):
+        wording = next(c['wording'] for c in load_cards() if c['id'] == 'K12')
+        for phrase in ('CLAUDE.md', 'AGENTS.md', 'skill', 'PR',
+                       'proposals bind nobody until merged',
+                       'quote both, offer a skill'):
+            self.assertIn(phrase, wording)
+        self.assertNotIn('teach', wording)
+
+    def test_boot_pages_match_card_source(self):
+        subprocess.run([sys.executable, str(REPO / 'ops/sync-core-rule-cards.py'), '--check'],
+                       check=True, cwd=REPO)
+
     def setUp(self):
         self.cards = load_cards()
         self.core = {c['id'] for c in self.cards if c['placement'] == 'CORE'}
