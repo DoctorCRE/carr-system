@@ -121935,6 +121935,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0940_codex_job_delegation_control_refs.sql	9402a4057ee309d9a4959257e9d5a9a4c41451536f57d3def2201f02fd6741ab	1970-01-01 00:00:00+00
 0944_retire_orphan_control_inventory.sql	ab7c35cfc581268b40bab5b29399e315286b24ba1c3c8c86bc0b9c49673def37	1970-01-01 00:00:00+00
 0947_allow_approved_control_evidence_refresh.sql	b051840f87086cdfcfbe21abae004df2f7023907f081851f95c22a7e017f8800	1970-01-01 00:00:00+00
+0950_remove_retired_workflow_manifest_binding.sql	87c2d7f9aba676b4b0e0d7262b024fe20f4ee1e7a7ced5ced4dcce19267d9a41	1970-01-01 00:00:00+00
 \.
 
 
