@@ -78,8 +78,14 @@ class ScheduledRefreshTests(unittest.TestCase):
                 time.sleep(0.15)
             except Exception:
                 pass
+        run_stage = board.run_publication_stage
+        normal_timeout = board.STAGE_TIMEOUT_SECONDS
+        def bounded_answer_stage(project, phase, action):
+            timeout = 0.03 if phase == "answers" else normal_timeout
+            with patch.object(board, "STAGE_TIMEOUT_SECONDS", timeout):
+                return run_stage(project, phase, action)
         prior_handler = signal.getsignal(signal.SIGALRM)
-        with patch.object(board, "STAGE_TIMEOUT_SECONDS", 0.03, create=True), patch.object(board, "render"), patch.object(board, "build_all_repos"), patch.object(board, "publish_board") as publish, patch.object(board, "poll_board_answers", side_effect=stall), patch.object(board, "publish_needs_joe_local") as local, patch("sys.stderr", new_callable=io.StringIO):
+        with patch.object(board, "run_publication_stage", side_effect=bounded_answer_stage), patch.object(board, "render"), patch.object(board, "build_all_repos"), patch.object(board, "publish_board") as publish, patch.object(board, "poll_board_answers", side_effect=stall), patch.object(board, "publish_needs_joe_local") as local, patch("sys.stderr", new_callable=io.StringIO):
             with self.assertRaisesRegex(RuntimeError, "answers.*timed_out"):
                 board.command_render(Namespace(project=board.LAUNCHD_BOARD, publish=True))
         local.assert_called_once_with()

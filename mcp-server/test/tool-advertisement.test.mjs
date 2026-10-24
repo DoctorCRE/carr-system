@@ -52,7 +52,12 @@ test("the shared client endpoint preserves five verbs' direct and passthrough gu
     const direct = await rpc("tools/call", { name, arguments: args });
     const delegated = await rpc("tools/call", { name: "call-verb", arguments: { verb: name, args } });
     assert.equal(direct.result.isError, true, name);
-    assert.deepEqual(delegated.result, direct.result, name);
+    const { correlation_id: directId, ...directError } = JSON.parse(direct.result.content[0].text);
+    const { correlation_id: delegatedId, ...delegatedError } = JSON.parse(delegated.result.content[0].text);
+    assert.match(directId, /^[a-f0-9-]{36}$/);
+    assert.match(delegatedId, /^[a-f0-9-]{36}$/);
+    assert.notEqual(directId, delegatedId, "separate requests have separate log lookup ids");
+    assert.deepEqual(delegatedError, directError, name);
     assert.equal(JSON.parse(direct.result.content[0].text).error, expected, name);
   }
 });
@@ -181,7 +186,13 @@ test("shared engineering doors are retired while app readers remain registered",
     const direct = await rpc("tools/call", { name, arguments: {} });
     const delegated = await rpc("tools/call", { name: "call-verb", arguments: { verb: name, args: {} } });
     assert.equal(JSON.parse(direct.result.content[0].text).error, "unknown_tool", name);
-    assert.deepEqual(delegated.result, direct.result, name);
+    const directError = JSON.parse(direct.result.content[0].text);
+    const delegatedError = JSON.parse(delegated.result.content[0].text);
+    assert.ok(directError.correlation_id, name);
+    assert.ok(delegatedError.correlation_id, name);
+    delete directError.correlation_id;
+    delete delegatedError.correlation_id;
+    assert.deepEqual(delegatedError, directError, name);
   }
   for (const name of ["engineering-passport", "read-portfolio", "list-my-codex-sessions",
     "recall-memory", "cancel-capability-session", "list-shipped-releases", "read-work-shape",
