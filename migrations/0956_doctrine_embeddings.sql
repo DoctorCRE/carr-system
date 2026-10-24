@@ -438,12 +438,12 @@ LANGUAGE sql IMMUTABLE SET search_path=pg_catalog AS $fn$ SELECT $current_grants
   }
 }$current_grants$::jsonb $fn$;
 
-CREATE OR REPLACE FUNCTION ops.scac_mutation_catalog_v118_current()
+create or replace function ops.scac_mutation_catalog_v118_current()
  RETURNS boolean
  LANGUAGE plpgsql
  STABLE SECURITY DEFINER
  SET search_path TO 'pg_catalog', 'public', 'ops', 'pg_temp'
-AS $function$
+as $fn$
 declare observed_count integer; observed_digest text; registered_count integer;
   current_grants jsonb := ops.scac_current_grant_contract();
 begin
@@ -488,7 +488,7 @@ begin
   select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
   if exists (select 1 from pg_auth_members m join pg_roles g on g.oid=m.roleid join pg_roles mem on mem.oid=m.member where mem.rolname~'^carr_' and (g.rolsuper or g.rolname~'^(neon_|pg_)')) then return false; end if;
   return observed_count=13 and observed_digest='sha256:93724fe71ed216afac9b4bf48eee500e693de057cae0b59f59ff8e68cc6a2bc0';
-end $function$;
+end $fn$;
 
 CREATE OR REPLACE FUNCTION ops.scac_reference_monitor_state() RETURNS jsonb
     LANGUAGE plpgsql STABLE SECURITY DEFINER
