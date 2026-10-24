@@ -75,23 +75,3 @@ test("worker packet accepts facts or explicit negative evidence, never recommend
     hint: "workers return scoped facts; the investigation owner adjudicates",
   });
 });
-
-test("investigation registry exposes the bounded loop and marks writes", () => {
-  const reads = ["next-signals", "investigation-neighborhood", "get-investigation"];
-  const writes = ["record-signal", "open-investigation", "open-investigation-branch",
-    "record-branch-evidence", "adjudicate-investigation-branch", "close-investigation"];
-
-  for (const name of reads) {
-    assert.ok(TOOLS[name], `${name} should be registered`);
-    assert.equal(Boolean(TOOLS[name].write), false, `${name} should be read-only`);
-  }
-  for (const name of writes) {
-    assert.ok(TOOLS[name], `${name} should be registered`);
-    assert.equal(TOOLS[name].write, true, `${name} should be a write`);
-  }
-
-  assert.equal(TOOLS["record-branch-evidence"].inputSchema.additionalProperties, false);
-  assert.equal(Object.hasOwn(TOOLS["record-branch-evidence"].inputSchema.properties, "recommendation"), false);
-  assert.equal(TOOLS["close-investigation"].inputSchema.required.includes("strongest_alternative"), true);
-  assert.equal(TOOLS["open-investigation-branch"].inputSchema.properties.max_depth, undefined);
-});

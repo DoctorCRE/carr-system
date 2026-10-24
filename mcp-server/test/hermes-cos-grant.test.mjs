@@ -71,7 +71,7 @@ test("ordinary Hermes and projector credentials retain their exact existing door
   assert.equal(profileForActor(a, new Request("https://api.doctorcre.com/mcp?profile=full")), "hermes");
   assert.equal(PROFILES.hermes.has("update-deal"), false);
   assert.equal(PROFILES.hermes.has("add-premises"), false);
-  assert.equal(PROFILES.hermes.has("project-room-queue"), true);
+  assert.equal(PROFILES.hermes.has("project-room-queue"), false);
   assert.equal(PROFILES.hermes.has("record-dispatch-link"), true);
 });
 
@@ -79,7 +79,7 @@ test("the CoS profile is server-locked and differs from Hermes by exactly two ve
   const req = new Request("https://api.doctorcre.com/mcp?profile=full");
   assert.equal(profileForActor(cos(), req), "hermes-cos");
   assert.deepEqual([...PROFILES.hermes].sort(), [
-    "add-critical-date", "add-loop", "complete-action", "log-activity", "project-room-queue",
+    "add-critical-date", "add-loop", "complete-action", "log-activity",
     "record-defect", "record-dispatch-link", "record-finding", "set-next-action", "stamp-touch", "update-loop",
   ]);
   assert.deepEqual([...PROFILES["hermes-cos"]].filter(v => !PROFILES.hermes.has(v)).sort(),

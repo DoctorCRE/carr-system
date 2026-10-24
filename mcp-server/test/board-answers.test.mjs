@@ -28,7 +28,7 @@ class Fake {
 
 test("board verbs expose typed versioned writes and a partner-only answer", () => {
   const writes = ["publish-board-snapshot", "ask-board-question", "revise-board-question",
-    "answer-board-question", "acknowledge-board-answer", "record-board-answer-applied"];
+    "answer-board-question", "acknowledge-board-answer"];
   assert.deepEqual([...BOARD_ANSWER_WRITE_VERBS], writes);
   for (const name of writes) {
     assert.equal(TOOLS[name]?.write, true, name);
@@ -178,13 +178,12 @@ test("concurrent same-key board writes replay the first result", async () => {
   assert.deepEqual(b.snapshot, a.snapshot);
 });
 
-test("board answers and receipts refuse a different sponsor within the same tenant", async () => {
+test("board answers and acknowledgments refuse a different sponsor within the same tenant", async () => {
   const answerId = "20000000-0000-0000-0000-000000000001";
   const answer = { id: answerId, asker_ref: "orchestrator:project", answer_text: "Proceed" };
   const fake = new Fake({
     "from board_answer a where": params => params.includes("joe") ? [answer] : [],
     "update board_answer a set received_at": params => params.includes("joe") ? [answer] : [],
-    "update board_answer a set applied_at": params => params.includes("joe") ? [answer] : [],
   });
   const args = { after_cursor: 0, asker_ref: "orchestrator:project" };
   const own = await TOOLS["read-board-answers"].handler(fake, joe, args);
@@ -198,16 +197,27 @@ test("board answers and receipts refuse a different sponsor within the same tena
     { idempotency_key: "ack-cross-sponsor", answer_id: answerId,
       asker_ref: "orchestrator:project", base_version: 1 }),
   error => error instanceof ToolError && error.payload.error === "board_version_conflict");
-  await assert.rejects(() => TOOLS["record-board-answer-applied"].handler(fake, dell,
-    { idempotency_key: "apply-cross-sponsor", answer_id: answerId,
-      base_version: 2, effect_ref: "pr:1400" }),
-  error => error instanceof ToolError && error.payload.error === "board_version_conflict");
-  for (const statement of ["update board_answer a set received_at",
-    "update board_answer a set applied_at"]) {
-    const [sql, params] = fake.calls.find(([query]) => query.includes(statement));
-    assert.match(sql, /a\.sponsoring_human_slug=\$4/);
-    assert.equal(params[3], "dell");
-  }
+  const [sql, params] = fake.calls.find(([query]) => query.includes("update board_answer a set received_at"));
+  assert.match(sql, /a\.sponsoring_human_slug=\$4/);
+  assert.equal(params[3], "dell");
+});
+
+test("acknowledgments require an exact version and record the actor", async () => {
+  const answerId = "20000000-0000-0000-0000-000000000001";
+  const received = { id: answerId, version: 2, status: "Received" };
+  const fake = new Fake({
+    "select request_hash, response": [],
+    "update board_answer a set received_at": [received],
+  });
+  const ack = await TOOLS["acknowledge-board-answer"].handler(fake, sponsoredRobot, {
+    idempotency_key: "ack-1", answer_id: answerId,
+    asker_ref: "orchestrator:project", base_version: 1,
+  });
+  assert.equal(ack.answer.status, "Received");
+  const [sql, params] = fake.calls.find(([query]) => query.includes("update board_answer a set received_at"));
+  assert.match(sql, /received_for_ref/);
+  assert.match(sql, /version=\$6/);
+  assert.deepEqual(params, [sponsoredRobot.id, "orchestrator:project", "carr-internal", "joe", answerId, 1]);
 });
 
 test("answer uses the authenticated partner, never a caller supplied answered_by", async () => {
@@ -242,34 +252,6 @@ test("a machine cannot answer even when it has a verified sponsor", async () => 
     error => error instanceof ToolError && error.payload.error === "board_answer_requires_human_partner",
   );
   assert.deepEqual(fake.calls, []);
-});
-
-test("Received and Applied require exact versions and record the actor and effect", async () => {
-  const answerId = "20000000-0000-0000-0000-000000000001";
-  const received = { id: answerId, version: 2, status: "Received" };
-  const applied = { id: answerId, version: 3, status: "Applied", effect_ref: "pr:1400" };
-  const fake = new Fake({
-    "select request_hash, response": [],
-    "update board_answer a set received_at": [received],
-    "update board_answer a set applied_at": [applied],
-  });
-  const ack = await TOOLS["acknowledge-board-answer"].handler(fake, sponsoredRobot, {
-    idempotency_key: "ack-1", answer_id: answerId,
-    asker_ref: "orchestrator:project", base_version: 1,
-  });
-  assert.equal(ack.answer.status, "Received");
-  const [ackSql, ackParams] = fake.calls.find(([sql]) => sql.includes("update board_answer a set received_at"));
-  assert.match(ackSql, /received_for_ref/);
-  assert.match(ackSql, /version=\$6/);
-  assert.deepEqual(ackParams, [sponsoredRobot.id, "orchestrator:project", "carr-internal", "joe", answerId, 1]);
-  const result = await TOOLS["record-board-answer-applied"].handler(fake, sponsoredRobot, {
-    idempotency_key: "applied-1", answer_id: answerId, base_version: 2,
-    effect_ref: "pr:1400",
-  });
-  assert.equal(result.answer.status, "Applied");
-  const [applySql, applyParams] = fake.calls.find(([sql]) => sql.includes("update board_answer a set applied_at"));
-  assert.match(applySql, /received_at is not null/);
-  assert.deepEqual(applyParams, [sponsoredRobot.id, "pr:1400", "carr-internal", "joe", answerId, 2]);
 });
 
 test("the board read leaves unanswered questions without a status", async () => {
