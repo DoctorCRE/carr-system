@@ -18,14 +18,9 @@ Subcommands:
     check                         — print config/provisioning status
 
 Config: ~/.config/carr-capture/config.json = {"base_url", "device_id",
-"token"}. Missing config, or any of the three fields empty, is a CLEAN
-NO-OP everywhere (log one line, exit 0) — Joe has not provisioned the
-device token yet (see SUMMARY.md, "Human provisioning"), and nothing about
-the capture pipeline may break in the meantime. The same rule applies to
-every HTTP failure: network error, timeout, 4xx, 5xx. This tool sits beside
-the actual recording pipeline, never inside its critical path — a down
-worker, a bad token, or a stale session must never stop a meeting from
-being recorded or transcribed.
+"token"}. Verified no-work returns zero; unavailable configuration returns
+78 and failed operations return one. This tool sits beside the recording
+pipeline. Its failures leave recordings and retry markers intact.
 
 Never logs the device token, the session token, or any Authorization header
 value — only "present"/"missing" where that matters (the check subcommand).
@@ -44,6 +39,7 @@ import uuid
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from enum import IntEnum
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +56,12 @@ CALL_CONTEXT_WAIT_SECONDS = 8
 
 class BridgeNetworkError(Exception):
     """Any transport-level failure: DNS, connection refused, timeout, ..."""
+
+
+class Outcome(IntEnum):
+    VERIFIED = 0
+    UNAVAILABLE = 1
+    UNCONFIGURED = 78
 
 
 # --- logging -----------------------------------------------------------
@@ -107,9 +109,7 @@ def load_config_raw() -> dict[str, Any] | None:
 
 
 def load_config() -> dict[str, str] | None:
-    """base_url/device_id/token, all non-empty, or None. None is the single
-    signal every subcommand treats as "clean no-op" — this is the only
-    place that decides whether the config is usable."""
+    """Return usable configuration, or None for an unavailable executor."""
     data = load_config_raw()
     if data is None:
         return None
@@ -127,7 +127,7 @@ def load_config() -> dict[str, str] | None:
 def read_json(path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
 
@@ -153,6 +153,15 @@ def write_json_atomic(path: Path, data: dict[str, Any], mode: int | None) -> boo
         except OSError:
             pass
         return False
+
+
+def verified(session_dir: Path, operation: str) -> int:
+    health_path = session_dir / ".capture-health.json"
+    health = read_json(health_path) or {}
+    health[f"last_verified_{operation}_at"] = iso_now_utc()
+    if not write_json_atomic(health_path, health, mode=0o600):
+        return Outcome.UNAVAILABLE
+    return Outcome.VERIFIED
 
 
 # --- http ------------------------------------------------------------------
@@ -223,37 +232,63 @@ def claim_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         log_line(f"SKIP claim already-ingested session={name}")
         return 0
 
-    announcement = read_json(session_dir / "announcement.json")
+    announcement_path = session_dir / "announcement.json"
+    announcement = read_json(announcement_path)
     if announcement is None:
+        if announcement_path.exists():
+            log_line(f"ERROR claim announcement.json unreadable session={name}")
+            return Outcome.UNAVAILABLE
         log_line(f"SKIP claim no-announcement session={name} (consent proof missing)")
         return 0
-    announced_at = str(announcement.get("announcement_fired_at") or "").strip()
-    if not announced_at:
-        log_line(f"SKIP claim announcement.json missing announcement_fired_at session={name}")
-        return 0
+    announced_at = announcement.get("announcement_fired_at")
+    if not isinstance(announced_at, str) or not announced_at.strip():
+        log_line(f"ERROR claim announcement.json invalid announcement_fired_at session={name}")
+        return Outcome.UNAVAILABLE
+    announced_at = announced_at.strip()
 
-    meta = read_json(session_dir / "meta.json")
+    meta_path = session_dir / "meta.json"
+    meta = read_json(meta_path)
     if meta is None:
+        if meta_path.exists():
+            log_line(f"ERROR claim meta.json unreadable session={name}")
+            return Outcome.UNAVAILABLE
         log_line(f"SKIP claim no-meta session={name}")
         return 0
-    started_at = str(meta.get("started") or "").strip()
-    if not started_at:
-        log_line(f"SKIP claim meta.json missing started session={name}")
-        return 0
+    started_at = meta.get("started")
+    if not isinstance(started_at, str) or not started_at.strip():
+        log_line(f"ERROR claim meta.json invalid started session={name}")
+        return Outcome.UNAVAILABLE
+    started_at = started_at.strip()
 
-    body = {
-        "nonce": str(uuid.uuid4()),
-        "device_id": cfg["device_id"],
-        "mode": "meeting",
-        "started_at": started_at,
-        "consent": {"announced_at": announced_at},
-    }
-    # meta.json exists before this function is reached, so an ordinary Quill
-    # session pays only this bounded wait. A Call Mode start has up to six
-    # seconds to discover its new session and write the mode; waiting eight
-    # prevents capture-watch from permanently claiming it as the wrong workflow.
-    if wait_for_call_mode(session_dir) == "weekly_deal_call":
-        body["workflow"] = "post_call"
+    # Freeze the server's timestamp shape, not whatever Python's parser accepts.
+    try:
+        announced_at, started_at = (
+            datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+            .isoformat().replace("+00:00", "Z")
+            for value in (announced_at, started_at))
+    except ValueError:
+        log_line(f"ERROR claim invalid prerequisite timestamp session={name}")
+        return Outcome.UNAVAILABLE
+
+    request_path = session_dir / ".capture-request.json"
+    body = read_json(request_path)
+    if request_path.exists() and (body is None or not body.get("nonce")):
+        log_line(f"ERROR claim request marker unreadable session={name}")
+        return Outcome.UNAVAILABLE
+    if body is None:
+        body = {
+            "nonce": str(uuid.uuid4()),
+            "device_id": cfg["device_id"],
+            "mode": "meeting",
+            "started_at": started_at,
+            "consent": {"announced_at": announced_at},
+        }
+        # A Call Mode start has six seconds to attach its workflow before
+        # this immutable claim. Persist the nonce before any ambiguous effect.
+        if wait_for_call_mode(session_dir) == "weekly_deal_call":
+            body["workflow"] = "post_call"
+        if not write_json_atomic(request_path, body, mode=0o600):
+            return Outcome.UNAVAILABLE
     headers = {"Authorization": f"Bearer {cfg['token']}"}
     url = f"{cfg['base_url']}/capture/claim"
 
@@ -261,17 +296,17 @@ def claim_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         status, resp = http_request("POST", url, body, headers)
     except BridgeNetworkError as exc:
         log_line(f"ERROR claim network failure session={name}: {exc}")
-        return 0
+        return Outcome.UNAVAILABLE
 
     if status != 200:
         log_line(f"ERROR claim rejected session={name} status={status}")
-        return 0
+        return Outcome.UNAVAILABLE
 
     session_token = str(resp.get("session_token") or "").strip()
     ttl_seconds = resp.get("ttl_seconds")
     if not session_token:
         log_line(f"ERROR claim response missing session_token session={name}")
-        return 0
+        return Outcome.UNAVAILABLE
 
     now = datetime.now(timezone.utc)
     claimed_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -290,15 +325,15 @@ def claim_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     }
     if not write_json_atomic(capture_marker, marker, mode=0o600):
         log_line(f"ERROR claim: could not persist .capture.json session={name}")
-        return 0
+        return Outcome.UNAVAILABLE
 
     log_line(f"CLAIMED session={name} ttl_seconds={ttl_seconds}")
 
     # Per spec: a successful claim immediately reports "recording". Routed
     # through status_cmd (re-reading the marker we just wrote) so there is
     # exactly one code path that posts a status update, ever.
-    status_cmd(cfg, session_dir, "recording", None)
-    return 0
+    status_rc = status_cmd(cfg, session_dir, "recording", None)
+    return status_rc or verified(session_dir, "claim")
 
 
 # --- status ------------------------------------------------------------
@@ -306,14 +341,18 @@ def claim_cmd(cfg: dict[str, str], session_dir: Path) -> int:
 
 def status_cmd(cfg: dict[str, str], session_dir: Path, state: str, detail: str | None) -> int:
     name = session_dir.name
-    marker = read_json(session_dir / ".capture.json")
+    capture_marker = session_dir / ".capture.json"
+    marker = read_json(capture_marker)
     if marker is None:
+        if capture_marker.exists():
+            log_line(f"ERROR status capture-marker-unreadable session={name} state={state}")
+            return Outcome.UNAVAILABLE
         log_line(f"NOOP status no-capture-marker session={name} state={state}")
-        return 0
+        return Outcome.VERIFIED
     session_token = str(marker.get("session_token") or "").strip()
     if not session_token:
-        log_line(f"NOOP status capture-marker-missing-token session={name} state={state}")
-        return 0
+        log_line(f"ERROR status capture-marker-missing-token session={name} state={state}")
+        return Outcome.UNAVAILABLE
 
     body: dict[str, Any] = {
         "session_token": session_token,
@@ -328,7 +367,7 @@ def status_cmd(cfg: dict[str, str], session_dir: Path, state: str, detail: str |
         status, _resp = http_request("POST", url, body, None)
     except BridgeNetworkError as exc:
         log_line(f"ERROR status network failure session={name} state={state}: {exc}")
-        return 0
+        return Outcome.UNAVAILABLE
 
     if status == 200:
         log_line(f"STATUS posted session={name} state={state}")
@@ -339,6 +378,7 @@ def status_cmd(cfg: dict[str, str], session_dir: Path, state: str, detail: str |
         )
     else:
         log_line(f"ERROR status rejected session={name} state={state} status={status}")
+        return Outcome.UNAVAILABLE
     return 0
 
 
@@ -396,7 +436,7 @@ def publish_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     bindings = shaped.get("bindings") or []
     post_bindings = [item for item in bindings if item.get("remote") == "post_call"]
     legacy_bindings = [item for item in bindings if item.get("remote") == "legacy"]
-    status_cmd(cfg, session_dir, "distilling", None)
+    status_rc = status_cmd(cfg, session_dir, "distilling", None)
     posted = post_batch(
         cfg, session_dir, "/capture/post-call/candidates",
         shaped.get("post_call_items") or [], post_bindings, "post-call",
@@ -405,14 +445,15 @@ def publish_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         cfg, session_dir, "/capture/candidates",
         shaped.get("legacy_items") or [], legacy_bindings, "legacy",
     )
-    if not (posted and legacy):
+    if not (posted and legacy) or status_rc != 0:
         return 1
     marker = {
         "published_at": iso_now_utc(),
         "post_call_count": len(shaped.get("post_call_items") or []),
         "legacy_count": len(shaped.get("legacy_items") or []),
     }
-    write_json_atomic(session_dir / post_call.PUSH_FILE, marker, mode=0o600)
+    if not write_json_atomic(session_dir / post_call.PUSH_FILE, marker, mode=0o600):
+        return Outcome.UNAVAILABLE
     log_line(
         f"PUBLISHED session={session_dir.name} "
         f"post_call={marker['post_call_count']} legacy={marker['legacy_count']}"
@@ -471,19 +512,22 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     capture_marker = session_dir / ".capture.json"
     marker = read_json(capture_marker)
     if marker is None:
+        if capture_marker.exists():
+            log_line(f"ERROR poll capture-marker-unreadable session={name}")
+            return Outcome.UNAVAILABLE
         log_line(f"NOOP poll no-capture-marker session={name}")
-        return 0
+        return Outcome.VERIFIED
     session_token = str(marker.get("session_token") or "").strip()
     if not session_token:
-        log_line(f"NOOP poll capture-marker-missing-token session={name}")
-        return 0
+        log_line(f"ERROR poll capture-marker-missing-token session={name}")
+        return Outcome.UNAVAILABLE
 
     # Candidate filing must win this race. Filing a zero-count aggregate report
     # before local proposals have their remote IDs would lock the session and
     # silently discard every proposed task/update/draft.
     if (session_dir / post_call.REPORT_FILE).exists() and publish_cmd(cfg, session_dir) != 0:
         log_line(f"POLL session={name} candidate publish incomplete — holding recordings")
-        return 0
+        return Outcome.UNAVAILABLE
 
     headers = {"Authorization": f"Bearer {session_token}"}
     url = f"{cfg['base_url']}/capture/session"
@@ -492,14 +536,18 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         status, resp = http_request("GET", url, None, headers)
     except BridgeNetworkError as exc:
         log_line(f"ERROR poll network failure session={name}: {exc}")
-        return 0
+        return Outcome.UNAVAILABLE
 
     if status == 401:
         log_line(f"ERROR poll unauthorized(401) session={name} (session token invalid/expired?)")
-        return 0
+        return Outcome.UNAVAILABLE
     if status != 200:
         log_line(f"ERROR poll failed session={name} status={status}")
-        return 0
+        return Outcome.UNAVAILABLE
+
+    if not isinstance(resp.get("state"), str) or "meeting_record" not in resp:
+        log_line(f"ERROR poll malformed response session={name}")
+        return Outcome.UNAVAILABLE
 
     meeting_record = resp.get("meeting_record")
     meeting_record_str = str(meeting_record).strip() if meeting_record is not None else ""
@@ -513,13 +561,13 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         # distilled, attributed narrative that is supposed to replace them
         # actually exists. Write NOTHING in that case — ever.
         log_line(f"POLL session={name} state={state} meeting_record=null — no ingested.json written")
-        return 0
+        return verified(session_dir, "poll")
 
     receipt: dict[str, Any] | None = None
     if is_post_call:
         if not (session_dir / post_call.REPORT_FILE).exists():
             log_line(f"POLL session={name} post_call local report unavailable — holding recordings")
-            return 0
+            return verified(session_dir, "poll")
         sync_candidate_statuses(session_dir, resp)
         raw_candidates = resp.get("candidates")
         post_call_candidates: dict[str, Any] = raw_candidates if isinstance(raw_candidates, dict) else {}
@@ -532,20 +580,21 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         if report.get("filed") is not True:
             if pending != 0 or candidate_count is None:
                 log_line(f"POLL session={name} post_call pending={pending} — holding recordings")
-                return 0
+                return verified(session_dir, "poll")
             filed, remote_hash = file_post_call_report(
                 cfg, session_dir, session_token, candidate_count,
             )
             if not filed:
-                return 0
+                return Outcome.UNAVAILABLE
         if not remote_hash:
             log_line(f"POLL session={name} post_call report missing hash — holding recordings")
-            return 0
+            return Outcome.UNAVAILABLE
         receipt = post_call.retention_ready(session_dir, remote_hash)
         if receipt is None:
             log_line(f"POLL session={name} post_call filed remotely — holding recordings pending local dispositions")
-            return 0
-        status_cmd(cfg, session_dir, "done", None)
+            return verified(session_dir, "poll")
+        if status_cmd(cfg, session_dir, "done", None) != 0:
+            return Outcome.UNAVAILABLE
 
     # candidates.confirmed may be a count or a list depending on the
     # response shape actually returned; only extract refs if it's a list.
@@ -573,7 +622,7 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         ingested.update({"post_call": True, "aggregate_report_hash": receipt["aggregate_report_hash"], "backend_report_sha256": receipt["backend_report_sha256"], "pending_items": receipt["pending_items"]})
     if not write_json_atomic(session_dir / "ingested.json", ingested, mode=None):
         log_line(f"ERROR poll: could not write ingested.json session={name}")
-        return 0
+        return Outcome.UNAVAILABLE
 
     try:
         capture_marker.unlink()
@@ -582,10 +631,10 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
             f"WARN poll: ingested.json written but could not remove .capture.json "
             f"session={name}: {exc}"
         )
-        return 0
+        return Outcome.UNAVAILABLE
 
     log_line(f"INGESTED session={name} meeting_record={meeting_record} records={len(records)}")
-    return 0
+    return verified(session_dir, "poll")
 
 
 # --- check -----------------------------------------------------------------
@@ -635,8 +684,8 @@ def main(argv: list[str]) -> int:
             return 2
         cfg = load_config()
         if cfg is None:
-            log_line("NOOP claim: no usable config (missing base_url/device_id/token)")
-            return 0
+            log_line("UNAVAILABLE claim: no usable config (missing base_url/device_id/token)")
+            return Outcome.UNCONFIGURED
         return claim_cmd(cfg, Path(argv[2]).resolve())
 
     if cmd == "status":
@@ -645,8 +694,8 @@ def main(argv: list[str]) -> int:
             return 2
         cfg = load_config()
         if cfg is None:
-            log_line("NOOP status: no usable config (missing base_url/device_id/token)")
-            return 0
+            log_line("UNAVAILABLE status: no usable config (missing base_url/device_id/token)")
+            return Outcome.UNCONFIGURED
         detail = argv[4] if len(argv) > 4 else None
         return status_cmd(cfg, Path(argv[2]).resolve(), argv[3], detail)
 
@@ -656,8 +705,8 @@ def main(argv: list[str]) -> int:
             return 2
         cfg = load_config()
         if cfg is None:
-            log_line("NOOP publish: no usable config (missing base_url/device_id/token)")
-            return 0
+            log_line("UNAVAILABLE publish: no usable config (missing base_url/device_id/token)")
+            return Outcome.UNCONFIGURED
         return publish_cmd(cfg, Path(argv[2]).resolve())
 
     if cmd == "poll":
@@ -666,8 +715,8 @@ def main(argv: list[str]) -> int:
             return 2
         cfg = load_config()
         if cfg is None:
-            log_line("NOOP poll: no usable config (missing base_url/device_id/token)")
-            return 0
+            log_line("UNAVAILABLE poll: no usable config (missing base_url/device_id/token)")
+            return Outcome.UNCONFIGURED
         return poll_cmd(cfg, Path(argv[2]).resolve())
 
     sys.stderr.write(f"usage: unknown subcommand {cmd!r}\n")
