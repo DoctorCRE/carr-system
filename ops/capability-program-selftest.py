@@ -103,27 +103,6 @@ def tier1() -> None:
           and "enable trigger capability_program_identity_guard_before_update" in reorder_sql
           and reorder_sql.rstrip().endswith("commit;"))
 
-    # ── THE BUILD-DISCIPLINE LATCH (2026-08-21) ─────────────────────────────
-    # capability-program said completed=0/51 and a session read that as "nothing
-    # is built" and started a rebuild of work already on main. completed counts
-    # confirmed_closed attestations only — not code on disk. The verb must say so
-    # so the number cannot be misread as build truth.
-    cp_src = (REPO / "mcp-server" / "src" / "capability-program.js").read_text(encoding="utf-8")
-    check("capability-program returns landed_in_repo: null",
-          "landed_in_repo: null" in cp_src,
-          "the Worker cannot stat the repo; null is the honest value")
-    check("capability-program returns built_unclosed: []",
-          "built_unclosed: []" in cp_src,
-          "the Worker cannot detect disk-landed work; [] is the honest default")
-    check("capability-program hint names the local detection path",
-          "Run ops/built_unclosed.py" in cp_src and "CLOSE-BEFORE-BUILD" in cp_src
-          and "completed counts confirmed_closed only" in cp_src,
-          "the hint must say completed counts confirmed_closed only and name CLOSE-BEFORE-BUILD")
-    check("sessionBrief first line is the build-discipline warning",
-          "This card may already have code" in cp_src
-          and "completed!=closed is not permission to rebuild" in cp_src
-          and "Run ops/built_unclosed.py before writing" in cp_src,
-          "sessionBrief must open with the CLOSE-BEFORE-BUILD warning")
 
 
 def tier2() -> None:

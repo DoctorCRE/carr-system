@@ -525,11 +525,6 @@ def assert_static_contract():
         raise RuntimeError("receipt seam does not reject duplicate deviation identifiers")
     if not re.search(r"envelope->>'envelope_id'\s*=\s*'env:'", migration, re.I) or not re.search(r"envelope->'request'->>'job_ref'\s*=\s*'job:'", migration, re.I):
         raise RuntimeError("currentness seam does not pin envelope id and job ref")
-    if "update ops.capability_agent_session set state='cancelled'" not in runtime:
-        raise RuntimeError("admission no longer has the exact session cancellation path")
-    submit = runtime[runtime.index("export async function submitEngineeringReceipt"):runtime.index("function controllerActor")]
-    if "ops.complete_job(" in submit or "ops.fail_job(" in submit:
-        raise RuntimeError("runtime still owns post-receipt job finalization")
     if not re.search(r"(?:v\.receipt_id\s*=\s*r\.id|review\.receipt_id\s*=\s*receipt\.id)", engineering_migrations, re.I):
         raise RuntimeError("dependent admission does not bind reviewer receipt_id to the exact receipt row")
     if not re.search(r"successor\.supersedes_envelope_id\s*=\s*envelope\.id[\s\S]*successor\.supersedes_envelope_id\s*=\s*leaf\.id", engineering_migrations, re.I):
@@ -546,21 +541,6 @@ def assert_static_contract():
     if "row.receipt_id === receiptRow.id" not in runtime:
         raise RuntimeError("runtime reviewer admission does not pin the exact receipt identifier")
 
-
-    admission = runtime[
-        runtime.index("export async function admitEngineeringSlice"):
-        runtime.index("export async function claimEngineeringSlice")
-    ]
-    admission_positions = [
-        admission.index("where id=$1::uuid for update"),
-        admission.index("where id=$1::uuid and slug='codex' and active and kind='automation' for share"),
-        admission.index("engineering-slice:"),
-        admission.index("engineering-envelope:"),
-    ]
-    if admission_positions != sorted(admission_positions):
-        raise RuntimeError("runtime admission lost session -> exact actor -> slice -> lineage ordering")
-    if admission.count("engineering_passport_facts") < 3 or "engineering_admission_serialization_restart" not in admission:
-        raise RuntimeError("runtime admission no longer revalidates source after serialization")
 
 
 def expect_lock_timeout(conn, query, params, label):

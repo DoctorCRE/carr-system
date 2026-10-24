@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { ToolError } from './tool-error.js';
 import { organizationTenantForActor } from './identity.js';
 import { partnerAuthoritySlugForActor } from './partner-authority.js';
-import { isCalendarDate } from './calendar-date.js';
 
 export const FEATURE_VERBS = Object.freeze({
   'decide-doc-suggestion':'doc-suggestion-actions',
@@ -35,49 +34,13 @@ const write = async (c, action, args) => {
   }
 };
 
-export const FEATURE_SWITCH_WRITES = new Set(['set-feature-switch','flip-feature-switch','check-feature-switches']);
+export const FEATURE_SWITCH_WRITES = new Set(['check-feature-switches']);
 const common = {
   name:{ type:'string', pattern:'^[a-z][a-z0-9-]{0,62}$' },
-  idempotency_key:{ type:'string' }, base_version:{ type:'integer', minimum:0 },
 };
-const audience = { type:'string', enum:['joe','team','everyone'] };
 const projection = row => ({ ...row, retirement_loop_id:undefined });
 
-export function featureSwitchTools({ withEnvelope, writeEvent, executeRegisteredTool }) {
-  const change = (verb, flip) => async (c, actor, args) => withEnvelope(c, actor, verb, args, async () => {
-    if (!/^[a-z][a-z0-9-]{0,62}$/.test(args.name || '') || !Number.isInteger(args.base_version) || args.base_version < 0
-      || (args.audience !== undefined && !['joe','team','everyone'].includes(args.audience)))
-      throw new ToolError({ error:'feature_switch_input_invalid' });
-    if (flip ? typeof args.enabled !== 'boolean' :
-      typeof args.default_enabled !== 'boolean' || typeof args.description !== 'string' || !args.description.trim() || args.description.trim().length > 1000
-      || !['joe','dell','claude'].includes(args.owner) || !isCalendarDate(args.expected_removal_on)
-      || (args.retired !== undefined && typeof args.retired !== 'boolean'))
-      throw new ToolError({ error:'feature_switch_input_invalid' });
-    const tenant = organizationTenantForActor(actor);
-    await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`feature-switch:${tenant}:${args.name}`]);
-    const prior = (await c.query('select * from feature_switch where organization_tenant_id=$1 and name=$2',
-      [tenant,args.name])).rows[0];
-    if ((prior?.version || 0) !== args.base_version || flip && !prior)
-      throw new ToolError({ error:'feature_switch_version_conflict', current_version:prior?.version || 0 });
-    let row;
-    if (!prior) {
-      if (args.retired === true) throw new ToolError({error:'feature_switch_cannot_create_retired'});
-      row = await write(c,'create',{ tenant, name:args.name, description:args.description.trim(), default_enabled:args.default_enabled,
-        audience:args.audience, owner:args.owner, expected_removal_on:args.expected_removal_on });
-    } else if (flip) {
-      if (prior.retired_at) throw new ToolError({ error:'feature_switch_retired' });
-      row = await write(c,'flip',{ id:prior.id, base_version:prior.version, enabled:args.enabled, audience:args.audience ?? prior.audience });
-    } else {
-      row = await write(c,'revise',{ id:prior.id, base_version:prior.version, description:args.description.trim(),
-        default_enabled:args.default_enabled, audience:args.audience, owner:args.owner,
-        expected_removal_on:args.expected_removal_on, retired:args.retired ?? null });
-    }
-    if (!row) throw new ToolError({ error:'feature_switch_version_conflict', current_version:prior?.version || 0 });
-    await writeEvent(c,actor,verb,'feature_switch',row.id,{
-      old:prior ? projection(prior) : null, new:projection(row), idempotency_key:args.idempotency_key,
-    });
-    return { ok:true, switch:projection(row) };
-  });
+export function featureSwitchTools({ withEnvelope, executeRegisteredTool }) {
   return {
     'check-feature-switches':{
       write:true,
@@ -114,22 +77,6 @@ export function featureSwitchTools({ withEnvelope, writeEvent, executeRegistered
         }
         return {ok:true,overdue,cleared,line:`${overdue.length ? 'WARN' : 'OK'} feature switches: ${overdue.length} overdue · on breach: create/update deduplicated owner loop; retire and remove gates after review or record a reviewed future date; verify list-feature-switches and consumer tests; auto-clear when retired or no longer overdue.`};
       }),
-    },
-    'set-feature-switch':{
-      write:true,
-      description:'Create or revise a feature switch with plain words, owner and removal date. Version 0 creates; a current version edits or retires. No deploy or release is performed.',
-      inputSchema:{ type:'object', additionalProperties:false, properties:{ ...common,
-        description:{type:'string',maxLength:1000}, default_enabled:{type:'boolean'}, audience,
-        owner:{type:'string',enum:['joe','dell','claude']}, expected_removal_on:{type:'string'}, retired:{type:'boolean'},
-      }, required:['idempotency_key','name','base_version','description','default_enabled','audience','owner','expected_removal_on'] },
-      handler:change('set-feature-switch',false),
-    },
-    'flip-feature-switch':{
-      write:true,
-      description:'Turn one current switch on or off, optionally changing its audience. The existing audit records who, when and before/after. The worker rereads on every request; no deploy is needed.',
-      inputSchema:{ type:'object', additionalProperties:false, properties:{ ...common, enabled:{type:'boolean'}, audience },
-        required:['idempotency_key','name','base_version','enabled'] },
-      handler:change('flip-feature-switch',true),
     },
     'list-feature-switches':{
       description:'Read feature switches and their server-evaluated availability for this authenticated actor. A named switch includes its audit history. Retired switches are unavailable.',
