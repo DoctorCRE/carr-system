@@ -112,7 +112,7 @@ export function dealItemTools({ withEnvelope, writeEvent, resolveSubject, ToolEr
   const base = { idempotency_key: { type: 'string' }, deal: { type: 'string' } };
   const bullet = { type: 'object', additionalProperties: false,
     properties: { date: { type: ['string', 'null'], format: 'date' }, kind: { type: 'string', enum: ['promised', 'call', 'suggestion', 'status'] }, text: { type: 'string', minLength: 1, maxLength: 240 } }, required: ['kind', 'text'] };
-  const command = (name, description, extra, required, run) => ({ write: true, description,
+  const command = (name, description, extra, required, run) => ({ write: true, humanOnly: true, description,
     inputSchema: { type: 'object', additionalProperties: false, properties: { ...base, ...extra }, required: ['idempotency_key', 'deal', ...required] },
     handler: async (c, actor, args) => {
       if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: 'partner_required' });
