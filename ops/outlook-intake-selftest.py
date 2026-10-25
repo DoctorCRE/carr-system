@@ -102,11 +102,15 @@ class Fake:
         self.contacts_rows = [CLIENT, LEAD]
         self.now = NOW
         self.on_decode = None
+        self.authenticated_principal = 'joe'
 
     def carr(self, verb, args):
         self.calls.append((verb, args))
         if verb in self.fail_verbs:
             raise intake.CarrError()
+        if verb == 'standing-context':
+            return {'ok': True, 'identity': {'sponsoring_human_id': self.authenticated_principal,
+                                           'runtime_principal': self.authenticated_principal + '-local'}}
         if verb == 'find':
             return {'parties': self.parties.get(args['query'], []), 'deals': []}
         if verb == 'catch-me-up':
@@ -1141,7 +1145,116 @@ class IntakeTest(unittest.TestCase):
         self.assertTrue(line.startswith('outlook-intake succeeded'))
 
 
+    def configure_partner(self):
+        from lib.outlook_intake_config import CONFIG
+        (self.home / CONFIG).parent.mkdir(parents=True, exist_ok=True)
+        (self.home / CONFIG).write_text(json.dumps({'principal': 'sample-partner', 'mailbox': 'sample@carr.us'}))
+        self.fake.authenticated_principal = 'sample-partner'
+
+    def test_partner_with_wrong_authenticated_identity_never_reads_or_writes(self):
+        self.configure_partner()
+        self.fake.authenticated_principal = 'other-partner'
+        result = self.run_intake()
+        self.assertEqual((result.state, result.reason), ('failed', 'identity_mismatch'))
+        self.assertEqual(self.fake.decodes, 0)
+        self.assertEqual(self.fake.writes(), [])
+
+class PartnerConfigTest(unittest.TestCase):
+    def test_configured_intake_refuses_unknown_account_provenance_before_writes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp) / 'home'
+            from lib.outlook_intake_config import CONFIG
+            (home / CONFIG).parent.mkdir(parents=True)
+            (home / CONFIG).write_text(json.dumps({'principal': 'sample-partner', 'mailbox': 'sample@carr.us'}))
+            calls = []
+            ports = intake.Ports(carr=lambda verb, args: calls.append((verb, args)) or {
+                'ok': True, 'identity': {'sponsoring_human_id': 'sample-partner',
+                                       'runtime_principal': 'sample-partner-local'}},
+                contacts=lambda: [], next_step=lambda *_: {}, decode=lambda *_: None, now=lambda: NOW)
+            repo = Path(temp) / 'repo'
+            result = intake.run(repo, home, ports)
+            self.assertEqual((result.state, result.reason), ('failed', 'account_scope_unavailable'))
+            self.assertEqual([v for v, _ in calls], ['standing-context'])
+            self.assertFalse(repo.exists(), 'refusal happens before creating private work files')
+
+    def test_configuration_accepts_only_explicit_partner_principal_and_own_carr_mailbox(self):
+        from lib.outlook_intake_config import IntakeIdentity, read_identity, CONFIG
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            self.assertIsNone(read_identity(home))
+            (home / CONFIG).parent.mkdir(parents=True)
+            (home / CONFIG).write_text(json.dumps({'principal': 'sample-partner', 'mailbox': 'Sample@carr.us'}))
+            self.assertEqual(read_identity(home), IntakeIdentity('sample-partner', 'sample@carr.us'))
+            for value in ({'principal': '', 'mailbox': 'sample@carr.us'},
+                          {'principal': 'sample-partner', 'mailbox': 'sample@example.test'},
+                          {'principal': 'sample-partner'}, []):
+                (home / CONFIG).write_text(json.dumps(value))
+                with self.assertRaises(ValueError):
+                    read_identity(home)
+
+    def test_prerequisites_report_all_checks_and_refuse_an_undeclared_machine_without_installing(self):
+        import contextlib
+        import io
+        import plistlib
+        from lib.outlook_intake_config import prepare_install
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo, home = root / 'repo', root / 'home'
+            repo.mkdir()
+            home.mkdir()
+            (repo / '.git').mkdir()
+            (repo / 'run.sh').touch()
+            stdout, stderr = io.StringIO(), io.StringIO()
+            original_read = Path.read_bytes
+            def read_metadata(path):
+                if str(path) == '/Applications/Microsoft Outlook.app/Contents/Info.plist':
+                    return plistlib.dumps({'CFBundleShortVersionString': '16.0-synthetic'})
+                return original_read(path)
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr), \
+                    patch.object(Path, 'read_bytes', read_metadata), \
+                    patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0, stdout='')), \
+                    patch('shutil.which', return_value='/synthetic/cargo'):
+                result = prepare_install(repo, home, ['--check', '--principal', 'sample-partner',
+                                                       '--mailbox', 'sample@carr.us'])
+            self.assertEqual(result, 1)
+            for requirement in ('Outlook version', 'Command Line Tools', 'Rust or prebuilt decoder', 'repo checkout'):
+                self.assertIn('PASS ' + requirement, stdout.getvalue())
+            self.assertIn('FAIL machine role', stdout.getvalue())
+            self.assertIn('FAIL mailbox account isolation', stdout.getvalue())
+            self.assertIn('account_scope_unavailable', stdout.getvalue())
+            self.assertEqual(list(home.iterdir()), [])
+            self.assertEqual(sorted(p.name for p in repo.iterdir()), ['.git', 'run.sh'])
+            from lib import machine_role
+            machine_role.write_marker('primary', home=str(home))
+            vendor = home / 'carr-local/hxstore-reverse-engineering'
+            decoder = vendor / 'hxprobe/target/release/hxprobe'
+            decoder.parent.mkdir(parents=True)
+            decoder.touch(mode=0o700)
+            receipt = vendor / '.carr-pin'
+            receipt.write_text('wrong-synthetic-pin')
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr), \
+                    patch.object(Path, 'read_bytes', read_metadata), \
+                    patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0, stdout='')), \
+                    patch('shutil.which', return_value=None):
+                self.assertEqual(prepare_install(repo, home, ['--check'], expected_pin='expected-synthetic-pin'), 1)
+                receipt.write_text('expected-synthetic-pin')
+                self.assertEqual(prepare_install(repo, home, ['--check'], expected_pin='expected-synthetic-pin'), 0)
+            self.assertIn('FAIL Rust or prebuilt decoder', stdout.getvalue())
+
+
 class ScheduleTest(unittest.TestCase):
+    def test_declared_partner_runs_only_intake_and_unknown_machine_is_refused(self):
+        from lib.launchd_scope import allowed_on_machine
+        from lib import machine_role
+        with tempfile.TemporaryDirectory() as home:
+            self.assertFalse(allowed_on_machine('com.carr.outlook-intake.plist', False, home=home))
+            machine_role.write_marker('partner', home=home)
+            self.assertFalse(machine_role.is_primary(ROOT, git_email=machine_role.OWNER_EMAIL, home=home))
+            self.assertTrue(allowed_on_machine('com.carr.outlook-intake.plist', False, home=home))
+            self.assertFalse(allowed_on_machine('com.carr.nightly-record-layer.plist', False, home=home))
+            machine_role.write_marker('secondary', home=home)
+            self.assertFalse(allowed_on_machine('com.carr.outlook-intake.plist', False, home=home))
+
     def test_intake_runs_only_on_the_studio_primary_role(self):
         from lib.launchd_scope import allowed_on_machine
         self.assertTrue(allowed_on_machine('com.carr.outlook-intake.plist', True))
@@ -1159,7 +1272,7 @@ class ScheduleTest(unittest.TestCase):
                          ['{{HOME}}/carr-local/bin/outlook-intake-copy', '--run-intake'])
         services = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
         [env] = [s for s in services if s['key'] == 'outlook-intake'][0]['environments']
-        self.assertEqual(env['runs_on'], 'primary')
+        self.assertEqual(env['runs_on'], 'primary_or_partner')
         self.assertGreaterEqual(env['expected_cadence_seconds'] + env['cadence_grace_seconds'], 12 * 3600 + 1800,
                                 'the overnight stand-down plus the spool flush is not stale')
         self.assertEqual(plist['Umask'], 0o077)

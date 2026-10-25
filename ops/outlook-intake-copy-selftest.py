@@ -102,12 +102,12 @@ class InstallerTest(unittest.TestCase):
             for relative in ('bin', 'tools', 'ops/launchd', 'lib', '.venv/bin', 'vendor-patches'):
                 (repo / relative).mkdir(parents=True)
             for relative in ('bin/install-outlook-intake.sh', 'tools/outlook-intake-copy.c',
-                             'lib/outlook_intake.py',
+                             'lib/outlook_intake.py', 'lib/outlook_intake_config.py',
                              'ops/launchd/com.carr.outlook-intake.plist',
                              'vendor-patches/hxprobe-calendar-and-bodies.patch'):
                 shutil.copyfile(ROOT / relative, repo / relative)
-            (repo / 'lib/machine_role.py').write_text('def is_primary(repo): return True\n')
-            (repo / 'lib/launchd_scope.py').write_text('def allowed_on_machine(name, primary): return primary\n')
+            (repo / 'lib/machine_role.py').write_text('def is_primary(repo, **kwargs): return True\ndef read_marker(home=None): return \"primary\"\n')
+            (repo / 'lib/launchd_scope.py').write_text('def allowed_on_machine(name, primary, **kwargs): return primary\n')
             (repo / '.venv/bin/python').symlink_to(sys.executable)
             vendor = home / 'carr-local/hxstore-reverse-engineering'
             (vendor / 'hxprobe/target/release').mkdir(parents=True)
@@ -116,7 +116,7 @@ class InstallerTest(unittest.TestCase):
             decoder.chmod(0o700)
             digest = hashlib.sha256((repo / 'vendor-patches/hxprobe-calendar-and-bodies.patch').read_bytes()).hexdigest()
             (vendor / '.carr-pin').write_text(f'191b54e42757687806202f8f696e9066f0514e11 {digest}\n')
-            command = ['/bin/zsh', '-f', '-c', 'export HOME="$1"; exec /bin/zsh -f "$2"',
+            command = ['/bin/zsh', '-f', '-c', 'export HOME="$1"; exec /bin/zsh -f "$2" "${@:3}"',
                        'installer-test', str(home), str(repo / 'bin/install-outlook-intake.sh')]
             result = subprocess.run(command, capture_output=True, text=True, check=True)
             helper = home / 'carr-local/bin/outlook-intake-copy'
@@ -135,6 +135,13 @@ class InstallerTest(unittest.TestCase):
             before = helper.stat().st_mtime_ns
             subprocess.run(command, capture_output=True, text=True, check=True)
             self.assertEqual(helper.stat().st_mtime_ns, before, 'an unchanged helper retains its privacy identity')
+            refused = subprocess.run(command + ['--principal', 'sample-partner', '--mailbox', 'sample@carr.us'],
+                                     capture_output=True, text=True)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn('account_scope_unavailable', refused.stderr)
+            self.assertEqual(helper.stat().st_mtime_ns, before)
+            self.assertFalse((home / '.config/carr/outlook-intake.json').exists())
+
 
 
 if __name__ == '__main__':

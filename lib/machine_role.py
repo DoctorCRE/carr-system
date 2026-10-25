@@ -4,8 +4,9 @@ The legacy git-email fallback remains for machines without a role marker.
 The marker separates the owner's identity from the one machine running shared jobs.
 
 THE MARKER. ~/.config/carr/machine-role.json, {"role": "primary"} or
-{"role": "secondary"}, written per machine by
-`ops/config-as-code.py set-role primary|secondary`. It is deliberately per
+{"role": "secondary"}, or {"role": "partner"}, written per machine by
+`ops/config-as-code.py set-role primary|secondary|partner`. The partner role
+permits only services explicitly placed on partner machines. It is deliberately per
 machine, but ~/.config/carr is copied wholesale between Macs at migration, so
 rewrite it on each Mac after a copy. Mark the old primary secondary BEFORE
 marking the new one primary, so the shared jobs never run on both.
@@ -20,7 +21,7 @@ import json
 import os
 import subprocess
 
-ROLES = ("primary", "secondary")
+ROLES = ("primary", "secondary", "partner")
 OWNER_EMAIL = "64207374+jbookout@users.noreply.github.com"
 
 
@@ -66,7 +67,7 @@ def is_primary(repo, git_email=None, home=None, env=None):
     marker = read_marker(home)
     if marker == "primary":
         return True
-    if marker in ("secondary", "invalid"):
+    if marker in ("secondary", "partner", "invalid"):
         return False
     if git_email is None:
         git_email = subprocess.run(

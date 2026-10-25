@@ -31,12 +31,19 @@ if [ ! -f "$SOURCE" ]; then
   print -u2 -- "install-outlook-intake: missing source plist: $SOURCE"
   exit 1
 fi
-if ! (cd "$REPO" && "$REPO/.venv/bin/python" -c \
-    "import sys; from lib import machine_role; from lib.launchd_scope import allowed_on_machine; sys.exit(0 if allowed_on_machine('$LABEL.plist', machine_role.is_primary('$REPO')) else 1)" \
-    2>/dev/null); then
-  print -u2 -- "install-outlook-intake: this Mac's role does not run $LABEL (see ops/config/services.json runs_on)"
-  exit 1
-fi
+"$REPO/.venv/bin/python" - "$REPO" "$HOME" "$WANT_PIN" "$@" <<'PYTHON'
+from pathlib import Path
+import sys
+repo, home = (Path(value) for value in sys.argv[1:3])
+sys.path.insert(0, str(repo))
+from lib.outlook_intake_config import prepare_install
+raise SystemExit(prepare_install(repo, home, sys.argv[4:], expected_pin=sys.argv[3]))
+PYTHON
+for argument in "$@"; do
+  if [ "$argument" = "--check" ]; then
+    exit 0
+  fi
+done
 
 if [ ! -x "$VENDOR/hxprobe/target/release/hxprobe" ] || [ "$(cat "$PIN" 2>/dev/null)" != "$WANT_PIN" ]; then
   if [ -e "$VENDOR" ]; then
@@ -93,7 +100,7 @@ touch "$LOG"
 chmod 600 "$LOG"
 
 print -- "install-outlook-intake: hxprobe pinned and built; plist rendered to $RENDERED"
-print -- "install-outlook-intake: one-time step on the Mac Studio: grant Full Disk Access to $HOME/carr-local/bin/outlook-intake-copy"
+print -- "install-outlook-intake: one-time step on this Mac: grant Full Disk Access to $HOME/carr-local/bin/outlook-intake-copy"
 print -- "  System Settings > Privacy & Security > Full Disk Access > add the helper above."
 print -- "install-outlook-intake: it is NOT loaded. To load it, run:"
 print -- "  install -m 644 '$RENDERED' '$DEST'"

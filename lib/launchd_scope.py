@@ -1,7 +1,7 @@
 """Installation and observation share the same launchd machine scope.
 
 The scope is read from ops/config/services.json, where every launchd
-environment declares runs_on: "primary", "secondary" or "every". This module
+environment declares runs_on: "primary", "secondary", "primary_or_partner" or "every". This module
 derives PRIMARY_ONLY and SECONDARY_ONLY from it, so the installer, the
 scheduled-job inventory cannot hold a different
 list from the catalog (rule a8c55a47: one job, one code path).
@@ -11,7 +11,7 @@ import os
 
 CATALOG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "ops", "config", "services.json")
-RUNS_ON = ("primary", "secondary", "every")
+RUNS_ON = ("primary", "secondary", "every", "primary_or_partner")
 
 def placements(catalog: str = CATALOG) -> dict[str, str]:
     """{plist filename: runs_on} for every launchd environment in the catalog.
@@ -39,12 +39,17 @@ def placements(catalog: str = CATALOG) -> dict[str, str]:
 
 
 PLACEMENT = placements()
-PRIMARY_ONLY = frozenset(name for name, where in PLACEMENT.items() if where == "primary")
+PRIMARY_ONLY = frozenset(name for name, where in PLACEMENT.items() if where in ("primary", "primary_or_partner"))
 # The mirror image: jobs only the SECOND machine needs, because the primary
 # already gets the same effect from a chain the second machine must not run.
 SECONDARY_ONLY = frozenset(name for name, where in PLACEMENT.items() if where == "secondary")
 
 
-def allowed_on_machine(filename: str, primary: bool) -> bool:
+def allowed_on_machine(filename: str, primary: bool, *, home=None, partner: bool | None = None) -> bool:
+    if PLACEMENT.get(filename) == "primary_or_partner":
+        if primary or partner is not None:
+            return primary or bool(partner)
+        from lib.machine_role import read_marker
+        return read_marker(home) == "partner"
     return not ((filename in PRIMARY_ONLY and not primary)
                 or (filename in SECONDARY_ONLY and primary))

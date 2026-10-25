@@ -162,7 +162,7 @@ def running(label, live, runtime):
 
 def expectation(job, role):
     """(enabled, installed) on a machine of this role; placement is launchd_scope's alone."""
-    if job["scheduler"] == "launchd" and not launchd_scope.allowed_on_machine(job["label"] + ".plist", role == "primary"):
+    if job["scheduler"] == "launchd" and not launchd_scope.allowed_on_machine(job["label"] + ".plist", role == "primary", partner=role == "partner"):
         return False, False
     return job["expected_enabled"], job.get("expected_installed", True)
 
@@ -351,7 +351,8 @@ def collect(manifest):
     sys.path.insert(0, str(SOURCE / "tools"))
     import flashlib
     snapshot["flash_grant"] = flashlib.active_grant()
-    snapshot["machine_role"] = "primary" if machine_role.is_primary(str(SOURCE), env=scrubbed_env()) else "secondary"
+    snapshot["machine_role"] = ("primary" if machine_role.is_primary(str(SOURCE), env=scrubbed_env())
+                                else "partner" if machine_role.read_marker() == "partner" else "secondary")
     def command(argv, source, absent_ok=False):
         try:
             result = subprocess.run(argv, capture_output=True, text=True, timeout=10,

@@ -215,7 +215,7 @@ def install_managed_safety(plan, *, apply):
 TOKENS = [(tok, real) for tok, real in
           (("{{VAULT}}", VAULT), ("{{REPO}}", REPO), ("{{HOME}}", HOME)) if real]
 
-from lib.launchd_scope import PRIMARY_ONLY, SECONDARY_ONLY
+from lib.launchd_scope import PRIMARY_ONLY, SECONDARY_ONLY, allowed_on_machine
 
 
 # A LaunchAgent that invokes this installer cannot unload its own label and
@@ -2035,7 +2035,7 @@ def cmd_install(apply):
         source = read(launchd_repo_path(f))
         if (launchd_calendar.plist_label(source or "") or f.removesuffix(".plist")) in held_labels:
             continue
-        if f in PRIMARY_ONLY and not IS_PRIMARY:
+        if f in PRIMARY_ONLY and not allowed_on_machine(f, IS_PRIMARY):
             live = os.path.join(LAUNCHD_SRC, f)
             if os.path.exists(live):
                 if retire_primary_only_plist(f, live, apply) == "failed":
@@ -2302,7 +2302,7 @@ def launchd_calendar_reinstall_plan(templates_dir, agents_dir):
         if refusal:
             row.update(action="fail", why=f"template refused: {refusal}")
             continue
-        if name in PRIMARY_ONLY and not IS_PRIMARY:
+        if name in PRIMARY_ONLY and not allowed_on_machine(name, IS_PRIMARY):
             row["why"] = "primary-only job on a secondary (install retires it)"
             continue
         if name in SECONDARY_ONLY and IS_PRIMARY:
@@ -2658,7 +2658,7 @@ def main():
         # carry the old role. A secondary retires its primary-only jobs.
         role = sys.argv[2] if len(sys.argv) > 2 else ""
         if role not in machine_role.ROLES:
-            print("usage: ops/config-as-code.py set-role primary|secondary")
+            print("usage: ops/config-as-code.py set-role primary|secondary|partner")
             return 64
         print(f"machine role: {role} ({machine_role.write_marker(role)})")
         return subprocess.run([sys.executable, os.path.abspath(__file__),

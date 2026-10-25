@@ -175,7 +175,7 @@ import io  # noqa: E402
 
 def run_inproc(templates, agents, fake, *extra, env=None, patch=None):
     saved = {k: getattr(cac, k) for k in ("HOME", "PRIMARY_ONLY",
-                                          "SECONDARY_ONLY", "IS_PRIMARY")}
+                                          "SECONDARY_ONLY", "IS_PRIMARY", "allowed_on_machine")}
     saved_registry = dict(cac.launchd_hold.DEFINITION_ONLY)
     saved_env = {k: os.environ.get(k) for k in (env or {})}
     try:
@@ -208,7 +208,7 @@ def run_inproc(templates, agents, fake, *extra, env=None, patch=None):
 A = "com.carr.fixture-a.plist"
 for label, patch in (
     ("definition-only", {"DEFINITION_ONLY": {A: "held"}}),
-    ("primary-only on a secondary", {"PRIMARY_ONLY": {A}, "IS_PRIMARY": False}),
+    ("primary-only on a secondary", {"PRIMARY_ONLY": {A}, "allowed_on_machine": lambda name, primary: name != A or primary, "IS_PRIMARY": False}),
     ("secondary-only on the primary", {"SECONDARY_ONLY": {A}, "IS_PRIMARY": True}),
 ):
     with tempfile.TemporaryDirectory(prefix="carr-reinstall-cal-") as tmp:

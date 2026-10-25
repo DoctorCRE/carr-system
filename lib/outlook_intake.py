@@ -60,6 +60,8 @@ from typing import Callable
 import uuid
 import zoneinfo
 
+from lib.outlook_intake_config import read_identity
+
 HXPROBE = Path('carr-local/hxstore-reverse-engineering/hxprobe/target/release/hxprobe')
 COPY_HELPER = Path('carr-local/bin/outlook-intake-copy')
 PROFILE = Path('Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity')
@@ -724,6 +726,25 @@ def _calendar_due(state: dict, now: datetime) -> bool:
 def run(repo: Path, home: Path, ports: Ports) -> Outcome:
     if not in_window(ports.now()):
         return Outcome('skipped', 'outside_window')
+    try:
+        identity = read_identity(home)
+    except (OSError, ValueError, TypeError):
+        return Outcome('failed', 'configuration_invalid')
+    from lib.machine_role import read_marker
+    if read_marker(home) == 'partner' and identity is None:
+        return Outcome('failed', 'configuration_required')
+    if identity:
+        try:
+            reply = ports.carr('standing-context', {'detail': 'scopes'})
+        except CarrError:
+            return Outcome('failed', 'identity_unverified')
+        verified = reply.get('identity')
+        if not isinstance(verified, dict):
+            return Outcome('failed', 'identity_unverified')
+        if (reply.get('ok') is not True or verified.get('sponsoring_human_id') != identity.principal
+                or verified.get('runtime_principal') not in (identity.principal, identity.principal + '-local')):
+            return Outcome('failed', 'identity_mismatch')
+        return Outcome('failed', 'account_scope_unavailable')
     out = repo / OUT
     out.mkdir(parents=True, exist_ok=True)
     os.chmod(out, 0o700)
