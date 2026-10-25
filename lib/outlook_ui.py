@@ -24,7 +24,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import time
 from typing import Callable
@@ -149,7 +148,7 @@ def is_ordinary_main_window(window: dict, full_screen_height: int) -> bool:
 
 def cua(tool: str, arguments: dict) -> dict:
     try:
-        driver = shutil.which('cua-driver') or str(load_settings().driver)
+        driver = str(load_settings().driver)
         result = subprocess.run([driver, 'call', tool, json.dumps(arguments)],
                                 capture_output=True, text=True, timeout=120)
         value = json.loads(result.stdout)

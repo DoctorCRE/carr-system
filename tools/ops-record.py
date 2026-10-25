@@ -246,11 +246,6 @@ def cmd_sync_registry(args) -> int:
     deps = spec.get("dependencies", [])
     declared = {s["key"] for s in services}
 
-    from lib.outlook_settings import load_settings
-    for service in services:
-        if service["owner_actor"] == "outlook_settings.owner":
-            service["owner_actor"] = load_settings().owner
-
     changes: list[str] = []
     with connect("owner") as conn, conn.cursor() as cur:
         for s in services:

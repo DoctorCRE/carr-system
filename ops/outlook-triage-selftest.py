@@ -305,7 +305,7 @@ class FakeOutlookCase(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix='outlook-triage-selftest-'))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.repo, self.home, bin_dir = self.tmp / 'repo', self.tmp / 'home', self.tmp / 'bin'
-        write_settings(self.home, self.repo, account=ACCOUNT)
+        write_settings(self.home, self.repo, account=ACCOUNT, driver=str(self.tmp / 'bin/cua-driver'))
         local_home = patch('pathlib.Path.home', return_value=self.home)
         local_home.start()
         self.addCleanup(local_home.stop)
@@ -368,11 +368,12 @@ class FakeOutlookCase(unittest.TestCase):
 
 
 class OutlookTriageTest(FakeOutlookCase):
-    def test_driver_in_home_local_bin_works_without_shell_path_setup(self):
+    def test_configured_driver_outside_shell_path_works(self):
         self.given([FILE_A, NEWS, UNREAD])
         local_driver = self.home / '.local/bin/cua-driver'
         local_driver.parent.mkdir(parents=True)
         (self.tmp / 'bin/cua-driver').rename(local_driver)
+        write_settings(self.home, self.repo, account=ACCOUNT, driver=str(local_driver))
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
         self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A']])
@@ -669,7 +670,7 @@ class RefreshTest(FakeOutlookCase):
         path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test'),
                                   listed('m2', self.UNREAD_BODY, 'c1@client.test')])
         self.guide.write_text('')
-        write_settings(self.home, self.repo, account=ACCOUNT)
+        write_settings(self.home, self.repo, account=ACCOUNT, driver=str(self.tmp / 'bin/cua-driver'))
         with patch.dict(os.environ, self.env, clear=True):
             outcome = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
                                           waits=Waits(0, 0, 0, 0, 0, 0, 0),
@@ -687,7 +688,7 @@ class RefreshTest(FakeOutlookCase):
         from lib import outlook_refresh
         self.given([self.READ_BODY])
         self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        write_settings(self.home, self.repo, account='wrong@example.test')
+        write_settings(self.home, self.repo, account='wrong@example.test', driver=str(self.tmp / 'bin/cua-driver'))
         with patch.dict(os.environ, self.env, clear=True):
             result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
                                          waits=Waits(0, 0, 0, 0, 0, 0, 0))

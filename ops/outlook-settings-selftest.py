@@ -6,6 +6,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 from unittest.mock import patch, MagicMock
 import os
+import plistlib
 from pathlib import Path
 import subprocess
 import sys
@@ -122,13 +123,15 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.repo, real)
         settings.require_repo(self.repo)
 
-    def test_catalog_sync_resolves_the_settings_owner_before_the_database_boundary(self):
+    def test_catalog_sync_needs_no_private_settings_and_preserves_declared_owner(self):
         spec = importlib.util.spec_from_file_location('outlook_catalog_test', ROOT / 'tools/ops-record.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         registry = self.home / 'registry.json'
-        registry.write_text(json.dumps({'services': [{'key': 'outlook-intake', 'name': 'Fixture intake',
-                                                     'owner_actor': 'outlook_settings.owner'}]}))
+        catalog = json.loads((ROOT / 'ops/config/services.json').read_text())
+        registry.write_text(json.dumps({'services': [row for row in catalog['services']
+                                                      if row['key'].startswith('outlook-')]}))
+        self.path.unlink()
         connection = MagicMock()
         cursor = connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
         cursor.fetchone.return_value = (False,)
@@ -138,7 +141,10 @@ class SettingsTest(unittest.TestCase):
             self.assertEqual(module.cmd_sync_registry(None), 0)
         statement, values = cursor.execute.call_args_list[0].args
         self.assertIn('insert into ops.service', statement)
-        self.assertEqual(values[5], 'fixture-owner')
+        self.assertEqual(values[5], 'joe')
+        owners = [call.args[1][5] for call in cursor.execute.call_args_list
+                  if 'insert into ops.service\n' in call.args[0]]
+        self.assertEqual(owners, ['joe', 'joe', 'joe'])
 
     def test_configured_exporter_file_wins_over_an_unrelated_shell_export(self):
         from exporters import common
@@ -177,6 +183,97 @@ class SettingsTest(unittest.TestCase):
                   'bounds': {'height': 949}}
         self.assertFalse(ui.is_ordinary_main_window(window, 949))
         self.assertTrue(ui.is_ordinary_main_window(window, 1200))
+
+    def test_private_pointers_reject_aliases_into_checkout_or_settings(self):
+        self.repo.mkdir()
+        alias = self.home / 'alias'
+        for field in ('mcp_credentials', 'database_credentials', 'folder_guide'):
+            for target in (self.repo / 'private.txt', self.path, self.repo):
+                with self.subTest(field=field, target=target):
+                    alias.symlink_to(target)
+                    write_settings(self.home, self.repo, **{field: str(alias)})
+                    try:
+                        with self.assertRaisesRegex(SettingsError, field):
+                            load_settings(self.home)
+                    finally:
+                        alias.unlink()
+
+    def test_private_pointers_reject_macos_var_alias_into_checkout(self):
+        if not str(self.repo).startswith('/private/var/'):
+            self.skipTest('requires the macOS /var alias')
+        for field in ('mcp_credentials', 'database_credentials', 'folder_guide'):
+            with self.subTest(field=field):
+                write_settings(self.home, self.repo, **{field: str(self.repo / 'private.txt').removeprefix('/private')})
+                with self.assertRaisesRegex(SettingsError, field):
+                    load_settings(self.home)
+
+    def test_external_pointer_alias_is_canonicalized_without_reading_target(self):
+        alias = self.home / 'external-alias'
+        target = self.home / 'external.txt'
+        alias.symlink_to(target)
+        write_settings(self.home, self.repo, database_credentials=str(alias))
+        self.assertEqual(load_settings(self.home).database_credentials, target)
+        self.assertFalse(target.exists())
+
+    def test_cua_uses_configured_driver_even_when_path_has_another(self):
+        from lib import outlook_ui as ui
+        configured = self.home / 'configured-driver'
+        configured.write_text("#!/bin/sh\necho '{\"selected\":\"configured\"}'\n")
+        configured.chmod(0o700)
+        other = self.home / 'cua-driver'
+        other.write_text("#!/bin/sh\necho '{\"selected\":\"wrong\"}'\n")
+        other.chmod(0o700)
+        write_settings(self.home, self.repo, driver=str(configured))
+        with patch('pathlib.Path.home', return_value=self.home), patch.dict(os.environ, {'PATH': str(self.home)}):
+            self.assertEqual(ui.cua('list_windows', {}), {'selected': 'configured'})
+
+    def test_shared_configuration_continues_after_missing_outlook_settings(self):
+        spec = importlib.util.spec_from_file_location('settings_config_test', ROOT / 'ops/config-as-code.py')
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        templates = self.repo / 'ops/launchd'
+        agents = self.home / 'Library/LaunchAgents'
+        templates.mkdir(parents=True)
+        agents.mkdir(parents=True)
+        outlook = (ROOT / 'ops/launchd/com.carr.outlook-intake.plist').read_text()
+        later = plistlib.dumps({'Label': 'com.carr.zz-later', 'ProgramArguments': ['/usr/bin/true']}).decode()
+        (templates / 'com.carr.outlook-intake.plist').write_text(outlook)
+        (templates / 'com.carr.zz-later.plist').write_text(later)
+        (agents / 'com.carr.outlook-intake.plist').write_text(outlook)
+        (agents / 'com.carr.zz-later.plist').write_text(later)
+        hooks = self.repo / 'hooks.json'
+        hooks.write_text('{}')
+        self.path.unlink()
+        with patch.multiple(mod, HOME=str(self.home), REPO=str(self.repo), REPO_HERE=str(self.repo),
+                            LAUNCHD_SRC=str(agents), LAUNCHD_REPO=str(templates), LAUNCHD_ALT_REPO={},
+                            SETTINGS=str(self.home / '.claude/settings.json'), HOOKS_REPO=str(hooks),
+                            TASKS_SRC=str(self.home / 'tasks'), TASKS_REPO=str(self.repo / 'tasks'),
+                            CODEX_CONFIG=str(self.home / 'config.toml'), CODEX_HOOKS_SRC=str(self.home / 'hooks.json'),
+                            PRIMARY_ONLY=set(), SECONDARY_ONLY=set(), PREREQUISITE_CHECK=lambda _: []), \
+                patch.object(mod, 'managed_safety_plan', return_value=[]), \
+                patch.object(mod, 'launchd_path_refusal', return_value=None), \
+                patch.object(mod, 'install_launchd_plist', return_value='loaded') as install, \
+                patch('pathlib.Path.home', return_value=self.home), redirect_stdout(StringIO()) as output:
+            self.assertEqual(mod.cmd_install(True), 1)
+            self.assertIn('com.carr.zz-later.plist', [call.args[0] for call in install.call_args_list])
+            self.assertEqual(mod.cmd_check(), 1)
+            self.assertEqual(mod.cmd_pull(False), 0)
+        self.assertIn('REFUSED', output.getvalue())
+        self.assertIn('outlook.json', output.getvalue())
+        self.assertNotIn('CONTINUITY INVALID', output.getvalue())
+        self.assertNotIn('MISSING FROM MACHINE', output.getvalue())
+        self.assertNotIn('not on this machine', output.getvalue())
+        self.assertIn('SETTINGS REFUSED', output.getvalue())
+        self.assertEqual((agents / 'com.carr.outlook-intake.plist').read_text(), outlook)
+
+    def test_rendering_disabled_service_does_not_require_activation(self):
+        write_settings(self.home, self.repo, services=['intake'])
+        settings = load_settings(self.home)
+        template = ROOT / 'ops/launchd/com.carr.outlook-triage.plist'
+        rendered = plistlib.loads(settings.render_plist(template))
+        self.assertEqual(rendered['WorkingDirectory'], str(self.repo))
+        with self.assertRaisesRegex(SettingsError, 'triage'):
+            settings.require_service('triage')
 
     def test_validation_command_refuses_before_effects(self):
         self.path.unlink()

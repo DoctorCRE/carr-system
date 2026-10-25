@@ -65,9 +65,6 @@ class OutlookSettings:
             return value
 
         plist = plistlib.loads(source if isinstance(source, bytes) else source.read_bytes())
-        label = plist.get('Label', '')
-        if label.startswith('com.carr.outlook-'):
-            self.require_service(label.removeprefix('com.carr.outlook-'))
         return plistlib.dumps(replace(plist), sort_keys=False)
 
     def require_repo(self, repo: Path) -> None:
@@ -161,7 +158,8 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
         if not values[name].endswith('/'):
             fail(name, 'must end with /')
     for name in ('mcp_credentials', 'database_credentials', 'folder_guide'):
-        if values[name] == path or values['repo'] in values[name].parents:
+        values[name] = values[name].resolve()
+        if values[name] == path.resolve() or values[name] == values['repo'] or values['repo'] in values[name].parents:
             fail(name, 'must point outside the repository and settings file')
     if values['repo'] in path.resolve().parents:
         fail('repo', 'settings must live outside the repository')

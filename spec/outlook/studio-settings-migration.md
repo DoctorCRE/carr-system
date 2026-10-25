@@ -74,4 +74,4 @@ There are no identity, address, profile or credential fallbacks.
 
 Outlook uses the configured MCP file with the existing local client profile. Ambient MCP token and break-glass overrides are removed for this route.
 The exporter uses the configured database credential file. Its other callers retain their existing credential selection behavior.
-The services catalog resolves `outlook_settings.owner` when registry sync runs; its current primary deployment placements stay unchanged.
+The shared services catalog retains its declared owner. Outlook jobs use the private settings owner for their record actions. Registry sync never reads per-machine settings; primary deployment placements stay unchanged.

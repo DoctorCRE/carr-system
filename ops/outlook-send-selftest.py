@@ -673,7 +673,7 @@ class SendTests(unittest.TestCase):
         self.dialog.return_value.stdout = '{"ok": true}'
         self.assertEqual(ports.carr('find', {'query': 'fixture'}), {'ok': True})
         self.assertEqual(self.dialog.call_args.kwargs['env']['CARR_MCP_ENV'],
-                         str(self.home / '.config/carr/mcp-tokens.env'))
+                         str((self.home / '.config/carr/mcp-tokens.env').resolve()))
         self.assertEqual(self.dialog.call_args.kwargs['cwd'], ROOT)
 
     def test_legacy_draft_keeps_mailto_bytes_and_refuses_missing_settings_before_open(self):
