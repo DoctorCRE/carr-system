@@ -35,6 +35,15 @@ class ReviewGate(unittest.TestCase):
             with self.subTest(body=body):
                 self.assertEqual(gate.approved(pr, [], [{"body": body}]), expected)
 
+    def test_changes_vetoes_approval_at_same_head(self):
+        for additions in (1, 151):
+            for reviewed_sha, expected in [("abc", False), ("old", True)]:
+                with self.subTest(additions=additions, reviewed_sha=reviewed_sha):
+                    pr = {"changed_files": 0, "additions": additions, "deletions": 0, "head": {"sha": "abc"}}
+                    comments = [{"body": f"VERDICT: CHANGES\nReviewed-SHA: {reviewed_sha}"},
+                                {"body": "VERDICT: APPROVE\nReviewed-SHA: abc"}]
+                    self.assertEqual(gate.approved(pr, [], comments), expected)
+
     def test_event_adapter(self):
         pr = {"base": {"ref": "main"}, "additions": 151, "deletions": 0, "head": {"sha": "abc"}, "changed_files": 1}
         for event in ({"number": 4}, {"issue": {"number": 4}}):
