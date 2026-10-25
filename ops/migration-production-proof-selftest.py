@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Offline contracts for the local production ledger proof."""
 import importlib.util
-import runpy
 from contextlib import redirect_stdout
 import io
 import hashlib
@@ -113,12 +112,10 @@ class ProofTests(unittest.TestCase):
 
 
     def test_reconstruction_failure_reports_post_pending_grants_not_run(self):
-        parse = runpy.run_path(str(ROOT / 'ops/migration-safety-gate.py'))['ledger_rows']
-        repository = parse((ROOT / 'db/schema.sql').read_text())
+        repository = repository_ledger()
         for failure in ([RuntimeError('reference failed')],
                         [dict(grants={}, ledger={}, dump=''), RuntimeError('replay failed')]):
             with self.subTest(failure=failure), \
-                 patch.object(proof, 'repository_ledger', return_value=repository), \
                  patch.object(proof, 'production_dsn', return_value='fixture'), \
                  patch.object(proof, 'read_source', return_value=(repository, '', {})), \
                  patch.object(proof.comparison, 'find_pg18', return_value=Path('/bin')), \
