@@ -255,7 +255,6 @@ const groups = {
 
 export const testRegistry = new Map(Object.entries(groups).flatMap(([checkName, ids]) => ids.map(id => [id, checks[checkName]])));
 export const futureGateIds = new Set([
-  "FRONTDOOR-USAGE-001",
   "MAP-A11Y-001",
   "MAP-ADOPTION-001",
   "MAP-PRIVACY-001",
