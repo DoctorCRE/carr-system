@@ -42,7 +42,7 @@ class CiTest(unittest.TestCase):
         executable.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
         executable.chmod(0o755)
         env = dict(os.environ)
-        env.pop('CARR_DOC_DRIFT_PYTHON', None)
+        env['CARR_DOC_DRIFT_PYTHON'] = str(executable)
         result = subprocess.run(['bash', str(scratch / 'ops/ci.sh'), '--doc-drift', '--base', 'abc123'],
                                 env=env, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
