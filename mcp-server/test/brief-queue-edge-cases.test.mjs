@@ -7,9 +7,9 @@ import { createHash } from 'node:crypto';
 
 const fixture = new URL('./fixtures/doctorcre-queues-3bcbce4e/', import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL('source.json', fixture), 'utf8'));
-const consumer = readFileSync(new URL('brief-queues.js', fixture), 'utf8');
+const consumer = readFileSync(new URL('brief-queues.js.txt', fixture), 'utf8');
 assert.equal(manifest.commit, '3bcbce4ee7bba4c1bfe58e28bb2789a8f5d51753');
-assert.equal(createHash('sha256').update(consumer).digest('hex'), manifest.files['brief-queues.js']);
+assert.equal(createHash('sha256').update(consumer).digest('hex'), manifest.files['brief-queues.js.txt']);
 const { mountBriefQueues } = await import(`data:text/javascript;base64,${Buffer.from(consumer
   .replace("'./change-receipts.mjs'", JSON.stringify(new URL('./fixtures/doctorcre-brief-a753e121/change-receipts.mjs', import.meta.url).href))
   .replace("import { readWithDeadline } from './auto-refresh.mjs';", 'const readWithDeadline = read => read();'))
