@@ -44,7 +44,7 @@ def publish(repo, code, details, run_url, api=github):
     if len(matches) > 1:
         raise RuntimeError('duplicate incident issues require reconciliation')
     issue = matches[0] if matches else None
-    status = {0: 'Recovered', 1: 'ALARM: a registered service has gone quiet',
+    status = {0: 'Recovered', 1: 'ALARM: a registered service failed or missed a report',
               78: 'BLIND: ledger unavailable; no service health verdict'}[code]
     body = (f'{MARKER}\n\n{status}\n\nProbe exit: {code}\n'
             f'Observed: {datetime.now(timezone.utc).isoformat()}\n\n'
