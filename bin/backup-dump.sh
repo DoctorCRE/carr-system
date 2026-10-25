@@ -64,6 +64,10 @@ STAMP="$(date -u +%Y%m%d)"
 OUTDIR="${BACKUP_OUTPUT_DIR:-$REPO/backups}"
 mkdir -p "$OUTDIR"
 OUT="$OUTDIR/carr-$STAMP.sql.age"
+if [ -z "${BACKUP_SKIP_R2:-}" ]; then
+  OUT="$("$PYTHON" "$REPO/bin/backup-archive-r2.py" --select-output "$OUT")"
+fi
+
 # --no-owner --no-acl ADDED 2026-08-02, and the reason is a real failure, not style.
 # The first genuine restore rehearsal ever run against these dumps died with
 #   ERROR: permission denied to change default privileges
@@ -99,38 +103,29 @@ RESULT="$("$PYTHON" "$REPO/bin/backup-guard.py" \
 }
 SIZE="$(print -r -- "$RESULT" | "$PYTHON" -c 'import json,sys; print(json.load(sys.stdin)["bytes"])')"
 FLOOR="$(print -r -- "$RESULT" | "$PYTHON" -c 'import json,sys; print(json.load(sys.stdin)["floor"])')"
-# keep 14 dailies in backups/ (local, gitignored); the R2 archive keeps everything forever
-ls -t "$OUTDIR"/carr-*.sql.age 2>/dev/null | tail -n +15 | xargs rm -f 2>/dev/null || true
-
-# BACKUP_SKIP_R2=1 ADDED 2026-08-14 (PROGRAM 4): the GitHub Actions runner's
-# disk does not survive past the job, so there is no local copy to keep and
-# no reason to spend the R2 quota archiving a dump that already goes to the
-# workflow artifact (90-day retention — see .github/workflows/backup-nightly.yml).
-# Unset on Joe's Mac, so the local nightly still archives to R2 exactly as
-# before.
 if [ -n "${BACKUP_SKIP_R2:-}" ]; then
   echo "backup ok -> $OUT ($SIZE bytes, floor was $FLOOR) -> R2 archive: skipped (BACKUP_SKIP_R2)"
 else
-  # Archive to R2 (ORDER 20's quota-guarded uploader, ORDER 42b's replacement for the
-  # git-commit step). Same production URL already resolved above is reused as
-  # DATABASE_URL so the real system_config.r2.quota_gb cap is consulted instead of
-  # the script defaulting blind. A quota refusal is reported, not fatal: the local
-  # dump in backups/ stands either way (rc=0 from the archiver), same posture the
-  # document pipeline takes on its OWED path.
-  ARCHIVE_JSON="$(cd "$REPO" && DATABASE_URL="$URL" .venv/bin/python bin/backup-archive-r2.py "$OUT" 2>&1)" \
-    || { echo "R2 archive step failed (backup itself is fine, sitting at $OUT):" >&2
-         echo "$ARCHIVE_JSON" >&2; }
-  # `|| true` is load-bearing under pipefail (added 2026-08-07): grep exits 1 when
-  # the archiver printed no key, and without it that would abort the script AFTER
-  # a good backup was already taken and archived.
-  R2_KEY="$(print -r -- "$ARCHIVE_JSON" | grep -m1 '"key"' | sed -E 's/.*"key": *"([^"]+)".*/\1/' || true)"
-  # Size reported in EXACT BYTES, not `du -h`. du floors at the 4K block size, so
-  # on 2026-08-07 the success line read "(4.0K)" for a 200-byte corrupt backup —
-  # the one number that would have exposed the failure could not physically be
-  # displayed small enough to look wrong.
-  if [ -n "${R2_KEY:-}" ]; then
+  ARCHIVE_RC=0
+  ARCHIVE_JSON="$(cd "$REPO" && DATABASE_URL="$URL" "$PYTHON" bin/backup-archive-r2.py "$OUT")" || ARCHIVE_RC=$?
+  R2_KEY="$(print -r -- "$ARCHIVE_JSON" | "$PYTHON" -c '
+import json,sys
+try:
+    result=json.load(sys.stdin)
+    if result["archived"] is not True or result["state"] != "archived":
+        raise ValueError("archive owed")
+    key=result["key"]
+    if not isinstance(key,str) or not key.startswith("backups/"):
+        raise ValueError("invalid archive key")
+    print(key)
+except (ValueError, KeyError, TypeError):
+    sys.exit(1)
+')" || ARCHIVE_RC=1
+  "$PYTHON" "$REPO/bin/backup-archive-r2.py" --prune-local "$OUTDIR"
+  if [ "$ARCHIVE_RC" -eq 0 ]; then
     echo "backup ok -> $OUT ($SIZE bytes, floor was $FLOOR) -> R2 archive: $R2_KEY"
   else
-    echo "backup ok -> $OUT ($SIZE bytes, floor was $FLOOR) -> R2 archive: see stderr above"
+    echo "backup ok -> $OUT ($SIZE bytes, floor was $FLOOR) -> R2 archive: OWED; retry bin/backup-archive-r2.py with this file" >&2
+    exit 1
   fi
 fi
