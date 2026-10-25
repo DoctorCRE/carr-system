@@ -2,8 +2,9 @@ import { readMigration } from "./migration-source.testhelper.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { TOOLS, ToolError } from "../src/tools.js";
+import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
 import { BOARD_ANSWER_WRITE_VERBS } from "../src/board-answers.js";
+import { mcpInventory } from "../../ops/scac-mutation-inventory.mjs";
 
 const joe = {
   id: "10000000-0000-0000-0000-000000000002", slug: "joe", display: "Joe",
@@ -252,6 +253,52 @@ test("a machine cannot answer even when it has a verified sponsor", async () => 
     error => error instanceof ToolError && error.payload.error === "board_answer_requires_human_partner",
   );
   assert.deepEqual(fake.calls, []);
+});
+
+const answerArgs = {
+  idempotency_key: "synthetic-human-answer", board_id: "project", question_id: "q1",
+  base_version: 1, answer_text: "Proceed",
+};
+
+for (const [label, actor] of [
+  ["Joe-sponsored agent", sponsoredRobot],
+  ["Dell-sponsored agent", { ...sponsoredRobot, sponsoring_human_slug: "dell" }],
+  ["unattended runner", { ...sponsoredRobot, slug: "joe-local", unattended: true, via: "unattended-token" }],
+  ["reviewer", { ...robot, review: true }],
+  ["unsponsored machine", robot],
+]) {
+  test(`board answer dispatch refuses ${label} before database access`, async () => {
+    const fake = new Fake();
+    await assert.rejects(() => executeRegisteredTool(fake, actor, "answer-board-question", { ...answerArgs }),
+      error => error instanceof ToolError && error.payload.error === "human_only_verb_requires_verified_partner");
+    assert.deepEqual(fake.calls, []);
+  });
+}
+
+for (const actor of [joe, dell]) {
+  test(`board answer dispatch records human ${actor.slug} and their current question revision`, async () => {
+    const fake = new Fake({
+      "from board_question": [{ question_id: "q1", revision: 1, choices: ["Proceed"],
+        allow_free_text: false, default_answer: "Wait", asker_ref: "orchestrator:project" }],
+      "insert into board_answer": params => [{ id: "answer-1", question_id: params[3],
+        question_revision: params[4], answer_text: params[6], answered_by: params[7],
+        answered_by_actor_id: params[8], default_overridden: params[9], status: "Sent" }],
+    });
+    const result = await executeRegisteredTool(fake, actor, "answer-board-question", { ...answerArgs });
+    assert.deepEqual(result.answer, { id: "answer-1", question_id: "q1", question_revision: 1,
+      answer_text: "Proceed", answered_by: actor.slug, answered_by_actor_id: actor.id,
+      default_overridden: true, status: "Sent" });
+    const [, params] = fake.calls.find(([sql]) => sql.includes("from board_question"));
+    assert.deepEqual(params, ["carr-internal", actor.slug, "project", "q1", 1]);
+  });
+}
+
+test("board answer discovery requires human presence while publication keeps sponsor authority", () => {
+  const rows = mcpInventory(TOOLS);
+  assert.equal(rows.find(row => row.operation === "answer-board-question").principal_mode,
+    "server_verified_human");
+  assert.equal(rows.find(row => row.operation === "publish-board-snapshot").principal_mode,
+    "authenticated_registered_principal");
 });
 
 test("the board read leaves unanswered questions without a status", async () => {

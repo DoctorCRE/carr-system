@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the core cards in CLAUDE.md and AGENTS.md from their shared source."""
+"""Render core cards and validate repository paths in CLAUDE.md and AGENTS.md."""
 import argparse
 import re
 from pathlib import Path
@@ -23,15 +23,47 @@ def render(text):
     return text[:start] + block + text[end:]
 
 
+def missing_paths(text):
+    references = {path.lstrip('/') for pair in re.findall(
+        r'\[[^]\n]*\]\(([^)\s]+)\)|^\s*\[[^]\n]+\]:\s*<?([^\s>]+)',
+        text, re.M) for path in pair if path}
+    references.update(path for path in re.findall(r'`([^`\s]+/[^`\s]+)`', text)
+                      if not path.startswith(('/', '~')))
+    text = re.sub(r'https?://[^\s`<>]+|(?<![\w.])(?:~/|/)[^\s`]+', '', text)
+    references.update(re.findall(
+        r'(?<![\w/.-])(?:[\w.-]+/)+[\w.-]+\.[a-zA-Z][a-zA-Z0-9]*\b', text))
+    roots = '|'.join(re.escape(p.name) for p in ROOT.iterdir() if p.is_dir())
+    references.update(re.findall(
+        rf'(?<![\w/.-])(?:\./)?(?:{roots})/[^\s`\[\]()]+', text))
+    references.update(re.findall(r'(?<![\w/.-])(?:[\w.-]+/)*[\w.-]+\.(?:md|py|sh|json|yml|yaml|toml)\b', text))
+    missing = []
+    while references:
+        reference = references.pop().split('#', 1)[0].rstrip('.,;:')
+        if not reference or re.match(r'(?:[a-z]+:|[~/])', reference):
+            continue
+        brace = re.search(r'\{([^{}]+)\}', reference)
+        if brace:
+            references.update(reference[:brace.start()] + choice + reference[brace.end():]
+                              for choice in brace[1].split(','))
+            continue
+        if any(char in reference for char in '<>*$'):
+            continue
+        if not (ROOT / reference).exists():
+            missing.append(reference)
+    return sorted(set(missing))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
     stale = []
+    broken = []
     for name in ('CLAUDE.md', 'AGENTS.md'):
         path = ROOT / name
         text = path.read_text()
         output = render(text)
+        broken.extend(f"{name}: {path}" for path in missing_paths(text))
         if output != text:
             if args.check:
                 stale.append(name)
@@ -39,7 +71,9 @@ def main():
                 path.write_text(output)
     if stale:
         print(f"Stale core cards: {', '.join(stale)}; run python3 ops/sync-core-rule-cards.py")
-    return int(bool(stale))
+    for reference in broken:
+        print(f"Missing guidance path: {reference}")
+    return int(bool(stale or broken))
 
 
 if __name__ == '__main__':
