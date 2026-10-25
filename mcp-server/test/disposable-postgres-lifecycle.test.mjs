@@ -1,4 +1,5 @@
-import test from 'node:test';
+import test, { before, after } from 'node:test';
+import { once } from 'node:events';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -9,6 +10,24 @@ import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
 
 const bin = ['/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin', '/usr/lib/postgresql/16/bin']
   .find(candidate => existsSync(path.join(candidate, 'initdb')));
+const unrelated = [];
+before(async () => {
+  if (!bin) return;
+  for (let i = 0; i < 12; i++) {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'x'.repeat(96 * 1024)],
+      { stdio: 'ignore' });
+    unrelated.push(child);
+    await once(child, 'spawn');
+  }
+});
+after(async () => {
+  await Promise.all(unrelated.map(async child => {
+    const exited = once(child, 'exit');
+    child.kill();
+    await exited;
+  }));
+});
+
 const helper = new URL('./helpers/disposable-postgres.mjs', import.meta.url).href;
 async function waitFor(predicate) {
   const deadline = Date.now() + 15000;
