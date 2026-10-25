@@ -168,7 +168,6 @@ test("running Worker canary remains independent from subscribed validation event
   }
 });
 
-
 function deployContext(event_name = "workflow_run", run = {}) {
   return {
     event_name, repository: "DoctorCRE/carr-system", ref: "refs/heads/main",
