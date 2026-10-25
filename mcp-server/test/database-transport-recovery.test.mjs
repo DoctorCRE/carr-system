@@ -151,3 +151,18 @@ test('write reconnects before BEGIN but never replays after BEGIN fails', async 
   assert.deepEqual(fixture.counts(), { attempts: 2, ends: 0, releases: 1 });
   assert.equal(fixture.statements.filter(sql => sql === 'begin').length, 1);
 });
+
+test('unsettled pool cleanup cannot hide the original connection refusal', async t => {
+  const error = handshake(401);
+  poolFixture(t, { failures: [error] });
+  let finishCleanup;
+  t.mock.method(Pool.prototype, 'end', () => new Promise(resolve => { finishCleanup = resolve; }));
+  t.after(() => finishCleanup?.());
+  let timer;
+  t.after(() => clearTimeout(timer));
+  const result = await Promise.race([
+    callTool(env, actor(), 'catch-me-up', { ref: 'C-1' }).catch(failure => failure),
+    new Promise(resolve => { timer = setTimeout(() => resolve('cleanup blocked the refusal'), 100); }),
+  ]);
+  assert.equal(result, error);
+});
