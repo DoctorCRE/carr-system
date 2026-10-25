@@ -124,6 +124,29 @@ class RunnerTests(unittest.TestCase):
             self.assertNotIn(secret, output)
             self.assertIn('[REDACTED]', output)
 
+    def test_final_failure_record_pairs_primary_and_reporting_errors(self):
+        for reporting_failed in (False, True):
+            with self.subTest(reporting_failed=reporting_failed), tempfile.TemporaryDirectory() as folder:
+                secret = 'synthetic-private-value'
+                with patch.object(runtime, 'ROOT', Path(folder)), \
+                     patch.object(sys, 'argv', ['routine', 'lead-signals-weekly']), \
+                     patch.dict(os.environ, {'CARR_MCP_UNATTENDED_TOKEN': secret}), \
+                     patch.object(runtime, 'execute', side_effect=ValueError('primary ' + secret)), \
+                     patch.object(runtime.Context, 'failure', side_effect=(
+                         RuntimeError('reporting ' + secret) if reporting_failed else None)), \
+                     patch('sys.stderr', new_callable=io.StringIO) as stderr:
+                    self.assertEqual(runtime.main(), 1)
+                output = stderr.getvalue()
+                last_line = output.splitlines()[-1]
+                self.assertTrue(last_line.startswith('routine failure evidence: '), last_line)
+                evidence = json.loads(last_line.removeprefix('routine failure evidence: '))
+                self.assertEqual(evidence, {
+                    'primary_error': 'ValueError: primary [REDACTED]',
+                    'reporting_error': 'RuntimeError: reporting [REDACTED]' if reporting_failed else None,
+                    'routine': 'lead-signals-weekly',
+                })
+                self.assertNotIn(secret, output)
+
     def test_previous_period_resumes_before_new_period(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
