@@ -1,5 +1,6 @@
 import { randomString } from "./google-oidc.js";
 import { publicError } from "./public-errors.js";
+import { isCalendarDate } from "./calendar-date.js";
 
 const JSON_HEADERS = { "content-type": "application/json" };
 const json = (body, status = 200) =>
@@ -205,13 +206,24 @@ function validateCandidates(body) {
 
 function validatePostCallLegacyItems(items) {
   for (const item of items) {
-    if (item.kind !== "activity")
-      return { error: "post_call_legacy_kind_forbidden", allowed: ["activity"] };
+    if (!["activity", "next_step"].includes(item.kind))
+      return { error: "post_call_legacy_kind_forbidden", allowed: ["activity", "next_step"] };
     if (Object.keys(item).some(key => !["kind", "payload", "evidence_quote", "confidence"].includes(key)) ||
-        Object.keys(item.payload).some(key => !["ref", "kind", "summary", "occurred_at"].includes(key)) ||
+        item.evidence_quote.length > 500)
+      return { error: "invalid_post_call_candidate" };
+    if (item.kind === "next_step") {
+      if (Object.keys(item.payload).some(key => !["deal", "text", "next_date"].includes(key)) ||
+          !isUuid(item.payload.deal) || typeof item.payload.text !== "string" ||
+          !item.payload.text.trim() || item.payload.text.length > 500 ||
+          !Object.hasOwn(item.payload, "next_date") ||
+          (item.payload.next_date !== null && !isCalendarDate(item.payload.next_date)))
+        return { error: "invalid_post_call_next_step" };
+      continue;
+    }
+    if (Object.keys(item.payload).some(key => !["ref", "kind", "summary", "occurred_at"].includes(key)) ||
         !isUuid(item.payload.ref) || item.payload.kind !== "note" ||
         typeof item.payload.summary !== "string" || !item.payload.summary.trim() ||
-        item.payload.summary.length > 500 || item.evidence_quote.length > 500 ||
+        item.payload.summary.length > 500 ||
         (item.payload.occurred_at != null && !validTime(item.payload.occurred_at)))
       return { error: "invalid_post_call_activity" };
   }
@@ -277,7 +289,7 @@ async function candidates(request, dependencies) {
           `select 1 from capture_post_call_report where session_id=$1
             /* capture:post-call-legacy-report-lock */`, [session.id]);
         if (filed.rows.length) refuse(409, { error: "post_call_report_filed" });
-        const refs = body.items.map(item => item.payload.ref);
+        const refs = body.items.map(item => item.kind === "next_step" ? item.payload.deal : item.payload.ref);
         const exact = await client.query(
           `select deal_id from capture_call_context($1::uuid[])
             /* capture:post-call-legacy-context */`, [refs]);
