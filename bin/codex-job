@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Run one Codex job in a fresh clone; return its final message and exit code."""
 import argparse
+import contextlib
+import json
 import os
 from pathlib import Path
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 
 python = Path(__file__).resolve().parents[1] / '.venv/bin/python'
@@ -15,6 +19,61 @@ if python.is_file() and Path(sys.prefix) != python.parent.parent:
     os.execv(str(python), [str(python), __file__, *sys.argv[1:]])
 
 from skill_picker import prepare
+
+
+IDLE_SECONDS = 15 * 60
+POLL_SECONDS = 5
+
+
+def run_codex(command, clone):
+    sessions = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex')) / 'sessions'
+    seen = set(sessions.rglob('*.jsonl'))
+    log, size, active = None, 0, time.monotonic()
+    child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=sys.stderr,
+                             start_new_session=True)
+    try:
+        while child.poll() is None:
+            if log is None:
+                for path in set(sessions.rglob('*.jsonl')) - seen:
+                    try:
+                        with path.open() as stream:
+                            metadata = json.loads(stream.readline())
+                        if metadata.get('payload', {}).get('cwd') == str(clone):
+                            log = path
+                            break
+                        seen.add(path)
+                    except (OSError, ValueError):
+                        continue
+            if log is not None:
+                with contextlib.suppress(FileNotFoundError):
+                    current = log.stat().st_size
+                    if current > size:
+                        active = time.monotonic()
+                    size = current
+            if time.monotonic() - active >= IDLE_SECONDS:
+                print('Codex stalled: session log has not grown for 15 minutes.',
+                      file=sys.stderr, flush=True)
+                return 124
+            try:
+                return child.wait(timeout=POLL_SECONDS)
+            except subprocess.TimeoutExpired:
+                pass
+        return child.returncode
+    finally:
+        handlers = {s: signal.signal(s, signal.SIG_IGN) for s in (signal.SIGTERM, signal.SIGINT)}
+        try:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(child.pid, signal.SIGTERM)
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(child.pid, signal.SIGKILL)
+            child.wait()
+        finally:
+            for signum, handler in handlers.items():
+                signal.signal(signum, handler)
 
 
 def main():
@@ -27,24 +86,32 @@ def main():
     repo = args.repo
     if not Path(repo).exists() and re.fullmatch(r'[\w.-]+/[\w.-]+', repo):
         repo = f'https://github.com/{repo}.git'
-    with tempfile.TemporaryDirectory(prefix='codex-job-') as workspace:
-        clone = Path(workspace) / 'checkout'
+    clone = Path(tempfile.mkdtemp(prefix='codex-job-')).resolve() / 'checkout'
+    status = 1
+    try:
         print(f'Clone: {clone}', file=sys.stderr, flush=True)
         subprocess.run(['git', 'clone', '--quiet', '--depth', '1', '--', repo, str(clone)],
                        check=True, stdin=subprocess.DEVNULL)
         subprocess.run(['git', '-C', str(clone), 'checkout', '--quiet', '-b', args.branch], check=True)
         subprocess.run(['git', '-C', str(clone), 'config', 'user.email',
                         'jbookout@users.noreply.github.com'], check=True)
-        brief, _ = prepare(args.brief, clone)
+        footer = Path(__file__).resolve().parents[1] / 'tools/room-bridge/brief-footer.md'
+        brief, _ = prepare(args.brief + '\n\n' + footer.read_text(), clone)
         result = clone.parent / 'result.md'
         command = ['codex', 'exec', '-C', str(clone), '--dangerously-bypass-hook-trust',
                    '-o', str(result)]
         for config in args.config:
             command.extend(['-c', config])
-        run = subprocess.run([*command, brief], stdin=subprocess.DEVNULL, stdout=sys.stderr)
+        code = run_codex([*command, brief], clone)
         if result.exists():
             print(result.read_text(), end='', flush=True)
-        return run.returncode
+        status = code
+        return status
+    finally:
+        if status == 0:
+            shutil.rmtree(clone.parent)
+        else:
+            print(f'Retained checkout: {clone}', file=sys.stderr, flush=True)
 
 
 def terminate(signum, _frame):
@@ -53,6 +120,7 @@ def terminate(signum, _frame):
 
 if __name__ == '__main__':
     signal.signal(signal.SIGTERM, terminate)
+    signal.signal(signal.SIGINT, terminate)
     try:
         raise SystemExit(main())
     except subprocess.CalledProcessError as error:

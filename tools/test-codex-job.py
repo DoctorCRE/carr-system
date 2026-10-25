@@ -9,12 +9,18 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
+import shutil
 import time
 import types
 import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'ops'))
+from git_env import fixture_env
+
+ENV = fixture_env()
 
 
 class Capture(io.StringIO):
@@ -27,13 +33,12 @@ class CodexJobTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             origin = root / 'origin'
-            subprocess.run(['git', 'init', '-q', str(origin)], check=True)
+            subprocess.run(['git', 'init', '-q', str(origin)], env=ENV, check=True)
             subprocess.run(['git', '-C', str(origin), '-c', 'user.name=Test',
                             '-c', 'user.email=test@example.invalid', 'commit', '-qm',
-                            'fixture', '--allow-empty'], check=True)
+                            'fixture', '--allow-empty'], env=ENV, check=True)
             fake = root / 'codex'
-            fake.write_text('''#!/usr/bin/env python3
-import json, os, pathlib, signal, subprocess, sys, time
+            fake.write_text(f'#!{sys.executable}\n' + '''import json, os, pathlib, signal, subprocess, sys, time
 clone = pathlib.Path(sys.argv[sys.argv.index('-C') + 1])
 mode = sys.argv[-1].splitlines()[0]
 (clone / 'brief').write_text(sys.argv[-1])
@@ -41,12 +46,14 @@ log = pathlib.Path(os.environ['CODEX_HOME']) / 'sessions/2026/01/01/job.jsonl'
 log.parent.mkdir(parents=True, exist_ok=True)
 if mode != 'missing':
     log.write_text(json.dumps({'type': 'session_meta', 'payload': {'cwd': str(clone)}}) + '\\n')
+if mode == 'failure':
+    subprocess.run(['git', '-C', str(clone), '-c', 'user.name=Test', 'commit', '-qm', 'unpushed work', '--allow-empty'], check=True)
 if mode in ('success', 'failure'):
     pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text('final message\\n')
     sys.exit(7 if mode == 'failure' else 0)
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
 child = subprocess.Popen([sys.executable, '-c', 'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)'])
-(clone / 'pids').write_text(f'{os.getpid()} {child.pid}')
+(pathlib.Path(os.environ['CODEX_HOME']).parent / 'pids').write_text(f'{os.getpid()} {child.pid}')
 for i in range(80):
     if mode == 'growing':
         with log.open('a') as f: f.write('activity\\n')
@@ -61,24 +68,24 @@ for i in range(80):
             argv = ['codex-job', str(origin), 'test/job', mode]
             output, errors = io.StringIO(), Capture()
             with patch.dict(sys.modules, {'skill_picker': picker}), \
-                    patch.dict(os.environ, {'PATH': str(root) + os.pathsep + os.defpath,
-                                            'CODEX_HOME': str(root / 'home')}), \
+                    patch.dict(os.environ, {**ENV, 'PATH': str(root) + os.pathsep + os.defpath,
+                                            'CODEX_HOME': str(root / 'home')}, clear=True), \
                     patch('os.execv'), patch.object(sys, 'argv', argv), \
                     contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
                 job = runpy.run_path(str(ROOT / 'bin/codex-job'))
-                job['main'].__globals__['IDLE_SECONDS'] = .25
+                job['main'].__globals__['IDLE_SECONDS'] = 2
                 job['main'].__globals__['POLL_SECONDS'] = .05
+                stop = threading.Event()
                 if cancel:
-                    import threading
                     def interrupt():
-                        while not list(root.glob('unused')):
-                            time.sleep(.01)
-                            if 'Clone: ' in errors.getvalue():
-                                checkout = Path(errors.getvalue().split('Clone: ')[1].splitlines()[0])
-                                if (checkout / 'pids').exists():
-                                    os.kill(os.getpid(), cancel)
-                                    return
-                    threading.Thread(target=interrupt, daemon=True).start()
+                        for _ in range(500):
+                            if stop.wait(.01):
+                                return
+                            if (root / 'pids').exists():
+                                os.kill(os.getpid(), cancel)
+                                return
+                    worker = threading.Thread(target=interrupt)
+                    worker.start()
                 previous = {s: signal.signal(s, job['terminate']) for s in (signal.SIGTERM, signal.SIGINT)}
                 try:
                     try:
@@ -86,12 +93,18 @@ for i in range(80):
                     except SystemExit as error:
                         code = error.code
                 finally:
-                    for s, handler in previous.items(): signal.signal(s, handler)
+                    stop.set()
+                    if cancel:
+                        worker.join()
+                    for s, handler in previous.items():
+                        signal.signal(s, handler)
             clone = Path(errors.getvalue().split('Clone: ')[1].splitlines()[0])
-            self.addCleanup(__import__('shutil').rmtree, clone.parent, True)
-            if (clone / 'pids').exists():
-                for pid in map(int, (clone / 'pids').read_text().split()):
+            self.addCleanup(shutil.rmtree, clone.parent, True)
+            if (root / 'pids').exists():
+                pids = list(map(int, (root / 'pids').read_text().split()))
+                for pid in pids:
                     self.addCleanup(self.kill, pid)
+                for pid in pids:
                     for _ in range(100):
                         state = subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)], capture_output=True, text=True).stdout.strip()
                         if not state or state.startswith('Z'): break
@@ -101,12 +114,15 @@ for i in range(80):
 
     @staticmethod
     def kill(pid):
-        with contextlib.suppress(ProcessLookupError): os.kill(pid, signal.SIGKILL)
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGKILL)
 
     def test_failure_retains_checkout_and_message(self):
         code, output, errors, clone = self.launch('failure')
         self.assertEqual((code, output), (7, 'final message\n'))
         self.assertTrue(clone.is_dir())
+        commits = subprocess.check_output(['git', '-C', str(clone), 'rev-list', '--count', 'HEAD'], env=ENV, text=True)
+        self.assertEqual(commits.strip(), '2')
         self.assertIn(f'Retained checkout: {clone}', errors)
 
     def test_success_cleans_up(self):
