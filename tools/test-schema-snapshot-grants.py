@@ -143,6 +143,19 @@ def main(argv):
                    if re.match(r"\s*grant\s", ln, re.I)
                    and not ln.lstrip().startswith("--")]
 
+    vector_grants = [
+        "grant execute on function public.vector(public.vector, integer, boolean) to carr_writer;",
+        "grant execute on function public.vector_norm(public.vector) to carr_writer;",
+        "revoke all on function public.array_to_halfvec(double precision[], integer, boolean) from public;",
+    ]
+    for statement in vector_grants:
+        check("unnamed extension function arguments use the generated grant grammar",
+              match_generated_grant(statement) is not None)
+    check("unnamed extension arguments preserve their type identity",
+          acl_facts(vector_grants) == (
+              ('function', 'public.vector(vector, integer, boolean)', 'execute', False),
+              ('function', 'public.vector_norm(vector)', 'execute', False),
+          ))
     canonical_section = carr_grants_section_lines(sql)
     raw_writer_grants = [ln for ln in canonical_section
                          if ln.endswith(" to carr_writer;")]

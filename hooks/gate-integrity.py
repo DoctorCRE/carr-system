@@ -23,14 +23,11 @@ HOOKS = REPO / "hooks"
 BASELINE = REPO / "ops/config/gate-baseline.json"
 CONTRACTS = {
     "hook_runtime.py": REPO / "lib/hook_runtime.py",
-    "hook-script-policy.json": REPO / "ops/config/hook-script-policy.json",
     "hooks.json": REPO / "ops/config/hooks.json",
     "codex-hooks.json": REPO / "ops/config/codex-hooks.json",
     "rule-enforcement-map.json": REPO / "ops/config/rule-enforcement-map.json",
-    "github_spacing.py": REPO / "lib/github_spacing.py",
     "native_shell.py": REPO / "lib/native_shell.py",
     "claude-managed-settings.json": REPO / "ops/config/claude-managed-settings.json",
-    "codex-requirements.toml": REPO / "ops/config/codex-requirements.toml",
     "codex-permissions.toml": REPO / "ops/config/codex-permissions.toml",
 }
 

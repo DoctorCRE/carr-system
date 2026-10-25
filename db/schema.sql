@@ -91,11 +91,11 @@ begin
   -- THE GATE ZERO PRODUCER SEAT TAKES NO PASSWORD, and that is the difference
   -- between the two machine logins rather than an oversight. 0502 creates it as
   -- `create role carr_gate_zero_producer login` with nothing else, and
-  -- ops/staging-database-login-provision-db-gate.py reads the seat's baseline
-  -- back as (rolcanlogin, rolpassword is null, rolconfig is null) = (t,t,t)
-  -- before it provisions anything — a snapshot that minted the seat with
-  -- carr_jobs' placeholder password failed that gate with (t,f,t). The seat is
-  -- credentialed by the provisioning path the gate exercises, not by this file,
+  -- Its provisioning baseline is
+  -- (rolcanlogin, rolpassword is null, rolconfig is null) = (t,t,t).
+  -- A snapshot that minted the seat with carr_jobs' placeholder password
+  -- violated that baseline with (t,f,t). The seat is
+  -- credentialed by its provisioning path, not by this file,
   -- so reproduce 0502's shape exactly and leave an existing role alone.
   select rolcanlogin into producer_can_login from pg_roles where rolname='carr_gate_zero_producer';
   if not found then
@@ -241,6 +241,20 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 --
 
 COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions';
+
+
+--
+-- Name: vector; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION vector; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION vector IS 'vector data type and ivfflat and hnsw access methods';
 
 
 --
@@ -28780,6 +28794,68 @@ end $$;
 
 
 --
+-- Name: policy_integrity_snapshot(); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.policy_integrity_snapshot() RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public', 'ops', 'pg_temp'
+    AS $$
+declare doctrine_gen bigint; doctrine_digest text; rule_digest text; schema_count integer; schema_highest text; schema_digest text; delivery_health record;
+begin
+  select generation into doctrine_gen from public.doctrine_meta where id=1;
+  if doctrine_gen is null then raise exception 'doctrine generation singleton is unavailable'; end if;
+  doctrine_digest:=ops.scac_doctrine_projection_digest();
+  if doctrine_digest is null then raise exception 'doctrine projection is unavailable'; end if;
+
+  if (select count(*) from ops.rule_delivery_policy where singleton)<>1 then
+    raise exception 'rule delivery policy singleton is unavailable';
+  end if;
+  select * into delivery_health from ops.rule_delivery_audit_counts(35);
+  if delivery_health.total<1 or delivery_health.untagged<>0 or delivery_health.orphaned<>0
+     or delivery_health.wildcarded<>0 or delivery_health.packless<>0
+     or delivery_health.packs<1 or delivery_health.emptypack<>0
+     or delivery_health.scope_mismatch<>0
+     or delivery_health.layer0_shared>delivery_health.layer0_shared_cap
+     or delivery_health.mode not in ('shadow','enforced') then
+    raise exception 'rule delivery projection is not activation-safe: %',to_jsonb(delivery_health);
+  end if;
+
+  select 'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(jsonb_build_object(
+    'active_rules',coalesce((select jsonb_agg(jsonb_build_object(
+      'id',r.id,'statement_digest','sha256:'||encode(public.digest(convert_to(r.statement,'UTF8'),'sha256'),'hex'),
+      'rule_scope',r.scope,'personal_to',r.personal_to,'short_id',l.short_id,
+      'load_layer',l.load_layer,'packs',l.packs,'scope',l.scope,
+      'map_digest',l.map_digest) order by r.id::text collate "C")
+      from public.rule r join ops.rule_load_layer l on l.rule_id=r.id where r.status='active'),'[]'::jsonb),
+    'packs',coalesce((select jsonb_agg(jsonb_build_object('pack',pack,
+      'title_digest','sha256:'||encode(public.digest(convert_to(title,'UTF8'),'sha256'),'hex'),
+      'description_digest','sha256:'||encode(public.digest(convert_to(description,'UTF8'),'sha256'),'hex'),
+      'triggers',triggers,'source_digest','sha256:'||encode(public.digest(convert_to(source,'UTF8'),'sha256'),'hex')) order by pack collate "C")
+      from ops.rule_pack),'[]'::jsonb),
+    'delivery_mode',(select mode from ops.rule_delivery_policy where singleton=true)
+  )),'UTF8'),'sha256'),'hex') into rule_digest;
+  if rule_digest is null then raise exception 'rule delivery projection is unavailable'; end if;
+
+  select count(*)::integer,max(filename collate "C") collate "default",
+    'sha256:'||encode(public.digest(coalesce(string_agg(convert_to(filename,'UTF8')||decode('00','hex')||convert_to(sha256,'UTF8')||decode('0a','hex'),''::bytea order by filename collate "C"),''::bytea),'sha256'),'hex')
+    into schema_count,schema_highest,schema_digest from public.schema_migrations;
+  if schema_count<1 or schema_highest is null then raise exception 'schema migration ledger is unavailable'; end if;
+  return jsonb_build_object('registry_version','scac-mutation-registry.v118','registry_digest','sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d',
+    'doctrine_generation',doctrine_gen,'doctrine_projection_digest',doctrine_digest,
+    'rule_projection_digest',rule_digest,'schema_applied_count',schema_count,
+    'schema_highest_migration',schema_highest,'schema_ledger_digest',schema_digest);
+end $$;
+
+
+--
+-- Name: FUNCTION policy_integrity_snapshot(); Type: COMMENT; Schema: ops; Owner: -
+--
+
+COMMENT ON FUNCTION ops.policy_integrity_snapshot() IS 'Deferred source integrity without retired SCAC seal or mutation-catalog validation. Registry fields retain historical epoch format only.';
+
+
+--
 -- Name: portfolio_accept_revision(uuid, uuid, text, uuid); Type: FUNCTION; Schema: ops; Owner: -
 --
 
@@ -39388,8 +39464,35 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
     LANGUAGE sql IMMUTABLE
     SET search_path TO 'pg_catalog'
     AS $_$ SELECT $current_grants${
-  "registry_version": "scac-mutation-registry.v118",
-  "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
+  "relation_dml": [
+    {
+      "grantee": "carr_writer",
+      "relation": "public.deal_vendor_assignment",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.deal_vendor_assignment",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.doctrine_embedding",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.doctrine_embedding:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    }
+  ],
   "secdef_execute": [
     {
       "config": [
@@ -39465,8 +39568,44 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[])",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[]):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[])",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[]):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
     }
   ],
+  "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
+  "registry_version": "scac-mutation-registry.v118",
+  "runtime_dml_grants": {
+    "count": 339,
+    "digest": "sha256:a210dbda8843ef57aecf1985cb0b97f7ab6fac5e1e99df0926542eb2945254bc"
+  },
   "retired_secdef_execute": [
     {
       "config": [
@@ -41145,7 +41284,14 @@ begin
   if registered_count<>jsonb_array_length(current_grants->'secdef_execute') then return false; end if;
   if observed_count<>1267 or observed_digest<>'sha256:587e762e80c6691d4a07c5b35e48a259c7b8bdf885d8595ffd0c14928c657efa' then return false; end if;
   with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper), runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper), capabilities as (select n.nspname,c.relname,c.relkind,c.relowner,acl.grantee,acl.privilege_type,acl.is_grantable from pg_class c join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) acl where n.nspname not in ('pg_catalog','information_schema') and c.relkind in ('r','p','v','m','f')), observed as (select 'db-relation-acl:'||nspname||'.'||relname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type) ingress_key,jsonb_build_object('ingress_key','db-relation-acl:'||nspname||'.'||relname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type),'ingress_kind','db_relation_acl','relation',nspname||'.'||relname,'relation_kind',relkind,'grantee',coalesce(r.rolname,'public'),'privilege',lower(privilege_type),'grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE') and grantee<>relowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
-  select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
+  select count(*) filter (where row not in (select value from jsonb_array_elements(current_grants->'relation_dml'))),
+    'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(
+      jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C")
+        filter (where row not in (select value from jsonb_array_elements(current_grants->'relation_dml'))),
+      '[]'::jsonb)),'UTF8'),'sha256'),'hex'),
+    count(*) filter (where row in (select value from jsonb_array_elements(current_grants->'relation_dml')))
+    into observed_count,observed_digest,registered_count from observed;
+  if registered_count<>jsonb_array_length(current_grants->'relation_dml') then return false; end if;
   if observed_count<>321 or observed_digest<>'sha256:2ece3984f1389d78749dd3055ecf72516f02f97e33d260192e66daff062292e0' then return false; end if;
   with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper), runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper), capabilities as (select n.nspname,c.relname,c.relkind,c.relowner,a.attname,acl.grantee,acl.privilege_type,acl.is_grantable from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(a.attacl) acl where a.attnum>0 and not a.attisdropped and a.attacl is not null and cardinality(a.attacl)>0 and n.nspname not in ('pg_catalog','information_schema') and c.relkind in ('r','p','v','m','f')), observed as (select 'db-column-acl:'||nspname||'.'||relname||'.'||attname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type) ingress_key,jsonb_build_object('ingress_key','db-column-acl:'||nspname||'.'||relname||'.'||attname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type),'ingress_kind','db_column_acl','relation',nspname||'.'||relname,'relation_kind',relkind,'column',attname,'grantee',coalesce(r.rolname,'public'),'privilege',lower(privilege_type),'grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where privilege_type in ('INSERT','UPDATE') and grantee<>relowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
   select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
@@ -52897,25 +53043,6 @@ CREATE FUNCTION ops.scac_policy_epoch_refresh() RETURNS trigger
     AS $$
 declare source jsonb; source_digest text; prior ops.scac_policy_epoch%rowtype; next_epoch bigint; created timestamptz:=clock_timestamp(); epoch_digest text; prefix_digest text; bootstrap_health record; settlement_key text;
 begin
-  -- SETTLEMENT DEDUPE (0476). These are per-row deferred constraint triggers on
-  -- 18 tables, so one settlement ("set constraints all immediate", or commit)
-  -- fires this function once per queued row. Every firing in a settlement sees
-  -- the same final table state: the snapshot below is identical each time, and
-  -- every firing after the first exits at the source_digest early-return — but
-  -- only AFTER paying for ops.scac_policy_epoch_snapshot(), whose catalog scans
-  -- cost ~0.7s each since the v10 registry. Seeding the reviewed rule
-  -- projection queues ~480 rows: 480 firings x 0.7s took the CI migration
-  -- class from 77s to 652s on 2026-09-01 (hosted runs 33451887858 vs
-  -- 33572556612; the db-gate-timing line names siep12/siep18 at ~165s each).
-  -- The key is txid + statement_timestamp: constant across one settlement's
-  -- firings, different for any later settlement in the same transaction, and
-  -- set_config(...,true) is transaction-local so nothing leaks across
-  -- transactions. Known edge, accepted and fail-closed: code that settles
-  -- twice INSIDE one statement with relevant writes between the settlements
-  -- would skip the second append; the chain-state check then reports the
-  -- epoch stale/incompatible (visible refusal, not silent corruption) and the
-  -- next settlement in any later statement appends the missed epoch. No such
-  -- caller exists in this repository today.
   settlement_key:=txid_current()::text||':'||extract(epoch from statement_timestamp())::text;
   if current_setting('carr.scac_epoch_settled',true)=settlement_key then return null; end if;
   perform pg_advisory_xact_lock(hashtextextended('carr-internal:scac-core:policy-epoch',0));
@@ -52926,15 +53053,11 @@ begin
        and bootstrap_health.orphaned=0 and bootstrap_health.wildcarded=0
        and bootstrap_health.packless=0 and bootstrap_health.emptypack=0
        and bootstrap_health.scope_mismatch=0 and bootstrap_health.mode='shadow' then
-      -- A freshly reconstructed database has no rule source until the canonical
-      -- control-plane sync.  Keep the epoch absent (therefore incompatible)
-      -- rather than blessing an empty policy.  The sync's deferred triggers
-      -- bootstrap epoch 1 from its final coherent projection.
       perform set_config('carr.scac_epoch_settled',settlement_key,true);
       return null;
     end if;
   end if;
-  source:=ops.scac_policy_epoch_snapshot();
+  source:=ops.policy_integrity_snapshot();
   source_digest:='sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(source),'UTF8'),'sha256'),'hex');
   if prior.epoch is not null and prior.source_digest=source_digest then
     perform set_config('carr.scac_epoch_settled',settlement_key,true);
@@ -52959,6 +53082,13 @@ begin
   perform set_config('carr.scac_epoch_settled',settlement_key,true);
   return null;
 end $$;
+
+
+--
+-- Name: FUNCTION scac_policy_epoch_refresh(); Type: COMMENT; Schema: ops; Owner: -
+--
+
+COMMENT ON FUNCTION ops.scac_policy_epoch_refresh() IS 'Deferred doctrine, rule delivery and ledger integrity; historical SCAC catalog audit does not gate commits.';
 
 
 --
@@ -59668,9 +59798,10 @@ begin
   select * into latest from ops.scac_policy_epoch order by epoch desc limit 1;
   select * into registry from ops.scac_mutation_registry_version
     where registry_version=latest.registry_version;
-  grant_state:=case when registry.registry_version='scac-mutation-registry.v118' and
-    (grant_snapshot->>'entry_count')::integer=336 and
-    grant_snapshot->>'grant_digest'='sha256:cd7e5cff7db2ff2d98fb626c15d0109af9af9de91927b7b32e53a2d7147e9ee6'
+  grant_state:=case when registry.registry_version=ops.scac_current_grant_contract()->>'registry_version' and
+    (grant_snapshot->>'entry_count')::integer=
+      (ops.scac_current_grant_contract()->'runtime_dml_grants'->>'count')::integer and
+    grant_snapshot->>'grant_digest'=ops.scac_current_grant_contract()->'runtime_dml_grants'->>'digest'
     then 'current' else 'drifted_or_unbound' end;
   with recursive connected(oid) as (
     select oid from pg_roles where rolname in ('carr_writer','carr_jobs','carr_authority')
@@ -69320,6 +69451,23 @@ $$;
 
 
 --
+-- Name: carr_business_date(timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.carr_business_date(instant timestamp with time zone DEFAULT CURRENT_TIMESTAMP) RETURNS date
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path TO 'pg_catalog'
+    AS $$ select (instant at time zone 'America/Chicago')::date $$;
+
+
+--
+-- Name: FUNCTION carr_business_date(instant timestamp with time zone); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.carr_business_date(instant timestamp with time zone) IS 'CARR calendar day in America/Chicago, independent of session timezone. Date-only facts stay dates.';
+
+
+--
 -- Name: carr_business_days(date, date); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -69477,15 +69625,16 @@ end $$;
 
 CREATE FUNCTION public.current_retrievable_doctrine(p_actor_id uuid, p_content_classes text[] DEFAULT NULL::text[]) RETURNS TABLE(section_id uuid, section_key text, section_title text, doc_slug text, doc_title text, content_class text, plain_text text, body_search_vector tsvector, section_title_vector tsvector, document_title_vector tsvector)
     LANGUAGE sql STABLE
+    SET search_path TO ''
     AS $$
-  select s.id, s.section_key, s.title, d.slug, d.title, d.content_class,
-         r.plain_text, r.search_vector, s.title_search_vector, d.title_search_vector
-    from doctrine_section s
-    join doctrine_document d on d.id = s.document_id
-    join doctrine_revision r on r.id = s.current_revision_id
-   where s.status = 'active'
-     and (d.visibility <> 'personal' or d.owner_actor_id = p_actor_id)
-     and (p_content_classes is null or d.content_class = any(p_content_classes))
+  select s.id,s.section_key,s.title,d.slug,d.title,d.content_class,
+         r.plain_text,r.search_vector,s.title_search_vector,d.title_search_vector
+    from public.doctrine_section s
+    join public.doctrine_document d on d.id=s.document_id
+    join public.doctrine_revision r on r.id=s.current_revision_id
+   where s.status='active'
+     and (d.visibility <> 'personal' or d.owner_actor_id=p_actor_id)
+     and (p_content_classes is null or d.content_class=any(p_content_classes))
 $$;
 
 
@@ -70041,13 +70190,102 @@ $$;
 
 
 --
+-- Name: search_doctrine_semantic(text, uuid, text[], integer, text, public.vector[]); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings public.vector[]) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+with policy as materialized (
+  select policy_id,version from public.retrieval_ranking_policy
+   where policy_id=coalesce(p_policy_id,
+     (select policy_id from public.retrieval_ranking_policy where is_default and status='active'))
+     and status in ('candidate','active')
+),
+visible as materialized (
+  select c.*, s.current_revision_id as revision_id
+    from public.current_retrievable_doctrine(p_actor_id,p_content_classes) c
+    join public.doctrine_section s on s.id=c.section_id
+),
+coverage as materialized (
+  select count(distinct v.section_id)::integer as visible,
+         count(distinct e.revision_id)::integer as embedded
+    from visible v
+    left join public.doctrine_revision r on r.id=v.revision_id and r.section_id=v.section_id
+    left join public.doctrine_embedding e on e.revision_id=r.id
+      and e.model='@cf/baai/bge-small-en-v1.5:cls:chunks-v1'
+),
+lexical as materialized (
+  select l.*, row_number() over (
+    order by l.final_score desc,l.concept_score desc,l.lexical_score desc,l.section_key,l.section_id) as position
+    from public.search_doctrine_situations(p_query,p_actor_id,p_content_classes,100,p_policy_id,true) l
+),
+chunk_scores as materialized (
+  select v.section_id,
+         max(1 - (e.embedding OPERATOR(public.<=>) q.embedding))::double precision as similarity
+    from visible v
+    join public.doctrine_revision r on r.id=v.revision_id and r.section_id=v.section_id
+    join public.doctrine_embedding e on e.revision_id=r.id
+      and e.model='@cf/baai/bge-small-en-v1.5:cls:chunks-v1'
+    cross join unnest(p_embeddings) as q(embedding)
+   group by v.section_id
+),
+nearest as materialized (
+  select v.*,c.similarity from visible v join chunk_scores c on c.section_id=v.section_id
+   order by c.similarity desc,v.section_id limit 100
+),
+semantic as (
+  select n.*, row_number() over (order by similarity desc,section_id) as position
+    from nearest n where similarity > 0
+),
+blended as (
+  select v.section_id,v.section_key,v.section_title as title,v.doc_slug,v.content_class,
+         coalesce(l.snippet,left(v.plain_text,240)) as snippet,
+         coalesce(l.lexical_score,0) as lexical_score,
+         coalesce(l.concept_score,0) as concept_score,
+         (30.5 * (coalesce(1.0/(60+l.position),0) + coalesce(1.0/(60+s.position),0)))::double precision as final_score,
+         coalesce(l.provenance,'{}'::jsonb) || jsonb_build_object(
+           'complete',true,'policy_id',p.policy_id,'policy_version',p.version,
+           'blend_id','rrf-60-v1','rrf_k',60,'rrf_scale',30.5,
+           'lexical_position',l.position,'semantic_position',s.position,
+           'lexical_final_score',l.final_score,
+           'semantic_similarity',s.similarity,
+           'embedding_model','@cf/baai/bge-small-en-v1.5:cls:chunks-v1') as provenance,
+         coalesce(s.similarity,0) as similarity
+    from visible v cross join policy p
+    left join lexical l on l.section_id=v.section_id
+    left join semantic s on s.section_id=v.section_id
+   where l.section_id is not null or s.section_id is not null
+),
+limited as (
+  select b.*,b.final_score as rank from blended b
+   order by final_score desc,similarity desc,concept_score desc,lexical_score desc,section_key,section_id
+   limit greatest(1,least(coalesce(p_limit,20),100))
+),
+hits as (
+  select coalesce(jsonb_agg((to_jsonb(l)-'similarity') || jsonb_build_object(
+    'provenance',l.provenance || jsonb_build_object('final_score',l.final_score))
+    order by l.final_score desc,l.similarity desc,l.concept_score desc,l.lexical_score desc,l.section_key,l.section_id),'[]'::jsonb) as value
+  from limited l
+)
+select jsonb_build_object('visible',c.visible,'embedded',c.embedded,'hits',
+  case when c.embedded=0 then
+    (select coalesce(jsonb_agg(to_jsonb(l)),'[]'::jsonb)
+       from public.search_doctrine_situations(p_query,p_actor_id,p_content_classes,p_limit,p_policy_id,true) l)
+  else h.value end)
+from coverage c cross join hits h
+$$;
+
+
+--
 -- Name: search_doctrine_situations(text, uuid, text[], integer, text, boolean); Type: FUNCTION; Schema: public; Owner: -
 --
 
 CREATE FUNCTION public.search_doctrine_situations(p_query text, p_actor_id uuid, p_content_classes text[] DEFAULT NULL::text[], p_limit integer DEFAULT 20, p_policy_id text DEFAULT NULL::text, p_allow_fallback boolean DEFAULT false) RETURNS TABLE(section_id uuid, section_key text, title text, doc_slug text, content_class text, rank double precision, snippet text, lexical_score double precision, concept_score double precision, final_score double precision, provenance jsonb)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
-    AS $$
+    AS $_$
 with
   normalized as materialized (
     select public.normalize_retrieval_phrase(p_query) as q
@@ -70085,6 +70323,12 @@ with
                when to_tsvector('english', p.normalized_phrase) @@ websearch_to_tsquery('english', n.q)
                then least(1.0, ts_rank_cd(to_tsvector('english', p.normalized_phrase),
                                          websearch_to_tsquery('english', n.q))::double precision)
+               when n.q !~ '"'
+                and websearch_to_tsquery('english', n.q)::text !~ '!'
+                and n.q !~ '(^|[[:space:]])or([[:space:]]|$)'
+                and to_tsvector('english', n.q) @@ plainto_tsquery('english', p.normalized_phrase)
+               then least(1.0, ts_rank_cd(to_tsvector('english', n.q),
+                                         plainto_tsquery('english', p.normalized_phrase))::double precision)
                else 0.0 end
              when 'trgm' then case when public.similarity(p.normalized_phrase, n.q) >= p.min_similarity
                then public.similarity(p.normalized_phrase, n.q) else 0.0 end
@@ -70111,8 +70355,6 @@ with
       from concept_evidence group by section_id
   ),
   unioned as materialized (
-    -- Coalesce FIRST, cap second: least(1.0, NULL) is 1.0 in PostgreSQL
-    -- (nulls are ignored), which is the whole defect this migration removes.
     select c.*, least(1.0, coalesce(l.raw_score, 0))::double precision as lexical_score,
            least(1.0, coalesce(ce.concept_score, 0))::double precision as concept_score,
            l.snippet, coalesce(ce.phrase_ids, '{}') as phrase_ids,
@@ -70199,7 +70441,7 @@ select l.section_id, l.section_key, l.section_title, l.doc_slug, l.content_class
                else '{}'::jsonb end
   from limited l
  order by l.final_score desc, l.concept_score desc, l.lexical_score desc, l.section_key asc
-$$;
+$_$;
 
 
 --
@@ -83879,6 +84121,24 @@ COMMENT ON TABLE public.deal_type_ref IS 'Deal transaction types (amendment 1). 
 
 
 --
+-- Name: deal_vendor_assignment; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.deal_vendor_assignment (
+    deal_id uuid NOT NULL,
+    party_id uuid NOT NULL,
+    role text NOT NULL,
+    company_party_id uuid NOT NULL,
+    contact_party_id uuid NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    note text,
+    updated_by uuid NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT deal_vendor_assignment_role_check CHECK ((role = ANY (ARRAY['lender'::text, 'contractor'::text, 'architect'::text, 'attorney'::text, 'title'::text, 'inspector'::text, 'landlord_rep'::text])))
+);
+
+
+--
 -- Name: defect; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -84069,6 +84329,22 @@ CREATE TABLE public.doctrine_edge_type (
     acyclic boolean NOT NULL,
     precedence_rank integer,
     description text NOT NULL
+);
+
+
+--
+-- Name: doctrine_embedding; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.doctrine_embedding (
+    revision_id uuid NOT NULL,
+    chunk_index integer DEFAULT 0 NOT NULL,
+    model text NOT NULL,
+    embedding public.vector(384) NOT NULL,
+    embedded_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT doctrine_embedding_chunk_index_check CHECK ((chunk_index >= 0)),
+    CONSTRAINT doctrine_embedding_embedding_check CHECK ((public.vector_norm(embedding) > (0)::double precision)),
+    CONSTRAINT doctrine_embedding_model_check CHECK ((model = '@cf/baai/bge-small-en-v1.5:cls:chunks-v1'::text))
 );
 
 
@@ -85281,6 +85557,7 @@ CREATE TABLE public.party (
     contact_state_set_by uuid,
     contact_state_set_at timestamp with time zone,
     cell text,
+    vendor_assignment_version integer DEFAULT 1 NOT NULL,
     CONSTRAINT party_kind_check CHECK ((kind = ANY (ARRAY['person'::text, 'org'::text])))
 );
 
@@ -86182,7 +86459,8 @@ CREATE VIEW public.v_last_touch AS
             a.source,
             a.version,
             a.updated_at,
-            a.updated_by
+            a.updated_by,
+            a.connected
            FROM (public.activity a
              JOIN public.activity_kind k ON ((k.slug = a.kind)))
           WHERE (k.is_contact OR ((a.kind = 'note'::text) AND (a.summary = 'last-touch stamp (imported)'::text)) OR ((a.kind = 'note'::text) AND (a.summary ~~ 'Last touch carried from%'::text)))
@@ -86200,27 +86478,27 @@ CREATE VIEW public.v_last_touch AS
         )
  SELECT 'deal'::text AS subject_type,
     deal_contact.deal_id AS subject_id,
-    (max(deal_contact.occurred_at))::date AS last_touch
+    public.carr_business_date(max(deal_contact.occurred_at)) AS last_touch
    FROM deal_contact
   GROUP BY deal_contact.deal_id
 UNION ALL
  SELECT 'client'::text AS subject_type,
     contact.client_id AS subject_id,
-    (max(contact.occurred_at))::date AS last_touch
+    public.carr_business_date(max(contact.occurred_at)) AS last_touch
    FROM contact
   WHERE (contact.client_id IS NOT NULL)
   GROUP BY contact.client_id
 UNION ALL
  SELECT 'lead'::text AS subject_type,
     contact.lead_id AS subject_id,
-    (max(contact.occurred_at))::date AS last_touch
+    public.carr_business_date(max(contact.occurred_at)) AS last_touch
    FROM contact
   WHERE (contact.lead_id IS NOT NULL)
   GROUP BY contact.lead_id
 UNION ALL
  SELECT 'vendor'::text AS subject_type,
     contact.vendor_id AS subject_id,
-    (max(contact.occurred_at))::date AS last_touch
+    public.carr_business_date(max(contact.occurred_at)) AS last_touch
    FROM contact
   WHERE (contact.vendor_id IS NOT NULL)
   GROUP BY contact.vendor_id;
@@ -86686,7 +86964,7 @@ CREATE VIEW public.v_claim_card AS
     dup_basis,
     (((email IS NOT NULL) AND (email <> ''::text)) OR ((phone IS NOT NULL) AND (phone <> ''::text))) AS has_channel,
     (NOT (((email IS NOT NULL) AND (email <> ''::text)) OR ((phone IS NOT NULL) AND (phone <> ''::text)))) AS needs_contact,
-    (est_lease_event - CURRENT_DATE) AS days_to_window,
+    (est_lease_event - public.carr_business_date()) AS days_to_window,
     created_at
    FROM public.candidate_pool cp
   WHERE ((status = 'pool'::text) AND (NOT dup_do_not_contact));
@@ -88837,6 +89115,27 @@ SELECT
 
 
 --
+-- Name: v_deal_room_vendor; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_deal_room_vendor AS
+ SELECT a.deal_id,
+    a.party_id,
+    a.role,
+    jsonb_build_object('id', company.id, 'name', company.name) AS company,
+    jsonb_build_object('id', contact.id, 'name', contact.name, 'email', contact.email, 'phone', contact.phone) AS contact,
+    a.note,
+    (to_jsonb(a.updated_at) #>> '{}'::text[]) AS updated_at
+   FROM (((public.deal_vendor_assignment a
+     JOIN public.party p ON (((p.id = a.party_id) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL))))
+     JOIN public.party company ON (((company.id = a.company_party_id) AND (company.merged_into IS NULL) AND (company.deleted_at IS NULL))))
+     JOIN public.party contact ON (((contact.id = a.contact_party_id) AND (contact.merged_into IS NULL) AND (contact.deleted_at IS NULL))))
+  WHERE (a.active AND (EXISTS ( SELECT 1
+           FROM public.vendor v
+          WHERE ((v.party_id = a.party_id) AND (v.merged_into IS NULL)))));
+
+
+--
 -- Name: v_defect; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -88901,11 +89200,11 @@ CREATE VIEW public.v_today_triage AS
     na.due_on,
     COALESCE(r.display_name, r.org_name) AS subject_name,
     r.ref AS subject_ref,
-    public.carr_business_days(na.due_on, CURRENT_DATE) AS business_days_overdue
+    public.carr_business_days(na.due_on, public.carr_business_date()) AS business_days_overdue
    FROM ((public.next_action na
      JOIN public.actor owner ON ((owner.id = na.owner_id)))
      LEFT JOIN public.v_ref_index r ON (((r.subject_id = na.subject_id) AND (r.subject_type = na.subject_type))))
-  WHERE ((na.status = 'open'::text) AND (na.due_on IS NOT NULL) AND (na.due_on <= CURRENT_DATE) AND ((na.hold_until IS NULL) OR (na.hold_until <= CURRENT_DATE)))
+  WHERE ((na.status = 'open'::text) AND (na.due_on IS NOT NULL) AND (na.due_on <= public.carr_business_date()) AND ((na.hold_until IS NULL) OR (na.hold_until <= public.carr_business_date())))
 UNION ALL
  SELECT 'post_call_action'::text AS item_kind,
     pca.id,
@@ -88916,11 +89215,11 @@ UNION ALL
     pca.due_on,
     COALESCE(r.display_name, r.org_name) AS subject_name,
     r.ref AS subject_ref,
-    public.carr_business_days(pca.due_on, CURRENT_DATE) AS business_days_overdue
+    public.carr_business_days(pca.due_on, public.carr_business_date()) AS business_days_overdue
    FROM ((public.capture_post_call_action pca
      JOIN public.actor owner ON ((owner.id = pca.owner_id)))
      LEFT JOIN public.v_ref_index r ON (((r.subject_id = pca.deal_id) AND (r.subject_type = 'deal'::text))))
-  WHERE ((pca.status = 'open'::text) AND (pca.due_on IS NOT NULL) AND (pca.due_on <= CURRENT_DATE))
+  WHERE ((pca.status = 'open'::text) AND (pca.due_on IS NOT NULL) AND (pca.due_on <= public.carr_business_date()))
 UNION ALL
  SELECT 'critical_date'::text AS item_kind,
     cd.id,
@@ -88931,10 +89230,10 @@ UNION ALL
     cd.due_on,
     COALESCE(r.display_name, r.org_name) AS subject_name,
     r.ref AS subject_ref,
-    public.carr_business_days(cd.due_on, CURRENT_DATE) AS business_days_overdue
+    public.carr_business_days(cd.due_on, public.carr_business_date()) AS business_days_overdue
    FROM (public.critical_date cd
      LEFT JOIN public.v_ref_index r ON (((r.subject_id = cd.deal_id) AND (r.subject_type = 'deal'::text))))
-  WHERE ((cd.status = 'open'::text) AND (cd.due_on <= (CURRENT_DATE + 14)))
+  WHERE ((cd.status = 'open'::text) AND (cd.due_on <= (public.carr_business_date() + 14)))
 UNION ALL
  SELECT 'ingest'::text AS item_kind,
     i.id,
@@ -88942,10 +89241,10 @@ UNION ALL
     i.id AS subject_id,
     NULL::text AS owner,
     COALESCE(NULLIF(TRIM(BOTH FROM (i.payload ->> 'summary'::text)), ''::text), NULLIF(TRIM(BOTH FROM (i.payload ->> 'title'::text)), ''::text), NULLIF(TRIM(BOTH FROM (i.payload ->> 'subject'::text)), ''::text), (i.source || ' item awaiting triage'::text)) AS what,
-    (i.received_at)::date AS due_on,
+    public.carr_business_date(i.received_at) AS due_on,
     NULLIF(TRIM(BOTH FROM (i.payload ->> 'organizer'::text)), ''::text) AS subject_name,
     NULL::text AS subject_ref,
-    public.carr_business_days((i.received_at)::date, CURRENT_DATE) AS business_days_overdue
+    public.carr_business_days(public.carr_business_date(i.received_at), public.carr_business_date()) AS business_days_overdue
    FROM public.ingest_inbox i
   WHERE (i.status = 'new'::text);
 
@@ -89912,6 +90211,25 @@ CREATE VIEW public.v_lead_stage_transition AS
 --
 
 CREATE VIEW public.v_lead_workspace_lifecycle AS
+ WITH live_clients AS MATERIALIZED (
+         SELECT cl.id,
+            cl.party_id
+           FROM (public.client cl
+             JOIN public.party cp_1 ON ((cp_1.id = cl.party_id)))
+          WHERE ((cl.merged_into IS NULL) AND (cp_1.merged_into IS NULL) AND (cp_1.deleted_at IS NULL))
+        ), client_parties AS (
+         SELECT DISTINCT live_clients.party_id
+           FROM live_clients
+        ), linked_leads AS MATERIALIZED (
+         SELECT DISTINCT bridge_1.lead_id
+           FROM (public.v_lead_client_link bridge_1
+             JOIN live_clients cl ON ((cl.id = bridge_1.client_id)))
+          WHERE (NOT bridge_1.either_merged)
+        ), deal_clients AS (
+         SELECT DISTINCT deal.client_id
+           FROM public.deal
+          WHERE (deal.client_id IS NOT NULL)
+        )
  SELECT l.id,
     l.party_id,
     l.client_id,
@@ -89922,20 +90240,14 @@ CREATE VIEW public.v_lead_workspace_lifecycle AS
     p.contact_state,
     (l.suppressed OR (l.stage = 'do_not_contact'::text) OR (p.contact_state = 'do_not_contact'::text)) AS do_not_contact,
     (NOT (l.suppressed OR (l.stage = 'do_not_contact'::text) OR (p.contact_state = 'do_not_contact'::text))) AS contact_eligible,
-    (EXISTS ( SELECT 1
-           FROM (public.client cl
-             JOIN public.party cp ON ((cp.id = cl.party_id)))
-          WHERE ((cl.party_id = p.id) AND (cl.merged_into IS NULL) AND (cp.merged_into IS NULL) AND (cp.deleted_at IS NULL)))) AS is_client,
-    (EXISTS ( SELECT 1
-           FROM ((public.v_lead_client_link bridge
-             JOIN public.client cl ON ((cl.id = bridge.client_id)))
-             JOIN public.party cp ON ((cp.id = cl.party_id)))
-          WHERE ((bridge.lead_id = l.id) AND (NOT bridge.either_merged) AND (cl.merged_into IS NULL) AND (cp.merged_into IS NULL) AND (cp.deleted_at IS NULL)))) AS linked_client,
-    (EXISTS ( SELECT 1
-           FROM public.deal d
-          WHERE (d.client_id = l.client_id))) AS is_deal
-   FROM (public.lead l
-     JOIN public.party p ON ((p.id = l.party_id)));
+    (cp.party_id IS NOT NULL) AS is_client,
+    (bridge.lead_id IS NOT NULL) AS linked_client,
+    (d.client_id IS NOT NULL) AS is_deal
+   FROM ((((public.lead l
+     JOIN public.party p ON ((p.id = l.party_id)))
+     LEFT JOIN client_parties cp ON ((cp.party_id = p.id)))
+     LEFT JOIN linked_leads bridge ON ((bridge.lead_id = l.id)))
+     LEFT JOIN deal_clients d ON ((d.client_id = l.client_id)));
 
 
 --
@@ -89943,6 +90255,26 @@ CREATE VIEW public.v_lead_workspace_lifecycle AS
 --
 
 CREATE VIEW public.v_lead_workspace AS
+ WITH live_clients AS MATERIALIZED (
+         SELECT cl.id,
+            cp.id AS party_id,
+            cp.name,
+            lower(TRIM(BOTH FROM cp.name)) AS normalized_name
+           FROM (public.client cl
+             JOIN public.party cp ON ((cp.id = cl.party_id)))
+          WHERE ((cl.merged_into IS NULL) AND (cp.merged_into IS NULL) AND (cp.deleted_at IS NULL))
+        ), possible_clients AS MATERIALIZED (
+         SELECT p_1.id AS party_id,
+            jsonb_agg(jsonb_build_object('client_id', cl.id, 'name', cl.name) ORDER BY cl.id) AS items
+           FROM (public.party p_1
+             JOIN live_clients cl ON (((cl.normalized_name = lower(TRIM(BOTH FROM p_1.name))) AND (cl.party_id <> p_1.id))))
+          GROUP BY p_1.id
+        ), last_moves AS MATERIALIZED (
+         SELECT DISTINCT ON (e.lead_id) e.lead_id,
+            jsonb_build_object('event_id', e.event_id, 'idempotency_key', e.idempotency_key, 'from', e.prior_stage, 'to', e.stage, 'occurred_at', e.occurred_at, 'automatic', e.automatic, 'reason', e.reason, 'evidence_date', (e.stage_review ->> 'evidence_date'::text), 'undone', (e.stage_review ->> 'undo_event_id'::text)) AS item
+           FROM public.v_lead_stage_transition e
+          ORDER BY e.lead_id, e.mutation_order DESC
+        )
  SELECT b.id,
     b.registry_ref,
     b.name,
@@ -89988,15 +90320,8 @@ CREATE VIEW public.v_lead_workspace AS
      JOIN public.lead l ON ((l.id = b.id)))
      JOIN public.party p ON ((p.id = life.party_id)))
      LEFT JOIN public.party org ON ((org.id = p.org_id)))
-     LEFT JOIN LATERAL ( SELECT jsonb_agg(jsonb_build_object('client_id', cl.id, 'name', cp.name) ORDER BY cl.id) AS items
-           FROM (public.client cl
-             JOIN public.party cp ON ((cp.id = cl.party_id)))
-          WHERE ((lower(TRIM(BOTH FROM cp.name)) = lower(TRIM(BOTH FROM p.name))) AND (cp.id <> p.id) AND (cl.merged_into IS NULL) AND (cp.merged_into IS NULL) AND (cp.deleted_at IS NULL))) matches ON (true))
-     LEFT JOIN LATERAL ( SELECT jsonb_build_object('event_id', e.event_id, 'idempotency_key', e.idempotency_key, 'from', e.prior_stage, 'to', e.stage, 'occurred_at', e.occurred_at, 'automatic', e.automatic, 'reason', e.reason, 'evidence_date', (e.stage_review ->> 'evidence_date'::text), 'undone', (e.stage_review ->> 'undo_event_id'::text)) AS item
-           FROM public.v_lead_stage_transition e
-          WHERE (e.lead_id = b.id)
-          ORDER BY e.mutation_order DESC
-         LIMIT 1) last_move ON (true))
+     LEFT JOIN possible_clients matches ON ((matches.party_id = p.id)))
+     LEFT JOIN last_moves last_move ON ((last_move.lead_id = b.id)))
   WHERE ((NOT life.suppressed) AND life.live_party);
 
 
@@ -90740,7 +91065,7 @@ CREATE VIEW public.v_renewal_decision_queue AS
            FROM public.deal_participant dp
           WHERE ((dp.deal_id = d.id) AND (dp.role = 'lead'::text) AND (dp.to_at IS NULL))
          LIMIT 1), c.created_by)) AND (owner.slug = ANY (ARRAY['joe'::text, 'dell'::text])))))
-  WHERE ((l.status = 'current'::text) AND ((l.expiration_on >= (CURRENT_DATE - 90)) AND (l.expiration_on <= (CURRENT_DATE + 548))) AND (l.evidence_kind = ANY (ARRAY['executed_lease'::text, 'lease_amendment'::text, 'lease_abstract'::text])) AND (NULLIF(btrim(l.evidence_ref), ''::text) IS NOT NULL) AND (NULLIF(btrim(l.source), ''::text) IS NOT NULL));
+  WHERE ((l.status = 'current'::text) AND ((l.expiration_on >= (public.carr_business_date() - 90)) AND (l.expiration_on <= (public.carr_business_date() + 548))) AND (l.evidence_kind = ANY (ARRAY['executed_lease'::text, 'lease_amendment'::text, 'lease_abstract'::text])) AND (NULLIF(btrim(l.evidence_ref), ''::text) IS NOT NULL) AND (NULLIF(btrim(l.source), ''::text) IS NOT NULL));
 
 
 --
@@ -91038,6 +91363,78 @@ UNION ALL
     e.subject_type
    FROM (public.event e
      JOIN public.actor act ON ((act.id = e.actor_id)));
+
+
+--
+-- Name: v_vendor_assignment_context; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_vendor_assignment_context AS
+ SELECT v.id,
+    v.vendor_ref AS ref,
+    v.version AS base_version,
+    p.vendor_assignment_version AS assignment_version,
+    v.party_id,
+        CASE
+            WHEN (company.id IS NOT NULL) THEN jsonb_build_object('id', company.id, 'name', company.name)
+            ELSE NULL::jsonb
+        END AS company,
+    COALESCE(( SELECT jsonb_agg(jsonb_build_object('id', contact.id, 'name', contact.name) ORDER BY contact.name, contact.id) AS jsonb_agg
+           FROM public.party contact
+          WHERE ((contact.kind = 'person'::text) AND (contact.merged_into IS NULL) AND (contact.deleted_at IS NULL) AND (((p.kind = 'person'::text) AND (contact.id = p.id)) OR ((p.kind = 'org'::text) AND (contact.org_id = p.id))))), '[]'::jsonb) AS contacts
+   FROM ((public.vendor v
+     JOIN public.party p ON ((p.id = v.party_id)))
+     LEFT JOIN public.party company ON (((company.id =
+        CASE
+            WHEN (p.kind = 'org'::text) THEN p.id
+            ELSE p.org_id
+        END) AND (company.kind = 'org'::text) AND (company.merged_into IS NULL) AND (company.deleted_at IS NULL))))
+  WHERE ((v.merged_into IS NULL) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL));
+
+
+--
+-- Name: v_vendor_duplicate_report; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_vendor_duplicate_report AS
+ WITH live AS (
+         SELECT v.id,
+            v.party_id,
+            p.org_id,
+            NULLIF(lower(btrim(p.email)), ''::text) AS email,
+            NULLIF(lower(regexp_replace(btrim(p.name), '\s+'::text, ' '::text, 'g'::text)), ''::text) AS name
+           FROM (public.vendor v
+             JOIN public.party p ON ((p.id = v.party_id)))
+          WHERE ((v.merged_into IS NULL) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL))
+        ), same_party AS (
+         SELECT count(*) AS n
+           FROM live
+          GROUP BY live.party_id
+         HAVING (count(*) > 1)
+        ), email_match AS (
+         SELECT live.email
+           FROM live
+          WHERE (live.email IS NOT NULL)
+          GROUP BY live.email
+         HAVING (count(DISTINCT live.party_id) > 1)
+        ), name_company_match AS (
+         SELECT live.name,
+            live.org_id
+           FROM live
+          WHERE ((live.name IS NOT NULL) AND (live.org_id IS NOT NULL))
+          GROUP BY live.name, live.org_id
+         HAVING (count(DISTINCT live.party_id) > 1)
+        )
+ SELECT ( SELECT (count(*))::integer AS count
+           FROM live) AS live_vendor_rows,
+    ( SELECT (count(*))::integer AS count
+           FROM same_party) AS same_party_groups,
+    ( SELECT (COALESCE(sum((same_party.n - 1)), (0)::numeric))::integer AS "coalesce"
+           FROM same_party) AS extra_vendor_rows,
+    ( SELECT (count(*))::integer AS count
+           FROM email_match) AS email_match_groups,
+    ( SELECT (count(*))::integer AS count
+           FROM name_company_match) AS name_company_match_groups;
 
 
 --
@@ -98931,6 +99328,14 @@ ALTER TABLE ONLY public.deal_type_ref
 
 
 --
+-- Name: deal_vendor_assignment deal_vendor_assignment_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_pkey PRIMARY KEY (deal_id, party_id, role);
+
+
+--
 -- Name: defect defect_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -99072,6 +99477,14 @@ ALTER TABLE ONLY public.doctrine_edge
 
 ALTER TABLE ONLY public.doctrine_edge_type
     ADD CONSTRAINT doctrine_edge_type_pkey PRIMARY KEY (edge_type);
+
+
+--
+-- Name: doctrine_embedding doctrine_embedding_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.doctrine_embedding
+    ADD CONSTRAINT doctrine_embedding_pkey PRIMARY KEY (revision_id, chunk_index);
 
 
 --
@@ -101255,6 +101668,13 @@ CREATE UNIQUE INDEX deal_review_one_open_per_actor_workspace ON public.deal_revi
 
 
 --
+-- Name: deal_vendor_assignment_active_contact; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX deal_vendor_assignment_active_contact ON public.deal_vendor_assignment USING btree (deal_id, role, contact_party_id) WHERE active;
+
+
+--
 -- Name: defect_class_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -101315,6 +101735,13 @@ CREATE INDEX doctrine_edge_source_idx ON public.doctrine_edge USING btree (sourc
 --
 
 CREATE INDEX doctrine_edge_target_idx ON public.doctrine_edge USING btree (target_section_id, edge_type);
+
+
+--
+-- Name: doctrine_embedding_cosine_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX doctrine_embedding_cosine_idx ON public.doctrine_embedding USING hnsw (embedding public.vector_cosine_ops);
 
 
 --
@@ -107368,6 +107795,13 @@ CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDAT
 
 
 --
+-- Name: deal_vendor_assignment scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDATE ON public.deal_vendor_assignment FOR EACH ROW EXECUTE FUNCTION ops.scac_reference_monitor_guard();
+
+
+--
 -- Name: defect scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -107428,6 +107862,13 @@ CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDAT
 --
 
 CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDATE ON public.doctrine_edge FOR EACH ROW EXECUTE FUNCTION ops.scac_reference_monitor_guard();
+
+
+--
+-- Name: doctrine_embedding scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDATE ON public.doctrine_embedding FOR EACH ROW EXECUTE FUNCTION ops.scac_reference_monitor_guard();
 
 
 --
@@ -108278,6 +108719,13 @@ CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.d
 
 
 --
+-- Name: deal_vendor_assignment scac_reference_monitor_guard_truncate; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.deal_vendor_assignment FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
+
+
+--
 -- Name: defect scac_reference_monitor_guard_truncate; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -108338,6 +108786,13 @@ CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.d
 --
 
 CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.doctrine_edge FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
+
+
+--
+-- Name: doctrine_embedding scac_reference_monitor_guard_truncate; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.doctrine_embedding FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
 
 
 --
@@ -114744,6 +115199,46 @@ ALTER TABLE ONLY public.deal
 
 
 --
+-- Name: deal_vendor_assignment deal_vendor_assignment_company_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_company_party_id_fkey FOREIGN KEY (company_party_id) REFERENCES public.party(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_contact_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_contact_party_id_fkey FOREIGN KEY (contact_party_id) REFERENCES public.party(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_deal_id_fkey FOREIGN KEY (deal_id) REFERENCES public.deal(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_party_id_fkey FOREIGN KEY (party_id) REFERENCES public.party(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.actor(id);
+
+
+--
 -- Name: defect defect_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -114925,6 +115420,14 @@ ALTER TABLE ONLY public.doctrine_edge
 
 ALTER TABLE ONLY public.doctrine_edge
     ADD CONSTRAINT doctrine_edge_target_section_id_fkey FOREIGN KEY (target_section_id) REFERENCES public.doctrine_section(id);
+
+
+--
+-- Name: doctrine_embedding doctrine_embedding_revision_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.doctrine_embedding
+    ADD CONSTRAINT doctrine_embedding_revision_id_fkey FOREIGN KEY (revision_id) REFERENCES public.doctrine_revision(id);
 
 
 --
@@ -116875,6 +117378,7 @@ revoke all on function ops.pending_slice_completion_proposals() from public;
 revoke all on function ops.pending_sourced_work_request_outcome_feedback(p_work_request text, p_organization_tenant_id text) from public;
 revoke all on function ops.pitr_probe_rows_immutable() from public;
 revoke all on function ops.pitr_probe_server_stamp() from public;
+revoke all on function ops.policy_integrity_snapshot() from public;
 revoke all on function ops.portfolio_accept_revision(p_revision_id uuid, p_idempotency_key uuid, p_accepted_digest text, p_review_id uuid) from public;
 revoke all on function ops.portfolio_accepted_digest(p_revision_id uuid) from public;
 revoke all on function ops.portfolio_accepted_preimage(p_revision_id uuid) from public;
@@ -117852,11 +118356,80 @@ revoke all on function ops.write_tour_share_comment(p_session_digest text, p_pro
 revoke all on function ops.write_tour_share_feedback(p_session_digest text, p_projection_ref text, p_property_ref text, p_action text, p_shortlisted boolean, p_comment text, p_idempotency_key uuid) from public;
 revoke all on function ops.write_tour_share_shortlist(p_session_digest text, p_projection_ref text, p_property_ref text, p_shortlisted boolean, p_idempotency_key uuid) from public;
 revoke all on function public.action_class_successor_gate(p_action_class text) from public;
+revoke all on function public.array_to_halfvec(double precision[], integer, boolean) from public;
+revoke all on function public.array_to_halfvec(integer[], integer, boolean) from public;
+revoke all on function public.array_to_halfvec(numeric[], integer, boolean) from public;
+revoke all on function public.array_to_halfvec(real[], integer, boolean) from public;
+revoke all on function public.array_to_sparsevec(double precision[], integer, boolean) from public;
+revoke all on function public.array_to_sparsevec(integer[], integer, boolean) from public;
+revoke all on function public.array_to_sparsevec(numeric[], integer, boolean) from public;
+revoke all on function public.array_to_sparsevec(real[], integer, boolean) from public;
+revoke all on function public.array_to_vector(double precision[], integer, boolean) from public;
+revoke all on function public.array_to_vector(integer[], integer, boolean) from public;
+revoke all on function public.array_to_vector(numeric[], integer, boolean) from public;
+revoke all on function public.array_to_vector(real[], integer, boolean) from public;
 revoke all on function public.assert_situation_retrieval_golden(p_suite_digest text) from public;
+revoke all on function public.avg(public.halfvec) from public;
+revoke all on function public.avg(public.vector) from public;
+revoke all on function public.binary_quantize(public.halfvec) from public;
+revoke all on function public.binary_quantize(public.vector) from public;
 revoke all on function public.capture_call_context(requested_deal_ids uuid[]) from public;
+revoke all on function public.carr_business_date(instant timestamp with time zone) from public;
+revoke all on function public.cosine_distance(public.halfvec, public.halfvec) from public;
+revoke all on function public.cosine_distance(public.sparsevec, public.sparsevec) from public;
+revoke all on function public.cosine_distance(public.vector, public.vector) from public;
 revoke all on function public.defect_resolution_evidence_must_resolve() from public;
 revoke all on function public.defect_resolution_is_append_only() from public;
 revoke all on function public.enforce_allocation_tree() from public;
+revoke all on function public.halfvec(public.halfvec, integer, boolean) from public;
+revoke all on function public.halfvec_accum(double precision[], public.halfvec) from public;
+revoke all on function public.halfvec_add(public.halfvec, public.halfvec) from public;
+revoke all on function public.halfvec_avg(double precision[]) from public;
+revoke all on function public.halfvec_cmp(public.halfvec, public.halfvec) from public;
+revoke all on function public.halfvec_combine(double precision[], double precision[]) from public;
+revoke all on function public.halfvec_concat(public.halfvec, public.halfvec) from public;
+revoke all on function public.halfvec_eq(public.halfvec, public.halfvec) from public;
+revoke all on function public.halfvec_ge(public.halfvec, public.halfvec) from public;
+revoke all on function public.halfvec_gt(public.halfvec, public.halfvec) from public;
+revoke all on function public.halfvec_in(cstring, oid, integer) from public;
+revoke all on function public.halfvec_l2_squared_distance(public.halfvec, public.halfvec) from public;
+revoke all on function public.halfvec_le(public.halfvec, public.halfvec) from public;
+revoke all on function public.halfvec_lt(public.halfvec, public.halfvec) from public;
+revoke all on function public.halfvec_mul(public.halfvec, public.halfvec) from public;
+revoke all on function public.halfvec_ne(public.halfvec, public.halfvec) from public;
+revoke all on function public.halfvec_negative_inner_product(public.halfvec, public.halfvec) from public;
+revoke all on function public.halfvec_out(public.halfvec) from public;
+revoke all on function public.halfvec_recv(internal, oid, integer) from public;
+revoke all on function public.halfvec_send(public.halfvec) from public;
+revoke all on function public.halfvec_spherical_distance(public.halfvec, public.halfvec) from public;
+revoke all on function public.halfvec_sub(public.halfvec, public.halfvec) from public;
+revoke all on function public.halfvec_to_float4(public.halfvec, integer, boolean) from public;
+revoke all on function public.halfvec_to_sparsevec(public.halfvec, integer, boolean) from public;
+revoke all on function public.halfvec_to_vector(public.halfvec, integer, boolean) from public;
+revoke all on function public.halfvec_typmod_in(cstring[]) from public;
+revoke all on function public.hamming_distance(bit, bit) from public;
+revoke all on function public.hnsw_bit_support(internal) from public;
+revoke all on function public.hnsw_halfvec_support(internal) from public;
+revoke all on function public.hnsw_sparsevec_support(internal) from public;
+revoke all on function public.hnswhandler(internal) from public;
+revoke all on function public.inner_product(public.halfvec, public.halfvec) from public;
+revoke all on function public.inner_product(public.sparsevec, public.sparsevec) from public;
+revoke all on function public.inner_product(public.vector, public.vector) from public;
+revoke all on function public.ivfflat_bit_support(internal) from public;
+revoke all on function public.ivfflat_halfvec_support(internal) from public;
+revoke all on function public.ivfflathandler(internal) from public;
+revoke all on function public.jaccard_distance(bit, bit) from public;
+revoke all on function public.l1_distance(public.halfvec, public.halfvec) from public;
+revoke all on function public.l1_distance(public.sparsevec, public.sparsevec) from public;
+revoke all on function public.l1_distance(public.vector, public.vector) from public;
+revoke all on function public.l2_distance(public.halfvec, public.halfvec) from public;
+revoke all on function public.l2_distance(public.sparsevec, public.sparsevec) from public;
+revoke all on function public.l2_distance(public.vector, public.vector) from public;
+revoke all on function public.l2_norm(public.halfvec) from public;
+revoke all on function public.l2_norm(public.sparsevec) from public;
+revoke all on function public.l2_normalize(public.halfvec) from public;
+revoke all on function public.l2_normalize(public.sparsevec) from public;
+revoke all on function public.l2_normalize(public.vector) from public;
 revoke all on function public.log_retrieval_query(p_query text, p_result_count integer, p_section_ids uuid[], p_score_bands jsonb, p_policy_id text, p_policy_version bigint, p_explicit_hit boolean, p_scope_ref text) from public;
 revoke all on function public.loop_amendment_history(p_loop_id uuid) from public;
 revoke all on function public.party_reference_counts(p_party uuid, p_exclude uuid) from public;
@@ -117865,7 +118438,58 @@ revoke all on function public.read_action_class_successors(p_action_class text) 
 revoke all on function public.resolve_memory_plan_anchor(p_plan_id uuid, p_tenant text) from public;
 revoke all on function public.retire_retrieval_curation(p_target_type text, p_target_id uuid, p_base_version bigint, p_actor_id uuid, p_reason text) from public;
 revoke all on function public.retrieval_visibility_actor_id(p_sponsor_slug text) from public;
+revoke all on function public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings public.vector[]) from public;
 revoke all on function public.search_doctrine_situations(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_allow_fallback boolean) from public;
+revoke all on function public.sparsevec(public.sparsevec, integer, boolean) from public;
+revoke all on function public.sparsevec_cmp(public.sparsevec, public.sparsevec) from public;
+revoke all on function public.sparsevec_eq(public.sparsevec, public.sparsevec) from public;
+revoke all on function public.sparsevec_ge(public.sparsevec, public.sparsevec) from public;
+revoke all on function public.sparsevec_gt(public.sparsevec, public.sparsevec) from public;
+revoke all on function public.sparsevec_in(cstring, oid, integer) from public;
+revoke all on function public.sparsevec_l2_squared_distance(public.sparsevec, public.sparsevec) from public;
+revoke all on function public.sparsevec_le(public.sparsevec, public.sparsevec) from public;
+revoke all on function public.sparsevec_lt(public.sparsevec, public.sparsevec) from public;
+revoke all on function public.sparsevec_ne(public.sparsevec, public.sparsevec) from public;
+revoke all on function public.sparsevec_negative_inner_product(public.sparsevec, public.sparsevec) from public;
+revoke all on function public.sparsevec_out(public.sparsevec) from public;
+revoke all on function public.sparsevec_recv(internal, oid, integer) from public;
+revoke all on function public.sparsevec_send(public.sparsevec) from public;
+revoke all on function public.sparsevec_to_halfvec(public.sparsevec, integer, boolean) from public;
+revoke all on function public.sparsevec_to_vector(public.sparsevec, integer, boolean) from public;
+revoke all on function public.sparsevec_typmod_in(cstring[]) from public;
+revoke all on function public.subvector(public.halfvec, integer, integer) from public;
+revoke all on function public.subvector(public.vector, integer, integer) from public;
+revoke all on function public.sum(public.halfvec) from public;
+revoke all on function public.sum(public.vector) from public;
+revoke all on function public.vector(public.vector, integer, boolean) from public;
+revoke all on function public.vector_accum(double precision[], public.vector) from public;
+revoke all on function public.vector_add(public.vector, public.vector) from public;
+revoke all on function public.vector_avg(double precision[]) from public;
+revoke all on function public.vector_cmp(public.vector, public.vector) from public;
+revoke all on function public.vector_combine(double precision[], double precision[]) from public;
+revoke all on function public.vector_concat(public.vector, public.vector) from public;
+revoke all on function public.vector_dims(public.halfvec) from public;
+revoke all on function public.vector_dims(public.vector) from public;
+revoke all on function public.vector_eq(public.vector, public.vector) from public;
+revoke all on function public.vector_ge(public.vector, public.vector) from public;
+revoke all on function public.vector_gt(public.vector, public.vector) from public;
+revoke all on function public.vector_in(cstring, oid, integer) from public;
+revoke all on function public.vector_l2_squared_distance(public.vector, public.vector) from public;
+revoke all on function public.vector_le(public.vector, public.vector) from public;
+revoke all on function public.vector_lt(public.vector, public.vector) from public;
+revoke all on function public.vector_mul(public.vector, public.vector) from public;
+revoke all on function public.vector_ne(public.vector, public.vector) from public;
+revoke all on function public.vector_negative_inner_product(public.vector, public.vector) from public;
+revoke all on function public.vector_norm(public.vector) from public;
+revoke all on function public.vector_out(public.vector) from public;
+revoke all on function public.vector_recv(internal, oid, integer) from public;
+revoke all on function public.vector_send(public.vector) from public;
+revoke all on function public.vector_spherical_distance(public.vector, public.vector) from public;
+revoke all on function public.vector_sub(public.vector, public.vector) from public;
+revoke all on function public.vector_to_float4(public.vector, integer, boolean) from public;
+revoke all on function public.vector_to_halfvec(public.vector, integer, boolean) from public;
+revoke all on function public.vector_to_sparsevec(public.vector, integer, boolean) from public;
+revoke all on function public.vector_typmod_in(cstring[]) from public;
 grant usage on schema ops to carr_authority;
 grant usage on schema ops to carr_calendar_prebrief_attestors;
 grant usage on schema ops to carr_calendar_prebrief_canary_jobs;
@@ -119037,6 +119661,8 @@ grant select on table public.deal_review_item to dot_reader;
 grant insert, select, update on table public.deal_review_session to carr_writer;
 grant select on table public.deal_review_session to dot_reader;
 grant select on table public.deal_type_ref to dot_reader;
+grant insert, select, update on table public.deal_vendor_assignment to carr_writer;
+grant select on table public.deal_vendor_assignment to dot_reader;
 grant select on table public.defect to carr_exporter;
 grant select on table public.defect to carr_reader;
 grant insert, select on table public.defect to carr_writer;
@@ -119071,6 +119697,8 @@ grant select on table public.doctrine_edge_type to carr_exporter;
 grant select on table public.doctrine_edge_type to carr_reader;
 grant select on table public.doctrine_edge_type to carr_writer;
 grant select on table public.doctrine_edge_type to dot_reader;
+grant insert, select on table public.doctrine_embedding to carr_writer;
+grant select on table public.doctrine_embedding to dot_reader;
 grant select on table public.doctrine_gate_check to carr_exporter;
 grant select on table public.doctrine_gate_check to carr_reader;
 grant insert, select, update on table public.doctrine_gate_check to carr_writer;
@@ -119431,6 +120059,9 @@ grant select on table public.v_deal_room_presence to dot_reader;
 grant select on table public.v_deal_room_session to carr_reader;
 grant select on table public.v_deal_room_session to carr_writer;
 grant select on table public.v_deal_room_session to dot_reader;
+grant select on table public.v_deal_room_vendor to carr_reader;
+grant select on table public.v_deal_room_vendor to carr_writer;
+grant select on table public.v_deal_room_vendor to dot_reader;
 grant select on table public.v_decision_entry to carr_exporter;
 grant select on table public.v_decision_entry to carr_reader;
 grant select on table public.v_decision_entry to carr_writer;
@@ -119627,6 +120258,12 @@ grant select on table public.v_subject_timeline to carr_writer;
 grant select on table public.v_subject_timeline to dot_reader;
 grant select on table public.v_today_triage to carr_reader;
 grant select on table public.v_today_triage to dot_reader;
+grant select on table public.v_vendor_assignment_context to carr_reader;
+grant select on table public.v_vendor_assignment_context to carr_writer;
+grant select on table public.v_vendor_assignment_context to dot_reader;
+grant select on table public.v_vendor_duplicate_report to carr_reader;
+grant select on table public.v_vendor_duplicate_report to carr_writer;
+grant select on table public.v_vendor_duplicate_report to dot_reader;
 grant select on table public.v_vendor_level_suggestion to carr_reader;
 grant select on table public.v_vendor_level_suggestion to dot_reader;
 grant select on table public.v_vendor_needs_type to carr_reader;
@@ -121288,6 +121925,12 @@ grant execute on function public.action_class_successor_gate(p_action_class text
 grant execute on function public.assert_situation_retrieval_golden(p_suite_digest text) to carr_writer;
 grant execute on function public.capture_call_context(requested_deal_ids uuid[]) to carr_reader;
 grant execute on function public.capture_call_context(requested_deal_ids uuid[]) to carr_writer;
+grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_authority;
+grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_exporter;
+grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_jobs;
+grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_reader;
+grant execute on function public.carr_business_date(instant timestamp with time zone) to carr_writer;
+grant execute on function public.carr_business_date(instant timestamp with time zone) to dot_reader;
 grant execute on function public.current_retrievable_doctrine(p_actor_id uuid, p_content_classes text[]) to carr_reader;
 grant execute on function public.current_retrievable_doctrine(p_actor_id uuid, p_content_classes text[]) to carr_writer;
 grant execute on function public.log_retrieval_query(p_query text, p_result_count integer, p_section_ids uuid[], p_score_bands jsonb, p_policy_id text, p_policy_version bigint, p_explicit_hit boolean, p_scope_ref text) to carr_writer;
@@ -121302,11 +121945,16 @@ grant execute on function public.resolve_memory_plan_anchor(p_plan_id uuid, p_te
 grant execute on function public.retire_retrieval_curation(p_target_type text, p_target_id uuid, p_base_version bigint, p_actor_id uuid, p_reason text) to carr_writer;
 grant execute on function public.retrieval_visibility_actor_id(p_sponsor_slug text) to carr_reader;
 grant execute on function public.retrieval_visibility_actor_id(p_sponsor_slug text) to carr_writer;
+grant execute on function public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings public.vector[]) to carr_reader;
+grant execute on function public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings public.vector[]) to carr_writer;
 grant execute on function public.search_doctrine_situations(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_allow_fallback boolean) to carr_reader;
 grant execute on function public.search_doctrine_situations(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_allow_fallback boolean) to carr_writer;
 grant execute on function public.state_as_of(p_type text, p_id uuid, p_at timestamp with time zone) to carr_exporter;
 grant execute on function public.state_as_of(p_type text, p_id uuid, p_at timestamp with time zone) to carr_reader;
 grant execute on function public.state_as_of(p_type text, p_id uuid, p_at timestamp with time zone) to carr_writer;
+grant execute on function public.vector(public.vector, integer, boolean) to carr_reader;
+grant execute on function public.vector(public.vector, integer, boolean) to carr_writer;
+grant execute on function public.vector_norm(public.vector) to carr_writer;
 grant carr_authority to neondb_owner;
 grant carr_calendar_prebrief_attestors to neondb_owner;
 grant carr_calendar_prebrief_canary_jobs to neondb_owner;
@@ -121935,6 +122583,14 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0940_codex_job_delegation_control_refs.sql	9402a4057ee309d9a4959257e9d5a9a4c41451536f57d3def2201f02fd6741ab	1970-01-01 00:00:00+00
 0944_retire_orphan_control_inventory.sql	ab7c35cfc581268b40bab5b29399e315286b24ba1c3c8c86bc0b9c49673def37	1970-01-01 00:00:00+00
 0947_allow_approved_control_evidence_refresh.sql	b051840f87086cdfcfbe21abae004df2f7023907f081851f95c22a7e017f8800	1970-01-01 00:00:00+00
+0950_remove_retired_workflow_manifest_binding.sql	87c2d7f9aba676b4b0e0d7262b024fe20f4ee1e7a7ced5ced4dcce19267d9a41	1970-01-01 00:00:00+00
+0951_deal_vendor_assignments.sql	f9053aa57b13351da64416e35e49dc38d8d8da0fb118122b2652778bf9eda7eb	1970-01-01 00:00:00+00
+0952_deal_vendor_grant_retirements.sql	6ab6b3dbe76dbb395a8b739eea002aeb2ac4661f2efeefbf53c52b2fd69fd902	1970-01-01 00:00:00+00
+0953_morning_brief_chicago_calendar.sql	b6a1c2d4666a7fe2ba645d3048b2f874014f47f97e88a3144e07bd6079f6903d	1970-01-01 00:00:00+00
+0954_lead_workspace_set_reads.sql	687e444a25754aa975adcbcf45b92b5ab6f763a5c7c1a20a3b571aca4e10e28e	1970-01-01 00:00:00+00
+0955_retrieval_concept_question_matching.sql	885f3cefb3b4359c20f242534750ef9ebd883cda93e0592119b504e9f407e0c1	1970-01-01 00:00:00+00
+0957_retire_scac_catalog_commit_check.sql	1a26b1a8e517c15d62b3a0fbd96b2f59278c1596839e33b3d4e6c423ab9c6a97	1970-01-01 00:00:00+00
+0958_doctrine_embeddings.sql	46c23b9e4f9888bdf0f817c06e06d74440b89a5cb5dd1923310a7aa05268ac45	1970-01-01 00:00:00+00
 \.
 
 

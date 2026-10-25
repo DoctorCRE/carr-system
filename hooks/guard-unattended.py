@@ -601,7 +601,7 @@ RULES = [
     # flags or obfuscation, same as every other rule here.
     (re.compile(r"\bage\s+[^|;&]*(--?d\b|--decrypt\b|--?i\b|--identity\b)", re.I),
      "raw decrypt of an encrypted backup — production data in cleartext. Use "
-     "`./run.sh restore-rehearse --verify-only [--date YYYYMMDD]`, which handles the "
+     "`./run.sh restore-rehearse --backup-run-id RUN --verify-only`, which handles the "
      "key and shreds the plaintext"),
     # 4. destructive SQL
     (re.compile(r"\bdrop\s+(table|schema|database|view|index)\b", re.I), "DROP"),
@@ -2132,11 +2132,6 @@ def check(cmd, cwd=None):
                     word.split(':')[-1].removeprefix('refs/heads/') in {'main', 'master'}
                     for word in words[1:] if not word.startswith('-')):
                 return 'direct push to main — use the branch and pull-request delivery path'
-    from lib.github_spacing import reason as spacing_reason
-    reason = spacing_reason(executable)
-    if reason:
-        return reason
-
     reason = source_restore_reason(cmd, cwd)
     if reason:
         return reason

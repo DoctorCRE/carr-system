@@ -57,6 +57,9 @@ GRANT_FULL = re.compile(
 # An entry here is a claim that a table is only ever read on the writer or
 # authority connection — write it with the verb that does it, or fix the grant.
 READER_EXEMPT: dict[str, str] = {
+    "public.deal_vendor_assignment":
+        "read on the writer connection by update-vendor, log-activity, and confirm-merge; "
+        "readers use public.v_deal_room_vendor",
     # 0872 revokes carr_reader on the base table on purpose; a read session sees
     # the log through public.v_defect. Both handlers that name it are write:true
     # verbs, which mcp.js routes to the carr_writer connection, and carr_writer

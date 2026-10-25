@@ -8,7 +8,7 @@
 #   ./run.sh all           — rebuild the canonical Lead Board, then the Deal Room
 #   ./run.sh review-queue  — rebuild the ONE review queue (out/review-queue/), a surface only
 #   ./run.sh brief-pack    — the four brief sections as callable units (out/brief-pack/)
-#   ./run.sh restore-rehearse — prove the encrypted backups actually restore (needs the age key)
+#   ./run.sh restore-rehearse --backup-run-id RUN — prove the encrypted backups actually restore (needs the age key)
 #   ./run.sh key-recovery-test — prove the OFFLINE PAPER key copy alone can recover a backup
 #   ./run.sh call-mode     — inspect or operate the local Quill Call Mode bridge
 #   ./run.sh local-db-ci   — run migration or strict CI on disposable local PG
@@ -117,33 +117,14 @@ case "${1:-}" in
   lint)         shift; python3 "$REPO/tools/writing-lint.py" "$@" ;;
   migrate)      shift; "$REPO/.venv/bin/python" "$REPO/tools/migrate.py" "$@" ;;
   export)       shift; "$REPO/.venv/bin/python" -m exporters.run_exports "$@" ;;
-  # `next` (2026-08-09, loop #297): open loops ordered by how LITTLE is left,
-  # which no other surface answers — bell/dated/decision all order by urgency.
-  # Read-only over v_loop_proximity (migration 0084). Prints its own coverage
-  # first, because most of the backlog predates the blocker gate and a ranking
-  # that hid that would look authoritative and be noise.
-  next)         shift; "$REPO/.venv/bin/python" "$REPO/tools/db-tap.py" run "$REPO/tools/closest-first.py" "$@" ;;
-  # `next-migration` (2026-08-13): the next free migration number, read from
-  # origin/main AND every linked worktree's migrations/ — not from `ls` in
-  # whichever tree you happen to be standing in, which cannot see a number a
-  # concurrent session has already taken. Read-only. See tools/next-migration.py.
-  next-migration) shift; python3 "$REPO/tools/next-migration.py" "$@" ;;
-  # `reserve-migration` (2026-08-24, ci-failures council cluster B): atomically
-  # CLAIM the next free migration number at mint time. next-migration only
-  # reports; two sessions asking it in the same minute still collide. The
-  # reservation ledger lives in the CANONICAL checkout's out/ — the one
-  # directory every worktree on this machine shares — and next-migration counts
-  # its rows as claims. See tools/reserve-migration.py.
-  reserve-migration) shift; python3 "$REPO/tools/reserve-migration.py" "$@" ;;
   # `worktree` (2026-08-10): an isolated checkout in one command. Two sessions
   # collided in the shared tree twice in one morning, and git-writer-gate's own
   # deny message already prescribes the fix — this makes it one step instead of
   # three, two of which (the .venv and out/ symlinks) are invisible until
   # something breaks on a path that is simply not there.
-  regen)        shift; "$PY" "$REPO/tools/regen.py" "$@" ;;
   worktree)     shift; "$REPO/bin/worktree.sh" "$@" ;;
   local-db-ci)  shift; "$PY" "$REPO/ops/local-pg-ci.py" "$@" ;;
   outlook-send) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["send", *sys.argv[1:]]))' "$@" ;;
   outlook-event) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["event", *sys.argv[1:]]))' "$@" ;;
-  *) echo "usage: run.sh map [--missing]|deal-room|lead-board|lead-promote [--count N] [--county X] [--segment X]|renewal-feed|all|corroborate|graph|graph-system|graph-health [--verbose]|section-index [each supports --recovery --reason WHY [--vault PATH]]|space-search <folder>|salesforce-diff [--apply]|registry-audit [--verbose] [--recovery --reason WHY [--vault PATH]]|review-queue [--fixture f.json]|brief-pack [--section all|one-thing|prebriefs|capacity|monday-agenda|renewal-shortlist] [--quiet] [--recovery [--vault PATH]]|retrieve [--recovery [--vault PATH]] <question>|health [--act] [--recovery --reason WHY [--vault PATH]]|config [check|pull|install] [--apply]|lint <file> [--surface email|social|proposal|web]|restore-rehearse [--preflight] [--verify-only] [--date YYYYMMDD] [--identity PATH] [--keep-branch]|key-recovery-test|migrate [--apply] [--yes]|export [--only <target>] [--bootstrap]|call [--branch <name>] <verb> '<json args>'|call-mode [serve|state|start|stop]|next [--all] [--domain X]|local-db-ci [--class migration|strict] [--port N]|regen [--pr N] [--list]|worktree <name> [--from B]|--list|--remove <name|path>"; exit 2 ;;
+  *) echo "usage: run.sh map [--missing]|deal-room|lead-board|lead-promote [--count N] [--county X] [--segment X]|renewal-feed|all|corroborate|graph|graph-system|graph-health [--verbose]|section-index [each supports --recovery --reason WHY [--vault PATH]]|space-search <folder>|salesforce-diff [--apply]|registry-audit [--verbose] [--recovery --reason WHY [--vault PATH]]|review-queue [--fixture f.json]|brief-pack [--section all|one-thing|prebriefs|capacity|monday-agenda|renewal-shortlist] [--quiet] [--recovery [--vault PATH]]|retrieve [--recovery [--vault PATH]] <question>|health [--act] [--recovery --reason WHY [--vault PATH]]|config [check|pull|install] [--apply]|lint <file> [--surface email|social|proposal|web]|restore-rehearse --backup-run-id RUN-or-latest [--preflight] [--verify-only] [--identity PATH] [--keep-branch]|key-recovery-test [--backup-run-id RUN-or-latest]|migrate [--apply] [--yes]|export [--only <target>] [--bootstrap]|call [--branch <name>] <verb> '<json args>'|call-mode [serve|state|start|stop]|local-db-ci [--class migration|strict] [--port N]|worktree <name> [--from B]|--list|--remove <name|path>"; exit 2 ;;
 esac

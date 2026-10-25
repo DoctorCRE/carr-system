@@ -21,6 +21,9 @@ only thing a restore can be compared EXACTLY against is the artifact itself.
   compare      artifact vs restored watermark. Exit 0 only on exact equality —
                rows AND content digest, table for table, none missing either side.
   digest       the sha256 of a stored file, as "sha256:<hex>".
+  latest-run-id
+               the newest provider-verified, unexpired backup run id, ordered
+               by run start time then id. Reads metadata only; downloads nothing.
   fetch-copy   the independently held copy AND the digest its producer
                recorded, both read from the store, never from an operator: the
                nightly workflow run's provider-authenticated "Backup artifact"
@@ -112,6 +115,7 @@ from typing import Any, Callable, Iterable
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
+from tools.restore_security import declaration, rebuild_security
 from lib.recovery_evidence import CORE_TABLES, bind, canonical_json, check_clock_skew  # noqa: E402
 
 COPY_RE = re.compile(
@@ -493,6 +497,50 @@ def read_copy_record(repository: str, run_id: int) -> dict[str, Any]:
     }
 
 
+def latest_backup_run_id(repository: str) -> int:
+    """Select the newest authenticated, available backup without fetching its bytes."""
+    bws = _status_module()
+    runs = {}
+    for page in range(1, bws.MAX_RUN_PAGES + 1):
+        response = bws.api(f"/repos/{repository}/actions/workflows/{bws.BACKUP_WORKFLOW_FILE}/runs",
+                           query={"branch": BACKUP_RUN_BRANCH, "status": "success",
+                                  "per_page": bws.RUNS_PER_PAGE, "page": page})
+        rows = response.get("workflow_runs") if isinstance(response, dict) else None
+        if not isinstance(rows, list):
+            raise ValueError("cannot enumerate backup workflow runs")
+        for run in rows:
+            if not isinstance(run, dict) or type(run.get("id")) is not int or run["id"] <= 0:
+                raise ValueError("backup workflow listing contains an invalid run id")
+            started = _instant(run.get("run_started_at"))
+            if started is None or started.tzinfo is None:
+                raise ValueError("backup workflow listing contains an invalid start time")
+            runs[run["id"]] = started
+        if len(rows) < bws.RUNS_PER_PAGE:
+            break
+    else:
+        raise ValueError("backup workflow listing exceeded its page limit")
+    for run_id in sorted(runs, key=lambda value: (runs[value], value), reverse=True):
+        try:
+            read_copy_record(repository, run_id)
+        except ValueError:
+            continue
+        return run_id
+    raise ValueError("no verified backup workflow run has an available artifact")
+
+
+def artifact_declaration(repository: str, run_id: int):
+    import base64
+    bws = _status_module()
+    _, identity = _backup_run(bws, repository, run_id)
+    got = bws.api(f"/repos/{repository}/contents/db/schema.sql", query={"ref": identity.head_sha})
+    if isinstance(got, dict) and re.fullmatch("[0-9a-f]{40}", str(got.get("sha", ""))):
+        got = bws.api(f"/repos/{repository}/git/blobs/{got['sha']}")
+    if not isinstance(got, dict) or got.get("encoding") != "base64":
+        raise ValueError("artifact db/schema.sql revision cannot be identified")
+    text = base64.b64decode(got.get("content", "")).decode("utf-8")
+    return declaration(text, identity.head_sha, got.get("sha"))
+
+
 def download_copy(repository: str, artifact_id: int, out_dir: Path) -> tuple[Path, Path]:
     """Download one stored artifact ZIP and extract its one dump. Returns (zip, dump)."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -693,11 +741,11 @@ def branch_target_start(project_id: str, branch_id: str, admin_dsn: str, databas
 
 
 # The statement classes a scoped plain pg_dump carries that a fresh throwaway
-# database cannot apply (see bin/restore-rehearse.sh, THE PORTABILITY FILTER).
-# Unlike the script's sed, this never touches COPY data lines.
+# database cannot apply. Replay the pinned declaration after loading.
+# COPY data lines always pass through unchanged.
 RESTORE_STATEMENT_FILTER = re.compile(
     rb"^(CREATE SCHEMA public;|ALTER DEFAULT PRIVILEGES|GRANT |REVOKE |ALTER .* OWNER TO |COMMENT ON EXTENSION )")
-RESTORE_EXTENSIONS = ("pg_trgm", "pgcrypto")
+RESTORE_EXTENSIONS = ("pg_trgm", "pgcrypto", "vector")
 
 
 def restore_stream(lines: Iterable[bytes]) -> Iterable[bytes]:
@@ -877,6 +925,7 @@ def verify_restore(*, repository: str, run_id: int, identity: Path, target_kind:
         armed()
     work_dir.mkdir(parents=True, exist_ok=True)
     record = read_copy_record(repository, run_id)
+    declared = artifact_declaration(repository, run_id)
     archive, dump = download_copy(repository, record.pop("_artifact_id"), work_dir)
     observed = file_digest(archive)
     artifact = artifact_watermark_from(dump, identity)
@@ -894,12 +943,14 @@ def verify_restore(*, repository: str, run_id: int, identity: Path, target_kind:
         started_at = local_target_start(admin_dsn)
     target = create_target_database(admin_dsn, database)
     load_artifact(dump, identity, target, work_dir)
+    security_parity = rebuild_security(target, declared)
     restored = restored_watermark(target, artifact)
     finished = now()  # this process's own clock, after its last read; it also stamps the binding
     check_clock_skew(finished, server_clock(target), "the restore target server")
     finished_at = _utc_seconds(finished)
     receipt = {
         "receipt_kind": RECEIPT_KIND,
+        "security_parity": security_parity,
         "target_kind": target_kind,
         "copy": {k: record[k] for k in COPY_KEYS},
         "oracle_id": ORACLE_ID,
@@ -1028,6 +1079,8 @@ def main(argv=None) -> int:
     c.add_argument("--restored", required=True)
     d = sub.add_parser("digest")
     d.add_argument("path")
+    latest = sub.add_parser("latest-run-id")
+    latest.add_argument("--repository", required=True)
     f = sub.add_parser("fetch-copy")
     f.add_argument("--repository", required=True)
     f.add_argument("--run-id", required=True, type=int)
@@ -1063,6 +1116,9 @@ def main(argv=None) -> int:
             return 0
         if a.cmd == "restored":
             print(json.dumps(restored_watermark(_dsn_from(a.dsn_env), _load_json(a.artifact)), sort_keys=True))
+            return 0
+        if a.cmd == "latest-run-id":
+            print(latest_backup_run_id(a.repository))
             return 0
         if a.cmd == "fetch-copy":
             archive, dump = fetch_copy(a.repository, a.run_id, Path(a.out_dir))

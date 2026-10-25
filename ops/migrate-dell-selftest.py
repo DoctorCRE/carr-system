@@ -134,7 +134,7 @@ require(
 )
 require(
     "preflight executes this selftest from the pulled packet",
-    "git-writer-gate \\\n           corpus-render-gate config-as-code migrate-dell" in script,
+    "for t in guard corpus-render-gate config-as-code migrate-dell; do" in script,
 )
 require(
     "fresh-machine preflight exercises the actual Claude-only installer",

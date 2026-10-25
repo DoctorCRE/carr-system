@@ -114,7 +114,7 @@ test("closed empty verb requests reject extra fields and non-objects through CI"
   const dir = mkdtempSync(path.join(root, "type-tests/request-"));
   const source = path.join(dir, "request.ts");
   const request = (value) => `import type { VerbInputs } from "../../.generated/verb-inputs.js";
-const request: VerbInputs["pending-slice-completion-proposals"] = ${value};\n`;
+const request: VerbInputs["list-my-codex-sessions"] = ${value};\n`;
   try {
     for (const [name, value] of [["extra field", '{ unexpected: "wrong" }'], ["non-object", '"wrong"']]) {
       await t.test(name, () => {

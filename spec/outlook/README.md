@@ -5,29 +5,7 @@ The [generated reference](surface-atlas.md) renders that JSON without consulting
 The [WR-000439 criteria](work-request-criteria.json) record the four slices, dependencies,
 autonomous design decisions, source study, and remaining acceptance criteria.
 
-## Commands
-
-Run these commands from the repository root with Python 3.10 or newer.
-Every command writes only to stdout. Shell redirection chooses the output file.
-The extractor opens bundle inputs read-only and never launches an application.
-
-| Command | Result |
-| --- | --- |
-| `python3 ops/outlook-atlas.py extract --version 16.114.26101123` | JSON inventory of the installed bundle. |
-| `python3 ops/outlook-atlas.py drift --version 16.114.26101123 --baseline spec/outlook/surface-atlas.json` | Regenerated inventory compared with the baseline as structured JSON. |
-| `python3 ops/outlook-atlas.py diff old.json new.json` | Comparison of two saved inventories. |
-| `python3 ops/outlook-atlas.py render spec/outlook/surface-atlas.json` | Generated Markdown reference. |
-| `python3 ops/outlook-atlas-selftest.py` | Synthetic module and CLI behavior tests. |
-
-`--app` selects another static app bundle. `--version` must match its full `CFBundleVersion`.
-On `extract`, optional `--baseline` preserves first-seen versions for existing identities.
-New identities receive the observed build. Without a baseline, extraction starts a new history.
-The version is an expectation check, not a request to download an older Outlook build.
-
-Exit code 0 means the command completed, including when drift exists.
-Consumers inspect the diff rather than interpreting code 0 as no drift.
-Invalid versions, metadata, schemas, or unreadable inputs produce code 2 and a fixed JSON error
-on stderr. They emit no partial atlas or source excerpts.
+The research atlas generator is retired. Saved inventories and findings remain below.
 
 ## Data contract
 
@@ -170,10 +148,7 @@ by ID. The criteria JSON records the exact contract and autonomous design decisi
 
 ## Audited reconstructed grammar
 
-`python3 ops/outlook-atlas.py reconcile spec/outlook/surface-atlas.json spec/outlook/grammar-sources.json`
-emits a reconciled atlas to stdout. It reads only the three pinned audit paths from local git objects.
-Fetch the pinned revisions before regeneration. It verifies each audit SHA-256, the observed build,
-and every referenced binary source hash against the saved atlas. It never reads the installed app.
+The saved reconciled atlas records the pinned audit evidence.
 The manifest records exact PR revisions and observed merge status. PR #2040 is merged.
 PRs #2041 and #2042 were open at the pinned heads, so their integration remains provisional.
 

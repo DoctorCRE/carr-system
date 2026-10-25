@@ -12,6 +12,7 @@
 // NO SEND CAPABILITY EXISTS OR WILL EXIST IN THIS WORKER.
 
 import { neon, Pool } from "@neondatabase/serverless";
+import { publicError } from "./public-errors.js";
 import { mcpOriginRefusal } from "./oauth-policy.js";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.js";
 import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
@@ -75,11 +76,11 @@ export async function setWriterActorContext(client, actor, { partnerAuthorityAct
   const sponsoringHumanSlug = personalScope.status === "personal" ? personalScope.sponsor : "";
   if (receiptSessionRef === null) {
     await client.query(
-      "select set_config('carr.acting_actor_slug',$1::text,true), " +
-      "set_config('carr.verified_human_actor_slug',$2::text,true), " +
-      "set_config('carr.organization_tenant_id',$3::text,true), " +
-      "set_config('carr.execution_host_id',$4::text,true), " +
-      "set_config('carr.sponsoring_human_slug',$5::text,true) /* writer-actor-context */",
+     "select set_config('carr.acting_actor_slug',$1::text,true), " +
+     "set_config('carr.verified_human_actor_slug',$2::text,true), " +
+     "set_config('carr.organization_tenant_id',$3::text,true), " +
+     "set_config('carr.execution_host_id',$4::text,true), " +
+     "set_config('carr.sponsoring_human_slug',$5::text,true) /* writer-actor-context */",
       [actor.slug, verifiedHumanSlug, tenant, executionHost, sponsoringHumanSlug],
     );
     return;
@@ -128,9 +129,7 @@ export const PROFILES = {
 
   // Native lifecycle credentials are purpose-bound server-side. They expose
   // only their own record surface even if a caller asks for ?profile=full.
-  "codex-continuity": new Set([
-    "codex-checkpoint", "codex-read-recovery",
-  ]),
+  "codex-continuity": new Set(),
 
   // Reads plus the capture verbs that are safe to run unattended: each one is
   // additive, carries an idempotency key, and cannot destroy or re-point an
@@ -141,7 +140,6 @@ export const PROFILES = {
   capture: new Set([
     "log-activity", "stamp-touch", "add-loop", "update-loop",
     "set-next-action", "complete-action", "add-critical-date", "record-finding",
-    "record-signal", "record-branch-evidence",
     "report-problem",
     // propose-outcome-feedback proposes and completes nothing (0872). Its
     // completion door, bind-work-request-criterion-evidence, is deliberately
@@ -163,7 +161,7 @@ export const PROFILES = {
     // partner authority (close-incident is humanOnly). Triage may advance only
     // detected -> triaged with a next action and provisional impact; it cannot
     // set severity, root cause, recovery evidence, or a closed state.
-    "open-incident", "triage-incident",
+    "triage-incident",
     // The research-site index (#1646): the weekly research runs add a source
     // they found useful and retire a dead one. Both are keyed; removal is soft.
     "add-research-site", "remove-research-site",
@@ -201,14 +199,13 @@ export const PROFILES = {
     // everything capture holds
     "log-activity", "stamp-touch", "add-loop", "update-loop",
     "set-next-action", "complete-action", "add-critical-date", "record-finding",
-    "record-signal", "record-branch-evidence", "record-defect", "open-incident", "triage-incident",
+     "record-defect",  "triage-incident",
     "add-research-site", "remove-research-site",
     // plus: close what it opened, advance the book, draft, and keep the record honest
     "close-loop", "update-deal", "add-premises", "record-counter",
     "prepare-document", "update-document-status",
     "log-decision", "update-decision",
-    "open-investigation", "open-investigation-branch",
-    "adjudicate-investigation-branch", "close-investigation",
+    "close-investigation",
     // plus: the marketing lane, since social is carved out of Dell's review
     "open-campaign", "score-campaign", "attach-to-campaign", "measure-placement",
   ]),
@@ -305,7 +302,7 @@ export const PROFILES = {
     "record-defect",
     // Runtime-only dispatch doors. The link's database function independently
     // requires the server-derived hermes-pilot actor.
-    "project-room-queue", "record-dispatch-link",
+    "record-dispatch-link",
   ]),
 
   // UNATTENDED (PR #1727 review, finding 2; rule b42e217e: unattended runs get
@@ -323,8 +320,8 @@ export const PROFILES = {
   unattended: new Set([
     "log-activity", "stamp-touch", "add-loop", "update-loop",
     "set-next-action", "complete-action", "add-critical-date", "record-finding",
-    "record-signal", "record-branch-evidence", "report-problem", "record-defect",
-    "open-incident", "triage-incident",
+     "report-problem", "record-defect",
+    "triage-incident",
     "close-loop",
     ...UNATTENDED_AUTHORITY_VERBS,
   ]),
@@ -337,7 +334,7 @@ export const PROFILES = {
   "hermes-cos": new Set([
     "log-activity", "stamp-touch", "add-loop", "update-loop",
     "set-next-action", "complete-action", "add-critical-date", "record-finding",
-    "record-defect", "project-room-queue", "record-dispatch-link", "update-deal", "add-premises",
+    "record-defect", "record-dispatch-link", "update-deal", "add-premises",
   ]),
 };
 
@@ -473,10 +470,10 @@ export function hermesCosPremisesRefusal(profile, name, args) {
 const CORE_TOOL_NAMES = new Set([
   "standing-context", "list-verbs", "call-verb",
   "report-problem", "record-defect", "add-loop",
-  "capability-program", "catch-me-up", "find", "loop-board",
+  "catch-me-up", "find", "loop-board",
   "read-doctrine", "read-loop", "read-room", "search-doctrine",
   "deal-room-board", "get-deal-room", "lead-board", "morning-brief", "today-triage",
-  "engineering-passport-source", "doctrine-sections",
+  "doctrine-sections",
   "add-room-turn", "map-architecture",
   "applicable-rules", "resolve-doctrine-rules", "doctrine-index",
 ]);
@@ -759,6 +756,8 @@ export async function callTool(env, actor, name, args, profile = "full") {
       Array.isArray(args?.links) && args.links.length)
     throw new ToolError({ error: "not_in_profile", verb: "log-activity (links[])", profile,
       hint: "a narrow profile may log the activity but not assert relationships — drop links[] from this call and file the introduction facts with add-loop for an interactive partner session to link-parties" });
+  if (!['full','doc'].includes(profile) && name === 'log-activity' && args?.vendor_assignments !== undefined)
+    throw new ToolError({error:'not_in_profile',verb:'log-activity (vendor_assignments)',profile});
   if (connectionRouteForTool(tool) === "reader") {
     const sql = neon(env.DATABASE_URL_READER);
     // sideWrite is the ONLY way a read verb may write, and it is deliberately
@@ -768,6 +767,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     // a refused write killed the answer (migration 0223). Anything using this
     // must treat the write as optional: losing it costs a record, never a reply.
     const client = {
+      ai: env.AI,
       query: async (text, params = []) => ({ rows: await sql.query(text, params) }),
       sideWrite: env?.DATABASE_URL_WRITER
         ? (text, params = []) => {
@@ -802,10 +802,12 @@ export async function callTool(env, actor, name, args, profile = "full") {
   const connectionString = needsAuthority ? authorityDsnForActor(env, actor) : env.DATABASE_URL_WRITER;
   const pool = new Pool({ connectionString });
   const client = await pool.connect();
+  client.ai = env.AI;
   const writerRead = tool.writerConnection === true && !tool.write;
   let readOk = true, readErrorKind = null;
   try {
     await client.query(tool.writerConnection && !tool.write ? "begin read only" : "begin");
+    client.inTransaction = true;
     const a = await client.query("select id from actor where slug=$1", [actor.slug]);
     // Guarded 2026-08-03. Unguarded, a missing actor row made this a raw
     // TypeError on `undefined.id` — a 500 with a stack trace where the real
@@ -815,7 +817,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     // exactly here, and that is a plausible shape of mistake during onboarding.
     if (!a.rows.length) throw new ToolError({ error: "actor_not_provisioned", slug: actor.slug,
       hint: "the token authenticates as this actor but no row exists in the actor table — " +
-            "provision the actor before any write verb will run" });
+           "provision the actor before any write verb will run" });
     // In place, not a copy — see executeWithTrustedPrincipal above.
     const actorWithId = Object.assign(actor, { id: a.rows[0].id });
     await setWriterActorContext(client, actorWithId,
@@ -863,6 +865,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
       const refusal = pgConstraintError(e);
       if (refusal) {
         const failure = await describeConstraint(client, refusal);
+        failure.cause = e; // Retain the original driver diagnostics for server logs only.
         if (writerRead && failure instanceof ToolError)
           readErrorKind = String(failure.payload?.error || "tool_error").slice(0, 64);
         throw failure;
@@ -955,26 +958,26 @@ export async function dispatch(request, env, ctx, actor) {
           capabilities: { tools: {} },
           serverInfo: { name: "carr-record-layer", version: "0.1.0" },
           instructions: profile === "doc" ? DOC_INSTRUCTIONS :
-            "CARR's record layer AND the doctrine store — the ONE source of truth for Joe Bookout's " +
-            "healthcare-CRE practice (partner Dell McCraney; business only, personal life is Life AI). " +
-            "OPENING ACT, every session: call standing-context FIRST — it returns the taught rules " +
-            "with the counts to recite in your first response, open action-required items, and the " +
-            "doctrine pointer. There are NO doctrine files: read via doctrine-index / search-doctrine / " +
-            "read-doctrine; state via catch-me-up / today-triage. Discovery advertises a compact core. " +
-            "For any other verb, use list-verbs with a filter to fetch its schema, then call-verb. " +
-            "Reuse discovered schemas in this session; do not load the complete catalog at startup. " +
-            "WRITE LAW (rule 14181e60): database " +
-            "first — content goes through verbs, NEVER into a .md file. Writes need a fresh " +
-            "idempotency_key (UUID) per intended action; mutations need base_version from a fresh read. " +
-            "version_conflict and needs_confirm are questions for the human, never auto-retried. Claude sends email and other outbound messages on Joe's behalf whenever Joe asks (one message or a standing instruction); with no ask, the default is a draft (decision 41906a30). This server has no send verb; sends go through Joe's own accounts. If this server is unreachable mid-task, " +
-            "STOP AND SAY SO — never improvise files. DELEGATION LATCH: when a partner says delegate, " +
-            "subagent, or cheapest qualified model for an active task, that authority survives new logins " +
-            "or data sources, phase changes, retries, continuation and compaction until the task ends " +
-            "or the partner revokes it. Choose the cheapest model still qualified to do the task " +
-            "correctly; this may be a peer-tier agent, never a forced downgrade. The main seat " +
-            "orchestrates, verifies and performs authorized " +
-            "writes; it does not reclaim the mechanical sweep. State the executor before each phase; " +
-            "a second inline mechanical tool call is the tripwire." + RULE_DELIVERY_RAIL +
+           "CARR's record layer AND the doctrine store — the ONE source of truth for Joe Bookout's " +
+           "healthcare-CRE practice (partner Dell McCraney; business only, personal life is Life AI). " +
+           "OPENING ACT, every session: call standing-context FIRST — it returns the taught rules " +
+           "with the counts to recite in your first response, open action-required items, and the " +
+           "doctrine pointer. There are NO doctrine files: read via doctrine-index / search-doctrine / " +
+           "read-doctrine; state via catch-me-up / today-triage. Discovery advertises a compact core. " +
+           "For any other verb, use list-verbs with a filter to fetch its schema, then call-verb. " +
+           "Reuse discovered schemas in this session; do not load the complete catalog at startup. " +
+           "WRITE LAW (rule 14181e60): database " +
+           "first — content goes through verbs, NEVER into a .md file. Writes need a fresh " +
+           "idempotency_key (UUID) per intended action; mutations need base_version from a fresh read. " +
+           "version_conflict and needs_confirm are questions for the human, never auto-retried. Claude sends email and other outbound messages on Joe's behalf whenever Joe asks (one message or a standing instruction); with no ask, the default is a draft (decision 41906a30). This server has no send verb; sends go through Joe's own accounts. If this server is unreachable mid-task, " +
+           "STOP AND SAY SO — never improvise files. DELEGATION LATCH: when a partner says delegate, " +
+           "subagent, or cheapest qualified model for an active task, that authority survives new logins " +
+           "or data sources, phase changes, retries, continuation and compaction until the task ends " +
+           "or the partner revokes it. Choose the cheapest model still qualified to do the task " +
+           "correctly; this may be a peer-tier agent, never a forced downgrade. The main seat " +
+           "orchestrates, verifies and performs authorized " +
+           "writes; it does not reclaim the mechanical sweep. State the executor before each phase; " +
+           "a second inline mechanical tool call is the tripwire." + RULE_DELIVERY_RAIL +
             (profile === "full" ? "" : ` ACTIVE PROFILE: ${profile}.` + (PROFILE_NOTICE[profile] || "")),
         });
       case "notifications/initialized":
@@ -989,69 +992,35 @@ export async function dispatch(request, env, ctx, actor) {
           const result = await callTool(env, scopedActor, rpc.params?.name, rpc.params?.arguments, profile);
           return reply({ content: [{ type: "text", text: JSON.stringify(result) }] });
         } catch (e) {
-          if (e instanceof ToolError)
-            return reply({ isError: true, content: [{ type: "text", text: JSON.stringify(e.payload) }] });
-          // UNMASK IT. Until 2026-08-21 an untyped throw fell through to the
-          // outer handler, which answers -32603 with the literal message
-          // "internal error" and puts the real cause in the JSON-RPC `data`
-          // field — a field MCP clients routinely drop, so the caller saw a
-          // four-word string naming nothing. The detail was already being
-          // recorded to the incident store and already being returned on the
-          // wire; the only thing missing was putting it where a caller reads.
-          //
-          // What that masking cost in one day: the capability queue's close
-          // verb had never once succeeded (a row lock on a table the serving
-          // role may only read) and read as "0 complete of 51" while six
-          // projects were finished; close-loop and update-decision each died
-          // on a short id reaching a uuid column. Three defects, all diagnosed
-          // by reading handler SQL, because the error itself said nothing.
-          //
-          // Still recorded to the incident store, same as before, and the
-          // string is redacted for connection-string shapes on the way out. A
-          // failure a caller can act on is not a leak; a failure nobody can
-          // read is just a longer outage.
-          const cause = String((e && e.stack) || e).slice(0, 600)
-            .replace(/\b\w+:\/\/[^\s'"]+/gi, "[redacted]");
-          scheduleFailureRecord(env, ctx, {
-            routeKey: `mcp:tools/call:${rpc?.params?.name || "unknown"}`,
-            failureClass: rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE, {
-              verb: rpc?.params?.name || null,
-              error: e,
-            }),
-            detail: cause.slice(0, 300),
-          });
-          return reply({ isError: true, content: [{ type: "text", text: JSON.stringify({
-            error: "unhandled_verb_failure",
-            verb: rpc?.params?.name || null,
-            cause,
-            hint: "this is the server's own exception, not a refusal of your arguments — the verb " +
-                  "reached code that threw. Read it before retrying: an unhandled failure repeated " +
-                  "with the same arguments fails the same way. If it names a database fault, the " +
-                  "handler's SQL is the place to look.",
-          }) }] });
+          const name = rpc.params?.name === "call-verb"
+            ? rpc.params?.arguments?.verb : rpc.params?.name;
+          const payload = publicError(e, { env, inputSchema: TOOLS[name]?.inputSchema });
+          if (!(e instanceof ToolError)) {
+            scheduleFailureRecord(env, ctx, {
+              routeKey: `mcp:tools/call:${rpc?.params?.name || "unknown"}`,
+              failureClass: rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE, {
+                verb: rpc?.params?.name || null, error: e,
+              }),
+              detail: `Request failed; correlation_id=${payload.correlation_id}`,
+            });
+          }
+          if (!(e instanceof ToolError) && TOOLS[name]) payload.verb = name;
+          return reply({ isError: true, content: [{ type: "text", text: JSON.stringify(payload) }] });
         }
       }
       default:
         return rpcError(-32601, `method not found: ${rpc.method}`);
     }
   } catch (e) {
-    // Program 4 Gap A2 (2026-08-14, defect cae5be2e): -32603 is the ONLY
-    // JSON-RPC code an uncaught exception can produce on this route (this is
-    // its sole call site), and /mcp always answers HTTP 200 for a JSON-RPC-
-    // level error — see trace.js's file header for why that makes this the
-    // one error code worth recording here. The detail string is the SAME
-    // truncated text already returned to the caller two lines below; nothing
-    // new is exposed by also recording it.
-    const detail = String(e).slice(0, 300);
+    const payload = publicError(e, { env, fallback: "internal_error" });
     scheduleFailureRecord(env, ctx, {
-      routeKey: `mcp:${rpc?.method || "unknown"}${rpc?.params?.name ? ":" + rpc.params.name : ""}`,
+      routeKey: `mcp:${rpc?.method || "unknown"}`,
       failureClass: rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE, {
-        verb: rpc?.params?.name || null,
-        error: e,
+        verb: rpc?.params?.name || null, error: e,
       }),
-      detail,
+      detail: `Request failed; correlation_id=${payload.correlation_id}`,
     });
-    return rpcError(-32603, "internal error", detail);
+    return rpcError(-32603, "internal error", payload);
   }
 }
 

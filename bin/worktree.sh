@@ -5,9 +5,7 @@
 # WHY THIS EXISTS. On 2026-08-10 two sessions collided in ~/carr-system twice in
 # one morning: each could only commit safely by hand-naming its paths, and one
 # stretch of work sat loose for thirteen hours because committing it would have
-# swept the other writer's files. git-writer-gate.py blocks that sweep, and its
-# own deny message already tells you the answer: "to change branch, use a
-# WORKTREE so no other session's tree moves."
+# swept the other writer's files. Use a worktree so no other session's tree moves.
 #
 # THE MECHANISM WAS NEVER MISSING. Seven worktrees were already live when this
 # was written. What was missing is that a usable one takes three steps, two of

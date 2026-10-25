@@ -1,16 +1,18 @@
 # Rule-delivery eval
 
-Measures the deterministic half of CARR rule delivery: which taught rules the
-trigger and pack layer puts in front of a session at each prompt and each tool
-call, with the Jev judgment switched off. It is the "skill triggering" case:
-the score is coupled directly to the trigger text.
+Replays CARR rule delivery for prompts and tool calls using offline scope
+fixtures and frozen moment decisions. The replay runs structural selection
+without a live Jev call.
 
 ## What is replayed
 
-| event | production code called |
+| event | offline selection called |
 |---|---|
-| prompt | `ops/rule_trigger_delivery.advise` (compiled `prompt_regex` rows, always-on; ranking and binding stubbed to raise), then `lib/rule_delivery_preuse.semantic_delivery` |
-| tool call | `hooks/rule-pack-preuse-reselection.py`: `_matches` (scheduled rail), `routed_rule_ids` (route rail, `ops/config/rule-routes.v1.json`), `matched_triggers` (compiled table), unioned as `process()` unions them and deduped per (rule, tool) inside a case |
+| prompt | `FrozenSelection.select` in `ops/rule_scope_replay.py`, with `UserPromptSubmit` and the case prompt |
+| tool call | The same selector with `PreToolUse`, the case prompt, tool name, and tool input |
+
+The selector combines `lib/rule_scope_lookup.py` structural matches with the
+recorded moment decisions in `ops/fixtures/rule-scope-compatibility.v1.json`.
 
 Nothing is written to production logs or caches. `selftest.py` checks that.
 

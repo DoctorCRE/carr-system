@@ -1289,11 +1289,11 @@ begin
   -- THE GATE ZERO PRODUCER SEAT TAKES NO PASSWORD, and that is the difference
   -- between the two machine logins rather than an oversight. 0502 creates it as
   -- `create role carr_gate_zero_producer login` with nothing else, and
-  -- ops/staging-database-login-provision-db-gate.py reads the seat's baseline
-  -- back as (rolcanlogin, rolpassword is null, rolconfig is null) = (t,t,t)
-  -- before it provisions anything — a snapshot that minted the seat with
-  -- carr_jobs' placeholder password failed that gate with (t,f,t). The seat is
-  -- credentialed by the provisioning path the gate exercises, not by this file,
+  -- Its provisioning baseline is
+  -- (rolcanlogin, rolpassword is null, rolconfig is null) = (t,t,t).
+  -- A snapshot that minted the seat with carr_jobs' placeholder password
+  -- violated that baseline with (t,f,t). The seat is
+  -- credentialed by its provisioning path, not by this file,
   -- so reproduce 0502's shape exactly and leave an existing role alone.
   select rolcanlogin into producer_can_login from pg_roles where rolname='carr_gate_zero_producer';
   if not found then
@@ -2022,7 +2022,9 @@ if [ "$RULE_DELIVERY_CUTOVER_APPLIED" = t ]; then
   # applied gets the current eight-row set; earlier ledgers keep the historical
   # nine-row preimages needed by their pending guarded transitions. 0471 adds
   # its control through the separate catalog source and does not mutate this
-  # human-review-pinned rule map.
+  # human-review-pinned rule map. Paths in these historical pre/postimages are
+  # exact replay values, not pointers to installed controls; do not repin them
+  # when a source file is retired.
   if [ "$RULE_DELIVERY_DIGEST_REPIN_APPLIED" = t ]; then
 cat >> "$TMP" <<'RULE_DELIVERY_ACTIVATION_TARGETS_POST_0363'
 -- CARR RULE DELIVERY ACTIVATION TARGETS POST-0363 (bin/schema-snapshot.sh) — exact reviewed cutover config.

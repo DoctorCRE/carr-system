@@ -13,18 +13,12 @@ The initial unpartitioned queries silently stopped at GitHub's 1,000-run search
 cap. Daily partitions stayed below the cap. Separate `gh run list --status
 failure` queries independently returned the same 207 and 113 failure IDs.
 `gh run view --log-failed` supplied the logs, and `--json jobs` identified failed
-steps. Logs remain in the desk's `/private/tmp/ci-failure-audit` cache. The
-[per-run ledger](../../tools/ci/ci-failure-audit-2026-10-15.json) records their
-SHA-256 digests, workflow, source SHA, attempt, evidence, and same-SHA passes.
+steps. The original ledger and local log cache were historical collection
+artifacts; the ledger was removed during the machinery purge. Its
+[historical version](https://github.com/DoctorCRE/carr-system/blob/da2ff1eb16d9068c717ec90ecd67802731ee67b7/tools/ci/ci-failure-audit-2026-10-15.json) preserves the collected digests and evidence. The linked
+GitHub runs below remain the source for inspecting individual failures.
 
-Recollect a new window with:
-
-```sh
-python3 tools/ci/ci-failure-audit.py \
-  --repo jbookout/carr-system --repo jbookout/doctorcre-app \
-  --start 2026-10-08T21:05:00Z --end 2026-10-15T21:05:00Z \
-  --cache /private/tmp/ci-failure-audit-new
-```
+Use `gh run list` and `gh run view --log-failed` for new investigations.
 
 The collector keys new entries by repository, run ID, and attempt. Every log
 and metadata request passes the inventoried `--attempt`; returned metadata must
@@ -120,26 +114,21 @@ are not claimed as changes in this PR.
 
 The following work remains outside the assigned write paths:
 
-- CARR's confirmed flakes include `tools/test_dot_processes.py`,
-  `tools/room-bridge/test_write_ownership_unit.py`, and
-  `tools/room-bridge/test_codex_live_unit.py`. Their source needs readiness and
-  process-lifecycle fixes; changing retries or treating the second pass as green
-  would hide failures. Some merge-queue fixture races were already repaired by
-  PR #1734. No changes here touch the retry door owned by PR #1786.
+- The CARR process, write-ownership, and Codex-live suites named in the
+  historical runs below were retired in the machinery purge. Those old failures
+  no longer identify current source files to repair.
 - DoctorCRE's ten full-main schedule failures all report `source_changed`.
   Some acknowledge zero tests and others acknowledge completed tests. The exact
-  offending generated path is not logged. Repair requires
-  `scripts/full-main.mjs` and its `test/full-main.test.mjs` tests, which are
-  outside this desk's write scope. Scheduled full-main remains red until fixed.
+  offending generated path is not logged. Repair belongs in DoctorCRE's full-main script and tests in
+  `jbookout/doctorcre-app`, outside this desk's write scope. Scheduled full-main remains red until fixed.
 - Eleven early DoctorCRE privacy runs exit 2, a setup/input refusal whose old
   diagnostic prints only the scanner filename. The current workflow supplies
   the corpus secret. Diagnosing a recurrence requires the scanner's error-code
-  handling in `scripts/privacy/client-data-check.mjs`, outside this scope.
+  handling in DoctorCRE's privacy scanner in `jbookout/doctorcre-app`,
+  outside this scope.
 - All 546 Authorized source merge controller runs were skipped, 515 from CI
-  completions and 31 from schedules. They consumed no runner job. Its existing
-  event/schedule contract is asserted by `mcp-server/test/source-merge-migration.test.mjs`.
-  Removing that unused chain requires changing that contract outside this scope;
-  this PR preserves the controller's activation behavior.
+  completions and 31 from schedules. They consumed no runner job. That controller
+  and its contract test were subsequently retired.
 
 ## Expected email change
 

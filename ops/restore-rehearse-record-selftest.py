@@ -181,15 +181,11 @@ def tier1() -> None:
     if not os.access(SCRIPT, os.X_OK):
         return
     source = Path(SCRIPT).read_text(encoding="utf-8")
-    restore_filter = re.search(r"^RESTORE_FILTER='([^']+)'$", source, re.MULTILINE)
-    check("restore portability filter removes only the pre-created public schema",
-          restore_filter is not None
-          and "CREATE SCHEMA public;" in restore_filter.group(1)
-          and restore_filter.group(1).count("CREATE SCHEMA") == 1,
-          "the fresh target already has public; ops and every other schema must still restore")
-    extension_names = set(re.findall(
-        r"create extension if not exists ([a-z0-9_]+)", source.lower()
-    ))
+    watermark = load_module_from_path("restore_record_watermark", str(Path(REPO) / "tools/restore-watermark.py"))
+    check("restore portability filter preserves application schemas and COPY data",
+          b"".join(watermark.restore_stream([b"CREATE SCHEMA public;\n", b"CREATE SCHEMA ops;\n"]))
+          == b"CREATE SCHEMA ops;\n")
+    extension_names = set(watermark.RESTORE_EXTENSIONS)
     migration_extensions = set()
     for migration in ((Path(REPO) / "migrations") / name for name in migration_names((Path(REPO) / "migrations").parent) if fnmatch.fnmatchcase(name, "*.sql")):
         migration_extensions.update(re.findall(
@@ -197,7 +193,7 @@ def tier1() -> None:
             read_migration(migration.parent.parent, migration.name).lower(),
         ))
     check("restore bootstraps every extension prerequisite declared by migrations",
-          extension_names == migration_extensions == {"pg_trgm", "pgcrypto"},
+          extension_names == migration_extensions == {"pg_trgm", "pgcrypto", "vector"},
           f"restore={sorted(extension_names)} migrations={sorted(migration_extensions)}")
 
     # ── a good run: state=succeeded, no invented failure_class ──────────────
@@ -227,6 +223,27 @@ def tier1() -> None:
           proc.stderr[:400])
     check("...and the rehearsal's own exit code is STILL 0 despite that",
           proc.returncode == 0, f"got {proc.returncode}")
+
+    proc = drive({
+        "EXIT": 0, "PROD_TABLES": 1,
+        "SUMMARY": "pct=100.0 rest_rows=1 rest_tables=1 prod_rows=1 prod_tables=1",
+        "SECURITY_PARITY": '{"verdict":"FAIL","schema_revision":"' + 'a' * 40 + '"}',
+    })
+    ev = evidence_lines(proc)
+    check("a dropped grant fails an otherwise complete fixture restore",
+          proc.returncode != 0, proc.stdout)
+    check("failed security parity is recorded in ops.run evidence",
+          field(ev, "state") == "failed" and 'security_parity=' in ev
+          and 'FAIL' in ev, ev)
+
+    for arguments in (['--preflight'], ['--dump', '/synthetic/no-artifact']):
+        env = unreachable_env()
+        env.pop('CARR_RESTORE_REHEARSE_SELFTEST', None)
+        refused = subprocess.run([SCRIPT, *arguments], capture_output=True, text=True,
+                                 timeout=10, env=env, cwd=REPO)
+        check('unidentified artifact revision refuses before loading ' + arguments[0],
+              refused.returncode != 0 and 'schema revision cannot be identified' in refused.stderr,
+              refused.stderr[:300])
 
     # ── bucket 1: preflight_failed — died before a dump or a production count ──
     proc = drive({"EXIT": 1, "DIE_REASON": "no age identity present"})
@@ -302,11 +319,74 @@ def tier1() -> None:
           "phase 0: preflight" in proc.stdout, proc.stdout[:400])
 
 
+def postgres_parity():
+    import hashlib
+    import socket
+    import psycopg
+    from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
+    from restore_security import declaration, apply_grants, check_parity
+
+    bins = Path(os.environ.get('CARR_TEST_POSTGRES_BIN') or os.environ.get('CARR_LOCAL_PG_BIN_DIR') or '/opt/homebrew/opt/postgresql@17/bin')
+    schema = """-- CARR GRANTS (bin/schema-snapshot.sh) — not produced by pg_dump.
+revoke all on function public.private_action() from public;
+grant usage on schema public to carr_writer;
+grant usage on schema public to carr_reader;
+grant select, insert, update on table public.fixture to carr_writer;
+grant select on table public.fixture to carr_reader;
+grant execute on function public.private_action() to carr_writer;
+-- PostgreSQL database dump
+"""
+    raw = schema.encode()
+    blob = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+    declared = declaration(schema, 'a' * 40, blob)
+    with postgres_fixture_group(), DisposablePostgres('carr-security-', bins / 'pg_ctl') as fixture:
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            port = listener.getsockname()[1]
+        data = fixture.root / 'data'
+        for command in ([bins / 'initdb', '-D', data, '-U', 'fixture_owner', '-A', 'trust', '--no-locale'],
+                        [bins / 'pg_ctl', '-D', data, '-l', fixture.root / 'postgres.log', '-o',
+                         f'-h 127.0.0.1 -p {port} -k {fixture.root}', '-w', 'start']):
+            fixture.run(command, check=True, capture_output=True, timeout=60)
+        with psycopg.connect(f'host=127.0.0.1 port={port} user=fixture_owner dbname=postgres', autocommit=True) as conn:
+            conn.execute('create role app_writer; create role app_reader; create role carr_writer; create role carr_reader')
+            conn.execute('create table public.fixture(id integer generated always as identity, derived integer generated always as (1) stored, value integer); create table public.denied(id integer generated always as identity, derived integer generated always as (1) stored, value integer)')
+            conn.execute("create function public.private_action() returns integer language sql as 'select 1'")
+            apply_grants(conn, declared)
+            result = check_parity(conn, declared)
+            check('local PG generated columns before writable columns preserve positive and negative role probes', result['verdict'] == 'PASS', str(result))
+            conn.execute('alter table public.fixture drop column id; alter table public.denied drop column id')
+            result = check_parity(conn, declared)
+            check('local PG stored generated column first preserves role probes', result['verdict'] == 'PASS', str(result))
+            conn.execute('revoke insert on public.fixture from app_writer')
+            result = check_parity(conn, declared)
+            check('local PG dropped grant fails security parity', result['verdict'] == 'FAIL', str(result))
+            proc = drive({'EXIT': 0, 'PROD_TABLES': 1,
+                          'SUMMARY': 'pct=100 rest_rows=1 rest_tables=1 prod_rows=1 prod_tables=1',
+                          'SECURITY_PARITY': __import__('json').dumps(result)})
+            check('local PG dropped grant fails the restore receipt', proc.returncode == 1, proc.stdout)
+            apply_grants(conn, declared)
+            conn.execute('grant select on public.fixture to app_reader with grant option')
+            result = check_parity(conn, declared)
+            check('local PG excess grant option fails security parity', result['verdict'] == 'FAIL', str(result))
+            conn.execute('revoke grant option for select on public.fixture from app_reader')
+            conn.execute('grant delete on public.fixture to app_reader')
+            result = check_parity(conn, declared)
+            check('local PG excess grant also fails security parity', result['verdict'] == 'FAIL', str(result))
+            conn.execute('revoke delete on public.fixture from app_reader')
+            apply_grants(conn, declared)
+            conn.execute('grant execute on function public.private_action() to public')
+            result = check_parity(conn, declared)
+            check('local PG PUBLIC execute leak fails parity', result['verdict'] == 'FAIL', str(result))
+
+
 def main() -> int:
     print("restore-rehearse-record-selftest — bin/restore-rehearse.sh must "
           "record one honest ops.run row per real rehearsal, and --preflight/"
           "--verify-only must record none")
     tier1()
+    if "--postgres" in sys.argv:
+        postgres_parity()
     print()
     if FAILED:
         print(f"FAILED {len(FAILED)} check(s):")

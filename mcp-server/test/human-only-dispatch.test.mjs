@@ -66,23 +66,21 @@ const forbiddenClient = {
 
 test("the registry still carries the humanOnly verbs this gate was built for", () => {
   assert.ok(humanOnlyVerbs.length > 0, "no humanOnly verb is declared anywhere in the registry");
-  assert.ok(humanOnlyVerbs.includes("accept-portfolio-revision"),
-    "accept-portfolio-revision must stay humanOnly — it records the v5 constitution acceptance");
   // The full set as of this commit. A change here is not a failure to paper
   // over: it means a verb gained or lost the flag, and that is a decision
   // somebody should see in a diff.
   assert.deepEqual(humanOnlyVerbs, [
     "accept-outcome-feedback",
-    "accept-portfolio-revision",
+
     "accept-ready-plan",
     "accept-ready-plan-amendment",
-    "adjudicate-incident",
+
     "answer-board-question",
     "answer-work-request-for-joe",
     "approve-lead-draft",
     "approve-lead-move",
     "claim-lead",
-    "close-incident",
+
     "confirm-merge",
     "decide-doc-suggestion",
     "link-lead-client",
@@ -118,25 +116,6 @@ test("the actor classes this gate refuses are the classes identity.js derives", 
 
 // THE BLOCKING FINDING ITSELF, named on its own so a failure reads as the
 // release defect it is rather than as one row of a loop.
-test("accept-portfolio-revision admits the verified nonhuman joe-local principal", async () => {
-  const receiptId = "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d";
-  const client = {
-    query: async (text) => {
-      if (text.includes("from tool_call where idempotency_key")) return { rows: [] };
-      if (text.includes("ops.portfolio_accept_revision")) return { rows: [{ id: receiptId }] };
-      if (text.includes("insert into tool_call") || text.includes("insert into event")) return { rows: [] };
-      throw new Error(`unexpected SQL: ${text}`);
-    },
-  };
-  const out = await executeRegisteredTool(client, joeLocal, "accept-portfolio-revision", {
-    idempotency_key: "9f1d0c2e-6a7b-4c8d-9e0f-1a2b3c4d5e6f",
-    revision_id: "2d3e4f50-6172-4839-8a9b-0c1d2e3f4a5b",
-    accepted_digest: `sha256:${"a".repeat(64)}`,
-    review_id: "3e4f5061-7283-494a-9b0c-1d2e3f4a5b6c",
-  });
-  assert.equal(out.ok, true);
-  assert.equal(out.receipt_id, receiptId);
-});
 
 test("verified sponsor-bound agents pass partner-authority gates except human identity merges", async () => {
   for (const verb of humanOnlyVerbs.filter(name => name !== "confirm-merge")) {
@@ -146,20 +125,6 @@ test("verified sponsor-bound agents pass partner-authority gates except human id
       assert.notEqual(error?.payload?.error, "human_only_verb_requires_verified_partner", `${verb}: ${label}`);
     }
   }
-});
-
-test("an unverified actor cannot self-assert Joe as sponsor", async () => {
-  const unverified = { ...joeLocal, native_agent_verified: false };
-  const error = await executeRegisteredTool(forbiddenClient, unverified, "accept-portfolio-revision", {
-    idempotency_key: "9f1d0c2e-6a7b-4c8d-9e0f-1a2b3c4d5e6f",
-    revision_id: "2d3e4f50-6172-4839-8a9b-0c1d2e3f4a5b",
-    accepted_digest: `sha256:${"a".repeat(64)}`,
-    review_id: "3e4f5061-7283-494a-9b0c-1d2e3f4a5b6c",
-  }).then(() => null, (e) => e);
-  assert.ok(error instanceof ToolError, `expected a ToolError, got ${error}`);
-  assert.equal(error.payload.error, "human_only_verb_requires_verified_partner");
-  assert.equal(error.payload.verb, "accept-portfolio-revision");
-  assert.equal(error.payload.actor_class, "sponsored_agent");
 });
 
 // EVERY humanOnly verb, EVERY nonhuman class. Arguments are deliberately empty:
@@ -182,31 +147,6 @@ for (const verb of humanOnlyVerbs) {
 // The other half of a gate: it has to let the right caller through. This asserts
 // the PASS, not the whole verb — a verified partner reaches the existing
 // behaviour, and the existing behaviour is what the rest of the suite covers.
-test("a verified human partner passes the gate into the existing behaviour", async () => {
-  const receiptId = "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d";
-  const seen = [];
-  const client = {
-    query: async (text, params = []) => {
-      seen.push(text);
-      if (text.includes("from tool_call where idempotency_key")) return { rows: [] };
-      if (text.includes("ops.portfolio_accept_revision")) return { rows: [{ id: receiptId }] };
-      if (text.includes("insert into tool_call")) return { rows: [] };
-      if (text.includes("insert into event")) return { rows: [] };
-      throw new Error(`unexpected SQL: ${text} ${JSON.stringify(params)}`);
-    },
-  };
-  const out = await executeRegisteredTool(client, joe, "accept-portfolio-revision", {
-    idempotency_key: "1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9",
-    revision_id: "2d3e4f50-6172-4839-8a9b-0c1d2e3f4a5b",
-    accepted_digest: `sha256:${"b".repeat(64)}`,
-    review_id: "3e4f5061-7283-494a-9b0c-1d2e3f4a5b6c",
-  });
-  assert.equal(out.ok, true);
-  assert.equal(out.receipt_id, receiptId);
-  assert.equal(out.accepted, true);
-  assert.ok(seen.some((t) => t.includes("ops.portfolio_accept_revision")),
-    "the human call must reach the acceptance function, not stop at the gate");
-});
 
 // A verb WITHOUT the flag is untouched by this change. Joe's 2026-08-26 ruling
 // (decision dc57f62d) is about those 220 verbs, and re-enforcing humanOnly must

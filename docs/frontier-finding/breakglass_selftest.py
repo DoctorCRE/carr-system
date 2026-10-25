@@ -23,8 +23,8 @@ by the plan's own words: "a run whose digests do not match the recorded
 approval note is refused by procedure with the refusal recorded" — the
 approval oracle is the WR-000046 record layer, not this file (Section 2,
 "Approval oracle (named)"); the driver's job is only to print the three
-digests for a human or auditor to compare, which it does. See RESULT.md for
-the full account of this and every other scoping choice below.
+digests for a human or auditor to compare, which it does. The full scoping
+account is in the doctrine document frontier-finding-evidence.
 """
 from __future__ import annotations
 

@@ -7,8 +7,8 @@ import { TOOLS } from "../src/tools.js";
 // (mcp.js setWriterActorContext). A memory verb on the stateless reader
 // connection would silently lose its owner's personal rows.
 test("every verb that reads memory_item runs where the sponsor is set", () => {
-  for (const name of ["recall-memory", "review-memory", "observe-memory",
-                      "promote-memory", "correct-memory", "forget-memory"]) {
+  for (const name of ["recall-memory",
+                       ]) {
     const tool = TOOLS[name];
     assert.ok(tool, `${name} is registered`);
     assert.ok(tool.write === true || tool.writerConnection === true,

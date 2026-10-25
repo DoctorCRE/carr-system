@@ -37,7 +37,7 @@ FUNCTION_TYPE = rf"(?:{IDENT}\.)?{IDENT}(?: {IDENT})*(?:\[\])?"
 # Catalog identifiers are lower-case, so the mode word cannot be mistaken for a
 # name. Postgres ignores OUT arguments when identifying a function, and so does
 # _snapshot_function_identity() below.
-FUNCTION_ARG = rf"(?:(?:OUT|INOUT|VARIADIC) )?{IDENT} {FUNCTION_TYPE}"
+FUNCTION_ARG = rf"(?:(?:OUT|INOUT|VARIADIC) )?(?:{IDENT} )?{FUNCTION_TYPE}"
 FUNCTION_ARGS = rf"(?:{FUNCTION_ARG}(?:, {FUNCTION_ARG})*)?"
 FUNCTION_TYPE_ARGS = rf"(?:{FUNCTION_TYPE}(?:, {FUNCTION_TYPE})*)?"
 GRANT_PATTERNS = (
@@ -140,15 +140,9 @@ def _argument_type(argument: str) -> str:
     bare = normalized[:-2] if normalized.endswith("[]") else normalized
     if bare in MULTIWORD_ARGUMENT_TYPES:
         return normalized
-    try:
-        _argument_name, argument_type = normalized.split(" ", 1)
-    except ValueError as exc:
-        # The generated grammar admits only name/type pairs; a single-token
-        # nameless type reaches acl_facts() through DERIVED_FUNCTION_GRANT and
-        # never through here.
-        raise SnapshotGrantError(
-            f"generated function argument has no name/type pair: {argument}"
-        ) from exc
+    if " " not in normalized:
+        return normalized
+    _argument_name, argument_type = normalized.split(" ", 1)
     return argument_type
 
 

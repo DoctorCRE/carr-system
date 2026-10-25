@@ -138,6 +138,7 @@ class BoardCase(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
+        self.enterContext(patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root)}))
         self.enterContext(patch.object(BOARD.repo_lib("machine_role"), "read_marker", return_value="primary"))
         self.enterContext(patch.object(tempfile, "tempdir", str(self.root)))
         self.enterContext(patch.dict(os.environ, {"CARR_WORK_QUEUE_DB": str(self.root / "queue.sqlite3")}))
@@ -1435,10 +1436,11 @@ class PublishAndAnswers(BoardCase):
              patch.object(BOARD, "build_all_repos", broken), \
              patch.object(BOARD, "publish_needs_joe_local"), \
              patch("sys.stderr", new_callable=io.StringIO) as err:
-            BOARD.command_render(args)
+            with self.assertRaisesRegex(RuntimeError, "gh unavailable"):
+                BOARD.command_render(args)
         self.assertEqual(events, [("render", "carr-v5", True), ("publish", "carr-v5"), ("poll", "carr-v5"),
                                   ("publish", "all-repos")])
-        self.assertIn("gh unavailable", err.getvalue())
+        self.assertIn("phase=portfolio outcome=failed", err.getvalue())
 
 
 class SharedBoardRoot(unittest.TestCase):
@@ -1506,6 +1508,8 @@ class SharedBoardRoot(unittest.TestCase):
 
 class NeedsJoePublication(unittest.TestCase):
     def setUp(self):
+        root = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": root}))
         self.enterContext(patch.object(BOARD.repo_lib("machine_role"), "read_marker", return_value="primary"))
 
     def test_local_publication_failures_do_not_interrupt_other_boards(self):
@@ -1527,10 +1531,12 @@ class NeedsJoePublication(unittest.TestCase):
                          patch.object(needs_joe_local, "read_source", return_value="", side_effect=read_effect), \
                          patch.object(BOARD, "call_verb", side_effect=call_effect) as call, \
                          patch("sys.stderr", new_callable=io.StringIO) as err:
-                        BOARD.command_render(Namespace(project=BOARD.LAUNCHD_BOARD, publish=False))
+                        with self.assertRaises(type(failure)) as raised:
+                            BOARD.command_render(Namespace(project=BOARD.LAUNCHD_BOARD, publish=False))
+                        self.assertIs(raised.exception, failure)
                     self.assertEqual(events, [("render", "carr-v5"), ("build", "all-repos"), ("publish", "carr-v5"),
                         ("poll", "carr-v5"), ("publish", "all-repos")])
-                    self.assertIn("needs-joe local page not published", err.getvalue())
+                    self.assertIn("phase=needs-joe outcome=failed", err.getvalue())
                     self.assertEqual(call.call_count, 0 if location == "read_source" else 1)
 
     def test_local_publication_uses_remote_version_and_reads_back(self):

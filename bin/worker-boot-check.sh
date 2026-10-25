@@ -53,8 +53,8 @@ LOG="$(mktemp 2>/dev/null || mktemp -t carr-worker-boot-log)"
 
 # wrangler dev writes bundles and local state under mcp-server/.wrangler/.
 # An ignored directory left inside mcp-server/ makes every later exact-source
-# check on this checkout refuse ("uncommitted or ignored inputs"; see
-# ops/exact-recovery-runtime-selftest.py), so the check removes the directory
+# check on this checkout refuse ("uncommitted or ignored inputs"), so the check
+# removes the directory
 # again when it created it, and leaves one it found alone.
 WRANGLER_STATE_DIR="$WORKER_DIR/.wrangler"
 if [ -e "$WRANGLER_STATE_DIR" ]; then WRANGLER_STATE_PREEXISTED=1; else WRANGLER_STATE_PREEXISTED=0; fi
@@ -73,7 +73,7 @@ trap cleanup EXIT INT TERM
 
 (
   cd "$WORKER_DIR" &&
-  exec "$WRANGLER" dev --port "$PORT" --ip 127.0.0.1 --assets "$ASSETS_DIR"
+  exec "$WRANGLER" dev --local --port "$PORT" --ip 127.0.0.1 --assets "$ASSETS_DIR"
 ) > "$LOG" 2>&1 &
 WRANGLER_PID=$!
 

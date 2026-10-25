@@ -4,6 +4,7 @@
 // below mirrors its open arithmetic for property tests and offline scorecard
 // inspection; it never rewrites a query or generates answer text.
 
+import { searchDoctrineWithEmbeddings } from "./doctrine-embeddings.js";
 import { personalScopeForActor } from "./identity.js";
 import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.js";
 import { ToolError } from "./tool-error.js";
@@ -156,7 +157,8 @@ export async function searchDoctrineSituations(c, actor, args) {
   // other five-argument caller keep exact strict semantics — the deliberate
   // negative cases (expect-no-hits, near-miss) are gate properties of the
   // strict lane, not of this best-effort lane.
-  const result = await c.query(
+  const semanticResult = await searchDoctrineWithEmbeddings(c, args, actorId);
+  const result = semanticResult.rows ? { rows: semanticResult.rows } : await c.query(
     `select * from search_doctrine_situations($1, $2::uuid, $3::text[], $4, $5, $6)`,
     [args.q, actorId, args.content_classes || null, args.limit || 20, policy, true]);
   const hits = result.rows.map(row => ({ ...row,
@@ -198,6 +200,7 @@ export async function searchDoctrineSituations(c, actor, args) {
     hits,
     total: hits.length,
     generated_text: false,
+    semantic: semanticResult.semantic,
   };
 }
 

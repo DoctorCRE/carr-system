@@ -90,12 +90,6 @@
       "reason": "Historical generated SCAC v114 source-contract manifest at 710845781. Line 161 serializes ingress identifiers, schema and handler digests, and job routing metadata, not authentication material. Retained in PR history after the successor was removed; exception binds only these exact immutable SQL bytes and this generic detector."
     },
     {
-      "path": "ops/config/studio-failover-inventory.v1.json",
-      "sha256": "f8aa2ba34a17e57ac18a33b7f2796504e62fbb90a7972bbe86bce658e18f108a",
-      "rule": "pii-phone",
-      "reason": "Machine inventory value (a RAM byte count), not a phone number; no record-layer or client data."
-    },
-    {
       "path": "ops/config/studio-failover.v1.json",
       "sha256": "2babac885eb2cdb5d84d6279131a15c208cc107e0af32712a5cffc70bc5c0758",
       "rule": "pii-email",
@@ -268,6 +262,18 @@
       "sha256": "7fef2e4a5aa5f1eb6662212cee2d628d36eb8d60f255d55edac10f689758950a",
       "rule": "pii-address",
       "reason": "Historical synthetic fixture in PR #2120 uses an invented example address; current fixture uses a synthetic location marker. Exact historical file bytes only, retained because force-push is forbidden."
+    },
+    {
+      "path": "mcp-server/test/public-errors.test.mjs",
+      "sha256": "96d22c481e6ff548b035f90c5824cebbe68bfc2bea2ee4b63b0f928c9c565024",
+      "rule": "credential-url",
+      "reason": "Historical synthetic MCP fixture in PR #2194 uses a placeholder password against the reserved .invalid host, never a credential. The current fixture uses the established short fake value. This exception binds only the exact historical file bytes because pushed history is retained without force-push."
+    },
+    {
+      "path": "ops/outlook-send-selftest.py",
+      "sha256": "0621a833ac8d0592d8d884985786331ff90c7c91348688d2fcaa3eacaf71847a",
+      "rule": "pii-email",
+      "reason": "Invented Cc and Bcc fixture recipients in c190c248, replaced by reserved example.test addresses in 05b41df3; offline fake Outlook test only. Bound to the historical blob because PR CI scans every introduced commit."
     }
   ]
 }
