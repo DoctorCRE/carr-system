@@ -66,10 +66,10 @@ def main():
             raise ValueError('Reviewer did not return a valid verdict')
         if json.loads(gh('view', '--json', 'headRefOid'))['headRefOid'] != sha:
             raise ValueError('PR head moved during review; nothing posted')
-        gh('comment', '--body', f"{verdict}\nReviewed-SHA: {sha}\nReviewer: {args.reviewer if args.reviewer == 'grok' else 'the Dot'}\n\n{findings}\n")
+        comment = root / 'comment'
+        comment.write_text(f"{verdict}\nReviewed-SHA: {sha}\nReviewer: {args.reviewer if args.reviewer == 'grok' else 'the Dot'}\n\n{findings}\n")
+        gh('comment', '--body-file', str(comment))
         if verdict == 'VERDICT: APPROVE':
-            if json.loads(gh('view', '--json', 'headRefOid'))['headRefOid'] != sha:
-                raise ValueError('PR head moved after comment; auto-merge skipped')
             gh('merge', '--auto', '--squash', '--match-head-commit', sha)
 
 
