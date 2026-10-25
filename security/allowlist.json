@@ -274,6 +274,18 @@
       "sha256": "0621a833ac8d0592d8d884985786331ff90c7c91348688d2fcaa3eacaf71847a",
       "rule": "pii-email",
       "reason": "Invented Cc and Bcc fixture recipients in c190c248, replaced by reserved example.test addresses in 05b41df3; offline fake Outlook test only. Bound to the historical blob because PR CI scans every introduced commit."
+    },
+    {
+      "path": "ops/outlook-intake-selftest.py",
+      "sha256": "26c1bd8d7100c5c4ced7f45bba9f99a81f2268261586d8873ee5f3c8c83b79aa",
+      "rule": "pii-email",
+      "reason": "Invented sample mailbox in offline Outlook intake fixtures. The production configuration parser requires the carr.us domain, so reserved-domain addresses cannot exercise accepted partner configuration. No real mailbox data is used. This qualification binds only this path and these exact synthetic test bytes."
+    },
+    {
+      "path": "ops/outlook-intake-copy-selftest.py",
+      "sha256": "9c2b629ff675713a5270a1044f9f86fa7e4f5c524aece308736b2582ac5736cc",
+      "rule": "pii-email",
+      "reason": "Invented sample mailbox in offline Outlook intake fixtures. The production configuration parser requires the carr.us domain, so reserved-domain addresses cannot exercise accepted partner configuration. No real mailbox data is used. This qualification binds only this path and these exact synthetic test bytes."
     }
   ]
 }
