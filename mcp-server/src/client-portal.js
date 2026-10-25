@@ -1,26 +1,4 @@
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
-const MATERIAL_KINDS = new Set(['document', 'tour', 'report']);
-
-function projectPortal(value, slug) {
-  if (!value || value.slug !== slug || !value.roadmap ||
-      typeof value.roadmap.current_phase !== 'string' || !Array.isArray(value.roadmap.phases) ||
-      !Array.isArray(value.materials) || value.materials.length > 100) return null;
-  const phases = [];
-  for (const phase of value.roadmap.phases) {
-    if (!phase || typeof phase.slug !== 'string' || typeof phase.label !== 'string') return null;
-    phases.push({ slug: phase.slug, label: phase.label });
-  }
-  if (!phases.some(phase => phase.slug === value.roadmap.current_phase)) return null;
-  const materials = [];
-  for (const item of value.materials) {
-    if (!item || !MATERIAL_KINDS.has(item.kind) || typeof item.title !== 'string' ||
-        !item.title.trim() || item.title.length > 200 || typeof item.content !== 'string' ||
-        !item.content.trim() || item.content.length > 10000) return null;
-    materials.push({ kind: item.kind, title: item.title, content: item.content });
-  }
-  return { slug, roadmap: { current_phase: value.roadmap.current_phase, phases }, materials };
-}
-
 export function clientPortalTools({ ToolError }) {
   return {
     'read-client-portal': {
@@ -36,7 +14,7 @@ export function clientPortalTools({ ToolError }) {
             typeof args.password !== 'string' || !args.password.length || args.password.length > 1024)
           throw new ToolError({ error: 'invalid_portal_request' });
         const rows = await c.query('select ops.read_client_portal($1::text,$2::text) as portal', [args.slug, args.password]);
-        const portal = projectPortal(rows.rows[0]?.portal, args.slug);
+        const portal = rows.rows[0]?.portal;
         if (!portal) throw new ToolError({ error: 'portal_access_denied' });
         return { ok: true, schema_version: 'client-portal.v1', portal };
       },

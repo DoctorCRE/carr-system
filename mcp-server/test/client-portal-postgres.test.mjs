@@ -12,8 +12,9 @@ test('a password opens only its client portal and the live deal roadmap', async 
   try {
     await c.query(await readFile(new URL('../../migrations/0001_init.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/0008_client_merged_into.sql', import.meta.url), 'utf8'));
-    await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create extension pgcrypto');
+    await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader; grant usage on schema ops to dot_reader; alter default privileges in schema ops grant select on tables to dot_reader; create extension pgcrypto');
     await c.query(await readFile(new URL('../../migrations/0975_client_portal.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/0976_client_portal_binding.sql', import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')", [actor.id]);
     await c.query("insert into client_status(slug,label) values('active','Active'); insert into deal_phase(slug,label,sort) values('research','Research',1),('negotiation','Negotiation',2)");
     const party = (await c.query("insert into party(kind,name,notes_path,created_by,updated_by) values('person','Synthetic client A','INTERNAL_A',$1,$1) returning id", [actor.id])).rows[0].id;
@@ -46,6 +47,28 @@ test('a password opens only its client portal and the live deal roadmap', async 
       await assert.rejects(read('synthetic-b', 'synthetic-password-a'), denied);
       await assert.rejects(read('missing', 'synthetic-password-a'), denied);
       assert.deepEqual(await read(), expected);
+    });
+
+    await t.test('portal ownership cannot be changed after creation', async () => {
+      for (const assignment of [
+        "client_id=(select client_id from ops.client_portal where slug='synthetic-b')",
+        "deal_id=(select deal_id from ops.client_portal where slug='synthetic-b')",
+        "client_id=(select client_id from ops.client_portal where slug='synthetic-b'),deal_id=(select deal_id from ops.client_portal where slug='synthetic-b')",
+      ]) {
+        await c.query('begin');
+        try { await assert.rejects(c.query(`update ops.client_portal set ${assignment} where slug='synthetic-a'`), { code: '23514' }); }
+        finally { await c.query('rollback'); }
+        assert.deepEqual(await read(), expected);
+      }
+      await c.query("update ops.client_portal set client_id=client_id,deal_id=deal_id where slug='synthetic-a'");
+    });
+
+    await t.test('Dot cannot read portal verifiers or raw material', async () => {
+      await c.query('set role dot_reader');
+      try {
+        for (const table of ['ops.client_portal', 'ops.client_portal_material'])
+          await assert.rejects(c.query(`select * from ${table}`), { code: '42501' });
+      } finally { await c.query('reset role'); }
     });
 
     await t.test('unpublished future and withdrawn material stays private', async () => {
