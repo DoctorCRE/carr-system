@@ -1,3 +1,4 @@
 [submodule "tools/dictation-rig/vendor/quill"]
 	path = tools/dictation-rig/vendor/quill
 	url = https://github.com/digimata/quill
+	ignore = dirty
