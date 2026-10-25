@@ -101445,6 +101445,13 @@ CREATE INDEX activity_deal_idx ON public.activity USING btree (deal_id, occurred
 
 
 --
+-- Name: activity_lead_timeline_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX activity_lead_timeline_idx ON public.activity USING btree (lead_id, occurred_at DESC, id DESC) WHERE (lead_id IS NOT NULL);
+
+
+--
 -- Name: activity_subject_timeline; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -101535,6 +101542,13 @@ CREATE INDEX capture_candidate_queue_idx ON public.capture_candidate USING btree
 
 
 --
+-- Name: capture_post_call_action_open_due_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX capture_post_call_action_open_due_idx ON public.capture_post_call_action USING btree (due_on, id) WHERE ((status = 'open'::text) AND (due_on IS NOT NULL));
+
+
+--
 -- Name: capture_post_call_candidate_session_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -101602,6 +101616,13 @@ CREATE INDEX codex_continuity_event_scope_idx ON public.codex_continuity_event U
 --
 
 CREATE INDEX codex_continuity_revision_checkpoint_idx ON public.codex_continuity_revision USING btree (checkpoint_id, checkpoint_version DESC);
+
+
+--
+-- Name: critical_date_open_due_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX critical_date_open_due_idx ON public.critical_date USING btree (due_on, id) WHERE (status = 'open'::text);
 
 
 --
@@ -101829,6 +101850,13 @@ CREATE INDEX event_idem_idx ON public.event USING btree (idempotency_key);
 
 
 --
+-- Name: event_lead_stage_mutation_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX event_lead_stage_mutation_idx ON public.event USING btree (subject_id, mutation_order DESC) WHERE ((subject_type = 'lead'::text) AND ((new_value ->> 'stage'::text) IS NOT NULL));
+
+
+--
 -- Name: event_subject_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -101840,6 +101868,13 @@ CREATE INDEX event_subject_idx ON public.event USING btree (subject_type, subjec
 --
 
 CREATE INDEX industry_event_tenant_start_idx ON public.industry_event USING btree (organization_tenant_id, starts_at, id);
+
+
+--
+-- Name: ingest_inbox_new_received_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ingest_inbox_new_received_idx ON public.ingest_inbox USING btree (received_at, id) WHERE (status = 'new'::text);
 
 
 --
@@ -101994,6 +102029,13 @@ CREATE INDEX negotiation_claim_round_idx ON public.negotiation_claim USING btree
 --
 
 CREATE INDEX negotiation_claim_type_idx ON public.negotiation_claim USING btree (claim_type);
+
+
+--
+-- Name: next_action_open_due_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX next_action_open_due_idx ON public.next_action USING btree (due_on, id) WHERE ((status = 'open'::text) AND (due_on IS NOT NULL));
 
 
 --
@@ -122591,6 +122633,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0955_retrieval_concept_question_matching.sql	885f3cefb3b4359c20f242534750ef9ebd883cda93e0592119b504e9f407e0c1	1970-01-01 00:00:00+00
 0957_retire_scac_catalog_commit_check.sql	1a26b1a8e517c15d62b3a0fbd96b2f59278c1596839e33b3d4e6c423ab9c6a97	1970-01-01 00:00:00+00
 0958_doctrine_embeddings.sql	46c23b9e4f9888bdf0f817c06e06d74440b89a5cb5dd1923310a7aa05268ac45	1970-01-01 00:00:00+00
+0959_triage_lead_read_indexes.sql	553d99d865d602ac9984e678333d9c0ebb58c370ecdcb7e76f29ca9352aba87b	1970-01-01 00:00:00+00
 \.
 
 

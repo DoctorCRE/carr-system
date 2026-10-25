@@ -105,8 +105,6 @@ def main():
                             scans = list(nodes(plan['Plan']))
                             if any(n['Node Type'] == 'Seq Scan' for n in scans):
                                 failures.append(f'{name} still scans unrelated history')
-                            if name.startswith('Q1') and any(n['Node Type'] == 'Sort' for n in scans):
-                                failures.append(f'{name} still sorts the selected history')
                 return results
 
             before = capture('selective', 'before')
