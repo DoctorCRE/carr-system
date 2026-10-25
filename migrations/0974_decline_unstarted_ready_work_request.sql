@@ -20,7 +20,7 @@ begin
   select pg_get_functiondef('ops.sourced_work_request_is_immutable()'::regprocedure)
     into v_definition;
   if (length(v_definition)-length(replace(v_definition,v_marker,'')))/length(v_marker)<>1 then
-    raise exception '0972 refused: sourced Work Request lifecycle predecessor shape drifted';
+    raise exception '0974 refused: sourced Work Request lifecycle predecessor shape drifted';
   end if;
   v_definition := replace(v_definition,v_marker,v_branch);
   execute replace(v_definition,
@@ -30,7 +30,7 @@ begin
     into v_definition;
   if (length(v_definition)-length(replace(v_definition,$old$v_state not in ('captured','triaged')$old$,'')))
       /length($old$v_state not in ('captured','triaged')$old$)<>1 then
-    raise exception '0972 refused: decline Work Request predecessor shape drifted';
+    raise exception '0974 refused: decline Work Request predecessor shape drifted';
   end if;
   v_definition := replace(v_definition,
     $old$v_state not in ('captured','triaged')$old$, $new$v_state not in ('captured','triaged','ready')$new$);
