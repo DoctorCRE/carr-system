@@ -53,7 +53,7 @@ if not (helper.is_file() and not helper.is_symlink() and os.access(helper, os.X_
         os.replace(temporary_pin, pin)
 
 label = 'com.carr.outlook-research-copy'
-plist = plistlib.loads((repo / f'ops/launchd/{label}.plist').read_bytes())
+plist = plistlib.loads((repo / f'spec/outlook/{label}.plist').read_bytes())
 plist['ProgramArguments'] = [str(helper)]
 for key in ('StandardOutPath', 'StandardErrorPath'):
     plist[key] = plist[key].replace('{{HOME}}', str(home))

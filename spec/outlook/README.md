@@ -176,7 +176,7 @@ arguments, runs no other command, and performs no networking or intake. Snapshot
 land in `~/carr-local/outlook-research/snap-<UTC timestamp>/`, owned by the user
 with mode 0700. Files have mode 0600. `manifest.json` records each source-relative
 path, source size and nanosecond mtime, and SHA-256 of the copied bytes. Keep these
-private. The shared profile can contain accounts beyond `joe.b.tester@outlook.com`.
+private. The shared profile can contain accounts beyond the designated TEST account.
 Only TEST-account changes are authorized research experiments. Microsoft Graph
 is forbidden for this workflow.
 

@@ -153,12 +153,12 @@ class InstallerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
             repo, home = root / 'repo', root / 'home & fixtures'
-            for relative in ('bin', 'tools', 'ops/launchd', '.venv/bin'):
+            for relative in ('bin', 'tools', 'spec/outlook', '.venv/bin'):
                 (repo / relative).mkdir(parents=True)
             (repo / '.venv/bin/python').symlink_to(sys.executable)
             for relative in ('bin/install-outlook-research-copy.sh',
                              'tools/outlook-research-copy.c',
-                             'ops/launchd/com.carr.outlook-research-copy.plist'):
+                             'spec/outlook/com.carr.outlook-research-copy.plist'):
                 shutil.copyfile(ROOT / relative, repo / relative)
             command = ['/bin/zsh', '-f', '-c',
                        'export HOME="$1"; exec /bin/zsh -f "$2"',
