@@ -8,8 +8,8 @@ through the named record-layer verbs:
 
 - an email to or from a known address becomes log-activity email_in/email_out
   with the full deduplicated plain-text body as its detail;
-- a past meeting becomes log-activity meeting, tour or call by its title;
-- a meeting in the next seven days becomes a dated ball (set-next-action);
+- calendar rows remain provisional schedule candidates in a private evidence index;
+  unsupported lifecycle rows never establish a reminder or completed contact;
 - one isolated haiku call per new matched email proposes a next step, which
   becomes a ball when the record has none or only an older one.
 
@@ -379,7 +379,7 @@ class Run:
     def __init__(self, ports: Ports, state: dict, now: datetime, out: Path):
         self.ports, self.state, self.now, self.out = ports, state, now, out
         self.today = now.astimezone(LOCAL).date()
-        self.counts = {k: 0 for k in ('emails', 'events_past', 'events_upcoming', 'logged', 'preview_only',
+        self.counts = {k: 0 for k in ('emails', 'logged', 'preview_only',
                                       'full_text_notes', 'balls_set', 'balls_kept', 'unmatched',
                                       'model_failed', 'steps_pending', 'writes_failed',
                                       'writes_deferred', 'requests_blocked')}
@@ -392,7 +392,7 @@ class Run:
         requests = self.state.setdefault('requests', {})
         request = requests.setdefault(args['idempotency_key'], {
             'verb': verb, 'payload': json.dumps(args), 'acknowledged': False,
-            'created_at': int(self.now.timestamp())})
+            'created_at': int(self.now.timestamp()), 'source_kind': 'mail'})
         _save(self.out, self.state)
         if not request['acknowledged']:
             if args['idempotency_key'] in self.attempted:
@@ -446,14 +446,13 @@ class Run:
                 raise CarrError(code='reply_unreadable') from None
         return action
 
-    def ball(self, ref: str, who: str, description: str, due_on: str, item_at: int, source: str,
-             only_if_none: bool = False) -> bool:
+    def ball(self, ref: str, who: str, description: str, due_on: str, item_at: int, source: str) -> bool:
         """Set the ball only while the canonical action read still holds."""
         action = self.open_ball(ref)
         existing = int(datetime.fromisoformat(action['updated_at']).timestamp()) if action else None
         if action and ref in self.balls and self.balls[ref][:2] == (action['id'], action['version']):
             existing = self.balls[ref][2]
-        if existing is not None and (only_if_none or existing >= item_at):
+        if existing is not None and existing >= item_at:
             self.counts['balls_kept'] += 1
             self.written.append((who, ref, 'set-next-action', 'kept newer ball'))
             return True
@@ -593,68 +592,29 @@ class Run:
 
     # calendar
 
-    def events(self, events: list[dict], matcher: Matcher, since: int) -> None:
-        logged = self.state.setdefault('events_logged', {})
-        balled = self.state.setdefault('events_balled', {})
-        unresolved = self.state.setdefault('calendar_unresolved', {})
-        transitions: list[int] = []
-        now = int(self.now.timestamp())
-        for e in sorted(events, key=lambda e: e['start_unix']):
-            source = f'{e["goid"]}|{e["start_unix"]}'
-            if e['end_unix'] > now:
-                transitions.append(e['end_unix'])
-            enters = e['start_unix'] - int(UPCOMING.total_seconds())
-            if enters > now:
-                transitions.append(enters)
-            past = e['end_unix'] <= now and (since <= e['end_unix'] or source in unresolved)
-            soon = now < e['start_unix'] <= now + UPCOMING.total_seconds()
-            if not past and not soon:
-                continue
-            if source not in unresolved and not (past and source not in logged) and not (soon and source not in balled):
-                continue
+    def events(self, events: list[dict], matcher: Matcher) -> None:
+        """Keep opaque schedule evidence, never infer attendance or current lifecycle."""
+        evidence = {}
+        unresolved = {}
+        for e in events:
+            candidate = _hash(json.dumps(e, sort_keys=True))
+            evidence[candidate] = {'status': 'unsupported', 'reason': 'hxstore_lifecycle_unverified',
+                                   'evidence': 'provisional_schedule',
+                                   'start_unix': e['start_unix'], 'end_unix': e['end_unix']}
             people = [(email, name) for name, email in e['attendees'] if email and not _internal(email)]
             org = (e['organizer_email'] or '').lower()
-            if org and not _internal(org) and org not in [p for p, _ in people]:
+            if org and not _internal(org):
                 people.append((org, e['organizer_name']))
-            refs: list[tuple[str, str]] = []
+            missing = {_hash(email): matcher.reason(email) for email, _ in people if matcher.reason(email)}
+            if missing or not people:
+                unresolved[candidate] = {'participants': missing}
             for email, name in people:
-                ref = matcher.ref(email)
-                if ref is None:
-                    reason = matcher.reason(email)
-                    assert reason is not None
-                    self.unmatched.add((name or '(no name)', _domain(email), reason))
-                elif ref not in [r for r, _ in refs]:
-                    refs.append((ref, name or email))
-            progress = unresolved.setdefault(source, {})
-            progress['participants'] = {_hash(email): matcher.reason(email) for email, _ in people
-                                        if matcher.reason(email)}
-            missing = not refs or bool(progress['participants'])
-            completed = progress.setdefault('logged_refs' if past else 'balled_refs', [])
-            refs = [(ref, name) for ref, name in refs if ref not in completed]
-            subject = e['subject'] or 'Meeting'
-            if past:
-                self.counts['events_past'] += 1
-                kind = 'tour' if re.search(r'\btour', subject, re.I) else 'call' if re.search(r'\bcall\b', subject, re.I) else 'meeting'
-                results = [self.write('log-activity', {
-                        'idempotency_key': key('log-activity', ref, source), 'ref': ref, 'kind': kind,
-                        'summary': f'{kind.capitalize()}: {subject}', 'detail': e['body'] or '',
-                        'occurred_at': _iso(e['start_unix'])}, name) for ref, name in refs]
-                completed.extend(ref for (ref, _), ok in zip(refs, results) if ok)
-                if not missing and all(results):
-                    logged[source] = e['end_unix']
-                    unresolved.pop(source, None)
-            else:
-                self.counts['events_upcoming'] += 1
-                start = datetime.fromtimestamp(e['start_unix'], LOCAL)
-                results = [self.ball(ref, name, f'{subject} with {name}, {start:%a %b %-d %-I:%M %p}',
-                                  start.date().isoformat(), now, f'event|{source}', only_if_none=True)
-                        for ref, name in refs]
-                completed.extend(ref for (ref, _), ok in zip(refs, results) if ok)
-                if not missing and all(results):
-                    balled[source] = e['start_unix']
-                    unresolved.pop(source, None)
-        self.state['calendar_due_at'] = min(transitions, default=None)
+                if matcher.reason(email):
+                    self.unmatched.add((name or '(no name)', _domain(email), matcher.reason(email)))
+        self.state.update(calendar_evidence=evidence, calendar_unresolved=unresolved, calendar_policy=1)
+        self.state.pop('calendar_due_at', None)
         self.state.pop('upcoming', None)
+        self.counts.update(calendar_counts(self.state))
 
     def report(self, out: Path, refresh_count: int) -> None:
         lines = [f'# Outlook intake {self.now.astimezone(LOCAL):%Y-%m-%d %H:%M %Z}', '', '## Counts', '']
@@ -713,12 +673,28 @@ def _prune(state: dict, now: datetime) -> None:
         state[name] = {k: t for k, t in state.get(name, {}).items() if t >= horizon}
 
 
-def _calendar_due(state: dict, now: datetime) -> bool:
-    """Recheck when a meeting enters the horizon or ends; seed older state once."""
-    if 'calendar_due_at' not in state:
-        return True
-    due = state['calendar_due_at']
-    return due is not None and due <= now.timestamp()
+def calendar_counts(state: dict) -> dict:
+    return {'calendar_lifecycle_unsupported': len(state.get('calendar_evidence', {})),
+            'calendar_requests_quarantined': sum(r.get('disposition') == 'calendar_unsupported'
+                                                 for r in state.get('requests', {}).values())}
+
+
+def _quarantine_calendar_requests(state: dict) -> None:
+    """Retain legacy assertions; replay next actions only with established mail provenance."""
+    for ident, request in state.get('requests', {}).items():
+        if request['acknowledged']:
+            continue
+        args = json.loads(request['payload'])
+        calendar = (request['verb'] == 'log-activity' and args.get('kind') in ('meeting', 'tour', 'call'))
+        if request['verb'] == 'set-next-action':
+            mail = request.get('source_kind') == 'mail' or any(
+                ident == key('set-next-action', step['ref'], f'next|{source}')
+                for source, step in state.get('steps', {}).items())
+            calendar = not mail
+        if calendar:
+            request.update(disposition='calendar_unsupported', retry_at=None,
+                           error_code='calendar_lifecycle_unsupported')
+
 
 
 def run(repo: Path, home: Path, ports: Ports) -> Outcome:
@@ -766,13 +742,16 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         except CarrError as error:
             return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code)
     contacts_changed = matcher is not None and state.get('contact_map') != matcher.fingerprint()
-    pending_writes = any(not r['acknowledged'] for r in state.get('requests', {}).values())
-    if state.get('store') == signature and not contacts_changed and not state.get('steps') and not pending_writes and not _calendar_due(state, now):
+    pending_writes = any(not r['acknowledged'] and r.get('disposition') != 'calendar_unsupported'
+                         for r in state.get('requests', {}).values())
+    if state.get('store') == signature and not contacts_changed and not state.get('steps') and not pending_writes and state.get('calendar_policy') == 1:
         if state.get('pending_full'):
             Run(ports, state, now, out).full_text([])
             _refresh_list(out, state['pending_full'])
             _save(out, state)
-        return Outcome('succeeded', 'store_unchanged', mapping_counts(state))
+        counts = {**mapping_counts(state), **calendar_counts(state)}
+        return Outcome('succeeded', 'calendar_lifecycle_unsupported' if any(calendar_counts(state).values())
+                       else 'store_unchanged', counts)
     try:
         meta, mails, events = _decode(home, out, ports.decode)
     except FullDiskAccessRequired as error:
@@ -790,8 +769,10 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     mails = _best_copies(mails)
     work = Run(ports, state, now, out)
     try:
+        _quarantine_calendar_requests(state)
+        _save(out, state)
         for request in list(state.get('requests', {}).values()):
-            if not request['acknowledged']:
+            if not request['acknowledged'] and request.get('disposition') != 'calendar_unsupported':
                 args = json.loads(request['payload'])
                 if request['verb'] == 'set-next-action' and (
                         args.get('owner') != BALL_OWNER or 'expected_action' not in args):
@@ -802,7 +783,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         work.emails(mails, matcher, since)
         work.full_text(mails)
         work.next_steps(mails)
-        work.events(events, matcher, since)
+        work.events(events, matcher)
     except CarrError as error:
         _save(out, state)
         return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code, work.counts)
@@ -825,7 +806,8 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint())
     _prune(state, now)
     _save(out, state)
-    return Outcome('succeeded', 'processed' if work.written or any(work.counts.values()) else 'nothing_new', counts)
+    return Outcome('succeeded', 'calendar_lifecycle_unsupported' if any(calendar_counts(state).values()) else
+                   'processed' if work.written or any(work.counts.values()) else 'nothing_new', counts)
 
 
 # ---- production ports --------------------------------------------------------

@@ -86,3 +86,28 @@ The extraction selectors and SQLite contracts retain their existing behavior.
 `python3 ops/hxstore-atlas-selftest.py` rebuilds a temporary copy after an atlas
 rename and checks the actual `map` output using a synthetic block.
 The repository gates class discovers this test alongside the existing surface tests.
+
+## Calendar lifecycle limits
+
+The maintained decoder and installer patch preserve byte-distinct calendar
+candidates instead of merging the longest body and largest attendee list.
+Exact byte copies collapse only inside this decode. GOID and start remain
+observed schedule grouping fields, not an authoritative occurrence identity.
+
+Every exported candidate has `lifecycle_status=unsupported` and
+`lifecycle_reason=hxstore_lifecycle_unverified`. The meta field
+`calendar_lifecycle_unsupported` counts those candidates. The decoder does not
+establish cancellation, deletion, revision order, recurrence exception identity,
+attendee response semantics, current schedule state, or attendance. Candidate
+bytes stay in decoder memory and are not exported to SQLite.
+
+Synthetic tests prove candidate separation and fail-closed labeling only.
+Native decoder validation and controlled test-account format research are still
+required before current calendar lifecycle or completeness can be claimed.
+
+Intake stores opaque candidate hashes and provisional schedule timestamps in its
+private state. It does not create reminders or contact activities from these
+rows. Existing unacknowledged calendar activities and next actions without
+established mail provenance remain quarantined with their frozen payloads.
+Mail continues independently. The status reason remains
+`calendar_lifecycle_unsupported` even when the store is unchanged.

@@ -23,10 +23,11 @@ CRC-checked before they are decompressed. Build with `cargo build --release
 
 WHAT THE PATCH ADDS to `hxprobe db <file> [out.db] [files-dir]`:
 - Calendar events (`src/calendar.rs`) in `events` and `event_attendees`: GOID,
-  start and end, subject, location, organizer and attendees. Events are keyed
-  by (GOID, start), and revisions merge field by field. On Joe's store on
-  2026-10-20 it decoded 169 of 188 distinct events, and the next seven days
-  matched his calendar exactly.
+  start and end, subject, location, organizer and attendees. Byte-distinct
+  candidates remain separate; only exact serialized copies collapse. GOID and
+  start are observed grouping fields. Every row exports unsupported lifecycle
+  status. Current occurrence state and attendance remain unverified. See
+  [calendar lifecycle limits](../vendor/hxprobe/UPSTREAM.md#calendar-lifecycle-limits).
 - Full bodies from EFMData sidecars (`src/body.rs`). These are gzip files at
   `Files/S0/<N>/EFMData/<id>.dat`. `<N>` is 845 on Joe's machine, so every
   `S0/*` folder is read rather than one hard-coded number. A sidecar is
