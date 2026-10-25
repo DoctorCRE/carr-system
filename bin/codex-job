@@ -2,7 +2,7 @@
 """Run one Codex job in a fresh clone; return its final message and exit code."""
 import argparse
 import contextlib
-import json
+import codecs
 import os
 from pathlib import Path
 import re
@@ -25,51 +25,45 @@ IDLE_SECONDS = 15 * 60
 POLL_SECONDS = 5
 
 
-def run_codex(command, clone):
-    sessions = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex')) / 'sessions'
-    seen = set(sessions.rglob('*.jsonl'))
-    logs, newest, active = set(), 0, time.monotonic()
-    child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=sys.stderr,
-                             start_new_session=True)
-    try:
-        while child.poll() is None:
-            for path in set(sessions.rglob('*.jsonl')) - seen:
-                try:
-                    with path.open() as stream:
-                        metadata = json.loads(stream.readline())
-                    if metadata.get('payload', {}).get('cwd') == str(clone):
-                        logs.add(path)
-                    seen.add(path)
-                except (OSError, ValueError):
-                    continue
-            for path in logs:
-                with contextlib.suppress(OSError):
-                    current = path.stat().st_mtime_ns
-                    if current > newest:
-                        newest = current
-                        active = time.monotonic()
-            if time.monotonic() - active >= IDLE_SECONDS:
-                print('Codex stalled: session log has not grown for 15 minutes.',
-                      file=sys.stderr, flush=True)
-                return 124
-            try:
-                return child.wait(timeout=POLL_SECONDS)
-            except subprocess.TimeoutExpired:
-                pass
-        return child.returncode
-    finally:
-        handlers = {s: signal.signal(s, signal.SIG_IGN) for s in (signal.SIGTERM, signal.SIGINT)}
+def run_codex(command):
+    active, offset, status = time.monotonic(), 0, None
+    decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
+    with tempfile.TemporaryFile() as output:
+        child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=output,
+                                 stderr=subprocess.STDOUT, start_new_session=True)
+        pgid = child.pid
         try:
-            for signum in (signal.SIGTERM, signal.SIGKILL):
-                if child.poll() is not None:
-                    break
-                with contextlib.suppress(OSError):
-                    os.killpg(child.pid, signum)
-                with contextlib.suppress(OSError, subprocess.TimeoutExpired):
-                    child.wait(timeout=5)
+            while True:
+                status = child.poll()
+                data = os.pread(output.fileno(), os.fstat(output.fileno()).st_size - offset, offset)
+                if data:
+                    sys.stderr.write(decoder.decode(data))
+                    sys.stderr.flush()
+                    offset += len(data)
+                    active = time.monotonic()
+                if status is not None:
+                    return status
+                if time.monotonic() - active >= IDLE_SECONDS:
+                    status = child.poll()
+                    if status is not None:
+                        continue
+                    print('Codex stalled: no output for 15 minutes.', file=sys.stderr, flush=True)
+                    return 124
+                time.sleep(POLL_SECONDS)
         finally:
-            for signum, handler in handlers.items():
-                signal.signal(signum, handler)
+            if status != 0:
+                handlers = {s: signal.signal(s, signal.SIG_IGN) for s in (signal.SIGTERM, signal.SIGINT)}
+                try:
+                    with contextlib.suppress(OSError):
+                        os.killpg(pgid, signal.SIGTERM)
+                    time.sleep(5)
+                    with contextlib.suppress(OSError):
+                        os.killpg(pgid, signal.SIGKILL)
+                    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+                        child.wait(timeout=5)
+                finally:
+                    for signum, handler in handlers.items():
+                        signal.signal(signum, handler)
 
 
 def main():
@@ -98,13 +92,13 @@ def main():
                    '-o', str(result)]
         for config in args.config:
             command.extend(['-c', config])
-        code = run_codex([*command, brief], clone)
+        code = run_codex([*command, brief])
         if result.exists():
             print(result.read_text(), end='', flush=True)
         status = code
         return status
     finally:
-        if status == 0:
+        if status == 0 or not clone.exists():
             shutil.rmtree(clone.parent)
         else:
             print(f'Retained checkout: {clone}', file=sys.stderr, flush=True)

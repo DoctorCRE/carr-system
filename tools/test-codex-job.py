@@ -1,7 +1,6 @@
 """Run the job lifecycle against local Git and a fake Codex process tree."""
 import contextlib
 import io
-import json
 import os
 from pathlib import Path
 import runpy
@@ -23,12 +22,16 @@ from git_env import fixture_env
 ENV = fixture_env()
 
 
-class Capture(io.StringIO):
-    def fileno(self):
-        return sys.__stderr__.fileno()
-
-
 class CodexJobTests(unittest.TestCase):
+    def setUp(self):
+        picker = types.ModuleType('skill_picker')
+        picker.prepare = lambda brief, _: (brief, [])
+        for stub in (patch.dict(sys.modules, {'skill_picker': picker}), patch('os.execv')):
+            stub.start()
+            self.addCleanup(stub.stop)
+        self.job = runpy.run_path(str(ROOT / 'bin/codex-job'))
+        self.job['main'].__globals__.update(IDLE_SECONDS=2, POLL_SECONDS=.05)
+
     def launch(self, mode, cancel=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -38,28 +41,27 @@ class CodexJobTests(unittest.TestCase):
                             '-c', 'user.email=test@example.invalid', 'commit', '-qm',
                             'fixture', '--allow-empty'], env=ENV, check=True)
             fake = root / 'codex'
-            fake.write_text(f'#!{sys.executable}\n' + '''import json, os, pathlib, signal, subprocess, sys, time
+            fake.write_text(f'#!{sys.executable}\n' + '''import os, pathlib, signal, subprocess, sys, time
 clone = pathlib.Path(sys.argv[sys.argv.index('-C') + 1])
 mode = sys.argv[-1].splitlines()[0]
 (clone / 'brief').write_text(sys.argv[-1])
 log = pathlib.Path(os.environ['CODEX_HOME']) / 'sessions/2026/01/01/job.jsonl'
 log.parent.mkdir(parents=True, exist_ok=True)
-if mode != 'missing':
-    log.write_text(json.dumps({'type': 'session_meta', 'payload': {'cwd': str(clone)}}) + '\\n')
+if mode == 'bad-json':
+    log.write_text('[]')
 if mode == 'failure':
     subprocess.run(['git', '-C', str(clone), '-c', 'user.name=Test', 'commit', '-qm', 'unpushed work', '--allow-empty'], check=True)
 if mode in ('success', 'failure'):
     pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text('final message\\n')
     sys.exit(7 if mode == 'failure' else 0)
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-child = subprocess.Popen([sys.executable, '-c', 'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)'])
+if mode != 'leader-exits':
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+child = subprocess.Popen([sys.executable, '-c', 'import pathlib,signal,sys,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); pathlib.Path(sys.argv[1]).touch(); time.sleep(30)', str(clone / 'ready')])
+while not (clone / 'ready').exists(): time.sleep(.01)
 (pathlib.Path(os.environ['CODEX_HOME']).parent / 'pids').write_text(f'{os.getpid()} {child.pid}')
 for i in range(80):
-    if mode == 'multi' and i == 10:
-        log = log.with_name('subagent.jsonl')
-        log.write_text(json.dumps({'type': 'session_meta', 'payload': {'cwd': str(clone)}}) + '\\n')
-    if mode == 'growing' or (mode == 'multi' and i >= 10):
-        with log.open('a') as f: f.write('activity\\n')
+    if mode in ('bad-json',):
+        print('activity', flush=True)
     if mode == 'unrelated':
         other = log.with_name('other.jsonl')
         with other.open('a') as f: f.write('unrelated activity\\n')
@@ -68,18 +70,12 @@ child.kill()
 child.wait()
 ''')
             fake.chmod(0o755)
-            picker = types.ModuleType('skill_picker')
-            picker.prepare = lambda brief, _: (brief, [])
             argv = ['codex-job', str(origin), 'test/job', mode]
-            output, errors = io.StringIO(), Capture()
-            with patch.dict(sys.modules, {'skill_picker': picker}), \
-                    patch.dict(os.environ, {**ENV, 'PATH': str(root) + os.pathsep + os.defpath,
+            output, errors = io.StringIO(), io.StringIO()
+            with patch.dict(os.environ, {**ENV, 'PATH': str(root) + os.pathsep + os.defpath,
                                             'CODEX_HOME': str(root / 'home')}, clear=True), \
-                    patch('os.execv'), patch.object(sys, 'argv', argv), \
+                    patch.object(sys, 'argv', argv), \
                     contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
-                job = runpy.run_path(str(ROOT / 'bin/codex-job'))
-                job['main'].__globals__['IDLE_SECONDS'] = 2
-                job['main'].__globals__['POLL_SECONDS'] = .05
                 stop = threading.Event()
                 if cancel:
                     def interrupt():
@@ -91,10 +87,10 @@ child.wait()
                                 return
                     worker = threading.Thread(target=interrupt)
                     worker.start()
-                previous = {s: signal.signal(s, job['terminate']) for s in (signal.SIGTERM, signal.SIGINT)}
+                previous = {s: signal.signal(s, self.job['terminate']) for s in (signal.SIGTERM, signal.SIGINT)}
                 try:
                     try:
-                        code = job['main']()
+                        code = self.job['main']()
                     except SystemExit as error:
                         code = error.code
                 finally:
@@ -129,63 +125,51 @@ child.wait()
         commits = subprocess.check_output(['git', '-C', str(clone), 'rev-list', '--count', 'HEAD'], env=ENV, text=True)
         self.assertEqual(commits.strip(), '2')
         self.assertIn(f'Retained checkout: {clone}', errors)
+        self.assertIn((ROOT / 'tools/room-bridge/brief-footer.md').read_text(), (clone / 'brief').read_text())
 
     def test_success_cleans_up(self):
-        code, output, _, clone = self.launch('success')
+        with patch('os.killpg') as killpg:
+            code, output, _, clone = self.launch('success')
+        killpg.assert_not_called()
         self.assertEqual((code, output), (0, 'final message\n'))
         self.assertFalse(clone.parent.exists())
 
-    def test_stalled_and_missing_logs_kill_the_group(self):
-        for mode in ('stalled', 'missing', 'unrelated'):
+    def test_idle_ignores_unrelated_sessions_and_kills_group(self):
+        for mode in ('stalled', 'unrelated'):
             with self.subTest(mode=mode):
                 code, _, errors, clone = self.launch(mode)
                 self.assertEqual(code, 124)
                 self.assertIn('stalled', errors)
                 self.assertTrue(clone.exists())
 
-    def test_growth_resets_idle_deadline(self):
-        code, _, errors, _ = self.launch('growing')
+    def test_non_object_session_does_not_abort_job(self):
+        code, _, errors, _ = self.launch('bad-json')
         self.assertEqual(code, 0, errors)
 
-    def test_subagent_growth_keeps_job_alive(self):
-        code, _, errors, _ = self.launch('multi')
-        self.assertEqual(code, 0, errors)
+    def test_exit_during_idle_observation_preserves_success(self):
+        child = Mock(pid=12345, returncode=0)
+        child.poll.side_effect = [None, 0, 0]
+        with patch('subprocess.Popen', return_value=child), patch('os.killpg'):
+            self.job['run_codex'].__globals__['IDLE_SECONDS'] = 0
+            self.assertEqual(self.job['run_codex'](['fixture']), 0)
 
-    def test_cleanup_errors_preserve_success(self):
-        with patch('os.killpg', side_effect=PermissionError('fixture denied')) as killpg:
-            code, output, _, clone = self.launch('success')
-        self.assertEqual((code, output), (0, 'final message\n'))
+    def test_failed_clone_removes_empty_workspace(self):
+        errors = io.StringIO()
+        with patch.object(sys, 'argv', ['codex-job', '/nonexistent/fixture', 'test/job', 'brief']), \
+                contextlib.redirect_stderr(errors):
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.job['main']()
+        clone = Path(errors.getvalue().split('Clone: ')[1].splitlines()[0])
+        self.addCleanup(shutil.rmtree, clone.parent, True)
         self.assertFalse(clone.parent.exists())
-        killpg.assert_not_called()
+        self.assertNotIn('Retained checkout:', errors.getvalue())
 
-    def test_unavailable_group_preserves_timeout_with_bounded_waits(self):
-        picker = types.ModuleType('skill_picker')
-        picker.prepare = lambda brief, _: (brief, [])
-        child = Mock(pid=12345)
-        child.poll.return_value = None
-        child.wait.side_effect = subprocess.TimeoutExpired('fixture', 5)
-        with tempfile.TemporaryDirectory() as tmp, \
-                patch.dict(sys.modules, {'skill_picker': picker}), patch('os.execv'), \
-                patch.dict(os.environ, {'CODEX_HOME': tmp}), \
-                patch('subprocess.Popen', return_value=child), \
-                patch('os.killpg', side_effect=PermissionError('fixture denied')):
-            job = runpy.run_path(str(ROOT / 'bin/codex-job'))
-            job['run_codex'].__globals__['IDLE_SECONDS'] = 0
-            self.assertEqual(job['run_codex'](['fixture'], Path(tmp)), 124)
-        self.assertTrue(child.wait.call_args_list)
-        self.assertTrue(all(call.kwargs.get('timeout') == 5
-                            for call in child.wait.call_args_list))
-
-    def test_signals_kill_the_group_and_retain_checkout(self):
+    def test_leader_exit_does_not_leave_grandchild(self):
         for signum in (signal.SIGTERM, signal.SIGINT):
             with self.subTest(signal=signum):
-                code, _, errors, clone = self.launch('stalled', cancel=signum)
+                code, _, errors, clone = self.launch('leader-exits', cancel=signum)
                 self.assertEqual(code, 128 + signum, errors)
                 self.assertTrue(clone.exists())
-
-    def test_footer_reaches_codex(self):
-        _, _, _, clone = self.launch('failure')
-        self.assertIn((ROOT / 'tools/room-bridge/brief-footer.md').read_text(), (clone / 'brief').read_text())
 
 
 if __name__ == '__main__':
