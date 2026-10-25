@@ -53,7 +53,7 @@ class CodexJobTests(unittest.TestCase):
                                       "--dangerously-bypass-hook-trust", "-o",
                                       str(Path(clone).parent / "result.md"),
                                       "-c", "model_reasoning_effort=high", "-c", "model=test",
-                                      "prepared brief"])
+                                      "--", "prepared brief"])
         self.assertEqual(calls[-1][1]["stdin"], subprocess.DEVNULL)
         prepare.assert_called_once_with("original brief", Path(clone))
         self.assertEqual((code, output), (0, "job result\n"))

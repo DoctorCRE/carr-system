@@ -41,7 +41,7 @@ def main():
                    '-o', str(result)]
         for config in args.config:
             command.extend(['-c', config])
-        run = subprocess.run([*command, brief], stdin=subprocess.DEVNULL, stdout=sys.stderr)
+        run = subprocess.run([*command, '--', brief], stdin=subprocess.DEVNULL, stdout=sys.stderr)
         if result.exists():
             print(result.read_text(), end='', flush=True)
         return run.returncode

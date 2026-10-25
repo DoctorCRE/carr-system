@@ -20,7 +20,7 @@ def main():
     parser.add_argument('file', type=Path)
     spec = parser.parse_args().file.resolve()
     jobs = [line.split('\t', 4) for line in spec.read_text().splitlines() if line.strip()]
-    names = [row[0] for row in jobs]
+    names = [row[0].casefold() for row in jobs]
     if any(len(row) != 5 or not re.fullmatch(r'[\w.-]+', row[0]) for row in jobs) or len(set(names)) != len(names):
         parser.error('expected five tab-separated fields and unique job names using letters, numbers, _, . or -')
     briefs = [(spec.parent / row[2]).read_text() + '\n\nTask details: ' + row[4] for row in jobs]
@@ -49,14 +49,14 @@ def main():
                             continue
                         match = re.match(r'^(?:\S+\s+)?(?:\S*/)?bin/codex-job\s+\S+\s+job/(\S+)', command.strip())
                         if match:
-                            running.add(match[1])
-                    running.update(n for n, p in active.items() if p.poll() is None)
-                    if len(running) < CAP and name not in running:
+                            running.add(match[1].casefold())
+                    running.update(n.casefold() for n, p in active.items() if p.poll() is None)
+                    if len(running) < CAP and name.casefold() not in running:
                         break
                     time.sleep(2)
                 with (logs / f'{name}.log').open('w') as log:
                     active[name] = subprocess.Popen([str(Path(__file__).resolve().with_name('codex-job')), repo,
-                        f'job/{name}', brief, '-c', f'model_reasoning_effort={effort}'],
+                        f'job/{name}', '-c', f'model_reasoning_effort={effort}', '--', brief],
                         stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
         finally:
             for job in active.values():

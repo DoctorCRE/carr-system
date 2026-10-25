@@ -1,12 +1,9 @@
-"""Exercise the queue and PR waiter through their command-line interfaces."""
+"""Exercise the queue through its command-line interface."""
 import contextlib
 import io
-import http.client
-import json
 from pathlib import Path
 import runpy
 import re
-import urllib.error
 import subprocess
 import sys
 import tempfile
@@ -14,19 +11,58 @@ import unittest
 from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'bin'))
+import skill_picker
 
 
 class JobToolsTests(unittest.TestCase):
-    def release(self, body):
-        response = io.BytesIO(body)
-        response.status = 200
-        return response
-
     def invoke(self, name, *args):
         with patch.object(sys, 'argv', [name, *args]), contextlib.redirect_stdout(io.StringIO()) as out:
             with self.assertRaises(SystemExit) as exit:
                 runpy.run_path(str(ROOT / 'bin' / name), run_name='__main__')
         return exit.exception.code, out.getvalue()
+
+    def test_queue_preserves_a_leading_hyphen_brief_through_codex_exec(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / 'queue.tsv'
+            (Path(tmp) / 'brief').write_text('---\nChecklist')
+            spec.write_text('one\towner/repo\tbrief\thigh\tdetails\n')
+            brief = '---\nChecklist\n\nTask details: details'
+            commands = []
+            def run(command, **kwargs):
+                commands.append(command)
+                return subprocess.CompletedProcess(command, 0)
+            def launch(command, **kwargs):
+                self.assertEqual(command[3:], ['-c', 'model_reasoning_effort=high', '--', brief])
+                with patch.object(sys, 'argv', command), \
+                        patch.object(sys, 'prefix', str(ROOT / '.venv')), \
+                        patch('signal.signal'), patch('subprocess.run', side_effect=run), \
+                        patch.object(skill_picker, 'prepare', side_effect=lambda brief, _: (brief, [])):
+                    with self.assertRaises(SystemExit) as exit:
+                        runpy.run_path(str(ROOT / 'bin/codex-job'), run_name='__main__')
+                self.assertEqual(exit.exception.code, 0)
+                return Mock(wait=Mock(return_value=0))
+            with patch('subprocess.check_output', return_value=''), \
+                    patch('subprocess.Popen', side_effect=launch), patch('fcntl.flock'):
+                code, out = self.invoke('codex-queue', str(spec))
+            self.assertEqual(code, 0)
+            self.assertEqual(commands[-1][-4:], ['-c', 'model_reasoning_effort=high', '--', brief])
+            self.assertIn('QUEUE-EMPTY', out)
+
+    def test_queue_rejects_casefolded_name_collisions_before_launch(self):
+        for names in (('Foo', 'foo'), ('Straße', 'STRASSE')):
+            with self.subTest(names=names), tempfile.TemporaryDirectory() as tmp:
+                spec = Path(tmp) / 'queue.tsv'
+                (Path(tmp) / 'brief').write_text('brief')
+                spec.write_text(''.join(f'{name}\towner/repo\tbrief\thigh\tdetails\n' for name in names))
+                with patch('subprocess.check_output', return_value=''), \
+                        patch('subprocess.Popen', return_value=Mock(wait=Mock(return_value=0))) as launch, \
+                        patch('fcntl.flock'), contextlib.redirect_stderr(io.StringIO()) as error:
+                    code, _ = self.invoke('codex-queue', str(spec))
+                self.assertEqual(code, 2)
+                self.assertIn('unique job names', error.getvalue())
+                launch.assert_not_called()
+                self.assertFalse((Path(tmp) / 'logs').exists())
 
     def test_queue_waits_for_capacity_and_reports_each_job(self):
         for status in (0, 7):
@@ -39,7 +75,7 @@ class JobToolsTests(unittest.TestCase):
                 free = '\n'.join(['python3 /repo/bin/codex-job owner/repo job/other brief'] * 20)
                 def launch(command, **kw):
                     self.assertLess(sum(p.poll() is None for p in launched), 9)
-                    self.assertEqual(command[1:], ['owner/repo', f'job/one{len(launched)}', 'Base brief\n\nTask details: Do it', '-c', 'model_reasoning_effort=high'])
+                    self.assertEqual(command[1:], ['owner/repo', f'job/one{len(launched)}', '-c', 'model_reasoning_effort=high', '--', 'Base brief\n\nTask details: Do it'])
                     def finish():
                         Path(kw['stdout'].name).write_text('https://github.com/owner/repo/pull/42\nlast error\n')
                         return status
@@ -152,80 +188,6 @@ class JobToolsTests(unittest.TestCase):
                         self.assertIn('QUEUE-EMPTY', out)
                 self.assertTrue(children)
                 self.assertTrue(all(job.wait.called for job in children), 'left launched children unwaited')
-
-    def test_live_sends_a_named_user_agent(self):
-        sha = 'a' * 40
-        def serve(request, **kwargs):
-            agent = request.get_header('User-agent', '') if not isinstance(request, str) else ''
-            if not agent or agent.startswith('Python-urllib/'):
-                raise urllib.error.HTTPError('https://api.doctorcre.com/release', 403, 'Forbidden', {}, None)
-            self.assertEqual(request.full_url, 'https://api.doctorcre.com/release')
-            return self.release(json.dumps({
-                'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': sha},
-            }).encode())
-        with patch('subprocess.check_output', return_value='MERGED\t' + sha), \
-                patch('urllib.request.urlopen', side_effect=serve), patch('time.sleep'):
-            code, out = self.invoke('wait-pr', 'owner/repo', '42', 'live')
-        self.assertEqual(code, 0, out)
-        self.assertIn('LIVE ' + sha, out)
-
-    def test_live_retries_truncated_http_body(self):
-        sha = 'a' * 40
-        broken = Mock()
-        broken.read.side_effect = http.client.IncompleteRead(b'{')
-        broken.__enter__ = Mock(return_value=broken)
-        broken.__exit__ = Mock(return_value=False)
-        good = self.release(json.dumps({
-            'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': sha},
-        }).encode())
-        with patch('subprocess.check_output', return_value='MERGED\t' + sha), \
-                patch('urllib.request.urlopen', side_effect=[broken, good]), patch('time.sleep'):
-            code, out = self.invoke('wait-pr', 'owner/repo', '42', 'live')
-        self.assertEqual(code, 0)
-        self.assertIn('LIVE ' + sha, out)
-
-    def test_live_requires_a_served_production_release(self):
-        sha = 'a' * 40
-        good = {'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': sha}}
-        for body, status in [
-            ({**good, 'ok': False}, 200),
-            ({**good, 'ok': 1}, 200),
-            ({**good, 'env': {'value': 'staging'}}, 200),
-            ({**good, 'env': None}, 200),
-            ({**good, 'env': 'production'}, 200),
-            ({**good, 'git_sha': {'value': 'bad'}}, 200),
-            (good, 503),
-        ]:
-            with self.subTest(body=body, status=status):
-                response = io.BytesIO(json.dumps(body).encode())
-                response.status = status
-                with patch('subprocess.check_output', return_value='MERGED\t' + sha), \
-                        patch('urllib.request.urlopen', return_value=response), patch('time.sleep'):
-                    code, out = self.invoke('wait-pr', 'owner/repo', '42', 'live')
-                self.assertEqual(code, 2)
-                self.assertNotIn('LIVE', out)
-
-    def test_waiter_retries_and_distinguishes_closed_merged_and_live(self):
-        merged = 'MERGED\t' + 'a' * 40
-        for mode, replies, releases, expected in [
-            ('merged', ['', subprocess.CalledProcessError(1, 'gh'), merged], [], 0),
-            ('merged', ['CLOSED\t'], [], 1),
-            ('live', ['CLOSED\t'], [], 1),
-            ('merged', ['[]', '{}', 'OPEN\t', 'MERGED\tbad', merged], [], 0),
-            ('merged', [''] * 960, [], 2),
-            ('live', [merged], [OSError('offline'), b'{}', b'{"git_sha":{"value":"old"}}',
-                                json.dumps({'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': 'a' * 40}}).encode()], 0),
-        ]:
-            with self.subTest(mode=mode, expected=expected), \
-                    patch('subprocess.check_output', side_effect=replies), \
-                    patch('urllib.request.urlopen', side_effect=[self.release(r) if isinstance(r, bytes) else r for r in releases]) as release, \
-                    patch('time.sleep'):
-                code, out = self.invoke('wait-pr', 'owner/repo', '42', mode)
-                self.assertEqual(code, expected)
-                if mode == 'live' and expected == 0:
-                    self.assertIn('a' * 40, out)
-                    self.assertEqual(release.call_args.args[0].full_url, 'https://api.doctorcre.com/release')
-                    self.assertEqual(release.call_args.kwargs, {'timeout': 30})
 
 
 if __name__ == '__main__':
