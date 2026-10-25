@@ -9,8 +9,8 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
 
-COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
-PY="$COMMON_DIR/../.venv/bin/python"
+COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || COMMON_DIR="$REPO/.git"
+PY="$(dirname "$COMMON_DIR")/.venv/bin/python"
 [ -x "$PY" ] || PY=python3
 export CARR_CI_PYTHON="$PY"
 CI_SELFTEST_TIMEOUT_SECONDS=120
