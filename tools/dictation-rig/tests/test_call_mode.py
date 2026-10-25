@@ -25,6 +25,7 @@ from typesafe_sdk import TypeSafeError
 
 BIN_DIR = Path(__file__).resolve().parents[1] / "bin"
 sys.path.insert(0, str(BIN_DIR))
+import post_call_jev as runtime_jev
 
 
 def load_module(name: str, filename: str):
@@ -49,7 +50,7 @@ _OFFLINE_CLIENT.__enter__ = Mock(return_value=_OFFLINE_CLIENT)
 _OFFLINE_CLIENT.__exit__ = Mock(return_value=False)
 _CLIENT_PATCHES = (
     patch.object(post_call_jev, "TypeSafeClient", return_value=_OFFLINE_CLIENT, create=True),
-    patch.object(post_call.post_call_jev, "TypeSafeClient", return_value=_OFFLINE_CLIENT, create=True),
+    patch.object(runtime_jev, "TypeSafeClient", return_value=_OFFLINE_CLIENT, create=True),
 )
 
 
@@ -68,7 +69,7 @@ def tearDownModule() -> None:
 class CallModeTests(unittest.TestCase):
     def test_live_partitioning_does_not_request_disabled_topic_advice(self) -> None:
         transcript = {"segments": [{"text": "synthetic words " * 100} for _ in range(20)]}
-        with patch.object(post_call.post_call_jev, "TypeSafeClient") as ask:
+        with patch.object(runtime_jev, "TypeSafeClient") as ask:
             post_call._topic_chunks(transcript)
         ask.assert_not_called()
 

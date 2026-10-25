@@ -475,7 +475,7 @@ class CallModeHandler(BaseHTTPRequestHandler):
                 context = post_call.store_context(target, body)
                 if (target / "transcript.json").exists():
                     threading.Thread(
-                        target=post_call.process_session, args=(target,), daemon=True,
+                        target=post_call.run_session, args=(target,), daemon=True,
                     ).start()
                 self.send_json({"ok": True, "session": context["session"]})
                 return
