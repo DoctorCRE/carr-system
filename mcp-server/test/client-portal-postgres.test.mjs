@@ -34,6 +34,13 @@ test('a password opens only its client portal and the live deal roadmap', async 
     assert.deepEqual(await read(), expected);
     const denied = error => { assert.deepEqual(error.payload, { error: 'portal_access_denied' }); return true; };
 
+    await t.test('the portal definer follows the canonical trusted search path policy', async () => {
+      const policy = (await readFile(new URL('./security-definer-search-path-postgres.sql', import.meta.url), 'utf8'))
+        .split('-- Negatives exercise')[0].replace(/^\\set.*$/gm, '');
+      try { await c.query(policy); }
+      finally { await c.query('rollback'); }
+    });
+
     await t.test('other-client credentials never return either client material', async () => {
       const partyB = (await c.query("insert into party(kind,name,notes_path,created_by,updated_by) values('person','Synthetic client B','INTERNAL_B',$1,$1) returning id", [actor.id])).rows[0].id;
       const clientB = (await c.query("insert into client(party_id,status,created_by,updated_by) values($1,'active',$2,$2) returning id", [partyB, actor.id])).rows[0].id;
