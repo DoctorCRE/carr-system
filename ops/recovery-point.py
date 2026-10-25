@@ -54,7 +54,6 @@ ever handles the backup credential itself.
 
 Usage:
   ops/recovery-point.py                 # human-readable report
-  ops/recovery-point.py --cloud-only    # independent off-Mac observation
   ops/recovery-point.py --json          # machine-readable
   ops/recovery-point.py --hours         # just the age in whole hours, or the
                                         # word "unknown"; what nightly.sh reads
@@ -464,11 +463,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", action="store_true", dest="as_json")
     ap.add_argument("--hours", action="store_true",
                     help="print only the age in whole hours, or 'unknown'")
-    ap.add_argument("--cloud-only", action="store_true",
-                    help="assess only qualified off-Mac artifacts, without reading local backups")
     args = ap.parse_args(argv)
 
-    report = assess([cloud_path()] if args.cloud_only else [local_path(), cloud_path()])
+    report = assess([local_path(), cloud_path()])
 
     if args.hours:
         age = report["age_hours"]

@@ -44,7 +44,7 @@ machine door in mcp-server/src/identity.js maps the same partners server-side,
 PR #334). slug "joe" → this is the primary machine and the hook is a NO-OP:
 Joe's canonical tree is a shared work surface for live sessions, an unbidden
 pull at session start can interleave with another session's push/reconcile,
-and the native checkout-pull job refreshes his checkout. Any other slug →
+so primary checkout updates remain explicit git operations. Any other slug →
 converge. When the file is absent (Dell's door provisioning was still owed in
 PR #334), fall back to the determinant config-as-code itself uses for
 per-machine ownership: git user.email against OWNER_EMAIL in
