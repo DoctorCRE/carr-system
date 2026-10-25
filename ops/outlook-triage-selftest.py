@@ -623,6 +623,24 @@ class RefreshTest(FakeOutlookCase):
     READ_BODY = msg('sender-news', 'subject-010', email='news@news.test')
     UNREAD_BODY = msg('folder-A, client-001', 'subject-011', '8:15 AM', unread=True, email='c1@client.test')
 
+    def test_same_host_refresh_worker_opens_only_read_mail_without_filing(self):
+        from lib import outlook_refresh
+        self.given([FILE_A, self.READ_BODY, self.UNREAD_BODY])
+        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test'),
+                                  listed('m2', self.UNREAD_BODY, 'c1@client.test')])
+        self.guide.unlink()
+        with patch.dict(os.environ, self.env, clear=True):
+            outcome = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                          waits=Waits(0, 0, 0, 0, 0, 0, 0))
+        self.assertEqual(outcome.state, 'succeeded')
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['selections'], [self.READ_BODY['label']])
+        self.assertEqual(state['moved'], [])
+        entries = json.loads(path.read_text())
+        self.assertIn('opened_at', entries[0])
+        self.assertNotIn('opened_at', entries[1])
+        self.assertEqual(len(entries), 2, 'opening is not a body-decoded acknowledgement')
+
     def test_read_email_is_opened_unchanged_and_stamped(self):
         self.given([FILE_A, self.READ_BODY, NEWS])
         path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
