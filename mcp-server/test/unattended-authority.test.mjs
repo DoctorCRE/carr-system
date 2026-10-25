@@ -7,7 +7,7 @@
 // that actor holds partner authority for exactly the acts tools.js's
 // UNATTENDED_AUTHORITY_VERBS lists, under a server-locked `unattended` profile.
 // Every other humanOnly/authorityOnly verb refuses it, and the verbs flagged
-// humanCallerOnly (today: confirm-merge) refuse every machine however it is
+// humanCallerOnly refuse every machine however it is
 // sponsored. Each runner holds its own token, and the runner's name reaches the
 // ledger as client_id.
 //
@@ -180,11 +180,11 @@ test("the Worker checks the unattended door before the local-token door", () => 
 
 // ---------- the humanCallerOnly flag ----------
 
-test("confirm-merge is the one verb carrying humanCallerOnly", () => {
+test("identity merges and retrieval curation require literal human callers", () => {
   assert.equal(TOOLS["confirm-merge"].humanCallerOnly, true);
   assert.equal(TOOLS["confirm-merge"].humanOnly, true);
   const flagged = Object.keys(TOOLS).filter(name => TOOLS[name].humanCallerOnly === true);
-  assert.deepEqual(flagged, ["confirm-merge"]);
+  assert.deepEqual(flagged.sort(), ["approve-retrieval-proposals", "confirm-merge", "retire-retrieval-curation"]);
 });
 
 test("confirm-merge refuses the unattended actor before database access", async () => {

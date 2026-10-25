@@ -1,35 +1,10 @@
 #!/usr/bin/env python3
-"""migration-shadow.py — run pending migrations against production's structure, then
-prove db/schema.sql is exactly what they produce.
+"""Apply pending migrations over the base snapshot on disposable PostgreSQL 18.
 
-THE RUN, all on a throwaway loopback cluster this script creates and removes:
-
-  1. initdb a PostgreSQL 18 cluster (production's major: a 17 server drops the
-     named NOT NULL constraints production carries, so its dump can never
-     match production's own).
-  2. Load the BASE branch's db/schema.sql — production's committed structure,
-     grants and applied-migration ledger. No business data exists anywhere in
-     this run and no provider credential is read.
-  3. tools/migrate.py --apply: every migration not in that ledger applies, in
-     order, exactly as the release pipeline would apply it to production.
-  4. bin/schema-snapshot.sh --from-disposable-local dumps the result.
-  5. Restore the export into a fresh database, compare reviewed seed rows with
-     their source, and prove business-data isolation.
-  6. Compare with the committed db/schema.sql. Normalize ledger apply times,
-     the admitted work-request sequence, control verification/update times and
-     SCAC seal/registration times. Structure, seed content, ledger membership
-     and checksums must match.
-
-A mismatch means the reference schema is stale or was not produced from the
-migrations. --write replaces db/schema.sql with the candidate (the regeneration
-path); --artifact-dir keeps a copy for CI to upload.
-
-Exit 0 match (or written) · 1 stale/different · 2 a step failed · 3 PostgreSQL 18
-is not available here (ops/ci.sh reports a SKIP; --strict turns that into a fail).
-
-  ops/migration-shadow.py                       # base = merge-base with origin/$GITHUB_BASE_REF or origin/main
-  ops/migration-shadow.py --write               # regenerate db/schema.sql
-  ops/migration-shadow.py --base <ref> [--pg-bin-dir DIR] [--artifact-dir DIR]
+Restore the candidate, compare reviewed seeds, and prove business-data isolation.
+An unchanged base snapshot passes. A changed snapshot must match the candidate.
+--write refreshes db/schema.sql; --artifact-dir retains the candidate for CI.
+Exit 0 verified, 1 changed snapshot differs, 2 step failed, 3 PG18 unavailable.
 """
 # doctrine: scripted-release-pipeline
 from __future__ import annotations
@@ -75,8 +50,6 @@ WORK_REQUEST_SEQUENCE_VALUE = re.compile(
     _load("schema_snapshot_currentness", REPO / "ops" / "schema-snapshot-currentness.py")
     .WORK_REQUEST_SEQUENCE_VALUE.pattern.decode(), re.MULTILINE)
 
-
-# ── comparison ─────────────────────────────────────────────────────────────
 
 SEED_TIME_FIELDS = {
     "ops.scac_mutation_registry_version": "sealed_at",
@@ -192,11 +165,7 @@ def newly_applied(before: str, after: str) -> list[str]:
     return sorted(set(rows_a) - set(rows_b))
 
 
-# ── snapshot IO ────────────────────────────────────────────────────────────
-# A snapshot is read and written byte for byte. Some CHECK constraints hold a
-# literal carriage return (the SCAC ingress_key checks reject '[\n\r\t]'), and
-# universal-newline text IO turns it into a line feed: the base then loads a
-# different constraint and --write commits it to db/schema.sql.
+# Preserve literal carriage returns in CHECK constraints during snapshot IO.
 
 def read_snapshot(path: pathlib.Path) -> str:
     with open(path, encoding="utf-8", newline="") as fh:
@@ -207,8 +176,6 @@ def write_snapshot(path: pathlib.Path, text: str) -> None:
     with open(path, "w", encoding="utf-8", newline="") as fh:
         fh.write(text)
 
-
-# ── the run ────────────────────────────────────────────────────────────────
 
 class StepFailed(RuntimeError):
     pass
@@ -342,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
     work = artifacts.root
     try:
         try:
-            _, candidate, applied = shadow(base, bindir, work)
+            base_snapshot, candidate, applied = shadow(base, bindir, work)
         except (StepFailed, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             print(f"migration-shadow: FAILED against {base[:12]}'s production structure — {exc}",
                   file=sys.stderr)
@@ -358,13 +325,14 @@ def main(argv: list[str] | None = None) -> int:
             write_snapshot(REPO / SNAPSHOT, candidate)
             print(f"migration-shadow: wrote {SNAPSHOT} from the shadow candidate")
             return 0
-        diffs = differences(read_snapshot(REPO / SNAPSHOT), candidate)
+        committed = read_snapshot(REPO / SNAPSHOT)
+        diffs = [] if committed == base_snapshot else differences(committed, candidate)
     finally:
         artifacts.close()
     if not diffs:
-        print(f"migration-shadow: OK — committed {SNAPSHOT} is exactly what the migrations produce")
+        print(f"migration-shadow: OK — committed {SNAPSHOT} plus pending migrations rebuilds cleanly")
         return 0
-    print(f"migration-shadow: {SNAPSHOT} is STALE — it is not what base + migrations produce:",
+    print(f"migration-shadow: {SNAPSHOT} was changed but does not match base + migrations:",
           file=sys.stderr)
     for line in diffs:
         print(f"  {line}", file=sys.stderr)

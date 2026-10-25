@@ -118,7 +118,7 @@ def main() -> int:
         registry_rows = {row["id"]: row for row in registry["entries"]}
         check("Drive registry names the record-native dashboard replacement",
               _normal_path(registry_rows["normal-dashboard-render"])
-              == "normal_path_repointed_to_record_native_front_door")
+              == "normal_path_repointed_to_record_native_boards")
 
     print(f"scheduled Drive writer selftest — {len(FAILED)} failure(s)")
     return 1 if FAILED else 0

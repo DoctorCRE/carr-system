@@ -78,14 +78,15 @@ If the store is shared, the work must remain within Joe's structure-and-field-
 metadata restriction without copying work-account files. That constraint must be
 resolved before applying the harness's shared-copy workflow.
 
-The next authoritative provider source is [Microsoft Graph immutable IDs](https://learn.microsoft.com/en-us/graph/outlook-immutable-id).
-`Prefer: IdType="ImmutableId"` requests mailbox-scoped stable message IDs, including
-folder moves and draft-to-sent retrieval. Archive-mailbox moves and export/reimport
-are exceptions. IDs are case-sensitive. Retain mailbox identity alongside the ID.
-The [Graph message contract](https://learn.microsoft.com/en-us/graph/api/resources/message?view=graph-rest-1.0#properties)
-distinguishes message `id`, version `changeKey`, and `conversationId`.
-These contracts do not prove that an HxStore candidate is a Graph immutable ID.
-No Graph authentication or mailbox API call was attempted.
+The next source is the test account's Outlook data, decoded with the existing
+Rust hxprobe reader. Joe's direction is to use Rust and the test account to decode
+all Outlook data. The employer forbids Microsoft Graph, so it is not an option
+or fallback for this work.
+First establish account isolation and obtain the required macOS access. Then
+capture the test-account snapshots above and compare the candidate identity
+fields across each transition. Extend the Rust decoder only from observed
+format evidence. Preserve the distinction between a message identity, a revision
+identifier, and a conversation identifier until the experiment proves each role.
 No hxprobe identity decoder or synthetic identity claim was added.
 
 ## Catalog confidence

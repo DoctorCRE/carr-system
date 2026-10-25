@@ -335,7 +335,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/situation-retrieval.js",
     "schema_digest": "87ecbaa9c95b2c975e799942c5885f84c4c11856e3e87a022d6fad90742ec923",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -362,7 +362,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/deal-items.js",
     "schema_digest": "951a874c8854706a552b3080ed6c371efc6956c400e10757c317d618fe617791",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -544,7 +544,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/deal-items.js",
     "schema_digest": "afab113d866bf2081d0599cdff0eba72209372e77ac0c1573cacf1c4aae91926",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -875,6 +875,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "get-next-action": {
+    "ingress_key": "mcp-tool:get-next-action",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "63787d4ab663cde75739db3ec6fc1a8c177d171dbfcaf84aa5be2a5603c6be7e",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "governance-queue": {
     "ingress_key": "mcp-tool:governance-queue",
     "source_locator": "mcp-server/src/tools.js",
@@ -925,7 +934,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/deal-items.js",
     "schema_digest": "eb212d3b90bab7fae46ce103f966ac8a290531a0fa731f4d765164e09cfd973a",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -977,7 +986,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "lead-board": {
     "ingress_key": "mcp-tool:lead-board",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "82702101136b8f45dafb837abdfdabe063cf8adac3fbaf50bd1db597727eeb8d",
+    "schema_digest": "276e9def9cb1c6427894526e1406f8bc270bf3dee58ff79e5384d365abdc79cc",
     "write": false,
     "human_only": false,
     "authority_only": false,
@@ -1842,7 +1851,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/deal-items.js",
     "schema_digest": "3adafb91a5d32c51e7386ca06582b49fb074888c19eceb1e5a11415e98f75ae5",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2207,7 +2216,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "6a55c6878ae4b86a6f36e0c4b04bb13d96aa595a97e3c9baeb9142fc54667bb3",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2234,7 +2243,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/situation-retrieval.js",
     "schema_digest": "9013091b73c6eaaccd10e5fb6eff9f9debd6b582e549fad7acf75ed48d70416e",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2412,7 +2421,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "set-next-action": {
     "ingress_key": "mcp-tool:set-next-action",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "6c54567055fcfc20c8e3246d9cfc663b9584b04a6cc00278850cd07be93a9101",
+    "schema_digest": "9c7139155f314a1dca649f7a6785ec280cf6fccb84114c96d165947608ecbce0",
     "write": true,
     "human_only": false,
     "authority_only": false,

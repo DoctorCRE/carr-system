@@ -76,16 +76,6 @@
   ],
   "runtime_verification_gates": [
     {
-      "test_id": "FRONTDOOR-USAGE-001",
-      "status": "future_gate_not_implemented_in_phase0_static_prototype",
-      "environment": "baseline_interview_and_usage_inventory",
-      "required_evidence": [
-        "current Front Door tile/flow usage inventory",
-        "Joe and Dell task frequency and friction observations",
-        "no more than three proven flows selected or explicit none decision"
-      ]
-    },
-    {
       "test_id": "FLOW-WS-06",
       "status": "future_gate_not_implemented_in_phase0_static_prototype",
       "environment": "uncoached_joe_owner_market_map_journey_with_optional_dell_validation",

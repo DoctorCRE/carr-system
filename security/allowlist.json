@@ -274,6 +274,12 @@
       "sha256": "0621a833ac8d0592d8d884985786331ff90c7c91348688d2fcaa3eacaf71847a",
       "rule": "pii-email",
       "reason": "Invented Cc and Bcc fixture recipients in c190c248, replaced by reserved example.test addresses in 05b41df3; offline fake Outlook test only. Bound to the historical blob because PR CI scans every introduced commit."
+    },
+    {
+      "path": ".github/workflows/doc-drift.yml",
+      "sha256": "d8df48bbcfca05c093469b5a4f91f2c993773086949a554681af81c7db13f97d",
+      "rule": "pii-email",
+      "reason": "Public Codex coauthor noreply identity in the scheduled snapshot commit message, not personal contact data. Qualified against the complete workflow; exception binds only these exact source bytes and the email detector."
     }
   ]
 }

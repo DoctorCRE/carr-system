@@ -9,7 +9,8 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
 
-PY="$REPO/.venv/bin/python"
+COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || COMMON_DIR="$REPO/.git"
+PY="$(dirname "$COMMON_DIR")/.venv/bin/python"
 [ -x "$PY" ] || PY=python3
 export CARR_CI_PYTHON="$PY"
 CI_SELFTEST_TIMEOUT_SECONDS=120
@@ -173,6 +174,12 @@ check_types() {
 
 check_contract() {
   local failures=""
+  local pg_paths rc=0
+  pg_paths="$(git grep -n -F '/opt/homebrew/opt/postgresql@17' -- '*.py' ':!lib/disposable_pg_fixture.py')" || rc=$?
+  if [ "$rc" -ne 1 ]; then
+    failures="$failures PostgreSQL-paths"
+    printf '%s\n' "PostgreSQL paths must use lib/disposable_pg_fixture.py (grep exit $rc)" "$pg_paths" >&2
+  fi
   if [ -f workspace/contracts/validate.mjs ]; then
     run_quiet "$LOGDIR/contract-workspace.log" node workspace/contracts/validate.mjs \
       || { failures="$failures workspace/contracts"; tail -20 "$LOGDIR/contract-workspace.log" >&2; }
@@ -567,7 +574,7 @@ check_migration_fixtures() {
       return
     fi
   fi
-  if [[ "$MIGRATION_PART" = all ]]; then
+  if [[ "$MIGRATION_PART" = all || "$MIGRATION_PART" = fixtures || "$MIGRATION_PART" = equivalence ]]; then
     if ! run_quiet "$LOGDIR/migration-restore-security.log" \
          "$PY" ops/restore-rehearse-record-selftest.py --postgres; then
       tail -30 "$LOGDIR/migration-restore-security.log" >&2
@@ -593,7 +600,7 @@ check_migration_fixtures() {
          fi
          shadow_note="; migration shadow not run (no PostgreSQL 18 here)" ;;
       *) tail -60 "$LOGDIR/migration-shadow.log" >&2
-         bad migration "migration shadow: pending migrations did not apply over the base snapshot, or db/schema.sql is not what they produce"
+         bad migration "migration shadow: pending migrations failed, or a changed db/schema.sql does not match their result"
          return ;;
     esac
   fi
@@ -1040,13 +1047,13 @@ check_binding() {
       problems="$problems worker-boot"
       tail -40 "$LOGDIR/binding-worker-boot.log" >&2
     fi
-  else
-    printf '        \033[33mskip\033[0m  worker-boot-check — wrangler not installed (run npm install in mcp-server/)\n' >&2
   fi
   if [ -n "$problems" ]; then
     bad binding "drift:$problems"
+  elif [ ! -x mcp-server/node_modules/.bin/wrangler ]; then
+    skip binding "worker boot not checked; wrangler not installed (run npm ci in mcp-server/)"
   else
-    ok binding "worker config declared; worker boot checked when wrangler is installed"
+    ok binding "worker config declared; worker boot passed"
   fi
 }
 

@@ -10,7 +10,7 @@ through the named record-layer verbs:
   with the full deduplicated plain-text body as its detail;
 - a past meeting becomes log-activity meeting, tour or call by its title;
 - a meeting in the next seven days becomes a dated ball (set-next-action);
-- one isolated haiku call per new matched email proposes a next step, which
+- one isolated haiku call per matched full email proposes a next step, which
   becomes a ball when the record has none or only an older one.
 
 A run outside 07:00-19:30 local does nothing. Matching requires one record with
@@ -24,14 +24,14 @@ reports failed and does not advance its watermark.
 
 An email whose body is still only Outlook's preview is logged with the preview,
 flagged preview_only, and listed in out/outlook-intake/needs-refresh.json for the
-evening triage job to open. The file is a JSON array, mode 0600, one object per
+same-host refresh worker to open. The file is a JSON array, mode 0600, one object per
 email:
 
     {"message_id": "<opaque intake id>", "subject_hash": "<sha256 hex of the subject>",
-     "sent_utc": "<ISO 8601>", "sender_email": "<address>", "opened_at": "<ISO 8601, triage adds it>"}
+     "sent_utc": "<ISO 8601>", "sender_email": "<address>", "opened_at": "<ISO 8601, refresh worker adds it>"}
 
-Triage finds the email by sender_email and subject_hash and adds opened_at; this
-job owns every other field and keeps opened_at when it rewrites the file. Once a
+The refresh worker finds the email by sender_email and subject_hash and adds opened_at; this
+intake job owns every other field and keeps opened_at when it rewrites the file. Once a
 listed email decodes with its full body, the next run logs that text as a
 log-activity note (activities cannot be updated in place: the verb refuses a
 reused key with new arguments) and drops the entry.
@@ -78,10 +78,11 @@ BACKFILL = timedelta(hours=48)
 LOOKBACK = timedelta(hours=6)
 UPCOMING = timedelta(days=7)
 REFRESH_DAYS = timedelta(days=7)
+REFRESH_INTERVAL = timedelta(minutes=30)
 COPY_WINDOW = 86_400
 VERIFIED_MIN = 0.95
 MODEL_BODY_CHARS = 12_000
-BALL_OWNERS = re.compile(r'^ball → (joe|joe-local):')
+BALL_OWNER = 'joe'
 
 
 def resolve_store(home: Path) -> Path:
@@ -95,13 +96,14 @@ def resolve_store(home: Path) -> Path:
 ERROR_CODES = frozenset({'timeout', 'auth_refused', 'key_reuse', 'transport_oversized',
                          'no_acknowledgement', 'reply_unreadable', 'transport_error',
                          'invalid_request', 'subject_unresolved', 'database_refused',
-                         'setup_failed', 'contacts_empty', 'contacts_read_failed'})
+                         'setup_failed', 'contacts_empty', 'contacts_read_failed', 'next_action_conflict',
+                         'legacy_action_guard_required'})
 BLOCKED_ERRORS = frozenset({'key_reuse', 'transport_oversized', 'invalid_request', 'subject_unresolved'})
 
 
 def _reply_error(reply: dict) -> str:
     error = reply.get('error')
-    if error == 'key_reuse':
+    if error in ('key_reuse', 'next_action_conflict'):
         return error
     if error in ('unauthorized', 'forbidden'):
         return 'auth_refused'
@@ -380,11 +382,11 @@ class Run:
         self.today = now.astimezone(LOCAL).date()
         self.counts = {k: 0 for k in ('emails', 'events_past', 'events_upcoming', 'logged', 'preview_only',
                                       'full_text_notes', 'balls_set', 'balls_kept', 'unmatched',
-                                      'model_failed', 'steps_pending', 'writes_failed',
+                                      'model_failed', 'steps_pending', 'hydration_expired', 'writes_failed',
                                       'writes_deferred', 'requests_blocked')}
         self.written: list[tuple[str, str, str, str]] = []
         self.unmatched: set[tuple[str, str, str]] = set()
-        self.balls: dict[str, int] = {}
+        self.balls: dict[str, tuple[str, int, int]] = {}
         self.attempted: set[str] = set()
 
     def write(self, verb: str, args: dict, who: str, note: str = '') -> bool:
@@ -410,6 +412,12 @@ class Run:
                 if not isinstance(reply, dict) or reply.get('ok') is not True:
                     raise CarrError(code=_reply_error(reply) if isinstance(reply, dict) else 'reply_unreadable')
             except CarrError as error:
+                if verb == 'set-next-action' and error.code == 'next_action_conflict':
+                    request.update(acknowledged=True, disposition='superseded', retry_at=None,
+                                   error_code=None)
+                    self.counts['balls_kept'] += 1
+                    _save(self.out, self.state)
+                    return True
                 blocked = error.code in BLOCKED_ERRORS
                 request.update(error_code=error.code, disposition='blocked' if blocked else 'retry',
                                retry_at=None if blocked else int(self.now.timestamp()) +
@@ -417,48 +425,49 @@ class Run:
                 self.counts['writes_failed'] += 1
                 _save(self.out, self.state)
                 return False
+            if verb == 'set-next-action':
+                request['next_action_id'] = reply.get('next_action_id')
             request.update(acknowledged=True, disposition='acknowledged', retry_at=None, error_code=None)
             _save(self.out, self.state)
         self.written.append((who, args['ref'], verb, note))
         return True
 
-    def open_ball(self, ref: str) -> int | None:
-        """When the newest open ball on ref was set (unix), or None."""
-        if ref in self.balls:
-            return self.balls[ref]
-        closed_after: dict[str, int] = {}
-        seen_owners: set[str] = set()
-        for row in sorted(self.ports.carr('catch-me-up', {'ref': ref, 'limit': 30}).get('timeline') or [],
-                          key=lambda r: r.get('occurred_at') or '', reverse=True):
-            at = int(datetime.fromisoformat(row['occurred_at']).timestamp())
-            if row.get('verb') in ('complete-action', 'log-outreach'):
-                actor = row.get('actor')
-                if actor:
-                    closed_after.setdefault(actor, at)
-            elif row.get('verb') == 'set-next-action':
-                owner_match = BALL_OWNERS.match(row.get('summary') or '')
-                if owner_match and owner_match[1] not in seen_owners:
-                    owner = owner_match[1]
-                    seen_owners.add(owner)
-                    if closed_after.get(owner, 0) < at:
-                        return at
-        return None
+    def open_ball(self, ref: str) -> dict | None:
+        """Read Joe's canonical ordinary action, including its replacement version."""
+        reply = self.ports.carr('get-next-action', {'ref': ref, 'owner': BALL_OWNER})
+        if reply.get('ok') is not True or reply.get('owner') != BALL_OWNER or 'action' not in reply:
+            raise CarrError(code='reply_unreadable')
+        action = reply['action']
+        if action is not None:
+            try:
+                if not isinstance(action['id'], str) or not isinstance(action['version'], int):
+                    raise ValueError('invalid action identity')
+                datetime.fromisoformat(action['updated_at'])
+            except (KeyError, TypeError, ValueError):
+                raise CarrError(code='reply_unreadable') from None
+        return action
 
     def ball(self, ref: str, who: str, description: str, due_on: str, item_at: int, source: str,
              only_if_none: bool = False) -> bool:
-        """Set the ball unless a newer one stands; True once nothing is left to do."""
-        existing = self.open_ball(ref)
+        """Set the ball only while the canonical action read still holds."""
+        action = self.open_ball(ref)
+        existing = int(datetime.fromisoformat(action['updated_at']).timestamp()) if action else None
+        if action and ref in self.balls and self.balls[ref][:2] == (action['id'], action['version']):
+            existing = self.balls[ref][2]
         if existing is not None and (only_if_none or existing >= item_at):
             self.counts['balls_kept'] += 1
             self.written.append((who, ref, 'set-next-action', 'kept newer ball'))
             return True
         note = 'no prior ball' if existing is None else 'replaced ball'
         args = {'idempotency_key': key('set-next-action', ref, source), 'ref': ref,
-                'description': description, 'due_on': due_on}
+                'description': description, 'due_on': due_on, 'owner': BALL_OWNER,
+                'expected_action': {k: action[k] for k in ('id', 'version')} if action else None}
         if not self.write('set-next-action', args, who, note):
             return False
-        self.counts['balls_set'] += 1
-        self.balls[ref] = item_at
+        request = self.state['requests'][args['idempotency_key']]
+        if request.get('disposition') != 'superseded':
+            self.counts['balls_set'] += 1
+            self.balls[ref] = (request.get('next_action_id'), 1, item_at)
         return True
 
     # emails
@@ -513,9 +522,11 @@ class Run:
             if not m['full']:
                 pending.setdefault(m['ident'], {'refs': refs, 'ck': m['ck'], 'sent': m['sent_unix'],
                                                 'sender_email': m['sender'].lower(),
-                                                'subject_hash': _hash(m['subject'] or '')})
+                                                'subject_hash': _hash(m['subject'] or ''),
+                                                'who': who, 'outbound': outbound})
                 pending[m['ident']]['refs'] = sorted(set(pending[m['ident']]['refs']) | set(refs))
-            steps.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0],
+            if m['full'] and m['ident'] not in pending:
+                steps.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0],
                                            'who': who, 'outbound': outbound,
                                            'activity_keys': [key('log-activity', ref, m['ident']) for ref in refs]})
             results = [self.write('log-activity', {
@@ -539,11 +550,16 @@ class Run:
         for m in mails:
             by_ck.setdefault(m['ck'], []).append(m)
         for ident, s in sorted(steps.items(), key=lambda kv: kv[1]['sent']):
+            if ident in self.state.get('pending_full', {}):
+                del steps[ident]
+                continue
             if not all(self.state['requests'].get(k, {}).get('acknowledged') for k in s.get('activity_keys', [])):
                 self.counts['steps_pending'] += 1
                 continue
             if 'reply' not in s:
                 found = [m for m in by_ck.get(s['ck'], []) if abs(m['first_sent'] - s['sent']) <= COPY_WINDOW]
+                if found and not found[0]['full']:
+                    continue
                 if not found:
                     self.counts['steps_pending'] += 1
                     continue
@@ -572,7 +588,8 @@ class Run:
             match = [m for m in full.get(p['ck'], []) if abs(m['first_sent'] - p['sent']) <= COPY_WINDOW]
             if not match:
                 if p['sent'] < self.now.timestamp() - REFRESH_DAYS.total_seconds():
-                    del pending[ident]
+                    p['expired'] = True
+                    self.counts['hydration_expired'] += 1
                 continue
             m = match[0]
             ok = all([self.write('log-activity', {
@@ -581,6 +598,15 @@ class Run:
                 'occurred_at': _iso(p['sent'])}, p['sender_email'], 'full text follow-up') for ref in p['refs']])
             if ok:
                 self.counts['full_text_notes'] += 1
+                steps = self.state.setdefault('steps', {})
+                steps.pop(ident, None)
+                steps.setdefault(f'fullbody|{ident}', {
+                    'ck': p['ck'], 'sent': p['sent'], 'ref': p['refs'][0],
+                    'who': p.get('who', p['sender_email']),
+                    'outbound': p.get('outbound', _internal(p['sender_email'])),
+                    'activity_keys': [key('log-activity', ref, ident) for ref in p['refs']
+                                      if key('log-activity', ref, ident) in self.state['requests']] +
+                                     [key('log-activity', ref, f'fullbody|{ident}') for ref in p['refs']]})
                 del pending[ident]
 
     # calendar
@@ -675,6 +701,8 @@ def _refresh_list(out: Path, pending: dict) -> int:
     for ident, p in sorted(pending.items(), key=lambda kv: kv[1]['sent']):
         entry = {'message_id': ident, 'subject_hash': p['subject_hash'], 'sent_utc': _iso(p['sent']),
                  'sender_email': p['sender_email']}
+        if p.get('expired'):
+            entry['expired'] = True
         if ident in opened:
             entry['opened_at'] = opened[ident]
         entries.append(entry)
@@ -688,7 +716,9 @@ def mapping_counts(state: dict) -> dict:
     participants = {}
     for item in [*mail.values(), *calendar.values()]:
         participants.update(item.get('participants', {}))
-    return {'unresolved_messages': len(mail),
+    return {'hydration_pending': len(state.get('pending_full', {})),
+            'hydration_expired': sum(bool(p.get('expired')) for p in state.get('pending_full', {}).values()),
+            'unresolved_messages': len(mail),
             'unresolved_calendar': len(calendar), 'unresolved_addresses': len(participants),
             'unmatched': len(participants),
             **{'mapping_' + reason: list(participants.values()).count(reason)
@@ -759,7 +789,8 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
             return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code)
     contacts_changed = matcher is not None and state.get('contact_map') != matcher.fingerprint()
     pending_writes = any(not r['acknowledged'] for r in state.get('requests', {}).values())
-    if state.get('store') == signature and not contacts_changed and not state.get('steps') and not pending_writes and not _calendar_due(state, now):
+    hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
+    if state.get('store') == signature and not hydration_due and not contacts_changed and not state.get('steps') and not pending_writes and not _calendar_due(state, now):
         if state.get('pending_full'):
             Run(ports, state, now, out).full_text([])
             _refresh_list(out, state['pending_full'])
@@ -780,16 +811,16 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     high = state.get('high_water')
     since = int((datetime.fromtimestamp(high, timezone.utc) - LOOKBACK if high else now - BACKFILL).timestamp())
     mails = _best_copies(mails)
+    state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
     work = Run(ports, state, now, out)
     try:
         for request in list(state.get('requests', {}).values()):
             if not request['acknowledged']:
                 args = json.loads(request['payload'])
-                if request['verb'] == 'set-next-action':
-                    existing = work.open_ball(args['ref'])
-                    if existing is not None and existing >= request['created_at']:
-                        del state['requests'][args['idempotency_key']]
-                        continue
+                if request['verb'] == 'set-next-action' and (
+                        args.get('owner') != BALL_OWNER or 'expected_action' not in args):
+                    request.update(disposition='blocked', retry_at=None,
+                                   error_code='legacy_action_guard_required')
                 work.write(request['verb'], args, 'pending write')
         matcher = matcher or Matcher(ports.contacts())
         work.emails(mails, matcher, since)

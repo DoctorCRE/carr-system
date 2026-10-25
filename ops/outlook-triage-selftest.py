@@ -362,6 +362,23 @@ class FakeOutlookCase(unittest.TestCase):
 
 
 class OutlookTriageTest(FakeOutlookCase):
+    def test_driver_in_home_local_bin_works_without_shell_path_setup(self):
+        self.given([FILE_A, NEWS, UNREAD])
+        local_driver = self.home / '.local/bin/cua-driver'
+        local_driver.parent.mkdir(parents=True)
+        (self.tmp / 'bin/cua-driver').rename(local_driver)
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
+        self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A']])
+        self.assertNotIn(UNREAD['label'], state['selections'])
+
+    def test_missing_driver_fails_without_selecting_mail(self):
+        self.given([FILE_A, UNREAD])
+        (self.tmp / 'bin/cua-driver').unlink()
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'cua_driver_unavailable'))
+        self.assertEqual((state['moved'], state['selections']), ([], []))
+
     def test_files_read_email_by_each_rule_and_never_selects_unread(self):
         self.given([FILE_A, VENDOR, FIRM, NEWS, UNCERTAIN, UNREAD])
         outcome, state = self.run_triage()
@@ -623,6 +640,63 @@ class RefreshTest(FakeOutlookCase):
     READ_BODY = msg('sender-news', 'subject-010', email='news@news.test')
     UNREAD_BODY = msg('folder-A, client-001', 'subject-011', '8:15 AM', unread=True, email='c1@client.test')
 
+    def test_refresh_worker_placement_and_entry_share_intake_host(self):
+        catalog = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
+        services = {s['key']: s for s in catalog}
+        intake_env = services['outlook-intake']['environments'][0]
+        refresh_env = services['outlook-refresh']['environments'][0]
+        self.assertEqual(refresh_env['runs_on'], intake_env['runs_on'])
+        plist = plistlib.loads((ROOT / refresh_env['deploy_mechanism']).read_bytes())
+        self.assertEqual(plist['WorkingDirectory'], '{{REPO}}')
+        self.assertEqual(plist['Umask'], 0o077)
+        self.assertNotIn('RunAtLoad', plist)
+        self.assertIn('from lib.outlook_refresh import main; raise SystemExit(main())', plist['ProgramArguments'])
+        self.assertEqual(plist['StartCalendarInterval'], calendar_for_window((7, 15), (19, 15), 30))
+        installer = (ROOT / 'bin/install-outlook-intake.sh').read_text()
+        self.assertIn('LABEL="com.carr.outlook-refresh"', installer)
+        self.assertNotIn('launchctl bootstrap', '\n'.join(line for line in installer.splitlines()
+                                                         if not line.startswith('print ')))
+
+    def test_same_host_refresh_worker_opens_only_read_mail_without_filing(self):
+        from lib import outlook_refresh
+        self.given([FILE_A, self.READ_BODY, self.UNREAD_BODY])
+        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test'),
+                                  listed('m2', self.UNREAD_BODY, 'c1@client.test')])
+        self.guide.write_text('')
+        account_path = self.home / '.config/carr/outlook-account'
+        account_path.write_text(ACCOUNT)
+        account_path.chmod(0o600)
+        with patch.dict(os.environ, self.env, clear=True):
+            outcome = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                          waits=Waits(0, 0, 0, 0, 0, 0, 0),
+                                          now_fn=lambda: EVENING.replace(hour=10))
+        self.assertEqual(outcome.state, 'succeeded')
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['selections'], [self.READ_BODY['label']])
+        self.assertEqual(state['moved'], [])
+        entries = json.loads(path.read_text())
+        self.assertIn('opened_at', entries[0])
+        self.assertNotIn('opened_at', entries[1])
+        self.assertEqual(len(entries), 2, 'opening is not a body-decoded acknowledgement')
+
+    def test_refresh_worker_refuses_wrong_account_and_active_user(self):
+        from lib import outlook_refresh
+        self.given([self.READ_BODY])
+        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        account_path = self.home / '.config/carr/outlook-account'
+        account_path.write_text('wrong@example.test')
+        account_path.chmod(0o600)
+        with patch.dict(os.environ, self.env, clear=True):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                         waits=Waits(0, 0, 0, 0, 0, 0, 0))
+        self.assertEqual(result.reason, 'wrong_account')
+        self.assertEqual(json.loads(self.state.read_text())['selections'], [])
+        self.given([self.READ_BODY], idle_seconds=1)
+        with patch.dict(os.environ, self.env, clear=True):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10))
+        self.assertEqual(result.reason, 'user_active')
+        self.assertEqual(json.loads(self.state.read_text())['selections'], [])
+
     def test_read_email_is_opened_unchanged_and_stamped(self):
         self.given([FILE_A, self.READ_BODY, NEWS])
         path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
@@ -777,12 +851,21 @@ class InstallTest(unittest.TestCase):
         self.assertIn('/bin/chmod 600 "$LOG"', self.installer)
         self.assertLess(self.installer.index('/bin/chmod 600 "$LOG"'), self.installer.index('print -- '))
 
-    def test_service_runs_on_the_secondary_mac_daily(self):
+    def test_installer_checks_machine_scope_before_private_mail_guide(self):
+        self.assertLess(self.installer.index("allowed_on_machine('$LABEL.plist'"),
+                        self.installer.index('if [ ! -s "$HOME/.config/carr/outlook-nightly-sweep.folders.md"'))
+
+    def test_service_runs_on_the_primary_mac_daily(self):
         services = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
         service = next(s for s in services if s['key'] == triage.SERVICE)
         env = service['environments'][0]
-        self.assertEqual(env['runs_on'], 'secondary')
+        self.assertEqual(env['runs_on'], 'primary')
         self.assertEqual(env['deploy_mechanism'], 'ops/launchd/com.carr.outlook-triage.plist')
+        from lib.launchd_scope import allowed_on_machine
+        self.assertTrue(allowed_on_machine('com.carr.outlook-triage.plist', primary=True))
+        self.assertFalse(allowed_on_machine('com.carr.outlook-triage.plist', primary=False))
+        self.assertIn("allowed_on_machine('$LABEL.plist', machine_role.is_primary('$REPO'))",
+                      self.installer)
         self.assertGreaterEqual(env['expected_cadence_seconds'] + env['cadence_grace_seconds'], 27.5 * 3600)
 
 

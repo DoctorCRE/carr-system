@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Fixtures for ops/migration-shadow.py.
-
-The shadow run builds a throwaway PostgreSQL 18 cluster from the BASE branch's
-db/schema.sql (production's structure and ledger), applies every pending
-migration on top, dumps the result with bin/schema-snapshot.sh and compares it
-with the committed db/schema.sql. These cases pin the comparison: it ignores
-only the time each migration happened to apply, and it never passes when the
-structure, the ledger membership or a checksum differs. The database path
-itself runs in the CI migration class, where PostgreSQL 18 is installed.
-
-Run: .venv/bin/python ops/migration-shadow-selftest.py
-"""
+"""Synthetic fixtures for shadow rebuilds, snapshot integrity, and cleanup."""
 import importlib.util
 import pathlib
 import subprocess
@@ -177,6 +166,21 @@ with tempfile.TemporaryDirectory() as tmp:
     initdb.chmod(0o755)
     with patch.dict(shadow.os.environ, {'PATH': str(older) + shadow.os.pathsep + str(bins)}, clear=True), patch.object(shadow, 'PG_BIN_CANDIDATES', ()):
         check("PG17 earlier on PATH cannot hide PG18", shadow.find_pg18(None) == bins.resolve())
+
+print("pending snapshot contract")
+with tempfile.TemporaryDirectory() as tmp:
+    repo = pathlib.Path(tmp)
+    (repo / 'db').mkdir()
+    base, candidate = snapshot(T, R1[:1]), snapshot(T + "CREATE TABLE widget(id int);\n", R1)
+    with patch.object(shadow, 'REPO', repo), patch.object(shadow, 'find_pg18', return_value=pathlib.Path('/synthetic/bin')), patch.object(shadow, 'shadow', return_value=(base, candidate, ['0002_b.sql'])):
+        for name, committed, expected in (
+            ('unchanged snapshot with pending migrations passes', base, 0),
+            ('refreshed snapshot passes', candidate, 0),
+            ('hand-edited snapshot fails', base + 'SELECT 42;\n', 1),
+            ('corrupt snapshot fails', 'invalid SQL', 1),
+        ):
+            shadow.write_snapshot(repo / 'db/schema.sql', committed)
+            check(name, shadow.main(['--base', 'synthetic']) == expected)
 
 print("applied set")
 check("newly applied migrations are the after-ledger minus the before-ledger, in order",
