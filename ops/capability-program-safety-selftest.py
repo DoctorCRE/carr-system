@@ -18,8 +18,11 @@ class CapabilityDatabaseSafety(unittest.TestCase):
         if target is not None:
             environment['CARR_CI_DATABASE_URL'] = target
         proof['FAILED'].clear()
+        def connection_boundary(*args, **kwargs):
+            self.assertFalse(any(name.startswith('PG') for name in os.environ))
+            raise InterruptedError('connection boundary')
         with patch.dict(os.environ, environment, clear=True), \
-                patch('psycopg.connect', side_effect=InterruptedError('connection boundary')) as connect, \
+                patch('psycopg.connect', side_effect=connection_boundary) as connect, \
                 contextlib.redirect_stdout(io.StringIO()):
             try:
                 proof['tier2']()
@@ -52,7 +55,8 @@ class CapabilityDatabaseSafety(unittest.TestCase):
             from psycopg.conninfo import conninfo_to_dict
             info = conninfo_to_dict(connect.call_args.args[0], **connect.call_args.kwargs)
             self.assertEqual(info['hostaddr'], host.strip('[]'))
-            self.assertEqual(info['service'], '')
+            self.assertNotIn('service', info)
+            self.assertEqual(info['passfile'], os.devnull)
             self.assertFalse(proof['FAILED'])
 
 
