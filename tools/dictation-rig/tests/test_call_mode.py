@@ -592,12 +592,13 @@ class PostCallTests(unittest.TestCase):
             {"speaker": "Dell", "text": "I will review the proposal."},
         ]}))
         post_call.store_context(self.session, self.context)
-        output = self.output(dell_tasks=[{
+        output = self.output(joe_tasks=[{
+            "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
+            "evidence": "Joe will call on February 29, 2028.", "due_on": "2028-02-29",
+        }], dell_tasks=[{
             "title": "Review proposal", "deal_id": "deal-b", "participant_ids": [],
             "evidence": "Dell will review the proposal.", "due_on": None,
         }])
-        output["joe_tasks"][0]["due_on"] = "2028-02-29"
-        output["joe_tasks"][0]["evidence"] = "Joe will call on February 29, 2028."
         status = post_call.process_session(self.session, distiller=lambda _request: output)
         self.assertEqual(status["state"], "ready_review")
         report = post_call.report_for_deal_room(self.session)["report"]
@@ -610,9 +611,12 @@ class PostCallTests(unittest.TestCase):
                          [("joe", "2028-02-29"), ("dell", None)])
 
     def test_invalid_action_dates_block_without_creating_candidates(self) -> None:
+        invalid_dates: tuple[object, ...] = (
+            "2027-02-29", "2026-04-31", "20261025", "2026-1-01",
+            "tomorrow", "2026-10-25T12:00:00Z", "", True, 23, {},
+        )
         for owner in ("joe", "dell"):
-            for due_on in ("2027-02-29", "2026-04-31", "20261025", "2026-1-01",
-                           "tomorrow", "2026-10-25T12:00:00Z", "", True, 23, {}):
+            for due_on in invalid_dates:
                 with self.subTest(owner=owner, due_on=due_on):
                     (self.session / post_call.REPORT_FILE).unlink(missing_ok=True)
                     post_call.store_context(self.session, self.context)
