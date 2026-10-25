@@ -41,6 +41,8 @@ from typing import Any
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
+sys.path.insert(0, str(REPO))
+from lib.disposable_pg_fixture import postgres_bin_dir
 PYTHON = str(REPO / ".venv" / "bin" / "python")
 
 # breakglass_run.py and gen_breakglass_run.py are deliberately import-only
@@ -171,18 +173,10 @@ class Cluster:
 
 
 def find_pg_bin_dir() -> Path:
-    for candidate in (
-        Path("/opt/homebrew/opt/postgresql@17/bin"),
-        Path("/opt/homebrew/opt/postgresql@16/bin"),
-        Path("/usr/local/opt/postgresql@17/bin"),
-        Path("/usr/local/opt/postgresql@16/bin"),
-    ):
-        if (candidate / "initdb").is_file():
-            return candidate
-    located = shutil.which("initdb")
-    if located:
-        return Path(located).resolve().parent
-    sys.exit("breakglass_selftest: no local PostgreSQL server binaries found (install postgresql@17)")
+    try:
+        return postgres_bin_dir()
+    except FileNotFoundError:
+        sys.exit('breakglass_selftest: no local PostgreSQL server binaries found')
 
 
 def port_is_free(port: int) -> bool:

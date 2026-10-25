@@ -36,10 +36,13 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib.disposable_pg_fixture import postgres_bin_dir
+
 WRAPPER = ROOT / "bin" / "backup-dump.sh"
 GUARD = ROOT / "bin" / "backup-guard.py"
 PG_DUMP = Path(os.environ.get("CARR_WR54_PG_DUMP", "/opt/homebrew/opt/libpq/bin/pg_dump"))
-PSQL = Path(os.environ.get("CARR_WR54_PSQL", "/opt/homebrew/opt/postgresql@17/bin/psql"))
+PSQL = Path(os.environ.get("CARR_WR54_PSQL", "psql"))
 AGE = Path(os.environ.get("CARR_WR54_AGE", "/opt/homebrew/bin/age"))
 AGE_KEYGEN = Path(os.environ.get("CARR_WR54_AGE_KEYGEN", "/opt/homebrew/bin/age-keygen"))
 
@@ -850,6 +853,7 @@ def portable_contract() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global PSQL
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true",
                         help="require and run the disposable PostgreSQL/real-age fixtures")
@@ -865,6 +869,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     try:
         dsn = require_local_dsn(raw_dsn)
+        if not os.environ.get("CARR_WR54_PSQL"):
+            PSQL = postgres_bin_dir(("psql",)) / "psql"
     except (OSError, ValueError) as exc:
         print(f"backup-guard-selftest: REFUSED: {exc}", file=sys.stderr)
         return 78
