@@ -15,7 +15,7 @@ const read = name => yaml.load(readFileSync(new URL("../../.github/workflows/" +
 function expression(value, github, success = true, inputs = { shard_trial: false }, cancelled = false) {
   if (value === undefined) return success && !cancelled;
   const raw = String(value).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
-  assert.match(raw, /^(?:github\.(?:workflow|ref|run_id|event_name|event\.action|event\.pull_request\.number|event\.pull_request\.draft|event\.pull_request\.base\.ref|event\.changes\.base\.ref)|inputs\.shard_trial|needs\.scope\.outputs\.full|always\(\)|cancelled\(\)|'[^']*'|[\s()=!&|]|true|false)+$/, `unsupported expression: ${raw}`);
+  assert.match(raw, /^(?:github\.(?:workflow|repository|ref|run_id|event_name|event\.workflow_run\.(?:conclusion|head_branch|event|head_repository\.full_name)|event\.action|event\.pull_request\.number|event\.pull_request\.draft|event\.pull_request\.base\.ref|event\.changes\.base\.ref)|inputs\.shard_trial|needs\.scope\.outputs\.full|always\(\)|cancelled\(\)|'[^']*'|[\s()=!&|]|true|false)+$/, `unsupported expression: ${raw}`);
   const safe = raw.replace(/github(?:\.[a-zA-Z_]+)+/g, path =>
     JSON.stringify(path.split(".").slice(1).reduce((value, key) => value?.[key], github) ?? ""));
   const result = runInNewContext(safe, { inputs, needs: { scope: { outputs: { full: "true" } } }, always: () => true, cancelled: () => cancelled }, { timeout: 1000 });
@@ -168,3 +168,37 @@ test("running Worker canary remains independent from subscribed validation event
   }
 });
 
+
+function deployContext(event_name = "workflow_run", run = {}) {
+  return {
+    event_name, repository: "DoctorCRE/carr-system", ref: "refs/heads/main",
+    event: { workflow_run: {
+      conclusion: "success", head_branch: "main", event: "push",
+      head_repository: { full_name: "DoctorCRE/carr-system" }, ...run,
+    } },
+  };
+}
+
+test("deploy accepts only successful main push canaries from this repository", () => {
+  const condition = read("deploy.yml").jobs.deploy.if;
+  assert.equal(expression(condition, deployContext()), true);
+  for (const run of [
+    { event: "pull_request" }, { event: "pull_request_target" },
+    { event: "workflow_dispatch" }, { event: "schedule" }, { event: undefined },
+    { head_repository: { full_name: "someone/carr-system" } },
+    { head_repository: {} }, { head_repository: null },
+    { head_branch: "feature" }, { conclusion: "failure" }, { conclusion: "cancelled" },
+  ]) {
+    assert.equal(expression(condition, deployContext("workflow_run", run)), false, JSON.stringify(run));
+  }
+});
+
+test("deploy preserves manual dispatch on main and refuses other events and refs", () => {
+  const condition = read("deploy.yml").jobs.deploy.if;
+  const manual = { event_name: "workflow_dispatch", ref: "refs/heads/main", event: {} };
+  assert.equal(expression(condition, manual), true);
+  assert.equal(expression(condition, { ...manual, ref: "refs/heads/feature" }), false);
+  for (const event_name of ["push", "pull_request", "schedule"]) {
+    assert.equal(expression(condition, deployContext(event_name)), false);
+  }
+});
