@@ -609,8 +609,9 @@ class Run:
             if missing or not people:
                 unresolved[candidate] = {'participants': missing}
             for email, name in people:
-                if matcher.reason(email):
-                    self.unmatched.add((name or '(no name)', _domain(email), matcher.reason(email)))
+                reason = matcher.reason(email)
+                if reason is not None:
+                    self.unmatched.add((name or '(no name)', _domain(email), reason))
         self.state.update(calendar_evidence=evidence, calendar_unresolved=unresolved, calendar_policy=1)
         self.state.pop('calendar_due_at', None)
         self.state.pop('upcoming', None)
