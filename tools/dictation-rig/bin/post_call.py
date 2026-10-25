@@ -24,7 +24,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-import post_call_jev
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import flashlib
 
@@ -704,6 +703,17 @@ def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
         ) from exc
 
 
+def run_session(session_dir: Path) -> dict[str, Any]:
+    """Keep model dependencies out of the Accessibility-granted companion."""
+    entry = Path(__file__).resolve()
+    python = entry.parents[3] / ".venv" / "bin" / "python3"
+    result = subprocess.run(
+        [str(python), str(entry), str(session_dir)],
+        capture_output=True, text=True, check=True, timeout=1800,
+    )
+    return json.loads(result.stdout)
+
+
 def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]] = default_distiller) -> dict[str, Any]:
     existing = read_json(session_dir / STATUS_FILE)
     if (session_dir / REPORT_FILE).exists() and existing is not None:
@@ -736,6 +746,8 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         write_private(session_dir / STATUS_FILE, status)
         return status
     try:
+        import post_call_jev
+
         stored_context = read_json(session_dir / CONTEXT_FILE) or {}
         jev_context = {**context, "speaker_labels": stored_context.get("speaker_labels"),
                        "local_partner": stored_context.get("recorder")}
@@ -942,3 +954,13 @@ def create_outlook_draft(session_dir: Path, draft_id: str, approved_content_hash
     drafts["drafts"][draft_id] = {"content_hash": approved_content_hash, "created_at": now()}
     write_private(session_dir / DRAFTS_FILE, drafts)
     return {"draft_id": draft_id, "content_hash": approved_content_hash, "idempotent": False}
+
+
+if __name__ == "__main__":
+    from credential_env import load_carr_tokens
+
+    for name, value in load_carr_tokens(
+        ["TYPESAFE_API_KEY"], path=Path.home() / ".config/carr/typesafe.env",
+    ).items():
+        os.environ.setdefault(name, value)
+    print(json.dumps(process_session(Path(sys.argv[1]).resolve())))

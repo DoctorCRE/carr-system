@@ -266,7 +266,7 @@ VIEW_ROWS = {
     "    def cursor(self):\n"
     "        yield _Cursor()\n"
     "@contextlib.contextmanager\n"
-    "def connect():\n"
+    "def connect(*, credential_file=None):\n"
     "    yield _Conn()\n")
 (root / "run.sh").write_text(
     "#!/usr/bin/env python3\nimport json,sys\n"
