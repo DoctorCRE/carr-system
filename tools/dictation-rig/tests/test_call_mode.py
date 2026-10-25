@@ -582,8 +582,53 @@ class PostCallTests(unittest.TestCase):
         )
         self.assertEqual([item["kind"] for item in shaped["legacy_items"]], ["activity"])
         self.assertEqual(shaped["legacy_items"][0]["payload"]["ref"], "deal-a")
+        self.assertIsNone(shaped["post_call_items"][0]["due_on"])
         remote_items = shaped["post_call_items"] + shaped["legacy_items"]
         self.assertLessEqual(max(len(item["evidence_quote"].split()) for item in remote_items), 15)
+
+    def test_explicit_action_dates_reach_review_and_candidate_submission(self) -> None:
+        (self.session / "transcript.json").write_text(json.dumps({"segments": [
+            {"speaker": "Joe", "text": "I will call Vendor A on February 29, 2028."},
+            {"speaker": "Dell", "text": "I will review the proposal."},
+        ]}))
+        post_call.store_context(self.session, self.context)
+        output = self.output(joe_tasks=[{
+            "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
+            "evidence": "Joe will call on February 29, 2028.", "due_on": "2028-02-29",
+        }], dell_tasks=[{
+            "title": "Review proposal", "deal_id": "deal-b", "participant_ids": [],
+            "evidence": "Dell will review the proposal.", "due_on": None,
+        }])
+        status = post_call.process_session(self.session, distiller=lambda _request: output)
+        self.assertEqual(status["state"], "ready_review")
+        report = post_call.report_for_deal_room(self.session)["report"]
+        self.assertEqual(report["joe_tasks"][0]["due_on"], "2028-02-29")
+        self.assertIsNone(report["dell_tasks"][0]["due_on"])
+        self.assertEqual(report["joe_tasks"][0]["candidate_status"], "unfiled")
+        actions = [item for item in post_call.sanitized_candidates(self.session)["post_call_items"]
+                   if item["kind"] == "assigned_action"]
+        self.assertEqual([(item["assignee"], item["due_on"]) for item in actions],
+                         [("joe", "2028-02-29"), ("dell", None)])
+
+    def test_invalid_action_dates_block_without_creating_candidates(self) -> None:
+        invalid_dates: tuple[object, ...] = (
+            "2027-02-29", "2026-04-31", "20261025", "2026-1-01",
+            "tomorrow", "2026-10-25T12:00:00Z", "", True, 23, {},
+        )
+        for owner in ("joe", "dell"):
+            for due_on in invalid_dates:
+                with self.subTest(owner=owner, due_on=due_on):
+                    (self.session / post_call.REPORT_FILE).unlink(missing_ok=True)
+                    post_call.store_context(self.session, self.context)
+                    output = self.output(joe_tasks=[], dell_tasks=[])
+                    output[f"{owner}_tasks"] = [{
+                        "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
+                        "evidence": "Call vendor", "due_on": due_on,
+                    }]
+                    status = post_call.process_session(self.session, distiller=lambda _request: output)
+                    self.assertEqual(status["state"], "blocked")
+                    self.assertIn("due_on", status["reason"])
+                    self.assertFalse((self.session / post_call.REPORT_FILE).exists())
 
     def test_candidate_receipts_are_bound_to_private_report_items(self) -> None:
         post_call.store_context(self.session, self.context)
@@ -656,6 +701,11 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(json.loads(argv[argv.index("--json-schema") + 1])["required"],
                          ["schema_version", "report", "joe_tasks", "dell_tasks",
                           "deal_updates", "draft_proposals", "review_questions"])
+        schema = json.loads(argv[argv.index("--json-schema") + 1])
+        for owner in ("joe", "dell"):
+            action = schema["properties"][f"{owner}_tasks"]["items"]
+            self.assertIn("due_on", action["required"])
+            self.assertEqual(action["properties"]["due_on"]["type"], ["string", "null"])
         source = json.loads(runner.call_args.kwargs["input"])
         self.assertEqual(source["CONTEXT"], self.context)
         self.assertEqual(source["TRANSCRIPT"]["segments"][0]["text"], "Call Vendor A")

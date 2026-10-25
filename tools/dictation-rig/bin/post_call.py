@@ -18,7 +18,7 @@ import sys
 import tempfile
 import urllib.parse
 import fcntl
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -59,10 +59,12 @@ def distiller_json_schema() -> dict[str, Any]:
             }, ["summary", "decisions", "open_questions"]),
             "joe_tasks": {"type": "array", "items": item({
                 **common, "title": {"type": "string"},
-            }, ["title", "deal_id", "participant_ids", "evidence"])},
+                "due_on": {"type": ["string", "null"], "format": "date"},
+            }, ["title", "deal_id", "participant_ids", "evidence", "due_on"])},
             "dell_tasks": {"type": "array", "items": item({
                 **common, "title": {"type": "string"},
-            }, ["title", "deal_id", "participant_ids", "evidence"])},
+                "due_on": {"type": ["string", "null"], "format": "date"},
+            }, ["title", "deal_id", "participant_ids", "evidence", "due_on"])},
             "deal_updates": {"type": "array", "items": item({
                 **common, "summary": {"type": "string"},
             }, ["deal_id", "summary", "participant_ids", "evidence"])},
@@ -273,7 +275,17 @@ def _validate_distillation(value: Any) -> dict[str, Any]:
         for item in items:
             if not isinstance(item, dict):
                 raise ContractError(f"{list_name} item must be an object")
-            _strict_keys(item, required)
+            is_action = list_name in {"joe_tasks", "dell_tasks"}
+            _strict_keys(item, required, {"due_on"} if is_action else set())
+            if is_action:
+                due_on = item.setdefault("due_on", None)
+                if due_on is not None:
+                    try:
+                        valid_date = isinstance(due_on, str) and date.fromisoformat(due_on).isoformat() == due_on
+                    except ValueError:
+                        valid_date = False
+                    if not valid_date:
+                        raise ContractError(f"{list_name}.due_on must be a YYYY-MM-DD calendar date or null")
             for key in required - {"deal_id", "participant_ids"}:
                 _string(item[key], f"{list_name}.{key}")
             if not isinstance(item["deal_id"], str) or not item["deal_id"].strip():
@@ -377,6 +389,8 @@ def _distiller_instruction() -> str:
         "Use only exact deal_id and party_id values present in CONTEXT; never copy display names into ID fields. "
         "When Joe says he/I/we will do something, create a joe_tasks item. "
         "When Dell says he/I/we will do something, create a dell_tasks item. "
+        "For each task, use due_on as YYYY-MM-DD only when the transcript states an unambiguous calendar date, including the year. "
+        "Use null when no date is stated. For relative dates or dates with an unclear year, use null and add a question to review_questions; never guess a date. "
         "A deal status statement creates a deal_updates item. "
         "A request to tell, update, email, or draft a message to an exact attached participant creates a draft_proposals item. "
         "Each item includes a transcript evidence phrase of at most 15 words and only attached participant_ids (an array of exact party_id strings, [] if none). "
@@ -386,8 +400,8 @@ def _distiller_instruction() -> str:
         "(no renaming, no extra keys, empty arrays/strings when there is nothing to report):\n"
         '{"schema_version": 1, '
         '"report": {"summary": "<string>", "decisions": ["<string>", ...], "open_questions": ["<string>", ...]}, '
-        '"joe_tasks": [{"title": "<string>", "deal_id": "<exact deal id>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
-        '"dell_tasks": [{"title": "<string>", "deal_id": "<exact deal id>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
+        '"joe_tasks": [{"title": "<string>", "due_on": null, "deal_id": "<exact deal id>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
+        '"dell_tasks": [{"title": "<string>", "due_on": null, "deal_id": "<exact deal id>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
         '"deal_updates": [{"deal_id": "<exact deal id>", "summary": "<string>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
         '"draft_proposals": [{"recipient_party_id": "<exact party id>", "deal_id": "<exact deal id>", "subject": "<string>", "body": "<string>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
         '"review_questions": ["<string>", ...]}\n'
@@ -586,7 +600,7 @@ def sanitized_candidates(session_dir: Path) -> dict[str, Any]:
                 continue
             post_call_items.append({
                 "kind": "assigned_action", "deal_id": task["deal_id"], "assignee": owner,
-                "action": task["title"], "due_on": None, "evidence_quote": task["evidence"],
+                "action": task["title"], "due_on": task.get("due_on"), "evidence_quote": task["evidence"],
                 "confidence": 0.5,
             })
             bindings.append(_candidate_binding(list_name, index, "post_call"))
