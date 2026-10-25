@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Mapping, Protocol, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.disposable_pg_fixture import DisposablePostgres
+from lib.disposable_pg_fixture import DisposablePostgres, postgres_bin_dir
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -220,31 +220,11 @@ def scrub_cloud_environment(source: Mapping[str, str]) -> dict[str, str]:
 
 
 def find_postgres_binaries() -> PostgresBinaries:
-    override = os.environ.get("CARR_LOCAL_PG_BIN_DIR", "").strip()
-    candidates: list[Path] = []
-    if override:
-        path = Path(override)
-        if not path.is_absolute():
-            raise LocalPGRefusal("CARR_LOCAL_PG_BIN_DIR must be an absolute path")
-        candidates.append(path)
-    candidates.extend(
-        [
-            Path("/opt/homebrew/opt/postgresql@17/bin"),
-            Path("/usr/local/opt/postgresql@17/bin"),
-            Path("/opt/homebrew/opt/postgresql@16/bin"),
-            Path("/usr/local/opt/postgresql@16/bin"),
-        ]
-    )
-    located = shutil.which("initdb")
-    if located:
-        candidates.append(Path(located).resolve().parent)
-    for directory in candidates:
-        paths = {name: directory / name for name in ("initdb", "pg_ctl", "createdb", "psql")}
-        if all(path.is_file() and os.access(path, os.X_OK) for path in paths.values()):
-            return PostgresBinaries(**paths)  # type: ignore[arg-type]
-    raise LocalPGRefusal(
-        "PostgreSQL client/server binaries were not found; install Homebrew postgresql@17"
-    )
+    try:
+        directory = postgres_bin_dir()
+    except (ValueError, FileNotFoundError) as exc:
+        raise LocalPGRefusal(str(exc)) from exc
+    return PostgresBinaries(*(directory / name for name in ('initdb', 'pg_ctl', 'createdb', 'psql')))
 
 
 def _failure_detail(result: CommandResult, lines: int = 12) -> str:

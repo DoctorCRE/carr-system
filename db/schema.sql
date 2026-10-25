@@ -90283,6 +90283,23 @@ CREATE VIEW public.v_lead_workspace AS
 
 
 --
+-- Name: v_lead_workspace_correspondence; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_lead_workspace_correspondence AS
+ SELECT a.id,
+    a.lead_id,
+    a.kind,
+    a.occurred_at,
+    a.summary,
+    a.detail,
+    a.source,
+    a.connected
+   FROM (public.activity a
+     JOIN public.v_lead_workspace b ON ((b.id = a.lead_id)));
+
+
+--
 -- Name: v_lead_workspace_detail; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -90325,6 +90342,30 @@ CREATE VIEW public.v_lead_workspace_detail AS
                   WHERE (v_lead_stage_transition.lead_id = b.id)
                   ORDER BY v_lead_stage_transition.mutation_order DESC
                  LIMIT 100) e) h ON (true));
+
+
+--
+-- Name: v_lead_workspace_stage_history; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_lead_workspace_stage_history AS
+ SELECT e.event_id,
+    e.lead_id,
+    e.mutation_order,
+    e.occurred_at,
+    e.prior_stage,
+    e.stage,
+    e.cause,
+    e.automatic,
+    e.reason,
+    e.idempotency_key,
+    e.stage_review,
+    e.actor_id,
+    e.actor_slug,
+    e.before_version,
+    e.after_version
+   FROM (public.v_lead_stage_transition e
+     JOIN public.v_lead_workspace b ON ((b.id = e.lead_id)));
 
 
 --
@@ -120079,6 +120120,10 @@ grant select on table public.v_lead_workspace to carr_authority;
 grant select on table public.v_lead_workspace to carr_reader;
 grant select on table public.v_lead_workspace to carr_writer;
 grant select on table public.v_lead_workspace to dot_reader;
+grant select on table public.v_lead_workspace_correspondence to carr_authority;
+grant select on table public.v_lead_workspace_correspondence to carr_reader;
+grant select on table public.v_lead_workspace_correspondence to carr_writer;
+grant select on table public.v_lead_workspace_correspondence to dot_reader;
 grant select on table public.v_lead_workspace_detail to carr_authority;
 grant select on table public.v_lead_workspace_detail to carr_reader;
 grant select on table public.v_lead_workspace_detail to carr_writer;
@@ -120086,6 +120131,10 @@ grant select on table public.v_lead_workspace_detail to dot_reader;
 grant select on table public.v_lead_workspace_lifecycle to carr_authority;
 grant select on table public.v_lead_workspace_lifecycle to carr_writer;
 grant select on table public.v_lead_workspace_lifecycle to dot_reader;
+grant select on table public.v_lead_workspace_stage_history to carr_authority;
+grant select on table public.v_lead_workspace_stage_history to carr_reader;
+grant select on table public.v_lead_workspace_stage_history to carr_writer;
+grant select on table public.v_lead_workspace_stage_history to dot_reader;
 grant select on table public.v_loop_bell_cap to dot_reader;
 grant select on table public.v_loop_no_blocker to carr_exporter;
 grant select on table public.v_loop_no_blocker to carr_reader;
@@ -122521,6 +122570,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0957_retire_scac_catalog_commit_check.sql	1a26b1a8e517c15d62b3a0fbd96b2f59278c1596839e33b3d4e6c423ab9c6a97	1970-01-01 00:00:00+00
 0958_doctrine_embeddings.sql	46c23b9e4f9888bdf0f817c06e06d74440b89a5cb5dd1923310a7aa05268ac45	1970-01-01 00:00:00+00
 0959_retire_approved_control_refusals.sql	b124bf9f5ae4f4aae271b5960cc3801d94aa03909243e3ecc8f3b88cee200020	1970-01-01 00:00:00+00
+0961_lead_history_pages.sql	b14f721d9ceb060b42920a3fa52208aa8368c11a96177c5f30783cb609439f49	1970-01-01 00:00:00+00
 \.
 
 

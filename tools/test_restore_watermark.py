@@ -56,7 +56,7 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 from lib import recovery_evidence  # noqa: E402
-from lib.disposable_pg_fixture import DisposablePostgres
+from lib.disposable_pg_fixture import DisposablePostgres, postgres_bin_dir
 TOOL = REPO / "tools" / "restore-watermark.py"
 REHEARSE = REPO / "bin" / "restore-rehearse.sh"
 EVALUATOR = REPO / "mcp-server" / "bin" / "recovery-matrix-evaluate.mjs"
@@ -1511,14 +1511,11 @@ class OutboundCensus(unittest.TestCase):
 def _pg_bins():
     """One directory holding a real server beside its client tools (libpq alone ships no server)."""
     names = ("initdb", "pg_ctl", "pg_dump", "psql", "postgres")
-    dirs = [Path(p).parent for p in filter(None, [shutil.which("postgres")])]
-    dirs += [Path(d) for d in ("/opt/homebrew/opt/postgresql@17/bin", "/usr/local/opt/postgresql@17/bin",
-                               "/usr/lib/postgresql/17/bin", "/usr/lib/postgresql/16/bin")]
-    for d in dirs:
-        cand = {n: str(d / n) for n in names}
-        if all(Path(p).exists() for p in cand.values()):
-            return cand
-    return None
+    try:
+        directory = postgres_bin_dir(names)
+    except FileNotFoundError:
+        return None
+    return {name: str(directory / name) for name in names}
 
 
 def _psycopg_available() -> bool:
