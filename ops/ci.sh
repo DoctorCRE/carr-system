@@ -593,7 +593,7 @@ check_migration_fixtures() {
          fi
          shadow_note="; migration shadow not run (no PostgreSQL 18 here)" ;;
       *) tail -60 "$LOGDIR/migration-shadow.log" >&2
-         bad migration "migration shadow: pending migrations did not apply over the base snapshot, or db/schema.sql is not what they produce"
+         bad migration "migration shadow: pending migrations failed, or a changed db/schema.sql does not match their result"
          return ;;
     esac
   fi
