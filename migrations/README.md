@@ -76,6 +76,17 @@ filename/checksum ledger with the source. A regression in either side fails CI.
   lead stages come from the live registry at import, human-reviewed, never
   guessed.
 
+## Resync a migration PR with main
+
+`tools/migrate.py` treats the applied ledger as a prefix, so a new migration must
+sort above every migration on main. When main moves under an open migration PR:
+
+1. Merge `origin/main`; resolve `db/schema.sql` with `git checkout --theirs db/schema.sql`.
+2. If the migration-open-pr check names a new slot, `git mv` the file to it and update its references (`git grep` the old name).
+3. Run `PATH=~/carr-system/.venv/bin:$PATH python ops/migration-shadow.py --base origin/main --write` to regenerate `db/schema.sql`.
+
+Briefs give the rule ("next number above main"), never a fixed number.
+
 ## Files
 
 | file | what |

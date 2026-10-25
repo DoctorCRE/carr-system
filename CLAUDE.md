@@ -86,6 +86,7 @@ Measured from the Orchestrator.macbook transcript (37 hours, 11 compactions,
 ## Migration and release state
 Read current canonical migration/release state before naming frontier/blocker.
 Dated incidents/WRs are history; source/CI grants no live authority.
+Resyncing a migration PR with main: [migrations/README.md](migrations/README.md#resync-a-migration-pr-with-main).
 
 ## Map work has one mandatory front door
 
