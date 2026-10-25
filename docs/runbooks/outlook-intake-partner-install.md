@@ -93,9 +93,40 @@ Do not treat a New Outlook UI profile as separate storage without verification.
 	launchctl kickstart "gui/$(id -u)/com.carr.outlook-intake"
 	```
 
-10. Verify the completed run, Dell's activity actor, and Dell's follow-up owner using a synthetic test contact.
+10. Enter the approved synthetic test contact's CARR reference.
 
-Require a successful receipt, a Dell-owned follow-up, and no activity from another Outlook account.
+	```sh
+	read 'outlook_fixture_ref?Approved synthetic CARR reference: '
+	```
+
+11. Check the completed intake receipt and the synthetic contact's actor and follow-up owner.
+
+	```sh
+	.venv/bin/python - "$outlook_partner_principal" "$outlook_fixture_ref" <<'PY'
+	import json
+	from pathlib import Path
+	import subprocess
+	import sys
+	owner, ref = sys.argv[1:]
+	def call(verb, args):
+	    result = subprocess.run(['./run.sh', 'call', verb, '-'], input=json.dumps(args),
+	                            capture_output=True, text=True, check=True)
+	    return json.loads(result.stdout)
+	prefix = 'outlook-intake-receipt '
+	lines = Path('out/outlook-intake-launchd.log').read_text().splitlines()
+	receipts = [json.loads(line.split(prefix, 1)[1]) for line in lines if prefix in line]
+	assert receipts and receipts[-1]['state'] == 'succeeded', 'No successful intake receipt'
+	action = call('get-next-action', {'ref': ref, 'owner': owner})
+	assert action.get('ok') is True and action.get('owner') == owner and action.get('action'), 'No partner follow-up'
+	rows = call('catch-me-up', {'ref': ref, 'limit': 30}).get('timeline', [])
+	assert any(row.get('entry_kind') == 'activity' and row.get('actor') in (owner, owner + '-local')
+	           and row.get('verb') in ('email_in', 'email_out', 'meeting', 'tour', 'call') for row in rows), 'No partner activity'
+	print('PASS intake receipt, partner activity, and partner follow-up')
+	PY
+	```
+
+Use a fresh synthetic contact and input that requires a follow-up.
+Verify exclusion of another account through the account-isolation acceptance tests before activation.
 A loaded job alone does not prove ingestion. The synthetic contact and its input must be approved test fixtures.
 Do not publish mailbox content, private reports, state, or credentials as evidence.
 Keep the checkout at its installed path. The helper binds its source profile, output directory, and repository at compile time.
