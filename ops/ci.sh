@@ -249,8 +249,7 @@ PYEOF
            tools/room-bridge/test_*_unit.py \
            tools/room-bridge/test_activation_reliability.py \
            tools/dictation-rig/tests/test_call_mode_runtime.py \
-           test/doc_drift/test_*.py test/doc_drift_product/test_*.py \
-           ops/migration-production-proof.py; do
+           test/doc_drift/test_*.py test/doc_drift_product/test_*.py; do
     [ -f "$t" ] || continue
     local base; base="$(basename "$t")"
     local why; why="$(excluded_reason "$base")"

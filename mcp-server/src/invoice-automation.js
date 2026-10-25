@@ -1,4 +1,5 @@
 // Local readers submit derived invoice facts. No provider, raw message or send path.
+import { canExercisePartnerAuthority } from "./partner-authority.js";
 const normal = value => typeof value === "string" ? value.trim().replace(/\s+/g, " ").toLowerCase() : "";
 const candidateDeals = (invoice,deals) => deals.filter(d=>normal(d.name)===normal(invoice.deal_name));
 const dateText = value => value instanceof Date ? value.toISOString().slice(0, 10) : value;
@@ -139,7 +140,7 @@ export function invoiceAutomation({withEnvelope,writeEvent,ToolError,updateDeal,
       write:true,humanOnly:true,description:"Restore the phase and invoice date before an invoice close. Record the partner who undid it; refuse newer phase or invoice-date work.",
       inputSchema:{...schema({idempotency_key:{type:"string"},invoice_id:{type:"string",format:"uuid"},base_version:{type:"integer"}}),required:["idempotency_key","invoice_id","base_version"]},
       handler:(c,actor,args)=>withEnvelope(c,actor,"undo-invoice-close",args,async()=>{
-        if(!actor.human) fail("human_approval_required");
+        if(!canExercisePartnerAuthority(actor)) fail("human_approval_required");
         const m=(await c.query("select * from deal_invoice_email where id=$1",[args.invoice_id])).rows[0];
         if(!m || m.status!=="applied") fail("invoice_close_not_applied");
         await lockDealField(c,m.deal_id,"phase");

@@ -57,6 +57,13 @@ which supplies `typesafe_sdk`. That worker loads only `TYPESAFE_API_KEY` from
 Keep the venv provisioned on each partner's Mac; do not install the SDK into
 the Accessibility-granted interpreter.
 
+The post-call model step runs `claude -p --model sonnet` headlessly through
+the existing Claude subscription login. It sends the supplied transcript and
+exact call context on stdin, disables tools and session persistence, and
+validates the structured JSON before writing a review pack. The Claude CLI
+must be installed and signed in on each partner's Mac. Model failures leave
+the session blocked for retry, with its transcript and context retained.
+
 **Risk color: red, human initiated.** Starting a call fires the audible consent
 announcement and begins client-visible recording, so it only happens after Joe
 or Dell clicks Start. No schedule or background trigger can start a recording.

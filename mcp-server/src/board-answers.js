@@ -250,7 +250,7 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
     },
 
     "answer-board-question": {
-      write: true, humanOnly: true,
+      write: true, humanOnly: true, humanCallerOnly: true,
       description: "Partner answers the current revision. Sent means this answer row was durably written; answered_by comes from authenticated identity.",
       inputSchema: { type: "object", properties: {
         idempotency_key: { type: "string" }, board_id: { type: "string" },

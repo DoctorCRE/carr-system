@@ -112,15 +112,15 @@ above record this projection's provenance, not a current-version gate.
 
 The only authorized code homes are:
 
-- `DoctorCRE/carr-system`: the CARR-specific runtime and authority — canonical
+- [DoctorCRE/carr-system](https://github.com/DoctorCRE/carr-system): the CARR-specific runtime and authority — canonical
   business records, domain rules and doctrine, versioned APIs and MCP,
   migrations, runtime control plane, assurance fabric, authentication,
   environments, and CARR releases.
-- `jbookout/doctorcre-app`: DoctorCRE's independently built and deployed human
+- [jbookout/doctorcre-app](https://github.com/jbookout/doctorcre-app): DoctorCRE's independently built and deployed human
   application, including its UI, interaction logic, project knowledge, and
   app-only state. It uses authenticated versioned CARR contracts and never
   accesses the CARR database directly.
-- `jbookout/software-factory`: development-time orchestration and tooling —
+- [jbookout/software-factory](https://github.com/jbookout/software-factory): development-time orchestration and tooling —
   bounded agent workflows, skills, prompts, templates, scaffolds, CI and review
   conventions, evals, release helpers, and factory job/evidence records. It is
   not a product runtime and owns no product data, domain rules, standing
@@ -232,7 +232,7 @@ path with `./run.sh config verify-progress-board` and
 `./run.sh config check-launchd-main-paths`. After moving that checkout, rerun
 the explicit installer.
 `install-progress-board --apply` and `verify-progress-board` preserve canonical
-`out/boards`; `--repo` accepts only that checkout. Feature worktrees are refused,
+`out/boards/<project>.json`; `--repo` accepts only that checkout. Feature worktrees are refused,
 including pre-merge verification. `check-launchd-main-paths` audits installed
 WorkingDirectory and program paths for non-main worktrees without changing
 plists.

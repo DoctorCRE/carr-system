@@ -399,8 +399,12 @@ production cutover during a documentation change or offline review.
   and available recovery points during an incident. Do not promise a fixed six-hour
   window or a measured recovery-point bound from dated prose.
 - Off-Mac backup creation and off-Mac freshness observation are different controls.
-  The configured freshness observer is Mac-local. An independent off-Mac alert and
-  a scoped cloud-artifact restore drill remain unverified prerequisites.
+  `.github/workflows/backup-freshness.yml` independently checks qualified cloud
+  artifacts every six hours using `ops/recovery-point.py --cloud-only --json`.
+  Stale, missing or unreadable evidence fails the workflow for GitHub Actions
+  failure notifications. Local copies cannot mask a cloud failure. Notification
+  receipt depends on GitHub subscription settings and remains unverified, as
+  does a scoped cloud-artifact restore drill.
 - `./run.sh key-recovery-test --backup-run-id RUN` tests an authenticated cloud
   artifact with the paper identity. Omitting the option selects `latest`.
   It reads input silently,
