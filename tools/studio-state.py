@@ -242,11 +242,10 @@ def archive_r2(path: Path, digest: str, quota_bytes: int | None) -> dict:
         return {'state': 'owed', 'reason': 'quota_unconfirmed'}
     key = f'studio-state/{digest}/{path.name}'
     try:
-        with r2.ledger_lock():
-            ledger = r2.load_ledger()
-            r2.reconcile(ledger)
-            cap, provenance = quota_bytes, 'operator-reviewed current configured cap'
-            result = r2.upload(str(path), key, digest, path.stat().st_size, cap, provenance, ledger)
+        ledger = r2.load_ledger()
+        r2.reconcile(ledger)
+        cap, provenance = quota_bytes, 'operator-reviewed current configured cap'
+        result = r2.upload(str(path), key, digest, path.stat().st_size, cap, provenance, ledger)
     except r2.QuotaExceeded:
         return {'state': 'owed', 'reason': 'quota_refused', 'key': key}
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):

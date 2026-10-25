@@ -65,7 +65,7 @@ OUTDIR="${BACKUP_OUTPUT_DIR:-$REPO/backups}"
 mkdir -p "$OUTDIR"
 OUT="$OUTDIR/carr-$STAMP.sql.age"
 if [ -z "${BACKUP_SKIP_R2:-}" ]; then
-  OUT="$("$PYTHON" "$REPO/bin/backup-archive-r2.py" --select-output "$OUT")"
+  OUT="$OUTDIR/carr-$STAMP-$("$PYTHON" -c 'import uuid; print(uuid.uuid4().hex)').sql.age"
 fi
 
 # --no-owner --no-acl ADDED 2026-08-02, and the reason is a real failure, not style.
@@ -112,7 +112,7 @@ else
 import json,sys
 try:
     result=json.load(sys.stdin)
-    if result["archived"] is not True or result["state"] != "archived":
+    if result["archived"] is not True:
         raise ValueError("archive owed")
     key=result["key"]
     if not isinstance(key,str) or not key.startswith("backups/"):
@@ -121,12 +121,10 @@ try:
 except (ValueError, KeyError, TypeError):
     sys.exit(1)
 ')" || ARCHIVE_RC=1
-  "$PYTHON" "$REPO/bin/backup-archive-r2.py" --prune-local "$OUTDIR" \
-    || echo "local prune failed; archive result follows" >&2
   if [ "$ARCHIVE_RC" -eq 0 ]; then
     echo "backup ok -> $OUT ($SIZE bytes, floor was $FLOOR) -> R2 archive: $R2_KEY"
   else
-    echo "backup ok -> $OUT ($SIZE bytes, floor was $FLOOR) -> R2 archive: OWED; retry bin/backup-archive-r2.py with this file" >&2
+    echo "backup ok -> $OUT ($SIZE bytes, floor was $FLOOR) -> R2 archive: OWED; local ciphertext retained" >&2
     exit 1
   fi
 fi

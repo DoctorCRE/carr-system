@@ -249,7 +249,7 @@ class StudioState(unittest.TestCase):
         class QuotaExceeded(Exception):
             pass
         uploader = mock.Mock(return_value={'uploaded': True})
-        r2 = types.SimpleNamespace(ledger_lock=contextlib.nullcontext, load_ledger=lambda: {'objects': {}}, reconcile=lambda ledger: None,
+        r2 = types.SimpleNamespace(load_ledger=lambda: {'objects': {}}, reconcile=lambda ledger: None,
                                    upload=uploader, QuotaExceeded=QuotaExceeded, BUCKET='synthetic-state',
                                    DEFAULT_QUOTA_GB=8, GB=1024 ** 3,
                                    wrangler_bin=lambda: '/synthetic/wrangler',

@@ -626,7 +626,7 @@ def finish_records(plan: dict, out: dict, bucket: str, dry_run: bool = False) ->
         return {"skipped": "DATABASE_URL not set"}
     import psycopg
     res: dict[str, Any] = {"r2_bucket": bucket, "attachments": []}
-    with psycopg.connect(url) as cn, cn.cursor() as cur, r2.ledger_lock():
+    with psycopg.connect(url) as cn, cn.cursor() as cur:
         cur.execute("select id from actor where slug='joe'")
         actor_row = cur.fetchone()
         if actor_row is None:

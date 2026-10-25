@@ -43,44 +43,22 @@ age identity and account-access dependencies. R2 upload can skip successfully
 when configuration is absent. A successful workflow alone does not prove an
 R2 object exists, decrypts, or restores. Confirm the selected copy independently.
 
-### Verify and retry the Studio database archive
+### Verify the Studio database archive
 
-The Studio backup reports R2 success only after downloading the selected remote
-ciphertext and matching its exact byte count and SHA-256. An upload response or
-local usage-ledger entry alone does not establish a verified archive. The cloud
-workflow's separate R2 copy is unchanged by this check.
+`bin/backup-dump.sh` reports an R2 archive only after the archiver succeeds and
+remote ciphertext matches both the local SHA-256 and byte count. A quota refusal,
+failed upload or failed readback exits nonzero and reports `R2 archive: OWED`.
+A usage-ledger cache hit is not remote proof.
 
-Each local ciphertext has a private `.archive.json` receipt beside it. An owed
-receipt persists before an upload starts. Quota refusal, upload failure, and
-failed readback leave the local ciphertext available and make the Studio backup
-exit unsuccessfully with `R2 archive: OWED`. A dry run changes no receipt.
+Local generations have unique filenames. The backup command retains all local
+ciphertexts, including failed and unverified archives. It creates no owed-copy
+ledger or receipts and installs no retry job. Local disk usage can grow beyond
+14 dailies. Review independent recovery copies before removing local files.
+Cloud runs using `BACKUP_SKIP_R2` retain their canonical artifact filenames.
 
-All steps below are required to retry an owed archive.
-
-1. Select the retained local ciphertext named by the failed backup result.
-2. Retry its archive through the retained command.
-
-   ```sh
-   .venv/bin/python bin/backup-archive-r2.py /secure/recovery/carr-selected.sql.age
-   ```
-
-3. Require exit zero and a JSON receipt with `archived: true` and `state: archived`.
-4. Preserve the verified key and digest independently for incident recovery.
-
-Retry replaces a missing or unverifiable object at the same content-addressed
-key. The existing quota guard still applies. The persisted usage reservation
-remains until a replacement upload succeeds. No remote object is deleted.
-Local retention keeps the newest 14 copies and every older copy without a
-matching verified receipt. Each Studio generation selects a unique local name,
-so concurrent and same-day backups preserve existing ciphertext. Archival and
-pruning coordinate through a stable sibling lock file beside each ciphertext.
-Archive writers hold the shared usage-ledger lock across reconciliation, uploads,
-and summary saves, so concurrent retries cannot lose quota reservations.
-Unresolved owed copies can therefore require more local disk than 14 dailies.
-
-This covers the truthful archive and retry portion of audit Slice D, finding F5.
-It does not prove independent key custody, provider retention, decryption,
-restoration, off-Mac freshness alerting, or a measured recovery time.
+This covers truthful archive proof and local retention for audit Slice D,
+finding F5. It does not prove independent escrow, provider retention, freshness
+alerts, role bootstrap or recovery-time drills.
 
 ### Operator-held state inventory
 

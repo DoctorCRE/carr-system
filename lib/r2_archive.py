@@ -44,8 +44,6 @@ check somebody has to remember.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
-import fcntl
 import json
 import os
 import re
@@ -124,15 +122,6 @@ def quota_bytes(conn=None) -> tuple[int, str]:
 
 # ---------------------------------------------------------------- the ledger
 
-@contextmanager
-def ledger_lock():
-    """Hold across ledger load, reconciliation, uploads and usage-summary saves."""
-    os.makedirs(os.path.dirname(LEDGER), exist_ok=True)
-    with open(LEDGER + '.lock', 'a+b') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        yield
-
-
 def load_ledger(bucket: str = BUCKET) -> dict:
     if os.path.exists(LEDGER):
         try:
@@ -179,8 +168,8 @@ def bucket_size(bucket: str = BUCKET) -> tuple[int | None, int | None, str]:
     try:
         p = subprocess.run([w, "r2", "bucket", "info", bucket],
                            capture_output=True, text=True, timeout=90, env=_wrangler_env())
-    except subprocess.TimeoutExpired:
-        return None, None, "wrangler r2 bucket info timed out; bucket size not consulted"
+    except (OSError, subprocess.TimeoutExpired):
+        return None, None, "wrangler r2 bucket info unavailable; bucket size not consulted"
     if p.returncode != 0:
         return None, None, f"wrangler r2 bucket info failed: {(p.stderr or p.stdout).strip()[:200]}"
     out = p.stdout

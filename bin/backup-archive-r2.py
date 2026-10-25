@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
-"""Archive ciphertext with verified R2 readback and a durable local receipt.
+"""Upload an encrypted DB dump and verify its exact remote bytes.
 
-Run with a ciphertext path to archive or retry it. Exit 1 while the copy is
-owed. --dry-run changes no receipts. --prune-local DIRECTORY retains the newest
-14 files and every older file without a matching verified archive receipt.
+Exit 1 when the off-Mac copy is unverified. Local ciphertext is retained by
+backup-dump.sh. A dry run reports archived=false and sends no bytes.
 """
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
-import uuid
 import signal
 import sys
 
@@ -47,38 +43,6 @@ def sha256_of(path: str) -> str:
     return h.hexdigest()
 
 
-def save_receipt(path: Path, receipt: dict) -> None:
-    descriptor, temporary = tempfile.mkstemp(prefix='.archive-', dir=path.parent)
-    try:
-        with os.fdopen(descriptor, 'w') as stream:
-            json.dump(receipt, stream, sort_keys=True)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, str(path) + '.archive.json')
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
-
-
-def archived(path: Path) -> bool:
-    try:
-        if path.is_symlink() or not path.is_file():
-            return False
-        receipt = json.loads(Path(str(path) + '.archive.json').read_text())
-        digest = sha256_of(str(path))
-        return (receipt['archived'] is True and receipt['state'] == 'archived'
-                and receipt['bytes'] == path.stat().st_size and receipt['sha256'] == digest
-                and receipt['key'] == f'backups/{digest[:16]}/{path.name}'
-                and receipt['bucket'] == r2.BUCKET)
-    except (OSError, ValueError, KeyError, TypeError):
-        return False
-
-
 def verify_remote(key: str, digest: str, size: int) -> None:
     binary = r2.wrangler_bin()
     if not binary:
@@ -98,69 +62,16 @@ def verify_remote(key: str, digest: str, size: int) -> None:
 
 
 def main() -> int:
-    import argparse
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('path', nargs='?', type=Path)
-    parser.add_argument('--dry-run', action='store_true')
-    modes = parser.add_mutually_exclusive_group()
-    modes.add_argument('--prune-local', type=Path)
-    modes.add_argument('--select-output', type=Path)
-    args = parser.parse_args()
-    if (args.prune_local or args.select_output) and (args.path or args.dry_run):
-        parser.error('maintenance modes cannot archive a ciphertext path')
-    if args.prune_local:
-        copies = []
-        for path in args.prune_local.glob('carr-*.sql.age'):
-            try:
-                if not path.is_symlink() and path.is_file():
-                    copies.append((path.stat().st_mtime_ns, path))
-            except FileNotFoundError:
-                continue
-        copies.sort(reverse=True)
-        for _, copy in copies[14:]:
-            try:
-                with Path(str(copy) + '.lock').open('a+b') as lock:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    if archived(copy):
-                        copy.unlink()
-                        Path(str(copy) + '.archive.json').unlink()
-            except (FileNotFoundError, BlockingIOError):
-                continue
-        return 0
-    if args.select_output:
-        path = args.select_output
-        path = path.with_name(path.name.removesuffix('.sql.age') + f'-{uuid.uuid4().hex}.sql.age')
-        print(path)
-        return 0
-    if args.path is None:
-        parser.error('a ciphertext path is required')
-    path = args.path
-    if path.is_symlink() or not path.is_file():
-        parser.error('ciphertext must be a regular local file')
+    argv = sys.argv[1:]
+    dry_run = "--dry-run" in argv
+    paths = [a for a in argv if not a.startswith("--")]
+    if not paths:
+        sys.exit("usage: backup-archive-r2.py <path-to-.sql.age> [--dry-run]")
+    path = paths[0]
+    if not os.path.exists(path):
+        sys.exit(f"not found: {path}")
+
     arm_watchdog()
-    try:
-        with Path(str(path) + '.lock').open('a+b') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            if path.is_symlink() or not path.is_file():
-                parser.error('ciphertext disappeared before archival')
-            with r2.ledger_lock():
-                return archive(path, args.dry_run)
-    except FileNotFoundError:
-        parser.error('ciphertext disappeared before archival')
-
-
-def archive(path: Path, dry_run: bool) -> int:
-    sha = sha256_of(str(path))
-    size = path.stat().st_size
-    key = f'backups/{sha[:16]}/{path.name}'
-    try:
-        previous = json.loads(Path(str(path) + '.archive.json').read_text())
-    except (OSError, ValueError):
-        previous = {}
-    receipt = {'archived': False, 'state': 'owed', 'reason': 'archive_pending',
-               'key': key, 'bucket': r2.BUCKET, 'bytes': size, 'sha256': sha}
-    if not dry_run:
-        save_receipt(path, receipt)
 
     conn = None
     url = os.environ.get("DATABASE_URL")
@@ -194,41 +105,41 @@ def archive(path: Path, dry_run: bool) -> int:
         if conn is not None:
             r2.reconcile(led, conn)
 
-        if (isinstance(previous, dict) and previous.get('archived') is False
-                and previous.get('sha256') == sha and key in led['objects']):
-            # The persisted reservation stands until the same key is replaced successfully.
-            led['objects'][key] = {**led['objects'][key], 'sha256': None, 'bytes': 0}
+        sha = sha256_of(path)
+        size = os.path.getsize(path)
+        key = f"backups/{sha[:16]}/{os.path.basename(path)}"
+
+        result = {"archived": False, "key": key, "bucket": r2.BUCKET,
+                  "bytes": size, "sha256": sha, "reason": "upload_failed"}
         try:
-            receipt['reason'] = 'upload_failed'
-            r2.upload(str(path), key, sha, size, cap, provenance, led, dry_run=dry_run)
+            r2.upload(path, key, sha, size, cap, provenance, led, dry_run=dry_run)
             if dry_run:
-                receipt.update(state='dry_run', reason='dry_run')
+                result["reason"] = "dry_run"
             else:
-                receipt['reason'] = 'readback_failed'
+                result["reason"] = "readback_failed"
                 verify_remote(key, sha, size)
-                if path.stat().st_size != size or sha256_of(str(path)) != sha:
-                    raise ValueError('source changed')
-                receipt.update(archived=True, state='archived', reason='verified')
+                if os.path.getsize(path) != size or sha256_of(path) != sha:
+                    raise ValueError("source changed")
+                result.update(archived=True, reason="verified")
         except r2.QuotaExceeded:
-            receipt['reason'] = 'quota_exceeded'
+            result["reason"] = "quota_exceeded"
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-            if receipt['reason'] != 'readback_failed':
-                receipt['reason'] = 'upload_failed'
+            pass
         if not dry_run:
-            save_receipt(path, receipt)
-            print(r2.usage_summary(r2.load_ledger(), cap, provenance), file=sys.stderr)
-        print(json.dumps(receipt, sort_keys=True))
-        return 0 if receipt['archived'] or dry_run else 1
+            print(r2.usage_summary(led, cap, provenance), file=sys.stderr)
+        print(json.dumps(result, sort_keys=True))
+        return 0 if result["archived"] or dry_run else 1
     finally:
         # finally, not the tail of the success path: a quota refusal and an
         # upload error both returned before the old close() and leaked the
         # connection.
-        signal.alarm(0)
         if conn is not None:
             try:
                 conn.close()
             except Exception:  # noqa: BLE001
                 pass
+
+        signal.alarm(0)
 
 
 if __name__ == "__main__":
