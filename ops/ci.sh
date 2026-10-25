@@ -241,6 +241,7 @@ PYEOF
   for t in ops/*-selftest.py tools/test-*.py tools/test_*.py tools/*-selftest.py \
            tools/room-bridge/test_*_unit.py \
            tools/room-bridge/test_activation_reliability.py \
+           tools/dictation-rig/tests/test_call_mode_runtime.py \
            test/doc_drift/test_*.py test/doc_drift_product/test_*.py \
            ops/migration-production-proof.py; do
     [ -f "$t" ] || continue
