@@ -40,7 +40,7 @@ def run(repo: Path, now: datetime, waits: Waits = Waits(),
             return blocked
         pid = outlook_pid()
         found = usable_window(pid) if pid else None
-        if not found:
+        if not found or pid is None:
             return Outcome('failed', 'no_usable_main_window')
         try:
             expected_account = account(Path.home() / '.config/carr/outlook-account')
