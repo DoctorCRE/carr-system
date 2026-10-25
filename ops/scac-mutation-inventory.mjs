@@ -30,6 +30,7 @@ function delegatesTo(name) {
   if (name === "find-and-catch-up") return ["catch-me-up", "find"];
   if (name === "prepare-conversation") return ["find-and-catch-up", "who-do-we-know"];
   if (name === "morning-brief") return ["claim-card", "deal-room-board", "loop-board", "today-triage"];
+  if (name === "morning-brief-queue") return ["governance-queue", "today-triage"];
   if (name === "call-verb") return ["*registered_operation"];
   return [];
 }

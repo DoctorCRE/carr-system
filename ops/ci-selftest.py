@@ -168,6 +168,50 @@ def test_strict_turns_skip_into_failure():
     check("--strict failure explains why a skip counts",
           "stopped running" in out_strict.lower() or "skipped" in out_strict.lower())
 
+def test_binding_reports_missing_wrangler_as_skipped():
+    with ci_fixture() as root:
+        (root / "mcp-server/wrangler.toml").write_text(
+            'name = "fixture"\nmain = "worker.js"\ncompatibility_date = "2026-01-01"\n')
+        for strict in (False, True):
+            args = ["--only", "binding"] + (["--strict"] if strict else [])
+            rc, output = run(args, root=root)
+            check(f"binding without Wrangler {'fails strict CI' if strict else 'skips locally'}",
+                  rc == (1 if strict else 0)
+                  and re.search(r"SKIP\s+binding", output) is not None
+                  and re.search(r"OK\s+binding", output) is None,
+                  output)
+
+
+def test_binding_preserves_config_and_boot_failures():
+    with ci_fixture() as root:
+        config = root / "mcp-server/wrangler.toml"
+        valid = 'name = "fixture"\nmain = "worker.js"\ncompatibility_date = "2026-01-01"\n'
+        config.write_text('name = "fixture"\n')
+        rc, output = run(["--only", "binding"], root=root)
+        check("binding config failure is not masked by missing Wrangler",
+              rc == 1 and re.search(r"FAIL\s+binding", output) is not None, output)
+        wrangler = root / "mcp-server/node_modules/.bin/wrangler"
+        wrangler.parent.mkdir(parents=True)
+        wrangler.write_text("#!/bin/sh\nexit 0\n")
+        wrangler.chmod(0o755)
+        boot = root / "bin/worker-boot-check.sh"
+        for status in (0, 1):
+            config.write_text(valid)
+            boot.write_text(f"#!/bin/sh\necho fixture-boot-executed > boot-result\nexit {status}\n")
+            boot.chmod(0o755)
+            rc, output = run(["--strict", "--only", "binding"], root=root)
+            check(f"binding {'passes after successful boot' if status == 0 else 'fails after unsuccessful boot'}",
+                  rc == status and (root / "boot-result").read_text() == "fixture-boot-executed\n"
+                  and re.search(rf"{'OK' if status == 0 else 'FAIL'}\s+binding", output) is not None,
+                  output)
+            (root / "boot-result").unlink()
+        config.write_text('name = "fixture"\n')
+        boot.write_text("#!/bin/sh\nexit 0\n")
+        rc, output = run(["--strict", "--only", "binding"], root=root)
+        check("successful boot does not mask invalid config",
+              rc == 1 and re.search(r"FAIL\s+binding", output) is not None, output)
+
+
 def test_gates_build_hxprobe_before_parallel_selftests():
     with tempfile.TemporaryDirectory(prefix="carr-hxprobe-gates-") as directory:
         root = pathlib.Path(directory).resolve()
@@ -756,6 +800,46 @@ def test_fail_tail_withholds_the_window_when_it_cannot_redact():
           "WITHHELD" in out, out)
     check("and where the captured log actually is",
           str(log) in out, out)
+
+def test_gates_report_every_completed_result_after_a_timeout():
+    with ci_fixture() as root:
+        ci = root / "ops/ci.sh"
+        ci.write_text(ci.read_text().replace("CI_SELFTEST_TIMEOUT_SECONDS=120",
+                                            "CI_SELFTEST_TIMEOUT_SECONDS=1"))
+        (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
+        (root / "tools/test_migration_fixture.py").write_text("print('later tool passed')\n")
+        cases = {
+            "a-timeout": f"import time; print('first timeout {FIXTURE_TOKEN}', flush=True); time.sleep(10)",
+            "b-failure": "print('ordinary assertion failed'); raise SystemExit(7)",
+            "c-success": "print('later success passed')",
+            "d-skip": "print('fixture unavailable'); raise SystemExit(78)",
+            "e-timeout": "import time; print('second timeout', flush=True); time.sleep(10)",
+        }
+        for name, source in cases.items():
+            (root / f"ops/{name}-selftest.py").write_text(source + "\n")
+        marker = root / "shell-started"
+        shell = root / "tools/test_timeout_fixture.sh"
+        shell.write_text(f"#!/bin/sh\ntouch {shlex.quote(str(marker))}\n")
+        shell.chmod(0o755)
+        rc, out = run(["--strict", "--only", "gates"],
+                      env={"CARR_CI_GATE_JOBS": "1"}, root=root)
+        check("timeout keeps the gates verdict red", rc == 1, out)
+        check("every completed timeout is reported distinctly",
+              "TIMEOUT:a-timeout-selftest.py" in out
+              and "TIMEOUT:e-timeout-selftest.py" in out, out)
+        check("a later assertion failure reaches the verdict",
+              "ordinary assertion failed" in out and " b-failure-selftest.py" in out
+              and "TIMEOUT:b-failure" not in out, out)
+        check("later successful suites remain visible",
+              "later success passed" in out and "later tool passed" in out, out)
+        check("a later unconfigured suite is reported",
+              "d-skip-selftest.py" in out and "NOT CONFIGURED (exit 78)" in out, out)
+        check("completed Python work is not described as aborted",
+              "aborting remaining gate selftests" not in out, out)
+        check("timeout diagnostics pass through redaction",
+              FIXTURE_TOKEN not in out and "<redacted:github-token:40 chars>" in out)
+        check("unstarted shell suites remain withheld after timeout", not marker.exists(), out)
+
 
 def test_gates_selftests_have_a_process_group_watchdog():
     helper = REPO / "bin" / "with-timeout.py"
@@ -1347,6 +1431,8 @@ def main(argv=None):
                test_freshness_checks_the_tree_without_requiring_main_ancestry,
                test_no_green_without_running,
                test_strict_turns_skip_into_failure,
+               test_binding_reports_missing_wrangler_as_skipped,
+               test_binding_preserves_config_and_boot_failures,
                test_unknown_class_refuses,
                test_hxprobe_runs_locked_checks_and_propagates_failures,
                test_gates_build_hxprobe_before_parallel_selftests,
@@ -1367,6 +1453,7 @@ def main(argv=None):
                test_a_failing_gates_output_is_printed_whole_when_it_is_short,
                test_a_long_failing_gate_log_is_tailed_and_still_redacted,
                test_fail_tail_withholds_the_window_when_it_cannot_redact,
+               test_gates_report_every_completed_result_after_a_timeout,
                test_gates_selftests_have_a_process_group_watchdog,
                test_push_floor_defers_the_gates_class_instead_of_running_it,
                test_push_floor_distinguishes_imported_main_paths_from_branch_changes,

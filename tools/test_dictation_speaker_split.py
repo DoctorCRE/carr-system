@@ -197,7 +197,7 @@ class ProcessSessionWiringTest(unittest.TestCase):
         ])
         self.stub(transcribe_session, "resolve_model", lambda log: Path("/models/stub.bin"))
         self.stub(transcribe_session, "load_prompt", lambda: "")
-        self.stub(transcribe_session.post_call, "process_session", lambda session_dir: {"state": "stubbed"})
+        self.stub(transcribe_session.post_call, "run_session", lambda session_dir: {"state": "stubbed"})
 
     def stub(self, module: object, name: str, value: object) -> None:
         patcher = mock.patch.object(module, name, value)
