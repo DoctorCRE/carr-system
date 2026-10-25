@@ -680,6 +680,25 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(opened[ident(first)], NOW.isoformat())
         self.assertEqual(len(opened), 2)
 
+    def test_meeting_keeps_open_action_hidden_by_thirty_newer_timeline_rows(self):
+        self.fake.timeline['C-901'] = [
+            {'verb': 'log-activity', 'occurred_at': NOW.isoformat(), 'summary': 'Synthetic note'}
+            for _ in range(31)]
+        action = {'id': 'synthetic-action', 'version': 2,
+                  'updated_at': (NOW - timedelta(days=3)).isoformat()}
+        original = self.fake.carr
+        def server(verb, args):
+            if verb == 'get-next-action':
+                self.assertEqual(args, {'ref': 'C-901', 'owner': 'joe'})
+                return {'ok': True, 'owner': 'joe', 'action': action}
+            return original(verb, args)
+        self.fake.carr = server
+        result = self.run_intake(events=[event('G-protected', timedelta(days=2),
+                                  attendees=[('Pat Example', 'pat@example.test')])])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(self.fake.writes('set-next-action'), [])
+        self.assertEqual(result.counts['balls_kept'], 1)
+
     def test_one_model_call_per_new_matched_email_and_none_for_unmatched(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1)),
                          mail('stranger@example.test', -timedelta(hours=1), subject='Spam')])
