@@ -1,4 +1,4 @@
-"""Prepare one Outlook mail or calendar draft, or dispatch it when Joe asked.
+"""Prepare one Outlook mail or calendar draft, or dispatch it when requested.
 
 A default call leaves a field-verified draft open. Explicit send intent requires
 native confirmation after suppression, the ten-item daily limit, duplicate checks
@@ -28,9 +28,8 @@ from urllib.parse import quote
 import uuid
 
 from lib import outlook_ui as ui
-from zoneinfo import ZoneInfo
+from lib.outlook_settings import load_settings
 
-ACCOUNT_CONFIG = Path.home() / '.config/carr/outlook-account'
 OUT = Path('out/outlook-send')
 LEDGER = 'ledger.jsonl'
 IDLE_SECONDS = 300
@@ -169,15 +168,8 @@ def _run(command: list[str], **kwargs) -> subprocess.CompletedProcess:
         raise _transport_failure(exc) from None
 
 
-def account(path: Path = ACCOUNT_CONFIG) -> str:
-    """Read the local account identity; never put a real address in source."""
-    info = path.lstat()
-    if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.getuid():
-        raise ValueError('account config must be an owned 0600 regular file')
-    value = path.read_text().strip().lower()
-    if not ADDRESS.fullmatch(value):
-        raise ValueError('account config must contain one address')
-    return value
+def account() -> str:
+    return load_settings().account
 
 
 def _norm(text: str) -> str:
@@ -244,7 +236,7 @@ class Ledger:
 # ---- mailbox matching --------------------------------------------------------
 
 def mail_in_mailbox(snapshot: Snapshot, mail: Mail, since: float) -> bool:
-    """A message Joe sent since `since` with this subject to any of these recipients.
+    """A message sent since `since` with this subject to any of these recipients.
 
     hxprobe sometimes leaves recipients empty or misreads them, so an unreadable
     recipient list counts as a match: a refused send is safe, a duplicate is not.
@@ -392,7 +384,8 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
 
 def _send_refusal(item: Mail | Event, ports: Ports, ledger: Ledger) -> str | None:
     recipients = sorted(set(item.recipients if isinstance(item, Mail) else item.attendees))
-    if sum(address != account() and address.rsplit('@', 1)[-1] != 'carr.us' for address in recipients) > 1:
+    settings = load_settings()
+    if sum(address != account() and address.rsplit('@', 1)[-1] != settings.internal_domain for address in recipients) > 1:
         return 'one_to_one_required'
     if recipients:
         try:
@@ -406,7 +399,7 @@ def _send_refusal(item: Mail | Event, ports: Ports, ledger: Ledger) -> str | Non
             return 'contact_policy_unreadable'
         if any(row['blocked'] for row in rows):
             return 'do_not_contact'
-    zone = ZoneInfo('America/Chicago')
+    zone = settings.timezone
     today = datetime.fromtimestamp(ports.now(), zone).date()
     if ledger.path.exists():
         attempts = [json.loads(line) for line in ledger.path.read_text().splitlines()]
@@ -791,7 +784,7 @@ class DecodedMailbox:
 
     def __init__(self, home: Path, repo: Path | None = None):
         self.home = home
-        self.repo = repo or Path(__file__).resolve().parents[1]
+        self.repo = repo or load_settings().repo
 
     def snapshot(self) -> Snapshot:
         from lib.outlook_intake import OUT, WORK_PREFIX, _snapshot, _decoder
@@ -823,12 +816,15 @@ class DecodedMailbox:
 
 def default_ports(repo: Path | None = None) -> Ports:
     from lib import outlook_triage
-    repo = repo or Path(__file__).resolve().parents[1]
+    settings = load_settings()
+    repo = repo or settings.repo
+    settings.require_repo(repo)
 
     def carr(verb: str, args: dict) -> dict:
         # stdin keeps message text and addresses out of argv/process listings.
         done = _run([str(repo / 'run.sh'), 'call', verb, '-'], input=json.dumps(args),
-                              cwd=repo, capture_output=True, text=True, timeout=120)
+                              cwd=repo, capture_output=True, text=True, timeout=120,
+                              env=settings.transport_environment())
         return json.loads(done.stdout)
 
     def contacts() -> list[tuple[str, str, str]]:
@@ -836,7 +832,7 @@ def default_ports(repo: Path | None = None) -> Ports:
         matcher = load_module_from_path('outlook_send_contacts', str(repo / 'tools/calendar-touch-matcher.py'))
         rows = []
         for view, id_col, name_col, org_col in matcher.RECORD_VIEWS:
-            _, found = matcher.read_view(view)
+            _, found = matcher.read_view(view, credential_file=settings.database_credentials)
             for row in found:
                 if not row.get('_out_of_market'):
                     rows.append((str(row.get('Email') or '').strip().lower(),
@@ -846,14 +842,14 @@ def default_ports(repo: Path | None = None) -> Ports:
 
     return Ports(open_form=open_form, mailbox=DecodedMailbox(Path.home(), repo),
                  idle_seconds=outlook_triage.hid_idle_seconds, carr=carr, contacts=contacts,
-                 out=Path.home() / '.local/state/carr/outlook-send')
+                 out=settings.send_state)
 
 
 # ---- public interface --------------------------------------------------------
 
 def send(to, cc, bcc, subject: str, body: str, *, idempotency_key: str, record: str | None = None,
          ports: Ports | None = None, send_requested: bool = False) -> Result:
-    """Prepare one email; send it only when Joe requested this item."""
+    """Prepare one email; send it only when requested for this item."""
     mail = Mail(_addresses(to), _addresses(cc), _addresses(bcc), subject, body)
     if not mail.to or not subject.strip():
         raise ValueError('an email needs a To address and a subject')
@@ -886,7 +882,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog='run.sh outlook-send')
     parser.add_argument('kind', choices=('send', 'event'))
     parser.add_argument('--json', required=True, type=Path)
-    parser.add_argument('--send', action='store_true', help="send or save only when Joe asked for this item; default is draft")
+    parser.add_argument('--send', action='store_true', help="send or save only when requested for this item; default is draft")
     args = parser.parse_args(argv)
     info = args.json.lstat()
     if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.getuid():

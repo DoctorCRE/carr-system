@@ -48,6 +48,7 @@ COPIES = [
     "lib/machine_prerequisites.py",
     "lib/launchd_calendar.py",
     "lib/machine_role.py",
+    "lib/outlook_settings.py",
     "lib/studio_failover.py",
     "lib/launchd_scope.py",
     "ops/config/services.json",

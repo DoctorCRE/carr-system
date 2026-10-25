@@ -13,6 +13,9 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from outlook_test_support import write_settings
+from lib.outlook_settings import load_settings, SettingsError
 
 
 class CopyTest(unittest.TestCase):
@@ -41,6 +44,22 @@ class CopyTest(unittest.TestCase):
     def copy(self, *args, cwd=None, env=None):
         return subprocess.run([str(self.helper), *args], cwd=cwd or self.work,
                               env=env, capture_output=True)
+
+    def test_scope_readback_names_only_the_compiled_paths_without_copying(self):
+        result = self.copy('--scope', cwd=self.root)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.decode(), f'{self.profile}\n{self.out}\n{self.root}\n')
+        self.assertFalse((self.work / 'store.hxd').exists())
+
+    def test_runtime_refuses_a_settings_profile_that_differs_from_the_granted_binary(self):
+        settings_home = tempfile.TemporaryDirectory()
+        self.addCleanup(settings_home.cleanup)
+        home = Path(settings_home.name).resolve()
+        write_settings(home, self.root, profile=str(self.profile), copy_helper=str(self.helper))
+        load_settings(home).verify_helper()
+        write_settings(home, self.root, profile=str(self.root / 'Other Profile'), copy_helper=str(self.helper))
+        with self.assertRaisesRegex(SettingsError, 'outlook.json.*copy_helper.*scope differs'):
+            load_settings(home).verify_helper()
 
     def test_copies_only_the_fixed_store_and_body_sidecars_privately(self):
         self.assertEqual(self.copy().returncode, 0)
@@ -95,52 +114,96 @@ class CopyTest(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'darwin', 'the installer requires macOS zsh and plutil')
 class InstallerTest(unittest.TestCase):
-    def test_installer_builds_the_helper_and_prints_the_one_time_privacy_step(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp).resolve()
-            repo = root / 'repo'
-            home = root / 'home'
-            for relative in ('bin', 'tools', 'ops/launchd', 'lib', '.venv/bin', 'vendor-patches'):
-                (repo / relative).mkdir(parents=True)
-            for relative in ('bin/install-outlook-intake.sh', 'tools/outlook-intake-copy.c',
-                             'lib/outlook_intake.py',
-                             'ops/launchd/com.carr.outlook-intake.plist',
-                             'ops/launchd/com.carr.outlook-refresh.plist',
-                             'vendor-patches/hxprobe-calendar-and-bodies.patch'):
-                shutil.copyfile(ROOT / relative, repo / relative)
-            (repo / 'lib/machine_role.py').write_text('def is_primary(repo): return True\n')
-            (repo / 'lib/launchd_scope.py').write_text('def allowed_on_machine(name, primary): return primary\n')
-            (repo / '.venv/bin/python').symlink_to(sys.executable)
-            vendor = home / 'carr-local/hxstore-reverse-engineering'
-            (vendor / 'hxprobe/target/release').mkdir(parents=True)
-            decoder = vendor / 'hxprobe/target/release/hxprobe'
-            decoder.write_text('#!/bin/sh\nexit 99\n')
-            decoder.chmod(0o700)
-            digest = hashlib.sha256((repo / 'vendor-patches/hxprobe-calendar-and-bodies.patch').read_bytes()).hexdigest()
-            (vendor / '.carr-pin').write_text(f'191b54e42757687806202f8f696e9066f0514e11 {digest}\n')
-            command = ['/bin/zsh', '-f', '-c', 'export HOME="$1"; exec /bin/zsh -f "$2"',
-                       'installer-test', str(home), str(repo / 'bin/install-outlook-intake.sh')]
-            result = subprocess.run(command, capture_output=True, text=True, check=True)
-            helper = home / 'carr-local/bin/outlook-intake-copy'
-            self.assertTrue(helper.is_file())
-            self.assertEqual(stat.S_IMODE(helper.stat().st_mode), 0o700)
-            self.assertIn(f'grant Full Disk Access to {helper}', result.stdout)
-            self.assertFalse((home / 'Library/LaunchAgents').exists())
-            refresh = plistlib.loads((repo / 'out/com.carr.outlook-refresh.plist').read_bytes())
-            self.assertEqual(refresh['WorkingDirectory'], str(repo))
-            self.assertIn(str(repo / '.venv/bin/python'), refresh['ProgramArguments'])
-            self.assertEqual(stat.S_IMODE((repo / 'out/outlook-refresh-launchd.log').stat().st_mode), 0o600)
-            profile = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity'
-            profile.mkdir(parents=True)
-            (profile / 'HxStore.hxd').write_bytes(b'installer-fixture')
-            out = repo / 'out/outlook-intake'
-            out.mkdir(mode=0o700)
-            work = Path(tempfile.mkdtemp(prefix='work-', dir=out))
-            subprocess.run([str(helper)], cwd=work, capture_output=True, check=True)
-            self.assertEqual((work / 'store.hxd').read_bytes(), b'installer-fixture')
-            before = helper.stat().st_mtime_ns
-            subprocess.run(command, capture_output=True, text=True, check=True)
-            self.assertEqual(helper.stat().st_mtime_ns, before, 'an unchanged helper retains its privacy identity')
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.repo, self.home = self.root / 'repo & quoted', self.root / 'home'
+        for relative in ('bin', 'tools', 'ops/launchd', 'lib', '.venv/bin', 'vendor-patches'):
+            (self.repo / relative).mkdir(parents=True)
+        for relative in ('bin/install-outlook-intake.sh', 'bin/install-outlook-triage.sh',
+                         'tools/outlook-intake-copy.c', 'lib/outlook_settings.py',
+                         'ops/launchd/com.carr.outlook-intake.plist',
+                         'ops/launchd/com.carr.outlook-refresh.plist',
+                         'ops/launchd/com.carr.outlook-triage.plist',
+                         'vendor-patches/hxprobe-calendar-and-bodies.patch'):
+            shutil.copyfile(ROOT / relative, self.repo / relative)
+        (self.repo / '.venv/bin/python').symlink_to(sys.executable)
+        self.profile = self.home / 'Custom Profile'
+        self.helper = self.home / 'custom binaries/granted-outlook-copy'
+        self.vendor = self.home / 'custom vendor/hxstore'
+        self.config = write_settings(self.home, self.repo, profile=str(self.profile),
+                                     vendor=str(self.vendor), copy_helper=str(self.helper))
+        (self.vendor / 'hxprobe/target/release').mkdir(parents=True)
+        decoder = self.vendor / 'hxprobe/target/release/hxprobe'
+        decoder.write_text('#!/bin/sh\nexit 99\n')
+        decoder.chmod(0o700)
+        digest = hashlib.sha256((self.repo / 'vendor-patches/hxprobe-calendar-and-bodies.patch').read_bytes()).hexdigest()
+        (self.vendor / '.carr-pin').write_text(f'191b54e42757687806202f8f696e9066f0514e11 {digest}\n')
+
+    def install(self, name='intake', check=True):
+        command = ['/bin/zsh', '-f', '-c', 'export HOME="$1"; exec /bin/zsh -f "$2"',
+                   'installer-test', str(self.home), str(self.repo / f'bin/install-outlook-{name}.sh')]
+        return subprocess.run(command, capture_output=True, text=True, check=check)
+
+    def test_installer_uses_settings_without_a_machine_role_and_preserves_the_granted_binary(self):
+        result = self.install()
+        self.assertTrue(self.helper.is_file())
+        self.assertEqual(stat.S_IMODE(self.helper.stat().st_mode), 0o700)
+        self.assertIn(f'grant Full Disk Access to {self.helper}', result.stdout)
+        self.assertFalse((self.home / 'Library/LaunchAgents').exists())
+        for service in ('intake', 'refresh'):
+            rendered = plistlib.loads((self.repo / f'out/com.carr.outlook-{service}.plist').read_bytes())
+            self.assertEqual(rendered['WorkingDirectory'], str(self.repo))
+            self.assertEqual(rendered['EnvironmentVariables']['PATH'], load_settings(self.home).executable_path)
+            self.assertEqual(stat.S_IMODE((self.repo / f'out/outlook-{service}-launchd.log').stat().st_mode), 0o600)
+        intake = plistlib.loads((self.repo / 'out/com.carr.outlook-intake.plist').read_bytes())
+        self.assertEqual(intake['ProgramArguments'][0], str(self.helper))
+        self.profile.mkdir(parents=True)
+        (self.profile / 'HxStore.hxd').write_bytes(b'installer-fixture')
+        out = self.repo / 'out/outlook-intake'
+        out.mkdir(mode=0o700)
+        work = Path(tempfile.mkdtemp(prefix='work-', dir=out))
+        subprocess.run([str(self.helper)], cwd=work, capture_output=True, check=True)
+        self.assertEqual((work / 'store.hxd').read_bytes(), b'installer-fixture')
+        load_settings(self.home).verify_helper()
+        before = self.helper.stat().st_mtime_ns
+        self.install()
+        self.assertEqual(self.helper.stat().st_mtime_ns, before, 'an unchanged helper retains its privacy identity')
+
+    def test_invalid_settings_refuse_both_installers_before_build_or_launchagent_writes(self):
+        self.config.unlink()
+        for service in ('intake', 'triage'):
+            result = self.install(service, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(str(self.config), result.stderr)
+            self.assertIn('file', result.stderr)
+        self.assertFalse(self.helper.exists())
+        self.assertFalse((self.repo / 'out').exists())
+        self.assertFalse((self.home / 'Library/LaunchAgents').exists())
+
+    def test_disabled_service_refuses_before_build(self):
+        write_settings(self.home, self.repo, services=['triage'])
+        result = self.install(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('outlook.json', result.stderr)
+        self.assertIn('services', result.stderr)
+        self.assertFalse(self.helper.exists())
+        self.assertFalse((self.repo / 'out').exists())
+
+    def test_triage_installer_uses_configured_guide_and_search_path_without_loading(self):
+        guide = self.home / 'custom folders.md'
+        guide.write_text('Synthetic folder guide')
+        guide.chmod(0o600)
+        write_settings(self.home, self.repo, folder_guide=str(guide), executable_path='/usr/bin:/bin')
+        result = self.install('triage')
+        dest = self.home / 'Library/LaunchAgents/com.carr.outlook-triage.plist'
+        self.assertTrue(dest.is_file())
+        self.assertIn('NOT loaded', result.stdout)
+        rendered = plistlib.loads(dest.read_bytes())
+        self.assertEqual(rendered['WorkingDirectory'], str(self.repo))
+        self.assertEqual(rendered['EnvironmentVariables']['PATH'], '/usr/bin:/bin')
+        self.assertEqual(stat.S_IMODE((self.repo / 'out/outlook-triage-launchd.log').stat().st_mode), 0o600)
 
 
 if __name__ == '__main__':
