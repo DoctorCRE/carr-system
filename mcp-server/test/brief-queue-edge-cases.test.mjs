@@ -75,3 +75,25 @@ test('an unlabeled eligible decision renders through the pinned app queue consum
   assert.match(view.content.innerHTML, /Decision loop:17/);
   assert.deepEqual(page.items[0].records, ['loop:17']);
 });
+
+for (const limit of [50, 1]) test(`same-number same-title decisions from different sources render with page limit ${limit}`, async () => {
+  const c = client(['open_loop', 'action_required'].map(kind => ({ number: '17', kind,
+    owner: 'joe', marker: 'decision', label: 'Same decision title', created_at: new Date('2026-01-01') })));
+  const first = await executeRegisteredTool(c, joe, 'morning-brief-queue', { queue: 'needs_joe', limit });
+  assert.equal(first.total, 2);
+  const pages = [first];
+  if (first.has_more) pages.push(await executeRegisteredTool(c, joe, 'morning-brief-queue',
+    { queue: 'needs_joe', limit, cursor: first.next_cursor }));
+  const view = await consumerView([...pages]);
+  assert.equal(view.updated.error, false);
+  if (first.has_more) {
+    view.view.click({ target: { closest: selector => selector === '[data-brief-queue-more]' ? {} : null } });
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.equal(view.updated.error, false);
+  assert.equal(view.content.innerHTML.match(/data-queue-item=/g)?.length, 2);
+  assert.match(view.content.innerHTML, /2 of 2/);
+  const items = pages.flatMap(page => page.items);
+  assert.equal(new Set(items.map(row => JSON.stringify([row.key, row.title]))).size, 2);
+  for (const row of items) assert.deepEqual(row.records, ['loop:17']);
+});

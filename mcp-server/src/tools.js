@@ -3412,7 +3412,8 @@ export const TOOLS = {
       if (args.queue === "needs_joe") {
         if (scope.sponsor !== "joe") throw new ToolError({ error: "needs_joe_not_applicable" });
         value = (await executeRegisteredTool(c, actor, "governance-queue", {})).needs_joe;
-        value = { ...value, items: value.items.map(row => ({ ...row, title: row.title || `Decision ${row.key}` })) };
+        value = { ...value, items: value.items.map(row => ({ ...row,
+          key: `${row.source}:${row.key}`, title: row.title || `Decision ${row.key}` })) };
         key = briefNeedsJoeKey;
       } else {
         value = { items: await readBriefLoops(c) };
