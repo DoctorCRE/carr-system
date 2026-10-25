@@ -1,6 +1,7 @@
 """Implementation of grok-run.sh; stdout contains the substantive Grok answer."""
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -8,7 +9,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/room-bridge"))
-from grok_wire import TIMEOUT_S, PreflightError, invoke_cli, run_request
+from grok_wire import IDLE_SECONDS, PreflightError, invoke_cli, run_request
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops"))
 from grok_session import sign_in_alert, authentication_result
 
@@ -64,14 +65,14 @@ def preflight():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, epilog=(
-        "Exit 3: sign-in required; 4: incomplete run; 5: wrong model; 6: unusable retrieval. "
+        "Exit 3: sign-in required; 4: incomplete run; 5: wrong model; 6: unusable retrieval; 7: stalled CLI. "
         "--retrieve explicitly requires source text JSON and retains a private diagnostic receipt. "
         "GROK_RUN_RECEIPT selects a receipt file instead of stderr. "
         "GROK_RUN_FAKE_NDJSON replays a fixture without calling Grok/npm."))
     parser.add_argument("--effort", choices=("low", "medium", "high"), default="high")
-    parser.add_argument("--max-turns", type=int, default=60)
-    parser.add_argument("--timeout-seconds", type=int, default=int(TIMEOUT_S),
-                        help="model invocation timeout in seconds (1-1800; default: 180)")
+    parser.add_argument("--max-turns", type=int, help="pass an explicit turn limit to Grok (default: omitted)")
+    parser.add_argument("--idle-seconds", type=float, default=IDLE_SECONDS,
+                        help="stop as stalled after no stdout line for this many seconds (default: %(default)s); no total runtime limit")
     parser.add_argument("--writable", action="store_true")
     parser.add_argument("--no-sign-in-alert", action="store_true",
                         help="The calling health job owns failure notification")
@@ -81,10 +82,10 @@ def main():
     prompt.add_argument("--prompt")
     prompt.add_argument("--prompt-file", type=Path)
     args = parser.parse_args()
-    if args.max_turns < 1:
+    if args.max_turns is not None and args.max_turns < 1:
         parser.error("--max-turns must be a positive integer")
-    if not 1 <= args.timeout_seconds <= 1800:
-        parser.error("--timeout-seconds must be between 1 and 1800")
+    if not math.isfinite(args.idle_seconds) or args.idle_seconds <= 0:
+        parser.error("--idle-seconds must be positive and finite")
     try:
         requested_prompt = args.prompt_file.read_text(encoding="utf-8") if args.prompt_file else args.prompt
     except (OSError, ValueError) as error:
@@ -107,7 +108,7 @@ def main():
     configured = os.environ.get("GROK_RUN_RECEIPT")
     outcome = run_request(requested_prompt, retrieval=args.retrieve, prefix=PREFIX,
         effort=args.effort, max_turns=args.max_turns, writable=args.writable,
-        timeout_seconds=args.timeout_seconds, invoke=invoke_cli, preflight=checked_preflight,
+        idle_seconds=args.idle_seconds, invoke=invoke_cli, preflight=checked_preflight,
         fixture=os.environ.get("GROK_RUN_FAKE_NDJSON"), require_identity=False,
         receipt_path=configured)
     receipt = outcome.pop("receipt")
