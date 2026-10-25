@@ -231,6 +231,51 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(request['attempts'], 1)
         self.assertFalse(request['acknowledged'])
 
+    def test_unsupported_candidates_never_establish_reminders_or_attendance(self):
+        candidates = [event('series', timedelta(days=1), attendees=[('Pat', 'pat@example.test')]),
+                      event('series', timedelta(days=2), attendees=[]),
+                      event('elapsed', -timedelta(hours=3), attendees=[('Lee', 'lee@example.test')])]
+        result = self.run_intake(events=candidates)
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(result.reason, 'calendar_lifecycle_unsupported')
+        self.assertEqual(result.counts['calendar_lifecycle_unsupported'], 3)
+        evidence = json.loads((self.out() / intake.STATE).read_text())['calendar_evidence']
+        self.assertTrue(all(e['evidence'] == 'provisional_schedule' for e in evidence.values()))
+        self.assertNotIn('series', self.report_text())
+
+    def test_unsupported_calendar_does_not_block_mail_or_hide_on_unchanged_store(self):
+        e = event('unknown', timedelta(days=1), attendees=[('Pat', 'pat@example.test')])
+        m = mail('lee@example.test', -timedelta(hours=1))
+        result = self.run_intake([m], [e])
+        self.assertEqual([(v, a.get('kind')) for v, a in self.fake.writes()], [('log-activity', 'email_in')])
+        self.assertEqual(result.state, 'succeeded')
+        quiet = self.run_intake([m], [e], touch=False)
+        self.assertEqual(quiet.reason, 'calendar_lifecycle_unsupported')
+        self.assertEqual(quiet.counts['calendar_lifecycle_unsupported'], 1)
+        self.assertEqual(self.fake.decodes, 1)
+
+    def test_orphan_calendar_requests_are_quarantined_before_replay(self):
+        self.out().mkdir(parents=True)
+        requests = {}
+        for verb, kind, origin in [('log-activity', 'meeting', 'legacy'),
+                                   ('set-next-action', None, 'event|legacy')]:
+            ident = intake.key(verb, 'C-901', origin)
+            args = {'idempotency_key': ident, 'ref': 'C-901'}
+            if kind:
+                args.update(kind=kind, summary='Meeting: synthetic', occurred_at=intake._iso(ts(-timedelta(hours=2))))
+            else:
+                args.update(description='Synthetic reminder', due_on='2026-10-21',
+                            owner=intake.BALL_OWNER, expected_action=None)
+            requests[ident] = dict(verb=verb, payload=json.dumps(args), acknowledged=False,
+                                   created_at=ts(-timedelta(hours=1)))
+        (self.out() / intake.STATE).write_text(json.dumps({'requests': requests}))
+        result = self.run_intake()
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(result.counts['calendar_requests_quarantined'], 2)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertTrue(all(r['disposition'] == 'calendar_unsupported' and not r['acknowledged']
+                            for r in state['requests'].values()))
+
     def test_partial_calendar_keeps_successes_across_failed_and_ambiguous_participants(self):
         e = event('partial', -timedelta(hours=3), attendees=[('Pat', 'pat@example.test'), ('Lee', 'lee@example.test'), ('New', 'new@example.test')])
         self.fake.contacts_rows += [intake.Contact('new@example.test', 'C-903', ''), intake.Contact('new@example.test', 'L-904', '')]
