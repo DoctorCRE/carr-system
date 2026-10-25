@@ -41,7 +41,15 @@ class JobToolsTests(unittest.TestCase):
                 def tick(_):
                     for job in launched:
                         job.poll.return_value = status
-                with patch('subprocess.check_output', side_effect=[full] + [free] * 15), \
+                snapshots = iter([full] + [free] * 15)
+                processes = []
+                def output(command, **kwargs):
+                    nonlocal processes
+                    if command[0] == 'pgrep':
+                        processes = next(snapshots).splitlines()
+                        return '\n'.join(map(str, range(len(processes))))
+                    return processes[int(command[-1])]
+                with patch('subprocess.check_output', side_effect=output), \
                         patch('subprocess.Popen', side_effect=launch), patch('fcntl.flock'), patch('time.sleep', side_effect=tick) as sleep:
                     code, out = self.invoke('codex-queue', str(spec))
                 self.assertEqual(code, int(status != 0))
@@ -50,6 +58,33 @@ class JobToolsTests(unittest.TestCase):
                 self.assertGreaterEqual(sleep.call_count, 2)
                 self.assertEqual(len(out.splitlines()), 12)
                 self.assertTrue((Path(tmp) / 'logs/one10.log').exists())
+
+    def test_queue_counts_long_running_argv_before_launching(self):
+        for names in ([str(i) for i in range(10)], ['queued']):
+            with self.subTest(names=names), tempfile.TemporaryDirectory() as tmp:
+                spec = Path(tmp) / 'queue.tsv'
+                (Path(tmp) / 'brief').write_text('brief')
+                spec.write_text('queued\towner/repo\tbrief\thigh\tdetails\n')
+                released = False
+                def output(command, **kwargs):
+                    if command[0] == 'pgrep':
+                        return '' if released else '\n'.join(map(str, range(len(names))))
+                    if '-p' in command:
+                        name = names[int(command[-1])]
+                        return '/very/long/python3 /very/long/bin/codex-job owner/repo job/' + name + ' brief'
+                    return '' if released else '/very/long/python3 /very/long/bin/codex-'
+                def tick(_):
+                    nonlocal released
+                    released = True
+                def launch(*args, **kwargs):
+                    self.assertTrue(released, 'launched before running capacity or duplicate name cleared')
+                    return Mock(wait=Mock(return_value=0))
+                with patch('subprocess.check_output', side_effect=output), \
+                        patch('subprocess.Popen', side_effect=launch), patch('fcntl.flock'), \
+                        patch('time.sleep', side_effect=tick):
+                    code, out = self.invoke('codex-queue', str(spec))
+                self.assertEqual(code, 0)
+                self.assertIn('QUEUE-EMPTY', out)
 
     def test_waiter_retries_and_distinguishes_closed_merged_and_live(self):
         merged = 'MERGED\t' + 'a' * 40

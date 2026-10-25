@@ -31,8 +31,24 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX)
         for (name, repo, _, effort, _), brief in zip(jobs, briefs):
             while True:
-                processes = subprocess.check_output(['ps', '-axo', 'command='], text=True)
-                running = set(re.findall(r'^(?:\S+\s+)?(?:\S*/)?bin/codex-job\s+\S+\s+job/(\S+)', processes, re.M))
+                try:
+                    pids = subprocess.check_output(['pgrep', '-f', '/bin/codex-job '], text=True)
+                except subprocess.CalledProcessError as error:
+                    if error.returncode != 1:
+                        raise
+                    pids = ''
+                running = set()
+                for pid in pids.split():
+                    try:
+                        command = subprocess.check_output(['ps', '-ww', '-o', 'args=', '-p', pid],
+                            text=True, stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    except subprocess.CalledProcessError as error:
+                        if error.returncode != 1:
+                            raise
+                        continue
+                    match = re.match(r'^(?:\S+\s+)?(?:\S*/)?bin/codex-job\s+\S+\s+job/(\S+)', command.strip())
+                    if match:
+                        running.add(match[1])
                 running.update(n for n, p in active.items() if p.poll() is None)
                 if len(running) < CAP and name not in running:
                     break
