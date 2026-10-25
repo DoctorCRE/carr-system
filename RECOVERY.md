@@ -62,8 +62,8 @@ alerts, role bootstrap or recovery-time drills.
 
 ### Operator-held state inventory
 
-Names only. The Studio state package below covers the explicit local allowlist.
-Its existence does not prove an off-host copy exists. Recover or deliberately
+Names only. Recover the required local state through independently retained copies.
+The inventory does not prove an off-host copy exists. Recover or deliberately
 reconstruct each required item before enabling writers. Never put values or
 client contents into this runbook or a PR.
 
@@ -82,72 +82,11 @@ client contents into this runbook or a PR.
 | Provider configuration, `neon_auth`, Worker bindings, secrets, and Durable Object state | Recover live provider state separately from source declarations. |
 | Matching age identity, historical decryption identities, credentials, signing material, sessions, keychains, and account recovery factors | Verify independent custody or reissue specific capabilities privately. Reissuing credentials cannot unlock old ciphertext without its matching identity. |
 
-### Preserve and stage Studio state
-
-`tools/studio-state.py` packages intake state and refresh queues, both send-ledger
-locations, calendar history, boards, the dossier roster, local vocabulary,
-the client-name list, and the triage folder guide. It records missing paths inside
-its encrypted manifest. It does not collect Outlook stores, credentials, keys, sessions, templates,
-`frozen-sources/`, or arbitrary ignored files. Recover templates and vault files
-through their providers. Verify mailbox retention with Microsoft separately.
-Neither a current calendar feed nor a new Outlook login replaces lost history.
-
-All steps below are required to create an off-host recovery copy.
-
-1. Fence intake, refresh, senders, calendar archival, board edits, and other writers before capture.
-2. Select the public age recipient whose matching identity has verified independent custody.
-3. Create and archive a uniquely named encrypted state package.
-
-   ```sh
-   .venv/bin/python tools/studio-state.py backup \
-     --repo "$RECOVERY_REPO" --home "$RECOVERY_HOME" \
-     --recipient "$RECOVERY_RECIPIENT" --writers-fenced \
-     --output /secure/recovery/studio-state.tar.age --archive-r2 \
-     --r2-quota-bytes "$RECOVERY_R2_QUOTA_BYTES"
-   ```
-
-4. Require an archived result and preserve its object key and ciphertext digest independently.
-5. Resume source writers only after confirming the selected copy's recovery coverage.
-
-Supply the repo and home paths, public recipient, and reviewed current R2 quota
-in bytes through operator tooling. Use the configured quota, not remaining space.
-Use a new output filename per capture. A local encrypted file alone is not an
-off-host backup. A quota refusal, failed upload, or failed readback leaves the
-off-host copy owed. No scheduled job is installed by this command. Run capture
-again after material state changes and verify independent retention. Retry an
-owed copy with the existing ciphertext and the same reviewed quota.
-
-   ```sh
-   .venv/bin/python tools/studio-state.py archive \
-     --archive /secure/recovery/studio-state.tar.age \
-     --r2-quota-bytes "$RECOVERY_R2_QUOTA_BYTES"
-   ```
-
-All steps below are required before activating a replacement host.
-
-1. Fence the old primary and keep replacement writers disabled.
-2. Retrieve the selected ciphertext and verify its independently recorded digest.
-3. Stage the package into a new private directory on an encrypted operator-controlled volume.
-
-   ```sh
-   .venv/bin/python tools/studio-state.py restore \
-     --archive /secure/recovery/studio-state.tar.age \
-     --identity /secure/recovery/identity.txt \
-     --staging /secure/recovery/staged-studio
-   ```
-
-4. Review the missing-path inventory and recover or explicitly classify each missing dependency.
-5. Copy verified staged files to their matching replacement repo and home locations while writers remain fenced.
-6. Reconcile pending sends against provider Sent history before enabling any sender.
-7. Complete host preparation below and verify fresh intake, refresh, and other required job outcomes.
-
-Restore verifies allowlisted names, exact sizes, and SHA-256 values before
-publishing `repo/` and `home/` under the staging directory. It refuses an
-existing staging path and does not activate jobs or overwrite live state.
-Recover the full intake checkpoint even when its pending mail predates the
-48-hour fallback. Preserve outbound ledger entries without treating them as
-proof that Microsoft accepted or rejected a send. A staged copy is not a
-completed host recovery or provider reconciliation receipt.
+Preserve required local state with native archive and copy tools while writers are
+stopped. Verify an independent off-host copy before relying on it. This repository
+provides no dedicated Studio state archive or automated restoration tool.
+Recover the complete intake checkpoint and reconcile outbound history with
+Microsoft before enabling senders. A local copy alone does not prove recovery.
 
 ---
 
@@ -377,12 +316,8 @@ production cutover during a documentation change or offline review.
   and available recovery points during an incident. Do not promise a fixed six-hour
   window or a measured recovery-point bound from dated prose.
 - Off-Mac backup creation and off-Mac freshness observation are different controls.
-  `.github/workflows/backup-freshness.yml` independently checks qualified cloud
-  artifacts every six hours using `ops/recovery-point.py --cloud-only --json`.
-  Stale, missing or unreadable evidence fails the workflow for GitHub Actions
-  failure notifications. Local copies cannot mask a cloud failure. Notification
-  receipt depends on GitHub subscription settings and remains unverified, as
-  does a scoped cloud-artifact restore drill.
+  The configured freshness observer is Mac-local. An independent off-Mac alert and
+  a scoped cloud-artifact restore drill remain unverified prerequisites.
 - `./run.sh key-recovery-test --backup-run-id RUN` tests an authenticated cloud
   artifact with the paper identity. Omitting the option selects `latest`.
   It reads input silently,
