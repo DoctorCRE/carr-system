@@ -10,6 +10,8 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'ops'))
+from git_env import fixture_env
 WRAPPER = """
 import runpy, sys, types
 from unittest.mock import Mock
@@ -25,18 +27,19 @@ class CodexJobTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        self.git_env = fixture_env()
         self.origin = self.root / 'origin'
-        subprocess.run(['git', 'init', '-q', str(self.origin)], check=True)
+        subprocess.run(['git', 'init', '-q', str(self.origin)], env=self.git_env, check=True)
         subprocess.run(['git', '-C', str(self.origin), '-c', 'user.name=Fixture',
                         '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture',
-                        '--allow-empty'], check=True)
+                        '--allow-empty'], env=self.git_env, check=True)
         self.codex = self.root / 'codex'
         self.codex.write_text(f'#!{sys.executable}\n')
         self.codex.chmod(0o755)
 
     def launch(self, body, repo=None):
         self.codex.write_text(f'#!{sys.executable}\n' + body)
-        job_env = dict(os.environ, PATH=str(self.root) + os.pathsep + os.defpath,
+        job_env = dict(self.git_env, PATH=str(self.root) + os.pathsep + os.defpath,
                        TMPDIR=str(self.root))
         return subprocess.Popen([sys.executable, '-c', WRAPPER, str(ROOT / 'bin/codex-job'),
                                  str(ROOT / '.venv'), str(repo or self.origin), 'test/job', 'brief'],
