@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Acceptance checks for the one ordered AI capability portfolio.
 
-Tier 1 runs in every CI job without credentials. Tier 2 activates only when
-DATABASE_URL is already supplied (normally through db-tap against isolated
-staging) and rolls every mutation back.
+Tier 1 runs in every CI job without credentials. Tier 2 requires an explicit
+CARR_CI_DATABASE_URL for a disposable literal-loopback fixture and rolls every
+mutation back. An inherited DATABASE_URL never enables this write proof.
 """
 
 from __future__ import annotations
@@ -106,18 +106,34 @@ def tier1() -> None:
 
 
 def tier2() -> None:
-    url = os.environ.get("DATABASE_URL")
+    url = os.environ.get("CARR_CI_DATABASE_URL")
     if not url:
-        print("TIER 2 — SKIP (DATABASE_URL not set; run through staging db-tap)")
+        print("TIER 2 — SKIP (no explicit disposable CARR_CI_DATABASE_URL)")
         return
-    print("TIER 2 — live isolated schema, all writes rolled back")
     try:
         import psycopg
+        from psycopg.conninfo import conninfo_to_dict
     except ImportError as exc:
         check("psycopg is installed", False, str(exc))
         return
 
-    with psycopg.connect(url) as conn:
+    try:
+        info = conninfo_to_dict(url)
+    except psycopg.Error:
+        check("explicit disposable database target is valid", False)
+        return
+    host = info.get("host")
+    if (host not in {"127.0.0.1", "::1"}
+            or info.get("hostaddr", host) != host
+            or info.get("service") or info.get("servicefile")
+            or "," in str(info.get("port", ""))):
+        check("explicit database target uses literal loopback without redirection", False)
+        return
+    for name in list(os.environ):
+        if name.startswith("PG"):
+            os.environ.pop(name)
+    print("TIER 2 — disposable loopback schema, all writes rolled back")
+    with psycopg.connect(url, hostaddr=host, passfile=os.devnull) as conn:
         with conn.cursor() as cur:
             cur.execute("select count(*), min(program_ordinal), max(program_ordinal) from ops.work_request where program_key=%s",
                         ("carr-ai-engineering-suite-v1",))
