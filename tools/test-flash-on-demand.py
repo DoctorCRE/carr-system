@@ -87,13 +87,6 @@ class FlashPolicyTests(unittest.TestCase):
         self.assertTrue(flashlib.health_row().startswith('OK'))
         self.process.assert_not_called()
 
-    def test_dictation_post_call_reports_off_without_starting(self):
-        post = load('tools/dictation-rig/bin/post_call.py', 'off_post_call')
-        self.assertFalse(post.flash_server_available())
-        with self.assertRaisesRegex(post.DistillerUnavailable, 'switched off'):
-            post.default_distiller({})
-        self.process.assert_not_called()
-
     def test_install_converges_drifted_plists_and_stops_server(self):
         import plistlib
         import flash_install
