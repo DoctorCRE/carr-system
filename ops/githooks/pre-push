@@ -3,10 +3,13 @@
 
 REFS="$(cat)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)"
+PY="$COMMON_DIR/../.venv/bin/python"
+[ -x "$PY" ] || PY=python3
 # The leak guard excludes only what this push's receiver (its URL, $2) advertises.
 CARR_PUSH_RECEIVER="${2:-${1:-origin}}"
 export CARR_PUSH_RECEIVER
-printf '%s\n' "$REFS" | python3 "$REPO_ROOT/security/leak_guard.py" \
+printf '%s\n' "$REFS" | "$PY" "$REPO_ROOT/security/leak_guard.py" \
   --root "$REPO_ROOT" --pre-push --remote "$CARR_PUSH_RECEIVER" || exit 1
 
 # The scoped floor catches content failures before upload. Hosted CI runs the full suite.
@@ -23,7 +26,7 @@ if [ -n "$REPO_ROOT" ] && [ -x "$REPO_ROOT/ops/ci.sh" ]; then
     _SKIP_BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo detached)"
     _SKIP_HEAD="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     _SKIP_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    if ! python3 - "$_SKIP_TS" "$_SKIP_BRANCH" "$_SKIP_HEAD" "$CARR_SKIP_CI_REASON" \
+    if ! "$PY" - "$_SKIP_TS" "$_SKIP_BRANCH" "$_SKIP_HEAD" "$CARR_SKIP_CI_REASON" \
       >> "$REPO_ROOT/out/ci-skip-receipts.jsonl" 2>/dev/null <<'PYEOF'
 import json, sys
 ts, branch, head, reason = sys.argv[1:5]
@@ -227,11 +230,11 @@ EOF
       # stands on its own -- which is why its output is best-effort and its own
       # exit status is discarded.
       if [ -x "$REPO_ROOT/ops/worktree-attribution.py" ] \
-          && command -v python3 >/dev/null 2>&1; then
+          && command -v "$PY" >/dev/null 2>&1; then
         MINE="$(basename "$REPO_ROOT")"
         FOREIGN="$(grep -oE '[A-Za-z0-9_./-]+\.[A-Za-z0-9]+' "$CI_LOG" 2>/dev/null \
                    | sort -u | head -40 \
-                   | xargs -r python3 "$REPO_ROOT/ops/worktree-attribution.py" \
+                   | xargs -r "$PY" "$REPO_ROOT/ops/worktree-attribution.py" \
                      --porcelain 2>/dev/null \
                    | awk -F'\t' -v me="$MINE" '$2 != "unknown" && $3 != me && $3 != "-"')"
         if [ -n "$FOREIGN" ]; then
@@ -267,8 +270,8 @@ fi
 # discarded, it is silent when the local list is absent, and it has no CI step.
 # ---------------------------------------------------------------------------
 if [ -n "$REPO_ROOT" ] && [ -f "$REPO_ROOT/ops/githooks/client-name-warn.py" ] \
-    && command -v python3 >/dev/null 2>&1; then
-  python3 "$REPO_ROOT/ops/githooks/client-name-warn.py" "origin/main...HEAD" "$REPO_ROOT" || true
+    && command -v "$PY" >/dev/null 2>&1; then
+  "$PY" "$REPO_ROOT/ops/githooks/client-name-warn.py" "origin/main...HEAD" "$REPO_ROOT" || true
 fi
 
 # ---------------------------------------------------------------------------
@@ -279,10 +282,10 @@ fi
 # stripped so its git calls read this checkout and nothing else.
 # ---------------------------------------------------------------------------
 if [ -n "$REPO_ROOT" ] && [ -f "$REPO_ROOT/ops/pr-size-check.py" ] \
-    && command -v python3 >/dev/null 2>&1; then
+    && command -v "$PY" >/dev/null 2>&1; then
   env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
       -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
       -u GIT_COMMON_DIR -u GIT_NAMESPACE -u GIT_CEILING_DIRECTORIES \
-      python3 "$REPO_ROOT/ops/pr-size-check.py" "origin/main...HEAD" "$REPO_ROOT" || true
+      "$PY" "$REPO_ROOT/ops/pr-size-check.py" "origin/main...HEAD" "$REPO_ROOT" || true
 fi
 exit 0

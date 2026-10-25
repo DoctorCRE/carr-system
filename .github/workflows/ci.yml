@@ -226,6 +226,24 @@ jobs:
         timeout-minutes: 5
         run: bash ops/ci-postgres.sh
 
+      - name: Identify the runner image for the zsh archive
+        if: matrix.part == 'equivalence'
+        id: zsh-image
+        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
+      - name: Restore zsh package archives
+        if: matrix.part == 'equivalence'
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ runner.temp }}/zsh-debs/*.deb
+          key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh') }}
+      - name: Install zsh
+        if: matrix.part == 'equivalence'
+        timeout-minutes: 12
+        env:
+          ZSH_RETRY_BACKOFF: "5"
+          ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
+        run: ops/ci-zsh.sh
+
       - name: Prove independent migration fixture
         if: matrix.part != 'acceptance' && !startsWith(matrix.part, 'gates-')
         env:

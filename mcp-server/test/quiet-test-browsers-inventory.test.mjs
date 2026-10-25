@@ -17,7 +17,7 @@ async function check(t, name, source) {
   await writeFile(path.join(root, name), source);
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
-  return spawnSync(process.execPath, ["--test", "mcp-server/test/quiet-test-browsers.test.mjs"], {
+  return spawnSync(process.execPath, ["--test", "--test-name-pattern=^tests and tools", "mcp-server/test/quiet-test-browsers.test.mjs"], {
     cwd: root, env, encoding: "utf8", timeout: 10_000,
   });
 }

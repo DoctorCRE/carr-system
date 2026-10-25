@@ -1,3 +1,4 @@
+import { CHROMIUM_SAFETY_ARGS } from "../../tools/chromium-safety-args.mjs";
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import puppeteer from 'puppeteer';
@@ -10,7 +11,7 @@ const browser = await puppeteer.launch({
   headless: true,
   executablePath,
   userDataDir: path.join(directory, '.chrome-profile'),
-  args: ['--no-sandbox'],
+  args: [...CHROMIUM_SAFETY_ARGS, '--no-sandbox'],
 });
 
 try {
