@@ -56,10 +56,10 @@ for (const file of files) {
       assert.deepEqual(current.runnable, current.triggers ? validationJobs : []);
     }
   });
-  test(`${file}: review transitions start full validation and drafts run only the sentinel`, () => {
+  test(`${file}: readiness respects workflow subscriptions and drafts run only the sentinel`, () => {
     const ready = policy(workflow, context("pull_request", "ready_for_review"));
-    assert.equal(ready.triggers, true);
-    assert.deepEqual(ready.runnable, ready.triggers ? validationJobs : []);
+    assert.equal(ready.triggers, file !== "ci.yml");
+    assert.deepEqual(ready.runnable, file === "ci.yml" ? [] : validationJobs);
     const event = context("pull_request", "converted_to_draft");
     event.event.pull_request.draft = true;
     const draft = policy(workflow, event);
