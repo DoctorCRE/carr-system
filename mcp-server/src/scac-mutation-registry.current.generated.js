@@ -977,7 +977,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "lead-board": {
     "ingress_key": "mcp-tool:lead-board",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "82702101136b8f45dafb837abdfdabe063cf8adac3fbaf50bd1db597727eeb8d",
+    "schema_digest": "276e9def9cb1c6427894526e1406f8bc270bf3dee58ff79e5384d365abdc79cc",
     "write": false,
     "human_only": false,
     "authority_only": false,

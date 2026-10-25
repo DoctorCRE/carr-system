@@ -3755,7 +3755,9 @@ export const TOOLS = {
     description: "The complete, safe worked-lead board. All leads surface, including weak, suppressed, and terminal rows: qualification is the human's job and this read is never pre-qualified or silently truncated. Returns the authoritative base_version needed by update-lead, ordered stage vocabulary including empty stages, score/confidence/freshness signals, and no phone, email, address, notes, or raw source detail.",
     inputSchema: LEAD_WORKSPACE_SCHEMA,
     handler: async (c, _actor, args = {}) => {
-      if (args.workspace === "leads") return readLeadWorkspace(c, args);
+      if (args.workspace === "leads") return readLeadWorkspace(c, args, ToolError);
+      if (args.correspondence_cursor !== undefined || args.stage_history_cursor !== undefined)
+        throw new ToolError({ error: "invalid_history_cursor" });
       const stages = (await c.query(
         `select slug,label,sort
            from v_lead_board_stage
