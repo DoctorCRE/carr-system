@@ -801,6 +801,46 @@ def test_fail_tail_withholds_the_window_when_it_cannot_redact():
     check("and where the captured log actually is",
           str(log) in out, out)
 
+def test_gates_report_every_completed_result_after_a_timeout():
+    with ci_fixture() as root:
+        ci = root / "ops/ci.sh"
+        ci.write_text(ci.read_text().replace("CI_SELFTEST_TIMEOUT_SECONDS=120",
+                                            "CI_SELFTEST_TIMEOUT_SECONDS=1"))
+        (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
+        (root / "tools/test_migration_fixture.py").write_text("print('later tool passed')\n")
+        cases = {
+            "a-timeout": f"import time; print('first timeout {FIXTURE_TOKEN}', flush=True); time.sleep(10)",
+            "b-failure": "print('ordinary assertion failed'); raise SystemExit(7)",
+            "c-success": "print('later success passed')",
+            "d-skip": "print('fixture unavailable'); raise SystemExit(78)",
+            "e-timeout": "import time; print('second timeout', flush=True); time.sleep(10)",
+        }
+        for name, source in cases.items():
+            (root / f"ops/{name}-selftest.py").write_text(source + "\n")
+        marker = root / "shell-started"
+        shell = root / "tools/test_timeout_fixture.sh"
+        shell.write_text(f"#!/bin/sh\ntouch {shlex.quote(str(marker))}\n")
+        shell.chmod(0o755)
+        rc, out = run(["--strict", "--only", "gates"],
+                      env={"CARR_CI_GATE_JOBS": "1"}, root=root)
+        check("timeout keeps the gates verdict red", rc == 1, out)
+        check("every completed timeout is reported distinctly",
+              "TIMEOUT:a-timeout-selftest.py" in out
+              and "TIMEOUT:e-timeout-selftest.py" in out, out)
+        check("a later assertion failure reaches the verdict",
+              "ordinary assertion failed" in out and " b-failure-selftest.py" in out
+              and "TIMEOUT:b-failure" not in out, out)
+        check("later successful suites remain visible",
+              "later success passed" in out and "later tool passed" in out, out)
+        check("a later unconfigured suite is reported",
+              "d-skip-selftest.py" in out and "NOT CONFIGURED (exit 78)" in out, out)
+        check("completed Python work is not described as aborted",
+              "aborting remaining gate selftests" not in out, out)
+        check("timeout diagnostics pass through redaction",
+              FIXTURE_TOKEN not in out and "<redacted:github-token:40 chars>" in out)
+        check("unstarted shell suites remain withheld after timeout", not marker.exists(), out)
+
+
 def test_gates_selftests_have_a_process_group_watchdog():
     helper = REPO / "bin" / "with-timeout.py"
     with tempfile.TemporaryDirectory() as td:
@@ -1413,6 +1453,7 @@ def main(argv=None):
                test_a_failing_gates_output_is_printed_whole_when_it_is_short,
                test_a_long_failing_gate_log_is_tailed_and_still_redacted,
                test_fail_tail_withholds_the_window_when_it_cannot_redact,
+               test_gates_report_every_completed_result_after_a_timeout,
                test_gates_selftests_have_a_process_group_watchdog,
                test_push_floor_defers_the_gates_class_instead_of_running_it,
                test_push_floor_distinguishes_imported_main_paths_from_branch_changes,

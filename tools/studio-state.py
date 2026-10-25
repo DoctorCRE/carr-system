@@ -30,7 +30,7 @@ FILES = (
 )
 DIRECTORIES = {
     'repo/out/calendar-archive': re.compile(r'calendar-(joe|dell)-[0-9]{8}\.ics'),
-    'repo/out/boards': re.compile(r'[a-zA-Z0-9_-]+(?:-answers)?\.jsonl?'),
+    'repo/out/boards': re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*\.jsonl?'),
 }
 EXCLUDED = ('exporters/templates', 'frozen-sources', 'Outlook profile',
             'vault and attachment bytes', 'credentials and account recovery factors')
@@ -74,6 +74,8 @@ def inventory(repo: Path, home: Path) -> tuple[dict[str, Path], list[str]]:
                 if allowed(candidate):
                     safe_path(child)
                     found[candidate] = child
+                else:
+                    missing.append(candidate)
     return found, missing
 
 
@@ -172,7 +174,10 @@ def unpack(data: bytes) -> tuple[dict[str, bytes], dict]:
             or set(members) != set(manifest['files'])):
         raise ValueError('state manifest does not match its members')
     missing = manifest['missing']
-    if (not members or any(not isinstance(name, str) or name not in (*FILES, *DIRECTORIES) for name in missing)
+    if (not members or any(not isinstance(name, str) or not (
+            name in (*FILES, *DIRECTORIES) or str(PurePosixPath(name)) == name
+            and str(PurePosixPath(name).parent) in DIRECTORIES and PurePosixPath(name).name != '..')
+            for name in missing)
             or len(set(missing)) != len(missing)
             or set(FILES) - set(members) != set(missing) & set(FILES)
             or any(name == absent or name.startswith(absent + '/') for name in members for absent in missing)):

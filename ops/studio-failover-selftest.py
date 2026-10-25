@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import plistlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,38 @@ sys.path.insert(0, str(ROOT))
 
 
 class InventoryTests(unittest.TestCase):
+    def test_regeneration_preserves_recovery_prerequisites_and_disabled_roles(self):
+        spec = importlib.util.spec_from_file_location('inventory_test', ROOT / 'ops/studio-inventory.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / 'ops/config').mkdir(parents=True)
+            shutil.copyfile(ROOT / 'ops/config/studio-failover.v1.json', root / 'ops/config/studio-failover.v1.json')
+            labels = ['com.carr.nightly-record-layer', 'com.carr.outlook-intake',
+                      'com.carr.outlook-refresh', 'com.carr.outlook-triage']
+            (root / 'ops/launchd').mkdir()
+            for label in labels:
+                shutil.copyfile(ROOT / ('ops/launchd/' + label + '.plist'), root / ('ops/launchd/' + label + '.plist'))
+            folder = root / 'out/studio-failover'
+            folder.mkdir(parents=True)
+            for host in ('studio', 'macbook'):
+                (folder / (host + '.json')).write_text(json.dumps({'host': host, 'launchd': [
+                    {'label': label, 'disabled': label == 'com.carr.nightly-record-layer'} for label in labels]}))
+            for _ in range(2):
+                module.compare(root)
+                config = json.loads((root / 'ops/config/studio-failover.v1.json').read_text())
+                jobs = {j['label']: j for j in config['jobs']}
+                self.assertEqual(jobs['com.carr.nightly-record-layer']['state'], ['~/carr-system/backups'])
+                for label in labels:
+                    self.assertFalse(jobs[label]['enabled'])
+                for label in labels[1:3]:
+                    self.assertEqual(jobs[label]['state'], ['~/carr-system/out/outlook-intake/state.json',
+                                                         '~/carr-system/out/outlook-intake/needs-refresh.json'])
+                self.assertEqual(jobs[labels[3]]['state'], ['~/.config/carr/outlook-nightly-sweep.folders.md'])
+                self.assertIn('Outlook permission and outbound reconciliation',
+                              {r['name'] for r in config['manual_roles']})
+
     def test_requested_dependencies_are_checked_independently_of_launchd_installation(self):
         with tempfile.TemporaryDirectory() as raw:
             paths = ['/bin/sh', '~/missing-failover-file']
@@ -45,6 +78,33 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(data['launchd'][0]['executables'], ['/bin/sh'])
 
 class FailoverTests(unittest.TestCase):
+    def test_takeover_leaves_outlook_disabled_until_manual_reconciliation(self):
+        module = self.host_module()
+        config = json.loads((ROOT / 'ops/config/studio-failover.v1.json').read_text())
+        config['jobs'] = [j for j in config['jobs'] if j['label'].startswith('com.carr.outlook-')]
+        self.assertEqual(len(config['jobs']), 3)
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            commands = []
+            def launchctl(argv, **kwargs):
+                commands.append(argv)
+                disabled = ['launchctl', 'disable', argv[-1]] in commands
+                return Mock(returncode=int(argv[1] == 'print' and disabled), stdout='last exit code = 78')
+            with patch.object(module.Path, 'home', return_value=root), \
+                 patch.object(module, 'command', side_effect=launchctl), patch.object(module, 'write_marker'), \
+                 patch.object(module, 'Leader') as leader, patch.object(module, 'connection'):
+                host = module.Host(ROOT, config, 'macbook')
+                agents = root / 'Library/LaunchAgents'
+                agents.mkdir(parents=True)
+                for job in config['jobs']:
+                    (agents / (job['label'] + '.plist')).write_text(host.body(job))
+                leader.return_value.read.return_value = ('macbook', 1)
+                host.start()
+                for job in config['jobs']:
+                    self.assertIn(['launchctl', 'disable', host.domain + '/' + job['label']], commands)
+                self.assertFalse(any(c[1] in ('bootstrap', 'kickstart', 'enable') for c in commands))
+                self.assertTrue(host.verify())
+
     def test_replacement_host_requires_intake_refresh_and_actual_backup_state(self):
         from lib.studio_failover import plan
         config = json.loads((ROOT / 'ops/config/studio-failover.v1.json').read_text())
@@ -76,6 +136,24 @@ class FailoverTests(unittest.TestCase):
                      if step['action'] == 'install'}
         self.assertNotIn('com.carr.cutover-watch', installed)
         self.assertNotIn('com.carr.timebomb-audit', installed)
+
+    def test_intake_launchd_program_keeps_its_full_disk_access_identity(self):
+        from lib.studio_failover import managed_body
+        module = self.host_module()
+        config = json.loads((ROOT / 'ops/config/studio-failover.v1.json').read_text())
+        config['jobs'] = [j for j in config['jobs'] if j['label'] == 'com.carr.outlook-intake']
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw)
+            with patch.object(module.Path, 'home', return_value=home), \
+                 patch.object(module, 'command', return_value=Mock(returncode=1, stdout='')):
+                host = module.Host(ROOT, config, 'macbook')
+                host.install()
+            path = home / 'Library/LaunchAgents/com.carr.outlook-intake.plist'
+            installed = path.read_text()
+            expected = [str(home / 'carr-local/bin/outlook-intake-copy'), '--run-intake']
+            self.assertEqual(plistlib.loads(installed.encode())['ProgramArguments'], expected)
+            reconciled = managed_body(installed, ROOT, home)
+            self.assertEqual(plistlib.loads(reconciled.encode())['ProgramArguments'], expected)
 
     def test_missing_canonical_template_does_not_hide_missing_executable(self):
         module = self.host_module()
