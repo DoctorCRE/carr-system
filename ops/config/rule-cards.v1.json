@@ -247,8 +247,8 @@
     {
       "id": "K09",
       "title": "Give runnable numbered steps",
-      "wording": "When giving a partner steps to run, number each, say all are required, one active-voice action per line under twenty words, ending with the check that proves it worked.",
-      "word_count": 29,
+      "wording": "When giving a partner steps to run, number each, say all are required, one active-voice action per line under twenty words, ending with the check that proves it worked. Fill in real values, never placeholders; if a step prints secrets, say before it runs not to paste the output.",
+      "word_count": 49,
       "placement": "CORE",
       "merged_from_drafts": [
         "C09"
