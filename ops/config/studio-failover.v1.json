@@ -105,7 +105,7 @@
         "~/carr-system/out/outlook-intake/state.json",
         "~/carr-system/out/outlook-intake/needs-refresh.json"
       ],
-      "enabled": true
+      "enabled": false
     },
     {
       "label": "com.carr.outlook-refresh",
@@ -115,7 +115,7 @@
         "~/carr-system/out/outlook-intake/state.json",
         "~/carr-system/out/outlook-intake/needs-refresh.json"
       ],
-      "enabled": true
+      "enabled": false
     },
     {
       "label": "com.carr.outlook-triage",
@@ -124,7 +124,7 @@
       "state": [
         "~/.config/carr/outlook-nightly-sweep.folders.md"
       ],
-      "enabled": true
+      "enabled": false
     }
   ],
   "manual_roles": [
