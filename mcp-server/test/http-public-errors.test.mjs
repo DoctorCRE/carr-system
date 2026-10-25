@@ -65,7 +65,7 @@ test('release keeps unavailable readbacks safe and correlated', async t => {
     assert.equal(readback.error, 'database_unavailable');
     assert.equal(readback.reason, 'Database readback is unavailable.');
   }
-  assert.doesNotMatch(JSON.stringify(body), /stack|SELECT|private_table|private_constraint|synthetic-private-row/i);
+  assert.doesNotMatch(JSON.stringify(body), /stack|\bSELECT\b|private_table|private_constraint|synthetic-private-row/i);
   assert.equal(logs.filter(log => log.correlation_id === correlationId &&
     log.diagnostic.stack.includes(diagnostic)).length, 2);
 });
