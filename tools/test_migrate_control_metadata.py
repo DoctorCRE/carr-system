@@ -58,7 +58,7 @@ class ApprovedControlMigrationTests(unittest.TestCase):
                         check=True, capture_output=True)
         with psycopg.connect(cls.dsn, autocommit=True) as conn:
             conn.execute('create role neondb_owner')
-        source = subprocess.check_output(['git', 'show', 'origin/main:db/schema.sql'], cwd=ROOT, text=True)
+        source = (ROOT / 'db/schema.sql').read_text()
         loaded = subprocess.run([str(cls.bins / 'psql'), cls.dsn, '-X', '-v', 'ON_ERROR_STOP=1', '-q'],
                                 input=source, env=cls.child, capture_output=True, text=True, timeout=120)
         if loaded.returncode:
