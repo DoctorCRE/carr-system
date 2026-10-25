@@ -198,7 +198,9 @@ existing executable. The helper publishes a snapshot only after copying succeeds
 and retains at most 20 completed snapshots. It prunes only its recognized private
 snapshot directories. Unrelated directories and symlinks remain untouched.
 Ordinary failures remove staging copies. Forced termination can leave a private
-hidden `.snap-*.pending` directory, which is never a published study input.
+hidden `.snap-*.pending` directory. Prune failures can leave hidden
+`.snap-*.retired` directories. Neither is a published study input. A clock rollback
+that would place a new snapshot before an existing snapshot is refused.
 Copies are sequential, not a transactional backup of a running Outlook profile.
 A source file changing during its copy is rejected; changes between separate
 file copies cannot be ruled out. Keep Outlook closed throughout capture.

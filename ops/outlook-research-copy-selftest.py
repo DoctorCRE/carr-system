@@ -30,10 +30,13 @@ class CopyTest(unittest.TestCase):
         (self.sidecars / 'ignore.txt').write_bytes(b'not-a-body')
         self.out = self.root / 'research'
         self.helper = self.root / 'copier'
+        self.build(ROOT / 'tools/outlook-research-copy.c')
+
+    def build(self, source):
         subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                         f'-DOUTLOOK_PROFILE={json.dumps(str(self.profile))}',
                         f'-DOUTLOOK_RESEARCH_ROOT={json.dumps(str(self.out))}',
-                        str(ROOT / 'tools/outlook-research-copy.c'), '-o', str(self.helper)],
+                        str(source), '-o', str(self.helper)],
                        check=True)
 
     def copy(self, *args):
@@ -93,6 +96,52 @@ class CopyTest(unittest.TestCase):
         self.assertEqual((outside / 'keep.txt').read_bytes(), b'outside')
         self.assertTrue((self.out / 'snap-not-a-timestamp').is_dir())
 
+    def test_clock_rollback_refuses_capture_without_removing_study_inputs(self):
+        self.assertEqual(self.copy().returncode, 0)
+        first, = self.snapshots()
+        for index in range(20):
+            shutil.copytree(first, self.out / f'snap-29990101T000000-{index:09d}Z')
+        shutil.rmtree(first)
+        before = {p.name: (p / 'HxStore.hxd').read_bytes() for p in self.snapshots()}
+        self.assertNotEqual(self.copy().returncode, 0)
+        self.assertEqual(before, {p.name: (p / 'HxStore.hxd').read_bytes()
+                                  for p in self.snapshots()})
+        self.assertEqual(len(list(self.out.iterdir())), 21)
+
+    def test_busy_prune_never_leaves_a_gutted_published_snapshot(self):
+        self.assertEqual(self.copy().returncode, 0)
+        first, = self.snapshots()
+        for index in range(20):
+            shutil.copytree(first, self.out / f'snap-20000101T000000-{index:09d}Z')
+        shutil.rmtree(first)
+        before = {p.name for p in self.snapshots()}
+        wrapper = self.root / 'busy-rmdir.c'
+        wrapper.write_text('''#define _POSIX_C_SOURCE 200809L
+#define _DARWIN_C_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
+static int busy_unlinkat(int fd, const char *name, int flags) {
+    if (flags == AT_REMOVEDIR && strstr(name, "snap-20000101T000000-000000000Z")) {
+        errno = EBUSY;
+        return -1;
+    }
+    return unlinkat(fd, name, flags);
+}
+#define unlinkat busy_unlinkat
+''' + f'#include {json.dumps(str(ROOT / "tools/outlook-research-copy.c"))}\n')
+        self.build(wrapper)
+        self.assertNotEqual(self.copy().returncode, 0)
+        for snapshot in self.snapshots():
+            self.assertIn(snapshot.name, before)
+            self.assertEqual((snapshot / 'HxStore.hxd').read_bytes(), b'synthetic-store')
+            self.assertTrue((snapshot / 'manifest.json').is_file())
+        self.assertFalse(list(self.out.glob('.*.pending')))
+        self.build(ROOT / 'tools/outlook-research-copy.c')
+        self.assertEqual(self.copy().returncode, 0)
+        self.assertEqual(len(self.snapshots()), 20)
+
     def test_one_run_restores_limit_when_many_old_snapshots_exist(self):
         self.assertEqual(self.copy().returncode, 0)
         first, = self.snapshots()
@@ -104,7 +153,8 @@ class CopyTest(unittest.TestCase):
     def test_arguments_and_wrong_destinations_are_refused(self):
         self.assertNotEqual(self.copy(str(self.root / 'elsewhere')).returncode, 0)
         self.assertFalse(self.out.exists())
-        self.out.mkdir(mode=0o755)
+        self.out.mkdir()
+        self.out.chmod(0o755)
         self.assertNotEqual(self.copy().returncode, 0)
         self.assertEqual(list(self.out.iterdir()), [])
         self.out.rmdir()

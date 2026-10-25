@@ -260,7 +260,7 @@ static int remove_contents(int fd) {
     return status;
 }
 
-static void prune(int root) {
+static void prune(int root, const char *new_name) {
     for (;;) {
         size_t count = 0;
         char oldest[32] = "";
@@ -268,15 +268,19 @@ static void prune(int root) {
         struct dirent *entry;
         while ((entry = next_entry(list))) {
             if (!own_snapshot(root, entry->d_name)) continue;
+            require(strcmp(new_name, entry->d_name) > 0);
             ++count;
             if (!*oldest || strcmp(entry->d_name, oldest) < 0) strcpy(oldest, entry->d_name);
         }
         closedir(list);
-        if (count <= 20) return;
-        int fd = directory(root, oldest);
+        if (count < 20) return;
+        char retired[48];
+        snprintf(retired, sizeof retired, ".%s.retired", oldest);
+        if (renameatx_np(root, oldest, root, retired, RENAME_EXCL) != 0) fail();
+        int fd = directory(root, retired);
         if (fd < 0 || remove_contents(fd) != 0) fail();
         close(fd);
-        if (unlinkat(root, oldest, AT_REMOVEDIR) != 0) fail();
+        if (unlinkat(root, retired, AT_REMOVEDIR) != 0) fail();
     }
 }
 
@@ -315,9 +319,9 @@ int main(int argc, char **argv) {
     copy_sidecars(profile, work, manifest, &first);
     fputs("]}\n", manifest);
     if (fflush(manifest) != 0 || fsync(fd) != 0 || fclose(manifest) != 0) fail();
+    prune(root, name);
     if (renameatx_np(root, pending, root, name, RENAME_EXCL) != 0) fail();
     staging_work = -1;
-    prune(root);
     close(profile);
     close(work);
     close(lock);
