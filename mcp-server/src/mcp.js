@@ -827,7 +827,8 @@ export async function callTool(env, actor, name, args, profile = "full") {
   try {
     client = await retrySafeDatabaseOperation(() => pool.connect());
   } catch (error) {
-    await pool.end().catch(() => {});
+    const cleanup = pool.end().catch(() => {});
+    env.ctx?.waitUntil?.(cleanup);
     throw error;
   }
   client.ai = env.AI;
