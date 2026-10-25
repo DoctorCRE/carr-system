@@ -409,7 +409,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -517,7 +517,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -1845,7 +1845,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": true,
     "delegates_to": []
   },
