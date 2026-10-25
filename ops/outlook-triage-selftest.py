@@ -623,15 +623,36 @@ class RefreshTest(FakeOutlookCase):
     READ_BODY = msg('sender-news', 'subject-010', email='news@news.test')
     UNREAD_BODY = msg('folder-A, client-001', 'subject-011', '8:15 AM', unread=True, email='c1@client.test')
 
+    def test_refresh_worker_placement_and_entry_share_intake_host(self):
+        catalog = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
+        services = {s['key']: s for s in catalog}
+        intake_env = services['outlook-intake']['environments'][0]
+        refresh_env = services['outlook-refresh']['environments'][0]
+        self.assertEqual(refresh_env['runs_on'], intake_env['runs_on'])
+        plist = plistlib.loads((ROOT / refresh_env['deploy_mechanism']).read_bytes())
+        self.assertEqual(plist['WorkingDirectory'], '{{REPO}}')
+        self.assertEqual(plist['Umask'], 0o077)
+        self.assertNotIn('RunAtLoad', plist)
+        self.assertIn('from lib.outlook_refresh import main; raise SystemExit(main())', plist['ProgramArguments'])
+        self.assertEqual(plist['StartCalendarInterval'], calendar_for_window((7, 15), (19, 15), 30))
+        installer = (ROOT / 'bin/install-outlook-intake.sh').read_text()
+        self.assertIn('LABEL="com.carr.outlook-refresh"', installer)
+        self.assertNotIn('launchctl bootstrap', '\n'.join(line for line in installer.splitlines()
+                                                         if not line.startswith('print ')))
+
     def test_same_host_refresh_worker_opens_only_read_mail_without_filing(self):
         from lib import outlook_refresh
         self.given([FILE_A, self.READ_BODY, self.UNREAD_BODY])
         path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test'),
                                   listed('m2', self.UNREAD_BODY, 'c1@client.test')])
-        self.guide.unlink()
+        self.guide.write_text('')
+        account_path = self.home / '.config/carr/outlook-account'
+        account_path.write_text(ACCOUNT)
+        account_path.chmod(0o600)
         with patch.dict(os.environ, self.env, clear=True):
             outcome = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                          waits=Waits(0, 0, 0, 0, 0, 0, 0))
+                                          waits=Waits(0, 0, 0, 0, 0, 0, 0),
+                                          now_fn=lambda: EVENING.replace(hour=10))
         self.assertEqual(outcome.state, 'succeeded')
         state = json.loads(self.state.read_text())
         self.assertEqual(state['selections'], [self.READ_BODY['label']])
@@ -640,6 +661,24 @@ class RefreshTest(FakeOutlookCase):
         self.assertIn('opened_at', entries[0])
         self.assertNotIn('opened_at', entries[1])
         self.assertEqual(len(entries), 2, 'opening is not a body-decoded acknowledgement')
+
+    def test_refresh_worker_refuses_wrong_account_and_active_user(self):
+        from lib import outlook_refresh
+        self.given([self.READ_BODY])
+        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        account_path = self.home / '.config/carr/outlook-account'
+        account_path.write_text('wrong@example.test')
+        account_path.chmod(0o600)
+        with patch.dict(os.environ, self.env, clear=True):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                         waits=Waits(0, 0, 0, 0, 0, 0, 0))
+        self.assertEqual(result.reason, 'wrong_account')
+        self.assertEqual(json.loads(self.state.read_text())['selections'], [])
+        self.given([self.READ_BODY], idle_seconds=1)
+        with patch.dict(os.environ, self.env, clear=True):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10))
+        self.assertEqual(result.reason, 'user_active')
+        self.assertEqual(json.loads(self.state.read_text())['selections'], [])
 
     def test_read_email_is_opened_unchanged_and_stamped(self):
         self.given([FILE_A, self.READ_BODY, NEWS])

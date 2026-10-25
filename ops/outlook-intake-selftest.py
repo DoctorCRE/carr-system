@@ -623,12 +623,14 @@ class IntakeTest(unittest.TestCase):
     def test_expired_hydration_remains_visible_and_can_recover(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='Hello', kind='preview', copy_key='expired')
         self.run_intake([preview])
-        self.fake.now += timedelta(days=8)
+        self.fake.now += timedelta(days=12)
         result = self.run_intake([preview], touch=False)
         self.assertEqual(result.counts['hydration_expired'], 1)
         [entry] = json.loads((self.out() / intake.REFRESH_LIST).read_text())
         self.assertTrue(entry['expired'])
         self.assertEqual(self.fake.model_calls, [])
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertNotIn(intake.key('log-activity', CLIENT.ref, ident(preview)), state['requests'])
         self.fake.now += timedelta(minutes=30)
         self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
         self.fake.timeline[CLIENT.ref] = [{'verb': 'set-next-action', 'summary': 'ball → joe: Call first',

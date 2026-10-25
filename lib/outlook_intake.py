@@ -10,7 +10,7 @@ through the named record-layer verbs:
   with the full deduplicated plain-text body as its detail;
 - a past meeting becomes log-activity meeting, tour or call by its title;
 - a meeting in the next seven days becomes a dated ball (set-next-action);
-- one isolated haiku call per new matched email proposes a next step, which
+- one isolated haiku call per matched full email proposes a next step, which
   becomes a ball when the record has none or only an older one.
 
 A run outside 07:00-19:30 local does nothing. Matching requires one record with
@@ -24,14 +24,14 @@ reports failed and does not advance its watermark.
 
 An email whose body is still only Outlook's preview is logged with the preview,
 flagged preview_only, and listed in out/outlook-intake/needs-refresh.json for the
-evening triage job to open. The file is a JSON array, mode 0600, one object per
+same-host refresh worker to open. The file is a JSON array, mode 0600, one object per
 email:
 
     {"message_id": "<opaque intake id>", "subject_hash": "<sha256 hex of the subject>",
-     "sent_utc": "<ISO 8601>", "sender_email": "<address>", "opened_at": "<ISO 8601, triage adds it>"}
+     "sent_utc": "<ISO 8601>", "sender_email": "<address>", "opened_at": "<ISO 8601, refresh worker adds it>"}
 
-Triage finds the email by sender_email and subject_hash and adds opened_at; this
-job owns every other field and keeps opened_at when it rewrites the file. Once a
+The refresh worker finds the email by sender_email and subject_hash and adds opened_at; this
+intake job owns every other field and keeps opened_at when it rewrites the file. Once a
 listed email decodes with its full body, the next run logs that text as a
 log-activity note (activities cannot be updated in place: the verb refuses a
 reused key with new arguments) and drops the entry.
@@ -542,6 +542,9 @@ class Run:
         for m in mails:
             by_ck.setdefault(m['ck'], []).append(m)
         for ident, s in sorted(steps.items(), key=lambda kv: kv[1]['sent']):
+            if ident in self.state.get('pending_full', {}):
+                del steps[ident]
+                continue
             if not all(self.state['requests'].get(k, {}).get('acknowledged') for k in s.get('activity_keys', [])):
                 self.counts['steps_pending'] += 1
                 continue
@@ -593,7 +596,8 @@ class Run:
                     'ck': p['ck'], 'sent': p['sent'], 'ref': p['refs'][0],
                     'who': p.get('who', p['sender_email']),
                     'outbound': p.get('outbound', _internal(p['sender_email'])),
-                    'activity_keys': [key('log-activity', ref, ident) for ref in p['refs']] +
+                    'activity_keys': [key('log-activity', ref, ident) for ref in p['refs']
+                                      if key('log-activity', ref, ident) in self.state['requests']] +
                                      [key('log-activity', ref, f'fullbody|{ident}') for ref in p['refs']]})
                 del pending[ident]
 
@@ -704,7 +708,9 @@ def mapping_counts(state: dict) -> dict:
     participants = {}
     for item in [*mail.values(), *calendar.values()]:
         participants.update(item.get('participants', {}))
-    return {'unresolved_messages': len(mail),
+    return {'hydration_pending': len(state.get('pending_full', {})),
+            'hydration_expired': sum(bool(p.get('expired')) for p in state.get('pending_full', {}).values()),
+            'unresolved_messages': len(mail),
             'unresolved_calendar': len(calendar), 'unresolved_addresses': len(participants),
             'unmatched': len(participants),
             **{'mapping_' + reason: list(participants.values()).count(reason)
