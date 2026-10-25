@@ -58,3 +58,21 @@ select md5('index-event-'||n)::uuid,timestamptz '2020-01-01 UTC'-n*interval '1 s
  case when n<=240 or n>19800 then '{"stage":"qualified"}'::jsonb
       when n%2=0 then '{"stage":null}'::jsonb else '{}'::jsonb end,'system'
 from generate_series(1,20000) n order by n;
+insert into party(id,kind,name,created_by,updated_by)
+select md5('index-vendor-party-'||n)::uuid,'person','Synthetic vendor '||n,
+ md5('index-actor')::uuid,md5('index-actor')::uuid from generate_series(1,20000) n;
+insert into vendor(id,party_id,category,created_by,updated_by,deal_history_verified_at,merged_into,deal_evidence)
+select md5('index-vendor-'||n)::uuid,
+ case when n<=5 then md5('index-vendor-party-1')::uuid else md5('index-vendor-party-'||n)::uuid end,
+ 'lender',md5('index-actor')::uuid,md5('index-actor')::uuid,
+ case when n not in (3,5) then timestamptz '2020-01-01 UTC'+(n-1)*interval '1 day' end,
+ case when n=5 then md5('index-vendor-1')::uuid end,
+ case when n=1 then jsonb_build_array(jsonb_build_object('deal_id',md5('index-deal')::uuid,
+ 'role','worked','occurred_at','2020-01-01T00:00:00Z','evidence_ref','synthetic')) else '[]'::jsonb end
+from generate_series(1,20000) n;
+insert into party_link(id,from_party,to_party,kind,note,source,created_by)
+select md5('index-link-'||n)::uuid,md5('index-vendor-party-'||n)::uuid,md5('index-party')::uuid,
+ 'referral','Synthetic referral','entry',md5('index-actor')::uuid from generate_series(1,20000) n;
+insert into party_link_deal(link_id,deal_id,referred_by,occurred_on,note,created_by)
+select md5('index-link-'||n)::uuid,md5('index-deal')::uuid,md5('index-vendor-party-'||n)::uuid,
+ date '2020-01-02','Synthetic attribution',md5('index-actor')::uuid from generate_series(1,20000) n;
