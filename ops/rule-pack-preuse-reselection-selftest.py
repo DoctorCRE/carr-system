@@ -31,6 +31,35 @@ class DeliveryTests(unittest.TestCase):
         runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(source), '')
         return hook.process(payload, runner=runner, dedupe=False, **options)
 
+    def test_empty_lookup_has_no_stdout_but_keeps_a_valid_receipt(self):
+        output = self.invoke([])
+        row = json.loads(output['hookSpecificOutput']['additionalContext'])
+        self.assertTrue(validate_lookup_receipt(row, repo=REPO))
+        self.assertEqual(row['rules'], [])
+        self.assertEqual(row['rule_ids'], [])
+        self.assertEqual(row['overflow'], [])
+        self.assertNotIn('cards', row)
+        with patch.object(hook, 'process', return_value=output):
+            verdict = hook.decide({})
+        self.assertEqual(verdict.code, 0)
+        self.assertEqual(verdict.stdout, '')
+
+    def test_nonempty_and_incomplete_outputs_still_reach_stdout(self):
+        outputs = [
+            self.invoke([dict(id='11111111', statement='Inspect the diff.',
+                scope={'tools': ['Bash']}, personal_to=None)]),
+            self.invoke([dict(id='22222222', statement='Invalid scope.', scope={}, personal_to=None)]),
+            self.invoke([dict(id='33333333', statement='Binding text ' * 2000,
+                scope={'tools': ['Bash']}, personal_to=None)]),
+            hook.context('RULE LOOKUP INCOMPLETE. Full text could not fit.', 'PreToolUse'),
+            hook.refused('PreToolUse'),
+        ]
+        for output in outputs:
+            with self.subTest(output=output), patch.object(hook, 'process', return_value=output):
+                verdict = hook.decide({})
+                self.assertEqual(verdict.code, 0)
+                self.assertEqual(json.loads(verdict.stdout), output)
+
     def test_data_defects_remain_incomplete_at_pretooluse(self):
         gaps = [dict(id='22222222', statement='Moment rule.',
                      scope={'moment': 'Before review'}, personal_to=None),
@@ -281,6 +310,16 @@ class CardDeliveryTests(unittest.TestCase):
         self.assertEqual([c['id'] for c in row['cards']], ['A01'])
         self.assertEqual(row['cards'][0]['acknowledgement'],
                          'Before acting, answer one line: applies yes/no; action or reason.')
+
+    def test_card_only_lookup_still_reaches_stdout(self):
+        output = self.invoke([], payload={'tool_name': 'EnterPlanMode',
+            'tool_input': {'plan': 'Should we add a new table for tour feedback or reuse notes?'}})
+        with patch.object(hook, 'process', return_value=output):
+            verdict = hook.decide({})
+        self.assertEqual(verdict.code, 0)
+        row = self.receipt(json.loads(verdict.stdout))
+        self.assertEqual(row['rules'], [])
+        self.assertIn('L07', [card['id'] for card in row['cards']])
 
     def test_planning_card_matches_its_own_pattern_at_pretooluse(self):
         payload = {'tool_name': 'EnterPlanMode',

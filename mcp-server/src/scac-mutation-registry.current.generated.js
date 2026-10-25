@@ -335,7 +335,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/situation-retrieval.js",
     "schema_digest": "87ecbaa9c95b2c975e799942c5885f84c4c11856e3e87a022d6fad90742ec923",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -362,7 +362,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/deal-items.js",
     "schema_digest": "951a874c8854706a552b3080ed6c371efc6956c400e10757c317d618fe617791",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -544,7 +544,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/deal-items.js",
     "schema_digest": "afab113d866bf2081d0599cdff0eba72209372e77ac0c1573cacf1c4aae91926",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -934,7 +934,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/deal-items.js",
     "schema_digest": "eb212d3b90bab7fae46ce103f966ac8a290531a0fa731f4d765164e09cfd973a",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1217,6 +1217,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "morning-assurance-queue": {
+    "ingress_key": "mcp-tool:morning-assurance-queue",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "f9bc31ea4b7272fe136ea9b4b50b9cefe1c1b8cd70def5e256205d197b500798",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "morning-brief": {
     "ingress_key": "mcp-tool:morning-brief",
     "source_locator": "mcp-server/src/tools.js",
@@ -1228,6 +1237,18 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
       "claim-card",
       "deal-room-board",
       "loop-board",
+      "today-triage"
+    ]
+  },
+  "morning-brief-queue": {
+    "ingress_key": "mcp-tool:morning-brief-queue",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "311e730892d29b318e416f279a7996e0cb8cda88235581c412e27490dcd8738a",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": [
+      "governance-queue",
       "today-triage"
     ]
   },
@@ -1851,7 +1872,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/deal-items.js",
     "schema_digest": "3adafb91a5d32c51e7386ca06582b49fb074888c19eceb1e5a11415e98f75ae5",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2216,7 +2237,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "6a55c6878ae4b86a6f36e0c4b04bb13d96aa595a97e3c9baeb9142fc54667bb3",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2243,7 +2264,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/situation-retrieval.js",
     "schema_digest": "9013091b73c6eaaccd10e5fb6eff9f9debd6b582e549fad7acf75ed48d70416e",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -3056,6 +3077,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text)",
       "volatility": "s",
       "ingress_key": "db-function-acl:ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=ops, public, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.admit_job_cost(p_job_id uuid, p_lease_token uuid, p_route_key text, p_estimated_cost_usd numeric)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.admit_job_cost(p_job_id uuid, p_lease_token uuid, p_route_key text, p_estimated_cost_usd numeric):carr_jobs:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

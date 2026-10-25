@@ -77,6 +77,8 @@ import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
 import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.js";
 import { partyIdentityTools } from "./party-identity.js";
+import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.js";
+import { readBriefAssurance } from "./brief-assurance.js";
 import { readNeedsJoe } from "./needs-joe.js";
 import { scheduleBoardTools } from "./schedule-board.js";
 export { canExercisePartnerAuthority, partnerAuthoritySlugForActor };
@@ -3398,6 +3400,65 @@ export const TOOLS = {
         item_kind: last.item_kind, id: last.id })) : null;
       const items = page.slice(0, limit).map(({ triage_total, triage_rank, triage_on, triage_due_on, ...row }) => row);
       return { items, total, has_more, next_cursor };
+    },
+  },
+
+  "morning-brief-queue": {
+    write: false,
+    description: "Continue a full morning queue. Today uses the partner triage cursor; loops sort due date first, caller first only on tied dates, then kind/number fingerprint; Needs Joe sorts blocking tier, oldest timestamp to millisecond precision, source/identity fingerprint after exclusions and duplicate collapse. Defaults to 50 rows. Returns total, returned, remaining (loops/Needs Joe), has_more, next_cursor. Pass the cursor and same queue. Cursors bind tenant, sponsor and queue. Live keysets are not snapshots; restart to include rows whose sort keys change before the cursor. Needs Joe totals cover available sources only when partial. No audience argument.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["queue"], properties: {
+      queue: { type: "string", enum: ["today", "loops", "needs_joe"] },
+      limit: { type: "integer", minimum: 1, maximum: 50 },
+      cursor: { type: "string", minLength: 1, maxLength: 8000 },
+    } },
+    handler: async (c, actor, args) => {
+      const scope = personalScopeForActor(actor);
+      if (scope.status !== "personal") throw new ToolError({ error: "morning_brief_requires_partner_scope" });
+      if (args.queue === "today") {
+        const value = await executeRegisteredTool(c, actor, "today-triage", {
+          owners: "partners", ...(args.limit === undefined ? {} : { limit: args.limit }),
+          ...(args.cursor === undefined ? {} : { cursor: args.cursor }),
+        });
+        return { ...value, sponsor: scope.sponsor, returned: value.items.length, items: value.items.map(row => ({ ...row,
+          owner_partner: row.owner ? TODO_OWNER_PARTNER.get(String(row.owner).toLowerCase()) : null })) };
+      }
+      let value, key;
+      if (args.queue === "needs_joe") {
+        if (scope.sponsor !== "joe") throw new ToolError({ error: "needs_joe_not_applicable" });
+        value = (await executeRegisteredTool(c, actor, "governance-queue", {})).needs_joe;
+        value = { ...value, items: value.items.map(row => ({ ...row,
+          title: row.title || `Decision ${row.key}` })) };
+        key = briefNeedsJoeKey;
+      } else {
+        value = { items: await readBriefLoops(c) };
+        key = briefLoopKey(scope.sponsor);
+      }
+      const page = await briefQueuePage(value.items, { ...args, key, ToolError,
+        scope: JSON.stringify([organizationTenantForActor(actor), scope.sponsor, args.queue]) });
+      return { ...value, ...page, count: page.returned, sponsor: scope.sponsor, state: value.state ?? (page.total ? "ready" : "empty"),
+        total_scope: value.state === "partial" ? "available_sources" : "eligible_queue" };
+    },
+  },
+
+  "morning-assurance-queue": {
+    write: false,
+    writerConnection: true,
+    description: "Full assurance cadence queue for the authenticated partner. Read-only writer transaction uses existing notification grants. Includes unread delivery cadence alerts only; active morning holds stay hidden. Failure leads action-required then completion; each severity sorts oldest timestamp then notification UUID. Returns total, returned, remaining, has_more, next_cursor; pass cursor to continue. Live keyset, not a snapshot. No recipient argument.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      limit: { type: "integer", minimum: 1, maximum: 50 },
+      cursor: { type: "string", minLength: 1, maxLength: 8000 },
+    } },
+    handler: async (c, actor, args) => {
+      const scope = personalScopeForActor(actor);
+      if (scope.status !== "personal") throw new ToolError({ error: "morning_brief_requires_partner_scope" });
+      try {
+        return { sponsor: scope.sponsor, ...await briefQueuePage(await readBriefAssurance(c, scope.sponsor), { ...args,
+          key: briefAssuranceKey, ToolError,
+          scope: JSON.stringify([organizationTenantForActor(actor), scope.sponsor, "assurance_cadence"]) }) };
+      } catch (error) {
+        if (error instanceof ToolError) throw error;
+        throw new ToolError({ error: "source_unavailable" });
+      }
     },
   },
 
@@ -9515,6 +9576,7 @@ registerTools({
 
   "resolve-post-call-candidate": {
     write: true,
+    humanOnly: true,
     description: "Human-only resolution for one Call Mode proposal. assigned_action creates a real next action for the explicit Joe or Dell assignee. email_draft only confirms metadata and its local body hash: it never creates or sends an email or Outlook draft.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, candidate_id: { type: "string" },

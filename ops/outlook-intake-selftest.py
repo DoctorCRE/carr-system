@@ -21,6 +21,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib import outlook_intake as intake
+from lib.outlook_settings import load_settings
+from outlook_test_support import write_settings
 
 NOW = datetime(2026, 10, 20, 15, 0, tzinfo=timezone.utc)
 SCHEMA = """
@@ -157,13 +159,20 @@ class Fake:
 
 class IntakeTest(unittest.TestCase):
     def setUp(self):
-        internal = patch.object(intake, '_internal', side_effect=lambda address: address.lower() in (OWNER, PARTNER))
+        scope = patch('lib.outlook_settings.OutlookSettings.verify_helper')
+        scope.start()
+        self.addCleanup(scope.stop)
+        internal = patch.object(intake, '_internal', side_effect=lambda address, domain: address.lower() in (OWNER, PARTNER))
         internal.start()
         self.addCleanup(internal.stop)
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.repo = self.tmp / 'repo'
         self.home = self.tmp / 'home'
+        write_settings(self.home, self.repo, owner='joe')
+        settings = patch.object(intake, 'load_settings', lambda home=None: load_settings(home or self.home))
+        settings.start()
+        self.addCleanup(settings.stop)
         self.store = self.home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity/HxStore.hxd'
         self.store.parent.mkdir(parents=True)
         self.store.write_bytes(b'Nostromo-fixture')
@@ -176,7 +185,9 @@ class IntakeTest(unittest.TestCase):
         copier.start()
         self.addCleanup(copier.stop)
 
-    def copy_snapshot(self, command, *, cwd, **kwargs):
+    def copy_snapshot(self, command, *, cwd=None, **kwargs):
+        if command[-1] == '--scope':
+            return subprocess.CompletedProcess(command, 0, stdout=f'{self.store.parent}\n{self.repo / intake.OUT}\n{self.repo}\n')
         self.assertEqual(command, [str(self.home / 'carr-local/bin/outlook-intake-copy')])
         shutil.copyfile(self.store, cwd / 'store.hxd')
         os.chmod(cwd / 'store.hxd', 0o600)
@@ -258,7 +269,7 @@ class IntakeTest(unittest.TestCase):
     def test_main_emits_monitoring_receipt_from_the_actual_outcome(self):
         from io import StringIO
         outcome = intake.Outcome('failed', 'writes_failed', {'writes_failed': 3})
-        with patch.object(intake, 'run', return_value=outcome), patch('sys.stdout', new_callable=StringIO) as stdout:
+        with patch.object(intake, 'load_settings', return_value=load_settings(self.home)), patch.object(type(load_settings(self.home)), 'require_repo'), patch.object(intake, 'run', return_value=outcome), patch('sys.stdout', new_callable=StringIO) as stdout:
             self.assertEqual(intake.main(), 1)
         receipt = stdout.getvalue().split('outlook-intake-receipt ', 1)[1]
         self.assertEqual(json.loads(receipt), {'state': 'failed', 'reason': 'writes_failed', 'counts': {'writes_failed': 3}})
@@ -267,7 +278,7 @@ class IntakeTest(unittest.TestCase):
         from types import SimpleNamespace
         for rows, code in (([], 'contacts_empty'), (ValueError('PRIVATE-SENTINEL'), 'contacts_read_failed')):
             with self.subTest(code=code):
-                def read_view(view):
+                def read_view(view, **kwargs):
                     if isinstance(rows, Exception):
                         raise rows
                     return [], rows
@@ -986,7 +997,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(len([1 for v, _ in self.fake.calls if v == 'set-next-action']), 2)
 
     def test_outside_seven_to_seven_nothing_is_decoded_or_called(self):
-        local = intake.LOCAL
+        local = load_settings(self.home).timezone
         for when in (datetime(2026, 10, 20, 0, 0, tzinfo=local), datetime(2026, 10, 20, 6, 59, tzinfo=local),
                      datetime(2026, 10, 20, 19, 31, tzinfo=local)):
             self.fake.now = when
@@ -1197,7 +1208,7 @@ class ScheduleTest(unittest.TestCase):
         self.assertNotIn('RunAtLoad', plist)
         self.assertNotIn('StartInterval', plist)
         self.assertEqual(plist['ProgramArguments'],
-                         ['{{HOME}}/carr-local/bin/outlook-intake-copy', '--run-intake'])
+                         ['{{COPY_HELPER}}', '--run-intake'])
         services = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
         [env] = [s for s in services if s['key'] == 'outlook-intake'][0]['environments']
         self.assertEqual(env['runs_on'], 'primary')
@@ -1240,6 +1251,7 @@ class StoreResolverTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
+        write_settings(self.home, self.home / 'repo', owner='joe')
         self.profiles = self.home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles'
         self.env = patch.dict(os.environ, {}, clear=False)
         self.env.start()

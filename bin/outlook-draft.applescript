@@ -2,20 +2,10 @@
 --
 -- argv: 1 window-title prefix (the subject)  2 "close" or "leave"
 --
--- WHY THE ODD KEYSTROKE DANCE, discovered empirically 2026-08-03 and NOT guessable:
--- New Outlook DISCARDS a mailto-spawned draft on close if it considers the message
--- untouched. `File > Save` alone does not save it; neither does Cmd+S. Joe watched
--- three drafts appear in his Drafts folder and vanish the moment the compose window
--- closed. Typing a single character marks the message MODIFIED, and from then on
--- File > Save commits it and it survives the close.
---
--- So: type one character, delete it, then save. Net content change is zero and the
--- modified flag is set. Verified by Joe on CLEAN TEST 4 — draft persisted, and the
--- typed character was not present in the body.
---
--- The window is matched by TITLE PREFIX because Outlook renders it as
--- "<subject> • joe.bookout@carr.us", and the account suffix is not ours to predict.
--- Every value arrives via argv so a subject full of quotes is inert data.
+-- An untouched mailto draft disappears on close. Type and delete one character
+-- before saving so Outlook persists it without changing the message content.
+-- Match the subject prefix because long subjects are truncated in window titles.
+-- Values arrive through argv so quoted subjects remain inert data.
 
 on run argv
   set titlePrefix to item 1 of argv

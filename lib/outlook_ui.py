@@ -4,7 +4,7 @@ The preflight half restarts Outlook into one ordinary, readable mailbox window;
 it was lifted from the cancelled agent-based sweep (commit 5f5d83ac5). The
 message-list half reads Inbox rows and moves one already-read row to a folder.
 
-Shapes confirmed against Joe's live Outlook on 2026-10-20 (read-only probe):
+Shapes confirmed against live Outlook on 2026-10-20 (read-only probe):
 the folder pane is an AXOutline of every folder, and with it showing a walk deep
 enough to reach the message list exceeds cua-driver's 20 s AX timeout, so the
 pane is hidden (View > Sidebar) while rows are read. invoke_menu reports
@@ -31,7 +31,7 @@ from typing import Callable
 APP = 'Microsoft Outlook'
 MAILBOX_TITLE = re.compile(r'. • [^\s@]+@[^\s@]+\.[^\s@]+$')
 INBOX_TITLE = re.compile(r'^Inbox • ')
-FULL_SCREEN_HEIGHT = 949
+from lib.outlook_settings import load_settings
 EXIT = {'succeeded': 0, 'skipped': 78, 'timed_out': 124, 'failed': 1}
 SIDEBAR = ['View', 'Sidebar']
 QUIT = ['Outlook', 'Quit Outlook']
@@ -141,14 +141,15 @@ def is_compose_window(window: dict) -> bool:
             and bounds.get('height', 0) >= 400)
 
 
-def is_ordinary_main_window(window: dict) -> bool:
+def is_ordinary_main_window(window: dict, full_screen_height: int) -> bool:
     return (is_main_window(window) and window.get('on_current_space') is True
-            and (window.get('bounds') or {}).get('height', FULL_SCREEN_HEIGHT) < FULL_SCREEN_HEIGHT)
+            and (window.get('bounds') or {}).get('height', full_screen_height) < full_screen_height)
 
 
 def cua(tool: str, arguments: dict) -> dict:
     try:
-        result = subprocess.run(['cua-driver', 'call', tool, json.dumps(arguments)],
+        driver = str(load_settings().driver)
+        result = subprocess.run([driver, 'call', tool, json.dumps(arguments)],
                                 capture_output=True, text=True, timeout=120)
         value = json.loads(result.stdout)
     except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
@@ -175,7 +176,8 @@ def _readable(pid: int, window: dict) -> bool:
 
 
 def usable_window(pid: int) -> dict | None:
-    return next((w for w in _windows(pid) if is_ordinary_main_window(w) and _readable(pid, w)), None)
+    full_screen_height = load_settings().full_screen_height
+    return next((w for w in _windows(pid) if is_ordinary_main_window(w, full_screen_height) and _readable(pid, w)), None)
 
 
 def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
@@ -405,7 +407,7 @@ class Window:
         """Open one listed, already-read email so Outlook downloads its full body.
 
         An unread email is never selected: it is skipped and refreshed on a later
-        night, once Joe has read it. The row is selected only while allowed() still
+        night, once the user has read it. The row is selected only while allowed() still
         holds, and counts as opened only when a fresh read shows it alone selected.
         """
         rows = self.rows(require_inbox=False)[1]

@@ -12,6 +12,7 @@ shows an unread row's label starting with "Unread". Fixtures use neutral IDs
 """
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import hashlib
 import io
 import json
@@ -29,10 +30,11 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib import outlook_triage as triage
+from outlook_test_support import write_settings
 from lib.launchd_calendar import calendar_for_window
 from lib.outlook_ui import Row, Waits
 
-ZONE = triage.ZONE
+ZONE = ZoneInfo('America/Chicago')
 EVENING = datetime(2026, 10, 20, 19, 15, tzinfo=ZONE)
 LAST = datetime(2026, 10, 20, 21, 0, tzinfo=ZONE)
 GUIDE = '''### Choosing the folder
@@ -303,8 +305,12 @@ class FakeOutlookCase(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix='outlook-triage-selftest-'))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.repo, self.home, bin_dir = self.tmp / 'repo', self.tmp / 'home', self.tmp / 'bin'
-        self.guide = self.home / triage.GUIDE
-        self.guide.parent.mkdir(parents=True)
+        write_settings(self.home, self.repo, account=ACCOUNT, driver=str(self.tmp / 'bin/cua-driver'))
+        local_home = patch('pathlib.Path.home', return_value=self.home)
+        local_home.start()
+        self.addCleanup(local_home.stop)
+        self.guide = self.home / '.config/carr/outlook-nightly-sweep.folders.md'
+        self.guide.parent.mkdir(parents=True, exist_ok=True)
         self.guide.write_text(GUIDE)
         self.guide.chmod(0o600)
         bin_dir.mkdir()
@@ -362,6 +368,24 @@ class FakeOutlookCase(unittest.TestCase):
 
 
 class OutlookTriageTest(FakeOutlookCase):
+    def test_configured_driver_outside_shell_path_works(self):
+        self.given([FILE_A, NEWS, UNREAD])
+        local_driver = self.home / '.local/bin/cua-driver'
+        local_driver.parent.mkdir(parents=True)
+        (self.tmp / 'bin/cua-driver').rename(local_driver)
+        write_settings(self.home, self.repo, account=ACCOUNT, driver=str(local_driver))
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
+        self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A']])
+        self.assertNotIn(UNREAD['label'], state['selections'])
+
+    def test_missing_driver_fails_without_selecting_mail(self):
+        self.given([FILE_A, UNREAD])
+        (self.tmp / 'bin/cua-driver').unlink()
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'cua_driver_unavailable'))
+        self.assertEqual((state['moved'], state['selections']), ([], []))
+
     def test_files_read_email_by_each_rule_and_never_selects_unread(self):
         self.given([FILE_A, VENDOR, FIRM, NEWS, UNCERTAIN, UNREAD])
         outcome, state = self.run_triage()
@@ -646,9 +670,7 @@ class RefreshTest(FakeOutlookCase):
         path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test'),
                                   listed('m2', self.UNREAD_BODY, 'c1@client.test')])
         self.guide.write_text('')
-        account_path = self.home / '.config/carr/outlook-account'
-        account_path.write_text(ACCOUNT)
-        account_path.chmod(0o600)
+        write_settings(self.home, self.repo, account=ACCOUNT, driver=str(self.tmp / 'bin/cua-driver'))
         with patch.dict(os.environ, self.env, clear=True):
             outcome = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
                                           waits=Waits(0, 0, 0, 0, 0, 0, 0),
@@ -666,9 +688,7 @@ class RefreshTest(FakeOutlookCase):
         from lib import outlook_refresh
         self.given([self.READ_BODY])
         self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        account_path = self.home / '.config/carr/outlook-account'
-        account_path.write_text('wrong@example.test')
-        account_path.chmod(0o600)
+        write_settings(self.home, self.repo, account='wrong@example.test', driver=str(self.tmp / 'bin/cua-driver'))
         with patch.dict(os.environ, self.env, clear=True):
             result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
                                          waits=Waits(0, 0, 0, 0, 0, 0, 0))
@@ -754,7 +774,7 @@ class RefreshTest(FakeOutlookCase):
 
 
 class DecideTest(unittest.TestCase):
-    guide = triage.FolderGuide.parse(GUIDE)
+    guide = triage.FolderGuide.parse(GUIDE, deal_prefix='Deals/', vendor_prefix='Networking/Vendors/A.List/')
 
     def decide(self, sender, find=None):
         row = Row(msg(sender, 'subject-x')['label'], 't', False)
@@ -802,9 +822,9 @@ class DecideTest(unittest.TestCase):
 
     def test_guide_without_deals_or_with_a_dangling_map_is_refused(self):
         with self.assertRaises(ValueError):
-            triage.FolderGuide.parse('CARR\nCARR/folder-C\n')
+            triage.FolderGuide.parse('CARR\nCARR/folder-C\n', deal_prefix='Deals/', vendor_prefix='Networking/Vendors/A.List/')
         with self.assertRaises(ValueError):
-            triage.FolderGuide.parse(GUIDE + 'map: sender-x -> CARR/folder-Z\n')
+            triage.FolderGuide.parse(GUIDE + 'map: sender-x -> CARR/folder-Z\n', deal_prefix='Deals/', vendor_prefix='Networking/Vendors/A.List/')
 
 
 class InstallTest(unittest.TestCase):
@@ -834,12 +854,20 @@ class InstallTest(unittest.TestCase):
         self.assertIn('/bin/chmod 600 "$LOG"', self.installer)
         self.assertLess(self.installer.index('/bin/chmod 600 "$LOG"'), self.installer.index('print -- '))
 
-    def test_service_runs_on_the_secondary_mac_daily(self):
+    def test_installer_checks_machine_scope_before_private_mail_guide(self):
+        self.assertLess(self.installer.index("-m lib.outlook_settings service triage"),
+                        self.installer.index('if [ ! -s "$GUIDE"'))
+
+    def test_service_runs_on_the_primary_mac_daily(self):
         services = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
         service = next(s for s in services if s['key'] == triage.SERVICE)
         env = service['environments'][0]
-        self.assertEqual(env['runs_on'], 'secondary')
+        self.assertEqual(env['runs_on'], 'primary')
         self.assertEqual(env['deploy_mechanism'], 'ops/launchd/com.carr.outlook-triage.plist')
+        from lib.launchd_scope import allowed_on_machine
+        self.assertTrue(allowed_on_machine('com.carr.outlook-triage.plist', primary=True))
+        self.assertFalse(allowed_on_machine('com.carr.outlook-triage.plist', primary=False))
+        self.assertIn("-m lib.outlook_settings service triage", self.installer)
         self.assertGreaterEqual(env['expected_cadence_seconds'] + env['cadence_grace_seconds'], 27.5 * 3600)
 
 

@@ -11,6 +11,8 @@ import io
 import json
 import os
 import stat
+import shlex
+import subprocess
 import sys
 import tempfile
 import time
@@ -25,6 +27,7 @@ from typesafe_sdk import TypeSafeError
 
 BIN_DIR = Path(__file__).resolve().parents[1] / "bin"
 sys.path.insert(0, str(BIN_DIR))
+import post_call_jev as runtime_jev
 
 
 def load_module(name: str, filename: str):
@@ -49,7 +52,7 @@ _OFFLINE_CLIENT.__enter__ = Mock(return_value=_OFFLINE_CLIENT)
 _OFFLINE_CLIENT.__exit__ = Mock(return_value=False)
 _CLIENT_PATCHES = (
     patch.object(post_call_jev, "TypeSafeClient", return_value=_OFFLINE_CLIENT, create=True),
-    patch.object(post_call.post_call_jev, "TypeSafeClient", return_value=_OFFLINE_CLIENT, create=True),
+    patch.object(runtime_jev, "TypeSafeClient", return_value=_OFFLINE_CLIENT, create=True),
 )
 
 
@@ -66,12 +69,6 @@ def tearDownModule() -> None:
 
 
 class CallModeTests(unittest.TestCase):
-    def test_live_partitioning_does_not_request_disabled_topic_advice(self) -> None:
-        transcript = {"segments": [{"text": "synthetic words " * 100} for _ in range(20)]}
-        with patch.object(post_call.post_call_jev, "TypeSafeClient") as ask:
-            post_call._topic_chunks(transcript)
-        ask.assert_not_called()
-
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.recordings = Path(self.tmp.name)
@@ -454,11 +451,6 @@ class CallModeHttpTests(unittest.TestCase):
 class PostCallTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
-        env = patch.dict(os.environ, {"CARR_FLASH_STATE_DIR": str(Path(self.tmp.name) / "flash")})
-        env.start()
-        self.addCleanup(env.stop)
-        post_call.flashlib.grant_path().parent.mkdir()
-        post_call.flashlib.grant_path().write_text(json.dumps({"issued_at": 0, "expires_at": 4e9}))
         self.session = Path(self.tmp.name) / "2026.08.10-1234"
         self.session.mkdir()
         self.context = {
@@ -632,187 +624,103 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(runner.call_args.args[0], ["fixture-distiller"])
         self.assertFalse(runner.call_args.kwargs["shell"])
 
-    def test_local_model_contract_is_strict_and_tolerates_a_json_code_fence(self) -> None:
-        schema = post_call.distiller_json_schema()
-        self.assertFalse(schema["additionalProperties"])
-        self.assertEqual(set(schema["required"]), set(schema["properties"]))
-        self.assertEqual(post_call.parse_model_json('```json\n{"ok": true}\n```'), {"ok": True})
-
-    def test_post_call_model_port_cannot_collide_with_quill_services(self) -> None:
-        self.assertNotIn(post_call.LLAMA_PORT, {8596, 8597})
-
-    class _FakeOpenerResponse:
-        def __init__(self, payload: bytes) -> None:
-            self._payload = payload
-
-        def read(self) -> bytes:
-            return self._payload
-
-        def __enter__(self) -> "PostCallTests._FakeOpenerResponse":
-            return self
-
-        def __exit__(self, *exc: object) -> None:
-            return None
-
-    class _FakeOpener:
-        """A minimal fake for urllib.request.urlopen: never touches a real socket.
-
-        Distinguishes the /v1/models health probe (called with a bare URL
-        string) from a /v1/chat/completions POST (called with a
-        urllib.request.Request) so both paths in resident_flash_distiller can
-        be exercised without a subprocess or a network call.
-        """
-
-        def __init__(self, health_ok: bool = True, chunk_contents: list[str] | None = None) -> None:
-            self.health_ok = health_ok
-            self.chunk_contents = list(chunk_contents or [])
-            self.calls: list[str] = []
-
-        def __call__(self, target: object, timeout: float | None = None) -> "PostCallTests._FakeOpenerResponse":
-            if isinstance(target, str):
-                self.calls.append(target)
-                if not self.health_ok:
-                    raise OSError("connection refused")
-                return PostCallTests._FakeOpenerResponse(b"{}")
-            full_url = target.full_url  # type: ignore[attr-defined]
-            self.calls.append(full_url)
-            content = self.chunk_contents.pop(0)
-            outer = {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": content}}]}
-            return PostCallTests._FakeOpenerResponse(json.dumps(outer).encode())
-
-    def _fake_opener(self, health_ok: bool = True, chunk_contents: list[str] | None = None) -> "PostCallTests._FakeOpener":
-        return PostCallTests._FakeOpener(health_ok=health_ok, chunk_contents=chunk_contents)
-
-    def test_resident_flash_distiller_calls_the_fixed_loopback_endpoint_and_parses_json(self) -> None:
-        content = json.dumps(self.output())
-        opener = self._fake_opener(chunk_contents=[content])
-        result = post_call.resident_flash_distiller({"session": self.session.name, "context": self.context, "transcript": {"segments": [{"speaker": "Joe", "text": "Call Vendor A"}]}}, opener=opener)
-        self.assertEqual(result["joe_tasks"][0]["title"], "Call vendor")
-        self.assertEqual(opener.calls[0], f"{post_call.FLASH_SERVER_URL}/v1/models")
-        self.assertTrue(opener.calls[1].startswith(post_call.FLASH_SERVER_URL))
-        self.assertIn("/v1/chat/completions", opener.calls[1])
-
-    def test_resident_flash_distiller_sends_model_and_disables_thinking(self) -> None:
-        captured: dict[str, object] = {}
-        real_request = post_call.urllib.request.Request
-
-        def spying_request(url, data=None, headers=None, method=None):
-            payload = json.loads(data)
-            captured["model"] = payload.get("model")
-            captured["chat_template_kwargs"] = payload.get("chat_template_kwargs")
-            return real_request(url, data=data, headers=headers, method=method)
-
-        opener = self._fake_opener(chunk_contents=[json.dumps(self.output())])
-        with patch.object(post_call.urllib.request, "Request", spying_request):
-            post_call.resident_flash_distiller({"session": self.session.name, "context": self.context, "transcript": {"segments": [{"speaker": "Joe", "text": "Call Vendor A"}]}}, opener=opener)
-        self.assertEqual(captured["model"], post_call.FLASH_SERVER_MODEL)
-        self.assertEqual(captured["chat_template_kwargs"], {"enable_thinking": False})
-
-    def test_resident_flash_distiller_fails_closed_when_the_resident_server_is_unreachable(self) -> None:
-        opener = self._fake_opener(health_ok=False)
-        with self.assertRaises(post_call.DistillerUnavailable):
-            post_call.resident_flash_distiller({"session": self.session.name, "context": self.context, "transcript": {"segments": []}}, opener=opener)
-
-    def test_resident_flash_distiller_never_starts_or_stops_a_process(self) -> None:
-        import inspect
-        self.assertNotIn("popen", inspect.signature(post_call.resident_flash_distiller).parameters)
-
-    def test_default_distiller_reports_an_unreachable_resident_server_and_never_uses_llama(self) -> None:
-        with patch.object(post_call, "resident_flash_distiller", side_effect=post_call.DistillerUnavailable("down")) as resident, \
-             patch.object(post_call, "llama_distiller") as llama:
-            with self.assertRaisesRegex(post_call.DistillerUnavailable, "Flash Next"):
-                post_call.default_distiller({"session": self.session.name, "context": self.context, "transcript": {"segments": []}})
-        resident.assert_called_once()
-        llama.assert_not_called()
-
-    def test_switched_off_distiller_defers_without_dropping_call_data(self) -> None:
+    def test_default_sonnet_command_produces_a_review_pack(self) -> None:
         post_call.store_context(self.session, self.context)
-        state = Path(self.tmp.name) / "flash-state"
-        state.mkdir()
-        (state / "flash.off").touch()
-        with patch.dict(os.environ, {"CARR_FLASH_STATE_DIR": str(state)}), \
-             patch.object(post_call, "resident_flash_distiller", side_effect=AssertionError("Flash was invoked")):
+        reply = {"is_error": False, "structured_output": self.output()}
+        overrides = {name: "synthetic-override" for name in (
+            "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+            "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
+            "CLAUDE_CODE_API_KEY_HELPER_TTL_MS", "CLAUDECODE")}
+        with patch.dict(os.environ, {**overrides, "CARR_POST_CALL_DISTILLER_COMMAND": ""}), \
+             patch.object(post_call.subprocess, "run", return_value=SimpleNamespace(
+                 returncode=0, stdout=json.dumps(reply))) as runner:
+            status = post_call.process_session(self.session)
+        self.assertEqual(status["state"], "ready_review")
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        self.assertEqual(report["joe_tasks"][0]["title"], "Call vendor")
+        argv = runner.call_args.args[0]
+        self.assertEqual(argv[:4], ["claude", "-p", "--model", "sonnet"])
+        self.assertIn("--no-session-persistence", argv)
+        self.assertEqual(argv[argv.index("--tools") + 1], "")
+        self.assertEqual(argv[argv.index("--setting-sources") + 1], "")
+        self.assertIn("--strict-mcp-config", argv)
+        self.assertIn("--disable-slash-commands", argv)
+        self.assertIn("--system-prompt", argv)
+        self.assertFalse(Path(runner.call_args.kwargs["cwd"]).exists())
+        self.assertNotEqual(str(self.session), runner.call_args.kwargs["cwd"])
+        for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+                     "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
+                     "CLAUDE_CODE_API_KEY_HELPER_TTL_MS", "CLAUDECODE"):
+            self.assertFalse(name in runner.call_args.kwargs["env"], name)
+        self.assertEqual(argv[argv.index("--output-format") + 1], "json")
+        self.assertEqual(json.loads(argv[argv.index("--json-schema") + 1])["required"],
+                         ["schema_version", "report", "joe_tasks", "dell_tasks",
+                          "deal_updates", "draft_proposals", "review_questions"])
+        source = json.loads(runner.call_args.kwargs["input"])
+        self.assertEqual(source["CONTEXT"], self.context)
+        self.assertEqual(source["TRANSCRIPT"]["segments"][0]["text"], "Call Vendor A")
+
+    def test_invalid_sonnet_output_blocks_without_writing_a_review_pack(self) -> None:
+        bad_shape = self.output(review_questions="not an array")
+        bad_item = self.output(dell_tasks=[{"title": "Incomplete"}])
+        cases = [
+            "not JSON", "[]", "{}",
+            json.dumps({"is_error": True, "structured_output": self.output()}),
+            json.dumps({"is_error": False, "structured_output": bad_shape}),
+            json.dumps({"is_error": False, "structured_output": bad_item}),
+        ]
+        for stdout in cases:
+            with self.subTest(stdout=stdout):
+                post_call.store_context(self.session, self.context)
+                with patch.dict(os.environ, {"CARR_POST_CALL_DISTILLER_COMMAND": ""}), \
+                     patch.object(post_call.subprocess, "run", return_value=SimpleNamespace(
+                         returncode=0, stdout=stdout)):
+                    status = post_call.process_session(self.session)
+                self.assertEqual(status["state"], "blocked")
+                self.assertTrue(status["reason"])
+                self.assertFalse((self.session / post_call.REPORT_FILE).exists())
+                self.assertFalse((self.session / post_call.DRAFTS_FILE).exists())
+                self.assertIsNotNone(post_call.context_from_session(self.session))
+                self.assertTrue((self.session / "transcript.json").exists())
+
+    def test_sonnet_execution_failures_block_without_a_report(self) -> None:
+        for failure in (OSError("missing CLI"), subprocess.TimeoutExpired("claude", 180)):
+            with self.subTest(failure=type(failure).__name__):
+                post_call.store_context(self.session, self.context)
+                with patch.dict(os.environ, {"CARR_POST_CALL_DISTILLER_COMMAND": ""}), \
+                     patch.object(post_call.subprocess, "run", side_effect=failure):
+                    status = post_call.process_session(self.session)
+                self.assertEqual(status["state"], "blocked")
+                self.assertFalse((self.session / post_call.REPORT_FILE).exists())
+
+    def test_nonzero_sonnet_exit_blocks_even_with_valid_json(self) -> None:
+        post_call.store_context(self.session, self.context)
+        with patch.dict(os.environ, {"CARR_POST_CALL_DISTILLER_COMMAND": ""}), \
+             patch.object(post_call.subprocess, "run", return_value=SimpleNamespace(
+                 returncode=1, stdout=json.dumps({"structured_output": self.output()}))):
             status = post_call.process_session(self.session)
         self.assertEqual(status["state"], "blocked")
-        self.assertEqual(status["reason"], "flash is switched off")
-        self.assertTrue((self.session / "transcript.json").exists())
-        self.assertIsNotNone(post_call.read_json(self.session / post_call.CONTEXT_FILE))
+        self.assertFalse((self.session / post_call.REPORT_FILE).exists())
 
-    def test_default_distiller_prefers_the_resident_server_and_never_falls_back_on_a_content_failure(self) -> None:
-        with patch.object(post_call, "resident_flash_distiller", return_value=self.output()) as resident, \
-             patch.object(post_call, "llama_distiller") as llama:
-            post_call.default_distiller({"session": self.session.name, "context": self.context, "transcript": {"segments": []}})
-        resident.assert_called_once()
-        llama.assert_not_called()
+    def test_injected_command_wins_and_keeps_the_request_contract(self) -> None:
+        post_call.store_context(self.session, self.context)
+        fixture = Path(self.tmp.name) / "fixture-distiller"
+        fixture.write_text(
+            f"#!{sys.executable}\nimport json, pathlib, sys\n"
+            f"pathlib.Path({str(self.session / 'request.json')!r}).write_text(sys.stdin.read())\n"
+            f"print({json.dumps(self.output())!r})\n"
+        )
+        fixture.chmod(0o700)
+        with patch.dict(os.environ, {"CARR_POST_CALL_DISTILLER_COMMAND": shlex.quote(str(fixture))}):
+            status = post_call.process_session(self.session)
+        self.assertEqual(status["state"], "ready_review")
+        request = json.loads((self.session / "request.json").read_text())
+        self.assertEqual(request["context"], self.context)
+        self.assertEqual(request["session"], self.session.name)
 
-        with patch.object(post_call, "resident_flash_distiller", side_effect=post_call.ContractError("bad json")) as resident, \
-             patch.object(post_call, "llama_distiller") as llama:
-            with self.assertRaises(post_call.ContractError):
-                post_call.default_distiller({"session": self.session.name, "context": self.context, "transcript": {"segments": []}})
-        resident.assert_called_once()
-        llama.assert_not_called()
-
-    def test_long_transcript_is_split_on_segments_and_merged_without_a_real_model(self) -> None:
-        transcript = {"segments": [{"speaker": "Joe", "text": "x" * 14000}, {"speaker": "Dell", "text": "y" * 14000}, {"speaker": "Joe", "text": "z" * 14000}]}
-        chunks = post_call.transcript_chunks(transcript, limit=25000)
-        self.assertEqual(len(chunks), 3)
-        first = self.output()
-        second = self.output(joe_tasks=[])
-        merged = post_call.merge_chunk_outputs([first, second])
-        self.assertEqual(len(merged["joe_tasks"]), 1)
-        self.assertEqual(merged["report"]["summary"], "Summary\n\nSummary")
-
-    @staticmethod
-    def long_segments(count: int = 20) -> list[dict[str, str]]:
-        return [{"speaker": "Joe" if i % 2 else "Dell", "text": f"s{i:02d} " + "w" * 1000} for i in range(count)]
-
-    def test_a_topic_judge_moves_the_cut_without_losing_or_repeating_a_segment(self) -> None:
-        segments = self.long_segments()
-        seen: list[list[int]] = []
-
-        def judge(_segments: list[object], options: list[int]) -> int:
-            seen.append(options)
-            return options[0]
-
-        plain = post_call.transcript_chunks({"segments": segments}, limit=10000)
-        judged = post_call.transcript_chunks({"segments": segments}, limit=10000, choose_cut=judge)
-        self.assertNotEqual([len(c["segments"]) for c in plain], [len(c["segments"]) for c in judged])
-        self.assertEqual([s for c in judged for s in c["segments"]], segments)
-        for chunk in judged[:-1]:
-            size = len(json.dumps(chunk, ensure_ascii=False))
-            self.assertLessEqual(size, 10000)
-            self.assertGreaterEqual(size, 10000 * post_call.CUT_WINDOW_FRACTION)
-        for options in seen:
-            self.assertLessEqual(len(options), post_call.MAX_CUT_CANDIDATES)
-            self.assertGreater(len(options), 1)
-
-    def test_a_topic_judge_that_declines_fails_or_answers_off_list_keeps_the_size_cut(self) -> None:
-        segments = self.long_segments()
-        plain = post_call.transcript_chunks({"segments": segments}, limit=10000)
-
-        def raises(_segments: list[object], _options: list[int]) -> int:
-            raise RuntimeError("network down")
-
-        for judge in (lambda _s, _o: None, raises, lambda _s, _o: 999):
-            self.assertEqual(post_call.transcript_chunks({"segments": segments}, limit=10000, choose_cut=judge), plain)
-
-    def test_many_small_segments_still_offer_jev_at_most_four_boundaries(self) -> None:
-        segments = [{"speaker": "Joe", "text": f"s{i:03d} " + "w" * 80} for i in range(300)]
-        seen: list[list[int]] = []
-        post_call.transcript_chunks({"segments": segments}, limit=10000,
-                                    choose_cut=lambda _s, o: seen.append(o))
-        self.assertTrue(seen)
-        for options in seen:
-            self.assertEqual(len(options), post_call.MAX_CUT_CANDIDATES)
-
-    def test_the_size_limit_cut_is_always_one_of_the_options(self) -> None:
-        segments = self.long_segments()
-        plain = post_call.transcript_chunks({"segments": segments}, limit=10000)
-        first_plain_cut = len(plain[0]["segments"])
-        seen: list[list[int]] = []
-        post_call.transcript_chunks({"segments": segments}, limit=10000,
-                                    choose_cut=lambda _s, o: seen.append(o))
-        self.assertEqual(seen[0][-1], first_plain_cut)
+    def test_post_call_path_has_no_retired_model_dependency(self) -> None:
+        for name in ("post_call.py", "post_call_jev.py"):
+            self.assertNotRegex((BIN_DIR / name).read_text(), r"(?i)flash|llama")
 
     def test_draft_creator_is_injectable_and_requires_a_confirmed_candidate(self) -> None:
         post_call.store_context(self.session, self.context)

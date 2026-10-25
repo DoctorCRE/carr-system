@@ -10,13 +10,6 @@
       "ssh": "macbook"
     }
   },
-  "scheduled_manifest": {
-    "repository": "DoctorCRE/carr-system",
-    "ref": "origin/codex/job-manifest-drift",
-    "captured_machine_role": "secondary",
-    "source_sha": "c5c4520b57302d0064560d0a1849813aa5443f06",
-    "path": "ops/config/scheduled-jobs.v1.json"
-  },
   "jobs": [
     {
       "label": "com.carr.cliproxyapi",
@@ -66,7 +59,7 @@
         "~/.config/carr/age-key.txt"
       ],
       "state": [
-        "~/carr-system/out/backups"
+        "~/carr-system/backups"
       ],
       "enabled": true
     },
@@ -103,6 +96,35 @@
       "credentials": [],
       "state": [],
       "enabled": false
+    },
+    {
+      "label": "com.carr.outlook-intake",
+      "source": "ops/launchd/com.carr.outlook-intake.plist",
+      "credentials": [],
+      "state": [
+        "~/carr-system/out/outlook-intake/state.json",
+        "~/carr-system/out/outlook-intake/needs-refresh.json"
+      ],
+      "enabled": false
+    },
+    {
+      "label": "com.carr.outlook-refresh",
+      "source": "ops/launchd/com.carr.outlook-refresh.plist",
+      "credentials": [],
+      "state": [
+        "~/carr-system/out/outlook-intake/state.json",
+        "~/carr-system/out/outlook-intake/needs-refresh.json"
+      ],
+      "enabled": false
+    },
+    {
+      "label": "com.carr.outlook-triage",
+      "source": "ops/launchd/com.carr.outlook-triage.plist",
+      "credentials": [],
+      "state": [
+        "~/.config/carr/outlook-nightly-sweep.folders.md"
+      ],
+      "enabled": false
     }
   ],
   "manual_roles": [
@@ -129,6 +151,10 @@
     {
       "name": "Claude scheduled definitions",
       "prerequisite": "demote source scheduler and reconcile target primary definitions without client settings edits"
+    },
+    {
+      "name": "Outlook permission and outbound reconciliation",
+      "prerequisite": "build the pinned intake reader and copy helper on the replacement primary; verify Outlook sign-in, matching account, Full Disk Access and Accessibility; restore intake state and refresh queue; reconcile both send ledgers against provider Sent history before enabling senders; verify intake and refresh outcomes; restore and validate the mode-0600 triage folder guide; verify triage on its catalog-declared host"
     }
   ],
   "rehearsal_max_age_days": 35

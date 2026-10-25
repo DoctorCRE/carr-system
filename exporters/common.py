@@ -239,12 +239,13 @@ class ProviderWaitResult:
         return f"read errors: {errors}; provider {state}; {launch}"
 
 
-def connect():
+def connect(*, credential_file=None):
     # db.env is read through lib/credential_file, the one Python reader of it.
     # Its values are shell-quoted so `set -a; . db.env` survives an `&` in the
     # DSN; on 2026-08-02 a hand-rolled parser here fed psycopg the quotes and
     # blinded the export register. The shared reader unquotes as the shell does.
-    url = credential("CARR_DB_EXPORTER_URL")
+    url = credential("CARR_DB_EXPORTER_URL", path=credential_file,
+                     environ={} if credential_file is not None else None)
     if not url:
         sys.exit("no CARR_DB_EXPORTER_URL (see ~/.config/carr/db.env)")
     return psycopg.connect(url)

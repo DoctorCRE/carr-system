@@ -7,7 +7,7 @@ import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-MIGRATION = ROOT / 'migrations/0963_retire_cost_refusal.sql'
+MIGRATION = ROOT / 'migrations/0967_retire_cost_refusal.sql'
 KEY = ('db-function-acl:ops.admit_job_cost(p_job_id uuid, p_lease_token uuid, '
        'p_route_key text, p_estimated_cost_usd numeric):carr_jobs:execute')
 spec = importlib.util.spec_from_file_location('cost_refusal_shadow', ROOT / 'ops/migration-shadow.py')
