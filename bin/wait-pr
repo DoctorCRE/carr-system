@@ -36,7 +36,9 @@ def main():
                 sha = commit
                 if args.target == 'merged':
                     break
-            with urllib.request.urlopen('https://api.doctorcre.com/release', timeout=30) as response:
+            request = urllib.request.Request('https://api.doctorcre.com/release',
+                headers={'User-Agent': 'DoctorCRE-wait-pr/1.0'})
+            with urllib.request.urlopen(request, timeout=30) as response:
                 live = json.load(response)
                 if (response.status == 200 and isinstance(live, dict)
                         and live.get('ok') is True

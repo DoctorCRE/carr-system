@@ -5,6 +5,8 @@ import http.client
 import json
 from pathlib import Path
 import runpy
+import re
+import urllib.error
 import subprocess
 import sys
 import tempfile
@@ -92,6 +94,35 @@ class JobToolsTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertIn('QUEUE-EMPTY', out)
 
+    def test_queue_counts_relative_jobs_and_launches_an_absolute_path(self):
+        for names in ([str(i) for i in range(10)], ['queued']):
+            with self.subTest(names=names), tempfile.TemporaryDirectory() as tmp:
+                spec = Path(tmp) / 'queue.tsv'
+                (Path(tmp) / 'brief').write_text('brief')
+                spec.write_text('queued\towner/repo\tbrief\thigh\tdetails\n')
+                released = False
+                commands = [f'python3 bin/codex-job owner/repo job/{name} brief' for name in names]
+                def output(command, **kwargs):
+                    if command[0] == 'pgrep':
+                        return '\n'.join(str(i) for i, argv in enumerate(commands)
+                                         if not released and re.search(command[-1], argv))
+                    return commands[int(command[-1])]
+                def tick(_):
+                    nonlocal released
+                    released = True
+                def launch(command, **kwargs):
+                    self.assertTrue(released, 'relative jobs did not block capacity or duplicate name')
+                    self.assertEqual(command[0], str(ROOT / 'bin/codex-job'))
+                    return Mock(wait=Mock(return_value=0))
+                with patch('subprocess.check_output', side_effect=output), \
+                        patch('subprocess.Popen', side_effect=launch), patch('fcntl.flock'), \
+                        patch('time.sleep', side_effect=tick), \
+                        patch.object(sys, 'argv', ['bin/codex-queue', str(spec)]), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    with self.assertRaises(SystemExit) as exit:
+                        runpy.run_path('bin/codex-queue', run_name='__main__')
+                self.assertEqual(exit.exception.code, 0)
+
     def test_queue_handles_non_utf8_argv_and_reaps_children_on_failure(self):
         for failure in (None, OSError('process query failed')):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
@@ -121,6 +152,22 @@ class JobToolsTests(unittest.TestCase):
                         self.assertIn('QUEUE-EMPTY', out)
                 self.assertTrue(children)
                 self.assertTrue(all(job.wait.called for job in children), 'left launched children unwaited')
+
+    def test_live_sends_a_named_user_agent(self):
+        sha = 'a' * 40
+        def serve(request, **kwargs):
+            agent = request.get_header('User-agent', '') if not isinstance(request, str) else ''
+            if not agent or agent.startswith('Python-urllib/'):
+                raise urllib.error.HTTPError('https://api.doctorcre.com/release', 403, 'Forbidden', {}, None)
+            self.assertEqual(request.full_url, 'https://api.doctorcre.com/release')
+            return self.release(json.dumps({
+                'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': sha},
+            }).encode())
+        with patch('subprocess.check_output', return_value='MERGED\t' + sha), \
+                patch('urllib.request.urlopen', side_effect=serve), patch('time.sleep'):
+            code, out = self.invoke('wait-pr', 'owner/repo', '42', 'live')
+        self.assertEqual(code, 0, out)
+        self.assertIn('LIVE ' + sha, out)
 
     def test_live_retries_truncated_http_body(self):
         sha = 'a' * 40
@@ -177,7 +224,8 @@ class JobToolsTests(unittest.TestCase):
                 self.assertEqual(code, expected)
                 if mode == 'live' and expected == 0:
                     self.assertIn('a' * 40, out)
-                    release.assert_called_with('https://api.doctorcre.com/release', timeout=30)
+                    self.assertEqual(release.call_args.args[0].full_url, 'https://api.doctorcre.com/release')
+                    self.assertEqual(release.call_args.kwargs, {'timeout': 30})
 
 
 if __name__ == '__main__':

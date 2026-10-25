@@ -33,7 +33,7 @@ def main():
             for (name, repo, _, effort, _), brief in zip(jobs, briefs):
                 while True:
                     try:
-                        pids = subprocess.check_output(['pgrep', '-f', '/bin/codex-job '], text=True, errors='replace')
+                        pids = subprocess.check_output(['pgrep', '-f', 'bin/codex-job '], text=True, errors='replace')
                     except subprocess.CalledProcessError as error:
                         if error.returncode != 1:
                             raise
@@ -55,7 +55,7 @@ def main():
                         break
                     time.sleep(2)
                 with (logs / f'{name}.log').open('w') as log:
-                    active[name] = subprocess.Popen([str(Path(__file__).with_name('codex-job')), repo,
+                    active[name] = subprocess.Popen([str(Path(__file__).resolve().with_name('codex-job')), repo,
                         f'job/{name}', brief, '-c', f'model_reasoning_effort={effort}'],
                         stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
         finally:
