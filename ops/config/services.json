@@ -85,10 +85,10 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.outlook-triage.plist",
-          "runs_on": "secondary",
+          "runs_on": "primary",
           "expected_cadence_seconds": 86400,
           "cadence_grace_seconds": 14400,
-          "notes": "Runs on the Mac that holds Joe's Outlook session, today the MacBook (role secondary). Fires every 15 minutes from 19:15 to 21:00 and runs at most once a day: a fire while Joe is active or a draft is open records skipped, and the 21:00 fire settles the day even when skipped, so every day leaves a row by about 21:00 (a success at 19:15 followed by one at 21:00 plus run time the next day is the widest gap, about 27.5 hours). Run rows come from bin/run-scheduled.sh with no names; the moves report stays private in out/outlook-triage/. Installed by bin/install-outlook-triage.sh."
+          "notes": "Runs on the Mac that holds Joe's Outlook session, the Studio (role primary). Fires every 15 minutes from 19:15 to 21:00 and runs at most once a day: a fire while Joe is active or a draft is open records skipped, and the 21:00 fire settles the day even when skipped, so every day leaves a row by about 21:00 (a success at 19:15 followed by one at 21:00 plus run time the next day is the widest gap, about 27.5 hours). Run rows come from bin/run-scheduled.sh with no names; the moves report stays private in out/outlook-triage/. Installed by bin/install-outlook-triage.sh."
         }
       ]
     },

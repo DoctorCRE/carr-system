@@ -22,6 +22,12 @@ if [ ! -f "$SOURCE" ]; then
   print -u2 -- "install-outlook-triage: missing source plist: $SOURCE"
   exit 1
 fi
+if ! (cd "$REPO" && "$REPO/.venv/bin/python" -c \
+    "import sys; from lib import machine_role; from lib.launchd_scope import allowed_on_machine; sys.exit(0 if allowed_on_machine('$LABEL.plist', machine_role.is_primary('$REPO')) else 1)" \
+    2>/dev/null); then
+  print -u2 -- "install-outlook-triage: this Mac's role does not run $LABEL (see ops/config/services.json runs_on)"
+  exit 1
+fi
 if [ ! -s "$HOME/.config/carr/outlook-nightly-sweep.folders.md" ]; then
   print -u2 -- "install-outlook-triage: missing private folder guide: ~/.config/carr/outlook-nightly-sweep.folders.md"
   exit 1
@@ -30,12 +36,7 @@ if [ "$(/usr/bin/stat -f %Lp "$HOME/.config/carr/outlook-nightly-sweep.folders.m
   print -u2 -- "install-outlook-triage: the folder guide names clients, so it must be mode 0600 (chmod 600 it); the job refuses it otherwise"
   exit 1
 fi
-if ! (cd "$REPO" && "$REPO/.venv/bin/python" -c \
-    "import sys; from lib import machine_role; from lib.launchd_scope import allowed_on_machine; sys.exit(0 if allowed_on_machine('$LABEL.plist', machine_role.is_primary('$REPO')) else 1)" \
-    2>/dev/null); then
-  print -u2 -- "install-outlook-triage: this Mac's role does not run $LABEL (see ops/config/services.json runs_on)"
-  exit 1
-fi
+
 
 /usr/bin/sed -e "s|{{REPO}}|$REPO|g" -e "s|{{HOME}}|$HOME|g" "$SOURCE" > "$TMP"
 /usr/bin/plutil -lint "$TMP" >/dev/null
