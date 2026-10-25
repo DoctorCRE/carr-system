@@ -15,8 +15,10 @@ def main():
 
     def retain_observations(rows):
         affected_services.extend(
-            {'service_key': row[0], 'hours_since_observed': float(row[7])}
-            for row in rows if row[6] is not None and row[4] == 'stale')
+            {'service_key': row.service_key,
+             'hours_since_observed': (float(row.hours_since_observed)
+                                      if row.hours_since_observed is not None else None)}
+            for row in probe['affected'](rows))
         return assess(rows)
 
     probe['main'].__globals__['assess'] = retain_observations

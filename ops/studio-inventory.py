@@ -120,6 +120,8 @@ def compare(root):
     import sys
     sys.path.insert(0, str(root))
     from lib.launchd_scope import PRIMARY_ONLY
+    declaration = json.loads((root / 'ops/config/studio-failover.v1.json').read_text())
+    declared = {j['label']: j for j in declaration['jobs']}
     folder = root / 'out/studio-failover'
     s, m = [json.loads((folder / (h + '.json')).read_text()) for h in ('studio', 'macbook')]
     labels = {p.removesuffix('.plist') for p in PRIMARY_ONLY}
@@ -131,9 +133,6 @@ def compare(root):
         'nightly-exports-daytime-retry': ['db.env', 'tokens.env'],
         'partner-ping': ['db.env'],
         'job-watchdog': ['db.env', 'mcp-tokens.env'], 'cutover-watch': ['mcp-tokens.env']}
-    states = {'partner-ping': ['~/.config/carr/partner-ping.json'],
-              'local.carr-progress-board': ['~/carr-system/out/boards'],
-              'nightly-record-layer': ['~/carr-system/out/backups']}
     jobs = []
     for label in sorted(labels):
         if label not in {j['label'] for j in s['launchd']}: continue
@@ -158,26 +157,13 @@ def compare(root):
             deps = ['~/.config/carr/' + p for p in credentials.get(key, [])]
             if key == 'cliproxyapi': deps += ['~/.cli-proxy-api/' + p for p in ('config.yaml', 'client-api-key', 'management-key')]
             installed_role = next(j for j in s['launchd'] if j['label'] == label)
-            jobs.append({'label': label, 'source': source, 'credentials': deps, 'state': states.get(key, []),
-                         'enabled': not installed_role['disabled']})
-    manual = [
-        ('guarded host startup', 'verify guarded or safely disabled startup on both hosts; bootstrap Studio with failback-to-studio.sh while MacBook is fenced; keep an unprepared returning host off until its old startup jobs are disabled'),
-        ('local model runtimes', 'provision model binaries and weights; verify their local server endpoints'),
-        ('local PostgreSQL instances', 'classify observed test clusters; restore and verify any persistent cluster'),
-        ('Model Room profile state', 'restore Hermes profiles and verify non-interactive desk authentication'),
-        ('Tailscale and SSH ingress', 'verify target tailnet and SSH ingress; repoint Studio-bound endpoints'),
-        ('Claude scheduled definitions', 'demote source scheduler and reconcile target primary definitions without client settings edits')]
-    manifest_ref = 'origin/main' if subprocess.run(['git', 'cat-file', '-e',
-        'origin/main:ops/config/scheduled-jobs.v1.json'], capture_output=True).returncode == 0 else 'origin/codex/job-manifest-drift'
-    scheduled = json.loads(subprocess.check_output(['git', 'show', manifest_ref + ':ops/config/scheduled-jobs.v1.json'], text=True))
-    manifest = {'repository': 'DoctorCRE/carr-system', 'ref': manifest_ref,
-                'captured_machine_role': scheduled.get('captured_machine_role'),
-                'source_sha': subprocess.check_output(['git', 'rev-parse', manifest_ref], text=True).strip(),
-                'path': 'ops/config/scheduled-jobs.v1.json'}
+            policy = declared.get(label, {})
+            jobs.append({'label': label, 'source': source, 'credentials': deps, 'state': policy.get('state', []),
+                         'enabled': policy.get('enabled', True) and not installed_role['disabled']})
     config = {'schema': 'carr-studio-failover/v1',
               'hosts': {h: {'hostname': d['host'], 'ssh': h} for h, d in [('studio', s), ('macbook', m)]},
-              'scheduled_manifest': manifest, 'jobs': jobs,
-              'manual_roles': [{'name': n, 'prerequisite': p} for n, p in manual], 'rehearsal_max_age_days': 35}
+              'jobs': jobs,
+              'manual_roles': declaration['manual_roles'], 'rehearsal_max_age_days': 35}
     config['hosts']['studio']['ssh'] = 'booko@mac-studio.tailc8cc93.ts.net'
     (root / 'ops/config/studio-failover.v1.json').write_text(json.dumps(config, indent=2) + '\n')
     print('Generated transfer declaration')

@@ -141,6 +141,9 @@ def installed_hook_file_regressions():
 
 
 def main():
+    assert all(Path(script).is_file() for source in (Path(REPO) / "ops/config/hooks.json", Path(REPO) / "ops/config/codex-hooks.json")
+               for doc in [json.loads(Path(source).read_text().replace("{{REPO}}", REPO))]
+               for script in mod.hook_block_script_paths(doc.get("hooks", doc))), "rendered Claude/Codex hook scripts must exist"
     installed_hook_file_regressions()
     permission_review_regressions()
     import tomllib

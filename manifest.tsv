@@ -22,7 +22,6 @@ pipelines/build-space-search.py	Automation/build-space-search.py
 pipelines/space-search-template.html	Automation/space-search-template.html
 # build-graph-notes.py is repo-only (no vault copy; the vault holds its OUTPUT in Graph/)
 pipelines/build-search-map.py	Automation/build-search-map.py
-pipelines/build-front-door.py	Automation/build-front-door.py
 pipelines/dso-match.py	Automation/dso-match.py
 pipelines/radar/corroborate.py	Automation/radar/corroborate.py
 pipelines/radar/enrich-pecos-nppes.py	Automation/radar/enrich-pecos-nppes.py

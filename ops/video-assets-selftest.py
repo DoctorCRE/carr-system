@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 # ci: selftest
-"""Hermetic checks for the Drive-free Front Door and video asset boundary."""
+"""Hermetic checks for the video asset boundary."""
 from __future__ import annotations
 
-import hashlib
-import html as html_lib
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
-import urllib.parse
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -28,70 +25,6 @@ def run_env(args: list[str], extra: dict[str, str]) -> subprocess.CompletedProce
         args, cwd=REPO, env={**env, **extra}, text=True, capture_output=True
     )
 
-
-build = REPO / "pipelines/build-front-door.py"
-page = REPO / "pipelines/front-door.html"
-first = run([sys.executable, str(build)])
-assert first.returncode == 0, first.stderr
-digest = hashlib.sha256(page.read_bytes()).hexdigest()
-second = run([sys.executable, str(build)])
-assert second.returncode == 0 and hashlib.sha256(page.read_bytes()).hexdigest() == digest
-html = page.read_text()
-for forbidden in ("&folder=", "CloudStorage", "GoogleDrive", "/poison/ambient-drive", "DNA%2F", "00_Context%2F"):
-    assert forbidden not in html, forbidden
-assert html.count("claude://cowork/new?q=") == 33
-assert html.count("Use%20the%20CARR%20record-layer%20verbs") == 33
-assert "DNA/" not in html and "00_Context/" not in html
-
-tile_prompts: dict[str, str] = {}
-for href, label in re.findall(
-    r'<a class="tile-main"[^>]+href="([^"]+)".*?<span class="tile-label">(.*?)</span>',
-    html,
-):
-    parsed = urllib.parse.urlparse(html_lib.unescape(href).replace("claude://", "https://"))
-    tile_prompts[html_lib.unescape(label)] = urllib.parse.parse_qs(parsed.query)["q"][0]
-def calls(label: str) -> list[tuple[str, tuple[str, ...]]]:
-    return [
-        (verb, tuple(field.strip() for field in fields.split(",") if field.strip()))
-        for verb, fields in re.findall(r"CALL ([a-z-]+)\(([^)]*)\)", tile_prompts[label])
-    ]
-
-
-assert calls("New Prospect") == [
-    ("find", ("query",)),
-    ("add-party", ("idempotency_key", "name")),
-    ("new-lead", ("idempotency_key", "party_id", "stage")),
-    ("new-client", ("idempotency_key", "party_id", "status", "acquisition_source", "research_evidence")),
-]
-assert calls("New Vendor") == [
-    ("find", ("query",)),
-    ("add-party", ("idempotency_key", "name")),
-    ("new-vendor", ("idempotency_key", "party_id", "category", "ref_code", "stage", "research_evidence")),
-    ("update-vendor", ("idempotency_key", "vendor", "base_version", "fields")),
-]
-assert calls("New Idea") == [("add-loop", ("idempotency_key", "kind", "owner", "body"))]
-assert calls("Teach a Rule") == [
-    ("teach", ("idempotency_key", "statement", "human_quote")),
-    ("approve-rule", ("idempotency_key", "rule_id", "policy_kind", "control_keys", "reason")),
-]
-assert "owner Joe" in tile_prompts["New Idea"]
-assert "Owner is derived by the server from the authenticated actor" in tile_prompts["New Prospect"]
-for label in ("New Prospect", "New Vendor"):
-    prompt = tile_prompts[label]
-    assert "find returns role or group refs, not a party_id" in prompt
-    assert "If find returns any live match, stop" in prompt
-    assert "existing-party UUID resolution/intake seam unavailable" in prompt
-    assert "Never pass a find ref as party_id" in prompt
-    assert "Only when find returns no live match" in prompt
-    assert "use that returned party_id" not in prompt
-assert "pending seam: exact installed control contract unavailable" in tile_prompts["Teach a Rule"]
-assert "allocate the next" not in tile_prompts["New Prospect"] and "live sheet" not in tile_prompts["New Vendor"]
-assert "comp-ingress seam as unavailable" in tile_prompts["File a Comp"]
-assert "prepare-conversation" in tile_prompts["Prep for a Meeting"]
-assert "morning-brief" in tile_prompts["Open Morning Brief"]
-assert all(verb in tile_prompts["Open the Dashboard"] for verb in ("today-triage", "deal-room-board", "loop-board"))
-for misleading in ("write the row", "write a sheet", "confirm the filename", "save it to DNA", "fall back to"):
-    assert all(misleading not in prompt.lower() for prompt in tile_prompts.values()), misleading
 
 listed = run([sys.executable, str(REPO / "video/plan-animated-static.py"), "--list"])
 assert listed.returncode == 0 and "concepts:" in listed.stdout
@@ -275,7 +208,6 @@ def _normal_path(entry):
     replacement = entry["replacement"]
     return replacement.get("normal_path", replacement.get("status"))
 
-assert _normal_path(rows["normal-front-door-launch-links"]) == "normal_path_repointed_to_record_native_launcher"
 assert _normal_path(rows["normal-video-assets"]) == "normal_path_uses_versioned_brand_assets_and_refuses_missing_media_seam"
 
-print("front-door/video asset selftest passed")
+print("video asset selftest passed")

@@ -45,6 +45,7 @@ function policy(workflow, event, success = true, inputs = { shard_trial: false }
 }
 for (const file of files) {
   const workflow = read(file);
+  const validationJobs = file === "ci.yml" ? Object.keys(workflow.jobs) : ["check", "verdict"];
   test(`${file}: close is unsubscribed and cannot publish skipped replacement checks`, () => {
     const closed = policy(workflow, context("pull_request", "closed"));
     assert.equal(closed.triggers, false, "close must start no workflow, not a workflow of skipped jobs");
@@ -52,13 +53,13 @@ for (const file of files) {
     for (const action of ["opened", "synchronize", "reopened"]) {
       const current = policy(workflow, context("pull_request", action));
       assert.equal(current.triggers, true);
-      assert.deepEqual(current.runnable, current.triggers ? current.jobs : []);
+      assert.deepEqual(current.runnable, current.triggers ? validationJobs : []);
     }
   });
   test(`${file}: review transitions start full validation and drafts run only the sentinel`, () => {
     const ready = policy(workflow, context("pull_request", "ready_for_review"));
     assert.equal(ready.triggers, true);
-    assert.deepEqual(ready.runnable, ready.triggers ? ready.jobs : []);
+    assert.deepEqual(ready.runnable, ready.triggers ? validationJobs : []);
     const event = context("pull_request", "converted_to_draft");
     event.event.pull_request.draft = true;
     const draft = policy(workflow, event);
@@ -82,7 +83,7 @@ for (const file of files) {
       assert.equal(one.cancel, false);
       assert.notEqual(one.group, current.group);
       assert.notEqual(one.group, two.group, "pending non-PR verdicts must not replace each other");
-      assert.deepEqual(one.runnable, one.triggers ? one.jobs : []);
+      assert.deepEqual(one.runnable, event === "schedule" ? one.jobs : validationJobs);
     }
   });
   test(`${file}: unsubscribed push events never count as validation`, () => {
