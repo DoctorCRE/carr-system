@@ -8,4 +8,4 @@ Rules: report PR number, head SHA, and test counts in your final reply; commits 
 
 Skill map (one owner per process; use only these): test-first = mattpocock-skills:tdd (not pstack tdd); design interview = grill-with-docs, run autonomously (answer your own frontier questions, record each in the PR's Decisions section; stop only for money, client-facing, credentials, identity edits or rule retirement); domain model = mattpocock-skills:domain-modeling; code structure = codebase-design; bug diagnosis = diagnosing-bugs; multi-session plan = wayfinder; adversarial review = pstack interrogate; verification = Prove It Works; working style = poteto-mode; writing = technical-writing + unslop. pstack principle-* skills are background principles, not separate processes.
 
-Reviewers post 'VERDICT: APPROVE|CHANGES' first and 'Reviewed-SHA: <head>'.
+Reviewers post 'VERDICT: APPROVE|CHANGES' first and 'Reviewed-SHA: <head>'. The job that authored a PR never posts a VERDICT comment on it; the orchestrator runs reviews.
