@@ -2,8 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 
-import { CHROMIUM_SAFETY_ARGS } from "../../tools/chromium-safety-args.mjs";
-
 const root = new URL("../../", import.meta.url);
 const launchers = new Set(["mcp-server/test/helpers/chrome-launch.mjs", "practice-plugin/test/browser.mjs", "deliverables/instagram-grid-reset-2026-08-11/render.mjs"]);
 const ignored = new Set([".git", "node_modules", ".venv", "__pycache__", "out"]);
@@ -59,6 +57,7 @@ test("tests and tools use the shared browser launchers", async () => {
 });
 
 test("every approved Chrome launcher supplies the shared keychain safety args", async () => {
+  const { CHROMIUM_SAFETY_ARGS } = await import("../../tools/chromium-safety-args.mjs");
   assert.deepEqual(CHROMIUM_SAFETY_ARGS, ["--use-mock-keychain", "--password-store=basic"]);
   for (const name of launchers) {
     const source = await readFile(new URL(name, root), "utf8");
