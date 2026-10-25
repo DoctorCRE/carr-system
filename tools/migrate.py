@@ -743,6 +743,7 @@ def main() -> None:
         conn.commit()
         print(f"lock_timeout: {LOCK_TIMEOUT}   statement_timeout: {STATEMENT_TIMEOUT}")
         for batch in migration_batches(pending):
+            retry_safe = not any(contains_transaction_control(sql) for _name, sql, _digest in batch)
             for attempt in range(4):
                 try:
                     committing = False
@@ -795,7 +796,7 @@ def main() -> None:
                     if not (lock_timeout or committing):
                         raise
                     conn.rollback()
-                    if lock_timeout and attempt < 3:
+                    if lock_timeout and retry_safe and attempt < 3:
                         delay = (2, 5, 10)[attempt]
                         print(f"lock timeout; retrying whole migration batch in {delay}s", flush=True)
                         time.sleep(delay)

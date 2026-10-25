@@ -42,7 +42,7 @@ class Connection:
     def fetchall(self): return list(BASELINE.migrations)
 
     def execute(self, sql, params=None):
-        if sql == 'select fixture_second':
+        if sql.startswith('select fixture_second'):
             self.attempts += 1
             if self.phase == 'execute':
                 error = next(self.errors, None)
@@ -50,9 +50,12 @@ class Connection:
                     raise error('synthetic refusal')
         if sql.startswith('select fixture_') or params:
             self.staged.append((sql, params))
+        if sql.endswith('; commit;'):
+            self.committed.extend(self.staged)
+            self.staged.clear()
 
     def commit(self):
-        if self.staged and self.staged[0][0] == 'select fixture_first' and self.phase == 'commit':
+        if self.staged and self.attempts and self.phase == 'commit':
             error = next(self.errors, None)
             if error:
                 raise error('synthetic refusal')
@@ -70,7 +73,7 @@ MIGRATIONS = [(f'999{n}_fixture.sql', f'select fixture_{word}', runner_sha256(f'
 
 
 class LockRetryTests(unittest.TestCase):
-    def run_command(self, phase, errors):
+    def run_command(self, phase, errors, migrations=MIGRATIONS):
         conn = Connection(phase, errors)
         sleeps = []
         output, error_output = io.StringIO(), io.StringIO()
@@ -83,7 +86,7 @@ class LockRetryTests(unittest.TestCase):
         with patch.dict(sys.modules, psycopg=driver), \
                 patch.dict('os.environ', DATABASE_URL='postgresql://localhost/synthetic'), \
                 patch.object(sys, 'argv', ['migrate.py', '--apply', '--yes']), \
-                patch.object(migrate, 'load_migrations', return_value=MIGRATIONS), \
+                patch.object(migrate, 'load_migrations', return_value=migrations), \
                 patch.object(migrate, 'load_baseline', return_value=BASELINE), \
                 patch.object(migrate, 'ATOMIC_MIGRATION_GROUPS', ((MIGRATIONS[1][0], MIGRATIONS[2][0]),)), \
                 patch('time.sleep', side_effect=sleep), \
@@ -127,6 +130,21 @@ class LockRetryTests(unittest.TestCase):
                 self.assertIn(message, error)
                 if phase == 'execute':
                     self.assertIn('ABANDONED (its whole transaction batch was rolled back)', error)
+
+    def test_transaction_control_batch_stops_at_first_lock_timeout(self):
+        for phase in ('execute', 'commit'):
+            for index in (1, 2):
+                with self.subTest(phase=phase, transaction_file=index):
+                    migrations = list(MIGRATIONS)
+                    name, sql, _ = migrations[index]
+                    sql += '; commit;'
+                    migrations[index] = (name, sql, runner_sha256(sql))
+                    conn, sleeps, status, _, _ = self.run_command(
+                        phase, [LockNotAvailable], migrations)
+                    self.assertEqual(status, 1)
+                    self.assertEqual(conn.attempts, 1)
+                    self.assertEqual(sleeps, [])
+                    self.assertEqual(conn.rollbacks, 1)
 
     def test_other_failures_stop_without_retry(self):
         for phase, exception in [('commit', DatabaseError), ('execute', QueryCanceled)]:
