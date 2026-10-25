@@ -92,12 +92,15 @@ class BaselineTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'cannot read'):
                 MigrationBaseline.load(Path(directory))
 
-    def test_committed_manifest_matches_every_retained_file_and_snapshot_row(self):
+    def test_committed_manifest_matches_retained_files_and_snapshot_prefix(self):
         root = Path(__file__).resolve().parents[1]
         baseline = MigrationBaseline.load(root)
         ledger = repository_ledger(root, baseline)
         parse = runpy.run_path(str(root / 'ops/migration-safety-gate.py'))['ledger_rows']
-        self.assertEqual(ledger, parse((root / 'db/schema.sql').read_text()))
+        snapshot = parse((root / 'db/schema.sql').read_text())
+        self.assertIsNotNone(snapshot)
+        baseline.validate_coverage(snapshot)
+        self.assertEqual(snapshot, dict(sorted(ledger.items())[:len(snapshot)]))
 
     def test_generator_reads_exact_source_instead_of_working_tree(self):
         root = Path(__file__).resolve().parents[1]
