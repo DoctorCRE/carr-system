@@ -69,7 +69,9 @@ class LeadTests(unittest.TestCase):
         csv_text = io.StringIO()
         writer = csv.DictWriter(csv_text, fieldnames=list(raw))
         writer.writeheader()
-        writer.writerow(raw)
+        bad = {**raw, "Provider Organization Name (Legal Business Name)": ""}
+        after = {**raw, "NPI": "1000000009", "Provider Organization Name (Legal Business Name)": "Example Optometry"}
+        writer.writerows([raw, bad, after])
         zipped = io.BytesIO()
         with zipfile.ZipFile(zipped, "w") as archive:
             archive.writestr("npidata_pfile_20260928-20261004.csv", csv_text.getvalue())
@@ -84,11 +86,18 @@ class LeadTests(unittest.TestCase):
             root = Path(folder)
             journal = root / "state.json"
             ctx = runtime.Context("lead-signals-weekly", now=NOW, journal=journal)
-            with patch.object(leads, "ROOT", root), patch.object(leads, "_fetch", side_effect=fetch), patch.object(runtime, "call_verb", side_effect=transport), patch("sys.stdout", new_callable=io.StringIO):
+            with patch.object(leads, "ROOT", root), patch.object(leads, "_fetch", side_effect=fetch), patch.object(runtime, "call_verb", side_effect=transport), patch("sys.stdout", new_callable=io.StringIO) as output, patch("sys.stderr", new_callable=io.StringIO) as errors:
                 self.assertEqual(runtime.run_module(ctx, leads), 0)
-                self.assertEqual([args["query"] for verb, args in calls if verb == "find"], ["Example Dental", "Example Principal"])
-                self.assertEqual([verb for verb, _ in calls if verb != "find"], ["add-loop", "add-loop"])
-                self.assertEqual({effect["verb"] for effect in json.loads(journal.read_text())["effects"].values()}, {"add-loop"})
+                self.assertEqual([args["query"] for verb, args in calls if verb == "find"], ["Example Dental", "Example Principal", "Example Optometry", "Example Principal"])
+                self.assertEqual([verb for verb, _ in calls if verb != "find"], ["add-loop", "add-loop", "add-loop"])
+                self.assertEqual([json.loads(args["body"])["npi"] for verb, args in calls if verb == "add-loop" and args["title"].startswith("NPPES proposal:")], ["1000000001", "1000000009"])
+                receipt = json.loads(output.getvalue())
+                self.assertEqual(receipt["candidate_count"], 2)
+                self.assertEqual(receipt["status"], "prepared")
+                state = json.loads(journal.read_text())
+                self.assertTrue(state["completed"])
+                self.assertEqual({effect["verb"] for effect in state["effects"].values()}, {"add-loop"})
+                self.assertIn('"missing_name": 1', errors.getvalue())
                 calls.clear()
                 restarted = runtime.Context("lead-signals-weekly", now=NOW, journal=journal)
                 self.assertEqual(runtime.execute(restarted), 0)
