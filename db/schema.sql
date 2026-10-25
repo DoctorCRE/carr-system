@@ -122633,7 +122633,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0955_retrieval_concept_question_matching.sql	885f3cefb3b4359c20f242534750ef9ebd883cda93e0592119b504e9f407e0c1	1970-01-01 00:00:00+00
 0957_retire_scac_catalog_commit_check.sql	1a26b1a8e517c15d62b3a0fbd96b2f59278c1596839e33b3d4e6c423ab9c6a97	1970-01-01 00:00:00+00
 0958_doctrine_embeddings.sql	46c23b9e4f9888bdf0f817c06e06d74440b89a5cb5dd1923310a7aa05268ac45	1970-01-01 00:00:00+00
-0959_triage_lead_read_indexes.sql	553d99d865d602ac9984e678333d9c0ebb58c370ecdcb7e76f29ca9352aba87b	1970-01-01 00:00:00+00
+0960_triage_lead_read_indexes.sql	553d99d865d602ac9984e678333d9c0ebb58c370ecdcb7e76f29ca9352aba87b	1970-01-01 00:00:00+00
 \.
 
 
