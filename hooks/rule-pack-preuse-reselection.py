@@ -241,6 +241,15 @@ def process(payload, *, runner=subprocess.run, dedupe=True):
 def decide(payload):
     output = process(payload)
     if output is not None:
+        text = output.get('hookSpecificOutput', {}).get('additionalContext')
+        if text:
+            try:
+                row = json.loads(text)
+            except ValueError:
+                row = {}
+            if (row.get('schema') == LOOKUP_RECEIPT_SCHEMA and row.get('complete')
+                    and not any(row.get(key) for key in ('rules', 'rule_ids', 'overflow', 'cards'))):
+                return 0
         print(json.dumps(output, sort_keys=True, separators=(',', ':')))
     return 0
 

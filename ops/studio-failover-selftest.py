@@ -45,6 +45,20 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(data['launchd'][0]['executables'], ['/bin/sh'])
 
 class FailoverTests(unittest.TestCase):
+    def test_replacement_host_requires_intake_refresh_and_actual_backup_state(self):
+        from lib.studio_failover import plan
+        config = json.loads((ROOT / 'ops/config/studio-failover.v1.json').read_text())
+        result = plan(config, {}, 'macbook')
+        installed = {step.get('label') for step in result['steps'] if step['action'] == 'install'}
+        self.assertTrue({'com.carr.outlook-intake', 'com.carr.outlook-refresh', 'com.carr.outlook-triage'} <= installed)
+        missing = '\n'.join(result['missing'])
+        self.assertIn('~/carr-system/backups', missing)
+        self.assertNotIn('~/carr-system/out/backups', missing)
+        for state in ('state.json', 'needs-refresh.json'):
+            self.assertIn('~/carr-system/out/outlook-intake/' + state, missing)
+        self.assertIn('Outlook permission and outbound reconciliation', missing)
+        self.assertFalse(result['ready'])
+
     @staticmethod
     def host_module():
         spec = importlib.util.spec_from_file_location('failover_host_test', ROOT / 'ops/studio-failover.py')
