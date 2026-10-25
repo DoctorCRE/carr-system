@@ -15,7 +15,7 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>{{HOME}}/carr-local/bin/outlook-intake-copy</string>
+    <string>{{COPY_HELPER}}</string>
     <string>--run-intake</string>
   </array>
   <key>WorkingDirectory</key><string>{{REPO}}</string>
@@ -52,7 +52,7 @@
 
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>{{HOME}}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PATH</key><string>{{EXECUTABLE_PATH}}</string>
   </dict>
 
   <key>StandardOutPath</key><string>{{REPO}}/out/outlook-intake-launchd.log</string>

@@ -68,3 +68,11 @@ Its bytes count toward coverage as wholly unframed, without tentative decoded cr
 **Audit-guided reconstruction**:
 Extraction of route and key vocabulary from a pinned static analysis of one exact binary build.
 A changed binary does not qualify until its constants and control flow receive a new audit.
+
+**Outlook machine settings**:
+The local operator's mailbox identity, record owner, service enablement, and paths.
+Credential entries are pointers to private files, never credential values.
+
+**Granted copy scope**:
+The profile, private snapshot root, and intake command bound into the executable granted Full Disk Access.
+Changing settings does not widen an existing executable's scope.

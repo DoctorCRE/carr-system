@@ -1,41 +1,10 @@
 #!/usr/bin/env python3
-"""outlook-draft.py — put a REAL draft in Joe's carr.us Drafts folder.
+"""Save a mailto draft in the configured Outlook application session.
 
-THE ROUTE, and it is the only one that works. Every API into this mailbox is
-closed: New Outlook exposes no mailbox to AppleScript (0 of 157 folders carry an
-account), Graph consent is blocked tenant-wide with no request button
-(AADSTS90094), and IMAP basic auth is refused. So this does not use an API. It
-drives the Outlook APPLICATION, which Joe is already signed into, via a mailto
-URL — and lets Outlook do the writing. Joe's insight, after the session had
-wrongly declared the problem unsolvable: "I'm already signed in to my carr email
-on the desktop app... it seems like you'd be able to make a email right into that
-desktop app." Full record: decision 496bc309.
-
-THREE THINGS THAT ARE NOT GUESSABLE AND COST AN AFTERNOON TO FIND:
-
-1. USE `open -a "Microsoft Outlook"`, NEVER a bare `open "mailto:..."`. Joe's
-   DEFAULT mail handler is his personal outlook.live.com in a browser, so a bare
-   open composes into the wrong account entirely. The first test looked like a
-   total failure and had actually succeeded in the wrong place.
-
-2. PERCENT-ENCODE WITH quote(), NEVER urlencode(). urlencode writes '+' for a
-   space and Outlook does not decode it, so subjects arrive as "CARR+draft+test".
-
-3. TYPE A CHARACTER BEFORE SAVING. New Outlook DISCARDS a mailto-spawned draft on
-   close if it considers the message untouched — it shows in the Drafts list while
-   the window is open, then vanishes. `File > Save` does not help. Cmd+S does not
-   help. Typing one character marks it modified; after that File > Save commits it
-   and it survives. The AppleScript types one character and deletes it, so the net
-   content change is zero. Verified: draft persisted, typed character absent.
-
-WHAT IT WILL NOT DO: send. There is no send path in this file or the AppleScript.
-It writes a draft and stops. Sending is a separate step that happens when Joe
-asks (decision 41906a30); with no ask, Joe opens Drafts, reads it, presses Send.
-
-USAGE
-  echo '{"to":"a@b.com","subject":"Hi","body":"line one\\nline two"}' | bin/outlook-draft.py
-  bin/outlook-draft.py --to a@b.com --subject Hi --body 'text'
-  bin/outlook-draft.py ... --leave-open     leave the compose window on screen
+Use an explicit application to avoid the system mailto handler. Encode spaces
+with quote(), since Outlook preserves urlencode()'s plus signs. The AppleScript
+marks the message modified before saving, because untouched drafts disappear
+when closed. This command never sends.
 """
 
 import argparse
@@ -44,6 +13,9 @@ import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.outlook_settings import load_settings
 
 SCRIPT = Path(__file__).resolve().parent / "outlook-draft.applescript"
 
@@ -92,6 +64,7 @@ def main():
             raise SystemExit("no input: pass flags or pipe JSON on stdin")
         payload = json.loads(raw)
 
+    load_settings()
     url = build_url(payload)
     if len(url) > 1900:
         # mailto has a practical length ceiling and a silently TRUNCATED draft is

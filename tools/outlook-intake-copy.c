@@ -14,7 +14,7 @@
 
 /* The installer binds these paths into the executable granted Full Disk Access. */
 #ifndef OUTLOOK_PROFILE
-#error OUTLOOK_PROFILE must name the fixed Main Identity profile
+#error OUTLOOK_PROFILE must name the configured fixed profile
 #endif
 #ifndef OUTLOOK_WORK_ROOT
 #error OUTLOOK_WORK_ROOT must name the intake output directory
@@ -170,6 +170,10 @@ static int run_intake(void) {
 }
 
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "--scope") == 0) {
+        printf("%s\n%s\n%s\n", OUTLOOK_PROFILE, OUTLOOK_WORK_ROOT, OUTLOOK_REPO);
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "--run-intake") == 0) return run_intake();
     require(argc == 1);
     umask(0077);
