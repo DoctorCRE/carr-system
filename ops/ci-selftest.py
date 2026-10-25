@@ -1022,7 +1022,7 @@ def test_hosted_draft_lifecycle():
     """Execute YAML conditions and verdict commands against same-head event fixtures.
 
     This models the scheduler inputs, not GitHub's remote check selection. In
-    particular, ready_for_review must schedule fresh lanes without a new SHA.
+    particular, CI readiness metadata must not schedule a new run at the same SHA.
     """
     def evaluate(expression, context):
         expression = str(expression)
@@ -1044,9 +1044,11 @@ def test_hosted_draft_lifecycle():
             ("doc-drift.yml", ("check",), "verdict", "drift-verdict")):
         wf = _hosted_workflow(filename)
         events = wf["on"]
-        check(f"{filename}: all PR lifecycle triggers survive",
-              set(events["pull_request"]["types"]) == {
-                  "opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft"})
+        expected_actions = {"opened", "synchronize", "reopened", "converted_to_draft"}
+        if filename != "ci.yml":
+            expected_actions.add("ready_for_review")
+        check(f"{filename}: only intended PR lifecycle events schedule runs",
+              set(events["pull_request"]["types"]) == expected_actions)
         check(f"{filename}: all non-PR full-suite triggers survive",
               {"merge_group", "schedule", "workflow_dispatch"} <= set(events))
         jobs = wf["jobs"]
@@ -1074,6 +1076,8 @@ def test_hosted_draft_lifecycle():
                     (True, "converted_to_draft", "a" * 40), (False, "ready_for_review", "a" * 40),
                     (False, "reopened", "a" * 40), (False, "synchronize", "a" * 40),
                     (False, "synchronize", "b" * 40)):
+                if action not in events["pull_request"]["types"]:
+                    continue
                 ctx = context(draft=draft, action=action, sha=sha)
                 groups.append(evaluate(wf["concurrency"]["group"], ctx))
                 check(f"{filename}: {action} draft={draft} SHA={sha[:7]} schedules correct lanes",
