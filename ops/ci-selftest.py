@@ -337,6 +337,15 @@ def test_hosted_migration_ownership():
     check("not-applicable proof cannot be reused as full main evidence", "full != 'false'" in record.get("if", ""))
 
 
+def test_contract_rejects_platform_postgres_defaults():
+    with ci_fixture() as root:
+        (root / 'lib/default.py').write_text("DEFAULT = '" + '/opt/homebrew/opt/' + "postgresql@17/bin'\n")
+        subprocess.run(['git', 'add', 'lib/default.py'], cwd=root, env=fixture_env(), check=True)
+        rc, output = run(['--strict', '--only', 'contract'], root=root)
+        check('contract rejects PostgreSQL paths outside the resolver',
+              rc == 1 and 'PostgreSQL paths must use lib/disposable_pg_fixture.py' in output)
+
+
 def test_migration_partitions_execute_complete_inventory():
     import shlex
     with tempfile.TemporaryDirectory() as directory:
@@ -374,6 +383,11 @@ def test_migration_partitions_execute_complete_inventory():
             check(f"migration {part} partition executes", rc == 0)
         check("fixture partition union retains the complete canonical fixture inventory",
               fixtures["reconstruction"] | fixtures["equivalence"] | fixtures["shadow"] == fixtures["fixtures"])
+        check("PR fixture partitions execute restore security parity", any(
+              "restore-rehearse-record-selftest.py --postgres" in call
+              for part in ("reconstruction", "equivalence", "shadow") for call in fixtures[part]))
+        check("restore security failure fails the PR fixture verdict",
+              run("equivalence", "restore-rehearse-record-selftest.py")[0] == 1)
         check("core partition union retains every canonical database command",
               fixtures["proofs"] | fixtures["gates"] == fixtures["core"])
         check("consumer partition excludes DB gate commands", not any(
@@ -1050,6 +1064,14 @@ def test_hosted_zsh_setup_does_not_refresh_working_indexes():
     canary_setup = next(st for st in canary if st.get("name") == "Install zsh")
     check("PR and canary execute the same bounded zsh installer",
           all(canary_setup[k] == setup[k] for k in ("run", "env", "timeout-minutes")))
+    fixture_steps = wf["jobs"]["migration-fixtures"]["steps"]
+    fixture_setup = next((st for st in fixture_steps if st.get("name") == "Install zsh"), {})
+    check("equivalence installs the restore rehearsal interpreter before its proof",
+          all(fixture_setup.get(k) == setup[k] for k in ("run", "env", "timeout-minutes"))
+          and fixture_setup.get("if") == "matrix.part == 'equivalence'"
+          and fixture_steps.index(fixture_setup) < next(
+              i for i, st in enumerate(fixture_steps)
+              if st.get("name") == "Prove independent migration fixture"))
     with tempfile.TemporaryDirectory(prefix="ci-zsh-setup-") as tmp:
         fixture = pathlib.Path(tmp)
         sudo = fixture / "sudo"
@@ -1277,12 +1299,52 @@ log.write_text(json.dumps(state))
                           remaining.is_file() and remaining.read_bytes() == b"cached-zsh-common")
 
 
+def test_worktree_python_selection():
+    with tempfile.TemporaryDirectory(prefix="carr-python-") as directory:
+        root = pathlib.Path(directory)
+        main, work = root / "main checkout", root / "worktree"
+        main.mkdir()
+        def git(*args):
+            subprocess.run(["git", *args], cwd=main, env=fixture_env(),
+                           check=True, capture_output=True)
+        git("init")
+        git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+            "commit", "--allow-empty", "-m", "fixture")
+        git("worktree", "add", "-b", "fixture", str(work))
+        fallback = root / "bin"
+        fallback.mkdir()
+        marker = root / "selected"
+        for relative in ("ops/ci.sh", "ops/githooks/pre-push"):
+            target = work / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO / relative, target)
+        for available in (False, True):
+            interpreters = [(fallback / "python3", "fallback"),
+                            (work / ".venv/bin/python", "worktree")]
+            if available:
+                interpreters.append((main / ".venv/bin/python", "main"))
+            for path, name in interpreters:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"#!/bin/sh\nprintf '{name}' > '{marker}'\nexit 73\n")
+                path.chmod(0o755)
+            for relative, args, code in (("ops/ci.sh", ["--doc-drift"], 73),
+                                         ("ops/githooks/pre-push", [], 1)):
+                result = subprocess.run(["bash", str(work / relative), *args],
+                    cwd=work, env={**fixture_env(), "PATH": str(fallback) + os.pathsep + os.defpath},
+                    input="", text=True, capture_output=True, timeout=15)
+                check(f"{relative} selects {'main venv' if available else 'python3 fallback'}",
+                      result.returncode == code and marker.exists()
+                      and marker.read_text() == ("main" if available else "fallback"), result.stderr)
+                marker.unlink(missing_ok=True)
+
+
 def main(argv=None):
     if (sys.argv[1:] if argv is None else argv) == ["--collection-only"]:
         test_every_test_file_in_the_tree_is_collected()
         test_each_class_runs_in_exactly_one_hosted_group()
         return 1 if any(not ok for _, ok, _ in RESULTS) else 0
-    for fn in (test_freshness_checks_the_tree_without_requiring_main_ancestry,
+    for fn in (test_worktree_python_selection,
+               test_freshness_checks_the_tree_without_requiring_main_ancestry,
                test_no_green_without_running,
                test_strict_turns_skip_into_failure,
                test_unknown_class_refuses,
@@ -1290,6 +1352,7 @@ def main(argv=None):
                test_gates_build_hxprobe_before_parallel_selftests,
                test_gate_shards_execute_a_disjoint_complete_inventory,
                test_migration_partitions_execute_complete_inventory,
+               test_contract_rejects_platform_postgres_defaults,
                test_hosted_migration_ownership,
                test_hosted_draft_lifecycle,
                test_database_scope_receipts,

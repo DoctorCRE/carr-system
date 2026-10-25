@@ -329,7 +329,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if (verb === "update-vendor" || verb === "log-activity" || ["set-next-step", "set-market-agent", "set-national-account-owner"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["set-next-step", "set-market-agent", "set-national-account-owner"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
@@ -1092,6 +1092,20 @@ async function resolvePartyForWrite(c, ref) {
   if (!hop.rows.length) throw new ToolError({ error: "not_found", table: "party", id: partyId });
   const hopped = hop.rows[0].merged_into !== null;
   return { partyId: hopped ? hop.rows[0].merged_into : partyId, hopped };
+}
+
+async function actionOwner(client, actor, requested) {
+  const permitted = permittedActionOwnerSlugs(actor);
+  const slug = requested === undefined || requested === null || requested === ""
+    ? actor.slug : String(requested).trim().toLowerCase();
+  if (!permitted.includes(slug))
+    throw new ToolError({ error: "owner_not_permitted", owner: slug, permitted,
+      hint: "a ball may be set for yourself, Joe, or Dell" });
+  if (slug === actor.slug) return { slug, id: actor.id };
+  const owner = await client.query("select id from actor where slug=$1", [slug]);
+  if (!owner.rows.length) throw new ToolError({ error: "actor_not_provisioned", slug,
+    hint: "the selected owner has no actor row" });
+  return { slug, id: owner.rows[0].id };
 }
 
 async function resolveSubject(client, ref) {
@@ -3755,7 +3769,9 @@ export const TOOLS = {
     description: "The complete, safe worked-lead board. All leads surface, including weak, suppressed, and terminal rows: qualification is the human's job and this read is never pre-qualified or silently truncated. Returns the authoritative base_version needed by update-lead, ordered stage vocabulary including empty stages, score/confidence/freshness signals, and no phone, email, address, notes, or raw source detail.",
     inputSchema: LEAD_WORKSPACE_SCHEMA,
     handler: async (c, _actor, args = {}) => {
-      if (args.workspace === "leads") return readLeadWorkspace(c, args);
+      if (args.workspace === "leads") return readLeadWorkspace(c, args, ToolError);
+      if (args.correspondence_cursor !== undefined || args.stage_history_cursor !== undefined)
+        throw new ToolError({ error: "invalid_history_cursor" });
       const stages = (await c.query(
         `select slug,label,sort
            from v_lead_board_stage
@@ -4163,13 +4179,37 @@ export const TOOLS = {
     }),
   },
 
+  "get-next-action": {
+    write: false,
+    writerConnection: true,
+    description: "Read the canonical ordinary open action for one owner on a client, lead, or vendor, including held actions. Returns null when none exists. Pass its id and version as set-next-action expected_action. Does not reconstruct state from a display timeline.",
+    inputSchema: { type: "object", properties: {
+      ref: { type: "string" }, owner: { type: "string" },
+    }, required: ["ref", "owner"] },
+    handler: async (c, actor, args) => {
+      const s = await resolveSubject(c, args.ref);
+      if (!["client", "lead", "vendor"].includes(s.type))
+        throw new ToolError({ error: "next_action_subject_unsupported" });
+      const owner = await actionOwner(c, actor, args.owner);
+      const rows = await c.query(
+        `select id, version, updated_at from next_action
+          where subject_type=$1 and subject_id=$2 and owner_id=$3 and status='open' and item_title is null`,
+        [s.type, s.id, owner.id]);
+      return { ok: true, owner: owner.slug, action: rows.rows[0] || null };
+    },
+  },
+
   "set-next-action": {
     write: true,
     description: "Set ONE open ball on a subject (replaces that owner's previous open one; the other partner's stays untouched). Defaults to your ball. Any authenticated caller, agent seats included, may name owner 'joe' or 'dell'; created_by remains the real runtime.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, ref: { type: "string" },
       description: { type: "string" }, due_on: { type: "string", description: "YYYY-MM-DD, optional" },
-      owner: { type: "string", description: "Optional owner. Any authenticated caller may name the caller, 'joe', or 'dell'. Defaults to the caller. created_by records the real runtime." } },
+      owner: { type: "string", description: "Optional owner. Any authenticated caller may name the caller, 'joe', or 'dell'. Defaults to the caller. created_by records the real runtime." },
+      expected_action: { description: "Optional conditional write for a client, lead, or vendor. Null creates only when no ordinary action exists. Otherwise id and version must still match. A conflict changes nothing.",
+        anyOf: [{ type: "null" }, { type: "object", additionalProperties: false,
+          properties: { id: { type: "string", format: "uuid" }, version: { type: "integer", minimum: 1 } },
+          required: ["id", "version"] }] } },
       required: ["idempotency_key","ref","description"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "set-next-action", args, async () => {
       const s = await resolveSubject(c, args.ref);
@@ -4178,27 +4218,36 @@ export const TOOLS = {
         await lockDealField(c, s.id, "next_date");
         await lockDealField(c, s.id, "next_step");
       }
-      const permitted = permittedActionOwnerSlugs(actor);
-      const ownerSlug = args.owner === undefined || args.owner === null || args.owner === ""
-        ? actor.slug : String(args.owner).trim().toLowerCase();
-      if (!permitted.includes(ownerSlug))
-        throw new ToolError({ error: "owner_not_permitted", owner: ownerSlug, permitted,
-          hint: "a ball may be set for yourself, Joe, or Dell" });
-      let ownerId = actor.id;
-      if (ownerSlug !== actor.slug) {
-        const owner = await c.query("select id from actor where slug=$1", [ownerSlug]);
-        if (!owner.rows.length) throw new ToolError({ error: "actor_not_provisioned", slug: ownerSlug,
-          hint: "the selected owner has no actor row" });
-        ownerId = owner.rows[0].id;
+      const { slug: ownerSlug, id: ownerId } = await actionOwner(c, actor, args.owner);
+      const guarded = Object.hasOwn(args, "expected_action");
+      const expected = args.expected_action;
+      if (guarded) {
+        if (!["client", "lead", "vendor"].includes(s.type))
+          throw new ToolError({ error: "next_action_subject_unsupported" });
+        if (expected !== null && (!expected || typeof expected !== "object" || Array.isArray(expected)
+          || Object.keys(expected).some(k => !["id", "version"].includes(k))
+          || typeof expected.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(expected.id)
+          || !Number.isInteger(expected.version) || expected.version < 1))
+          throw new ToolError({ error: "invalid_expected_action" });
       }
       const superseded = s.type === "deal"
         ? await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-action") : {};
       // [amendment 8] Replacing an unfinished ball used to record the old one as
       // 'done'. It wasn't done — it was superseded. No-fabrication applies to
       // metadata too, and 'done' would inflate any completion measure built on this.
-      await c.query(
-        `update next_action set status='dropped', updated_by=$4 where subject_type=$2 and subject_id=$3
-         and owner_id=$1 and status='open' and item_title is null`, [ownerId, s.type, s.id, actor.id]);
+      if (guarded) {
+        if (expected !== null) {
+          const dropped = await c.query(
+            `update next_action set status='dropped', updated_by=$4 where subject_type=$2 and subject_id=$3
+              and owner_id=$1 and status='open' and item_title is null and id=$5 and version=$6 returning id`,
+            [ownerId, s.type, s.id, actor.id, expected.id, expected.version]);
+          if (!dropped.rows.length) throw new ToolError({ error: "next_action_conflict" });
+        }
+      } else {
+        await c.query(
+          `update next_action set status='dropped', updated_by=$4 where subject_type=$2 and subject_id=$3
+           and owner_id=$1 and status='open' and item_title is null`, [ownerId, s.type, s.id, actor.id]);
+      }
       const droppedPostCall = s.type === "deal" ? (await c.query(
         `update capture_post_call_action
             set status='dropped',updated_at=now(),completed_at=null
@@ -4208,10 +4257,17 @@ export const TOOLS = {
       const droppedPostCallIds = [...(superseded.superseded_post_call_action_ids || []), ...droppedPostCall.map(x => x.id)];
       const oldDate = s.type === "deal" ? (await c.query(
         "select next_date::text as next_date from deal where id=$1", [s.id])).rows[0]?.next_date ?? null : null;
-      const r = await c.query(
-        `insert into next_action (subject_type, subject_id, owner_id, due_on, description, created_by, updated_at)
-         values ($1,$2,$3,$4,$5,$6,clock_timestamp()) returning id`,
-        [s.type, s.id, ownerId, args.due_on || null, args.description, actor.id]);
+      let r;
+      try {
+        r = await c.query(
+          `insert into next_action (subject_type, subject_id, owner_id, due_on, description, created_by, updated_at)
+           values ($1,$2,$3,$4,$5,$6,clock_timestamp()) returning id`,
+          [s.type, s.id, ownerId, args.due_on || null, args.description, actor.id]);
+      } catch (error) {
+        if (guarded && error.code === "23505" && error.constraint === "one_open_next_action_per_owner")
+          throw new ToolError({ error: "next_action_conflict" });
+        throw error;
+      }
       await writeEvent(c, actor, "set-next-action", s.type, s.id,
         { old: droppedPostCall.length ? { post_call_actions: droppedPostCall.map(x =>
             ({ id: x.id, description: x.description, status: "open" })) } : null,

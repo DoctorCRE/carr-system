@@ -17,6 +17,28 @@ import sys
 import tempfile
 import threading
 
+
+def postgres_bin_dir(names=('initdb', 'pg_ctl', 'createdb', 'psql', 'postgres')):
+    candidates = []
+    for key in ('CARR_TEST_POSTGRES_BIN', 'CARR_LOCAL_PG_BIN_DIR'):
+        override = os.environ.get(key, '').strip()
+        if override:
+            candidates.append(Path(override))
+    located = shutil.which('initdb')
+    if located:
+        candidates.append(Path(located).resolve().parent)
+    candidates.extend(Path(path) for path in (
+        '/opt/homebrew/opt/postgresql@17/bin', '/usr/local/opt/postgresql@17/bin',
+        '/opt/homebrew/opt/postgresql@16/bin', '/usr/local/opt/postgresql@16/bin',
+        '/usr/lib/postgresql/17/bin', '/usr/lib/postgresql/16/bin'))
+    for directory in candidates:
+        if not directory.is_absolute():
+            raise ValueError('PostgreSQL binary directory must be an absolute path')
+        if all((directory / name).is_file() and os.access(directory / name, os.X_OK)
+               for name in names):
+            return directory
+    raise FileNotFoundError('PostgreSQL client/server binaries were not found')
+
 LOCK_PATH = Path('/tmp') / f'carr-disposable-postgres-{os.getuid()}.lock'
 _thread_lock = threading.RLock()
 _depth = 0
