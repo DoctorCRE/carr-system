@@ -71,7 +71,7 @@ class CopyTest(unittest.TestCase):
             for name in files:
                 self.assertEqual(stat.S_IMODE((Path(directory) / name).stat().st_mode), 0o600)
 
-    def test_repeated_snapshots_prune_only_oldest_owned_completed_snapshots(self):
+    def test_repeated_snapshots_preserve_all_completed_snapshots(self):
         self.assertEqual(self.copy().returncode, 0)
         first, = self.snapshots()
         self.out.joinpath('snap-not-a-timestamp').mkdir()
@@ -89,66 +89,53 @@ class CopyTest(unittest.TestCase):
             names.append(max(p.name for p in self.snapshots()
                              if (p / 'manifest.json').is_file() and not p.is_symlink()))
         kept = [p for p in self.snapshots() if p.name in names]
-        self.assertEqual([p.name for p in kept], names[-20:])
-        self.assertFalse(first.exists())
+        self.assertEqual([p.name for p in kept], names)
+        self.assertEqual((first / 'HxStore.hxd').read_bytes(), b'synthetic-store')
         self.assertEqual((foreign / 'keep.txt').read_bytes(), b'not-a-helper-snapshot')
         self.assertTrue(alias.is_symlink())
         self.assertEqual((outside / 'keep.txt').read_bytes(), b'outside')
         self.assertTrue((self.out / 'snap-not-a-timestamp').is_dir())
 
-    def test_clock_rollback_refuses_capture_without_removing_study_inputs(self):
+    def test_future_dated_snapshot_does_not_prevent_capture(self):
         self.assertEqual(self.copy().returncode, 0)
         first, = self.snapshots()
-        for index in range(20):
-            shutil.copytree(first, self.out / f'snap-29990101T000000-{index:09d}Z')
-        shutil.rmtree(first)
-        before = {p.name: (p / 'HxStore.hxd').read_bytes() for p in self.snapshots()}
-        self.assertNotEqual(self.copy().returncode, 0)
-        self.assertEqual(before, {p.name: (p / 'HxStore.hxd').read_bytes()
-                                  for p in self.snapshots()})
-        self.assertEqual(len(list(self.out.iterdir())), 21)
-
-    def test_busy_prune_never_leaves_a_gutted_published_snapshot(self):
+        future = self.out / 'snap-29990101T000000-000000000Z'
+        first.rename(future)
+        before = {str(p.relative_to(future)): p.read_bytes()
+                  for p in future.rglob('*') if p.is_file()}
         self.assertEqual(self.copy().returncode, 0)
-        first, = self.snapshots()
-        for index in range(20):
-            shutil.copytree(first, self.out / f'snap-20000101T000000-{index:09d}Z')
-        shutil.rmtree(first)
-        before = {p.name for p in self.snapshots()}
-        wrapper = self.root / 'busy-rmdir.c'
-        wrapper.write_text('''#define _POSIX_C_SOURCE 200809L
-#define _DARWIN_C_SOURCE
-#include <errno.h>
-#include <fcntl.h>
-#include <string.h>
-#include <unistd.h>
-static int busy_unlinkat(int fd, const char *name, int flags) {
-    if (flags == AT_REMOVEDIR && strstr(name, "snap-20000101T000000-000000000Z")) {
-        errno = EBUSY;
-        return -1;
-    }
-    return unlinkat(fd, name, flags);
-}
-#define unlinkat busy_unlinkat
-''' + f'#include {json.dumps(str(ROOT / "tools/outlook-research-copy.c"))}\n')
-        self.build(wrapper)
-        self.assertNotEqual(self.copy().returncode, 0)
-        for snapshot in self.snapshots():
-            self.assertIn(snapshot.name, before)
-            self.assertEqual((snapshot / 'HxStore.hxd').read_bytes(), b'synthetic-store')
-            self.assertTrue((snapshot / 'manifest.json').is_file())
-        self.assertFalse(list(self.out.glob('.*.pending')))
-        self.build(ROOT / 'tools/outlook-research-copy.c')
-        self.assertEqual(self.copy().returncode, 0)
-        self.assertEqual(len(self.snapshots()), 20)
+        self.assertEqual(len(self.snapshots()), 2)
+        self.assertEqual(before, {str(p.relative_to(future)): p.read_bytes()
+                                  for p in future.rglob('*') if p.is_file()})
 
-    def test_one_run_restores_limit_when_many_old_snapshots_exist(self):
+    def test_failed_publication_preserves_every_existing_snapshot(self):
         self.assertEqual(self.copy().returncode, 0)
         first, = self.snapshots()
         for index in range(25):
             shutil.copytree(first, self.out / f'snap-20000101T000000-{index:09d}Z')
-        self.assertEqual(self.copy().returncode, 0)
-        self.assertEqual(len(self.snapshots()), 20)
+        names = {p.name for p in self.snapshots()}
+        before = {str(p.relative_to(self.out)): p.read_bytes()
+                  for snapshot in self.snapshots()
+                  for p in snapshot.rglob('*') if p.is_file()}
+        wrapper = self.root / 'failed-publish.c'
+        wrapper.write_text('''#define _POSIX_C_SOURCE 200809L
+#define _DARWIN_C_SOURCE
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+static int fail_publish(int fromfd, const char *from, int tofd, const char *to, unsigned int flags) {
+    if (strstr(from, ".pending")) { errno = EIO; return -1; }
+    return renameatx_np(fromfd, from, tofd, to, flags);
+}
+#define renameatx_np fail_publish
+''' + f'#include {json.dumps(str(ROOT / "tools/outlook-research-copy.c"))}\n')
+        self.build(wrapper)
+        self.assertNotEqual(self.copy().returncode, 0)
+        self.assertEqual({p.name for p in self.snapshots()}, names)
+        self.assertEqual(before, {str(p.relative_to(self.out)): p.read_bytes()
+                                  for snapshot in self.snapshots()
+                                  for p in snapshot.rglob('*') if p.is_file()})
+        self.assertEqual({p.name for p in self.out.iterdir()}, names | {'.lock'})
 
     def test_arguments_and_wrong_destinations_are_refused(self):
         self.assertNotEqual(self.copy(str(self.root / 'elsewhere')).returncode, 0)

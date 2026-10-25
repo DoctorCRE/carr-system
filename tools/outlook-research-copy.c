@@ -206,33 +206,6 @@ static void copy_sidecars(int profile, int work, FILE *manifest, int *first) {
     close(target);
 }
 
-static int snapshot_name(const char *name) {
-    if (strlen(name) != 31 || strncmp(name, "snap-", 5) != 0 ||
-        name[13] != 'T' || name[20] != '-' || name[30] != 'Z') return 0;
-    for (size_t i = 5; i < 30; ++i)
-        if (i != 13 && i != 20 && (name[i] < '0' || name[i] > '9')) return 0;
-    return 1;
-}
-
-static int own_snapshot(int root, const char *name) {
-    if (!snapshot_name(name)) return 0;
-    int fd = directory(root, name);
-    if (fd < 0) return 0;
-    struct stat info;
-    int own = fstat(fd, &info) == 0 && info.st_uid == getuid() && (info.st_mode & 0777) == 0700;
-    int manifest = openat(fd, "manifest.json", O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
-    if (manifest >= 0) {
-        char prefix[sizeof manifest_prefix - 1];
-        own = own && fstat(manifest, &info) == 0 && S_ISREG(info.st_mode) &&
-              info.st_uid == getuid() && info.st_nlink == 1 && (info.st_mode & 0777) == 0600 &&
-              read(manifest, prefix, sizeof prefix) == sizeof prefix &&
-              memcmp(prefix, manifest_prefix, sizeof prefix) == 0;
-        close(manifest);
-    } else own = 0;
-    close(fd);
-    return own;
-}
-
 static int remove_contents(int fd) {
     DIR *list = fdopendir(directory(fd, "."));
     if (!list) return -1;
@@ -258,30 +231,6 @@ static int remove_contents(int fd) {
     }
     closedir(list);
     return status;
-}
-
-static void prune(int root, const char *new_name) {
-    for (;;) {
-        size_t count = 0;
-        char oldest[32] = "";
-        DIR *list = entries(root);
-        struct dirent *entry;
-        while ((entry = next_entry(list))) {
-            if (!own_snapshot(root, entry->d_name)) continue;
-            require(strcmp(new_name, entry->d_name) > 0);
-            ++count;
-            if (!*oldest || strcmp(entry->d_name, oldest) < 0) strcpy(oldest, entry->d_name);
-        }
-        closedir(list);
-        if (count < 20) return;
-        char retired[48];
-        snprintf(retired, sizeof retired, ".%s.retired", oldest);
-        if (renameatx_np(root, oldest, root, retired, RENAME_EXCL) != 0) fail();
-        int fd = directory(root, retired);
-        if (fd < 0 || remove_contents(fd) != 0) fail();
-        close(fd);
-        if (unlinkat(root, retired, AT_REMOVEDIR) != 0) fail();
-    }
 }
 
 int main(int argc, char **argv) {
@@ -319,7 +268,6 @@ int main(int argc, char **argv) {
     copy_sidecars(profile, work, manifest, &first);
     fputs("]}\n", manifest);
     if (fflush(manifest) != 0 || fsync(fd) != 0 || fclose(manifest) != 0) fail();
-    prune(root, name);
     if (renameatx_np(root, pending, root, name, RENAME_EXCL) != 0) fail();
     staging_work = -1;
     close(profile);
