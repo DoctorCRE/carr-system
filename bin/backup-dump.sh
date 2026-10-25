@@ -121,7 +121,8 @@ try:
 except (ValueError, KeyError, TypeError):
     sys.exit(1)
 ')" || ARCHIVE_RC=1
-  "$PYTHON" "$REPO/bin/backup-archive-r2.py" --prune-local "$OUTDIR"
+  "$PYTHON" "$REPO/bin/backup-archive-r2.py" --prune-local "$OUTDIR" \
+    || echo "local prune failed; archive result follows" >&2
   if [ "$ARCHIVE_RC" -eq 0 ]; then
     echo "backup ok -> $OUT ($SIZE bytes, floor was $FLOOR) -> R2 archive: $R2_KEY"
   else

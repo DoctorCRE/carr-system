@@ -44,6 +44,8 @@ check somebody has to remember.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 import re
@@ -121,6 +123,15 @@ def quota_bytes(conn=None) -> tuple[int, str]:
 
 
 # ---------------------------------------------------------------- the ledger
+
+@contextmanager
+def ledger_lock():
+    """Hold across ledger load, reconciliation, uploads and usage-summary saves."""
+    os.makedirs(os.path.dirname(LEDGER), exist_ok=True)
+    with open(LEDGER + '.lock', 'a+b') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
 
 def load_ledger(bucket: str = BUCKET) -> dict:
     if os.path.exists(LEDGER):

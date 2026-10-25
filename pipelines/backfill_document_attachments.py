@@ -135,7 +135,7 @@ def main() -> int:
     say(f"# Document attachment backfill — {time.strftime('%Y-%m-%d %H:%M')} "
         f"({'APPLY' if a.apply else 'dry run'})")
 
-    with psycopg.connect(url) as cn, cn.cursor() as cur:
+    with psycopg.connect(url) as cn, cn.cursor() as cur, r2.ledger_lock():
         cap, provenance = r2.quota_bytes(cn)
         led = r2.load_ledger(a.r2_bucket)
         rec = r2.reconcile(led, cn, a.r2_bucket)

@@ -73,7 +73,9 @@ remains until a replacement upload succeeds. No remote object is deleted.
 Local retention keeps the newest 14 copies and every older copy without a
 matching verified receipt. Each Studio generation selects a unique local name,
 so concurrent and same-day backups preserve existing ciphertext. Archival and
-pruning coordinate through a lock on each local ciphertext.
+pruning coordinate through a stable sibling lock file beside each ciphertext.
+Archive writers hold the shared usage-ledger lock across reconciliation, uploads,
+and summary saves, so concurrent retries cannot lose quota reservations.
 Unresolved owed copies can therefore require more local disk than 14 dailies.
 
 This covers the truthful archive and retry portion of audit Slice D, finding F5.

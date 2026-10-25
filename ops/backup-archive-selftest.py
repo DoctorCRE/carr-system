@@ -31,6 +31,13 @@ args = sys.argv[1:]
 target = pathlib.Path(os.environ['FIXTURE_REMOTE']) / args[3].replace('/', '_')
 mode = os.environ.get('FIXTURE_MODE', '')
 if args[2] == 'put':
+    if mode == 'put_barrier':
+        gate = pathlib.Path(os.environ['FIXTURE_REMOTE']).parent
+        (gate / 'putting').touch()
+        deadline = time.monotonic() + 10
+        while not (gate / 'release').exists():
+            if time.monotonic() > deadline: raise SystemExit(9)
+            time.sleep(0.01)
     if mode == 'upload_error':
         print('fixture-provider-private-error', file=sys.stderr)
         raise SystemExit(7)
@@ -126,6 +133,28 @@ elif args[2] == 'get':
         self.assertTrue(unknown.exists())
         self.assertTrue(changed.exists())
 
+    def test_prune_ignores_a_copy_disappearing_during_listing(self):
+        vanished = self.path.with_name('carr-20260102.sql.age')
+        vanished.write_bytes(b'concurrently removed opaque bytes')
+        driver = """
+import pathlib, runpy, sys
+original = pathlib.Path.is_file
+def is_file(path):
+    result = original(path)
+    if path.name == 'carr-20260102.sql.age' and result:
+        path.unlink()
+    return result
+pathlib.Path.is_file = is_file
+sys.argv = [sys.argv[1], '--prune-local', sys.argv[2]]
+runpy.run_path(sys.argv[0], run_name='__main__')
+"""
+        result = subprocess.run(
+            [sys.executable, '-c', driver, str(self.repo / 'bin/backup-archive-r2.py'),
+             str(self.path.parent)], env=self.child_env, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(vanished.exists())
+        self.assertTrue(self.path.exists())
+
     def test_dry_run_does_not_replace_an_owed_receipt(self):
         self.run_archive(mode='upload_error')
         receipt = self.receipt()
@@ -164,7 +193,7 @@ elif args[2] == 'get':
         os.utime(self.path, (1, 1))
         for day in range(2, 17):
             (self.path.parent / f'carr-202601{day:02}.sql.age').write_bytes(b'newer')
-        with self.path.open('rb') as source:
+        with Path(str(self.path) + '.lock').open('a+b') as source:
             fcntl.flock(source, fcntl.LOCK_EX)
             result = self.run_archive('--prune-local', self.path.parent)
             self.assertEqual(result.returncode, 0)
@@ -182,13 +211,97 @@ elif args[2] == 'get':
             while not (self.repo / 'reading').exists() and time.monotonic() < deadline:
                 time.sleep(0.01)
             self.assertTrue((self.repo / 'reading').exists())
-            with self.path.open('rb') as source:
+            with Path(str(self.path) + '.lock').open('a+b') as source:
                 with self.assertRaises(BlockingIOError):
                     fcntl.flock(source, fcntl.LOCK_EX | fcntl.LOCK_NB)
         finally:
             (self.repo / 'release').touch()
             output, error = process.communicate(timeout=10)
         self.assertEqual(process.returncode, 0, output + error)
+
+    def test_retry_waiting_for_quota_keeps_its_verified_copy(self):
+        self.assertEqual(self.run_archive().returncode, 0)
+        os.utime(self.path, (1, 1))
+        for day in range(2, 17):
+            (self.path.parent / f'carr-202601{day:02}.sql.age').write_bytes(b'newer')
+        driver = """
+import fcntl, pathlib, runpy, sys
+original = fcntl.flock
+waiting = pathlib.Path(sys.argv[2])
+def flock(stream, flags):
+    if str(stream.name).endswith('r2-usage.json.lock'):
+        waiting.touch()
+    return original(stream, flags)
+fcntl.flock = flock
+sys.argv = [sys.argv[1], sys.argv[3]]
+runpy.run_path(sys.argv[0], run_name='__main__')
+"""
+        with (self.repo / 'out/r2-usage.json.lock').open('a+b') as ledger_lock:
+            fcntl.flock(ledger_lock, fcntl.LOCK_EX)
+            retry = subprocess.Popen(
+                [sys.executable, '-c', driver, str(self.repo / 'bin/backup-archive-r2.py'),
+                 str(self.repo / 'waiting'), str(self.path)], env=self.child_env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                deadline = time.monotonic() + 5
+                while not (self.repo / 'waiting').exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue((self.repo / 'waiting').exists())
+                pruned = self.run_archive('--prune-local', self.path.parent)
+                self.assertEqual(pruned.returncode, 0, pruned.stderr)
+                retained = self.path.exists()
+            finally:
+                fcntl.flock(ledger_lock, fcntl.LOCK_UN)
+                output, error = retry.communicate(timeout=10)
+        self.assertTrue(retained)
+        self.assertEqual(retry.returncode, 0, output + error)
+
+    def concurrent_archives(self, remaining):
+        size = self.path.stat().st_size
+        ledger_path = self.repo / 'out/r2-usage.json'
+        ledger_path.write_text(json.dumps({'objects': {'other': {'bytes': 8 * 1024 ** 3 - remaining}}}))
+        other = self.path.with_name('carr-20260102.sql.age')
+        other.write_bytes(b'x' * size)
+        first = subprocess.Popen(
+            [sys.executable, str(self.repo / 'bin/backup-archive-r2.py'), str(self.path)],
+            env={**self.child_env, 'FIXTURE_MODE': 'put_barrier'},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        second = None
+        try:
+            deadline = time.monotonic() + 5
+            while not (self.repo / 'putting').exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue((self.repo / 'putting').exists())
+            second = subprocess.Popen(
+                [sys.executable, str(self.repo / 'bin/backup-archive-r2.py'), str(other)],
+                env=self.child_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                second.communicate(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
+        finally:
+            (self.repo / 'release').touch()
+            first_output, first_error = first.communicate(timeout=10)
+            if second is not None:
+                second_output, second_error = second.communicate(timeout=10)
+        self.assertEqual(first.returncode, 0, first_output + first_error)
+        return second, second_output, second_error, json.loads(ledger_path.read_text())
+
+    def test_concurrent_archives_preserve_both_quota_reservations(self):
+        size = self.path.stat().st_size
+        second, output, error, ledger = self.concurrent_archives(2 * size)
+        self.assertEqual(second.returncode, 0, output + error)
+        self.assertEqual(len(ledger['objects']), 3)
+        self.assertEqual(ledger['bytes_used'], 8 * 1024 ** 3)
+        self.assertEqual(len(list((self.repo / 'remote').iterdir())), 2)
+
+    def test_concurrent_archives_cannot_spend_the_same_quota(self):
+        second, output, error, ledger = self.concurrent_archives(self.path.stat().st_size)
+        self.assertEqual(second.returncode, 1, output + error)
+        self.assertEqual(json.loads(output)['reason'], 'quota_exceeded')
+        self.assertEqual(len(ledger['objects']), 2)
+        self.assertEqual(ledger['bytes_used'], 8 * 1024 ** 3)
+        self.assertEqual(len(list((self.repo / 'remote').iterdir())), 1)
 
     def test_full_quota_retry_reuses_only_its_existing_reservation(self):
         self.run_archive(mode='wrong')
@@ -201,7 +314,7 @@ elif args[2] == 'get':
         self.assertEqual(json.loads(ledger_path.read_text())['objects'], ledger['objects'])
         self.assertEqual(self.run_archive().returncode, 0)
 
-    def shell(self, mode='', archive_result=None, archive_status=0, skip_r2=False):
+    def shell(self, mode='', archive_result=None, archive_status=0, skip_r2=False, prune_status=0):
         shutil.copyfile(ROOT / 'bin/backup-dump.sh', self.repo / 'bin/backup-dump.sh')
         python = self.repo / '.venv/bin/python'
         python.parent.mkdir(parents=True, exist_ok=True)
@@ -222,7 +335,7 @@ print(json.dumps({'bytes': out.stat().st_size, 'floor': 1}))
             (self.repo / 'bin/backup-archive-r2.py').write_text(
                 'import sys\n'
                 'if "--select-output" in sys.argv: print(sys.argv[-1]); raise SystemExit(0)\n'
-                'if "--prune-local" in sys.argv: raise SystemExit(0)\n'
+                f'if "--prune-local" in sys.argv: raise SystemExit({prune_status})\n'
                 + f'print({archive_result!r})\nraise SystemExit({archive_status})\n')
         return subprocess.run(['/bin/zsh' , str(self.repo / 'bin/backup-dump.sh')],
                               env={**self.child_env, 'PATH': str(commands) + ':/usr/bin:/bin',
@@ -247,6 +360,20 @@ print(json.dumps({'bytes': out.stat().st_size, 'floor': 1}))
         receipts = list(self.path.parent.glob('*.archive.json'))
         self.assertEqual(len(receipts), 1)
         self.assertIs(json.loads(receipts[0].read_text())['archived'], True)
+
+    def test_prune_failure_preserves_the_reported_archive_result(self):
+        for archived in (True, False):
+            with self.subTest(archived=archived):
+                payload = json.dumps({'archived': archived, 'state': 'archived' if archived else 'owed',
+                                      'key': 'backups/fixture'})
+                result = self.shell(archive_result=payload, archive_status=0 if archived else 1,
+                                    prune_status=7)
+                shutil.rmtree(self.repo / 'commands')
+                (self.repo / '.venv/bin/python').unlink()
+                self.assertEqual(result.returncode, 0 if archived else 1, result.stdout + result.stderr)
+                self.assertIn('R2 archive: backups/fixture' if archived else 'R2 archive: OWED',
+                              result.stdout + result.stderr)
+                self.assertIn('local prune failed', result.stderr)
 
     def test_shell_rejects_malformed_json_and_truthy_archive_values(self):
         for payload, status in [('noise', 0),

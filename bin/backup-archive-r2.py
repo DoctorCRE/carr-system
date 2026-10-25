@@ -109,13 +109,18 @@ def main() -> int:
     if (args.prune_local or args.select_output) and (args.path or args.dry_run):
         parser.error('maintenance modes cannot archive a ciphertext path')
     if args.prune_local:
-        copies = sorted((path for path in args.prune_local.glob('carr-*.sql.age')
-                         if not path.is_symlink() and path.is_file()),
-                        key=lambda path: path.stat().st_mtime_ns, reverse=True)
-        for copy in copies[14:]:
+        copies = []
+        for path in args.prune_local.glob('carr-*.sql.age'):
             try:
-                with copy.open('rb') as source:
-                    fcntl.flock(source, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if not path.is_symlink() and path.is_file():
+                    copies.append((path.stat().st_mtime_ns, path))
+            except FileNotFoundError:
+                continue
+        copies.sort(reverse=True)
+        for _, copy in copies[14:]:
+            try:
+                with Path(str(copy) + '.lock').open('a+b') as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     if archived(copy):
                         copy.unlink()
                         Path(str(copy) + '.archive.json').unlink()
@@ -134,11 +139,12 @@ def main() -> int:
         parser.error('ciphertext must be a regular local file')
     arm_watchdog()
     try:
-        with path.open('rb') as source:
-            fcntl.flock(source, fcntl.LOCK_EX)
-            if os.fstat(source.fileno()).st_ino != path.stat().st_ino:
-                parser.error('ciphertext changed before archival')
-            return archive(path, args.dry_run)
+        with Path(str(path) + '.lock').open('a+b') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if path.is_symlink() or not path.is_file():
+                parser.error('ciphertext disappeared before archival')
+            with r2.ledger_lock():
+                return archive(path, args.dry_run)
     except FileNotFoundError:
         parser.error('ciphertext disappeared before archival')
 
