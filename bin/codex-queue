@@ -65,7 +65,7 @@ def main():
             failed |= code != 0
             text = (logs / f'{name}.log').read_text(errors='replace')
             prs = re.findall(r'https://github\.com/[\w.-]+/[\w.-]+/pull/\d+', text)
-            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            lines = [line.strip() for line in text.splitlines() if line.strip() and not line.startswith('hint:')]
             print(name, prs[-1] if code == 0 and prs else (lines[-1] if lines else f'exit {code}'))
         print('QUEUE-EMPTY')
     return int(failed)
