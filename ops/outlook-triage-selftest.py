@@ -362,6 +362,23 @@ class FakeOutlookCase(unittest.TestCase):
 
 
 class OutlookTriageTest(FakeOutlookCase):
+    def test_driver_in_home_local_bin_works_without_shell_path_setup(self):
+        self.given([FILE_A, NEWS, UNREAD])
+        local_driver = self.home / '.local/bin/cua-driver'
+        local_driver.parent.mkdir(parents=True)
+        (self.tmp / 'bin/cua-driver').rename(local_driver)
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
+        self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A']])
+        self.assertNotIn(UNREAD['label'], state['selections'])
+
+    def test_missing_driver_fails_without_selecting_mail(self):
+        self.given([FILE_A, UNREAD])
+        (self.tmp / 'bin/cua-driver').unlink()
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'cua_driver_unavailable'))
+        self.assertEqual((state['moved'], state['selections']), ([], []))
+
     def test_files_read_email_by_each_rule_and_never_selects_unread(self):
         self.given([FILE_A, VENDOR, FIRM, NEWS, UNCERTAIN, UNREAD])
         outcome, state = self.run_triage()
@@ -777,12 +794,21 @@ class InstallTest(unittest.TestCase):
         self.assertIn('/bin/chmod 600 "$LOG"', self.installer)
         self.assertLess(self.installer.index('/bin/chmod 600 "$LOG"'), self.installer.index('print -- '))
 
-    def test_service_runs_on_the_secondary_mac_daily(self):
+    def test_installer_checks_machine_scope_before_private_mail_guide(self):
+        self.assertLess(self.installer.index("allowed_on_machine('$LABEL.plist'"),
+                        self.installer.index('if [ ! -s "$HOME/.config/carr/outlook-nightly-sweep.folders.md"'))
+
+    def test_service_runs_on_the_primary_mac_daily(self):
         services = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
         service = next(s for s in services if s['key'] == triage.SERVICE)
         env = service['environments'][0]
-        self.assertEqual(env['runs_on'], 'secondary')
+        self.assertEqual(env['runs_on'], 'primary')
         self.assertEqual(env['deploy_mechanism'], 'ops/launchd/com.carr.outlook-triage.plist')
+        from lib.launchd_scope import allowed_on_machine
+        self.assertTrue(allowed_on_machine('com.carr.outlook-triage.plist', primary=True))
+        self.assertFalse(allowed_on_machine('com.carr.outlook-triage.plist', primary=False))
+        self.assertIn("allowed_on_machine('$LABEL.plist', machine_role.is_primary('$REPO'))",
+                      self.installer)
         self.assertGreaterEqual(env['expected_cadence_seconds'] + env['cadence_grace_seconds'], 27.5 * 3600)
 
 
