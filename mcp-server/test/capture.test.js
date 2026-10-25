@@ -535,7 +535,7 @@ test("post-call lifecycle cannot finalize after one acceptance and stores only s
     description: "Unrelated Dell task", status: "open" });
   await assert.rejects(executeRegisteredTool(db, { ...joe, human: false }, "resolve-post-call-candidate",
     { idempotency_key: "machine-no", candidate_id: first.id, accept: true }),
-  error => error instanceof ToolError && error.payload.error === "human_only");
+  error => error instanceof ToolError && error.payload.error === "human_only_verb_requires_verified_partner");
   const acceptedAction = await TOOLS["resolve-post-call-candidate"].handler(db, joe,
     { idempotency_key: "accept-action", candidate_id: first.id, accept: true });
   assert.equal(acceptedAction.assignee, "dell");
