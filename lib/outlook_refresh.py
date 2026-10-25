@@ -10,13 +10,16 @@ from pathlib import Path
 
 from lib import outlook_intake as intake
 from lib import outlook_triage as triage
-from lib.outlook_send import account
+from lib.outlook_settings import load_settings
 from lib.outlook_ui import (CuaError, Outcome, UiError, Waits, Window,
                             outlook_pid, prepare_outlook, usable_window)
 
 
 def run(repo: Path, now: datetime, waits: Waits = Waits(),
         now_fn=lambda: datetime.now(timezone.utc)) -> Outcome:
+    settings = load_settings()
+    settings.require_repo(repo)
+    settings.require_service('refresh')
     if not intake.in_window(now):
         return Outcome('skipped', 'outside_window')
     path = repo / intake.OUT / intake.REFRESH_LIST
@@ -42,10 +45,7 @@ def run(repo: Path, now: datetime, waits: Waits = Waits(),
         found = usable_window(pid) if pid else None
         if not found or pid is None:
             return Outcome('failed', 'no_usable_main_window')
-        try:
-            expected_account = account(Path.home() / '.config/carr/outlook-account')
-        except (OSError, ValueError):
-            return Outcome('failed', 'account_config_invalid')
+        expected_account = settings.account
         if not found.get('title', '').endswith(f' • {expected_account}'):
             return Outcome('failed', 'wrong_account')
         window = Window(pid, found['window_id'], waits)

@@ -20,6 +20,7 @@ import tempfile
 import time
 import hashlib
 import secrets
+from xml.sax.saxutils import escape
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -394,12 +395,23 @@ def missing_targets(body):
 
 
 def portable(text):
+    if '<plist' in text and (launchd_calendar.plist_label(text) or '').startswith('com.carr.outlook-'):
+        from lib.outlook_settings import load_settings
+        settings = load_settings(Path(HOME))
+        settings.require_repo(Path(REPO))
+        for token, value in sorted(settings.plist_replacements.items(), key=lambda item: len(item[1]), reverse=True):
+            text = text.replace(escape(value), token)
     for tok, real in TOKENS:
         text = text.replace(real, tok)
     return text
 
 
 def concrete(text):
+    if '{{COPY_HELPER}}' in text or '{{EXECUTABLE_PATH}}' in text:
+        from lib.outlook_settings import load_settings
+        settings = load_settings(Path(HOME))
+        settings.require_repo(Path(REPO))
+        text = settings.render_plist(text.encode()).decode()
     for tok, real in TOKENS:
         text = text.replace(tok, real)
     if '<plist' in text:

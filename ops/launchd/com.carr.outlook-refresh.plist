@@ -48,7 +48,7 @@
 
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>{{HOME}}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PATH</key><string>{{EXECUTABLE_PATH}}</string>
   </dict>
 
   <key>StandardOutPath</key><string>{{REPO}}/out/outlook-refresh-launchd.log</string>
