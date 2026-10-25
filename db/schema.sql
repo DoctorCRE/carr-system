@@ -122525,7 +122525,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0961_lead_history_pages.sql	b14f721d9ceb060b42920a3fa52208aa8368c11a96177c5f30783cb609439f49	1970-01-01 00:00:00+00
 0962_triage_lead_read_indexes.sql	553d99d865d602ac9984e678333d9c0ebb58c370ecdcb7e76f29ca9352aba87b	1970-01-01 00:00:00+00
 0965_retire_cache_evidence_refs.sql	5914556446bc59634aca464c1251dbbcc436bde94b3fc9a7379e4b631fe3bec2	1970-01-01 00:00:00+00
-0968_retire_work_shape_admission.sql	1a9b2f3abd4b673b073a2fa57fca31be046447c33c1f6309b2d034b775b726f3	1970-01-01 00:00:00+00
+0969_retire_work_shape_admission.sql	1a9b2f3abd4b673b073a2fa57fca31be046447c33c1f6309b2d034b775b726f3	1970-01-01 00:00:00+00
 \.
 
 
