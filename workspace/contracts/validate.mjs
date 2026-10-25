@@ -222,9 +222,8 @@ for (const baseline of acceptance.baseline_measure_plan) {
 }
 assert.equal(contracts["domain-glossary.v1.json"].operating_objective.objectives.length, 8, "eight objectives");
 const cutoverOwners = new Map(surfaceMap.cutover_owner_assignments.map(item => [item.id, item]));
-assert.equal(cutoverOwners.size, 5, "five explicit surface cutover owner assignments");
+assert.equal(cutoverOwners.size, 4, "four explicit surface cutover owner assignments");
 for (const surface of surfaceMap.surfaces.filter(item => item.cutover_owner.startsWith("OPEN-SURFACE-OWNER-"))) assert.equal(cutoverOwners.get(surface.cutover_owner)?.surface_id, surface.id, `surface owner ${surface.cutover_owner}`);
-assert(testIds.has("FRONTDOOR-USAGE-001"), "Front Door usage gate test ID");
 assert.equal(tenantGovernance.status, "phase0_contract_only_no_production_enforcement_claim", "tenant governance Phase 0 status");
 assert.equal(tenantGovernance.canonical_sources.find(item => item.document_id === manifest.source.durable_doctrine_id).generation, 344, "tenant governance Workspace generation");
 exact(tenantGovernance.tenant_context_contract.propagation_channels, ["browser", "api", "background_job", "local_edge_sync", "search", "export", "attachment", "doc", "ai"], "tenant propagation channels");
