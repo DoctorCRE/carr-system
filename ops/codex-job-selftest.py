@@ -4,6 +4,7 @@ import contextlib
 import io
 from pathlib import Path
 import runpy
+import shutil
 import subprocess
 import sys
 import types
@@ -28,6 +29,10 @@ class CodexJobTests(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, status)
             return subprocess.CompletedProcess(argv, 0)
 
+        def spawn(argv, **kwargs):
+            code = execute(argv, **kwargs).returncode
+            return types.SimpleNamespace(pid=12345, wait=lambda: code)
+
         args = ["codex-job", repo, "test-job", "original brief"]
         for config in configs:
             args.extend(["-c", config])
@@ -35,12 +40,15 @@ class CodexJobTests(unittest.TestCase):
             patch.dict(sys.modules, {"skill_picker": picker}),
             patch("os.execv"),  # keep the test interpreter; no runtime re-exec
             patch("subprocess.run", side_effect=execute),
+            patch("subprocess.Popen", side_effect=spawn),
+            patch("os.killpg", side_effect=ProcessLookupError),
             patch.object(sys, "argv", args),
             contextlib.redirect_stdout(output),
             contextlib.redirect_stderr(errors),
         ):
             launcher = runpy.run_path(str(ROOT / "bin/codex-job"))
             code = launcher["main"]()
+        self.addCleanup(shutil.rmtree, Path(calls[0][0][-1]).parent, True)
         return code, output.getvalue(), calls, picker.prepare
 
     def test_final_codex_argv_uses_hook_trust_and_prepared_brief(self):
