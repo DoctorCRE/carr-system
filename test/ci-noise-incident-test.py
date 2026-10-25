@@ -183,10 +183,10 @@ class IncidentTests(unittest.TestCase):
                     ' def cursor(self): return self\n'
                     f' def execute(self, *args): {query}\n'
                     ' def fetchall(self): return [("service", "production", "high", "launchd", '
-                    '"stale", "bad", "observed", 24)]\n'
+                    '"stale", "bad", "observed", 24, 3600, True)]\n'
                     'def connect(*args, **kwargs): return Connection()\n')
                 result = subprocess.run([sys.executable, str(runner)], capture_output=True, text=True,
-                                        env={**os.environ, 'PYTHONPATH': directory,
+                                        env={'PATH': os.defpath, 'HOME': directory, 'PYTHONPATH': directory,
                                              'LIVENESS_DATABASE_URL': 'fixture'}, timeout=10)
                 self.assertEqual(result.returncode, 1)
                 if query == 'pass':
@@ -208,12 +208,12 @@ class IncidentTests(unittest.TestCase):
                 ' def execute(self, *args): pass\n'
                 ' def fetchall(self): return [('
                 '"stopped-critical-service", "production", "high", "launchd", '
-                '"stale", "private-health-diagnostic", "observed", 24), ('
+                '"stale", "private-health-diagnostic", "observed", 24, 3600, True), ('
                 '"stopped-backup", "production", "critical", "launchd", '
-                '"stale", "private-health-diagnostic", "observed", 36)]\n'
+                '"stale", "private-health-diagnostic", "observed", 36, 3600, True)]\n'
                 'def connect(*args, **kwargs): return Connection()\n')
             result = subprocess.run([sys.executable, str(runner)], capture_output=True, text=True,
-                                    env={**os.environ, 'PYTHONPATH': directory,
+                                    env={'PATH': os.defpath, 'HOME': directory, 'PYTHONPATH': directory,
                                          'LIVENESS_DATABASE_URL': 'private-credential'}, timeout=10)
         self.assertEqual(result.returncode, 1)
         code, artifact, publish = self.run_main(result)
@@ -225,6 +225,49 @@ class IncidentTests(unittest.TestCase):
         ])
         self.assertNotIn('private-health-diagnostic', json.dumps(artifact))
         self.assertNotIn('private-credential', json.dumps(artifact))
+        publish.assert_called_once()
+
+    def test_real_probe_retains_fresh_failed_and_missing_first_reports(self):
+        runner = Path(__file__).parents[1] / 'ops/ci-noise-probe.py'
+        rows = [
+            ("fresh-failed", "production", "high", "cloudflare-worker", "fresh",
+             "unavailable", "observed", 0.5, None, False),
+            ("required-missing", "production", "critical", "launchd", "missing",
+             "unknown", None, None, 3600, True),
+            ("not-due", "production", "critical", "launchd", "missing",
+             "unknown", None, None, 3600, False),
+            ("on-demand", "production", "critical", "launchd", "missing",
+             "unknown", None, None, None, False),
+            ("low-noise", "production", "low", "cloudflare-worker", "fresh",
+             "unavailable", "observed", 0.5, None, False),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, 'psycopg.py').write_text(
+                'class Connection:\n'
+                ' def __enter__(self): return self\n'
+                ' def __exit__(self, *args): pass\n'
+                ' def cursor(self): return self\n'
+                ' def execute(self, query):\n'
+                '  assert "se.expected_cadence_seconds" in query\n'
+                '  assert "se.cadence_grace_seconds" in query\n'
+                '  assert "s.registered_at" in query\n'
+                '  assert "s.retired_at is null" in query\n'
+                f' def fetchall(self): return {rows!r}\n'
+                'def connect(*args, **kwargs): return Connection()\n')
+            result = subprocess.run([sys.executable, str(runner)], capture_output=True, text=True,
+                                    env={'PATH': os.defpath, 'HOME': directory,
+                                         'PYTHONPATH': directory, 'LIVENESS_DATABASE_URL': 'fixture'},
+                                    timeout=10)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {
+            'schema': 'edge-liveness-verdict/v1', 'probe_exit': 1, 'status': 'ALARM',
+            'affected_services': [
+                {'service_key': 'fresh-failed', 'hours_since_observed': 0.5},
+                {'service_key': 'required-missing', 'hours_since_observed': None},
+            ]})
+        code, artifact, publish = self.run_main(result)
+        self.assertEqual(code, 0)
+        self.assertEqual(artifact['affected_services'], json.loads(result.stdout)['affected_services'])
         publish.assert_called_once()
 
     def test_edge_workflow_keeps_read_only_defaults(self):

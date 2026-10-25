@@ -195,7 +195,7 @@ export async function readNeedsJoe(c, actor, governance, { now = Date.now() } = 
            from loop_item
           where status = 'open' and kind in ('action_required', 'open_loop', 'team_loop')
             and (lower(owner) in ('joe', 'joint') or (owner is null and kind = 'action_required'))
-          order by created_at limit 500 /* needs-joe */`)).rows;
+          order by created_at, kind, number /* needs-joe */`)).rows;
       return { items: loopItems(rows, now, exclude) };
     }),
     ...await source(sources, "work_requests", async () => {

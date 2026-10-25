@@ -1,27 +1,12 @@
 #!/usr/bin/env python3
-"""ops/edge-liveness-selftest.py — prove the alarm fires, and prove what it
-refuses to fire on.
+"""Exercise the observer verdict with synthetic health rows and no database.
 
-WHY THIS FILE HAS TO EXIST. ops/edge-liveness.py returned green on its first run
-against production and will keep returning green for as long as the Mac behaves,
-which is most of the time. A detector that has only ever been observed agreeing
-that nothing is wrong has demonstrated nothing at all — it would look identical
-if `stale` were misspelled, if the criticality filter excluded everything, or if
-the whole verdict were `return 0`. The alarm paths cannot be triggered against
-production on demand without lying to the ledger, so they are triggered here
-against fabricated rows through the REAL decision function.
-
-WHAT IT DOES NOT TEST, said plainly: the SQL. assess() is a pure function of the
-rows and this file hands it rows directly, so a query that selects the wrong
-column would pass every check below. The query is exercised by running the tool
-against production, which is done and recorded in the pull request; these checks
-own the decision, that run owns the read.
-
-Row shape, matching the query's select list exactly:
-    (service_key, environment, criticality, runtime,
-     freshness_state, health, observed_at, hours_since)
+The subprocess fixtures in test/ci-noise-incident-test.py also cover the query
+adapter and sanitized artifact. These fixtures do not execute PostgreSQL.
 """
 import os
+from contextlib import redirect_stdout
+from io import StringIO
 import sys
 from datetime import datetime, timezone
 from typing import Any
@@ -51,16 +36,16 @@ def check(label: str, cond: bool, detail: str = "") -> None:
 
 def row(key: str, *, crit: str = "high", runtime: str = "launchd",
         fresh: str = "fresh", health: str = "healthy",
-        observed: bool = True, hours: float = 0.5) -> tuple[Any, ...]:
-    return (key, "production", crit, runtime, fresh, health,
-            NOW if observed else None, hours if observed else None)
+        observed: bool = True, hours: float = 0.5,
+        cadence: int | None = None, overdue: bool = False) -> tuple[Any, ...]:
+    return el.Observation(key, "production", crit, runtime, fresh, health,
+            NOW if observed else None, hours if observed else None, cadence, overdue)
 
 
 def main() -> int:
     print("edge-liveness-selftest — the alarm must fire, and must refuse to "
           "fire on the three things that are not failures\n")
 
-    # ── it fires ─────────────────────────────────────────────────────────────
     rc = el.assess([row("carr-mcp", fresh="stale", health="unknown", hours=9.0),
                     row("capture-poll", runtime="launchd")])
     check("a high-criticality service gone stale alarms", rc == 1, f"rc={rc}")
@@ -69,7 +54,26 @@ def main() -> int:
                         fresh="stale", hours=30.0)])
     check("a critical non-launchd service gone stale alarms", rc == 1, f"rc={rc}")
 
-    # ── the dead-Mac collapse ────────────────────────────────────────────────
+    for crit in ("high", "critical"):
+        rc = el.assess([row("fresh-failed", crit=crit, runtime="cloudflare-worker",
+                            health="unavailable")])
+        check(f"a fresh {crit} failed service alarms", rc == 1, f"rc={rc}")
+
+    for crit in ("high", "critical"):
+        output = StringIO()
+        with redirect_stdout(output):
+            rc = el.assess([row("required-missing", crit=crit, observed=False,
+                                fresh="missing", health="unknown", cadence=3600,
+                                overdue=True)])
+        check(f"an overdue never-started {crit} service alarms", rc == 1)
+        check("missing first completion is distinct from a stopped Mac",
+              "never started" in output.getvalue() and "MAC HAS GONE DARK" not in output.getvalue())
+
+    for cadence, overdue in ((3600, False), (None, True)):
+        rc = el.assess([row("not-due", observed=False, fresh="missing",
+                            health="unknown", cadence=cadence, overdue=overdue)])
+        check("new or unscheduled services do not alarm", rc == 0)
+
     all_dark = [row(f"job-{i}", fresh="stale", hours=6.0 + i) for i in range(5)]
     rc = el.assess(all_dark)
     check("every launchd service stale together alarms", rc == 1, f"rc={rc}")
@@ -80,40 +84,47 @@ def main() -> int:
     check("one launchd job stale while others are fresh still alarms",
           rc == 1, f"rc={rc}")
 
-    # ── AND THE THREE REFUSALS, which are the point ──────────────────────────
-    # 1. Never observed is not gone quiet. On the day this shipped, 17 of 33
-    #    production rows had never reported. Alarming on those would have fired
-    #    17 alarms about services that were working.
     rc = el.assess([row("brand-new", observed=False, fresh="missing",
                         health="unknown"),
                     row("also-new", observed=False, fresh="missing",
                         health="unknown")])
-    check("services that have NEVER reported do not alarm", rc == 0, f"rc={rc}")
+    check("unscheduled services that never reported do not alarm", rc == 0, f"rc={rc}")
 
     check("...and a never-observed service cannot make the Mac look dark, "
           "because it was never alive to go dark",
           el.assess([row("brand-new", observed=False, fresh="missing")]) == 0)
 
-    # 2. Low and medium criticality are noted, never alarmed. logitech-keymap is
-    #    a keyboard remapper; an alarm for it is an alarm nobody reads when the
-    #    record layer stops.
+    mixed = [row("dark-local", fresh="stale", hours=9.0),
+             row("failed-cloud", runtime="cloudflare-worker", health="unavailable"),
+             row("missing-required", observed=False, fresh="missing", health="unknown",
+                 cadence=3600, overdue=True)]
+    output = StringIO()
+    with redirect_stdout(output):
+        rc = el.assess(mixed)
+    check("Mac-dark collapse preserves independent failed and never-started findings",
+          rc == 1 and "MAC HAS GONE DARK" in output.getvalue()
+          and "failed-cloud" in output.getvalue() and "missing-required" in output.getvalue())
+
+    for crit in ("low", "medium"):
+        rc = el.assess([row("failed-noise", crit=crit, health="unavailable"),
+                        row("missing-noise", crit=crit, observed=False, fresh="missing",
+                            health="unknown", cadence=3600, overdue=True), row("healthy")])
+        check(f"{crit} failed or never-started services do not alarm", rc == 0)
+    rc = el.assess([row("expected-skip", health="degraded")])
+    check("a fresh skipped or cancelled observation keeps its existing nonalarm outcome", rc == 0)
+
     rc = el.assess([row("logitech-keymap", crit="low", fresh="stale", hours=8.0),
                     row("capture-poll", crit="medium", fresh="stale", hours=8.0),
                     row("still-fine", crit="high", fresh="fresh")])
     check("low and medium criticality going quiet does NOT alarm",
           rc == 0, f"rc={rc}")
 
-    # 3. Fresh is fresh.
     rc = el.assess([row("a"), row("b", crit="critical"), row("c", crit="low")])
     check("everything fresh returns clean", rc == 0, f"rc={rc}")
 
-    # ── an empty catalog is a failure, not a clean bill ──────────────────────
-    # A reader that says "nothing is wrong" when it can see nothing at all is
-    # the false-green mechanism the Control Room premortem names by name.
     check("an empty result set alarms rather than reporting all-clear",
           el.assess([]) == 1)
 
-    # ── the low/medium case must not silently swallow a high one ─────────────
     rc = el.assess([row("noise", crit="low", fresh="stale", hours=8.0),
                     row("real", crit="high", fresh="stale", hours=8.0)])
     check("a high-criticality alarm survives alongside low-criticality noise",

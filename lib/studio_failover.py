@@ -184,7 +184,8 @@ def run_guarded(authority, host, label, launch, disarm=lambda: None):
 
 def guarded_plist(body, repo, host, labels):
     p = plistlib.loads(body.encode() if isinstance(body, str) else body)
-    if p.get('Label') not in labels: return body
+    # macOS attributes Full Disk Access to launchd's program, not its child.
+    if p.get('Label') not in labels or p.get('Label') == 'com.carr.outlook-intake': return body
     p.pop('AbandonProcessGroup', None)
     args = p.get('ProgramArguments') or [p['Program']]
     if str(repo / 'ops/studio-job-guard.py') not in args:
