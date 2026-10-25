@@ -99,7 +99,7 @@ def run(args, env=None, shell_cmd=None, timeout=60, root=None):
     ci = root / "ops/ci.sh"
     cmd = ([*shell_cmd, str(ci), *args] if shell_cmd else [str(ci), *args])
     with tempfile.TemporaryDirectory(prefix="carr-ci-test-", dir="/tmp") as directory:
-        e.update(TMPDIR=directory, TMP=directory, TEMP=directory)
+        e.update(TMPDIR=directory, TMP=directory, TEMP=directory, RUNNER_TEMP=directory)
         p = subprocess.run(cmd, capture_output=True, text=True, cwd=root, env=e, timeout=timeout)
     return p.returncode, ANSI.sub("", (p.stdout or "") + (p.stderr or ""))
 
@@ -865,6 +865,54 @@ def test_gates_report_every_completed_result_after_a_timeout():
         check("unstarted shell suites remain withheld after timeout", not marker.exists(), out)
 
 
+def test_failed_gate_logs_survive_exit():
+    with ci_fixture() as root, tempfile.TemporaryDirectory() as logs:
+        (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
+        (root / "ops/a-failure-selftest.py").write_text(
+            "print('first evidence\\n' + 'middle\\n' * 250 + 'last evidence'); raise SystemExit(7)\n")
+        command = ["bash", str(root / "ops/ci.sh"), "--strict", "--only", "gates"]
+        processes = [subprocess.Popen(command, cwd=root,
+                     env={**fixture_env(), "RUNNER_TEMP": logs},
+                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(2)]
+        for process in processes:
+            output, error = process.communicate(timeout=30)
+            check("deliberate gate failure remains red", process.returncode == 1, output + error)
+        retained = list(pathlib.Path(logs).glob("carr-ci.*"))
+        check("concurrent runs retain separate evidence directories", len(retained) == 2)
+        for directory in retained:
+            log = directory / "gate-a-failure-selftest.py.log"
+            check("full failed log survives ci.sh exit", log.is_file()
+                  and "first evidence" in log.read_text() and "last evidence" in log.read_text()
+                  and len(log.read_text().splitlines()) == 252)
+            check("passing gate logs are removed", not (directory / "safety-hooks.log").exists()
+                  and not (directory / "gate-test_migration_fixture.py.log").exists())
+        ci = root / "ops/ci.sh"
+        ci.write_text(ci.read_text().replace("CI_SELFTEST_TIMEOUT_SECONDS=120",
+                                            "CI_SELFTEST_TIMEOUT_SECONDS=1"))
+        (root / "ops/a-failure-selftest.py").write_text(
+            f"import time; print('timeout evidence {FIXTURE_TOKEN}', flush=True); time.sleep(10)\n")
+        result = subprocess.run(command, cwd=root,
+                                env={**fixture_env(), "RUNNER_TEMP": logs,
+                                     "GITHUB_ACTIONS": "true", "CARR_CI_GATE_JOBS": "1"},
+                                capture_output=True, text=True, timeout=30)
+        timeout_dirs = set(pathlib.Path(logs).glob("carr-ci.*")) - set(retained)
+        check("timeout preserves its exit verdict and evidence", result.returncode == 1
+              and "TIMEOUT:a-failure" in result.stdout and len(timeout_dirs) == 1)
+        for directory in timeout_dirs:
+            raw = directory / "gate-a-failure-selftest.py.log"
+            redacted = directory / "gate-a-failure-selftest.py.log.redacted"
+            check("hosted timeout retains complete redacted artifact", raw.is_file()
+                  and redacted.is_file() and "timeout evidence" in redacted.read_text()
+                  and FIXTURE_TOKEN not in redacted.read_text()
+                  and "<redacted:github-token:40 chars>" in redacted.read_text())
+        retained += list(timeout_dirs)
+        result = subprocess.run(["bash", str(root / "ops/ci.sh"), "--strict", "--only", "freshness"],
+                                cwd=root, env={**fixture_env(), "RUNNER_TEMP": logs},
+                                capture_output=True, text=True, timeout=15)
+        check("passing runs remove their log directory", result.returncode == 0
+              and set(pathlib.Path(logs).glob("carr-ci.*")) == set(retained))
+
+
 def test_gates_selftests_have_a_process_group_watchdog():
     helper = REPO / "bin" / "with-timeout.py"
     with tempfile.TemporaryDirectory() as td:
@@ -1455,7 +1503,7 @@ def main(argv=None):
         test_every_test_file_in_the_tree_is_collected()
         test_each_class_runs_in_exactly_one_hosted_group()
         return 1 if any(not ok for _, ok, _ in RESULTS) else 0
-    for fn in (test_worktree_python_selection,
+    for fn in (test_failed_gate_logs_survive_exit, test_worktree_python_selection,
                test_freshness_checks_the_tree_without_requiring_main_ancestry,
                test_no_green_without_running,
                test_strict_turns_skip_into_failure,

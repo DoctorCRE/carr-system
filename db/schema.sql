@@ -100942,6 +100942,13 @@ CREATE INDEX capture_candidate_queue_idx ON public.capture_candidate USING btree
 
 
 --
+-- Name: capture_post_call_action_deal_history_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX capture_post_call_action_deal_history_idx ON public.capture_post_call_action USING btree (deal_id, accepted_at, id);
+
+
+--
 -- Name: capture_post_call_action_open_due_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -101016,6 +101023,13 @@ CREATE INDEX codex_continuity_event_scope_idx ON public.codex_continuity_event U
 --
 
 CREATE INDEX codex_continuity_revision_checkpoint_idx ON public.codex_continuity_revision USING btree (checkpoint_id, checkpoint_version DESC);
+
+
+--
+-- Name: critical_date_deal_due_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX critical_date_deal_due_idx ON public.critical_date USING btree (deal_id, due_on, id);
 
 
 --
@@ -101429,6 +101443,13 @@ CREATE INDEX negotiation_claim_round_idx ON public.negotiation_claim USING btree
 --
 
 CREATE INDEX negotiation_claim_type_idx ON public.negotiation_claim USING btree (claim_type);
+
+
+--
+-- Name: next_action_deal_history_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX next_action_deal_history_idx ON public.next_action USING btree (subject_id, created_at, id) WHERE (subject_type = 'deal'::text);
 
 
 --
@@ -121968,6 +121989,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0967_retire_cost_refusal.sql	27ec72ffa788024603c1ca5a80994dca0c43e79a739de544af63dcc6acc3e07f	1970-01-01 00:00:00+00
 0970_vendor_relationship_read_indexes.sql	51988621bb715075a772cd1b6985c814df24b6c96c47ac0cbb4976624318aca3	1970-01-01 00:00:00+00
 0971_retire_cache_observations.sql	d14e2a48c38ddc7a1ad347bc4fceeff48cd7b32b381c966cfc464dcc38b8ba2b	1970-01-01 00:00:00+00
+0973_deal_history_read_indexes.sql	44e55f3efd9fdece86cd31aea3cd502471bd2057e461f02d71363a413e451dcf	1970-01-01 00:00:00+00
 \.
 
 
