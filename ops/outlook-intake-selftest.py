@@ -645,8 +645,8 @@ class IntakeTest(unittest.TestCase):
         self.assertNotIn(intake.key('log-activity', CLIENT.ref, ident(preview)), state['requests'])
         self.fake.now += timedelta(minutes=30)
         self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
-        self.fake.timeline[CLIENT.ref] = [{'verb': 'set-next-action', 'summary': 'ball → joe: Call first',
-                                         'occurred_at': NOW.isoformat()}]
+        self.fake.actions[CLIENT.ref, 'joe'] = {
+            'id': 'synthetic-human-action', 'version': 2, 'updated_at': NOW.isoformat()}
         full = {**preview, 'body': 'Hello. Send the floor plan.', 'body_kind': 'full'}
         self.run_intake([full], touch=False)
         self.assertEqual(len(self.fake.model_calls), 1)
