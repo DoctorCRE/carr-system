@@ -45,9 +45,10 @@ R2 object exists, decrypts, or restores. Confirm the selected copy independently
 
 ### Operator-held state inventory
 
-Names only. This list is not a backup package or evidence that off-host copies
-exist. Recover or deliberately reconstruct each required item before enabling
-writers. Never put values or client contents into this runbook or a PR.
+Names only. The Studio state package below covers the explicit local allowlist.
+Its existence does not prove an off-host copy exists. Recover or deliberately
+reconstruct each required item before enabling writers. Never put values or
+client contents into this runbook or a PR.
 
 | State or capability | Recovery requirement |
 |---|---|
@@ -63,6 +64,73 @@ writers. Never put values or client contents into this runbook or a PR.
 | Drive and OneDrive vault files, attachments, finished deliverables, and R2 document objects | Recover file bytes through provider-specific retention. Database references are not file backups. |
 | Provider configuration, `neon_auth`, Worker bindings, secrets, and Durable Object state | Recover live provider state separately from source declarations. |
 | Matching age identity, historical decryption identities, credentials, signing material, sessions, keychains, and account recovery factors | Verify independent custody or reissue specific capabilities privately. Reissuing credentials cannot unlock old ciphertext without its matching identity. |
+
+### Preserve and stage Studio state
+
+`tools/studio-state.py` packages intake state and refresh queues, both send-ledger
+locations, calendar history, boards, the dossier roster, local vocabulary,
+the client-name list, and the triage folder guide. It records missing paths inside
+its encrypted manifest. It does not collect Outlook stores, credentials, keys, sessions, templates,
+`frozen-sources/`, or arbitrary ignored files. Recover templates and vault files
+through their providers. Verify mailbox retention with Microsoft separately.
+Neither a current calendar feed nor a new Outlook login replaces lost history.
+
+All steps below are required to create an off-host recovery copy.
+
+1. Fence intake, refresh, senders, calendar archival, board edits, and other writers before capture.
+2. Select the public age recipient whose matching identity has verified independent custody.
+3. Create and archive a uniquely named encrypted state package.
+
+   ```sh
+   .venv/bin/python tools/studio-state.py backup \
+     --repo "$RECOVERY_REPO" --home "$RECOVERY_HOME" \
+     --recipient "$RECOVERY_RECIPIENT" --writers-fenced \
+     --output /secure/recovery/studio-state.tar.age --archive-r2 \
+     --r2-quota-bytes "$RECOVERY_R2_QUOTA_BYTES"
+   ```
+
+4. Require an archived result and preserve its object key and ciphertext digest independently.
+5. Resume source writers only after confirming the selected copy's recovery coverage.
+
+Supply the repo and home paths, public recipient, and reviewed current R2 quota
+in bytes through operator tooling. Use the configured quota, not remaining space.
+Use a new output filename per capture. A local encrypted file alone is not an
+off-host backup. A quota refusal, failed upload, or failed readback leaves the
+off-host copy owed. No scheduled job is installed by this command. Run capture
+again after material state changes and verify independent retention. Retry an
+owed copy with the existing ciphertext and the same reviewed quota.
+
+   ```sh
+   .venv/bin/python tools/studio-state.py archive \
+     --archive /secure/recovery/studio-state.tar.age \
+     --r2-quota-bytes "$RECOVERY_R2_QUOTA_BYTES"
+   ```
+
+All steps below are required before activating a replacement host.
+
+1. Fence the old primary and keep replacement writers disabled.
+2. Retrieve the selected ciphertext and verify its independently recorded digest.
+3. Stage the package into a new private directory on an encrypted operator-controlled volume.
+
+   ```sh
+   .venv/bin/python tools/studio-state.py restore \
+     --archive /secure/recovery/studio-state.tar.age \
+     --identity /secure/recovery/identity.txt \
+     --staging /secure/recovery/staged-studio
+   ```
+
+4. Review the missing-path inventory and recover or explicitly classify each missing dependency.
+5. Copy verified staged files to their matching replacement repo and home locations while writers remain fenced.
+6. Reconcile pending sends against provider Sent history before enabling any sender.
+7. Complete host preparation below and verify fresh intake, refresh, and other required job outcomes.
+
+Restore verifies allowlisted names, exact sizes, and SHA-256 values before
+publishing `repo/` and `home/` under the staging directory. It refuses an
+existing staging path and does not activate jobs or overwrite live state.
+Recover the full intake checkpoint even when its pending mail predates the
+48-hour fallback. Preserve outbound ledger entries without treating them as
+proof that Microsoft accepted or rejected a send. A staged copy is not a
+completed host recovery or provider reconciliation receipt.
 
 ---
 
@@ -106,10 +174,13 @@ definition alone is not scheduler registration. The retained headless option is
 `ops/headless-tasks/install.sh install restore-rehearse-weekly`; disable any
 duplicate registration and verify the reviewed host timezone first.
 
-The nine-job failover inventory does not prove Outlook capability recovery.
+The failover inventory includes intake and refresh state requirements and an
+explicit Outlook permission and outbound reconciliation prerequisite. Triage
+must run on the host named by the current services catalog. The inventory does
+not prove Full Disk Access, Accessibility, mailbox access, or a working helper.
 If state is unavailable, record its loss and reconcile pending outbound work
-before enabling senders. Local state backup and clean-Mac capability validation
-remain separate work; these instructions do not implement them.
+before enabling senders. A clean-Mac walkthrough and actual off-host state
+recovery remain operational checks, not outcomes established by this source.
 
 ---
 
