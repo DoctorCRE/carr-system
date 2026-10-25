@@ -196,6 +196,15 @@ jobs:
             fi
           fi
 
+      - name: Retain failed CI logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: failed-ci-${{ strategy.job-index }}-${{ github.job }}
+          path: ${{ runner.temp }}/carr-ci.*/*.log.redacted
+          if-no-files-found: ignore
+          retention-days: 14
+
   migration-fixtures:
     needs: scope
     if: ${{ !cancelled() && needs.scope.outputs.full != 'false' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
@@ -265,6 +274,15 @@ jobs:
           path: ${{ runner.temp }}/migration-shadow/schema.sql
           if-no-files-found: ignore
 
+
+      - name: Retain failed CI logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: failed-ci-${{ strategy.job-index }}-${{ github.job }}
+          path: ${{ runner.temp }}/carr-ci.*/*.log.redacted
+          if-no-files-found: ignore
+          retention-days: 14
 
   fallow:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
