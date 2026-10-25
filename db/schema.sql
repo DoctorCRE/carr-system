@@ -36008,24 +36008,6 @@ $_$;
 
 
 --
--- Name: refuse_approved_rule_contract_rewrite(); Type: FUNCTION; Schema: ops; Owner: -
---
-
-CREATE FUNCTION ops.refuse_approved_rule_contract_rewrite() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-declare
-  v_rule_id uuid;
-begin
-  v_rule_id := case when tg_op='INSERT' then new.rule_id else old.rule_id end;
-  if exists (select 1 from ops.rule_approval_receipt where rule_id=v_rule_id) then
-    raise exception 'approved rule % contract is immutable; approve a replacement rule',v_rule_id;
-  end if;
-  return case when tg_op='DELETE' then old else new end;
-end $$;
-
-
---
 -- Name: refuse_assurance_persistence_rewrite(); Type: FUNCTION; Schema: ops; Owner: -
 --
 
@@ -36113,31 +36095,6 @@ CREATE FUNCTION ops.refuse_legacy_schedule_disable_receipt_rewrite() RETURNS tri
     AS $$
 begin
   raise exception 'legacy schedule disable receipts are append-only';
-end $$;
-
-
---
--- Name: refuse_live_approved_control_rewrite(); Type: FUNCTION; Schema: ops; Owner: -
---
-
-CREATE FUNCTION ops.refuse_live_approved_control_rewrite() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-begin
-  if exists (
-    select 1 from ops.rule_approval_receipt ar
-     join public.rule r on r.id=ar.rule_id and r.status='active'
-    where old.control_key=any(ar.requested_control_keys)
-  ) then
-    if tg_op='UPDATE'
-       and (to_jsonb(new)-array['implementation_ref','test_ref','verified_at','updated_at'])
-           is not distinct from
-           (to_jsonb(old)-array['implementation_ref','test_ref','verified_at','updated_at']) then
-      return new;
-    end if;
-    raise exception 'control % backs an active approved rule and is immutable',old.control_key;
-  end if;
-  return case when tg_op='DELETE' then old else new end;
 end $$;
 
 
@@ -102453,34 +102410,6 @@ CREATE TRIGGER activation_reliability_telemetry_append_only BEFORE DELETE OR UPD
 
 
 --
--- Name: enforcement_control_catalog active_approved_control_immutable; Type: TRIGGER; Schema: ops; Owner: -
---
-
-CREATE TRIGGER active_approved_control_immutable BEFORE DELETE OR UPDATE ON ops.enforcement_control_catalog FOR EACH ROW EXECUTE FUNCTION ops.refuse_live_approved_control_rewrite();
-
-
---
--- Name: rule_admission approved_rule_admission_immutable; Type: TRIGGER; Schema: ops; Owner: -
---
-
-CREATE TRIGGER approved_rule_admission_immutable BEFORE DELETE OR UPDATE ON ops.rule_admission FOR EACH ROW EXECUTE FUNCTION ops.refuse_approved_rule_contract_rewrite();
-
-
---
--- Name: rule_control_binding approved_rule_control_binding_immutable; Type: TRIGGER; Schema: ops; Owner: -
---
-
-CREATE TRIGGER approved_rule_control_binding_immutable BEFORE INSERT OR DELETE OR UPDATE ON ops.rule_control_binding FOR EACH ROW EXECUTE FUNCTION ops.refuse_approved_rule_contract_rewrite();
-
-
---
--- Name: rule_enforcement_point approved_rule_enforcement_point_immutable; Type: TRIGGER; Schema: ops; Owner: -
---
-
-CREATE TRIGGER approved_rule_enforcement_point_immutable BEFORE INSERT OR DELETE OR UPDATE ON ops.rule_enforcement_point FOR EACH ROW EXECUTE FUNCTION ops.refuse_approved_rule_contract_rewrite();
-
-
---
 -- Name: assurance_evidence_extension assurance_evidence_append_only; Type: TRIGGER; Schema: ops; Owner: -
 --
 
@@ -122640,6 +122569,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0955_retrieval_concept_question_matching.sql	885f3cefb3b4359c20f242534750ef9ebd883cda93e0592119b504e9f407e0c1	1970-01-01 00:00:00+00
 0957_retire_scac_catalog_commit_check.sql	1a26b1a8e517c15d62b3a0fbd96b2f59278c1596839e33b3d4e6c423ab9c6a97	1970-01-01 00:00:00+00
 0958_doctrine_embeddings.sql	46c23b9e4f9888bdf0f817c06e06d74440b89a5cb5dd1923310a7aa05268ac45	1970-01-01 00:00:00+00
+0959_retire_approved_control_refusals.sql	b124bf9f5ae4f4aae271b5960cc3801d94aa03909243e3ecc8f3b88cee200020	1970-01-01 00:00:00+00
 0961_lead_history_pages.sql	b14f721d9ceb060b42920a3fa52208aa8368c11a96177c5f30783cb609439f49	1970-01-01 00:00:00+00
 \.
 
