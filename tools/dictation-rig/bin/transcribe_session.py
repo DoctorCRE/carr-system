@@ -406,11 +406,7 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
     }
     write_outputs(session_dir, transcript)
 
-    # Post-call processing is a local sibling step. It has no network client;
-    # without a context index it records an awaiting state, and without an
-    # explicitly configured distiller it records a blocked state rather than
-    # inventing an AI summary.
-    post_status = post_call.process_session(session_dir)
+    post_status = post_call.run_session(session_dir)
 
     log(
         f"FINISH transcribe_session.py segments={len(merged_segments)} "

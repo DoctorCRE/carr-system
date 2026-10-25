@@ -1,0 +1,23 @@
+{
+  "context": {
+    "session": "synthetic-call",
+    "workspace_kind": "deal_room",
+    "generated_at": "2026-01-01T00:00:00Z",
+    "deals": [{"id": "synthetic-clinic", "name": "Synthetic Clinic", "owner": "Joe", "operating_state": "active", "participants": []}]
+  },
+  "transcript": {
+    "segments": [
+      {"speaker": "Joe", "text": "For Synthetic Clinic, I will call the landlord about renewal."},
+      {"speaker": "Dell", "text": "For Synthetic Clinic, I will send the revised proposal."}
+    ]
+  },
+  "distillation": {
+    "schema_version": 1,
+    "report": {"summary": "Joe will call the Synthetic Clinic landlord. Dell will send the revised proposal.", "decisions": [], "open_questions": []},
+    "joe_tasks": [{"title": "Call the landlord about renewal", "deal_id": "synthetic-clinic", "participant_ids": [], "evidence": "I will call the landlord about renewal"}],
+    "dell_tasks": [{"title": "Send the revised proposal", "deal_id": "synthetic-clinic", "participant_ids": [], "evidence": "I will send the revised proposal"}],
+    "deal_updates": [],
+    "draft_proposals": [],
+    "review_questions": []
+  }
+}

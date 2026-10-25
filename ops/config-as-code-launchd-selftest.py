@@ -658,6 +658,51 @@ print('OUTCOME:', mod.install_launchd_plist(dest.name, str(dest), body,
         ]
 
 
+def outlook_render_cases() -> list[bool]:
+    from lib.outlook_settings import SettingsError, load_settings
+    from outlook_test_support import write_settings
+    outcomes: list[bool] = []
+    with tempfile.TemporaryDirectory(prefix="outlook-config-render-") as temp:
+        root = Path(temp).resolve()
+        home, repo = root / "home & local", root / "repo & local"
+        config = write_settings(home, repo, copy_helper=str(home / "custom & bin/granted-copy"),
+                                executable_path=f"{home}/custom & bin:/usr/bin:/bin")
+        settings = load_settings(home)
+        with patch.object(mod, "HOME", str(home)), patch.object(mod, "REPO", str(repo)), \
+                patch.object(mod, "TOKENS", [("{{REPO}}", str(repo)), ("{{HOME}}", str(home))]), \
+                patch("pathlib.Path.home", return_value=home):
+            for name in ("intake", "refresh", "triage"):
+                template = (REPO / f"ops/launchd/com.carr.outlook-{name}.plist").read_text()
+                rendered = mod.concrete(template)
+                definition = plistlib.loads(rendered.encode())
+                outcomes.append(check(
+                    f"generic renderer binds configured Outlook {name} paths",
+                    definition["WorkingDirectory"] == str(repo)
+                    and definition["EnvironmentVariables"]["PATH"] == settings.executable_path
+                    and (name != "intake" or definition["ProgramArguments"][0] == str(settings.copy_helper)),
+                    definition))
+                captured = mod.portable(rendered)
+                outcomes.append(check(
+                    f"generic capture keeps Outlook {name} machine settings portable",
+                    str(home) not in captured and str(repo) not in captured
+                    and "{{EXECUTABLE_PATH}}" in captured
+                    and (name != "intake" or "{{COPY_HELPER}}" in captured)
+                    and plistlib.loads(mod.concrete(captured).encode()) == definition
+                    and mod.launchd_texts_match(rendered, template),
+                    captured))
+            config.unlink()
+            try:
+                mod.concrete(template)
+            except SettingsError as error:
+                outcomes.append(check("generic Outlook render refuses missing settings with file diagnostic",
+                                      str(config) in str(error) and "file" in str(error), error))
+            else:
+                outcomes.append(check("generic Outlook render refuses missing settings with file diagnostic", False))
+            outcomes.append(check("generic non-Outlook render needs no Outlook settings",
+                                  mod.concrete(plist("com.carr.synthetic")) == plist("com.carr.synthetic")))
+    return outcomes
+
+
 def main() -> int:
     original_run = mod.subprocess.run
     original_active = os.environ.get(mod.ACTIVE_LAUNCHD_LABEL_ENV)
@@ -988,6 +1033,7 @@ def main() -> int:
             and plistlib.loads(converted.encode())["RunAtLoad"] is True,
             mod.refused_launchd_templates(str(repo)),
         ))
+    cases.extend(outlook_render_cases())
     cases.extend(retired_launchd_cases())
     cases.extend(smoke_job_refusal_cases())
     cases.extend(failed_reload_retry_cases())
