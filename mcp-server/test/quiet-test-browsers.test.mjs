@@ -2,16 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 
+import { CHROMIUM_SAFETY_ARGS } from "../../tools/chromium-safety-args.mjs";
+
 const root = new URL("../../", import.meta.url);
-const launchers = new Set(["mcp-server/test/helpers/chrome-launch.mjs", "practice-plugin/test/browser.mjs"]);
+const launchers = new Set(["mcp-server/test/helpers/chrome-launch.mjs", "practice-plugin/test/browser.mjs", "deliverables/instagram-grid-reset-2026-08-11/render.mjs"]);
 const ignored = new Set([".git", "node_modules", ".venv", "__pycache__", "out"]);
 
 async function* sources(directory = "") {
   for (const entry of await readdir(new URL(`${directory || "."}/`, root), { withFileTypes: true })) {
     const name = directory ? `${directory}/${entry.name}` : entry.name;
     if (entry.isDirectory() && !ignored.has(entry.name)) yield* sources(name);
-    else if (entry.isFile() && (/\.(?:[cm]?[jt]sx?|py|(?:ba|z)?sh)$/.test(name) || !entry.name.includes("."))
-      && /(?:^|\/)(?:tests?|tools|ops|bin)(?:\/|$)/.test(name)) yield name;
+    else if (entry.isFile() && (/\.(?:[cm]?[jt]sx?|py|(?:ba|z)?sh)$/.test(name) || !entry.name.includes("."))) yield name;
   }
 }
 
@@ -55,4 +56,13 @@ test("tests and tools use the shared browser launchers", async () => {
     if (browserImport || browserApi || unownedTest || launchesExecutable(source, shell)) violations.push(name);
   }
   assert.deepEqual(violations, [], "Use the shared browser helper so launch policy and teardown cannot drift");
+});
+
+test("every approved Chrome launcher supplies the shared keychain safety args", async () => {
+  assert.deepEqual(CHROMIUM_SAFETY_ARGS, ["--use-mock-keychain", "--password-store=basic"]);
+  for (const name of launchers) {
+    const source = await readFile(new URL(name, root), "utf8");
+    assert.match(source, /import\s*\{\s*CHROMIUM_SAFETY_ARGS\s*\}\s*from/, name);
+    assert.match(source, /(?:args:\s*\[|spawnChrome\(chrome,\s*\[)\s*\.\.\.CHROMIUM_SAFETY_ARGS/, name);
+  }
 });
