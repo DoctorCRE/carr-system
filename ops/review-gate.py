@@ -12,6 +12,9 @@ RISKY = ("*launchagents*", "*.plist", "install-*.sh", "*/install-*.sh",
 
 
 def approved(pr, files, comments):
+    if any(c["body"].splitlines()[:1] == ["VERDICT: CHANGES"]
+           and f'Reviewed-SHA: {pr["head"]["sha"]}' in c["body"].splitlines() for c in comments):
+        return False
     risky = any(f.get("status") == "added" and f.get("filename", "").startswith(("bin/", "hooks/", "ops/", ".github/workflows/")) for f in files) or any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
                 for f in files for key in ("filename", "previous_filename") for pattern in RISKY)
     if len(files) == pr["changed_files"] and pr["additions"] - pr["deletions"] <= 150 and not risky:
