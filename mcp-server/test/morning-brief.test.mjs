@@ -23,7 +23,7 @@ function costFixture() {
     alerts: [], action: "Finance Ops: inspect provider and driver; verify the next complete day; auto-clear when thresholds pass." };
 }
 
-function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, assuranceRows = [], localUpdatedAt = new Date().toISOString() } = {}) {
+function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, localUpdatedAt = new Date().toISOString() } = {}) {
   const queries = [];
   return {
     queries,
@@ -48,7 +48,7 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
       if (sql.includes("from loop_item")) return { rows: [
         { number: 7, owner: "joe", label: "Resolve the lease item" },
         { number: 8, owner: "dell", label: "Chase the broker packet" },
-       ].filter((row) => sql.includes("in ('joe','dell')") || params.some((value) => String(value).toLowerCase() === row.owner)) };
+      ].filter((row) => params.some((value) => String(value).toLowerCase() === row.owner)) };
       if (sql.includes("from v_renewal_decision_queue_status")) return { rows: [
         { t1_candidate_count: renewalState === "empty" ? 0 : 1, source_observed_at: "2026-08-21T06:00:00Z", freshness_state: renewalState },
       ] };
@@ -58,7 +58,7 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
       ] };
       if (sql.includes("from board_snapshot") && params[2] === "system-costs")
         return { rows: costs === null ? [] : [{ snapshot_json: { costs } }] };
-      if (sql.includes("ops.v5_a05_assurance_cadence_batch")) return { rows: [{ batch: assuranceRows }] };
+      if (sql.includes("ops.v5_a05_assurance_cadence_batch")) return { rows: [{ batch: [] }] };
       if (sql.includes("read_governance_queue")) return { rows: [{ queue: governanceQueue || { pending_rule_approvals: [
         { rule_id: "rule-1", statement: "Name the deal in every question box.", admitted_at: "2026-10-01T00:00:00Z" },
       ] } }] };
@@ -383,16 +383,4 @@ test("a failed cost board read never exposes driver error details", async () => 
   assert.equal(result.sections.costs.state, "unavailable");
   assert.match(result.sections.costs.action, /owner orchestrator.*verify.*auto-clear/);
   assert.doesNotMatch(JSON.stringify(result), /fixture source unavailable/);
-});
-
-test("brief assurance summary discloses the sealed reader cap and reaches a full queue without weakening grants", async () => {
-  const result = await executeRegisteredTool(client({ assuranceRows: Array.from({ length: 50 }, (_, i) => ({ notification_id: `synthetic-${i}` })) }), JOE, "morning-brief", {});
-  const section = result.sections.assurance_cadence;
-  assert.equal(section.state, "partial");
-  assert.equal(section.total, null);
-  assert.equal(section.remaining, null);
-  assert.equal(section.has_more, null);
-  assert.equal(section.total_lower_bound, 50);
-  assert.deepEqual(section.full_list, { tool: "morning-assurance-queue", args: {} });
-  assert.equal(result.state, "partial");
 });

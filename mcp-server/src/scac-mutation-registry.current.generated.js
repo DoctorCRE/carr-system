@@ -1236,7 +1236,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "delegates_to": [
       "claim-card",
       "deal-room-board",
-      "morning-brief-queue",
+      "loop-board",
       "today-triage"
     ]
   },

@@ -262,10 +262,8 @@ export async function readNeedsJoe(c, actor, governance, { now = Date.now() } = 
     }),
   ];
 
-  const sinceTime = value => value != null && Number.isFinite(new Date(value).getTime())
-    ? new Date(value).getTime() : Infinity;
   const order = (a, b) => TIER_RANK[a.blocks.tier] - TIER_RANK[b.blocks.tier]
-    || sinceTime(a.since) - sinceTime(b.since) || a.key.localeCompare(b.key);
+    || (b.age_days ?? -1) - (a.age_days ?? -1) || a.key.localeCompare(b.key);
   const items = collapseDuplicates(found.sort(order));
   const states = Object.values(sources).map(value => value.state);
   return {

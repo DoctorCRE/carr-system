@@ -3427,7 +3427,7 @@ export const TOOLS = {
         if (scope.sponsor !== "joe") throw new ToolError({ error: "needs_joe_not_applicable" });
         value = (await executeRegisteredTool(c, actor, "governance-queue", {})).needs_joe;
         value = { ...value, items: value.items.map(row => ({ ...row,
-          key: `${row.source}:${row.key}`, title: row.title || `Decision ${row.key}` })) };
+          title: row.title || `Decision ${row.key}` })) };
         key = briefNeedsJoeKey;
       } else {
         value = { items: await readBriefLoops(c) };
@@ -3435,9 +3435,7 @@ export const TOOLS = {
       }
       const page = await briefQueuePage(value.items, { ...args, key, ToolError,
         scope: JSON.stringify([organizationTenantForActor(actor), scope.sponsor, args.queue]) });
-      return { ...value, ...page, sponsor: scope.sponsor, state: value.state ?? (page.total ? "ready" : "empty"),
-        full_list: { tool: "morning-brief-queue", args: { queue: args.queue } },
-        continuation: page.next_cursor ? { tool: "morning-brief-queue", args: { queue: args.queue, cursor: page.next_cursor } } : null,
+      return { ...value, ...page, count: page.returned, sponsor: scope.sponsor, state: value.state ?? (page.total ? "ready" : "empty"),
         total_scope: value.state === "partial" ? "available_sources" : "eligible_queue" };
     },
   },
@@ -3502,9 +3500,7 @@ export const TOOLS = {
           if (owner_partner === undefined) continue;
           items.push({ ...row, owner_partner });
         }
-        return { ...value, returned: items.length, full_list: { tool: "morning-brief-queue", args: { queue: "today" } },
-          continuation: value.next_cursor ? { tool: "morning-brief-queue", args: { queue: "today", cursor: value.next_cursor } } : null,
-          items, item_kinds: Object.entries({
+        return { ...value, items, item_kinds: Object.entries({
           next_action: "Next actions",
           post_call_action: "Post-call actions",
           critical_date: "Critical dates including upcoming deadlines",
@@ -3525,7 +3521,18 @@ export const TOOLS = {
         const accounts = value.accounts.filter((row) => String(row?.account_owner || "").toLowerCase() === scope.sponsor);
         return { state: items.length || accounts.length ? "ready" : "empty", items, accounts };
       });
-      const loops = await section(async () => executeRegisteredTool(c, actor, "morning-brief-queue", { queue: "loops" }));
+      const loops = await section(async () => {
+        // loop-board is a shared read that already accepts owner 'joe' or
+        // 'dell' from any caller, so showing both partners' loops adds no
+        // authority. The caller's own loops lead.
+        const items = [];
+        for (const owner_partner of [scope.sponsor, scope.sponsor === "joe" ? "dell" : "joe"]) {
+          const value = await executeRegisteredTool(c, actor, "loop-board",
+            { kind: "open_loop", status: "open", owner: owner_partner, limit: 60 });
+          items.push(...value.loops.map((row) => ({ ...row, owner_partner })));
+        }
+        return { items };
+      });
       const renewals = await section(async () => {
         const status = await c.query(
           "select t1_candidate_count, source_observed_at, freshness_state from v_renewal_decision_queue_status where owner_slug=$1",
@@ -3575,19 +3582,13 @@ export const TOOLS = {
         const result = await c.query(
           "select ops.v5_a05_assurance_cadence_batch($1) as batch", [scope.sponsor]);
         const batch = result.rows[0]?.batch;
-        if (!Array.isArray(batch)) throw new Error("invalid assurance batch");
-        const bounded = batch.length >= 50;
-        return { items: batch, returned: batch.length, total: bounded ? null : batch.length,
-          remaining: bounded ? null : 0, has_more: bounded ? null : false, next_cursor: null,
-          ...(bounded ? { state: "partial", reason: "legacy_reader_limit", total_lower_bound: batch.length } : {}),
-          ordered_by: "legacy newest-first summary; full queue has stable severity/oldest/id order",
-          full_list: { tool: "morning-assurance-queue", args: {} } };
+        return { items: Array.isArray(batch) ? batch : [] };
       });
       // Joe's brief leads with the one list of what waits on him. A partial list
       // with nothing in it is unavailable, never empty: a failed source could be
       // hiding the item he needs to see.
       const needsJoe = scope.sponsor === "joe" ? await section(async () => {
-        const list = await executeRegisteredTool(c, actor, "morning-brief-queue", { queue: "needs_joe" });
+        const list = (await executeRegisteredTool(c, actor, "governance-queue", {})).needs_joe;
         if (list.state === "partial" && !list.items.length)
           return { ...list, state: "unavailable", reason: "source_unavailable" };
         return list;

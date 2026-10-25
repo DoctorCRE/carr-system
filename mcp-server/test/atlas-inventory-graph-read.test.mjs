@@ -177,7 +177,7 @@ test("the declared layer is built from the bundled registries and nothing else",
   // mutation -> source module, and op -> op delegation.
   const source = SCAC_MUTATION_OPERATIONS["add-loop"].source_locator;
   assert.equal(hasEdge(payload, "mutation:add-loop", `module:${source}`, "implemented_in"), true);
-  assert.equal(hasEdge(payload, "mutation:morning-brief", "mutation:morning-brief-queue", "delegates_to"), true);
+  assert.equal(hasEdge(payload, "mutation:morning-brief", "mutation:loop-board", "delegates_to"), true);
   // A wildcard delegation names no operation, so it must draw no edge.
   assert.deepEqual(SCAC_MUTATION_OPERATIONS["call-verb"].delegates_to, ["*registered_operation"]);
   assert.equal(payload.edges.some((item) => item.from === "mutation:call-verb" && item.type === "delegates_to"), false);
