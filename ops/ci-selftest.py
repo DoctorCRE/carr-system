@@ -337,6 +337,15 @@ def test_hosted_migration_ownership():
     check("not-applicable proof cannot be reused as full main evidence", "full != 'false'" in record.get("if", ""))
 
 
+def test_contract_rejects_platform_postgres_defaults():
+    with ci_fixture() as root:
+        (root / 'lib/default.py').write_text("DEFAULT = '" + '/opt/homebrew/opt/' + "postgresql@17/bin'\n")
+        subprocess.run(['git', 'add', 'lib/default.py'], cwd=root, env=fixture_env(), check=True)
+        rc, output = run(['--strict', '--only', 'contract'], root=root)
+        check('contract rejects PostgreSQL paths outside the resolver',
+              rc == 1 and 'PostgreSQL paths must use lib/disposable_pg_fixture.py' in output)
+
+
 def test_migration_partitions_execute_complete_inventory():
     import shlex
     with tempfile.TemporaryDirectory() as directory:
@@ -374,6 +383,11 @@ def test_migration_partitions_execute_complete_inventory():
             check(f"migration {part} partition executes", rc == 0)
         check("fixture partition union retains the complete canonical fixture inventory",
               fixtures["reconstruction"] | fixtures["equivalence"] | fixtures["shadow"] == fixtures["fixtures"])
+        check("PR fixture partitions execute restore security parity", any(
+              "restore-rehearse-record-selftest.py --postgres" in call
+              for part in ("reconstruction", "equivalence", "shadow") for call in fixtures[part]))
+        check("restore security failure fails the PR fixture verdict",
+              run("equivalence", "restore-rehearse-record-selftest.py")[0] == 1)
         check("core partition union retains every canonical database command",
               fixtures["proofs"] | fixtures["gates"] == fixtures["core"])
         check("consumer partition excludes DB gate commands", not any(
@@ -1050,6 +1064,14 @@ def test_hosted_zsh_setup_does_not_refresh_working_indexes():
     canary_setup = next(st for st in canary if st.get("name") == "Install zsh")
     check("PR and canary execute the same bounded zsh installer",
           all(canary_setup[k] == setup[k] for k in ("run", "env", "timeout-minutes")))
+    fixture_steps = wf["jobs"]["migration-fixtures"]["steps"]
+    fixture_setup = next((st for st in fixture_steps if st.get("name") == "Install zsh"), {})
+    check("equivalence installs the restore rehearsal interpreter before its proof",
+          all(fixture_setup.get(k) == setup[k] for k in ("run", "env", "timeout-minutes"))
+          and fixture_setup.get("if") == "matrix.part == 'equivalence'"
+          and fixture_steps.index(fixture_setup) < next(
+              i for i, st in enumerate(fixture_steps)
+              if st.get("name") == "Prove independent migration fixture"))
     with tempfile.TemporaryDirectory(prefix="ci-zsh-setup-") as tmp:
         fixture = pathlib.Path(tmp)
         sudo = fixture / "sudo"
@@ -1330,6 +1352,7 @@ def main(argv=None):
                test_gates_build_hxprobe_before_parallel_selftests,
                test_gate_shards_execute_a_disjoint_complete_inventory,
                test_migration_partitions_execute_complete_inventory,
+               test_contract_rejects_platform_postgres_defaults,
                test_hosted_migration_ownership,
                test_hosted_draft_lifecycle,
                test_database_scope_receipts,

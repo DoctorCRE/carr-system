@@ -174,6 +174,12 @@ check_types() {
 
 check_contract() {
   local failures=""
+  local pg_paths rc=0
+  pg_paths="$(git grep -n -F '/opt/homebrew/opt/postgresql@17' -- '*.py' ':!lib/disposable_pg_fixture.py')" || rc=$?
+  if [ "$rc" -ne 1 ]; then
+    failures="$failures PostgreSQL-paths"
+    printf '%s\n' "PostgreSQL paths must use lib/disposable_pg_fixture.py (grep exit $rc)" "$pg_paths" >&2
+  fi
   if [ -f workspace/contracts/validate.mjs ]; then
     run_quiet "$LOGDIR/contract-workspace.log" node workspace/contracts/validate.mjs \
       || { failures="$failures workspace/contracts"; tail -20 "$LOGDIR/contract-workspace.log" >&2; }
@@ -568,7 +574,7 @@ check_migration_fixtures() {
       return
     fi
   fi
-  if [[ "$MIGRATION_PART" = all ]]; then
+  if [[ "$MIGRATION_PART" = all || "$MIGRATION_PART" = fixtures || "$MIGRATION_PART" = equivalence ]]; then
     if ! run_quiet "$LOGDIR/migration-restore-security.log" \
          "$PY" ops/restore-rehearse-record-selftest.py --postgres; then
       tail -30 "$LOGDIR/migration-restore-security.log" >&2

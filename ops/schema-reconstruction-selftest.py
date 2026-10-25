@@ -12,7 +12,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / 'tools')]
-from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
+from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group, postgres_bin_dir
 from migration_baseline import MigrationBaseline, repository_ledger
 
 POSTGRES = '--postgres' in sys.argv
@@ -24,12 +24,7 @@ class ReconstructionTests(unittest.TestCase):
     @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
     def test_snapshot_only_rebuild_contract(self):
         import psycopg
-        configured = os.environ.get('CARR_TEST_POSTGRES_BIN')
-        initdb = shutil.which('initdb')
-        if initdb and not (Path(initdb).parent / 'postgres').is_file():
-            initdb = None
-        bins = Path(configured) if configured else Path(initdb).parent if initdb else Path('/opt/homebrew/opt/postgresql@17/bin')
-        self.assertTrue((bins / 'initdb').is_file(), 'PostgreSQL server binaries required')
+        bins = postgres_bin_dir()
         expected = repository_ledger(ROOT, MigrationBaseline.load(ROOT))
         highest = next(reversed(expected))
         with postgres_fixture_group(), DisposablePostgres('carr-reconstruct-', bins / 'pg_ctl') as fixture:
