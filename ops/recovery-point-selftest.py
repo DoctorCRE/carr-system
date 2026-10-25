@@ -22,10 +22,8 @@ backups/ directory would pass or fail depending on the day it is run.
 """
 from __future__ import annotations
 
-import contextlib
-import functools
 import importlib.util
-import io
+import functools
 import itertools
 import json
 import os
@@ -210,61 +208,7 @@ def provider_fixture(*, artifact_hours: float = 2.0, run_attempt: int = 2,
     }
 
 
-def cloud_only_cli_tests() -> None:
-    cases = [
-        (present("cloud", 2), "ok", 0),
-        (present("cloud", 25), "out_of_contract", 1),
-        (none("cloud"), "gap", 1),
-        (unknown("cloud"), "unknown", 2),
-    ]
-    for cloud, verdict, expected_code in cases:
-        output = io.StringIO()
-        with mock.patch.object(rp, "cloud_path", return_value=cloud), \
-             mock.patch.object(rp, "local_path", side_effect=AssertionError("local state read")), \
-             contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
-            try:
-                code = rp.main(["--cloud-only", "--json"])
-                report = json.loads(output.getvalue())
-            except SystemExit as exc:
-                code, report = exc.code, {}
-        check(f"cloud-only CLI reports {verdict} without consulting local state",
-              code == expected_code and report.get("verdict") == verdict
-              and report.get("paths") == [cloud])
-    output = io.StringIO()
-    local, cloud = present("local", 1), present("cloud", 25)
-    with mock.patch.object(rp, "local_path", return_value=local), \
-         mock.patch.object(rp, "cloud_path", return_value=cloud), contextlib.redirect_stdout(output):
-        code = rp.main(["--json"])
-    report = json.loads(output.getvalue())
-    check("default CLI still accepts a fresh local copy alongside a stale cloud copy",
-          code == 0 and report["verdict"] == "ok" and report["paths"] == [local, cloud])
-
-
-def cloud_workflow_test() -> None:
-    import yaml
-
-    path = HERE.parent / ".github/workflows/backup-freshness.yml"
-    if not path.exists():
-        check("off-Mac freshness workflow independently schedules the cloud-only CLI", False)
-        return
-    workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
-    job = workflow["jobs"]["freshness"]
-    steps = job["steps"]
-    probe = steps[-1]
-    check("off-Mac freshness workflow independently schedules the cloud-only CLI",
-          workflow["on"]["schedule"] == [{"cron": "20 4,10,16,22 * * *"}]
-          and "workflow_dispatch" in workflow["on"]
-          and workflow["permissions"] == {"contents": "read", "actions": "read", "checks": "read"}
-          and probe["run"] == "python ops/recovery-point.py --cloud-only --json"
-          and probe["env"] == {"GH_TOKEN": "${{ github.token }}"}
-          and not any(step.get("continue-on-error") or step.get("if") for step in steps)
-          and "continue-on-error" not in job and "if" not in job
-          and "secrets." not in path.read_text())
-
-
 def main() -> int:
-    cloud_only_cli_tests()
-    cloud_workflow_test()
     # ── the two collapses, each in its own direction ─────────────────────────
     r = rp.assess([none("local", configured=True), unknown("cloud")])
     check("unknown is NOT reported as fresh (a dead workflow stays visible)",

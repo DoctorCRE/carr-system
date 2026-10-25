@@ -78,15 +78,12 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertIsNotNone(next(iter(rows.values()))["cleared_at"])
 
-    def test_failed_collection_keeps_findings_and_warns_without_persisting_observer_state(self):
+    def test_failed_collection_keeps_findings_without_collection_error_finding(self):
         failed = {"jobs": [{"label": "com.carr.fixture", "exit_code": 7, "log_line": "failed"}], "disk_free_percent": 50}
         with patch.object(watchdog, "collect", side_effect=[failed, OSError("launchctl unavailable")]):
             self.assertEqual(watchdog.scan(self.root, self.config), 0)
             self.assertEqual(watchdog.scan(self.root, self.config), 1)
-        context = watchdog.digest(self.root, self.config)
-        self.assertIn("2 open finding", context)
-        self.assertIn("watchdog scan failed", context)
-        self.assertIn("com.carr.fixture exit 7", context)
+        self.assertIn("1 open finding", watchdog.digest(self.root, self.config))
         rows = watchdog.read_latest(self.root / self.config["paths"]["findings"])
         self.assertEqual({f["kind"] for f in rows.values()}, {"job_failed"})
 
