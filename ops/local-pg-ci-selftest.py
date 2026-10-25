@@ -407,6 +407,23 @@ check("start failure still removes cluster", remove_start_failure.call_count == 
 run_sh = (REPO / "run.sh").read_text(encoding="utf-8")
 check("one-command route is registered", "local-db-ci)" in run_sh and "ops/local-pg-ci.py" in run_sh)
 
+with tempfile.TemporaryDirectory() as directory:
+    selected, fallback = Path(directory) / "selected", Path(directory) / "fallback"
+    for bins in (selected, fallback):
+        bins.mkdir()
+        for name in ("initdb", "pg_ctl", "createdb", "psql", "postgres"):
+            binary = bins / name
+            binary.write_text("#!/bin/sh\nexit 0\n")
+            binary.chmod(0o755)
+    with patch.dict(os.environ, {"CARR_TEST_POSTGRES_BIN": str(selected),
+                                 "CARR_LOCAL_PG_BIN_DIR": str(fallback)}):
+        check("test PostgreSQL override precedes the local fallback",
+              mod.find_postgres_binaries().initdb.parent == selected)
+    with patch.dict(os.environ, {"CARR_TEST_POSTGRES_BIN": str(selected),
+                                 "CARR_LOCAL_PG_BIN_DIR": "unused-relative-fallback"}):
+        check("valid test override does not validate an unused fallback",
+              mod.find_postgres_binaries().initdb.parent == selected)
+
 print(f"local PG CI selftest — {passed}/{passed + len(failed)} passed")
 if failed:
     print("FAILED: " + "; ".join(failed))

@@ -75,6 +75,7 @@
 // absent value must be visibly absent, per the honesty requirement this was
 // built against.
 
+import { TOOLS } from "./tools.js";
 import { publicError } from "./public-errors.js";
 import { stampedGitSha } from "./build-stamp.js";
 import { mutationManifestIdentity } from "./mutation-registry.js";
@@ -183,6 +184,7 @@ export async function buildRelease({ env, sql, verbCount, now = () => new Date()
       ? { value: environment, reason: null }
       : { value: "unknown", reason: "CARR_ENV not set on this Worker — an unlabelled deployment is never assumed to be production" },
     verb_count: verbCount,
+    verbs: Object.keys(TOOLS).sort(),
     provider: "cloudflare-workers",
     worker_version: workerVersion,
     git_sha: sha

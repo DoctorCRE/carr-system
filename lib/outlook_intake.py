@@ -10,7 +10,7 @@ through the named record-layer verbs:
   with the full deduplicated plain-text body as its detail;
 - a past meeting becomes log-activity meeting, tour or call by its title;
 - a meeting in the next seven days becomes a dated ball (set-next-action);
-- one isolated haiku call per new matched email proposes a next step, which
+- one isolated haiku call per matched full email proposes a next step, which
   becomes a ball when the record has none or only an older one.
 
 A run outside 07:00-19:30 local does nothing. Matching requires one record with
@@ -24,14 +24,14 @@ reports failed and does not advance its watermark.
 
 An email whose body is still only Outlook's preview is logged with the preview,
 flagged preview_only, and listed in out/outlook-intake/needs-refresh.json for the
-evening triage job to open. The file is a JSON array, mode 0600, one object per
+same-host refresh worker to open. The file is a JSON array, mode 0600, one object per
 email:
 
     {"message_id": "<opaque intake id>", "subject_hash": "<sha256 hex of the subject>",
-     "sent_utc": "<ISO 8601>", "sender_email": "<address>", "opened_at": "<ISO 8601, triage adds it>"}
+     "sent_utc": "<ISO 8601>", "sender_email": "<address>", "opened_at": "<ISO 8601, refresh worker adds it>"}
 
-Triage finds the email by sender_email and subject_hash and adds opened_at; this
-job owns every other field and keeps opened_at when it rewrites the file. Once a
+The refresh worker finds the email by sender_email and subject_hash and adds opened_at; this
+intake job owns every other field and keeps opened_at when it rewrites the file. Once a
 listed email decodes with its full body, the next run logs that text as a
 log-activity note (activities cannot be updated in place: the verb refuses a
 reused key with new arguments) and drops the entry.
@@ -78,6 +78,7 @@ BACKFILL = timedelta(hours=48)
 LOOKBACK = timedelta(hours=6)
 UPCOMING = timedelta(days=7)
 REFRESH_DAYS = timedelta(days=7)
+REFRESH_INTERVAL = timedelta(minutes=30)
 COPY_WINDOW = 86_400
 VERIFIED_MIN = 0.95
 MODEL_BODY_CHARS = 12_000
@@ -381,7 +382,7 @@ class Run:
         self.today = now.astimezone(LOCAL).date()
         self.counts = {k: 0 for k in ('emails', 'events_past', 'events_upcoming', 'logged', 'preview_only',
                                       'full_text_notes', 'balls_set', 'balls_kept', 'unmatched',
-                                      'model_failed', 'steps_pending', 'writes_failed',
+                                      'model_failed', 'steps_pending', 'hydration_expired', 'writes_failed',
                                       'writes_deferred', 'requests_blocked')}
         self.written: list[tuple[str, str, str, str]] = []
         self.unmatched: set[tuple[str, str, str]] = set()
@@ -521,9 +522,11 @@ class Run:
             if not m['full']:
                 pending.setdefault(m['ident'], {'refs': refs, 'ck': m['ck'], 'sent': m['sent_unix'],
                                                 'sender_email': m['sender'].lower(),
-                                                'subject_hash': _hash(m['subject'] or '')})
+                                                'subject_hash': _hash(m['subject'] or ''),
+                                                'who': who, 'outbound': outbound})
                 pending[m['ident']]['refs'] = sorted(set(pending[m['ident']]['refs']) | set(refs))
-            steps.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0],
+            if m['full'] and m['ident'] not in pending:
+                steps.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0],
                                            'who': who, 'outbound': outbound,
                                            'activity_keys': [key('log-activity', ref, m['ident']) for ref in refs]})
             results = [self.write('log-activity', {
@@ -547,11 +550,16 @@ class Run:
         for m in mails:
             by_ck.setdefault(m['ck'], []).append(m)
         for ident, s in sorted(steps.items(), key=lambda kv: kv[1]['sent']):
+            if ident in self.state.get('pending_full', {}):
+                del steps[ident]
+                continue
             if not all(self.state['requests'].get(k, {}).get('acknowledged') for k in s.get('activity_keys', [])):
                 self.counts['steps_pending'] += 1
                 continue
             if 'reply' not in s:
                 found = [m for m in by_ck.get(s['ck'], []) if abs(m['first_sent'] - s['sent']) <= COPY_WINDOW]
+                if found and not found[0]['full']:
+                    continue
                 if not found:
                     self.counts['steps_pending'] += 1
                     continue
@@ -580,7 +588,8 @@ class Run:
             match = [m for m in full.get(p['ck'], []) if abs(m['first_sent'] - p['sent']) <= COPY_WINDOW]
             if not match:
                 if p['sent'] < self.now.timestamp() - REFRESH_DAYS.total_seconds():
-                    del pending[ident]
+                    p['expired'] = True
+                    self.counts['hydration_expired'] += 1
                 continue
             m = match[0]
             ok = all([self.write('log-activity', {
@@ -589,6 +598,15 @@ class Run:
                 'occurred_at': _iso(p['sent'])}, p['sender_email'], 'full text follow-up') for ref in p['refs']])
             if ok:
                 self.counts['full_text_notes'] += 1
+                steps = self.state.setdefault('steps', {})
+                steps.pop(ident, None)
+                steps.setdefault(f'fullbody|{ident}', {
+                    'ck': p['ck'], 'sent': p['sent'], 'ref': p['refs'][0],
+                    'who': p.get('who', p['sender_email']),
+                    'outbound': p.get('outbound', _internal(p['sender_email'])),
+                    'activity_keys': [key('log-activity', ref, ident) for ref in p['refs']
+                                      if key('log-activity', ref, ident) in self.state['requests']] +
+                                     [key('log-activity', ref, f'fullbody|{ident}') for ref in p['refs']]})
                 del pending[ident]
 
     # calendar
@@ -683,6 +701,8 @@ def _refresh_list(out: Path, pending: dict) -> int:
     for ident, p in sorted(pending.items(), key=lambda kv: kv[1]['sent']):
         entry = {'message_id': ident, 'subject_hash': p['subject_hash'], 'sent_utc': _iso(p['sent']),
                  'sender_email': p['sender_email']}
+        if p.get('expired'):
+            entry['expired'] = True
         if ident in opened:
             entry['opened_at'] = opened[ident]
         entries.append(entry)
@@ -696,7 +716,9 @@ def mapping_counts(state: dict) -> dict:
     participants = {}
     for item in [*mail.values(), *calendar.values()]:
         participants.update(item.get('participants', {}))
-    return {'unresolved_messages': len(mail),
+    return {'hydration_pending': len(state.get('pending_full', {})),
+            'hydration_expired': sum(bool(p.get('expired')) for p in state.get('pending_full', {}).values()),
+            'unresolved_messages': len(mail),
             'unresolved_calendar': len(calendar), 'unresolved_addresses': len(participants),
             'unmatched': len(participants),
             **{'mapping_' + reason: list(participants.values()).count(reason)
@@ -767,7 +789,8 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
             return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code)
     contacts_changed = matcher is not None and state.get('contact_map') != matcher.fingerprint()
     pending_writes = any(not r['acknowledged'] for r in state.get('requests', {}).values())
-    if state.get('store') == signature and not contacts_changed and not state.get('steps') and not pending_writes and not _calendar_due(state, now):
+    hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
+    if state.get('store') == signature and not hydration_due and not contacts_changed and not state.get('steps') and not pending_writes and not _calendar_due(state, now):
         if state.get('pending_full'):
             Run(ports, state, now, out).full_text([])
             _refresh_list(out, state['pending_full'])
@@ -788,6 +811,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     high = state.get('high_water')
     since = int((datetime.fromtimestamp(high, timezone.utc) - LOOKBACK if high else now - BACKFILL).timestamp())
     mails = _best_copies(mails)
+    state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
     work = Run(ports, state, now, out)
     try:
         for request in list(state.get('requests', {}).values()):

@@ -255,6 +255,13 @@ def _unread(tabs: dict[str | None, list[Row]]) -> Counter:
 
 def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report: Report,
                refresh_list: Path, closed: Callable[[], bool]) -> Outcome:
+    return preserve_unread(window, report, lambda tabs: (
+        refresh_all(window, refresh_list, limits, report, closed)
+        or _move_all(window, tabs, guide, find, limits, report, closed)))
+
+
+def preserve_unread(window: Window, report: Report, action: Callable[[dict], Outcome]) -> Outcome:
+    """Verify the unread set before and after any read-mail operation."""
     badge, tabs = _inbox(window)
     unread = _unread(tabs)
     if any(r.selected and r.read_state is not ReadState.READ for rows in tabs.values() for r in rows):
@@ -263,8 +270,7 @@ def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report:
         report.left['unread_set_unverified'] += sum(len(rows) for rows in tabs.values())
         return Outcome('failed', 'unread_set_unverified')
     try:
-        outcome = (refresh_all(window, refresh_list, limits, report, closed)
-                   or _move_all(window, tabs, guide, find, limits, report, closed))
+        outcome = action(tabs)
     except ValueError:
         outcome = Outcome('failed', 'refresh_list_invalid')
     except UiError as exc:

@@ -185,7 +185,7 @@ test('logging outreach cannot silently complete unrelated structured commitments
 
 test('unverified automation and cross-deal item writes are refused', async () => {
   const target = (await readDealItems(c,deal)).find(i => i.status === 'open');
-  await assert.rejects(command('complete-deal-item',{ item_id:target.id },{ ...actor,human:false }),e => e.payload?.error === 'partner_required');
+  await assert.rejects(command('complete-deal-item',{ item_id:target.id },{ ...actor,human:false }),e => e.payload?.error === 'human_only_verb_requires_verified_partner');
   await assert.rejects(command('complete-deal-item',{ item_id:randomUUID() }),e => e.payload?.error === 'deal_item_not_found');
 });
 

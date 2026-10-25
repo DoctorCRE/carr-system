@@ -174,6 +174,12 @@ check_types() {
 
 check_contract() {
   local failures=""
+  local pg_paths rc=0
+  pg_paths="$(git grep -n -F '/opt/homebrew/opt/postgresql@17' -- '*.py' ':!lib/disposable_pg_fixture.py')" || rc=$?
+  if [ "$rc" -ne 1 ]; then
+    failures="$failures PostgreSQL-paths"
+    printf '%s\n' "PostgreSQL paths must use lib/disposable_pg_fixture.py (grep exit $rc)" "$pg_paths" >&2
+  fi
   if [ -f workspace/contracts/validate.mjs ]; then
     run_quiet "$LOGDIR/contract-workspace.log" node workspace/contracts/validate.mjs \
       || { failures="$failures workspace/contracts"; tail -20 "$LOGDIR/contract-workspace.log" >&2; }
@@ -273,10 +279,9 @@ PYEOF
     if [ "$grc" -eq 124 ]; then
       failures="$failures TIMEOUT:$base"
       gates_timed_out=1
-      printf '        \033[31mTIMEOUT\033[0m  %s — exceeded %ss (pool-scaled); aborting remaining gate selftests\n' \
+      printf '        \033[31mTIMEOUT\033[0m  %s — exceeded %ss (pool-scaled); reporting all completed Python gate results\n' \
         "$base" "$pooled_timeout" >&2
-      tail -12 "$LOGDIR/gate-$base.log" >&2
-      break
+      fail_tail "$LOGDIR/gate-$base.log"
     elif [ "$grc" -eq 78 ]; then
       skiplist="$skiplist $base"
       printf '        \033[33mnot run\033[0m  %s — NOT CONFIGURED (exit 78): %s\n' \
@@ -568,7 +573,7 @@ check_migration_fixtures() {
       return
     fi
   fi
-  if [[ "$MIGRATION_PART" = all ]]; then
+  if [[ "$MIGRATION_PART" = all || "$MIGRATION_PART" = fixtures || "$MIGRATION_PART" = equivalence ]]; then
     if ! run_quiet "$LOGDIR/migration-restore-security.log" \
          "$PY" ops/restore-rehearse-record-selftest.py --postgres; then
       tail -30 "$LOGDIR/migration-restore-security.log" >&2
@@ -594,7 +599,7 @@ check_migration_fixtures() {
          fi
          shadow_note="; migration shadow not run (no PostgreSQL 18 here)" ;;
       *) tail -60 "$LOGDIR/migration-shadow.log" >&2
-         bad migration "migration shadow: pending migrations did not apply over the base snapshot, or db/schema.sql is not what they produce"
+         bad migration "migration shadow: pending migrations failed, or a changed db/schema.sql does not match their result"
          return ;;
     esac
   fi
@@ -1041,13 +1046,13 @@ check_binding() {
       problems="$problems worker-boot"
       tail -40 "$LOGDIR/binding-worker-boot.log" >&2
     fi
-  else
-    printf '        \033[33mskip\033[0m  worker-boot-check — wrangler not installed (run npm install in mcp-server/)\n' >&2
   fi
   if [ -n "$problems" ]; then
     bad binding "drift:$problems"
+  elif [ ! -x mcp-server/node_modules/.bin/wrangler ]; then
+    skip binding "worker boot not checked; wrangler not installed (run npm ci in mcp-server/)"
   else
-    ok binding "worker config declared; worker boot checked when wrangler is installed"
+    ok binding "worker config declared; worker boot passed"
   fi
 }
 

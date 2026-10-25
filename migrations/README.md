@@ -66,12 +66,10 @@ filename/checksum ledger with the source. A regression in either side fails CI.
   Expand adds the new shape beside the old; contract removes the old shape only
   after every reader and writer has moved. A contract migration lands in its own
   PR, after the expand release.
-- **db/schema.sql carries every migration.** A PR that adds a migration also
-  regenerates the snapshot: `ops/migration-shadow.py --write` (PostgreSQL 18),
-  or commit the `migration-shadow-schema-<sha>` artifact the CI migration job
-  uploads. That job builds the base branch's snapshot on a throwaway
-  PostgreSQL 18 cluster, applies the PR's migrations, and requires the committed
-  snapshot to equal the result.
+- **Snapshots can lag migrations.** CI applies pending migrations over the base
+  snapshot. A changed snapshot must equal that result. The weekly instruction
+  drift workflow opens one standalone snapshot refresh PR from a disposable
+  PostgreSQL 18 rebuild. Do not hand-edit `db/schema.sql`.
 - **Seeds are honest.** `0002_seed.sql` seeds only documented vocab;
   lead stages come from the live registry at import, human-reviewed, never
   guessed.
@@ -79,11 +77,11 @@ filename/checksum ledger with the source. A regression in either side fails CI.
 ## Resync a migration PR with main
 
 `tools/migrate.py` treats the applied ledger as a prefix, so a new migration must
-sort above every migration on main. When main moves under an open migration PR:
+sort above every migration on main. When main moves under an open migration PR, all steps are required:
 
-1. Merge `origin/main`; resolve `db/schema.sql` with `git checkout --theirs db/schema.sql`.
-2. If the migration-open-pr check names a new slot, `git mv` the file to it and update its references (`git grep` the old name).
-3. Run `PATH=~/carr-system/.venv/bin:$PATH python ops/migration-shadow.py --base origin/main --write` to regenerate `db/schema.sql`.
+1. Merge `origin/main` and keep its `db/schema.sql`.
+2. If the migration-open-pr check names a new slot, rename the migration and update its references.
+3. Run `python ops/migration-shadow.py --base origin/main` to verify the snapshot plus pending migrations on PostgreSQL 18.
 
 Briefs give the rule ("next number above main"), never a fixed number.
 
