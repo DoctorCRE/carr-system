@@ -14,6 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class JobToolsTests(unittest.TestCase):
+    def release(self, body):
+        response = io.BytesIO(body)
+        response.status = 200
+        return response
+
     def invoke(self, name, *args):
         with patch.object(sys, 'argv', [name, *args]), contextlib.redirect_stdout(io.StringIO()) as out:
             with self.assertRaises(SystemExit) as exit:
@@ -116,6 +121,27 @@ class JobToolsTests(unittest.TestCase):
                 self.assertTrue(children)
                 self.assertTrue(all(job.wait.called for job in children), 'left launched children unwaited')
 
+    def test_live_requires_a_served_production_release(self):
+        sha = 'a' * 40
+        good = {'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': sha}}
+        for body, status in [
+            ({**good, 'ok': False}, 200),
+            ({**good, 'ok': 1}, 200),
+            ({**good, 'env': {'value': 'staging'}}, 200),
+            ({**good, 'env': None}, 200),
+            ({**good, 'env': 'production'}, 200),
+            ({**good, 'git_sha': {'value': 'bad'}}, 200),
+            (good, 503),
+        ]:
+            with self.subTest(body=body, status=status):
+                response = io.BytesIO(json.dumps(body).encode())
+                response.status = status
+                with patch('subprocess.check_output', return_value='MERGED\t' + sha), \
+                        patch('urllib.request.urlopen', return_value=response), patch('time.sleep'):
+                    code, out = self.invoke('wait-pr', 'owner/repo', '42', 'live')
+                self.assertEqual(code, 2)
+                self.assertNotIn('LIVE', out)
+
     def test_waiter_retries_and_distinguishes_closed_merged_and_live(self):
         merged = 'MERGED\t' + 'a' * 40
         for mode, replies, releases, expected in [
@@ -125,11 +151,11 @@ class JobToolsTests(unittest.TestCase):
             ('merged', ['[]', '{}', 'OPEN\t', 'MERGED\tbad', merged], [], 0),
             ('merged', [''] * 960, [], 2),
             ('live', [merged], [OSError('offline'), b'{}', b'{"git_sha":{"value":"old"}}',
-                                json.dumps({'git_sha': {'value': 'a' * 40}}).encode()], 0),
+                                json.dumps({'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': 'a' * 40}}).encode()], 0),
         ]:
             with self.subTest(mode=mode, expected=expected), \
                     patch('subprocess.check_output', side_effect=replies), \
-                    patch('urllib.request.urlopen', side_effect=[io.BytesIO(r) if isinstance(r, bytes) else r for r in releases]) as release, \
+                    patch('urllib.request.urlopen', side_effect=[self.release(r) if isinstance(r, bytes) else r for r in releases]) as release, \
                     patch('time.sleep'):
                 code, out = self.invoke('wait-pr', 'owner/repo', '42', mode)
                 self.assertEqual(code, expected)

@@ -2,7 +2,7 @@
 """Wait up to 960 polls, 30 seconds apart, for merge/closure and optionally release.
 
 Closed without merge exits 1. Exhausted retries exit 2. Live requires the exact
-merge commit in the CARR release's git_sha.value field.
+merge commit in a healthy, served production CARR release.
 """
 import argparse
 import json
@@ -36,7 +36,15 @@ def main():
                 if args.target == 'merged':
                     break
             with urllib.request.urlopen('https://api.doctorcre.com/release', timeout=30) as response:
-                if json.load(response)['git_sha']['value'] == sha:
+                live = json.load(response)
+                if (response.status == 200 and isinstance(live, dict)
+                        and live.get('ok') is True
+                        and isinstance(live.get('env'), dict)
+                        and live['env'].get('value') == 'production'
+                        and isinstance(live.get('git_sha'), dict)
+                        and isinstance(live['git_sha'].get('value'), str)
+                        and re.fullmatch(r'[0-9a-f]{40}', live['git_sha']['value'])
+                        and live['git_sha']['value'] == sha):
                     break
         except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
             continue
