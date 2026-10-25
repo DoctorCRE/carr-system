@@ -103,41 +103,14 @@ class JobToolsTests(unittest.TestCase):
                 self.assertEqual(len(out.splitlines()), 12)
                 self.assertTrue((Path(tmp) / 'logs/one10.log').exists())
 
-    def test_queue_counts_long_running_argv_before_launching(self):
+    def test_queue_counts_jobs_with_spaces_and_launches_an_absolute_path(self):
         for names in ([str(i) for i in range(10)], ['queued']):
             with self.subTest(names=names), tempfile.TemporaryDirectory() as tmp:
                 spec = Path(tmp) / 'queue.tsv'
                 (Path(tmp) / 'brief').write_text('brief')
                 spec.write_text('queued\towner/repo\tbrief\thigh\tdetails\n')
                 released = False
-                def output(command, **kwargs):
-                    if command[0] == 'pgrep':
-                        return '' if released else '\n'.join(map(str, range(len(names))))
-                    if '-p' in command:
-                        name = names[int(command[-1])]
-                        return '/very/long/python3 /very/long/bin/codex-job owner/repo job/' + name + ' brief'
-                    return '' if released else '/very/long/python3 /very/long/bin/codex-'
-                def tick(_):
-                    nonlocal released
-                    released = True
-                def launch(*args, **kwargs):
-                    self.assertTrue(released, 'launched before running capacity or duplicate name cleared')
-                    return Mock(wait=Mock(return_value=0))
-                with patch('subprocess.check_output', side_effect=output), \
-                        patch('subprocess.Popen', side_effect=launch), patch('fcntl.flock'), \
-                        patch('time.sleep', side_effect=tick):
-                    code, out = self.invoke('codex-queue', str(spec))
-                self.assertEqual(code, 0)
-                self.assertIn('QUEUE-EMPTY', out)
-
-    def test_queue_counts_relative_jobs_and_launches_an_absolute_path(self):
-        for names in ([str(i) for i in range(10)], ['queued']):
-            with self.subTest(names=names), tempfile.TemporaryDirectory() as tmp:
-                spec = Path(tmp) / 'queue.tsv'
-                (Path(tmp) / 'brief').write_text('brief')
-                spec.write_text('queued\towner/repo\tbrief\thigh\tdetails\n')
-                released = False
-                commands = [f'python3 bin/codex-job owner/repo job/{name} brief' for name in names]
+                commands = [f'/Users/A B/python /Users/A B/bin/codex-job owner/repo job/{name} brief' for name in names]
                 def output(command, **kwargs):
                     if command[0] == 'pgrep':
                         return '\n'.join(str(i) for i, argv in enumerate(commands)
@@ -147,7 +120,7 @@ class JobToolsTests(unittest.TestCase):
                     nonlocal released
                     released = True
                 def launch(command, **kwargs):
-                    self.assertTrue(released, 'relative jobs did not block capacity or duplicate name')
+                    self.assertTrue(released, 'running jobs did not block capacity or duplicate name')
                     self.assertEqual(command[0], str(ROOT / 'bin/codex-job'))
                     return Mock(wait=Mock(return_value=0))
                 with patch('subprocess.check_output', side_effect=output), \

@@ -21,8 +21,8 @@ def main():
     spec = parser.parse_args().file.resolve()
     jobs = [line.split('\t', 4) for line in spec.read_text().splitlines() if line.strip()]
     names = [row[0].casefold() for row in jobs]
-    if any(len(row) != 5 or not re.fullmatch(r'[\w.-]+', row[0]) for row in jobs) or len(set(names)) != len(names):
-        parser.error('expected five tab-separated fields and unique job names using letters, numbers, _, . or -')
+    if any(len(row) != 5 for row in jobs) or len(set(names)) != len(names):
+        parser.error('expected five tab-separated fields and unique job names')
     briefs = [(spec.parent / row[2]).read_text() + '\n\nTask details: ' + row[4] for row in jobs]
     logs = spec.parent / 'logs'
     logs.mkdir(exist_ok=True)
@@ -33,7 +33,7 @@ def main():
             for (name, repo, _, effort, _), brief in zip(jobs, briefs):
                 while True:
                     try:
-                        pids = subprocess.check_output(['pgrep', '-f', 'bin/codex-job '], text=True, errors='replace')
+                        pids = subprocess.check_output(['pgrep', '-f', 'codex-job'], text=True, errors='replace')
                     except subprocess.CalledProcessError as error:
                         if error.returncode != 1:
                             raise
@@ -47,9 +47,7 @@ def main():
                             if error.returncode != 1:
                                 raise
                             continue
-                        match = re.match(r'^(?:\S+\s+)?(?:\S*/)?bin/codex-job\s+\S+\s+job/(\S+)', command.strip())
-                        if match:
-                            running.add(match[1].casefold())
+                        running.update(arg[4:].casefold() for arg in command.split() if arg.startswith('job/'))
                     running.update(n.casefold() for n, p in active.items() if p.poll() is None)
                     if len(running) < CAP and name.casefold() not in running:
                         break
