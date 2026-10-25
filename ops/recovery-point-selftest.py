@@ -208,7 +208,55 @@ def provider_fixture(*, artifact_hours: float = 2.0, run_attempt: int = 2,
     }
 
 
+def local_producer_date_tests() -> None:
+    now = datetime(2026, 10, 25, 12, tzinfo=timezone.utc)
+    with tempfile.TemporaryDirectory(prefix="carr-rpo-local-") as raw, \
+         mock.patch.object(rp, "_now", return_value=now):
+        backups = Path(raw) / "backups"
+        backups.mkdir()
+        old = backups / "carr-20261020.sql.age"
+        old.write_bytes(b"synthetic opaque bytes")
+        os.utime(old, (now.timestamp(), now.timestamp()))
+        result = rp.local_path(raw)
+        check("touching an old local copy cannot renew its recovery point",
+              result.get("at") == "2026-10-20T00:00:00Z"
+              and result.get("age_hours") == 132.0
+              and rp.assess([result, none("cloud")])["verdict"] == "out_of_contract")
+        old.unlink()
+        for name in ("carr-20260230.sql.age", "carr-20261026.sql.age", "renamed.sql.age"):
+            candidate = backups / name
+            candidate.write_bytes(b"synthetic opaque bytes")
+            try:
+                result = rp.local_path(raw)
+            except ValueError:
+                result = {"state": "crashed"}
+            check(f"unusable local producer date stays unknown for {name}",
+                  result["state"] == "unknown"
+                  and rp.assess([result, present("cloud", 30)])["verdict"] == "unknown")
+            candidate.unlink()
+        old.write_bytes(b"synthetic opaque bytes")
+        unknown_copy = backups / "renamed.sql.age"
+        unknown_copy.write_bytes(b"synthetic opaque bytes")
+        result = rp.local_path(raw)
+        check("unrecognized local copy prevents a conclusive stale verdict",
+              result["state"] == "unknown"
+              and rp.assess([result, present("cloud", 30)])["verdict"] == "unknown")
+        for suffix in ("", "-" + "a" * 32):
+            fresh = backups / f"carr-20261025{suffix}.sql.age"
+            fresh.write_bytes(b"synthetic opaque bytes")
+            os.utime(fresh, (0, 0))
+            result = rp.local_path(raw)
+            check(f"newer producer date beats mtime and unknown copies for {fresh.name}",
+                  result["state"] == "present"
+                  and result.get("at") == "2026-10-25T00:00:00Z"
+                  and result.get("age_hours") == 12.0
+                  and result["detail"].startswith(fresh.name + ";")
+                  and rp.assess([result, present("cloud", 30)])["verdict"] == "ok")
+            fresh.unlink()
+
+
 def main() -> int:
+    local_producer_date_tests()
     # ── the two collapses, each in its own direction ─────────────────────────
     r = rp.assess([none("local", configured=True), unknown("cloud")])
     check("unknown is NOT reported as fresh (a dead workflow stays visible)",

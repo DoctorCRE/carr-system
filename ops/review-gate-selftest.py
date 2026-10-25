@@ -23,6 +23,12 @@ class ReviewGate(unittest.TestCase):
                 with self.subTest(path=path, key=key):
                     self.assertFalse(gate.approved({"changed_files": 1, "head": {"sha": "abc"}, "additions": 0, "deletions": 0}, [{key: path}], []))
 
+    def test_added_machinery(self):
+        pr = {"changed_files": 1, "additions": 1, "deletions": 0, "head": {"sha": "abc"}}
+        for path, status, expected in [("bin/foo", "added", False), ("bin/codex-job", "modified", True), ("docs/x.md", "added", True)]:
+            with self.subTest(path=path, status=status):
+                self.assertEqual(gate.approved(pr, [{"filename": path, "status": status}], []), expected)
+
     def test_sha_bound_comment_format(self):
         pr = {"changed_files": 0, "additions": 151, "deletions": 0, "head": {"sha": "abc"}}
         for body, expected in [("VERDICT: APPROVE\nReviewed-SHA: abc", True), ("VERDICT: APPROVE\r\nReviewed-SHA: abc", True), ("VERDICT: CHANGES\nReviewed-SHA: abc", False), ("VERDICT: APPROVE\nReviewed-SHA: old", False), ("prefix\nVERDICT: APPROVE\nReviewed-SHA: abc", False), ("VERDICT: APPROVE\nReviewed-SHA: abcd", False)]:
