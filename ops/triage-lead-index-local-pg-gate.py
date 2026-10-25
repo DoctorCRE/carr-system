@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # ci: db-gate
 # ci: db-gate-before-isolated
-"""Prove audit #2182 Q3 then Q1 on a snapshot-loaded disposable PostgreSQL 18."""
+"""Prove audit #2182 Q1, Q3 and Q4 on a snapshot-loaded disposable PostgreSQL 18."""
 import argparse
+from datetime import date, datetime, timezone
 import hashlib
 import importlib.util
 import json
@@ -32,7 +33,7 @@ def nodes(plan):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base', default='origin/main')
-    parser.add_argument('--slice', choices=('Q3', 'Q1', 'all'), default='all')
+    parser.add_argument('--slice', choices=('Q3', 'Q1', 'Q4', 'all'), default='all')
     parser.add_argument('--baseline', action='store_true', help='assert access paths before pending migrations')
     parser.add_argument('--evidence', type=Path, help='write before/after EXPLAIN JSON')
     args = parser.parse_args()
@@ -77,6 +78,19 @@ def main():
                 'Q1 history': "select * from v_lead_stage_transition where lead_id=md5('index-lead-1')::uuid order by mutation_order desc limit 100",
                 'Q1 latest': "select distinct on (lead_id) lead_id,event_id from v_lead_stage_transition order by lead_id,mutation_order desc",
             }
+            party = "md5('index-vendor-party-1')::uuid"
+            queries.update({
+                'Q4 coverage': f"select case when bool_and(deal_history_verified_at is not null) then min(deal_history_verified_at) end from vendor where party_id={party} and merged_into is null",
+                'Q4 lock': f"select id from vendor where party_id={party} and merged_into is null order by id for update",
+                'Q4 referrals': f"select deal_id,referred_by,occurred_on from party_link_deal where referred_by={party} order by deal_id",
+            })
+            projection = subprocess.run(['node', '--input-type=module', '-e',
+                "import {vendorRelationshipJoin} from './mcp-server/src/vendor-relationship.js'; console.log(vendorRelationshipJoin)"],
+                cwd=ROOT, env=clean, capture_output=True, text=True, timeout=60)
+            assert projection.returncode == 0, projection.stderr
+            projection_sql = "select v.id,vr.payload from vendor v join party p on p.id=v.party_id " + projection.stdout
+            queries['Q4 directory projection'] = projection_sql + f" where v.party_id={party} and v.merged_into is null order by v.id"
+            queries['Q4 detail projection'] = projection_sql + " where v.id=md5('index-vendor-1')::uuid"
             queries = {name: sql for name, sql in queries.items() if args.slice == 'all' or name.startswith(args.slice)}
             queries['triage view'] = 'select * from v_today_triage order by due_on nulls last,item_kind,id'
             queries['lead detail'] = "select * from v_lead_workspace_detail where id=md5('index-lead-1')::uuid"
@@ -103,7 +117,9 @@ def main():
                         evidence['plans'][f'{ratio} {side} {name}'] = plan
                         if ratio == 'selective' and side == 'after' and name.startswith('Q'):
                             scans = list(nodes(plan['Plan']))
-                            if any(n['Node Type'] == 'Seq Scan' for n in scans):
+                            if any(n['Node Type'] == 'Seq Scan' and
+                                   (not name.startswith('Q4') or n.get('Relation Name') in
+                                    ('vendor', 'party_link_deal')) for n in scans):
                                 failures.append(f'{name} still scans unrelated history')
                 return results
 
@@ -127,6 +143,22 @@ def main():
                 ):
                     expected = {synthetic_id(f'index-{prefix}-{n}') for n in range(1, 101) if n not in excluded}
                     assert {row[0] for row in after[name]} == expected, name
+            if args.slice in ('all', 'Q4'):
+                selected = sorted(synthetic_id(f'index-vendor-{n}') for n in range(1, 5))
+                assert after['Q4 lock'] == [(value,) for value in selected]
+                assert after['Q4 coverage'] == [(None,)]
+                assert after['Q4 referrals'] == [(synthetic_id('index-deal'), synthetic_id('index-vendor-party-1'), date(2020, 1, 2))]
+                assert [row[0] for row in after['Q4 directory projection']] == selected
+                for _, payload in after['Q4 directory projection'] + after['Q4 detail projection']:
+                    assert payload['coverage_verified_at'] is None
+                    assert (payload['deals_referred'], payload['deals_worked'], payload['won'], payload['lost']) == (1, 1, 0, 0)
+                with conn.transaction():
+                    conn.execute("update vendor set deal_history_verified_at='2020-01-03 UTC' where id=md5('index-vendor-3')::uuid")
+                    verified = conn.execute(queries['Q4 detail projection']).fetchone()[1]
+                    assert datetime.fromisoformat(verified['coverage_verified_at']) == datetime(2020, 1, 1, tzinfo=timezone.utc)
+                    conn.execute("update vendor set deal_history_verified_at=null where id in (select id from vendor where party_id=" + party + " and merged_into is null)")
+                    assert conn.execute(queries['Q4 coverage']).fetchall() == [(None,)]
+                    raise psycopg.Rollback()
             if args.slice in ('all', 'Q1'):
                 expected = sorted(range(1, 121), key=lambda n: (n // 2, synthetic_id(f'index-activity-{n}')), reverse=True)[:100]
                 assert [row[0] for row in after['Q1 correspondence']] == [synthetic_id(f'index-activity-{n}') for n in expected]

@@ -24,6 +24,12 @@ class CardTests(unittest.TestCase):
             self.assertIn(phrase, wording)
         self.assertNotIn('teach', wording)
 
+    def test_runnable_steps_use_real_values_and_warn_before_secret_output(self):
+        wording = next(c['wording'] for c in load_cards() if c['id'] == 'K09')
+        self.assertIn('Fill in real values, never placeholders;', wording)
+        self.assertIn('if a step prints secrets, say before it runs not to paste the output.',
+                      wording)
+
     def test_boot_pages_match_card_source(self):
         subprocess.run([sys.executable, str(REPO / 'ops/sync-core-rule-cards.py'), '--check'],
                        check=True, cwd=REPO)

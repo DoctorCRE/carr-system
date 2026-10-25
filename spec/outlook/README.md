@@ -167,3 +167,47 @@ confidence and untested runtime acceptance. No URL or send probe runs.
 Extraction with a reconciled baseline retains the audited grammar only when the exact build and
 referenced source hashes match. Changed binaries require a new audit instead of stale grammar.
 Diffs separate route/key changes from audit evidence and reconciliation provenance changes.
+
+## Research-only store snapshots on Studio
+
+The research helper copies `HxStore.hxd` and the intake helper's body sidecars
+(`Files/S0/*/EFMData/*.dat`) from the fixed Main Identity profile. It accepts no
+arguments, runs no other command, and performs no networking or intake. Snapshots
+land in `~/carr-local/outlook-research/snap-<UTC timestamp>/`, owned by the user
+with mode 0700. Files have mode 0600. `manifest.json` records each source-relative
+path, source size and nanosecond mtime, and SHA-256 of the copied bytes. Keep these
+private. The shared profile can contain accounts beyond the designated TEST account.
+Only TEST-account changes are authorized research experiments. Microsoft Graph
+is forbidden for this workflow.
+
+All steps below are required on Studio. The installer renders the job and prints
+the two load commands. It does not load or run the helper.
+
+1. Run `./bin/install-outlook-research-copy.sh` from the checkout containing this change.
+2. Open System Settings > Privacy & Security > Full Disk Access > +.
+3. Select `~/carr-local/bin/outlook-research-copy` using the file dialog's Go to Folder shortcut, then enable its grant.
+4. Run the printed `mkdir -p ... && install -m 644 ...` command to place the rendered plist in `~/Library/LaunchAgents/`.
+5. Run the printed `launchctl bootstrap gui/$(id -u) ...` command to load the on-demand job.
+6. Quit Outlook after the intended TEST-account change has synced, before taking a research snapshot.
+7. Run `launchctl kickstart gui/$(id -u)/com.carr.outlook-research-copy` for each snapshot.
+8. Check `launchctl print gui/$(id -u)/com.carr.outlook-research-copy` for exit code 0 and a new snapshot containing `manifest.json`.
+
+The job has no schedule and no RunAtLoad. Rebuilding or replacing the binary
+requires re-granting Full Disk Access. An unchanged pinned build preserves the
+existing executable. The helper publishes a snapshot only after copying succeeds
+and retains at most 20 completed snapshots. It prunes only its recognized private
+snapshot directories. Unrelated directories and symlinks remain untouched.
+Ordinary failures remove staging copies. Forced termination can leave a private
+hidden `.snap-*.pending` directory. Prune failures can leave hidden
+`.snap-*.retired` directories. Neither is a published study input. A clock rollback
+that would place a new snapshot before an existing snapshot is refused.
+Copies are sequential, not a transactional backup of a running Outlook profile.
+A source file changing during its copy is rejected; changes between separate
+file copies cannot be ruled out. Keep Outlook closed throughout capture.
+
+Use the Rust decoder in `vendor/hxprobe` and the private immutable copies described
+in [the harness contract](hxstore-harness.json). Compare consecutive copies after
+one TEST-account action and capture an unchanged control. The retention limit can
+remove a study baseline, so preserve required study inputs separately before
+20 newer captures. Store bytes and sidecars remain local; snapshot creation never
+writes into Outlook or produces production records.
