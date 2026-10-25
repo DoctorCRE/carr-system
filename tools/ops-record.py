@@ -375,6 +375,7 @@ def cmd_run(args) -> int:
     if ended is not None and started is None:
         started = ended
 
+    observed = ended or datetime.now(timezone.utc)
     corr = correlation_of(args.correlation)
     try:
         with connect("routine") as conn, conn.transaction(), conn.cursor() as cur:
@@ -395,6 +396,9 @@ def cmd_run(args) -> int:
                 # "say it once and stop" path covers both without new logic.
                 print(str(e), file=sys.stderr)   # already carries the prefix
                 return 78
+            cur.execute(
+                "select pg_advisory_xact_lock(hashtextextended(%s::text, 0))",
+                (f"ops.run:{sid}:{args.environment}:{args.key}",))
             release_id = None
             recovery_strategy = None
             recovery_plan_ref = None
@@ -432,7 +436,7 @@ def cmd_run(args) -> int:
                         budget_ms, recovery_strategy, recovery_plan_ref,
                         source_kind, source_ref, observed_at, expires_at,
                         evidence_ref, detail)
-                   select %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now(),
+                   select %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, %s,
                           -- THE OBSERVATION DECLARES ITS OWN EXPIRY, taken from
                           -- the registry at write time when the caller does not
                           -- name one. Without this the row reads `unknown`
@@ -443,9 +447,9 @@ def cmd_run(args) -> int:
                           -- null, and null still means unknown, honestly.
                           case
                             when %s::int is not null
-                              then now() + make_interval(secs => %s::int)
+                              then %s::timestamptz + make_interval(secs => %s::int)
                             when se.expected_cadence_seconds is not null
-                              then now() + make_interval(secs =>
+                              then %s::timestamptz + make_interval(secs =>
                                      se.expected_cadence_seconds + se.cadence_grace_seconds)
                           end,
                           %s,%s
@@ -457,13 +461,21 @@ def cmd_run(args) -> int:
                  args.failure_class, args.exit_code, args.attempt, started, ended,
                  budget_ms, recovery_strategy if is_recovery else None,
                  recovery_plan_ref if is_recovery else None,
-                 args.source_kind, args.source_ref,
-                 args.expires_in, args.expires_in,
+                 args.source_kind, args.source_ref, observed,
+                 args.expires_in, observed, args.expires_in, observed,
                  args.evidence_ref, (args.detail or None),
                  sid, args.environment))
             run_id = cur.fetchone()[0]
             recovered = []
-            if args.state == "succeeded":
+            cur.execute(
+                """select id from ops.run
+                    where service_id = %s and environment = %s and run_key = %s
+                      and state in ('succeeded','failed','timed_out')
+                    order by observed_at desc, id desc limit 1""",
+                (sid, args.environment, args.key))
+            latest = cur.fetchone()
+            is_current = latest is not None and latest[0] == run_id
+            if is_current and args.state == "succeeded":
                 # THE NONZERO-TO-ZERO TRANSITION, on the path that already runs.
                 # The council preferred this to the spool flusher precisely
                 # because it is where the transition is visible: the flusher
@@ -473,7 +485,7 @@ def cmd_run(args) -> int:
                 recovered = _record_success_recovery(
                     cur=cur, service_key=args.service, environment=args.environment,
                     run_key=args.key, run_id=run_id)
-            elif args.state in ("failed", "timed_out"):
+            elif is_current and args.state in ("failed", "timed_out"):
                 cur.execute("select criticality from ops.service where id = %s", (sid,))
                 criticality = cur.fetchone()[0]
                 _record_failure_incident(

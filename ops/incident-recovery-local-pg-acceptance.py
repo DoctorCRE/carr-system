@@ -29,10 +29,16 @@ for coverage.
 Needs a disposable loopback cluster; ops/local-pg-ci.py supplies one and runs
 this in its acceptance chain. Exits 78 when there is no such cluster to use.
 """
+import json
 import os
 import subprocess
 import sys
+import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
 import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
 import psycopg
@@ -112,6 +118,118 @@ def incidents(cur):
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+def check_receipt_chronology(owner, dsn):
+    with tempfile.TemporaryDirectory(prefix="receipt-chronology-") as td:
+        root = Path(td)
+        now = datetime.now(timezone.utc)
+        old = (now - timedelta(hours=2)).isoformat()
+        recent = (now - timedelta(minutes=10)).isoformat()
+        harness = (
+            "import runpy, sys; from datetime import datetime; "
+            "from unittest.mock import patch; from lib import scheduled_run; "
+            "scheduled_run.LOG = sys.argv[2]; "
+            "clock = patch('lib.scheduled_run.datetime'); "
+            "mock = clock.start(); mock.now.return_value = datetime.fromisoformat(sys.argv[1]); "
+            "runpy.run_path('hooks/scheduled-run-record.py', run_name='__main__')")
+        env = dict(os.environ, HOME=td, CARR_REPO_ROOT=td)
+
+        def stop(session, state, at, database):
+            transcript = root / (session + ".jsonl")
+            transcript.write_text("\n".join(json.dumps(row) for row in [
+                {"type": "queue-operation", "operation": "enqueue", "timestamp": old,
+                 "content": f'<scheduled-task name="{SERVICE}" file="/x/SKILL.md">'},
+                {"message": {"role": "user" if state == "failed" else "assistant",
+                             "content": [{"type": "tool_result", "is_error": True,
+                                          "content": "synthetic failure"}] if state == "failed"
+                             else [{"type": "text", "text": "completed"}]}},
+            ]) + "\n")
+            result = subprocess.run(
+                [PYTHON, "-c", harness, at, str(root / "hook.log")],
+                input=json.dumps({"hook_event_name": "Stop", "session_id": session,
+                                  "transcript_path": str(transcript)}),
+                text=True, capture_output=True, cwd=REPO,
+                env=dict(env, CARR_DB_JOBS_URL=database), timeout=30)
+            assert result.returncode == 0 and not result.stdout, result.stderr
+
+        def snapshot():
+            with psycopg.connect(owner) as conn, conn.cursor() as cur:
+                cur.execute("select health from ops.v_service_environment_health "
+                            "where service_key = %s and environment = 'production'", (SERVICE,))
+                health = cur.fetchone()[0]
+                rows = [r for r in incidents(cur) if '|production|scheduled-session|' in r['signature']]
+                return health, [(r['state'], r['recovery_evidence_ref'], r['monitoring_until']) for r in rows]
+
+        with psycopg.connect(owner, autocommit=True) as conn:
+            conn.execute("insert into ops.service_environment "
+                         "(service_id,environment,expected_cadence_seconds) "
+                         "select id,'production',3600 from ops.service where key=%s", (SERVICE,))
+        dead = "postgresql://carr_jobs@127.0.0.1:1/nonexistent"
+        stop("old-success", "succeeded", old, dead)
+        pending = root / "out/scheduled-run-record-cache/old-success.pending"
+        check(pending.exists(), "failed delivery must retain the old success receipt")
+        stop("new-failure", "failed", recent, dsn)
+        before = snapshot()
+        check(before[0] == 'unavailable' and before[1] and before[1][0][0] == 'detected',
+              "new failure must establish unhealthy evidence and a detected incident")
+        stop("old-success", "succeeded", recent, dsn)
+        check(snapshot() == before, "old success retry must not recover a newer failure")
+        stop("new-success", "succeeded", (now - timedelta(minutes=5)).isoformat(), dsn)
+        before = snapshot()
+        check(before[0] == 'healthy' and before[1][0][0] == 'monitoring',
+              "a genuinely newer success must establish monitoring")
+        stop("another-old-success", "succeeded", old, dead)
+        stop("another-old-success", "succeeded", recent, dsn)
+        check(snapshot() == before, "old success must not replace newer recovery evidence")
+        stop("old-failure", "failed", old, dead)
+        stop("old-failure", "failed", recent, dsn)
+        check(snapshot() == before, "old failure retry must not invalidate newer recovery")
+        with psycopg.connect(owner) as conn:
+            rows = conn.execute("select observed_at, ended_at, expires_at < now() from ops.run "
+                                "where service_id=(select id from ops.service where key=%s) "
+                                "and environment='production' order by ended_at", (SERVICE,)).fetchall()
+            check(len(rows) == 5 and all(r[0] == r[1] for r in rows),
+                  "recorded observation times must preserve each frozen completion time")
+            check(all(r[2] for r in rows[:3]), "replaying old receipts must not renew their freshness")
+        with psycopg.connect(owner, autocommit=True) as conn:
+            conn.execute("delete from ops.run where environment='production' and "
+                         "service_id=(select id from ops.service where key=%s)", (SERVICE,))
+        stop("race-baseline", "failed", old, dsn)
+        with psycopg.connect(owner) as blocker, ThreadPoolExecutor(max_workers=2) as pool:
+            blocker.execute("select id from ops.incident where signature like %s "
+                            "for no key update", (SERVICE + '|production|%',))
+            newer = pool.submit(stop, "race-new-success", "succeeded", recent, dsn)
+
+            def wait_for_recorder(fragment, expected=1):
+                deadline = time.monotonic() + 10
+                with psycopg.connect(owner, autocommit=True) as observer:
+                    while time.monotonic() < deadline:
+                        count = observer.execute(
+                            "select count(*) from pg_stat_activity where usename='carr_jobs' "
+                            "and wait_event_type='Lock' and query like %s", ('%' + fragment + '%',)).fetchone()[0]
+                        if count >= expected:
+                            return
+                        time.sleep(0.01)
+                raise AssertionError("recorder did not reach expected lock wait")
+
+            try:
+                wait_for_recorder("update ops.incident")
+                older = pool.submit(stop, "race-old-failure", "failed",
+                                    (now - timedelta(minutes=20)).isoformat(), dsn)
+                wait_for_recorder("", 2)
+            finally:
+                blocker.rollback()
+            newer.result(timeout=30)
+            older.result(timeout=30)
+        after = snapshot()
+        check(after[0] == 'healthy' and after[1][0][0] == 'monitoring',
+              "concurrent older failure must not invalidate the newer success")
+        with psycopg.connect(owner, autocommit=True) as conn:
+            conn.execute("delete from ops.incident where signature like %s",
+                         (SERVICE + '|production|%',))
+            conn.execute("delete from ops.run where environment='production' and "
+                         "service_id=(select id from ops.service where key=%s)", (SERVICE,))
+
+
 def main():
     owner = loopback_dsn()
     with psycopg.connect(owner, autocommit=True) as conn, conn.cursor() as cur:
@@ -139,6 +257,8 @@ def main():
             cur.execute("select 1")
     except psycopg.OperationalError as exc:
         refuse(f"cannot reach this cluster as carr_jobs: {str(exc).splitlines()[0]}")
+
+    check_receipt_chronology(owner, dsn)
 
     # ── 0. THE GRANT 0117 WROTE IS STILL THE GRANT. ─────────────────────────
     # If this ever passes for the wrong reason — because someone widened the
