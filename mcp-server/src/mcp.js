@@ -31,6 +31,28 @@ const JSON_HEADERS = { "content-type": "application/json" };
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
 
+function transientDatabaseTransport(error) {
+  if (error instanceof ToolError || error?.code) return false;
+  const message = error?.message || "";
+  if (error?.name === "NeonDbError" &&
+      /^Server error \(HTTP status (500|520|522|524|525)\):/.test(message)) return true;
+  const sourceMessage = error?.sourceError?.message || message;
+  return sourceMessage === "Network connection lost." ||
+    sourceMessage === "Connection terminated unexpectedly" ||
+    /^Uncaught TypeError: Failed to establish the WebSocket connection: expected server to reply with HTTP status code 101 \(switching protocols\), but received (500|520|522|524|525) instead\.$/.test(sourceMessage);
+}
+
+async function retrySafeDatabaseOperation(operation) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt === 2 || !transientDatabaseTransport(error)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
+}
+
 const CANONICAL_OWNERSHIP_HOST_VERSION = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,95}$/;
 
 // This is deployment metadata the Worker received from Cloudflare, not a
@@ -768,7 +790,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     // must treat the write as optional: losing it costs a record, never a reply.
     const client = {
       ai: env.AI,
-      query: async (text, params = []) => ({ rows: await sql.query(text, params) }),
+      query: async (text, params = []) => ({ rows: await retrySafeDatabaseOperation(() => sql.query(text, params)) }),
       sideWrite: env?.DATABASE_URL_WRITER
         ? (text, params = []) => {
             const run = neon(env.DATABASE_URL_WRITER).query(text, params)
@@ -801,7 +823,13 @@ export async function callTool(env, actor, name, args, profile = "full") {
   const needsAuthority = tool.authorityOnly === true;
   const connectionString = needsAuthority ? authorityDsnForActor(env, actor) : env.DATABASE_URL_WRITER;
   const pool = new Pool({ connectionString });
-  const client = await pool.connect();
+  let client;
+  try {
+    client = await retrySafeDatabaseOperation(() => pool.connect());
+  } catch (error) {
+    await pool.end().catch(() => {});
+    throw error;
+  }
   client.ai = env.AI;
   const writerRead = tool.writerConnection === true && !tool.write;
   let readOk = true, readErrorKind = null;

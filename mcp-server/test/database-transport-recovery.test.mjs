@@ -131,3 +131,23 @@ for (const statement of ['begin', 'commit']) {
     assert.equal(fixture.statements.filter(sql => sql.startsWith('begin')).length, 1);
   });
 }
+
+for (const error of [handshake(401),
+  Object.assign(new Error('Connection terminated unexpectedly'), { code: '08006' }),
+]) test(`connection refusal is not retried for ${error.code || 'HTTP 401'}`, async t => {
+  const fixture = poolFixture(t, { failures: [error] });
+  await assert.rejects(callTool(env, actor(), 'catch-me-up', { ref: 'C-1' }), e => e === error);
+  assert.deepEqual(fixture.counts(), { attempts: 1, ends: 1, releases: 0 });
+  assert.deepEqual(fixture.statements, []);
+});
+
+test('write reconnects before BEGIN but never replays after BEGIN fails', async t => {
+  const error = new Error('Connection terminated unexpectedly');
+  const fixture = poolFixture(t, { failures: [handshake(525)],
+    queryFailure: { statement: 'begin', error } });
+  await assert.rejects(callTool(env, actor(), 'add-loop',
+    { idempotency_key: 'synthetic-idempotency', kind: 'idea', owner: 'Joe', body: 'Synthetic idea' }),
+  e => e === error);
+  assert.deepEqual(fixture.counts(), { attempts: 2, ends: 0, releases: 1 });
+  assert.equal(fixture.statements.filter(sql => sql === 'begin').length, 1);
+});
