@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Offline card contract and replay checks, collected by ops/ci.sh gates."""
 import importlib.util
+import io
 import json
 from pathlib import Path
 import sys
 import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -25,6 +27,50 @@ class CardTests(unittest.TestCase):
     def test_boot_pages_match_card_source(self):
         subprocess.run([sys.executable, str(REPO / 'ops/sync-core-rule-cards.py'), '--check'],
                        check=True, cwd=REPO)
+
+    def test_guidance_checker_rejects_missing_paths(self):
+        script = REPO / 'ops/sync-core-rule-cards.py'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'ops').mkdir()
+            (root / 'ops/present.py').touch()
+            for name in ('CLAUDE.md', 'AGENTS.md'):
+                for reference in ('[missing](ops/deleted.py#section)',
+                                  '`ops/deleted.py`', 'See ops/deleted.py.',
+                                  '`ops/{present,deleted}.py`',
+                                  '[missing](/ops/deleted.py)',
+                                  '`removed-directory/missing-command`'):
+                    with self.subTest(name=name, reference=reference):
+                        for page in ('CLAUDE.md', 'AGENTS.md'):
+                            (root / page).write_text((REPO / page).read_text())
+                        (root / name).write_text((root / name).read_text() + '\n' + reference)
+                        spec = importlib.util.spec_from_file_location('guidance', script)
+                        checker = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(checker)
+                        with mock.patch.object(checker, 'ROOT', root), mock.patch(
+                                'sys.argv', [str(script), '--check']), mock.patch(
+                                'sys.stdout', new_callable=io.StringIO) as output:
+                            self.assertNotEqual(checker.main(), 0)
+                        self.assertIn('removed-directory/missing-command' if 'removed-directory' in reference
+                                      else 'ops/deleted.py', output.getvalue())
+
+    def test_guidance_path_syntax(self):
+        spec = importlib.util.spec_from_file_location(
+            'guidance', REPO / 'ops/sync-core-rule-cards.py')
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'ops').mkdir()
+            (root / 'ops/present.py').touch()
+            with mock.patch.object(checker, 'ROOT', root):
+                self.assertEqual(checker.missing_paths(
+                    '[ok](ops/present.py#section) `ops/present.py` '
+                    '[web](https://example.com/deleted.md) ~/outside/file.md '
+                    '`ops/<name>.py`'), [])
+                self.assertEqual(checker.missing_paths(
+                    '[gone](removed/file.txt) See removed/file.py.\n[ref]: removed/other.txt'),
+                    ['removed/file.py', 'removed/file.txt', 'removed/other.txt'])
 
     def setUp(self):
         self.cards = load_cards()
