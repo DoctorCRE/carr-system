@@ -168,6 +168,50 @@ def test_strict_turns_skip_into_failure():
     check("--strict failure explains why a skip counts",
           "stopped running" in out_strict.lower() or "skipped" in out_strict.lower())
 
+def test_binding_reports_missing_wrangler_as_skipped():
+    with ci_fixture() as root:
+        (root / "mcp-server/wrangler.toml").write_text(
+            'name = "fixture"\nmain = "worker.js"\ncompatibility_date = "2026-01-01"\n')
+        for strict in (False, True):
+            args = ["--only", "binding"] + (["--strict"] if strict else [])
+            rc, output = run(args, root=root)
+            check(f"binding without Wrangler {'fails strict CI' if strict else 'skips locally'}",
+                  rc == (1 if strict else 0)
+                  and re.search(r"SKIP\s+binding", output) is not None
+                  and re.search(r"OK\s+binding", output) is None,
+                  output)
+
+
+def test_binding_preserves_config_and_boot_failures():
+    with ci_fixture() as root:
+        config = root / "mcp-server/wrangler.toml"
+        valid = 'name = "fixture"\nmain = "worker.js"\ncompatibility_date = "2026-01-01"\n'
+        config.write_text('name = "fixture"\n')
+        rc, output = run(["--only", "binding"], root=root)
+        check("binding config failure is not masked by missing Wrangler",
+              rc == 1 and re.search(r"FAIL\s+binding", output) is not None, output)
+        wrangler = root / "mcp-server/node_modules/.bin/wrangler"
+        wrangler.parent.mkdir(parents=True)
+        wrangler.write_text("#!/bin/sh\nexit 0\n")
+        wrangler.chmod(0o755)
+        boot = root / "bin/worker-boot-check.sh"
+        for status in (0, 1):
+            config.write_text(valid)
+            boot.write_text(f"#!/bin/sh\necho fixture-boot-executed > boot-result\nexit {status}\n")
+            boot.chmod(0o755)
+            rc, output = run(["--strict", "--only", "binding"], root=root)
+            check(f"binding {'passes after successful boot' if status == 0 else 'fails after unsuccessful boot'}",
+                  rc == status and (root / "boot-result").read_text() == "fixture-boot-executed\n"
+                  and re.search(rf"{'OK' if status == 0 else 'FAIL'}\s+binding", output) is not None,
+                  output)
+            (root / "boot-result").unlink()
+        config.write_text('name = "fixture"\n')
+        boot.write_text("#!/bin/sh\nexit 0\n")
+        rc, output = run(["--strict", "--only", "binding"], root=root)
+        check("successful boot does not mask invalid config",
+              rc == 1 and re.search(r"FAIL\s+binding", output) is not None, output)
+
+
 def test_gates_build_hxprobe_before_parallel_selftests():
     with tempfile.TemporaryDirectory(prefix="carr-hxprobe-gates-") as directory:
         root = pathlib.Path(directory).resolve()
@@ -1347,6 +1391,8 @@ def main(argv=None):
                test_freshness_checks_the_tree_without_requiring_main_ancestry,
                test_no_green_without_running,
                test_strict_turns_skip_into_failure,
+               test_binding_reports_missing_wrangler_as_skipped,
+               test_binding_preserves_config_and_boot_failures,
                test_unknown_class_refuses,
                test_hxprobe_runs_locked_checks_and_propagates_failures,
                test_gates_build_hxprobe_before_parallel_selftests,
