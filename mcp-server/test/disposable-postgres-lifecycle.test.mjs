@@ -1,6 +1,7 @@
-import test from 'node:test';
+import test, { before, after } from 'node:test';
+import { once } from 'node:events';
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import path from 'node:path';
@@ -9,6 +10,25 @@ import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
 
 const bin = ['/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin', '/usr/lib/postgresql/16/bin']
   .find(candidate => existsSync(path.join(candidate, 'initdb')));
+const unrelated = [];
+before(async () => {
+  if (!bin) return;
+  for (let i = 0; i < 12; i++) {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'x'.repeat(96 * 1024)],
+      { stdio: 'ignore' });
+    unrelated.push(child);
+    await once(child, 'spawn');
+  }
+});
+after(async () => {
+  await Promise.all(unrelated.map(async child => {
+    if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+    const exited = once(child, 'exit');
+    child.kill();
+    await exited;
+  }));
+});
+
 const helper = new URL('./helpers/disposable-postgres.mjs', import.meta.url).href;
 async function waitFor(predicate) {
   const deadline = Date.now() + 15000;
@@ -62,9 +82,11 @@ for (const mode of ['SIGINT', 'SIGTERM', 'exit', 'SIGKILL-during-start']) {
       }
       await exited;
       await waitFor(() => !existsSync(root));
-      const processes = execFileSync('ps', ['-axo', 'command'], { encoding: 'utf8' }).split('\n');
-      assert.equal(processes.some(command => command.includes('postgres -D ') && command.includes(path.join(root, 'data'))), false,
-        'no postmaster may survive removal of its owned data directory');
+      const data = path.join(root, 'data').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const processes = spawnSync('pgrep', ['-f', `postgres -D ${data}`], { encoding: 'utf8' });
+      assert.ifError(processes.error);
+      assert.equal(processes.status, 1,
+        `no postmaster may survive removal of its owned data directory: ${processes.stdout}${processes.stderr}`);
     } finally {
       child?.kill('SIGTERM');
       if (root) await waitFor(() => !existsSync(root));
