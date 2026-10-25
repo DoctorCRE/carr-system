@@ -270,7 +270,7 @@ for (const scenario of ["exit", "hang"]) {
     assert.equal(existsSync(fake.calls[0].profile), false);
     assert.match(browser.attempts[0].diagnostic, new RegExp(`fixture:${scenario}`));
     assert.ok(browser.startupMs > 0);
-    for (const arg of ["--headless=new", "--no-first-run", "--no-sandbox", "--disable-background-networking", "--remote-debugging-port=0"]) {
+    for (const arg of ["--use-mock-keychain", "--password-store=basic", "--headless=new", "--no-first-run", "--no-sandbox", "--disable-background-networking", "--remote-debugging-port=0"]) {
       assert.ok(fake.calls[1].args.includes(arg), arg);
     }
     await browser.close();
