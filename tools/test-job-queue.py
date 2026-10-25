@@ -1,6 +1,7 @@
 """Exercise the queue and PR waiter through their command-line interfaces."""
 import contextlib
 import io
+import http.client
 import json
 from pathlib import Path
 import runpy
@@ -120,6 +121,21 @@ class JobToolsTests(unittest.TestCase):
                         self.assertIn('QUEUE-EMPTY', out)
                 self.assertTrue(children)
                 self.assertTrue(all(job.wait.called for job in children), 'left launched children unwaited')
+
+    def test_live_retries_truncated_http_body(self):
+        sha = 'a' * 40
+        broken = Mock()
+        broken.read.side_effect = http.client.IncompleteRead(b'{')
+        broken.__enter__ = Mock(return_value=broken)
+        broken.__exit__ = Mock(return_value=False)
+        good = self.release(json.dumps({
+            'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': sha},
+        }).encode())
+        with patch('subprocess.check_output', return_value='MERGED\t' + sha), \
+                patch('urllib.request.urlopen', side_effect=[broken, good]), patch('time.sleep'):
+            code, out = self.invoke('wait-pr', 'owner/repo', '42', 'live')
+        self.assertEqual(code, 0)
+        self.assertIn('LIVE ' + sha, out)
 
     def test_live_requires_a_served_production_release(self):
         sha = 'a' * 40

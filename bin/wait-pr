@@ -5,6 +5,7 @@ Closed without merge exits 1. Exhausted retries exit 2. Live requires the exact
 merge commit in a healthy, served production CARR release.
 """
 import argparse
+import http.client
 import json
 import re
 import subprocess
@@ -46,7 +47,7 @@ def main():
                         and re.fullmatch(r'[0-9a-f]{40}', live['git_sha']['value'])
                         and live['git_sha']['value'] == sha):
                     break
-        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException, subprocess.SubprocessError):
             continue
     else:
         print('Retry limit reached')
