@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""codex-queue FILE. TSV fields: name, owner/repo, brief path, effort, task details.
+
+Brief paths and logs/NAME.log are relative to FILE. Queue runners serialize per
+user; the active queue fills up to CAP distinct job names, including outside jobs.
+"""
+import argparse
+import fcntl
+import os
+from pathlib import Path
+import re
+import subprocess
+import time
+
+CAP = 10
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('file', type=Path)
+    spec = parser.parse_args().file.resolve()
+    jobs = [line.split('\t', 4) for line in spec.read_text().splitlines() if line.strip()]
+    names = [row[0] for row in jobs]
+    if any(len(row) != 5 or not re.fullmatch(r'[\w.-]+', row[0]) for row in jobs) or len(set(names)) != len(names):
+        parser.error('expected five tab-separated fields and unique job names using letters, numbers, _, . or -')
+    briefs = [(spec.parent / row[2]).read_text() + '\n\nTask details: ' + row[4] for row in jobs]
+    logs = spec.parent / 'logs'
+    logs.mkdir(exist_ok=True)
+    active = {}
+    with Path(f'/tmp/codex-queue-{os.getuid()}.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        for (name, repo, _, effort, _), brief in zip(jobs, briefs):
+            while True:
+                processes = subprocess.check_output(['ps', '-axo', 'command='], text=True)
+                running = set(re.findall(r'^(?:\S+\s+)?(?:\S*/)?bin/codex-job\s+\S+\s+job/(\S+)', processes, re.M))
+                running.update(n for n, p in active.items() if p.poll() is None)
+                if len(running) < CAP and name not in running:
+                    break
+                time.sleep(2)
+            with (logs / f'{name}.log').open('w') as log:
+                active[name] = subprocess.Popen([str(Path(__file__).with_name('codex-job')), repo,
+                    f'job/{name}', brief, '-c', f'model_reasoning_effort={effort}'],
+                    stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
+        failed = False
+        for name, job in active.items():
+            code = job.wait()
+            failed |= code != 0
+            text = (logs / f'{name}.log').read_text(errors='replace')
+            prs = re.findall(r'https://github\.com/[\w.-]+/[\w.-]+/pull/\d+', text)
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            print(name, prs[-1] if code == 0 and prs else (lines[-1] if lines else f'exit {code}'))
+        print('QUEUE-EMPTY')
+    return int(failed)
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

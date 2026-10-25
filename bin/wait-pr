@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Wait up to 960 polls, 30 seconds apart, for merge/closure and optionally release.
+
+Closed without merge exits 1. Exhausted retries exit 2. Live requires the exact
+merge commit in the CARR release's git_sha.value field.
+"""
+import argparse
+import json
+import re
+import subprocess
+import time
+import urllib.request
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('repo')
+    parser.add_argument('pr', type=int)
+    parser.add_argument('target', choices=['merged', 'live'], nargs='?', default='merged')
+    args = parser.parse_args()
+    sha = None
+    for attempt in range(960):
+        if attempt:
+            time.sleep(30)
+        try:
+            if sha is None:
+                state, commit = subprocess.check_output(['gh', 'pr', 'view', str(args.pr),
+                    '--repo', args.repo, '--json', 'state,mergeCommit', '--jq',
+                    '[.state, .mergeCommit.oid // ""] | @tsv'], text=True, timeout=30).rstrip('\n').split('\t')
+                if state == 'CLOSED':
+                    print('CLOSED without merge')
+                    return 1
+                if state != 'MERGED' or not re.fullmatch(r'[0-9a-f]{40}', commit):
+                    continue
+                sha = commit
+                if args.target == 'merged':
+                    break
+            with urllib.request.urlopen('https://api.doctorcre.com/release', timeout=30) as response:
+                if json.load(response)['git_sha']['value'] == sha:
+                    break
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+            continue
+    else:
+        print('Retry limit reached')
+        return 2
+    print(args.target.upper(), sha)
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
