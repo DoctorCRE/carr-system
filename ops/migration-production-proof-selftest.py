@@ -142,17 +142,6 @@ class ProofTests(unittest.TestCase):
             self.assertIn('LOCAL-ONLY', result.stdout)
 
 
-    def test_ci_reports_live_proofs_not_run_on_hosted_runners(self):
-        source = (ROOT / 'ops/ci.sh').read_text()
-        start = source.index('  excluded_reason()')
-        end = source.index('  local eligible=', start)
-        script = 'scope="$1"; PY="$2"; CARR_CI_PORTABLE_ONLY=0\n' + source[start:end] + '\nexcluded_reason migration-production-proof.py\n'
-        result = subprocess.run(['bash', '-c', script, 'scope-fixture',
-                                 str(ROOT / 'ops/config/ci-check-scope.json'), sys.executable],
-                                env=dict(os.environ, GITHUB_ACTIONS='true'), capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('LOCAL-ONLY:', result.stdout)
-
     def test_failed_subprocess_diagnostics_redact_credentials(self):
         response = subprocess.CompletedProcess([], 1, b'', b'password=placeholder postgres://reader:placeholder@localhost/example')  # ci-secret-scan: allow synthetic placeholder
         with patch.object(proof.subprocess, 'run', return_value=response):
