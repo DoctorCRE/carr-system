@@ -1039,7 +1039,7 @@ const OPERATION_SCHEMAS = deepFreeze({
   // made HERE as well so an agent that somehow reached this function still
   // refuses before any load happens.
   "commit-winning-property": {
-    write: true, humanOnly: false, authorityOnly: true,
+    write: true, humanOnly: false, humanCallerOnly: true, authorityOnly: true,
     transition: "commit-winning-property", subject_kind: "assignment",
     keys: TRANSITION_PAYLOAD_KEYS, required: ["idempotency_key", "subject_ref", "evidence_refs"],
   },
@@ -1054,12 +1054,12 @@ const OPERATION_SCHEMAS = deepFreeze({
     keys: TRANSITION_PAYLOAD_KEYS, required: ["idempotency_key", "subject_ref", "evidence_refs"],
   },
   "record-deal-closing": {
-    write: true, humanOnly: false, authorityOnly: true,
+    write: true, humanOnly: false, humanCallerOnly: true, authorityOnly: true,
     transition: "record-deal-closing", subject_kind: "deal",
     keys: TRANSITION_PAYLOAD_KEYS, required: ["idempotency_key", "subject_ref", "evidence_refs"],
   },
   "cancel-pending-deal": {
-    write: true, humanOnly: false, authorityOnly: true,
+    write: true, humanOnly: false, humanCallerOnly: true, authorityOnly: true,
     transition: "cancel-pending-deal", subject_kind: "deal",
     keys: TRANSITION_PAYLOAD_KEYS, required: ["idempotency_key", "subject_ref", "evidence_refs"],
   },
@@ -1182,7 +1182,8 @@ export function v5J102ToolRegistrations() {
     name,
     store_operation: name,
     write: OPERATION_SCHEMAS[name].write,
-    humanOnly: OPERATION_SCHEMAS[name].humanOnly,
+    humanOnly: OPERATION_SCHEMAS[name].humanOnly || OPERATION_SCHEMAS[name].humanCallerOnly === true,
+    humanCallerOnly: OPERATION_SCHEMAS[name].humanCallerOnly === true,
     authorityOnly: OPERATION_SCHEMAS[name].authorityOnly,
     role: roles[name],
     handler: handlers[name],
@@ -4279,7 +4280,7 @@ export function creLifecycleStoreTools({
   }
   const tools = {};
   for (const registration of v5J102ToolRegistrations()) {
-    const { name, store_operation, write, humanOnly, authorityOnly, handler: method, role } = registration;
+    const { name, store_operation, write, humanOnly, humanCallerOnly, authorityOnly, handler: method, role } = registration;
     const run = async (client, actor, args) => {
       const store = createStore({ db: v5J102TransactionScopedHandle(client) });
       try {
@@ -4299,6 +4300,7 @@ export function creLifecycleStoreTools({
       write,
       writerConnection: true,
       ...(humanOnly ? { humanOnly: true } : {}),
+      ...(humanCallerOnly ? { humanCallerOnly: true } : {}),
       ...(authorityOnly ? { authorityOnly: true } : {}),
       description: `DoctorCRE v5 J102 CRE lifecycle. ${role}`,
       inputSchema: v5J102ToolInputSchema(store_operation),

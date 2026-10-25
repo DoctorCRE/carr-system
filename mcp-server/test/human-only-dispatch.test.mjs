@@ -81,7 +81,9 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "approve-lead-move",
     "approve-retrieval-proposals",
     "backfill-deal-items",
+    "cancel-pending-deal",
     "claim-lead",
+    "commit-winning-property",
 
     "complete-deal-item",
     "confirm-merge",
@@ -96,6 +98,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     // calendar adapter to READ their own carr.us mailbox, and its withdrawal.
     "record-commission-receipt",
     "record-correspondence-adapter-consent",
+    "record-deal-closing",
     "record-deal-item",
     // V5-J102: a lifecycle correction rewrites recorded history, so it is a
     // partner act on the authority connection.
