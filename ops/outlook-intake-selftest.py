@@ -620,19 +620,44 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([full], touch=False)
         self.assertEqual(len(self.fake.model_calls), 1)
 
-    def test_preview_refresh_expires_after_eight_days_with_an_unchanged_store(self):
-        preview = mail('pat@example.test', -timedelta(hours=1), body='Can we meet', kind='preview')
-        self.assertEqual(self.run_intake([preview]).state, 'succeeded')
-        path = self.out() / intake.REFRESH_LIST
-        self.assertEqual(len(json.loads(path.read_text())), 1)
-        decodes, calls = self.fake.decodes, len(self.fake.calls)
+    def test_expired_hydration_remains_visible_and_can_recover(self):
+        preview = mail('pat@example.test', -timedelta(hours=1), body='Hello', kind='preview', copy_key='expired')
+        self.run_intake([preview])
         self.fake.now += timedelta(days=8)
-        self.assertEqual(self.run_intake([preview], touch=False).state, 'succeeded')
-        self.assertEqual(json.loads(path.read_text()), [], 'expired previews leave the refresh list')
-        self.assertEqual(self.fake.decodes, decodes, 'expiry needs no decode')
-        self.assertEqual(len(self.fake.calls), calls, 'expiry needs no record call')
-        self.assertEqual(self.run_intake([preview], touch=False).reason, 'store_unchanged')
-        self.assertEqual(json.loads(path.read_text()), [], 'expiry persists across runs')
+        result = self.run_intake([preview], touch=False)
+        self.assertEqual(result.counts['hydration_expired'], 1)
+        [entry] = json.loads((self.out() / intake.REFRESH_LIST).read_text())
+        self.assertTrue(entry['expired'])
+        self.assertEqual(self.fake.model_calls, [])
+        self.fake.now += timedelta(minutes=30)
+        self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
+        self.fake.timeline[CLIENT.ref] = [{'verb': 'set-next-action', 'summary': 'ball → joe: Call first',
+                                         'occurred_at': NOW.isoformat()}]
+        full = {**preview, 'body': 'Hello. Send the floor plan.', 'body_kind': 'full'}
+        self.run_intake([full], touch=False)
+        self.assertEqual(len(self.fake.model_calls), 1)
+        self.assertEqual(self.fake.writes('set-next-action'), [], 'keep the intervening human action')
+        self.assertEqual(json.loads((self.out() / intake.REFRESH_LIST).read_text()), [])
+
+    def test_legacy_preview_null_is_reconsidered_after_full_body_note_ack(self):
+        preview = mail('pat@example.test', -timedelta(hours=1), body='Hello', kind='preview', copy_key='legacy')
+        self.run_intake([preview])
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        state['pending_full'][ident(preview)].pop('outbound')
+        state['pending_full'][ident(preview)].pop('who')
+        state_path.write_text(json.dumps(state))
+        full = {**preview, 'body': 'Hello. Send the floor plan.', 'body_kind': 'full'}
+        self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
+        self.fake.fail_verbs.add('log-activity')
+        self.fake.now += timedelta(minutes=30)
+        self.run_intake([full], touch=False)
+        self.assertEqual(self.fake.model_calls, [], 'full text must be acknowledged first')
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=30)
+        self.run_intake([full], touch=False)
+        self.assertEqual([m['text'] for m in self.fake.model_calls], [full['body']])
+        self.assertEqual(len(self.fake.writes('set-next-action')), 1)
 
     def test_once_the_full_body_decodes_it_is_logged_as_a_note_and_leaves_the_list(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='Can we meet', kind='preview', copy_key='k2')
