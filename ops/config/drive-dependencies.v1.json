@@ -81,28 +81,6 @@
       }
     },
     {
-      "id": "scheduled-calendar-ics",
-      "class": "scheduled",
-      "sources": [
-        "bin/pull-gmail-calendar.py"
-      ],
-      "path_pattern": "{{VAULT}}/**",
-      "producer": "calendar legacy ICS reader",
-      "consumers": [
-        "recovery operator"
-      ],
-      "canonicality": "recovery_only",
-      "replacement": {
-        "status": "accepted",
-        "target": "calendar record/event source",
-        "normal_path": "normal_path_refuses_missing_canonical_seam",
-        "accepted_by": "joe",
-        "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
-        "verified": "bin/pull-gmail-calendar.py refuses with MISSING_CANONICAL_SEAM naming the calendar record source (line 491); Drive needs --recovery --reason --recovery-root."
-      }
-    },
-    {
       "id": "scheduled-learning-render",
       "class": "scheduled",
       "sources": [
@@ -471,31 +449,6 @@
       "replacement": {
         "status": "not_a_runtime_reader",
         "target": "path recognition remains until retirement"
-      }
-    },
-    {
-      "id": "policy-nightly-canary-drive-capability-guard",
-      "class": "policy_guard",
-      "sources": [
-        "pipelines/availability_matcher.py"
-      ],
-      "path_pattern": "{{VAULT}}/**",
-      "reference_selectors": [
-        {
-          "source": "pipelines/availability_matcher.py",
-          "alias": "{{VAULT}}",
-          "line": 167,
-          "excerpt": "*\"CARR_VAULT\"*"
-        }
-      ],
-      "producer": "nightly availability canary",
-      "consumers": [
-        "canary capability boundary"
-      ],
-      "canonicality": "projection",
-      "replacement": {
-        "status": "not_a_runtime_reader",
-        "target": "canary rejects an ambient Drive capability before it reads a snapshot"
       }
     },
     {

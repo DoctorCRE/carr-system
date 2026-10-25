@@ -167,25 +167,17 @@ CODEX_PERMISSIONS_END = "# <<< CARR managed permissions <<<"
 CLAUDE_MANAGED_SETTINGS = (
     "/Library/Application Support/ClaudeCode/managed-settings.json"
     if sys.platform == 'darwin' else '/etc/claude-code/managed-settings.json')
-CODEX_REQUIREMENTS = '/etc/codex/requirements.toml'
 
 
 def managed_safety_plan():
     """Merge fixed restrictions into native managed policy, preserving other owners."""
-    import tomlkit
     sources = Path(REPO) / 'ops/config'
     claude_source = sources / 'claude-managed-settings.json'
-    codex_source = sources / 'codex-requirements.toml'
     claude = json.loads(read(CLAUDE_MANAGED_SETTINGS) or '{}')
     desired = json.loads(claude_source.read_text())
     deny = claude.setdefault('permissions', {}).setdefault('deny', [])
     deny.extend(rule for rule in desired['permissions']['deny'] if rule not in deny)
-    codex = tomlkit.parse(read(CODEX_REQUIREMENTS) or '')
-    desired_codex = tomlkit.parse(codex_source.read_text())
-    rules = codex.setdefault('rules', {}).setdefault('prefix_rules', [])
-    rules.extend(rule for rule in desired_codex['rules']['prefix_rules'] if rule not in rules)
-    return [(CLAUDE_MANAGED_SETTINGS, json.dumps(claude, indent=2) + '\n'),
-            (CODEX_REQUIREMENTS, tomlkit.dumps(codex))]
+    return [(CLAUDE_MANAGED_SETTINGS, json.dumps(claude, indent=2) + '\n')]
 
 
 def managed_safety_writable(plan):
@@ -204,14 +196,9 @@ def managed_safety_writable(plan):
 
 def install_managed_safety(plan, *, apply):
     """Render only owned policy fields in dry runs; never print unrelated settings."""
-    import tomllib
     for name, body in plan:
         sources = Path(REPO) / 'ops/config'
-        if name == CLAUDE_MANAGED_SETTINGS:
-            view = json.loads((sources / 'claude-managed-settings.json').read_text())
-        else:
-            parsed = tomllib.loads((sources / 'codex-requirements.toml').read_text())
-            view = {'rules': parsed['rules']}
+        view = json.loads((sources / 'claude-managed-settings.json').read_text())
         print(f"  {'write' if apply else 'would write'} managed safety policy: {name}")
         print(json.dumps(view, indent=2))
         if apply and read(name) != body:

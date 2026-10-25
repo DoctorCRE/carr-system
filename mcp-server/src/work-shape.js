@@ -146,16 +146,6 @@ const builderBriefSchema = {
 };
 
 export function workShapeTools({ withEnvelope, writeEvent, ToolError }) {
-  const decisionFields = {
-    trinity: trinitySchema,
-    hidden_assumption: { type: "string" },
-    repo_searches: { type: "array", minItems: 2, maxItems: 3, items: { type: "string" } },
-    maintained_repos: { type: "array", minItems: 5, items: repoSchema },
-    archetypes: { type: "array", minItems: 3, maxItems: 3, items: archetypeSchema },
-    chosen_key: { type: "string" }, mind_changing_fact: { type: "string" },
-    builder_brief: builderBriefSchema, source_url: { type: "string" },
-  };
-  const requiredDecisionFields = ["trinity", "hidden_assumption", "repo_searches", "maintained_repos", "archetypes", "chosen_key", "mind_changing_fact", "builder_brief"];
 
   return {
     "read-work-shape": {
@@ -222,58 +212,6 @@ export function workShapeTools({ withEnvelope, writeEvent, ToolError }) {
           human_quote: args.human_quote || null, idempotency_key: args.idempotency_key,
         });
         return { ok: true, work_request: { id: updated.id, ref: updated.ref, title: updated.title, state: updated.state, version: Number(updated.version), shape_disposition: updated.shape_disposition, shape_fixed_surface_ref: updated.shape_fixed_surface_ref, shape_rationale: updated.shape_rationale, shape_decided_by_actor_id: updated.shape_decided_by_actor_id, shape_decided_at: updated.shape_decided_at } };
-      }),
-    },
-    "write-work-shape": {
-      write: true,
-      description: "Append an evidence-backed implementation-shape decision to a canonical Work Request. Any qualified seat may write it. base_version is the current shape revision (0 for the first); work_request_base_version binds the exact request analyzed. Exactly three assumption-distinct archetypes, 2-3 searches, 5+ distinct maintained repositories, a falsifier, and an approximately 120-word builder brief are hard preconditions. This proposes form; it grants no human-only authority.",
-      inputSchema: {
-        type: "object", additionalProperties: false,
-        properties: {
-          idempotency_key: { type: "string" }, work_request: { type: "string" }, base_version: { type: "integer", minimum: 0 }, work_request_base_version: { type: "integer", minimum: 1 },
-          ...decisionFields, human_quote: { type: "string" },
-        },
-        required: ["idempotency_key", "work_request", "base_version", "work_request_base_version", ...requiredDecisionFields],
-      },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "write-work-shape", args, async () => {
-        const validation = shapeDecisionError(args);
-        if (validation) throw new ToolError(validation);
-        const work = (await c.query(`select id, ref, title, state, version, capture_idempotency_key, shape_disposition, shape_fixed_surface_ref, shape_rationale from ops.work_request where ref=$1 or id::text=$1 limit 1 for update`, [args.work_request])).rows[0];
-        if (!work) throw new ToolError({ error: "work_request_not_found", work_request: args.work_request });
-        if (!PREBUILD_STATES.has(work.state))
-          throw new ToolError({ error: "work_shape_frozen", work_request: work.ref, state: work.state, allowed_states: [...PREBUILD_STATES] });
-        if (work.shape_disposition !== "required")
-          throw new ToolError({ error: "work_shape_not_required", work_request: work.ref, shape_disposition: work.shape_disposition || null, resolution: "set the Work Request shape disposition to required against a fresh base version before writing analysis" });
-        // A sourced Shape needs the EFFECTIVE receipt-backed required disposition
-        // (original receipt or its forward correction) exactly current for this
-        // version, not merely the column; the database trigger enforces the same
-        // rule on insert. Unsourced requests keep the column check above.
-        if (work.capture_idempotency_key) {
-          const lineage = await sourcedDispositionLineage(c, work.id);
-          if (!lineage || lineage.backs_current_version !== true || lineage.effective?.disposition !== "required")
-            throw new ToolError({ error: "work_shape_not_required", work_request: work.ref, shape_disposition: work.shape_disposition || null, disposition_lineage: lineage,
-              resolution: "the sourced required disposition must be receipt-backed for the current Work Request version; record or correct it through set-work-shape-disposition first" });
-        }
-        if (Number(args.work_request_base_version) !== Number(work.version))
-          throw new ToolError({ error: "work_request_version_conflict", current_version: Number(work.version), work_request_base_version: Number(args.work_request_base_version), resolution: "re-read the Work Request and reassess its implementation shape; never attach reasoning based on stale requirements" });
-        const current = (await c.query(`select * from ops.work_shape_revision where work_request_id=$1 order by version desc limit 1`, [work.id])).rows[0];
-        const currentVersion = current ? Number(current.version) : 0;
-        if (Number(args.base_version) !== currentVersion)
-          throw new ToolError({ error: "version_conflict", current_version: currentVersion, base_version: Number(args.base_version), resolution: "re-read work shape and merge against the current revision; never retry blind" });
-        const next = currentVersion + 1;
-        const inserted = (await c.query(
-          `insert into ops.work_shape_revision
-             (work_request_id, work_request_version, version, trinity, hidden_assumption, repo_searches, maintained_repos, archetypes, chosen_key, mind_changing_fact, builder_brief, source_url, created_by_actor_id)
-           values ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11::jsonb,$12,$13)
-           returning *`,
-          [work.id, Number(work.version), next, JSON.stringify(args.trinity), args.hidden_assumption, JSON.stringify(args.repo_searches), JSON.stringify(args.maintained_repos), JSON.stringify(args.archetypes), args.chosen_key, args.mind_changing_fact, JSON.stringify(args.builder_brief), args.source_url || null, actor.id],
-        )).rows[0];
-        await writeEvent(c, actor, "write-work-shape", "ops_work_request", work.id, {
-          field: "implementation_shape", old: current ? { revision_id: current.id, version: currentVersion, chosen_key: current.chosen_key } : null,
-          new: { revision_id: inserted.id, version: next, chosen_key: inserted.chosen_key },
-          human_quote: args.human_quote || null, idempotency_key: args.idempotency_key,
-        });
-        return { ok: true, work_request: { id: work.id, ref: work.ref, title: work.title, state: work.state, version: Number(work.version), shape_disposition: work.shape_disposition }, shape: shapeRow(inserted) };
       }),
     },
   };

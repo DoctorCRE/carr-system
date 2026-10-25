@@ -226,12 +226,16 @@ A failed scheduled publish keeps local notes and questions for the next render.
 and says so. There is no static HTML copy. The launchd job runs
 `ops/progress-board-render.sh` from a repository checkout, which binds
 `CARR_REPO_ROOT` and the repo's `.venv` Python; never run an extracted copy.
-The installer uses fleet sync's canonical main checkout.
+Install from the canonical checkout on main with
+`./run.sh config install-progress-board --apply`; verify the canonical runtime
+path with `./run.sh config verify-progress-board` and
+`./run.sh config check-launchd-main-paths`. After moving that checkout, rerun
+the explicit installer.
 `install-progress-board --apply` and `verify-progress-board` preserve canonical
 `out/boards`; `--repo` accepts only that checkout. Feature worktrees are refused,
-including pre-merge verification. Fleet sync rebinds the agent after main
-advances. `check-launchd-main-paths` audits installed WorkingDirectory and
-program paths for non-main worktrees without changing plists.
+including pre-merge verification. `check-launchd-main-paths` audits installed
+WorkingDirectory and program paths for non-main worktrees without changing
+plists.
 A `done` card with no PR is Live (complete). A project card with a merged PR
 stays Merged until production shows it: only `--delivery-target worker`
 (carr-system) or `app` (doctorcre-app) completes from the release readback;
@@ -279,6 +283,9 @@ Before opening or updating any pull request, apply both skills to the diff:
 Both are required. Read each skill first; if one is missing, report it rather
 than claim the pass. The PR body's `Design and debt pass` section gives one
 line per skill: what it changed, or why nothing did.
+The body also states the PR's net lines (`+added / −removed`, tests included); when
+the net is positive, it names what the added code replaces or why nothing could be
+deleted instead (Joe 2026-10-24).
 This section is the canonical policy for both client entry points.
 
 Rigorous engineering work uses `/poteto-mode` from [upstream pstack](https://github.com/cursor/plugins/tree/main/pstack). Every job sizes itself first (`/grill-with-docs` if big, `/wayfinder` past one session) and codes test-first with `/tdd` (Pocock's). When pstack and Pocock overlap, the skill map in [tools/room-bridge/brief-footer.md](tools/room-bridge/brief-footer.md) names the one owner per process.

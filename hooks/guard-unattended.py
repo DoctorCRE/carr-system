@@ -2132,11 +2132,6 @@ def check(cmd, cwd=None):
                     word.split(':')[-1].removeprefix('refs/heads/') in {'main', 'master'}
                     for word in words[1:] if not word.startswith('-')):
                 return 'direct push to main — use the branch and pull-request delivery path'
-    from lib.github_spacing import reason as spacing_reason
-    reason = spacing_reason(executable)
-    if reason:
-        return reason
-
     reason = source_restore_reason(cmd, cwd)
     if reason:
         return reason

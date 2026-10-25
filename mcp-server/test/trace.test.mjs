@@ -757,7 +757,7 @@ test("withFailureRecording: a 4xx response (including 401, the routine-noise cas
 // assertion, and proves the actor-unresolved 401 path the same way.
 // ────────────────────────────────────────────────────────────────────────
 
-test("dispatch(): a genuine uncaught exception in a tool call schedules a failure record with failureClass verb_internal_error, and the caller is TOLD WHAT FAILED", async () => {
+test("dispatch(): a genuine uncaught exception in a tool call schedules a failure record with failureClass verb_internal_error, and the caller receives a correlation id", async () => {
   const waited = [];
   // env.DATABASE_URL_READER is absent: list-verbs is a read verb, so callTool's
   // read branch calls neon(undefined) BEFORE its own try/catch — a real,
@@ -775,22 +775,14 @@ test("dispatch(): a genuine uncaught exception in a tool call schedules a failur
   });
   const res = await dispatch(req, env, ctx, actor);
   const body = await res.json();
-  // CHANGED 2026-08-21, deliberately. This used to assert `body.error.code ===
-  // -32603`, the protocol-level envelope whose message is the literal string
-  // "internal error" and whose real cause sits in `data` — a field MCP clients
-  // routinely drop. That masking is what let the capability queue's close verb
-  // fail on every call it ever received while reporting nothing a caller could
-  // read, and what turned two short-id-into-a-uuid-column bugs into blind
-  // retries. A tool-call failure now comes back as a tool-level error result
-  // that names the verb and carries the cause.
+  // The public contract carries a log lookup id; diagnostics stay server-side.
   assert.equal(body.error, undefined, "a tool-call failure is no longer a protocol-level error");
   assert.equal(body.result.isError, true, "it is a tool result flagged as an error");
   const payload = JSON.parse(body.result.content[0].text);
   assert.equal(payload.error, "unhandled_verb_failure");
   assert.equal(payload.verb, "list-verbs", "the caller must be told WHICH verb threw");
-  assert.ok(payload.cause && payload.cause.length > 0, "the cause must actually be present, not an empty string");
-  assert.doesNotMatch(payload.cause, /fake:fake@/,
-    "the connection string in this env must be redacted out of the surfaced cause");
+  assert.equal(payload.cause, undefined, "exception diagnostics stay in server logs");
+  assert.match(payload.correlation_id, /^[a-f0-9-]{36}$/);
   assert.equal(waited.length, 1, "a failure record must STILL be scheduled — unmasking does not replace recording");
   await assert.doesNotReject(waited[0]);
 });

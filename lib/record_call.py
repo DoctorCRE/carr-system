@@ -32,7 +32,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,6 +45,7 @@ from lib.secret_redaction import redact_text, sensitive_env_values
 REPO = Path(__file__).resolve().parents[1]
 RUN_SH = REPO / "run.sh"
 PROFILE_ENV = "CARR_MCP_CLIENT_PROFILE"
+DEADLINE_ENV = "CARR_RECORD_DEADLINE_MS"
 
 OK, REFUSED, TRANSIENT, FAILED = "ok", "refused", "transient", "failed"
 OUTCOMES = (OK, REFUSED, TRANSIENT, FAILED)
@@ -87,11 +90,14 @@ def call_verb(verb: str, args: Mapping[str, Any], *, timeout: float | None = 120
               profile: str | None = None, env: Mapping[str, str] | None = None,
               runner: Runner | None = None) -> VerbResult:
     """Call one verb through `run.sh call`. Never raises for a failed call.
-    `runner` defaults to subprocess.run, looked up at call time."""
-    runner = runner or subprocess.run
-    child_env = {k: v for k, v in (os.environ if env is None else env).items() if k != PROFILE_ENV}
+    The default runner owns and reaps the complete subprocess group."""
+    runner = runner or _run_process
+    child_env = {k: v for k, v in (os.environ if env is None else env).items()
+                 if k not in (PROFILE_ENV, DEADLINE_ENV)}
     if profile is not None:
         child_env[PROFILE_ENV] = profile
+    child_env[DEADLINE_ENV] = (str(int(time.time() * 1000 + timeout * 1000))
+                               if timeout is not None else "0")
     secrets = sensitive_env_values(child_env)
 
     def line(text: str) -> str:
@@ -129,6 +135,36 @@ def call_verb(verb: str, args: Mapping[str, Any], *, timeout: float | None = 120
     if isinstance(body, dict) and (body.get("ok") is False or body.get("error")):
         return VerbResult(verb, REFUSED, reply=body, detail=line(json.dumps(body)))
     return VerbResult(verb, OK, reply=body)
+
+
+def _run_process(argv, *, cwd, env, stdin, capture_output, text, timeout):
+    with subprocess.Popen(argv, cwd=cwd, env=env, stdin=stdin,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          text=text, start_new_session=True) as proc:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except BaseException:
+            _stop_process_group(proc)
+            raise
+        return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+
+
+def _stop_process_group(proc):
+    def send(sig):
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            pass
+
+    send(signal.SIGTERM)
+    try:
+        proc.communicate(timeout=0.2)
+    except subprocess.TimeoutExpired:
+        pass
+    finally:
+        # A child may close its pipes and outlive the terminated group leader.
+        send(signal.SIGKILL)
+        proc.communicate()
 
 
 _UNPARSED = object()

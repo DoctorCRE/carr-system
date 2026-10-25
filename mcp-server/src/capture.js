@@ -1,4 +1,5 @@
 import { randomString } from "./google-oidc.js";
+import { publicError } from "./public-errors.js";
 
 const JSON_HEADERS = { "content-type": "application/json" };
 const json = (body, status = 200) =>
@@ -73,9 +74,9 @@ function isSha256(value) {
   return typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
 }
 
-function errorResponse(error) {
+function errorResponse(error, env) {
   if (error?.captureStatus) return json(error.payload, error.captureStatus);
-  return json({ error: "database_unavailable", detail: String(error?.message || error).slice(0, 200) }, 503);
+  return json(publicError(error, { env, fallback: "database_unavailable" }), 503);
 }
 
 function refuse(status, payload) {
@@ -122,7 +123,7 @@ async function claim(request, env, dependencies) {
     return json({ session_token: opaque, ttl_seconds: CAPTURE_SESSION_TTL_SECONDS });
   } catch (error) {
     if (error?.code === "23505") return json({ error: "nonce_replayed" }, 409);
-    return errorResponse(error);
+    return dependencies.errorResponse(error);
   }
 }
 
@@ -181,7 +182,7 @@ async function status(request, dependencies) {
       return updated.rows[0];
     });
     return json({ ok: true, state: result.state, at: result.state_at });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) { return dependencies.errorResponse(error); }
 }
 
 function validateCandidates(body) {
@@ -305,7 +306,7 @@ async function candidates(request, dependencies) {
           /* capture:candidates-result */`, [session.id, body.idempotency_key]);
     });
     return json({ ok: true, candidate_ids: result.rows.map(row => row.id) });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) { return dependencies.errorResponse(error); }
 }
 
 async function postCallCandidates(request, dependencies) {
@@ -364,7 +365,7 @@ async function postCallCandidates(request, dependencies) {
           /* capture:post-call-candidates-result */`, [session.id, body.idempotency_key]);
     });
     return json({ ok: true, candidate_ids: result.rows.map(row => row.id) });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) { return dependencies.errorResponse(error); }
 }
 
 async function callContext(request, dependencies) {
@@ -395,7 +396,7 @@ async function callContext(request, dependencies) {
       byDeal.set(row.deal_id, deal);
     }
     return json({ deals: [...byDeal.values()] });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) { return dependencies.errorResponse(error); }
 }
 
 async function postCallReport(request, dependencies) {
@@ -437,7 +438,7 @@ async function postCallReport(request, dependencies) {
       return { filed: true, already: false, candidate_count: total };
     });
     return json({ ok: true, ...result });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) { return dependencies.errorResponse(error); }
 }
 
 async function session(request, dependencies) {
@@ -474,13 +475,14 @@ async function session(request, dependencies) {
     candidate_statuses: row.candidate_statuses || [],
     post_call_report: row.post_call_report || { filed: false },
     meeting_record: row.post_call ? null : (row.meeting_record || null) });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) { return dependencies.errorResponse(error); }
 }
 
 export function createCaptureHandler(overrides = {}) {
-  const dependencies = { randomStringFn: randomString, ...overrides };
+  const configured = { randomStringFn: randomString, ...overrides };
   return {
     async fetch(request, env) {
+      const dependencies = { ...configured, errorResponse: error => errorResponse(error, env) };
       const path = new URL(request.url).pathname;
       if (path === "/capture/claim" && request.method === "POST") return claim(request, env, dependencies);
       if (path === "/capture/status" && request.method === "POST") return status(request, dependencies);

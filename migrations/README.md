@@ -49,7 +49,7 @@ filename/checksum ledger with the source. A regression in either side fails CI.
   an exact checked-in filename; it cannot skip an earlier pending dependency
   or hand-pick files out of order.
 - **0001 mirrors the vault schema file.** `0001_init.sql` is the applied copy
-  of `record-layer/schema-draft-2026-07-30.sql` (v2). Until first apply, keep
+  of the vault's original schema draft (v2). Until first apply, keep
   them identical — after first apply, the vault file freezes as the design
   record and changes land here as new migrations.
 - **Every new migration declares its risk in its header** (the comment lines
@@ -76,13 +76,24 @@ filename/checksum ledger with the source. A regression in either side fails CI.
   lead stages come from the live registry at import, human-reviewed, never
   guessed.
 
+## Resync a migration PR with main
+
+`tools/migrate.py` treats the applied ledger as a prefix, so a new migration must
+sort above every migration on main. When main moves under an open migration PR:
+
+1. Merge `origin/main`; resolve `db/schema.sql` with `git checkout --theirs db/schema.sql`.
+2. If the migration-open-pr check names a new slot, `git mv` the file to it and update its references (`git grep` the old name).
+3. Run `PATH=~/carr-system/.venv/bin:$PATH python ops/migration-shadow.py --base origin/main --write` to regenerate `db/schema.sql`.
+
+Briefs give the rule ("next number above main"), never a fixed number.
+
 ## Files
 
 | file | what |
 |---|---|
 | `0001_init.sql` | Full schema v2: tables, triggers, indexes, sequences (addendum §A + §D applied) |
 | `0002_seed.sql` | Actors, reference vocab, system_config thresholds |
-| (build day) `0003_roles_views.sql` | carr_writer / carr_reader roles + the views (v_deal_board, v_export_deals, v_integrity_digest, ...) — needs the Neon project to exist so grants bind to real roles |
+| `0004_roles_views.sql` | carr_writer / carr_reader roles and grants |
 
 ## Two migrations name a file that is not themselves (2026-08-15)
 

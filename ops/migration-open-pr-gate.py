@@ -23,12 +23,12 @@ def findings(main: set[str], pending: set[str], peer: Claims) -> list[str]:
     targets = allocate_integration_successors(main, pending, occupied_slots=peer.occupied)
     return [f'{name}: slot {name[:4]} belongs to '
             + (f'PR #{peer.owners[int(name[:4])]}' if int(name[:4]) > ceiling else 'main')
-            + f'; renumber to {targets[name]} with ./run.sh regen --pr <number>' for name in sorted(bad)]
+            + f'; rename to {targets[name]} and update its references' for name in sorted(bad)]
 
 
 def main() -> int:
     if os.environ.get('GITHUB_EVENT_NAME') != 'pull_request':
-        print('migration-open-pr-gate: open PR read runs on pull_request; local regen also checks claims')
+        print('migration-open-pr-gate: open PR read runs on pull_request')
         return 0
     try:
         event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())

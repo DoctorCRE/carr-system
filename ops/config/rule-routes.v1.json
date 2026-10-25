@@ -262,8 +262,7 @@
      "tools": [],
      "verbs": [
       "log-decision",
-      "update-loop",
-      "write-work-shape"
+      "update-loop"
      ],
      "bash_patterns": []
     }
@@ -369,10 +368,13 @@
    "routes": [
     {
      "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "write-work-shape"
+     "tools": [
+      "EnterPlanMode",
+      "UpdatePlan",
+      "update_plan",
+      "functions.update_plan"
      ],
+     "verbs": [],
      "bash_patterns": []
     }
    ]
@@ -715,11 +717,8 @@
      "tools": [],
      "verbs": [
       "accept-ready-plan",
-      "admit-engineering-slice",
       "propose-ready-plan",
-      "register-engineering-slice-plan",
-      "set-work-shape-disposition",
-      "write-work-shape"
+      "set-work-shape-disposition"
      ],
      "bash_patterns": []
     },
@@ -1159,9 +1158,7 @@
       "MultiEdit"
      ],
      "verbs": [
-      "advance-workflow-cutover-stage",
-      "open-workflow-cutover-plan",
-      "record-workflow-caller"
+      "advance-workflow-cutover-stage"
      ],
      "bash_patterns": [
       "\\A(?:(?:\\\\[^\\n]|\\\"(?:\\\\.|[^\\\"\\\\])*\\\"|'[^']*'|[^\\\\'\\\";&|()\\n])*[;&|()\\n])*[ \\t]*(?:['\\\"]?(?:/usr/bin/|/usr/local/bin/|/opt/homebrew/bin/|(?:\\./)?\\.venv/bin/)?python3['\\\"]?\\s+)?['\\\"]?(?:/(?:[^\\s\\'\\\";&|()]+/)?carr-system/|(?:\\./)?)bin/codex-job['\\\"]?(?=[\\s;&|()<>]|$)",
@@ -1415,7 +1412,6 @@
       "MultiEdit"
      ],
      "verbs": [
-      "correct-memory",
       "record-defect",
       "report-problem"
      ],
@@ -1686,8 +1682,7 @@
      ],
      "verbs": [
       "propose-ready-plan",
-      "accept-ready-plan",
-      "register-engineering-slice-plan"
+      "accept-ready-plan"
      ],
      "bash_patterns": [
       "\\A(?:(?:\\\\[^\\n]|\\\"(?:\\\\.|[^\\\"\\\\])*\\\"|'[^']*'|[^\\\\'\\\";&|()\\n])*[;&|()\\n])*[ \\t]*(?:['\\\"]?(?:/usr/bin/|/usr/local/bin/|/opt/homebrew/bin/|(?:\\./)?\\.venv/bin/)?python3['\\\"]?\\s+)?['\\\"]?(?:/(?:[^\\s\\'\\\";&|()]+/)?carr-system/|(?:\\./)?)bin/codex-job['\\\"]?(?=[\\s;&|()<>]|$)",
@@ -2295,7 +2290,6 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "assign-profile",
       "read-profiles"
      ],
      "bash_patterns": []
@@ -2318,7 +2312,6 @@
      "verbs": [
       "accept-ready-plan",
       "propose-ready-plan",
-      "register-engineering-slice-plan",
       "set-work-shape-disposition"
      ],
      "bash_patterns": [
@@ -2334,8 +2327,7 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "propose-ready-plan",
-      "write-work-shape"
+      "propose-ready-plan"
      ],
      "bash_patterns": []
     }
@@ -2603,9 +2595,7 @@
      "tools": [],
      "verbs": [
       "new-lead",
-      "next-signals",
-      "record-finding",
-      "record-signal"
+      "record-finding"
      ],
      "bash_patterns": []
     }
@@ -3058,8 +3048,7 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "propose-ready-plan",
-      "register-engineering-slice-plan"
+      "propose-ready-plan"
      ],
      "bash_patterns": []
     }
@@ -3178,8 +3167,6 @@
       "close-loop",
       "complete-action",
       "log-decision",
-      "mark-slice-completion",
-      "propose-slice-completion",
       "update-loop"
      ],
      "bash_patterns": [
@@ -3232,9 +3219,7 @@
       "Edit",
       "MultiEdit"
      ],
-     "verbs": [
-      "correct-memory"
-     ],
+     "verbs": [],
      "bash_patterns": [
       "\\bgit\\s+(?:commit|push)\\b",
       "\\bgh\\s+pr\\s+(?:create|edit|view)\\b"
@@ -3257,9 +3242,7 @@
     {
      "kind": "trigger",
      "tools": [],
-     "verbs": [
-      "review-engineering-slice"
-     ],
+     "verbs": [],
      "bash_patterns": [
       "\\bgh\\s+pr\\s+review\\b"
      ]

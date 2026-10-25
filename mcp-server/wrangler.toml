@@ -224,3 +224,6 @@ binding = "carr_documents"
 bucket_name = "carr-documents"
 
 # ─────────────────────────────────────────────────────────────────────────────
+
+[ai]
+binding = "AI"

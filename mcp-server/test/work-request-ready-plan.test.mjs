@@ -17,7 +17,7 @@ const ACCEPT = { idempotency_key: "20000000-0000-0000-0000-000000000099", human_
 async function refused(fn) { try { await fn(); assert.fail("expected refusal"); } catch (error) { assert.ok(error instanceof ToolError); return error.payload; } }
 
 class PlanFake {
-  constructor({ registryError = false } = {}) { this.calls = []; this.toolCalls = new Map(); this.registryError = registryError; }
+  constructor({ registryError = false, packIndex } = {}) { this.calls = []; this.toolCalls = new Map(); this.registryError = registryError; this.packIndex = packIndex; }
   async query(text, params = []) {
     const sql = text.replace(/\s+/g, " ").trim(); this.calls.push({ sql, params });
     if (/^(savepoint|release savepoint|rollback to savepoint)/i.test(sql)) return { rows: [] };
@@ -28,11 +28,11 @@ class PlanFake {
       scope_summary: PROPOSE.scope_summary, runbook_ref: PROPOSE.runbook_ref,
       runbook_revision_id: "50000000-0000-0000-0000-000000000001", runbook_content_hash: `sha256:${"b".repeat(64)}` }] };
     if (sql.includes("rule-delivery-source-snapshot")) {
-      if (this.registryError) throw new Error("synthetic registry unavailable");
+      if (this.registryError) throw this.registryError;
       return { rows: [{ map_versions: 1,
       map_digest: "f".repeat(64), tagged_rules: 2, work_request_title: "Bounded maintenance",
       desired_outcome: "Keep the existing bounded behavior truthful.", acceptance_criteria: [],
-      pack_index: [
+      pack_index: this.packIndex ?? [
         { pack: "engineering-git", title: "Engineering", triggers: ["migration", "schema", "deploy", "test"], rule_count: 2 },
         { pack: "source-study", title: "Study", triggers: ["new capability"], rule_count: 1 },
       ] }] };
@@ -250,12 +250,48 @@ test("migration 0492 rebases proposal, acceptance, and both 0333 outcome guards 
   assert.match(acceptOutcome, /where x\.slug=actor_slug and x\.active and x\.kind='human' for share;/, "0333 human acceptance survives");
 });
 
-test("catalog failure rolls back its savepoint and leaves proposal audit writes committable", async () => {
-  const db = new PlanFake({ registryError: true });
+test("catalog failure rolls back its savepoint and leaves proposal audit writes committable", async t => {
+  const logs = [];
+  t.mock.method(console, "error", line => logs.push(JSON.parse(line)));
+  const db = new PlanFake({ registryError: new Error("synthetic registry unavailable") });
   const out = await executeRegisteredTool(db, JOE, "propose-ready-plan", structuredClone(PROPOSE));
   assert.equal(out.rule_delivery_source.status, "unavailable");
   assert.equal(out.rule_delivery_source.reason, "rule_delivery_registry_unavailable");
+  assert.match(out.rule_delivery_source.correlation_id, /^[a-f0-9-]{36}$/);
+  assert.ok(logs.some(log => log.correlation_id === out.rule_delivery_source.correlation_id));
   assert.ok(db.calls.some(call => /^rollback to savepoint siep02_rule_delivery_source/i.test(call.sql)));
   assert.ok(db.calls.some(call => call.sql.startsWith("insert into event")));
   assert.ok(db.calls.some(call => call.sql.startsWith("insert into tool_call")));
+});
+
+for (const [path, options, reason, diagnostic] of [
+  ["registry", { registryError: new Error("SELECT private_table; private_constraint; synthetic-private-row") },
+    "rule_delivery_registry_unavailable", "SELECT private_table; private_constraint; synthetic-private-row"],
+  ["derivation", { packIndex: [] }, "rule_delivery_source_invalid", "a nonempty typed rule pack index is required"],
+]) test(`ready-plan ${path} recovery retains the successful receipt without exposing diagnostics`, async t => {
+  const logs = [];
+  t.mock.method(console, "error", line => logs.push(JSON.parse(line)));
+  const correlationId = "d170d000-0000-4000-8000-000000000041";
+  const db = new PlanFake(options);
+  const out = await executeRegisteredTool(db, { ...JOE, correlation_id: correlationId },
+    "propose-ready-plan", structuredClone(PROPOSE));
+  assert.equal(out.ok, true);
+  assert.equal(out.plan_ref, "PLAN-000001");
+  assert.equal(out.plan_hash, ACCEPT.plan_hash);
+  assert.equal(out.state, "triaged");
+  assert.deepEqual(out.rule_delivery_source, { schema_version: "rule-delivery-source.v1",
+    status: "unavailable", reason, correlation_id: correlationId });
+  assert.doesNotMatch(JSON.stringify(out), /detail|stack|SELECT|private_table|private_constraint|synthetic-private-row/);
+  assert.equal(JSON.stringify(out).includes(diagnostic), false);
+  assert.ok(logs.some(log => log.correlation_id === correlationId && log.diagnostic.stack.includes(diagnostic)));
+  assert.ok(db.calls.some(call => call.sql === "release savepoint siep02_rule_delivery_source"));
+  if (path === "registry")
+    assert.ok(db.calls.some(call => call.sql === "rollback to savepoint siep02_rule_delivery_source"));
+  assert.ok(db.calls.some(call => call.sql.startsWith("insert into event")));
+  const receipt = db.toolCalls.get(PROPOSE.idempotency_key);
+  assert.deepEqual(receipt.response, out);
+  const replay = await executeRegisteredTool(db, { ...JOE, correlation_id: correlationId },
+    "propose-ready-plan", structuredClone(PROPOSE));
+  assert.equal(replay.replayed, true);
+  assert.deepEqual(replay.rule_delivery_source, out.rule_delivery_source);
 });

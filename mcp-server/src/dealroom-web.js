@@ -6,6 +6,7 @@
 // actor for the existing MCP and pipeline handlers. No identity or deal data
 // is stored in the cookie.
 
+import { publicError } from "./public-errors.js";
 import {
   exchangeGoogleCode,
   googleAuthorizationUrl,
@@ -543,7 +544,7 @@ async function roomTurns(request, env, session, dependencies) {
   try {
     read = await dependencies.roomReadFn(env, { after_seq: paging.after, limit: paging.limit });
   } catch (error) {
-    return json({ error: "wire_unavailable", detail: String(error?.message || error).slice(0, 200) }, 503);
+    return json(publicError(error, { env, fallback: "wire_unavailable" }), 503);
   }
   if (!read || read.ok !== true) return json({ error: read?.error || "wire_unavailable" }, 503);
   // The CSRF token rides the authenticated read so the composer needs no second
@@ -571,7 +572,7 @@ async function roomLatest(request, env, session, dependencies) {
       before_seq: rawBefore === null ? undefined : Number(rawBefore), limit, mode: rawMode,
     });
   } catch (error) {
-    return json({ error: "wire_unavailable", detail: String(error?.message || error).slice(0, 200) }, 503);
+    return json(publicError(error, { env, fallback: "wire_unavailable" }), 503);
   }
   if (!read || read.ok !== true) return json({ error: read?.error || "wire_unavailable" }, 503);
   return json({ ...read, actor: { slug: session.actor.slug, display: session.actor.display },
@@ -583,7 +584,7 @@ async function roomQueue(_request, env, _session, dependencies) {
   if (typeof dependencies.queueReadFn !== "function") return json({ error: "not_found" }, 404);
   let read;
   try { read = await dependencies.queueReadFn(env, {}); }
-  catch (error) { return json({ error: "queue_unavailable", detail: String(error?.message || error).slice(0, 200), live: false }, 503); }
+  catch (error) { return json({ ...publicError(error, { env, fallback: "queue_unavailable" }), live: false }, 503); }
   if (!read || read.ok !== true) return json({ error: read?.error || "queue_unavailable", live: false }, 503);
   // Deliberately no actor or CSRF token here: this is a small, exact read
   // contract. The enqueue form obtains its synchronizer token from /turns.
@@ -650,7 +651,7 @@ async function roomTurnPost(request, env, session, dependencies) {
       originChannel: "browser-human", originActor: session.actor.slug,
     });
   } catch (error) {
-    return json({ error: "wire_unavailable", detail: String(error?.message || error).slice(0, 200) }, 503);
+    return json(publicError(error, { env, fallback: "wire_unavailable" }), 503);
   }
   if (!posted || posted.ok !== true) return json({ error: posted?.error || "wire_unavailable" }, posted?.error === "key_reuse" ? 409 : 503);
   return json(posted);

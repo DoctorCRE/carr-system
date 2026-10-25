@@ -48,11 +48,8 @@ test('retiring the classifier gateway removes its store and functions while pres
       assert.deepEqual((await client.query("select tablename from pg_publication_tables where pubname='fixture_publication'")).rows,
         [{ tablename: 'unrelated_record' }]);
       assert.equal((await client.query("select count(*)::integer n from pg_indexes where indexname in ('tool_call_jev_receipt_idx','tool_call_jev_settlement_idx')")).rows[0].n, 0);
-      const { SCAC_MUTATION_CURRENT_DB_GRANTS: expected } = await import('../src/scac-mutation-registry.current.generated.js');
-      const retirementContract = Object.fromEntries(
-        ['registry_version', 'registry_digest', 'secdef_execute', 'retired_secdef_execute']
-          .map(key => [key, expected[key]]));
-      assert.deepEqual((await client.query('select ops.scac_current_grant_contract() value')).rows[0].value, retirementContract);
+      const expected = JSON.parse(readFileSync(migration, 'utf8').match(/\$current_grants\$([\s\S]*?)\$current_grants\$/)[1]);
+      assert.deepEqual((await client.query('select ops.scac_current_grant_contract() value')).rows[0].value, expected);
       const retired = expected.retired_secdef_execute.filter(row => /ops\.(?:jev_call_receipt_integrity|read_jev_call_receipts|record_jev_call_receipt)\(/.test(row.signature));
       assert.equal(retired.length, 5, 'all retired Jev execute grants remain accounted for by the sealed catalog');
     } finally {
