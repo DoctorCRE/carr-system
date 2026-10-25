@@ -6,7 +6,6 @@ import subprocess
 import sys
 import unittest
 
-import migrate
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTROL = 'delegation_names_model_and_effort'
@@ -57,9 +56,9 @@ class ApprovedControlMigrationTests(unittest.TestCase):
                         check=True, capture_output=True)
         with psycopg.connect(cls.dsn, autocommit=True) as conn:
             conn.execute('create role neondb_owner')
-        loaded = subprocess.run([str(cls.bins / 'psql'), cls.dsn, '-X', '-v', 'ON_ERROR_STOP=1', '-q',
-                                 '-f', str(ROOT / 'db/schema.sql')], env=cls.child,
-                                capture_output=True, text=True, timeout=120)
+        source = subprocess.check_output(['git', 'show', 'origin/main:db/schema.sql'], cwd=ROOT, text=True)
+        loaded = subprocess.run([str(cls.bins / 'psql'), cls.dsn, '-X', '-v', 'ON_ERROR_STOP=1', '-q'],
+                                input=source, env=cls.child, capture_output=True, text=True, timeout=120)
         if loaded.returncode:
             raise RuntimeError(loaded.stderr[-2000:])
         sys.path.insert(0, str(ROOT / 'ops'))
@@ -68,6 +67,47 @@ class ApprovedControlMigrationTests(unittest.TestCase):
             seed_reviewed_rule_projection(cur, slug='control-retirement-fixture',
                 title='Control retirement regression', rule_label='Control retirement fixture',
                 uuid_tail='000000009445')
+        result = subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'), '--apply', '--yes'],
+            cwd=ROOT, env={**cls.child, 'DATABASE_URL': cls.dsn}, capture_output=True, text=True, timeout=120)
+        if result.returncode:
+            raise RuntimeError(result.stdout + result.stderr)
+
+    def test_source_integrity_and_grants_survive_retirement(self):
+        with self.psycopg.connect(self.dsn, autocommit=True) as conn:
+            conn.execute('update doctrine_meta set generation=generation+1 where id=1')
+            for statement, message in (
+                ("update schema_migrations set sha256=repeat('f',64) where filename=(select min(filename) from schema_migrations)", 'schema ledger prefix rewrite refused'),
+                ("delete from schema_migrations where filename=(select max(filename) from schema_migrations)", 'schema ledger rollback refused'),
+                ('update doctrine_meta set generation=generation-1 where id=1', 'doctrine generation rollback refused'),
+                ('delete from ops.rule_load_layer where rule_id=(select rule_id from ops.rule_load_layer limit 1)', 'rule delivery projection is not activation-safe'),
+            ):
+                with self.subTest(integrity=message), self.assertRaisesRegex(self.psycopg.errors.RaiseException, message):
+                    with conn.transaction():
+                        conn.execute(statement)
+            for role in ('carr_reader', 'carr_writer', 'carr_jobs', 'carr_authority'):
+                self.assertFalse(conn.execute("select has_function_privilege(%s,'ops.policy_integrity_snapshot()','execute')", (role,)).fetchone()[0])
+            self.assertTrue(conn.execute("select has_table_privilege('carr_writer','public.deal_vendor_assignment','insert')").fetchone()[0])
+            expected = conn.execute("select ops.scac_current_grant_contract()->'runtime_dml_grants'").fetchone()[0]
+            actual = conn.execute('select ops.scac_runtime_dml_grant_snapshot()').fetchone()[0]
+            self.assertEqual(actual, {'schema_version': 'scac-runtime-dml-grants.v1',
+                                     'entry_count': expected['count'], 'grant_digest': expected['digest']})
+            state = conn.execute('select ops.scac_reference_monitor_state()').fetchone()[0]
+            self.assertEqual(state['grant_state'], 'current')
+            self.assertEqual(state['missing_guard_count'], 0)
+            self.assertEqual(state['guard_state'], 'complete')
+            self.assertEqual(conn.execute("""select count(*) from pg_proc p,
+                lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+                where p.oid='ops.policy_integrity_snapshot()'::regprocedure
+                and a.grantee=0 and a.privilege_type='EXECUTE'""").fetchone()[0], 0)
+            self.assertTrue(conn.execute('select ops.scac_mutation_catalog_v118_current()').fetchone()[0])
+            for statement in (
+                'grant update on public.doctrine_embedding to carr_writer',
+                'grant execute on function public.search_doctrine_semantic(text,uuid,text[],integer,text,vector[]) to public',
+            ):
+                with conn.transaction(force_rollback=True):
+                    conn.execute(statement)
+                    self.assertFalse(conn.execute('select ops.scac_mutation_catalog_v118_current()').fetchone()[0])
+            self.assertTrue(conn.execute('select ops.scac_mutation_catalog_v118_current()').fetchone()[0])
 
     def test_approved_contracts_allow_forward_maintenance_and_preserve_evidence(self):
         with self.psycopg.connect(self.dsn, autocommit=True) as conn:
@@ -99,8 +139,8 @@ class ApprovedControlMigrationTests(unittest.TestCase):
                 ('delete from ops.rule_control_binding where rule_id=%s', (rule,)),
                 ('delete from ops.rule_enforcement_point where rule_id=%s', (rule,)),
             ):
-                with self.subTest(statement=statement), conn.transaction(force_rollback=True):
-                    conn.execute(statement, params)
+                with self.subTest(statement=statement), conn.transaction():
+                    self.assertEqual(conn.execute(statement, params).rowcount, 1)
             self.assertEqual(conn.execute('select to_jsonb(ar) from ops.rule_approval_receipt ar where rule_id=%s', (rule,)).fetchone(), receipt)
             with self.assertRaisesRegex(self.psycopg.errors.RaiseException, 'append-only'):
                 with conn.transaction():
