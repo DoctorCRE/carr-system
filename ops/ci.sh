@@ -1047,13 +1047,13 @@ check_binding() {
       problems="$problems worker-boot"
       tail -40 "$LOGDIR/binding-worker-boot.log" >&2
     fi
-  else
-    printf '        \033[33mskip\033[0m  worker-boot-check — wrangler not installed (run npm install in mcp-server/)\n' >&2
   fi
   if [ -n "$problems" ]; then
     bad binding "drift:$problems"
+  elif [ ! -x mcp-server/node_modules/.bin/wrangler ]; then
+    skip binding "worker boot not checked; wrangler not installed (run npm ci in mcp-server/)"
   else
-    ok binding "worker config declared; worker boot checked when wrangler is installed"
+    ok binding "worker config declared; worker boot passed"
   fi
 }
 
