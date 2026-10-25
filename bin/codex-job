@@ -5,9 +5,11 @@ import os
 from pathlib import Path
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 
 python = Path(__file__).resolve().parents[1] / '.venv/bin/python'
@@ -27,11 +29,14 @@ def main():
     repo = args.repo
     if not Path(repo).exists() and re.fullmatch(r'[\w.-]+/[\w.-]+', repo):
         repo = f'https://github.com/{repo}.git'
-    with tempfile.TemporaryDirectory(prefix='codex-job-') as workspace:
-        clone = Path(workspace) / 'checkout'
+    workspace = Path(tempfile.mkdtemp(prefix='codex-job-'))
+    clone = workspace / 'checkout'
+    status, cloned = 1, False
+    try:
         print(f'Clone: {clone}', file=sys.stderr, flush=True)
         subprocess.run(['git', 'clone', '--quiet', '--depth', '1', '--', repo, str(clone)],
                        check=True, stdin=subprocess.DEVNULL)
+        cloned = True
         subprocess.run(['git', '-C', str(clone), 'checkout', '--quiet', '-b', args.branch], check=True)
         subprocess.run(['git', '-C', str(clone), 'config', 'user.email',
                         'jbookout@users.noreply.github.com'], check=True)
@@ -41,10 +46,35 @@ def main():
                    '-o', str(result)]
         for config in args.config:
             command.extend(['-c', config])
-        run = subprocess.run([*command, brief], stdin=subprocess.DEVNULL, stdout=sys.stderr)
+        child = subprocess.Popen([*command, brief], stdin=subprocess.DEVNULL,
+                                 stdout=sys.stderr, start_new_session=True)
+        pgid = child.pid
+        try:
+            code = child.wait()
+        finally:
+            try:
+                os.killpg(pgid, signal.SIGTERM)
+                try:
+                    time.sleep(0.2)
+                finally:
+                    os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            finally:
+                child.wait()
+        status = code
         if result.exists():
-            print(result.read_text(), end='', flush=True)
-        return run.returncode
+            try:
+                print(result.read_text(), end='', flush=True)
+            except BrokenPipeError:
+                with open(os.devnull, 'w') as sink:
+                    os.dup2(sink.fileno(), sys.stdout.fileno())
+        return status
+    finally:
+        if status == 0 or not cloned:
+            shutil.rmtree(workspace)
+        else:
+            print(f'Retained checkout: {clone}', file=sys.stderr, flush=True)
 
 
 def terminate(signum, _frame):
@@ -53,6 +83,7 @@ def terminate(signum, _frame):
 
 if __name__ == '__main__':
     signal.signal(signal.SIGTERM, terminate)
+    signal.signal(signal.SIGINT, terminate)
     try:
         raise SystemExit(main())
     except subprocess.CalledProcessError as error:
