@@ -180,11 +180,11 @@ test("the Worker checks the unattended door before the local-token door", () => 
 
 // ---------- the humanCallerOnly flag ----------
 
-test("identity merges and retrieval curation require literal human callers", () => {
+test("identity merges, retrieval curation and board answers require literal human callers", () => {
   assert.equal(TOOLS["confirm-merge"].humanCallerOnly, true);
   assert.equal(TOOLS["confirm-merge"].humanOnly, true);
   const flagged = Object.keys(TOOLS).filter(name => TOOLS[name].humanCallerOnly === true);
-  assert.deepEqual(flagged.sort(), ["approve-retrieval-proposals", "confirm-merge", "retire-retrieval-curation"]);
+  assert.deepEqual(flagged.sort(), ["answer-board-question", "approve-retrieval-proposals", "confirm-merge", "retire-retrieval-curation"]);
 });
 
 test("confirm-merge refuses the unattended actor before database access", async () => {
