@@ -279,10 +279,9 @@ PYEOF
     if [ "$grc" -eq 124 ]; then
       failures="$failures TIMEOUT:$base"
       gates_timed_out=1
-      printf '        \033[31mTIMEOUT\033[0m  %s — exceeded %ss (pool-scaled); aborting remaining gate selftests\n' \
+      printf '        \033[31mTIMEOUT\033[0m  %s — exceeded %ss (pool-scaled); reporting all completed Python gate results\n' \
         "$base" "$pooled_timeout" >&2
-      tail -12 "$LOGDIR/gate-$base.log" >&2
-      break
+      fail_tail "$LOGDIR/gate-$base.log"
     elif [ "$grc" -eq 78 ]; then
       skiplist="$skiplist $base"
       printf '        \033[33mnot run\033[0m  %s — NOT CONFIGURED (exit 78): %s\n' \
