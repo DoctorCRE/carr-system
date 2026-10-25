@@ -122533,7 +122533,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0970_vendor_relationship_read_indexes.sql	51988621bb715075a772cd1b6985c814df24b6c96c47ac0cbb4976624318aca3	1970-01-01 00:00:00+00
 0971_retire_cache_observations.sql	d14e2a48c38ddc7a1ad347bc4fceeff48cd7b32b381c966cfc464dcc38b8ba2b	1970-01-01 00:00:00+00
 0973_deal_history_read_indexes.sql	44e55f3efd9fdece86cd31aea3cd502471bd2057e461f02d71363a413e451dcf	1970-01-01 00:00:00+00
-0974_client_portal.sql	f2a222bebc61eabb575412388948622625beb76ffbf19d7660edfe17565f4750	1970-01-01 00:00:00+00
+0975_client_portal.sql	f2a222bebc61eabb575412388948622625beb76ffbf19d7660edfe17565f4750	1970-01-01 00:00:00+00
 \.
 
 
