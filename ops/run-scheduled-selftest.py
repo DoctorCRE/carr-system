@@ -39,12 +39,20 @@ class ScheduledRunTests(unittest.TestCase):
         child = self.root / "child.py"
         child.write_text("import sys\n"
                          "print('SYNTHETIC_PRIVATE_BODY')\n"
-                         "print('SYNTHETIC_PRIVATE_ERROR', file=sys.stderr)\n"
+                         "print('synthetic intake failure', file=sys.stderr)\n"
                          f"print({('outlook-intake-receipt ' + json.dumps(receipt))!r})\n"
                          f"sys.exit({code})\n")
         return subprocess.run(["/bin/zsh", str(self.root / "bin/run-scheduled.sh"),
                                "outlook-intake", "outlook.intake", sys.executable, str(child)],
                               cwd=self.root, env=self.env, text=True, capture_output=True, timeout=15)
+
+    def test_failed_intake_stderr_is_appended_to_existing_log(self):
+        log = self.root / "out/run-scheduled.log"
+        log.parent.mkdir()
+        log.write_text("previous run\n")
+        result = self.invoke_intake({"state": "failed", "reason": "writes_failed", "counts": {}})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("previous run\nsynthetic intake failure\n", log.read_text())
 
     def test_intake_receipt_preserves_reason_and_counts_without_private_output(self):
         result = self.invoke_intake({"state": "failed", "reason": "writes_failed",
