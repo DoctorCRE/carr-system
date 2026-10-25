@@ -139,13 +139,16 @@ def main():
     def failed(exc):
         detail = redact_text(f'{type(exc).__name__}: {exc}', known_secrets=sensitive_env_values(os.environ))[:500]
         print(f'routine {args.id}: FAIL {detail}', file=sys.stderr)
+        cause = None
         if not args.dry_run:
             try:
                 ctx.failure(detail)
             except Exception as reporting_error:
                 cause = redact_text(f'{type(reporting_error).__name__}: {reporting_error}',
                                     known_secrets=sensitive_env_values(os.environ))[:500]
-                print(f'routine failure-loop write unavailable: {cause}; inspect private journal and recorded job failure', file=sys.stderr)
+        print('routine failure evidence: ' + json.dumps({
+            'primary_error': detail, 'reporting_error': cause, 'routine': args.id,
+        }), file=sys.stderr)
         return 1
 
     if args.dry_run:

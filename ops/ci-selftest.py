@@ -801,6 +801,30 @@ def test_fail_tail_withholds_the_window_when_it_cannot_redact():
     check("and where the captured log actually is",
           str(log) in out, out)
 
+def test_gates_never_run_the_production_diagnostic():
+    with ci_fixture() as root:
+        (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
+        diagnostic = root / "ops/migration-production-proof.py"
+        diagnostic.write_text(
+            "from pathlib import Path\n"
+            "Path('production-diagnostic-ran').touch()\n"
+            "raise SystemExit(9)\n")
+        marker = root / "production-diagnostic-ran"
+        ordinary = root / "ops/ordinary-selftest.py"
+        for hosted, portable in (("false", "0"), ("false", "1"), ("true", "0")):
+            for status in (0, 1):
+                marker.unlink(missing_ok=True)
+                ordinary.write_text(f"print('ordinary suite ran')\nraise SystemExit({status})\n")
+                rc, out = run(["--strict", "--only", "gates"], root=root,
+                              env={"GITHUB_ACTIONS": hosted, "CARR_CI_PORTABLE_ONLY": portable})
+                case = f"hosted={hosted}, portable={portable}, ordinary exit={status}"
+                check(f"gates never launch the production diagnostic ({case})",
+                      not marker.exists(), out)
+                check(f"gates still run ordinary selftests ({case})",
+                      "ordinary suite ran" in out, out)
+                check(f"gates preserve the ordinary selftest verdict ({case})", rc == status, out)
+
+
 def test_gates_report_every_completed_result_after_a_timeout():
     with ci_fixture() as root:
         ci = root / "ops/ci.sh"
@@ -1453,6 +1477,7 @@ def main(argv=None):
                test_a_failing_gates_output_is_printed_whole_when_it_is_short,
                test_a_long_failing_gate_log_is_tailed_and_still_redacted,
                test_fail_tail_withholds_the_window_when_it_cannot_redact,
+               test_gates_never_run_the_production_diagnostic,
                test_gates_report_every_completed_result_after_a_timeout,
                test_gates_selftests_have_a_process_group_watchdog,
                test_push_floor_defers_the_gates_class_instead_of_running_it,

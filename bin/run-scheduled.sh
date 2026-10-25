@@ -42,7 +42,7 @@ fi
 STARTED="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
 if [ -n "$receipt_file" ]; then
-  "$@" > "$receipt_file" 2>/dev/null
+  "$@" > "$receipt_file" 2>> "$LOG"
   rc=$?
 else
   "$@"
