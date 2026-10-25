@@ -58,7 +58,7 @@ RECORD_VIEWS = (
 INTERNAL_DOMAIN = "carr.us"
 
 
-def read_view(view):
+def read_view(view, *, credential_file=None):
     """Column names and all rows of one export view, through the exporters' login.
 
     ``view`` is always one of the RECORD_VIEWS constants, never caller input.
@@ -67,7 +67,7 @@ def read_view(view):
     """
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from exporters.common import connect
-    with connect() as conn, conn.cursor() as cur:
+    with connect(credential_file=credential_file) as conn, conn.cursor() as cur:
         cur.execute(f"select * from {view}")
         cols = [d[0] for d in cur.description]
         return cols, [dict(zip(cols, row)) for row in cur.fetchall()]

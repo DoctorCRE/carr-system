@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from outlook_test_support import write_settings
 
 
 class InventoryTests(unittest.TestCase):
@@ -84,7 +85,8 @@ class FailoverTests(unittest.TestCase):
         config['jobs'] = [j for j in config['jobs'] if j['label'].startswith('com.carr.outlook-')]
         self.assertEqual(len(config['jobs']), 3)
         with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
+            root = Path(raw).resolve()
+            write_settings(root, ROOT, services=['intake'])
             commands = []
             def launchctl(argv, **kwargs):
                 commands.append(argv)
@@ -143,14 +145,17 @@ class FailoverTests(unittest.TestCase):
         config = json.loads((ROOT / 'ops/config/studio-failover.v1.json').read_text())
         config['jobs'] = [j for j in config['jobs'] if j['label'] == 'com.carr.outlook-intake']
         with tempfile.TemporaryDirectory() as raw:
-            home = Path(raw)
+            home = Path(raw).resolve()
+            helper = home / 'custom-bin/granted-copy'
+            write_settings(home, ROOT, copy_helper=str(helper), executable_path='/custom/bin:/usr/bin:/bin')
             with patch.object(module.Path, 'home', return_value=home), \
                  patch.object(module, 'command', return_value=Mock(returncode=1, stdout='')):
                 host = module.Host(ROOT, config, 'macbook')
                 host.install()
             path = home / 'Library/LaunchAgents/com.carr.outlook-intake.plist'
             installed = path.read_text()
-            expected = [str(home / 'carr-local/bin/outlook-intake-copy'), '--run-intake']
+            expected = [str(helper), '--run-intake']
+            self.assertEqual(plistlib.loads(installed.encode())['EnvironmentVariables']['PATH'], '/custom/bin:/usr/bin:/bin')
             self.assertEqual(plistlib.loads(installed.encode())['ProgramArguments'], expected)
             reconciled = managed_body(installed, ROOT, home)
             self.assertEqual(plistlib.loads(reconciled.encode())['ProgramArguments'], expected)
