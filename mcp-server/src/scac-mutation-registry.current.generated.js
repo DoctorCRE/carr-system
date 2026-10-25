@@ -1489,6 +1489,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-client-portal": {
+    "ingress_key": "mcp-tool:read-client-portal",
+    "source_locator": "mcp-server/src/client-portal.js",
+    "schema_digest": "25c4425e3887511ffa3b9a7d402b99e4167a424450ee8f986d53e1f1bd686c7a",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-correspondence-thread": {
     "ingress_key": "mcp-tool:read-correspondence-thread",
     "source_locator": "mcp-server/src/governed-correspondence-store.v5.js",
