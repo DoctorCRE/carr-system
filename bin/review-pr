@@ -16,14 +16,13 @@ def run(*args, **kwargs):
 
 def main():
     parser = argparse.ArgumentParser(description='Review a PR synchronously for correctness and post one SHA-bound comment.',
-        epilog='Grok uses a temporary blobless checkout with no turn or time caps. Dot sends a Slack DM, then polls its thread after 10 minutes and every 15 minutes. A moved head or invalid review exits nonzero without posting. APPROVE enables GitHub squash auto-merge. Requires gh, git, grok-run.sh (or sibling bin/grok-run.sh), and claude for Dot.')
+        epilog='The authoring job must never review its own PR; the orchestrator runs reviews. Grok uses a temporary blobless checkout with no turn or time caps. Dot sends a Slack DM, then polls its thread after 10 minutes and every 15 minutes. A moved head skips auto-merge; invalid reviews exit without posting. APPROVE enables GitHub squash auto-merge. Requires gh, git, grok-run.sh (or sibling bin/grok-run.sh), and claude for Dot.')
     parser.add_argument('repo', metavar='OWNER/REPO')
     parser.add_argument('pr', type=int, metavar='PR')
     parser.add_argument('--reviewer', choices=('grok', 'dot'), default='grok', help='default: grok')
     args = parser.parse_args()
 
     def gh(verb, *options):
-        run('sleep', '2')
         return run('gh', 'pr', verb, str(args.pr), '--repo', args.repo, *options)
 
     head = json.loads(gh('view', '--json', 'headRefOid,title'))
@@ -36,14 +35,13 @@ def main():
         if args.reviewer == 'grok':
             checkout = root / 'repo'
             run('git', 'clone', '--filter=blob:none', '--no-checkout', f'https://github.com/{args.repo}.git', str(checkout))
-            run('git', '-C', str(checkout), 'fetch', 'origin', sha)
+            run('git', '-C', str(checkout), 'fetch', 'origin', f'pull/{args.pr}/head')
             run('git', '-C', str(checkout), 'checkout', '--detach', sha)
             prompt_file = root / 'prompt'
             prompt_file.write_text(prompt + 'End with one line VERDICT: APPROVE or VERDICT: CHANGES.\n')
             runner = shutil.which('grok-run.sh') or str(Path(__file__).resolve().with_name('grok-run.sh'))
             review = run(runner, '--effort', 'medium', '--prompt-file', str(prompt_file), cwd=checkout)
-            lines = review.splitlines()
-            verdict, findings = lines[-1], '\n'.join(lines[:-1])
+            findings, _, verdict = review.rpartition('\n')
         else:
             def claude(tool, request):
                 return run('claude', '-p', '--allowedTools', 'mcp__claude_ai_Slack__slack_'+tool, input=request)
@@ -69,8 +67,7 @@ def main():
         if json.loads(gh('view', '--json', 'headRefOid'))['headRefOid'] != sha:
             raise ValueError('PR head moved during review; nothing posted')
         comment = root / 'comment'
-        reviewer = 'grok' if args.reviewer == 'grok' else 'the Dot'
-        comment.write_text(f'{verdict}\nReviewed-SHA: {sha}\nReviewer: {reviewer}\n\n{findings}\n')
+        comment.write_text(f"{verdict}\nReviewed-SHA: {sha}\nReviewer: {args.reviewer if args.reviewer == 'grok' else 'the Dot'}\n\n{findings}\n")
         gh('comment', '--body-file', str(comment))
         if verdict == 'VERDICT: APPROVE':
             gh('merge', '--auto', '--squash', '--match-head-commit', sha)

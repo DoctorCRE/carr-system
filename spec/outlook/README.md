@@ -194,20 +194,19 @@ the two load commands. It does not load or run the helper.
 
 The job has no schedule and no RunAtLoad. Rebuilding or replacing the binary
 requires re-granting Full Disk Access. An unchanged pinned build preserves the
-existing executable. The helper publishes a snapshot only after copying succeeds
-and retains at most 20 completed snapshots. It prunes only its recognized private
-snapshot directories. Unrelated directories and symlinks remain untouched.
+existing executable. The helper publishes a snapshot only after copying succeeds.
+It never deletes completed snapshots. The operator removes old snapshots when
+space is needed and preserves required study baselines. Existing snapshots do
+not prevent capture after clock rollback; an exact timestamp collision fails
+without replacing the existing snapshot.
 Ordinary failures remove staging copies. Forced termination can leave a private
-hidden `.snap-*.pending` directory. Prune failures can leave hidden
-`.snap-*.retired` directories. Neither is a published study input. A clock rollback
-that would place a new snapshot before an existing snapshot is refused.
+hidden `.snap-*.pending` directory, which is not a published study input.
 Copies are sequential, not a transactional backup of a running Outlook profile.
 A source file changing during its copy is rejected; changes between separate
 file copies cannot be ruled out. Keep Outlook closed throughout capture.
 
 Use the Rust decoder in `vendor/hxprobe` and the private immutable copies described
 in [the harness contract](hxstore-harness.json). Compare consecutive copies after
-one TEST-account action and capture an unchanged control. The retention limit can
-remove a study baseline, so preserve required study inputs separately before
-20 newer captures. Store bytes and sidecars remain local; snapshot creation never
-writes into Outlook or produces production records.
+one TEST-account action and capture an unchanged control. Store bytes and sidecars
+remain local; snapshot creation never writes into Outlook or produces production
+records.
