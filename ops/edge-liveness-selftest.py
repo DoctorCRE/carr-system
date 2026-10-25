@@ -69,6 +69,11 @@ def main() -> int:
                         fresh="stale", hours=30.0)])
     check("a critical non-launchd service gone stale alarms", rc == 1, f"rc={rc}")
 
+    for crit in ("high", "critical"):
+        rc = el.assess([row("fresh-failed", crit=crit, runtime="cloudflare-worker",
+                            health="unavailable")])
+        check(f"a fresh {crit} failed service alarms", rc == 1, f"rc={rc}")
+
     # ── the dead-Mac collapse ────────────────────────────────────────────────
     all_dark = [row(f"job-{i}", fresh="stale", hours=6.0 + i) for i in range(5)]
     rc = el.assess(all_dark)
