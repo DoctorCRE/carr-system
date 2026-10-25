@@ -29,34 +29,38 @@ def main():
     active = {}
     with Path(f'/tmp/codex-queue-{os.getuid()}.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        for (name, repo, _, effort, _), brief in zip(jobs, briefs):
-            while True:
-                try:
-                    pids = subprocess.check_output(['pgrep', '-f', '/bin/codex-job '], text=True)
-                except subprocess.CalledProcessError as error:
-                    if error.returncode != 1:
-                        raise
-                    pids = ''
-                running = set()
-                for pid in pids.split():
+        try:
+            for (name, repo, _, effort, _), brief in zip(jobs, briefs):
+                while True:
                     try:
-                        command = subprocess.check_output(['ps', '-ww', '-o', 'args=', '-p', pid],
-                            text=True, stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        pids = subprocess.check_output(['pgrep', '-f', '/bin/codex-job '], text=True, errors='replace')
                     except subprocess.CalledProcessError as error:
                         if error.returncode != 1:
                             raise
-                        continue
-                    match = re.match(r'^(?:\S+\s+)?(?:\S*/)?bin/codex-job\s+\S+\s+job/(\S+)', command.strip())
-                    if match:
-                        running.add(match[1])
-                running.update(n for n, p in active.items() if p.poll() is None)
-                if len(running) < CAP and name not in running:
-                    break
-                time.sleep(2)
-            with (logs / f'{name}.log').open('w') as log:
-                active[name] = subprocess.Popen([str(Path(__file__).with_name('codex-job')), repo,
-                    f'job/{name}', brief, '-c', f'model_reasoning_effort={effort}'],
-                    stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
+                        pids = ''
+                    running = set()
+                    for pid in pids.split():
+                        try:
+                            command = subprocess.check_output(['ps', '-ww', '-o', 'args=', '-p', pid],
+                                text=True, errors='replace', stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        except subprocess.CalledProcessError as error:
+                            if error.returncode != 1:
+                                raise
+                            continue
+                        match = re.match(r'^(?:\S+\s+)?(?:\S*/)?bin/codex-job\s+\S+\s+job/(\S+)', command.strip())
+                        if match:
+                            running.add(match[1])
+                    running.update(n for n, p in active.items() if p.poll() is None)
+                    if len(running) < CAP and name not in running:
+                        break
+                    time.sleep(2)
+                with (logs / f'{name}.log').open('w') as log:
+                    active[name] = subprocess.Popen([str(Path(__file__).with_name('codex-job')), repo,
+                        f'job/{name}', brief, '-c', f'model_reasoning_effort={effort}'],
+                        stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
+        finally:
+            for job in active.values():
+                job.wait()
         failed = False
         for name, job in active.items():
             code = job.wait()

@@ -86,6 +86,36 @@ class JobToolsTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertIn('QUEUE-EMPTY', out)
 
+    def test_queue_handles_non_utf8_argv_and_reaps_children_on_failure(self):
+        for failure in (None, OSError('process query failed')):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                spec = Path(tmp) / 'queue.tsv'
+                (Path(tmp) / 'brief').write_text('brief')
+                spec.write_text(''.join(f'{name}\towner/repo\tbrief\thigh\tdetails\n' for name in ('first', 'second')))
+                children = []
+                def launch(*args, **kwargs):
+                    job = Mock(poll=Mock(return_value=0), wait=Mock(return_value=0))
+                    children.append(job)
+                    return job
+                def output(command, **kwargs):
+                    if command[0] == 'pgrep':
+                        return '123' if children else ''
+                    if failure:
+                        raise failure
+                    return b'python3 /repo/bin/codex-job owner/repo job/other \xff'.decode(
+                        errors=kwargs.get('errors', 'strict'))
+                with patch('subprocess.check_output', side_effect=output), \
+                        patch('subprocess.Popen', side_effect=launch), patch('fcntl.flock'):
+                    if failure:
+                        with self.assertRaises(OSError):
+                            self.invoke('codex-queue', str(spec))
+                    else:
+                        code, out = self.invoke('codex-queue', str(spec))
+                        self.assertEqual(code, 0)
+                        self.assertIn('QUEUE-EMPTY', out)
+                self.assertTrue(children)
+                self.assertTrue(all(job.wait.called for job in children), 'left launched children unwaited')
+
     def test_waiter_retries_and_distinguishes_closed_merged_and_live(self):
         merged = 'MERGED\t' + 'a' * 40
         for mode, replies, releases, expected in [
