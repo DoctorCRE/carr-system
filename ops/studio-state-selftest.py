@@ -99,6 +99,22 @@ class StudioState(unittest.TestCase):
         self.assertIn('repo/exporters/dossier-roster.local.json', manifest['missing'])
         self.assertIn('exporters/templates', manifest['excluded'])
 
+    def test_board_projects_with_dots_are_packaged_and_omissions_are_reported(self):
+        files = {'repo/out/boards/acme.v2.json': b'{"cards":[]}',
+                 'repo/out/boards/acme.v2-answers.jsonl': b'{"answer":"synthetic"}\n'}
+        for name, content in files.items():
+            self.put(name, content)
+        omitted = ['repo/out/boards/.hidden.json', 'repo/out/boards/notes.txt',
+                   'repo/out/boards/nested', 'repo/out/calendar-archive/unselected.txt']
+        for name in omitted:
+            self.put(name + '/child.txt' if name.endswith('/nested') else name, b'unselected')
+        data, manifest = state.pack(self.repo, self.home)
+        self.assertEqual(set(manifest['files']), set(files))
+        self.assertTrue(set(omitted) <= set(manifest['missing']))
+        members, restored_manifest = state.unpack(data)
+        self.assertEqual(members, files)
+        self.assertEqual(restored_manifest['missing'], manifest['missing'])
+
     def test_existing_output_and_staging_are_never_overwritten(self):
         self.put('repo/out/outlook-intake/state.json', b'{}')
         self.assertEqual(self.backup()[0], 0)

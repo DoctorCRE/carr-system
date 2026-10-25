@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Private, local-only Call Mode post-call processing.
+"""Private Call Mode post-call processing.
 
 This module has no send implementation. Deal Room supplies an exact,
 short-lived context index; transcript, report and email body remain in 0600
-files in the recording session.  A local model is called only through an
-injected command contract so tests never need a model.  The one outbound
-network call this module makes is the guarded, advisory Jev item check in
-post_call_jev.py (decision 008d682a) -- it can never block the review pack.
+files in the recording session. Headless Sonnet uses the Claude subscription
+login; an injected command contract keeps tests offline. Advisory Jev item
+checks in post_call_jev.py can never block the review pack.
 """
 from __future__ import annotations
 
@@ -16,17 +15,15 @@ import os
 import shlex
 import subprocess
 import sys
-import time
-import urllib.request
+import tempfile
 import urllib.parse
 import fcntl
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-import post_call_jev
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-import flashlib
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 SCHEMA_VERSION = 1
 CONTEXT_FILE = "call-context.json"
@@ -35,22 +32,7 @@ STATUS_FILE = "post-call.json"
 DRAFTS_FILE = "outlook-drafts.json"
 PUSH_FILE = "backend-push.json"
 LOCK_FILE = ".post-call.lock"
-LLAMA_SERVER = "/opt/homebrew/bin/llama-server"
-LLAMA_MODEL = Path.home() / ".cache" / "llama.cpp" / "models" / "qwen2.5-1.5b-instruct-q4_k_m.gguf"
-# Quill owns 8596 (cleanup) and 8597 (final transcription); this child must
-# never bind either resident service's port.
-LLAMA_PORT = 8598
 OUTLOOK_URL_LIMIT = 1900
-
-# Flash Next (launchd label local.ds4-flash-next) shares its loopback endpoint
-# with other local Flash clients. flashlib requires a human grant and protects
-# requests from idle shutdown. Requests may queue behind other callers.
-# It is a much stronger model than the bundled
-# 1.5B llama.cpp model and, unlike it, reliably produces a usable review pack
-# (2026-09-23 feasibility check against a real and a synthetic transcript).
-FLASH_SERVER_URL = "http://127.0.0.1:8000"
-FLASH_SERVER_MODEL = "qwen3.8-flash-next"
-FLASH_SERVER_HEALTH_TIMEOUT = 3
 
 
 def distiller_json_schema() -> dict[str, Any]:
@@ -388,139 +370,8 @@ def command_distiller(request: dict[str, Any], command: str | None = None, runne
     return parsed
 
 
-# A judged cut may land anywhere in the last quarter of a full chunk, so a
-# chunk never shrinks below three quarters of the limit to follow a topic.
-CUT_WINDOW_FRACTION = 0.75
-MAX_CUT_CANDIDATES = 4
-
-
-def _spread_cut_options(options: list[int], limit: int) -> list[int]:
-    """At most `limit` evenly spaced options, always keeping the last one --
-    the size-limit cut the splitter would have made anyway."""
-    if len(options) <= limit:
-        return options
-    step = (len(options) - 1) / (limit - 1)
-    return sorted({options[round(i * step)] for i in range(limit)})
-
-
-def transcript_chunks(transcript: dict[str, Any], limit: int = 24000,
-                      choose_cut: Callable[[list[Any], list[int]], int | None] | None = None) -> list[dict[str, Any]]:
-    """Split only at transcript segments, never in the middle of a speaker turn.
-
-    Without `choose_cut` a chunk ends wherever the size limit falls, which can
-    cut one discussion in half: the second chunk then lacks the setup (which
-    deal "it" is), and the same item can be distilled from both halves.
-
-    `choose_cut(segments, options)` may instead pick where the topic changes.
-    `options` are segment indexes to cut before, all inside the last quarter of
-    the full chunk and always including the size-limit cut. Anything it returns
-    outside `options`, None, or an exception keeps the size-limit cut, so a
-    judge can move a boundary but can never fail the split.
-    """
-    segments = transcript.get("segments")
-    if not isinstance(segments, list):
-        raise ContractError("transcript segments must be an array")
-
-    def size(lo: int, hi: int) -> int:
-        return len(json.dumps({"segments": segments[lo:hi]}, ensure_ascii=False))
-
-    chunks: list[dict[str, Any]] = []
-    start = end = 0
-    while end < len(segments):
-        if size(start, end + 1) <= limit:
-            end += 1
-            continue
-        if end == start:
-            raise RuntimeError("a transcript segment exceeds bounded local distiller context")
-        cut = end
-        if choose_cut is not None:
-            floor = limit * CUT_WINDOW_FRACTION
-            options = _spread_cut_options(
-                [k for k in range(start + 1, end + 1) if size(start, k) >= floor],
-                MAX_CUT_CANDIDATES,
-            )
-            if len(options) > 1:
-                try:
-                    picked = choose_cut(segments, options)
-                except Exception:
-                    picked = None
-                if picked in options:
-                    cut = picked
-        chunks.append({"segments": segments[start:cut]})
-        start = cut
-    if start < len(segments) or not chunks:
-        chunks.append({"segments": segments[start:]})
-    return chunks
-
-
-def _topic_chunks(transcript: dict[str, Any]) -> list[dict[str, Any]]:
-    """Use deterministic size cuts while semantic topic effects are disabled."""
-    return transcript_chunks(transcript)
-
-
-def merge_chunk_outputs(outputs: list[dict[str, Any]]) -> dict[str, Any]:
-    """Deterministic merge: preserve first occurrence, no cross-chunk invention."""
-    if not outputs:
-        raise ContractError("local post-call model returned no chunk outputs")
-    checked = [_validate_distillation(output) for output in outputs]
-    result: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "report": {"summary": "\n\n".join(item["report"]["summary"] for item in checked if item["report"]["summary"]), "decisions": [], "open_questions": []}, "joe_tasks": [], "dell_tasks": [], "deal_updates": [], "draft_proposals": [], "review_questions": []}
-    for key in ("decisions", "open_questions"):
-        seen: set[str] = set()
-        merged: list[Any] = []
-        for item in checked:
-            for entry in item["report"][key]:
-                if entry in seen:
-                    continue
-                seen.add(entry)
-                merged.append(entry)
-        result["report"][key] = merged
-    for key in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals", "review_questions"):
-        seen_items: set[str] = set()
-        merged_items: list[Any] = []
-        for item in checked:
-            for entry in item[key]:
-                fingerprint = json.dumps(entry, sort_keys=True)
-                if fingerprint in seen_items:
-                    continue
-                seen_items.add(fingerprint)
-                merged_items.append(entry)
-        result[key] = merged_items
-    return result
-
-
-def parse_model_json(content: str) -> dict[str, Any]:
-    """Accept one JSON object, tolerating only common code-fence/prose wrappers."""
-    text = content.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if len(lines) >= 3 and lines[-1].strip() == "```":
-            text = "\n".join(lines[1:-1]).strip()
-    if not text.startswith("{") or not text.endswith("}"):
-        start, end = text.find("{"), text.rfind("}")
-        if start < 0 or end <= start:
-            raise ContractError("local post-call model returned no JSON object")
-        text = text[start:end + 1]
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise ContractError("local post-call model returned invalid JSON") from exc
-    if not isinstance(parsed, dict):
-        raise ContractError("local post-call model returned non-object JSON")
-    return parsed
-
-
 def _distiller_instruction() -> str:
-    """The shared system prompt for every local distiller backend.
-
-    Spells out the exact top-level and nested key names the caller must
-    return. Some local OpenAI-compatible servers accept a ``response_format``
-    json_schema without actually constraining decoding against it (verified
-    2026-09-23 against the resident Flash Next server: a deeply nested
-    ``strict`` schema was silently ignored and the model invented its own
-    shape), so the schema is also spelled out in prose and by example here;
-    ``parse_model_json`` plus ``_validate_distillation`` remain the real
-    enforcement.
-    """
+    """Require exact context IDs and transcript-supported proposals."""
     return (
         "You distill a Joe-and-Dell weekly commercial-real-estate call. "
         "Use only exact deal_id and party_id values present in CONTEXT; never copy display names into ID fields. "
@@ -545,163 +396,48 @@ def _distiller_instruction() -> str:
     )
 
 
-def _distiller_chat_body(chunk: dict[str, Any], context: dict[str, Any], *, model: str | None = None,
-                          max_tokens: int = 1200, extra: dict[str, Any] | None = None) -> bytes:
-    source = json.dumps({"CONTEXT": context, "TRANSCRIPT": chunk}, ensure_ascii=False)
-    payload: dict[str, Any] = {
-        "messages": [
-            {"role": "system", "content": _distiller_instruction()},
-            {"role": "user", "content": source},
-        ],
-        "temperature": 0, "max_tokens": max_tokens,
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "carr_post_call", "strict": True,
-                "schema": distiller_json_schema(),
-            },
-        },
-    }
-    if model:
-        payload["model"] = model
-    if extra:
-        payload.update(extra)
-    return json.dumps(payload).encode()
-
-
-def _distiller_chunk_content(outer: dict[str, Any]) -> str:
-    choice = outer["choices"][0]
-    message = choice["message"]
-    content = message.get("content")
-    if not isinstance(content, str) or not content.strip():
-        fields = ",".join(sorted(str(key) for key in message))
-        finish = str(choice.get("finish_reason") or "unknown")
-        raise RuntimeError(
-            f"local post-call model returned empty content (fields={fields}; finish={finish})"
-        )
-    return content
-
-
-def llama_distiller(request: dict[str, Any], popen: Callable[..., Any] = subprocess.Popen, opener: Callable[..., Any] = urllib.request.urlopen) -> dict[str, Any]:
-    """One bounded, private llama-server child; never touches Quill's port 8596."""
-    if not Path(LLAMA_SERVER).is_file() or not LLAMA_MODEL.is_file():
-        raise RuntimeError("no local post-call model runtime is available")
-    context_json = json.dumps(request["context"], ensure_ascii=False)
-    if len(context_json) > 28000:
-        raise RuntimeError("call-context index exceeds bounded local distiller context")
-    chunks = _topic_chunks(request["transcript"])
-    child = popen([
-        LLAMA_SERVER, "-m", str(LLAMA_MODEL), "--host", "127.0.0.1",
-        "--port", str(LLAMA_PORT), "-c", "16384", "--threads", "4",
-        "--reasoning", "off", "--reasoning-format", "none",
-    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
-        deadline = time.monotonic() + 25
-        while time.monotonic() < deadline:
-            try:
-                with opener(f"http://127.0.0.1:{LLAMA_PORT}/health", timeout=1):
-                    break
-            except Exception:
-                time.sleep(0.2)
-        else:
-            raise RuntimeError("local post-call model did not become ready")
-        outputs: list[dict[str, Any]] = []
-        for chunk in chunks:
-            body = _distiller_chat_body(chunk, request["context"], max_tokens=1200)
-            req = urllib.request.Request(f"http://127.0.0.1:{LLAMA_PORT}/v1/chat/completions", data=body, headers={"Content-Type": "application/json"}, method="POST")
-            with opener(req, timeout=120) as response:
-                outer = json.loads(response.read().decode("utf-8"))
-            content = _distiller_chunk_content(outer)
-            outputs.append(parse_model_json(content))
-        return merge_chunk_outputs(outputs)
-    except (RuntimeError, ContractError):
-        raise
-    except (OSError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-        raise RuntimeError("local post-call model failed closed") from exc
-    finally:
-        child.terminate()
-        try:
-            child.wait(timeout=5)
-        except Exception:
-            child.kill()
-
-
-class DistillerUnavailable(RuntimeError):
-    """The resident distiller server could not be reached at all.
-
-    Kept distinct from other ``RuntimeError``s raised by
-    ``resident_flash_distiller`` (bad/oversized content, malformed response)
-    so ``default_distiller`` can fall back to the bundled llama path only on
-    unreachability, never on a content-quality failure it should surface
-    instead of papering over.
-    """
-
-
-def flash_server_available(opener: Callable[..., Any] = urllib.request.urlopen, timeout: float = FLASH_SERVER_HEALTH_TIMEOUT) -> bool:
-    try:
-        with flashlib.request_scope(FLASH_SERVER_URL, opener=opener), opener(f"{FLASH_SERVER_URL}/v1/models", timeout=timeout):
-            return True
-    except Exception:
-        return False
-
-
-def resident_flash_distiller(request: dict[str, Any], opener: Callable[..., Any] = urllib.request.urlopen) -> dict[str, Any]:
-    """Use an already running, human-granted Flash server or report unavailable."""
-    context_json = json.dumps(request["context"], ensure_ascii=False)
-    if len(context_json) > 28000:
-        raise RuntimeError("call-context index exceeds bounded local distiller context")
-    if not flash_server_available(opener=opener):
-        raise DistillerUnavailable(f"the local model server at {FLASH_SERVER_URL} is unreachable")
-    chunks = _topic_chunks(request["transcript"])
-    outputs: list[dict[str, Any]] = []
-    try:
-        for chunk in chunks:
-            body = _distiller_chat_body(
-                chunk, request["context"], model=FLASH_SERVER_MODEL, max_tokens=2000,
-                extra={"chat_template_kwargs": {"enable_thinking": False}},
-            )
-            req = urllib.request.Request(f"{FLASH_SERVER_URL}/v1/chat/completions", data=body, headers={"Content-Type": "application/json"}, method="POST")
-            try:
-                with flashlib.request_scope(FLASH_SERVER_URL, opener=opener), opener(req, timeout=150) as response:
-                    outer = json.loads(response.read().decode("utf-8"))
-            except (OSError, TimeoutError) as exc:
-                raise DistillerUnavailable(
-                    f"the resident local model server at {FLASH_SERVER_URL} became unreachable mid-request"
-                ) from exc
-            content = _distiller_chunk_content(outer)
-            outputs.append(parse_model_json(content))
-        return merge_chunk_outputs(outputs)
-    except (RuntimeError, ContractError):
-        raise
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-        raise RuntimeError("resident local post-call model failed closed") from exc
-
-
 def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
-    """CARR_POST_CALL_DISTILLER_COMMAND still wins outright (test/ops override).
-
-    Otherwise the resident Flash Next server is the only default. There is NO
-    fallback to the bundled 1.5B llama.cpp model: on 2026-09-23 that model
-    looped ("Joe says: 'I will do this.'") until it hit its token limit on
-    both a real session and a realistic synthetic one, so falling back to it
-    would only replace "Flash Next is not running" with a misleading
-    "no JSON object" reason. Unreachability is reported as itself, in words a
-    partner can act on, and the session stays blocked until it is retried.
-    llama_distiller is kept for an explicit CARR_POST_CALL_DISTILLER_COMMAND-
-    style override only.
-    """
+    """Use subscription Sonnet unless an explicit command is injected."""
     command = os.environ.get("CARR_POST_CALL_DISTILLER_COMMAND")
     if command:
         return command_distiller(request, command=command)
-    if flashlib.is_switched_off():
-        raise DistillerUnavailable(flashlib.OFF_REASON)
+    from lib.headless_tasks import API_ENV
+
+    argv = [
+        "claude", "-p", "--model", "sonnet", "--no-session-persistence",
+        "--tools", "", "--setting-sources", "", "--strict-mcp-config",
+        "--disable-slash-commands", "--exclude-dynamic-system-prompt-sections",
+        "--output-format", "json", "--json-schema", json.dumps(distiller_json_schema()),
+        "--system-prompt", _distiller_instruction(),
+    ]
+    child_env = {k: v for k, v in os.environ.items() if k not in API_ENV and k != "CLAUDECODE"}
+    prompt = json.dumps({"CONTEXT": request["context"], "TRANSCRIPT": request["transcript"]}, ensure_ascii=False)
     try:
-        return resident_flash_distiller(request)
-    except DistillerUnavailable as exc:
-        raise DistillerUnavailable(
-            "Flash Next, the local model that writes the review pack, is not running; "
-            "start it and retry this call"
-        ) from exc
+        with tempfile.TemporaryDirectory() as empty:
+            done = subprocess.run(argv, input=prompt, text=True, capture_output=True,
+                                  cwd=empty, env=child_env, timeout=180, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("headless Sonnet could not complete the post-call review pack") from exc
+    if done.returncode:
+        raise RuntimeError(f"headless Sonnet exited with code {done.returncode}")
+    try:
+        reply = json.loads(done.stdout)
+    except json.JSONDecodeError as exc:
+        raise ContractError("headless Sonnet returned invalid JSON") from exc
+    if not isinstance(reply, dict) or reply.get("is_error") or not isinstance(reply.get("structured_output"), dict):
+        raise ContractError("headless Sonnet returned no structured review pack")
+    return reply["structured_output"]
+
+
+def run_session(session_dir: Path) -> dict[str, Any]:
+    """Keep model dependencies out of the Accessibility-granted companion."""
+    entry = Path(__file__).resolve()
+    python = entry.parents[3] / ".venv" / "bin" / "python3"
+    result = subprocess.run(
+        [str(python), str(entry), str(session_dir)],
+        capture_output=True, text=True, check=True, timeout=1800,
+    )
+    return json.loads(result.stdout)
 
 
 def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]] = default_distiller) -> dict[str, Any]:
@@ -736,6 +472,8 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         write_private(session_dir / STATUS_FILE, status)
         return status
     try:
+        import post_call_jev
+
         stored_context = read_json(session_dir / CONTEXT_FILE) or {}
         jev_context = {**context, "speaker_labels": stored_context.get("speaker_labels"),
                        "local_partner": stored_context.get("recorder")}
@@ -942,3 +680,13 @@ def create_outlook_draft(session_dir: Path, draft_id: str, approved_content_hash
     drafts["drafts"][draft_id] = {"content_hash": approved_content_hash, "created_at": now()}
     write_private(session_dir / DRAFTS_FILE, drafts)
     return {"draft_id": draft_id, "content_hash": approved_content_hash, "idempotent": False}
+
+
+if __name__ == "__main__":
+    from credential_env import load_carr_tokens
+
+    for name, value in load_carr_tokens(
+        ["TYPESAFE_API_KEY"], path=Path.home() / ".config/carr/typesafe.env",
+    ).items():
+        os.environ.setdefault(name, value)
+    print(json.dumps(process_session(Path(sys.argv[1]).resolve())))

@@ -536,6 +536,34 @@ class DatabaseDesign(unittest.TestCase):
                 self.assertIn(second['refused'],('40001','25001'))
                 self.assertEqual([result['refused'] for result in (first,second)],['25001','25001'])
 
+    def test_26_cache_works_without_unused_evidence_column(self):
+        self.assertFalse(self.one("""select exists(select 1 from information_schema.columns
+            where table_schema='ops' and table_name='cognition_result_cache'
+              and column_name='evidence_refs')"""))
+        cognition = self.cognition()
+        key, dependency = uuid.uuid4().hex, uuid.uuid4().hex
+        self.c.execute('set local role carr_jobs')
+        for proposal in ({'synthetic': 'first'}, {'synthetic': 'replacement'}):
+            self.assertTrue(self.one(
+                'select ops.put_cognition_cache(%s,%s,1,1,%s,array[%s],60)',
+                (key, cognition, Jsonb(proposal), dependency)))
+            self.assertEqual(self.one('select ops.get_cognition_cache(%s)', (key,)), proposal)
+        self.assertEqual(self.one('select ops.invalidate_cognition_cache(%s)', (dependency,)), 1)
+        self.assertIsNone(self.one('select ops.get_cognition_cache(%s)', (key,)))
+        self.assertEqual(self.one('select ops.invalidate_cognition_cache(%s)', (dependency,)), 0)
+
+    def test_27_cache_evidence_retirement_refuses_unexpected_dependency(self):
+        self.c.execute("alter table ops.cognition_result_cache add column evidence_refs text[] not null default '{}'")
+        self.c.execute("create temp view synthetic_cache_evidence as select evidence_refs from ops.cognition_result_cache")
+        migration = ROOT / 'migrations/0965_retire_cache_evidence_refs.sql'
+        refusal = self.refuses(migration.read_text())
+        self.assertIsNotNone(refusal, 'retirement removed an unexpected dependent view')
+        self.assertEqual(refusal[0], '2BP01')
+        self.assertTrue(self.one("""select exists(select 1 from information_schema.columns
+            where table_schema='ops' and table_name='cognition_result_cache'
+              and column_name='evidence_refs')"""))
+        self.assertEqual(self.c.execute('select * from synthetic_cache_evidence').fetchall(), [])
+
     def test_19_refused_conversation_rename_leaves_no_revision(self):
         self.isolated_race_database()
         conv=self.conversation()

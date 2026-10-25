@@ -280,6 +280,36 @@
       "sha256": "d8df48bbcfca05c093469b5a4f91f2c993773086949a554681af81c7db13f97d",
       "rule": "pii-email",
       "reason": "Public Codex coauthor noreply identity in the scheduled snapshot commit message, not personal contact data. Qualified against the complete workflow; exception binds only these exact source bytes and the email detector."
+    },
+    {
+      "path": "ops/outlook-settings-parity-selftest.py",
+      "sha256": "7cd45d7f7d68de3ef355011a65a17877e6391abdf0b63192d1e3b154ff8f469e",
+      "rule": "pii-email",
+      "reason": "Offline intake parity fixture uses an invented mailbox at the Studio domain to exercise the unchanged internal-domain classification. No mailbox is contacted. Exact reviewed fixture bytes only."
+    },
+    {
+      "path": "ops/outlook-settings-selftest.py",
+      "sha256": "fad54b90bfec9fe2538f5a3142f2de21901bb6f7c5270e2c22aae37d78dda434",
+      "rule": "pii-email",
+      "reason": "Offline migration test checks the already documented Studio mailbox identity from the prior committed draft script. It writes only a synthetic home and never contacts a mailbox or reads credentials. Exact reviewed test bytes only."
+    },
+    {
+      "path": "ops/outlook-settings-selftest.py",
+      "sha256": "8dc88a0522c472e1790bad4c0444b32a2b0f12e7467a9e29eb8ac0572db5a68a",
+      "rule": "pii-email",
+      "reason": "Offline migration test checks the already documented Studio mailbox identity from the prior committed draft script. It writes only a synthetic home and never contacts a mailbox or reads credentials. Exact reviewed test bytes only."
+    },
+    {
+      "path": "spec/outlook/studio-settings-migration.md",
+      "sha256": "604dc365cb632b18252908cc8972422c9b9b7d0a5f0bfdb19b7785ac2cfebc1d",
+      "rule": "pii-email",
+      "reason": "Studio settings migration explicitly preserves the owner mailbox identity already documented in the prior committed Outlook draft script. This is an operator migration recipe, not client data or a credential. Exact reviewed document bytes only."
+    },
+    {
+      "path": "spec/outlook/studio-settings-migration.md",
+      "sha256": "acd2ec3e4823ae3c7728c5e9c66b0b8807a3d7c1eef2bc94facdbb59b071acc6",
+      "rule": "pii-email",
+      "reason": "Studio settings migration explicitly preserves the owner mailbox identity already documented in the prior committed Outlook draft script. This is an operator migration recipe, not client data or a credential. Exact reviewed document bytes only."
     }
   ]
 }

@@ -71384,7 +71384,6 @@ CREATE TABLE ops.cognition_result_cache (
     cognition_version integer NOT NULL,
     output_schema_version integer NOT NULL,
     proposal jsonb NOT NULL,
-    evidence_refs text[] DEFAULT '{}'::text[] NOT NULL,
     validated_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     expires_at timestamp with time zone NOT NULL,
@@ -122085,7 +122084,8 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0959_retire_approved_control_refusals.sql	b124bf9f5ae4f4aae271b5960cc3801d94aa03909243e3ecc8f3b88cee200020	1970-01-01 00:00:00+00
 0961_lead_history_pages.sql	b14f721d9ceb060b42920a3fa52208aa8368c11a96177c5f30783cb609439f49	1970-01-01 00:00:00+00
 0962_triage_lead_read_indexes.sql	553d99d865d602ac9984e678333d9c0ebb58c370ecdcb7e76f29ca9352aba87b	1970-01-01 00:00:00+00
-0964_retire_cache_observations.sql	d14e2a48c38ddc7a1ad347bc4fceeff48cd7b32b381c966cfc464dcc38b8ba2b	1970-01-01 00:00:00+00
+0965_retire_cache_evidence_refs.sql	5914556446bc59634aca464c1251dbbcc436bde94b3fc9a7379e4b631fe3bec2	1970-01-01 00:00:00+00
+0966_retire_cache_observations.sql	d14e2a48c38ddc7a1ad347bc4fceeff48cd7b32b381c966cfc464dcc38b8ba2b	1970-01-01 00:00:00+00
 \.
 
 

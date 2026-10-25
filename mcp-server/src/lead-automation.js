@@ -1,6 +1,7 @@
 // Contact evidence is captured from the local mail/calendar stores. This job
 // consumes those dated activities; it never opens a mailbox or sends a message.
 import { createHash } from "node:crypto";
+import { canExercisePartnerAuthority } from "./partner-authority.js";
 export const LEAD_AUTOMATION_CONTRACT = "lead-automation.v1";
 const bodyDigest = body => createHash("sha256").update(body).digest("hex");
 const ACTIVE = ["new", "qualified", "outreach_active", "engaged"];
@@ -246,7 +247,7 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoi
       write: true, humanOnly: true, description: "One-tap approval of the displayed first-contact draft. It remains a draft; this verb sends nothing and does not move the lead.",
       inputSchema: { ...schema({ idempotency_key: { type: "string" }, draft_id: { type: "string", format: "uuid" } }), required: ["idempotency_key","draft_id"] },
       handler: (c,actor,args) => withEnvelope(c,actor,"approve-lead-draft",args,async () => {
-        if (!actor.human) fail("human_approval_required");
+        if (!canExercisePartnerAuthority(actor)) fail("human_approval_required");
         const d = (await c.query(`select d.* from lead_contact_draft d join lead l on l.id=d.lead_id
           join party p on p.id=l.party_id where d.id=$1 and d.party_id=l.party_id
           and l.stage='qualified' and not l.suppressed and p.merged_into is null and p.deleted_at is null and p.contact_state='active' for update of l,p,d`, [args.draft_id])).rows[0];
@@ -257,10 +258,10 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoi
       }),
     },
     "approve-lead-move": {
-      write: true,humanOnly: true,description: "Apply a displayed weak-evidence lead stage proposal after a human confirms it. Preserve its activity reference and refuse a stale proposal.",
+      write: true,humanOnly: true,description: "Apply a displayed weak-evidence lead stage proposal after a partner or verified sponsored agent confirms it. Preserve its activity reference and refuse a stale proposal.",
       inputSchema: { ...schema({ idempotency_key: { type: "string" }, move_id: { type: "string",format: "uuid" }, base_version: { type: "integer" } }), required: ["idempotency_key","move_id","base_version"] },
       handler: (c,actor,args) => withEnvelope(c,actor,"approve-lead-move",args,async () => {
-        if (!actor.human) fail("human_approval_required");
+        if (!canExercisePartnerAuthority(actor)) fail("human_approval_required");
         const m = (await c.query(`select m.*,l.version,l.stage from lead_stage_move m
           join lead l on l.id=m.lead_id join party p on p.id=l.party_id
           where m.id=$1 and m.status='proposed' and not l.suppressed and p.merged_into is null and p.deleted_at is null and p.contact_state='active' for update of l,p,m`,[args.move_id])).rows[0];
@@ -275,7 +276,7 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoi
       write: true, humanOnly: true, description: "Undo the latest applied lead stage move. Restore its prior stage and record who undid it; refuse newer stage work or a stale version.",
       inputSchema: { ...schema({idempotency_key:{type:"string"},move_id:{type:"string",format:"uuid"},base_version:{type:"integer"}}), required:["idempotency_key","move_id","base_version"] },
       handler:(c,actor,args) => withEnvelope(c,actor,"undo-lead-move",args,async()=>{
-        if (!actor.human) fail("human_approval_required");
+        if (!canExercisePartnerAuthority(actor)) fail("human_approval_required");
         const m=(await c.query(`select m.*,l.stage,l.version from lead_stage_move m join lead l on l.id=m.lead_id
           where m.id=$1 for update of l,m`,[args.move_id])).rows[0];
         if (!m || m.status!=="applied" || m.stage!==m.to_stage || m.version!==args.base_version) fail("stale_lead_undo");

@@ -1217,6 +1217,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "morning-assurance-queue": {
+    "ingress_key": "mcp-tool:morning-assurance-queue",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "f9bc31ea4b7272fe136ea9b4b50b9cefe1c1b8cd70def5e256205d197b500798",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "morning-brief": {
     "ingress_key": "mcp-tool:morning-brief",
     "source_locator": "mcp-server/src/tools.js",
@@ -1228,6 +1237,18 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
       "claim-card",
       "deal-room-board",
       "loop-board",
+      "today-triage"
+    ]
+  },
+  "morning-brief-queue": {
+    "ingress_key": "mcp-tool:morning-brief-queue",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "311e730892d29b318e416f279a7996e0cb8cda88235581c412e27490dcd8738a",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": [
+      "governance-queue",
       "today-triage"
     ]
   },
@@ -3056,6 +3077,51 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text)",
       "volatility": "s",
       "ingress_key": "db-function-acl:ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=ops, public, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.get_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_cache_key text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.get_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_cache_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=ops, public, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.invalidate_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_dependency_ref text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.invalidate_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_dependency_ref text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=ops, public, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.put_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_cache_key text, p_cognition_key text, p_cognition_version integer, p_output_schema_version integer, p_proposal jsonb, p_dependency_refs text[], p_ttl_seconds integer)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.put_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_cache_key text, p_cognition_key text, p_cognition_version integer, p_output_schema_version integer, p_proposal jsonb, p_dependency_refs text[], p_ttl_seconds integer):carr_jobs:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

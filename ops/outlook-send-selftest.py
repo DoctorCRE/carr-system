@@ -1,7 +1,7 @@
 """Offline tests for lib/outlook_send.py. A fake cua-driver plays Outlook and a fake decoded mailbox
 plays Sent Items and the calendar; nothing real is touched and no Send is ever pressed.
 
-The fake mirrors the compose window read from Joe's live Outlook on 2026-10-20: the
+The fake mirrors the observed compose window shape. It has the
 title "SUBJECT • account", AXTextFields "To Recipients", "Cc Recipients" and
 "Bcc Recipients" whose AXStaticText children read "ADDRESS, Presence Unknown", an
 AXTextField "Subject", depth-1 Send and Discard buttons, and a Draft > Send menu.
@@ -13,6 +13,7 @@ import traceback
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
+import importlib.util
 import os
 from pathlib import Path
 import stat
@@ -29,6 +30,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib import outlook_send as send_mod
 from lib import outlook_ui as ui
+from lib.outlook_settings import load_settings
+from outlook_test_support import write_settings
 from lib.outlook_send import EventRow, Ports, SentRow, Snapshot, State
 
 ACCOUNT = 'sender@example.test'
@@ -257,6 +260,10 @@ class SendTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.out = Path(self.tmp.name) / 'out'
+        self.home = Path(self.tmp.name) / 'home'
+        self.config = write_settings(self.home, ROOT, account=ACCOUNT, internal_domain='company.test')
+        self.enterContext(patch.object(send_mod, 'load_settings', lambda: load_settings(home=self.home)))
+        self.enterContext(patch.object(ui, 'load_settings', lambda: load_settings(home=self.home)))
         self.dialog = self.enterContext(patch.object(send_mod.subprocess, 'run',
             return_value=subprocess.CompletedProcess(['osascript'], 0, 'true\n', '')))
 
@@ -374,6 +381,16 @@ class SendTests(unittest.TestCase):
         self.assertEqual(result.reason, 'daily_cap')
         self.assertEqual(h.fake.press_count, 10)
 
+    def test_daily_cap_uses_the_configured_local_date(self):
+        write_settings(self.home, ROOT, account=ACCOUNT, internal_domain='company.test', timezone='Asia/Tokyo')
+        h = Harness(self.out)
+        h.clock.t = datetime(2030, 1, 2, 14, 59, tzinfo=timezone.utc).timestamp()
+        for i in range(10):
+            self.assertTrue(h.send(key=f'cap-{i}', subject=f'Individual note {i}').ok)
+        self.assertEqual(h.send(key='eleventh', subject='Eleventh').reason, 'daily_cap')
+        h.clock.t = datetime(2030, 1, 2, 15, 1, tzinfo=timezone.utc).timestamp()
+        self.assertEqual(h.send(key='next-day', subject='Next local day').state, State.DONE)
+
     def test_do_not_contact_refuses_every_recipient_field(self):
         for field in ('to', 'cc', 'bcc'):
             with self.subTest(field=field):
@@ -473,14 +490,19 @@ class SendTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertRegex(stdout.getvalue(), r'transport_TimeoutExpired_[0-9a-f]{12}')
 
-    def test_account_comes_from_private_config(self):
-        config = Path(self.tmp.name) / 'account'
-        config.write_text('sender@example.test\n')
-        config.chmod(0o600)
-        self.assertEqual(send_mod.account(config), ACCOUNT)
-        config.chmod(0o644)
-        with self.assertRaises(ValueError):
-            send_mod.account(config)
+    def test_configured_internal_domain_allows_one_external_recipient(self):
+        write_settings(self.home, ROOT, account=ACCOUNT, internal_domain='practice.test')
+        result = Harness(self.out).send(to=['person-a@example.test', 'colleague@practice.test'])
+        self.assertEqual(result.state, State.DONE)
+
+    def test_account_comes_from_private_settings(self):
+        self.assertEqual(send_mod.account(), ACCOUNT)
+        write_settings(self.home, ROOT, account='another@practice.test')
+        self.assertEqual(send_mod.account(), 'another@practice.test')
+        self.config.chmod(0o644)
+        with self.assertRaises(ValueError) as refusal:
+            send_mod.account()
+        self.assertIn(str(self.config), str(refusal.exception))
 
     def test_sends_once_and_confirms_from_sent_items(self):
         h = Harness(self.out)
@@ -645,6 +667,31 @@ class SendTests(unittest.TestCase):
         self.assertTrue(callable(ports.carr))
         self.assertTrue(callable(ports.mailbox.snapshot))
 
+    def test_default_adapter_uses_configured_state_and_credential_pointer(self):
+        ports = send_mod.default_ports()
+        self.assertEqual(ports.out, self.home / '.local/state/carr/outlook-send')
+        self.dialog.return_value.stdout = '{"ok": true}'
+        self.assertEqual(ports.carr('find', {'query': 'fixture'}), {'ok': True})
+        self.assertEqual(self.dialog.call_args.kwargs['env']['CARR_MCP_ENV'],
+                         str((self.home / '.config/carr/mcp-tokens.env').resolve()))
+        self.assertEqual(self.dialog.call_args.kwargs['cwd'], ROOT)
+
+    def test_legacy_draft_keeps_mailto_bytes_and_refuses_missing_settings_before_open(self):
+        spec = importlib.util.spec_from_file_location('outlook_draft_fixture', ROOT / 'bin/outlook-draft.py')
+        draft = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(draft)
+        self.assertEqual(draft.build_url({'to': ['recipient@example.test'], 'subject': 'A test',
+                                          'body': 'One.\nTwo.', 'cc': ACCOUNT}),
+                         'mailto:recipient@example.test?subject=A%20test&body=One.%0ATwo.&cc=sender%40example.test')
+        self.config.unlink()
+        with patch.object(draft, 'load_settings', lambda: load_settings(home=self.home)), \
+                patch.object(sys, 'argv', ['outlook-draft.py', '--to', 'recipient@example.test', '--subject', 'A test']), \
+                patch.object(draft.subprocess, 'run') as command:
+            with self.assertRaises(ValueError) as refusal:
+                draft.main()
+            self.assertIn(str(self.config), str(refusal.exception))
+        command.assert_not_called()
+
     def test_cua_refusal_is_a_failure_before_press(self):
         h = Harness(self.out)
         original = h.fake.__call__
@@ -762,6 +809,7 @@ class SendTests(unittest.TestCase):
         repo = Path(self.tmp.name) / 'checkout'
         (repo / '.git').mkdir(parents=True)
         workspaces = []
+        write_settings(home, repo, account=ACCOUNT, internal_domain='company.test')
         vendor = home / 'carr-local/hxstore-reverse-engineering'
         vendor.mkdir(parents=True)
         store = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity/HxStore.hxd'
@@ -807,6 +855,7 @@ class SendTests(unittest.TestCase):
         home = Path(self.tmp.name) / 'home'
         repo = Path(self.tmp.name) / 'checkout'
         repo.mkdir()
+        write_settings(home, repo, account=ACCOUNT, internal_domain='company.test')
         vendor = home / 'carr-local/hxstore-reverse-engineering'
         vendor.mkdir(parents=True)
         store = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity/HxStore.hxd'

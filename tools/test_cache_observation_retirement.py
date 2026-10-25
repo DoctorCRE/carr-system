@@ -7,7 +7,7 @@ import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-MIGRATION = ROOT / 'migrations/0964_retire_cache_observations.sql'
+MIGRATION = ROOT / 'migrations/0966_retire_cache_observations.sql'
 FUNCTIONS = (
     'ops.get_cognition_cache_for_job(uuid,uuid,text)',
     'ops.put_cognition_cache_for_job(uuid,uuid,text,text,integer,integer,jsonb,text[],integer)',
