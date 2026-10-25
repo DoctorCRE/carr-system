@@ -88,12 +88,35 @@ bad()  { RAN=$((RAN+1)); printf '  \033[31mFAIL\033[0m  %-11s %s\n' "$1" "${2:-}
 skip() { RAN=$((RAN+1)); printf '  \033[33mSKIP\033[0m  %-11s %s\n' "$1" "${2:-}"; SKIPPED=$((SKIPPED+1)); SKIPPED_CLASSES="$SKIPPED_CLASSES $1"; }
 
 run_quiet() {  # run_quiet <logfile> <cmd...>  — capture output, return status
-  local log="$1"; shift
+  local log="$1" rc; shift
   "$@" >"$log" 2>&1
+  rc=$?
+  printf '%s\n' "$rc" >"$log.rc"
+  return "$rc"
 }
 
-LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/carr-ci.XXXXXX")"
-trap 'rm -rf "$LOGDIR"' EXIT
+LOGDIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/carr-ci.XXXXXX")" || exit 1
+trap '
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    rm -rf "$LOGDIR"
+  else
+    for status in "$LOGDIR"/*.rc; do
+      [ -f "$status" ] || continue
+      log="${status%.rc}"
+      case "$log" in *.log) ;; *) log="$log.log" ;; esac
+      [ "$(cat "$status")" != 0 ] || rm -f "$log" "$status"
+    done
+    if [ "${GITHUB_ACTIONS:-}" = true ]; then
+      for log in "$LOGDIR"/*.log; do
+        [ -f "$log" ] || continue
+        "$PY" ops/ci-secret-scan.py --redact <"$log" >"$log.redacted" || rm -f "$log.redacted"
+      done
+    fi
+    printf "ci-retained-logs: %s\n" "$LOGDIR" >&2
+  fi
+  exit "$rc"
+' EXIT
 
 fail_tail() {  # fail_tail <logfile>
   local log="$1" lines window
