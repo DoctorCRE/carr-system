@@ -46,8 +46,10 @@ R2 object exists, decrypts, or restores. Confirm the selected copy independently
 ### Verify the Studio database archive
 
 `bin/backup-dump.sh` reports an R2 archive only after the archiver succeeds and
-remote ciphertext matches both the local SHA-256 and byte count. A quota refusal,
-failed upload or failed readback exits nonzero and reports `R2 archive: OWED`.
+an S3 HEAD request matches the local byte count and MD5 against ContentLength
+and ETag. This requires AWS CLI and R2 S3 credentials in its normal credential
+chain. The usage-ledger row is written only after verification. A quota refusal,
+failed upload or failed metadata check exits nonzero and reports `R2 archive: OWED`.
 A usage-ledger cache hit is not remote proof.
 
 Local generations have unique filenames. The backup command retains all local

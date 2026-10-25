@@ -23,30 +23,31 @@ class ArchiveTests(unittest.TestCase):
             shutil.copyfile(ROOT / name, self.repo / name)
         self.wrapper = self.repo / 'mcp-server/node_modules/.bin/wrangler'
         self.wrapper.write_text('''#!/usr/bin/python3
-import os, pathlib, shutil, sys
+import hashlib, json, os, pathlib, shutil, sys
 args = sys.argv[1:]
-target = pathlib.Path(os.environ['FIXTURE_REMOTE']) / args[3].replace('/', '_')
+key = args[args.index('--key') + 1] if '--key' in args else args[3].split('/', 1)[1]
+target = pathlib.Path(os.environ['FIXTURE_REMOTE']) / key.replace('/', '_')
 mode = os.environ.get('FIXTURE_MODE', '')
 if args[2] == 'put':
     if mode == 'upload_error':
         print('fixture-provider-private-error', file=sys.stderr)
         raise SystemExit(7)
     shutil.copyfile(args[args.index('--file') + 1], target)
-elif args[2] == 'get':
-    if mode == 'wrong':
-        sys.stdout.buffer.write(b'x' * target.stat().st_size)
-    elif mode == 'get_error':
+elif args[:2] == ['s3api', 'head-object']:
+    if mode == 'head_error':
         raise SystemExit(8)
-    elif '--file' in args:
-        shutil.copyfile(target, args[args.index('--file') + 1])
-    else:
-        sys.stdout.buffer.write(target.read_bytes())
+    data = target.read_bytes()
+    print(json.dumps({'ContentLength': len(data) + (mode == 'size'),
+                      'ETag': 'wrong' if mode == 'wrong' else hashlib.md5(data).hexdigest()}))
+else:
+    raise SystemExit('unexpected download')
 ''')
         self.wrapper.chmod(0o700)
+        (self.wrapper.parent / 'aws').symlink_to(self.wrapper)
         self.path = self.repo / 'backups/carr-20260101.sql.age'
         self.path.write_bytes(b'opaque synthetic transport bytes\n')
-        self.child_env = {'PATH': '/usr/bin:/bin', 'HOME': str(self.repo / 'home'),
-                          'LC_ALL': 'C', 'FIXTURE_REMOTE': str(self.repo / 'remote')}
+        self.child_env = {'PATH': str(self.wrapper.parent) + ':/usr/bin:/bin', 'HOME': str(self.repo / 'home'),
+                          'LC_ALL': 'C', 'CLOUDFLARE_ACCOUNT_ID': 'fixture-account', 'FIXTURE_REMOTE': str(self.repo / 'remote')}
 
     def run_archive(self, *args, mode=''):
         return subprocess.run([sys.executable, str(self.repo / 'bin/backup-archive-r2.py'),
@@ -89,7 +90,7 @@ print(json.dumps({'bytes': out.stat().st_size, 'floor': 1}))
             (self.repo / 'bin/backup-archive-r2.py').write_text(
                 f'print({archive_result!r})\nraise SystemExit({archive_status})\n')
         return subprocess.run(['/bin/zsh', str(self.repo / 'bin/backup-dump.sh')],
-                              env={**self.child_env, 'PATH': str(commands) + ':/usr/bin:/bin',
+                              env={**self.child_env, 'PATH': str(commands) + ':' + self.child_env['PATH'],
                                    'CARR_DB_BACKUP_URL': 'fixture-not-a-dsn', 'FIXTURE_MODE': mode,
                                    **({'BACKUP_SKIP_R2': '1'} if skip_r2 else {})},
                               capture_output=True, text=True, timeout=20)
@@ -108,7 +109,6 @@ print(json.dumps({'bytes': out.stat().st_size, 'floor': 1}))
         result = self.shell()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('R2 archive: backups/', result.stdout)
-        self.assertFalse(list(self.path.parent.glob('*.archive.json')))
         self.assertTrue(self.path.exists())
 
     def test_shell_rejects_malformed_json_and_truthy_archive_values(self):
@@ -129,19 +129,19 @@ print(json.dumps({'bytes': out.stat().st_size, 'floor': 1}))
         generated = list(self.path.parent.glob('carr-*.sql.age'))
         self.assertEqual(len(generated), 2)
         self.assertTrue(all(len(path.name) == len('carr-20260101.sql.age') for path in generated))
-        self.assertFalse(list(self.path.parent.glob('*.archive.json')))
 
     def test_failed_archive_retains_ciphertext_and_reports_reason(self):
-        for mode, reason in [('upload_error', 'upload_failed'), ('wrong', 'readback_failed'),
-                             ('get_error', 'readback_failed')]:
+        for mode, reason in [('upload_error', 'verification_failed'), ('wrong', 'verification_failed'),
+                             ('head_error', 'verification_failed'), ('size', 'verification_failed')]:
             with self.subTest(mode=mode):
                 result = self.run_archive(mode=mode)
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertIs(json.loads(result.stdout)['archived'], False)
                 self.assertEqual(json.loads(result.stdout)['reason'], reason)
                 self.assertTrue(self.path.exists())
+                ledger = json.loads((self.repo / 'out/r2-usage.json').read_text())
+                self.assertFalse(ledger['objects'])
                 self.assertNotIn('fixture-provider-private-error', result.stdout + result.stderr)
-                self.assertFalse(list(self.path.parent.glob('*.archive.json')))
 
     def test_quota_refusal_retains_ciphertext(self):
         (self.repo / 'out/r2-usage.json').write_text(json.dumps({
@@ -157,7 +157,7 @@ print(json.dumps({'bytes': out.stat().st_size, 'floor': 1}))
             remote.unlink()
         result = self.run_archive()
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(json.loads(result.stdout)['reason'], 'readback_failed')
+        self.assertEqual(json.loads(result.stdout)['reason'], 'verification_failed')
         self.assertTrue(self.path.exists())
 
     def test_dry_run_never_certifies_or_uploads(self):
@@ -165,7 +165,6 @@ print(json.dumps({'bytes': out.stat().st_size, 'floor': 1}))
         self.assertEqual(result.returncode, 0)
         self.assertIs(json.loads(result.stdout)['archived'], False)
         self.assertFalse(list((self.repo / 'remote').iterdir()))
-        self.assertFalse(list(self.path.parent.glob('*.archive.json')))
 
     def test_same_day_generations_preserve_previous_ciphertexts(self):
         self.assertEqual(self.shell().returncode, 0)

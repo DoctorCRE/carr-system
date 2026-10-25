@@ -316,8 +316,20 @@ def object_exists(key: str, bucket: str = BUCKET) -> bool:
     return p.returncode == 0
 
 
+def verify_remote(key: str, size: int, bucket: str, md5: str) -> None:
+    account = _wrangler_env()["CLOUDFLARE_ACCOUNT_ID"]
+    result = subprocess.run(
+        ["aws", "s3api", "head-object", "--endpoint-url",
+         f"https://{account}.r2.cloudflarestorage.com", "--region", "auto",
+         "--bucket", bucket, "--key", key, "--output", "json"],
+        capture_output=True, text=True, timeout=120, check=True)
+    metadata = json.loads(result.stdout)
+    if metadata.get("ContentLength") != size or metadata.get("ETag", "").strip('"') != md5:
+        raise ValueError("R2 object metadata mismatch")
+
+
 def upload(path: str, key: str, sha256: str, size: int, cap: int, provenance: str,
-           led: dict, bucket: str = BUCKET, dry_run: bool = False) -> dict:
+           led: dict, bucket: str = BUCKET, dry_run: bool = False, verify_md5: str | None = None) -> dict:
     """Upload one file under the cap. Raises QuotaExceeded instead of overrunning.
 
     Idempotent by construction: the key contains the content hash, so a rerun
@@ -325,6 +337,8 @@ def upload(path: str, key: str, sha256: str, size: int, cap: int, provenance: st
     """
     known = led["objects"].get(key)
     if known and known.get("sha256") == sha256:
+        if verify_md5 and not dry_run:
+            verify_remote(key, size, bucket, verify_md5)
         return {"key": key, "uploaded": False, "reason": "already archived (same bytes, same key)",
                 "bytes": size, "bucket": bucket}
 
@@ -350,6 +364,8 @@ def upload(path: str, key: str, sha256: str, size: int, cap: int, provenance: st
     if p.returncode != 0:
         raise RuntimeError(f"R2 upload failed for {key}: {(p.stderr or p.stdout).strip()[:400]}")
 
+    if verify_md5:
+        verify_remote(key, size, bucket, verify_md5)
     led["objects"][key] = {"bytes": size, "sha256": sha256, "uploaded_at": _now(),
                            "filename": os.path.basename(path)}
     save_ledger(led)

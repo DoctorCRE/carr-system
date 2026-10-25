@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upload an encrypted DB dump and verify its exact remote bytes.
+"""Upload an encrypted DB dump and verify its remote object metadata.
 
 Exit 1 when the off-Mac copy is unverified. Local ciphertext is retained by
 backup-dump.sh. A dry run reports archived=false and sends no bytes.
@@ -10,7 +10,6 @@ import hashlib
 import json
 import os
 import subprocess
-import tempfile
 import signal
 import sys
 
@@ -35,30 +34,14 @@ def arm_watchdog(seconds: int = WATCHDOG_S) -> None:
     signal.alarm(seconds)
 
 
-def sha256_of(path: str) -> str:
+def hashes_of(path: str) -> tuple[str, str]:
     h = hashlib.sha256()
+    md5 = hashlib.md5()
     with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             h.update(chunk)
-    return h.hexdigest()
-
-
-def verify_remote(key: str, digest: str, size: int) -> None:
-    binary = r2.wrangler_bin()
-    if not binary:
-        raise ValueError('readback unavailable')
-    with tempfile.TemporaryFile() as stream:
-        result = subprocess.run(
-            [binary, 'r2', 'object', 'get', f'{r2.BUCKET}/{key}', '--remote', '--pipe'],
-            stdout=stream, stderr=subprocess.DEVNULL, timeout=120, env=r2._wrangler_env())
-        stream.seek(0)
-        observed = hashlib.sha256()
-        total = 0
-        for chunk in iter(lambda: stream.read(1 << 20), b''):
-            observed.update(chunk)
-            total += len(chunk)
-        if result.returncode or total != size or observed.hexdigest() != digest:
-            raise ValueError('readback mismatch')
+            md5.update(chunk)
+    return h.hexdigest(), md5.hexdigest()
 
 
 def main() -> int:
@@ -105,21 +88,17 @@ def main() -> int:
         if conn is not None:
             r2.reconcile(led, conn)
 
-        sha = sha256_of(path)
+        sha, md5 = hashes_of(path)
         size = os.path.getsize(path)
         key = f"backups/{sha[:16]}/{os.path.basename(path)}"
 
         result = {"archived": False, "key": key, "bucket": r2.BUCKET,
-                  "bytes": size, "sha256": sha, "reason": "upload_failed"}
+                  "bytes": size, "sha256": sha, "reason": "verification_failed"}
         try:
-            r2.upload(path, key, sha, size, cap, provenance, led, dry_run=dry_run)
+            r2.upload(path, key, sha, size, cap, provenance, led, dry_run=dry_run, verify_md5=md5)
             if dry_run:
                 result["reason"] = "dry_run"
             else:
-                result["reason"] = "readback_failed"
-                verify_remote(key, sha, size)
-                if os.path.getsize(path) != size or sha256_of(path) != sha:
-                    raise ValueError("source changed")
                 result.update(archived=True, reason="verified")
         except r2.QuotaExceeded:
             result["reason"] = "quota_exceeded"
@@ -130,9 +109,6 @@ def main() -> int:
         print(json.dumps(result, sort_keys=True))
         return 0 if result["archived"] or dry_run else 1
     finally:
-        # finally, not the tail of the success path: a quota refusal and an
-        # upload error both returned before the old close() and leaked the
-        # connection.
         if conn is not None:
             try:
                 conn.close()
