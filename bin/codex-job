@@ -28,28 +28,26 @@ POLL_SECONDS = 5
 def run_codex(command, clone):
     sessions = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex')) / 'sessions'
     seen = set(sessions.rglob('*.jsonl'))
-    log, size, active = None, 0, time.monotonic()
+    logs, newest, active = set(), 0, time.monotonic()
     child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=sys.stderr,
                              start_new_session=True)
     try:
         while child.poll() is None:
-            if log is None:
-                for path in set(sessions.rglob('*.jsonl')) - seen:
-                    try:
-                        with path.open() as stream:
-                            metadata = json.loads(stream.readline())
-                        if metadata.get('payload', {}).get('cwd') == str(clone):
-                            log = path
-                            break
-                        seen.add(path)
-                    except (OSError, ValueError):
-                        continue
-            if log is not None:
-                with contextlib.suppress(FileNotFoundError):
-                    current = log.stat().st_size
-                    if current > size:
+            for path in set(sessions.rglob('*.jsonl')) - seen:
+                try:
+                    with path.open() as stream:
+                        metadata = json.loads(stream.readline())
+                    if metadata.get('payload', {}).get('cwd') == str(clone):
+                        logs.add(path)
+                    seen.add(path)
+                except (OSError, ValueError):
+                    continue
+            for path in logs:
+                with contextlib.suppress(OSError):
+                    current = path.stat().st_mtime_ns
+                    if current > newest:
+                        newest = current
                         active = time.monotonic()
-                    size = current
             if time.monotonic() - active >= IDLE_SECONDS:
                 print('Codex stalled: session log has not grown for 15 minutes.',
                       file=sys.stderr, flush=True)
@@ -62,15 +60,13 @@ def run_codex(command, clone):
     finally:
         handlers = {s: signal.signal(s, signal.SIG_IGN) for s in (signal.SIGTERM, signal.SIGINT)}
         try:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(child.pid, signal.SIGTERM)
-            try:
-                child.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(child.pid, signal.SIGKILL)
-            child.wait()
+            for signum in (signal.SIGTERM, signal.SIGKILL):
+                if child.poll() is not None:
+                    break
+                with contextlib.suppress(OSError):
+                    os.killpg(child.pid, signum)
+                with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+                    child.wait(timeout=5)
         finally:
             for signum, handler in handlers.items():
                 signal.signal(signum, handler)

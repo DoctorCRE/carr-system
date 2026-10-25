@@ -14,7 +14,7 @@ import shutil
 import time
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'ops'))
@@ -55,12 +55,17 @@ signal.signal(signal.SIGTERM, signal.SIG_IGN)
 child = subprocess.Popen([sys.executable, '-c', 'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)'])
 (pathlib.Path(os.environ['CODEX_HOME']).parent / 'pids').write_text(f'{os.getpid()} {child.pid}')
 for i in range(80):
-    if mode == 'growing':
+    if mode == 'multi' and i == 10:
+        log = log.with_name('subagent.jsonl')
+        log.write_text(json.dumps({'type': 'session_meta', 'payload': {'cwd': str(clone)}}) + '\\n')
+    if mode == 'growing' or (mode == 'multi' and i >= 10):
         with log.open('a') as f: f.write('activity\\n')
     if mode == 'unrelated':
         other = log.with_name('other.jsonl')
         with other.open('a') as f: f.write('unrelated activity\\n')
     time.sleep(.05)
+child.kill()
+child.wait()
 ''')
             fake.chmod(0o755)
             picker = types.ModuleType('skill_picker')
@@ -141,6 +146,35 @@ for i in range(80):
     def test_growth_resets_idle_deadline(self):
         code, _, errors, _ = self.launch('growing')
         self.assertEqual(code, 0, errors)
+
+    def test_subagent_growth_keeps_job_alive(self):
+        code, _, errors, _ = self.launch('multi')
+        self.assertEqual(code, 0, errors)
+
+    def test_cleanup_errors_preserve_success(self):
+        with patch('os.killpg', side_effect=PermissionError('fixture denied')) as killpg:
+            code, output, _, clone = self.launch('success')
+        self.assertEqual((code, output), (0, 'final message\n'))
+        self.assertFalse(clone.parent.exists())
+        killpg.assert_not_called()
+
+    def test_unavailable_group_preserves_timeout_with_bounded_waits(self):
+        picker = types.ModuleType('skill_picker')
+        picker.prepare = lambda brief, _: (brief, [])
+        child = Mock(pid=12345)
+        child.poll.return_value = None
+        child.wait.side_effect = subprocess.TimeoutExpired('fixture', 5)
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.dict(sys.modules, {'skill_picker': picker}), patch('os.execv'), \
+                patch.dict(os.environ, {'CODEX_HOME': tmp}), \
+                patch('subprocess.Popen', return_value=child), \
+                patch('os.killpg', side_effect=PermissionError('fixture denied')):
+            job = runpy.run_path(str(ROOT / 'bin/codex-job'))
+            job['run_codex'].__globals__['IDLE_SECONDS'] = 0
+            self.assertEqual(job['run_codex'](['fixture'], Path(tmp)), 124)
+        self.assertTrue(child.wait.call_args_list)
+        self.assertTrue(all(call.kwargs.get('timeout') == 5
+                            for call in child.wait.call_args_list))
 
     def test_signals_kill_the_group_and_retain_checkout(self):
         for signum in (signal.SIGTERM, signal.SIGINT):
