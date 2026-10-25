@@ -175,7 +175,7 @@ jobs:
         env:
           # ops/ci.sh refuses any DSN that is not loopback. This one is the
           # service container above.
-          CARR_CI_DATABASE_URL: postgres://carr_ci:carr_ci@localhost:5432/carr_ci # ci-secret-scan: allow — throwaway container credential, loopback only, dies with the runner
+          CARR_CI_DATABASE_URL: postgres://carr_ci:carr_ci@127.0.0.1:5432/carr_ci # ci-secret-scan: allow — throwaway container credential, loopback only, dies with the runner
           # Excludes the checks whose dependency cannot exist on a runner
           # (installed Claude Code settings, macOS launchd). Each one prints its
           # reason in the output; nothing is dropped silently.
