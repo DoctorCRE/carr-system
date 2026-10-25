@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from pathlib import Path
 import plistlib
 import shutil
@@ -11,7 +10,7 @@ import subprocess
 import sys
 import time
 
-from local_jobs import append, command, epoch, locked, path_at, read_latest, stamp, tail
+from local_jobs import append, command, locked, path_at, read_latest, stamp, tail
 
 SOURCE = Path(__file__).resolve().parents[1]
 KINDS = {"job_failed", "disk_low"}
@@ -91,25 +90,10 @@ def reconcile(root, config, found, observed_jobs, now=None):
             append(path, {**prior, "cleared_at": stamp(now)})
 
 
-def digest(root, config, *, session_id=None, now=None):
+def digest(root, config, *, session_id=None):
     active = sorted((f for f in read_latest(path_at(root, config["paths"]["findings"])).values()
                      if f.get("kind") in KINDS and (f["kind"] != "job_failed" or "exit_code" in f)
                      and not f.get("cleared_at")), key=lambda f: f["key"])
-    state = "unavailable"
-    try:
-        scan = read_latest(path_at(root, config["paths"]["scan_ledger"])).get("scan", {})
-        if scan.get("status") == "failed":
-            state = "failed"
-        elif scan.get("status") == "completed":
-            age = (time.time() if now is None else now) - epoch(scan["at"])
-            if math.isfinite(age) and age >= 0:
-                thresholds = config["thresholds"]
-                state = "stale" if age > thresholds["scan_seconds"] + thresholds["scan_grace_seconds"] else None
-    except (OSError, ValueError, TypeError, KeyError, AttributeError, OverflowError):
-        pass
-    if state:
-        active.insert(0, {"key": "watchdog_scan:" + state, "reason":
-                         f"watchdog scan {state}; inspect " + config["paths"]["scan_ledger"]})
     view = [{k: f.get(k) for k in ("key", "reason")} for f in active]
     if session_id:
         signature = hashlib.sha256(json.dumps(view, sort_keys=True).encode()).hexdigest()

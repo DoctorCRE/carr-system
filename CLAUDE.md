@@ -30,7 +30,7 @@ Before acting when a card applies, answer one line with applies yes/no and the a
 
 [K10] Write to the question: When writing to Joe, lead with the outcome in short plain prose sized to the question; tables or diagrams only for order, comparison, or flow. Keep evidence words exact; contrast only raised alternatives.
 
-[K09] Give runnable numbered steps: When giving a partner steps to run, number each, say all are required, one active-voice action per line under twenty words, ending with the check that proves it worked.
+[K09] Give runnable numbered steps: When giving a partner steps to run, number each, say all are required, one active-voice action per line under twenty words, ending with the check that proves it worked. Fill in real values, never placeholders; if a step prints secrets, say before it runs not to paste the output.
 
 [K11] Use observed clocks: When stating a date, time, age, or "today", take it from an observed timestamp or clock read and give it in Joe's timezone.
 
@@ -104,7 +104,7 @@ Read and follow [the required PR policy](AGENTS.md#before-every-pr-design-and-de
 
 ## Agent skills
 
-Use `gh pr merge --auto --squash <pr>` for GitHub native auto-merge, `gh pr list` for open PRs, and `tools/room-bridge/briefs/{builder,staging-score}.md` for dispatch briefs.
+Use `gh pr merge --auto --squash <pr>` for GitHub native auto-merge, `gh pr list` for open PRs, and [the brief rules](tools/room-bridge/brief-footer.md) for dispatch briefs.
 
 ### Issue tracker
 

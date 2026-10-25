@@ -409,7 +409,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -517,7 +517,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -1845,7 +1845,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -3077,6 +3077,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text)",
       "volatility": "s",
       "ingress_key": "db-function-acl:ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=ops, public, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.admit_job_cost(p_job_id uuid, p_lease_token uuid, p_route_key text, p_estimated_cost_usd numeric)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.admit_job_cost(p_job_id uuid, p_lease_token uuid, p_route_key text, p_estimated_cost_usd numeric):carr_jobs:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

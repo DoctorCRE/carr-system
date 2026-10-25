@@ -310,6 +310,12 @@
       "sha256": "acd2ec3e4823ae3c7728c5e9c66b0b8807a3d7c1eef2bc94facdbb59b071acc6",
       "rule": "pii-email",
       "reason": "Studio settings migration explicitly preserves the owner mailbox identity already documented in the prior committed Outlook draft script. This is an operator migration recipe, not client data or a credential. Exact reviewed document bytes only."
+    },
+    {
+      "path": "spec/outlook/README.md",
+      "sha256": "8e2322438ef700c25df8c6f8333c5ee0b4a674565928d8f02c0cacc37a2cb5d3",
+      "rule": "pii-email",
+      "reason": "Historical research-helper README at 2b1643b8 names the operator-designated TEST mailbox, not a client contact or credential. The literal is removed from the current README; this exception binds only these exact historical documentation bytes."
     }
   ]
 }
