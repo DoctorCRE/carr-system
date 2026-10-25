@@ -3,6 +3,7 @@
 import json
 import hashlib
 import os
+import plistlib
 from pathlib import Path
 import shutil
 import stat
@@ -104,6 +105,7 @@ class InstallerTest(unittest.TestCase):
             for relative in ('bin/install-outlook-intake.sh', 'tools/outlook-intake-copy.c',
                              'lib/outlook_intake.py',
                              'ops/launchd/com.carr.outlook-intake.plist',
+                             'ops/launchd/com.carr.outlook-refresh.plist',
                              'vendor-patches/hxprobe-calendar-and-bodies.patch'):
                 shutil.copyfile(ROOT / relative, repo / relative)
             (repo / 'lib/machine_role.py').write_text('def is_primary(repo): return True\n')
@@ -124,6 +126,10 @@ class InstallerTest(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(helper.stat().st_mode), 0o700)
             self.assertIn(f'grant Full Disk Access to {helper}', result.stdout)
             self.assertFalse((home / 'Library/LaunchAgents').exists())
+            refresh = plistlib.loads((repo / 'out/com.carr.outlook-refresh.plist').read_bytes())
+            self.assertEqual(refresh['WorkingDirectory'], str(repo))
+            self.assertIn(str(repo / '.venv/bin/python'), refresh['ProgramArguments'])
+            self.assertEqual(stat.S_IMODE((repo / 'out/outlook-refresh-launchd.log').stat().st_mode), 0o600)
             profile = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity'
             profile.mkdir(parents=True)
             (profile / 'HxStore.hxd').write_bytes(b'installer-fixture')
