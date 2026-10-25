@@ -28,7 +28,7 @@ revoke all on sequence ops.client_portal_material_id_seq from public,carr_reader
 
 -- Verifiers use bcrypt(SHA-256(password)), so passwords differing beyond bcrypt's 72-byte limit remain distinct.
 create function ops.read_client_portal(p_slug text,p_password text) returns jsonb
-language plpgsql stable security definer set search_path=pg_catalog as $$
+language plpgsql stable security definer set search_path=pg_catalog,pg_temp as $$
 declare
   portal ops.client_portal%rowtype;
   supplied_hash text;
@@ -204,7 +204,7 @@ LANGUAGE sql IMMUTABLE SET search_path=pg_catalog AS $fn$ SELECT $current_grants
     },
     {
       "config": [
-        "search_path=pg_catalog"
+        "search_path=pg_catalog, pg_temp"
       ],
       "grantee": "carr_reader",
       "parallel": "u",
