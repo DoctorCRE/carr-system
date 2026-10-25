@@ -1,3 +1,4 @@
+import { CHROMIUM_SAFETY_ARGS } from "../../../tools/chromium-safety-args.mjs";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -179,6 +180,7 @@ export async function launchChrome(chrome, {
     let lastProbe = "DevToolsActivePort has not been published";
     try {
       child = spawnChrome(chrome, [
+        ...CHROMIUM_SAFETY_ARGS,
         "--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--no-sandbox",
         "--disable-background-networking", "--disable-default-apps", "--disable-dev-shm-usage",
         "--allow-file-access-from-files", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank",
