@@ -41,13 +41,16 @@ export async function readBriefLoops(c) {
     .map(row => ({ ...row, owner_partner: row.owner.toLowerCase() }));
 }
 
-export const briefLoopKey = sponsor => row => [row.due_on || '~',
-  row.owner_partner === sponsor ? '0' : '1', String(row.kind), String(row.number)];
+const fingerprint = async value => {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+};
+export const briefLoopKey = sponsor => async row => [row.due_on || '~',
+  row.owner_partner === sponsor ? '0' : '1', String(row.kind), await fingerprint(String(row.number))];
 const tier = { work: '0', capability: '1', pending: '2' };
 const timestamp = value => value != null && Number.isFinite(new Date(value).getTime()) ? new Date(value).toISOString() : '~';
 export const briefNeedsJoeKey = async row => {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([row.key, row.title])));
-  const identity = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+  const identity = await fingerprint(JSON.stringify([row.key, row.title]));
   return [tier[row.blocks.tier], timestamp(row.since), row.source, identity];
 };
 export const briefAssuranceKey = row => [({ failure: '0', action_required: '1', completion: '2' })[row.severity] || '3',

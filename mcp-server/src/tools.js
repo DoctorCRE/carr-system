@@ -3405,7 +3405,7 @@ export const TOOLS = {
 
   "morning-brief-queue": {
     write: false,
-    description: "Continue a full morning queue. Today uses the partner triage cursor; loops sort due date first, caller first only on tied dates, then kind/number; Needs Joe sorts blocking tier, oldest timestamp to millisecond precision, source/identity fingerprint after exclusions and duplicate collapse. Defaults to 50 rows. Returns total, returned, remaining (loops/Needs Joe), has_more, next_cursor. Pass the cursor and same queue. Cursors bind tenant, sponsor and queue. Live keysets are not snapshots; restart to include rows whose sort keys change before the cursor. Needs Joe totals cover available sources only when partial. No audience argument.",
+    description: "Continue a full morning queue. Today uses the partner triage cursor; loops sort due date first, caller first only on tied dates, then kind/number fingerprint; Needs Joe sorts blocking tier, oldest timestamp to millisecond precision, source/identity fingerprint after exclusions and duplicate collapse. Defaults to 50 rows. Returns total, returned, remaining (loops/Needs Joe), has_more, next_cursor. Pass the cursor and same queue. Cursors bind tenant, sponsor and queue. Live keysets are not snapshots; restart to include rows whose sort keys change before the cursor. Needs Joe totals cover available sources only when partial. No audience argument.",
     inputSchema: { type: "object", additionalProperties: false, required: ["queue"], properties: {
       queue: { type: "string", enum: ["today", "loops", "needs_joe"] },
       limit: { type: "integer", minimum: 1, maximum: 50 },

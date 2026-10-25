@@ -34,6 +34,26 @@ const client = (loops, items = []) => ({ query: async sql => {
   }] };
   return { rows: [] };
 } });
+for (const number of ['a'.repeat(257), '測'.repeat(10000)])
+  test(`loop continuation preserves long identities of length ${number.length}`, async () => {
+    const numbers = [number, `${number}b`, 'z'];
+    const c = client(numbers.map(number => ({ number, kind: 'open_loop', owner: 'joe', due_on: '2026-01-01' })));
+    const found = [];
+    let cursor;
+    for (let i = 0; i < numbers.length; i++) {
+      const page = await executeRegisteredTool(c, joe, 'morning-brief-queue',
+        { queue: 'loops', limit: 1, ...(cursor ? { cursor } : {}) });
+      assert.equal(page.total, numbers.length);
+      assert.equal(page.returned, 1);
+      assert.equal(page.remaining, numbers.length - i - 1);
+      assert.equal(page.has_more, i < numbers.length - 1);
+      found.push(page.items[0].number);
+      cursor = page.next_cursor;
+      if (page.has_more) assert.ok(cursor.length <= 8000);
+    }
+    assert.equal(cursor, null);
+    assert.deepEqual(found.slice().sort(), numbers.slice().sort());
+  });
 test('long Unicode local identities produce bounded usable continuation cursors', async () => {
   const c = client([], [{ kind: 'tabled', text: '測'.repeat(1000), at: '2026-01-01' },
     { kind: 'tabled', text: '後'.repeat(1000), at: '2026-01-02' }]);
