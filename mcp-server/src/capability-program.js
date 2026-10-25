@@ -142,13 +142,6 @@ export function capabilityProgramTools({ withEnvelope, writeEvent, ToolError }) 
         const CANCELLABLE = ["claimed", "in_progress", "verification"];
         if (!CANCELLABLE.includes(row.state)) throw new ToolError({ error: "invalid_state_transition", from: row.state, to: "ready", required_from: CANCELLABLE, hint: "only a project actually in flight has a session to cancel" });
 
-        // THE SHAPE GATE WOULD REFUSE THIS AT THE DATABASE, so it is checked
-        // here where the message can say what to do. ops.work_request_shape_gate
-        // rejects any row entering 'ready' without a shape disposition, and it
-        // also freezes the shape columns once a row leaves the pre-build states,
-        // so this verb cannot set one on the row's behalf.
-        if (!row.shape_disposition) throw new ToolError({ error: "work_shape_disposition_required", work_request: row.ref, resolution: "this project carries no shape disposition, so it cannot return to ready; record one with set-work-shape-disposition first" });
-
         const open = await c.query(`select * from ops.capability_agent_session where work_request_id=$1 and state not in ('completed','cancelled') for update`, [row.id]);
         const session = open.rows[0];
         if (!session) throw new ToolError({ error: "no_open_capability_session", work_request: row.ref, hint: "this project is in flight with no open session; nothing to cancel" });

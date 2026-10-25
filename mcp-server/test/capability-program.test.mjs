@@ -246,15 +246,6 @@ test("a cancel refuses without a reason, and refuses a row that is not in flight
     error => error.payload.error === "invalid_state_transition");
 });
 
-test("a cancel refuses a row with no shape disposition rather than letting the database refuse it", async () => {
-  const { db } = cancelFixture({ shape_disposition: null });
-  await assert.rejects(
-    cancelTools()["cancel-capability-session"].handler(db, actor, {
-      idempotency_key: "00000000-0000-4000-8000-00000000000e", sequence: 38, base_version: 5,
-      reason: "row is stuck", program_key: PROGRAM }),
-    error => error.payload.error === "work_shape_disposition_required");
-});
-
 test("a cancel refuses a session id that is not the row's open session", async () => {
   const { db } = cancelFixture();
   await assert.rejects(
@@ -263,3 +254,16 @@ test("a cancel refuses a session id that is not the row's open session", async (
       reason: "wrong session", capability_agent_session_id: "not-the-open-one", program_key: PROGRAM }),
     error => error.payload.error === "capability_agent_session_not_for_current_project");
 });
+
+for (const shape_disposition of [null, "required"]) {
+  test(`a cancel returns a project with ${shape_disposition} shape to ready`, async () => {
+    const fixture = cancelFixture({ shape_disposition });
+    const result = await cancelTools()["cancel-capability-session"].handler(fixture.db, actor, {
+      idempotency_key: "00000000-0000-4000-8000-000000000010", sequence: 38, base_version: 5,
+      reason: "Park the candidate.", program_key: PROGRAM,
+    });
+    assert.equal(result.project.state, "ready");
+    assert.equal(result.project.shape_disposition, shape_disposition);
+    assert.equal(result.cancelled_session.candidate_fingerprint, "abc");
+  });
+}
