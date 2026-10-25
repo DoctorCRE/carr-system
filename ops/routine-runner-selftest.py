@@ -131,7 +131,7 @@ class RunnerTests(unittest.TestCase):
                 with patch.object(runtime, 'ROOT', Path(folder)), \
                      patch.object(sys, 'argv', ['routine', 'lead-signals-weekly']), \
                      patch.dict(os.environ, {'CARR_MCP_UNATTENDED_TOKEN': secret}), \
-                     patch.object(runtime, 'execute', side_effect=ValueError('primary ' + secret)), \
+                     patch.object(runtime, 'execute', side_effect=ValueError('primary ' + secret + '\nsecond line')), \
                      patch.object(runtime.Context, 'failure', side_effect=(
                          RuntimeError('reporting ' + secret) if reporting_failed else None)), \
                      patch('sys.stderr', new_callable=io.StringIO) as stderr:
@@ -141,7 +141,7 @@ class RunnerTests(unittest.TestCase):
                 self.assertTrue(last_line.startswith('routine failure evidence: '), last_line)
                 evidence = json.loads(last_line.removeprefix('routine failure evidence: '))
                 self.assertEqual(evidence, {
-                    'primary_error': 'ValueError: primary [REDACTED]',
+                    'primary_error': 'ValueError: primary [REDACTED]\nsecond line',
                     'reporting_error': 'RuntimeError: reporting [REDACTED]' if reporting_failed else None,
                     'routine': 'lead-signals-weekly',
                 })
