@@ -101631,6 +101631,13 @@ CREATE INDEX party_contact_state_idx ON public.party USING btree (contact_state)
 
 
 --
+-- Name: party_link_deal_referrer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX party_link_deal_referrer_idx ON public.party_link_deal USING btree (referred_by, deal_id);
+
+
+--
 -- Name: party_link_from_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -101908,6 +101915,13 @@ CREATE INDEX tool_read_call_verb_sponsor_idx ON public.tool_read_call USING btre
 --
 
 CREATE INDEX vendor_category_slug_idx ON public.vendor USING btree (category_slug);
+
+
+--
+-- Name: vendor_live_party_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX vendor_live_party_idx ON public.vendor USING btree (party_id, id) WHERE (merged_into IS NULL);
 
 
 --
@@ -122156,6 +122170,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0962_triage_lead_read_indexes.sql	553d99d865d602ac9984e678333d9c0ebb58c370ecdcb7e76f29ca9352aba87b	1970-01-01 00:00:00+00
 0965_retire_cache_evidence_refs.sql	5914556446bc59634aca464c1251dbbcc436bde94b3fc9a7379e4b631fe3bec2	1970-01-01 00:00:00+00
 0967_retire_cost_refusal.sql	27ec72ffa788024603c1ca5a80994dca0c43e79a739de544af63dcc6acc3e07f	1970-01-01 00:00:00+00
+0970_vendor_relationship_read_indexes.sql	51988621bb715075a772cd1b6985c814df24b6c96c47ac0cbb4976624318aca3	1970-01-01 00:00:00+00
 \.
 
 
