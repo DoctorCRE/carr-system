@@ -89,7 +89,7 @@ class Fake {
     throw new Error(`unexpected fake query ${sql}`);
   }
 }
-const human={id:"actor-example",human:true};
+const human={id:"actor-example",slug:"joe",human:true};
 const tools=leadAutomationTools({invoices:{preview:async()=>[],apply:async()=>[]},withEnvelope:async(c,a,v,args,f)=>f(),writeEvent:async(c,...args)=>c.events.push(args),ToolError:class extends Error{constructor(value){super(value.error);}}});
 test("dry runs issue SELECT only, use the same planner and never prepare drafts",async()=>{
   for(const [name,args] of [["lead-stage-preview",{}],["advance-leads",{idempotency_key:"synthetic-preview",dry_run:true}]]){
@@ -109,7 +109,7 @@ test("existing applied evidence is not returned as a newly applied move",async()
   const result=await tools['advance-leads'].handler(db,human,{idempotency_key:'synthetic-conflict'});
   assert.deepEqual(result.moves,[]);assert.deepEqual(db.events,[]);assert.equal(db.l.stage,'new');
 });
-test("draft approval is human-only, makes no stage move and cannot send",async()=>{
+test("draft approval requires partner authority, makes no stage move and cannot send",async()=>{
   const db=new Fake();db.drafts=[{id:"draft-example",lead_id:lead.id}];
   await assert.rejects(()=>tools["approve-lead-draft"].handler(db,{...human,human:false},{draft_id:"draft-example"}),/human_approval/);
   const r=await tools["approve-lead-draft"].handler(db,human,{draft_id:"draft-example"});assert.equal(r.sent,false);assert.equal(db.l.stage,"new");
