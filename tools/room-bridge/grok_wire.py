@@ -338,12 +338,12 @@ def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFOR
                 receipt_path=None, model=MODEL) -> dict:
     """One execution owns URL validation, provider outcome codes and private receipts.
 
-    Every prompt URL must be public and free of embedded credentials before
+    Retrieval URLs must be public and free of embedded credentials before
     invocation. Retrieval output requires explicit opt-in and source text;
     local files cannot establish provenance.
     """
     prompt_urls = requested_urls(task)
-    outcome = retrieval_request_error(prompt_urls) if prompt_urls or retrieval else None
+    outcome = retrieval_request_error(prompt_urls) if retrieval else None
     urls = prompt_urls if retrieval else []
     cli_version = None
     if outcome is None:
