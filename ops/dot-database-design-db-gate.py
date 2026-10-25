@@ -540,7 +540,10 @@ class DatabaseDesign(unittest.TestCase):
         self.assertFalse(self.one("""select exists(select 1 from information_schema.columns
             where table_schema='ops' and table_name='cognition_result_cache'
               and column_name='evidence_refs')"""))
-        cognition = self.cognition()
+        cognition = 'dot-' + uuid.uuid4().hex
+        self.c.execute('set local session_replication_role=replica')
+        self.c.execute("insert into ops.cognition_job(key,version,input_schema_version,output_schema_version,input_schema,output_schema,max_tokens,max_cost_usd,timeout_seconds,provider_routes) values(%s,1,1,1,'{}','{}',1,1,60,array['synthetic'])", (cognition,))
+        self.c.execute('set local session_replication_role=origin')
         key, dependency = uuid.uuid4().hex, uuid.uuid4().hex
         self.c.execute('set local role carr_jobs')
         for proposal in ({'synthetic': 'first'}, {'synthetic': 'replacement'}):
