@@ -69,7 +69,9 @@ class LeadTests(unittest.TestCase):
         csv_text = io.StringIO()
         writer = csv.DictWriter(csv_text, fieldnames=list(raw))
         writer.writeheader()
-        writer.writerow(raw)
+        bad = {**raw, "Provider Organization Name (Legal Business Name)": ""}
+        after = {**raw, "NPI": "1000000009", "Provider Organization Name (Legal Business Name)": "Example Optometry"}
+        writer.writerows([raw, bad, after])
         zipped = io.BytesIO()
         with zipfile.ZipFile(zipped, "w") as archive:
             archive.writestr("npidata_pfile_20260928-20261004.csv", csv_text.getvalue())
@@ -84,11 +86,18 @@ class LeadTests(unittest.TestCase):
             root = Path(folder)
             journal = root / "state.json"
             ctx = runtime.Context("lead-signals-weekly", now=NOW, journal=journal)
-            with patch.object(leads, "ROOT", root), patch.object(leads, "_fetch", side_effect=fetch), patch.object(runtime, "call_verb", side_effect=transport), patch("sys.stdout", new_callable=io.StringIO):
+            with patch.object(leads, "ROOT", root), patch.object(leads, "_fetch", side_effect=fetch), patch.object(runtime, "call_verb", side_effect=transport), patch("sys.stdout", new_callable=io.StringIO) as output, patch("sys.stderr", new_callable=io.StringIO) as errors:
                 self.assertEqual(runtime.run_module(ctx, leads), 0)
-                self.assertEqual([args["query"] for verb, args in calls if verb == "find"], ["Example Dental", "Example Principal"])
-                self.assertEqual([verb for verb, _ in calls if verb != "find"], ["add-loop", "add-loop"])
-                self.assertEqual({effect["verb"] for effect in json.loads(journal.read_text())["effects"].values()}, {"add-loop"})
+                self.assertEqual([args["query"] for verb, args in calls if verb == "find"], ["Example Dental", "Example Principal", "Example Optometry", "Example Principal"])
+                self.assertEqual([verb for verb, _ in calls if verb != "find"], ["add-loop", "add-loop", "add-loop"])
+                self.assertEqual([json.loads(args["body"])["npi"] for verb, args in calls if verb == "add-loop" and args["title"].startswith("NPPES proposal:")], ["1000000001", "1000000009"])
+                receipt = json.loads(output.getvalue())
+                self.assertEqual(receipt["candidate_count"], 2)
+                self.assertEqual(receipt["status"], "prepared")
+                state = json.loads(journal.read_text())
+                self.assertTrue(state["completed"])
+                self.assertEqual({effect["verb"] for effect in state["effects"].values()}, {"add-loop"})
+                self.assertIn('"missing_name": 1', errors.getvalue())
                 calls.clear()
                 restarted = runtime.Context("lead-signals-weekly", now=NOW, journal=journal)
                 self.assertEqual(runtime.execute(restarted), 0)
@@ -135,8 +144,40 @@ class LeadTests(unittest.TestCase):
             raw["Provider Enumeration Date"] = enumeration
             self.assertEqual(len(leads.parse_nppes([raw], as_of=NOW.date(), source=leads.INDEX_URL)), expected)
         raw["Provider Enumeration Date"] = "not-a-date"
-        with self.assertRaises(ValueError):
-            leads.parse_nppes([raw], as_of=NOW.date(), source=leads.INDEX_URL)
+        with patch("sys.stderr", new_callable=io.StringIO):
+            self.assertEqual(leads.parse_nppes([raw], as_of=NOW.date(), source=leads.INDEX_URL), [])
+
+    def test_weekly_archive_rejects_bad_record_values_and_keeps_neighbors(self):
+        first = copy.deepcopy(FIXTURE["nppes_rows"][0])
+        last = {**first, "NPI": "1000000009"}
+        for changes, reason in (
+            ({"NPI": "not-an-npi"}, "invalid_npi"),
+            ({"Provider Enumeration Date": "not-a-date"}, "invalid_enumeration_date"),
+            ({"Entity Type Code": "3"}, "unknown_entity_type"),
+            ({"Provider Organization Name (Legal Business Name)": ""}, "missing_name"),
+        ):
+            with self.subTest(reason=reason):
+                bad = {**first, **changes}
+                text = io.StringIO()
+                writer = csv.DictWriter(text, fieldnames=list(first))
+                writer.writeheader()
+                writer.writerows([first, bad, bad, last])
+                output = io.BytesIO()
+                with zipfile.ZipFile(output, "w") as archive:
+                    archive.writestr("npidata_pfile_weekly.csv", text.getvalue())
+                with patch("sys.stderr", new_callable=io.StringIO) as errors:
+                    rows = leads.parse_weekly_zip(output.getvalue(), as_of=NOW.date(), source=leads.INDEX_URL)
+                self.assertEqual([row["npi"] for row in rows], ["1000000001", "1000000009"])
+                self.assertEqual(errors.getvalue(), 'NPPES rejected rows: ' + json.dumps({reason: 2}) + "\n")
+
+    def test_weekly_archive_missing_required_columns_still_fails(self):
+        for content in ("", "NPI,Entity Type Code\n1000000001,2\n"):
+            with self.subTest(content=content):
+                output = io.BytesIO()
+                with zipfile.ZipFile(output, "w") as archive:
+                    archive.writestr("npidata_pfile_weekly.csv", content)
+                with self.assertRaisesRegex(ValueError, "missing required columns"):
+                    leads.parse_weekly_zip(output.getvalue(), as_of=NOW.date(), source=leads.INDEX_URL)
 
     def test_weekly_publications_reject_stale_and_wrong_host(self):
         link = '<a href="NPPES_Data_Dissemination_092826_100426_Weekly_V2.zip">weekly</a>'
@@ -185,8 +226,8 @@ class LeadTests(unittest.TestCase):
         outside["Provider Business Practice Location Address City Name"] = "Pensacola"
         outside["Provider Business Practice Location Address State Name"] = "FL"
         outside["Provider Business Practice Location Address Postal Code"] = "32501"
-        with self.assertRaisesRegex(ValueError, "NPPES provider name missing"):
-            leads.parse_nppes([outside], as_of=NOW.date(), source=leads.INDEX_URL)
+        with patch("sys.stderr", new_callable=io.StringIO):
+            self.assertEqual(leads.parse_nppes([outside], as_of=NOW.date(), source=leads.INDEX_URL), [])
 
     def test_mailing_only_is_visible_with_lower_estimate(self):
         raw = copy.deepcopy(FIXTURE["nppes_rows"][2])
