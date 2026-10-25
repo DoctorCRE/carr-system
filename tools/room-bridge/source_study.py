@@ -142,21 +142,22 @@ def _run_job(folder, phase, runtime):
     auth_home = Path.home() / '.grok' if provider == 'grok' else Path(os.environ.get('CODEX_HOME', Path.home() / '.codex'))
     env = runtime_env(runtime, auth_home, os.environ, provider=provider)
 
-    def confined_run(command, **kwargs):
+    def confined_command(command):
         if command[0] not in ('codex', 'grok'):
             raise ValueError('research attempted an unexpected executable')
         binary = shutil.which(command[0], path=env['PATH'])
         if not binary:
             raise ValueError('research provider executable unavailable')
-        kwargs['env'] = env
-        return subprocess.run(confine([binary, *command[1:]], folder), **kwargs)
+        return confine([binary, *command[1:]], folder)
 
     if phase == 'retrieval':
         from grok_wire import PROVIDER_MODEL, invoke_cli, run_request
         result = run_request(request['prompt'], cwd=str(folder), model=route['model'],
-            effort=route['effort'], timeout_seconds=request['timeout'],
-            invoke=lambda prompt, **kw: invoke_cli(prompt, **kw, run=confined_run,
-                                                  model=route['model'], env=env))
+            effort=route['effort'], idle_seconds=request['timeout'],
+            invoke=lambda prompt, **kw: invoke_cli(
+                prompt, **kw, model=route['model'], env=env,
+                popen=lambda argv, **options: subprocess.Popen(
+                    confined_command(argv), **options)))
         metadata = result.get('provider_metadata', {})
         if (result.get('status') != 'completed' or not result.get('result')
                 or metadata.get('actual_model') != PROVIDER_MODEL or metadata.get('effort') != route['effort']
@@ -168,10 +169,10 @@ def _run_job(folder, phase, runtime):
         answer = result['result']
     else:
         output = runtime / 'result.md'
-        process = confined_run(['codex', 'exec', '--dangerously-bypass-hook-trust', '--json',
+        process = subprocess.run(confined_command(['codex', 'exec', '--dangerously-bypass-hook-trust', '--json',
             '--sandbox', 'read-only', '--skip-git-repo-check', '-C', str(folder), '-o', str(output),
             '-m', route['model'], '-c', 'model_reasoning_effort=' + json.dumps(route['effort']),
-            request['prompt']], cwd=str(folder), capture_output=True, text=True,
+            request['prompt']]), cwd=str(folder), env=env, capture_output=True, text=True,
             stdin=subprocess.DEVNULL, timeout=request['timeout'])
         events = []
         for line in process.stdout.splitlines():

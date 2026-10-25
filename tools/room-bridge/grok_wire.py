@@ -1,4 +1,4 @@
-"""Bounded Grok CLI retrieval through the existing authenticated subscription.
+"""Progress-monitored Grok CLI retrieval through the existing authenticated subscription.
 
 The answer's prose cannot certify a model. Only the CLI's terminal modelUsage
 event does; absent, mixed or mismatched provider metadata refuses completion.
@@ -13,15 +13,16 @@ import json
 import os
 from pathlib import Path
 import re
+import select
 import subprocess
 import tempfile
+import time
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 MODEL = "grok-4.7"
 PROVIDER_MODEL = "grok-4.7-build"
 EFFORT = "high"
-TIMEOUT_S = 180.0
-MAX_TURNS = 60
+IDLE_SECONDS = 600.0
 QUOTA_ERROR = re.compile(r"(?:status\s*[:=]?\s*402\b|usage\s+balance\s+exhausted)", re.I)
 
 
@@ -298,13 +299,15 @@ def parse_result(stdout: str, returncode: int, *, stderr: str = "", urls: list[s
     return {**outcome, "provider_metadata": metadata, "receipt": receipt}
 
 
-def invoke_cli(prompt: str, *, cwd=None, effort=EFFORT, max_turns=MAX_TURNS,
-               writable=False, timeout_seconds=TIMEOUT_S, run=subprocess.run, model=MODEL, env=None):
-    """Invoke native Grok with an explicit sandbox and bounded run time."""
+def invoke_cli(prompt: str, *, cwd=None, effort=EFFORT, max_turns=None,
+               writable=False, idle_seconds=IDLE_SECONDS, popen=subprocess.Popen, model=MODEL, env=None):
+    """Invoke native Grok with an explicit sandbox and progress monitoring."""
     argv = ["grok", "--model", model, "--reasoning-effort", effort,
-            "--max-turns", str(max_turns), "--always-approve",
+            "--always-approve",
             "--sandbox", "workspace" if writable else "read-only",
             "--output-format", "streaming-json", "--single", prompt]
+    if max_turns is not None:
+        argv += ["--max-turns", str(max_turns)]
     env = dict(os.environ if env is None else env)
     env.pop("CARR_GROK_RUN_READ_ONLY", None)
     if writable:
@@ -319,11 +322,45 @@ def invoke_cli(prompt: str, *, cwd=None, effort=EFFORT, max_turns=MAX_TURNS,
                 "DELEGATION_GATE_LEDGER": "delegation-gate-ledger.jsonl",
             }.items():
                 env[key] = str(Path(state) / name)
-            return run(argv, cwd=cwd, capture_output=True, text=True,
-                       stdin=subprocess.DEVNULL, timeout=timeout_seconds, env=env)
+            return stream_cli(argv, cwd, env, idle_seconds, popen)
     env["CARR_GROK_RUN_READ_ONLY"] = "1"
-    return run(argv, cwd=cwd, capture_output=True, text=True,
-               stdin=subprocess.DEVNULL, timeout=timeout_seconds, env=env)
+    return stream_cli(argv, cwd, env, idle_seconds, popen)
+
+
+class Stalled(subprocess.TimeoutExpired):
+    """The CLI stopped emitting complete stdout lines."""
+
+
+def stream_cli(argv, cwd, env, idle_seconds, popen):
+    chunks = []
+    with tempfile.TemporaryFile() as diagnostics, popen(
+            argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=diagnostics) as process:
+        deadline = time.monotonic() + idle_seconds
+        try:
+            while True:
+                remaining = max(0, deadline - time.monotonic())
+                if not select.select([process.stdout], [], [], remaining)[0]:
+                    raise Stalled(argv, idle_seconds)
+                chunk = os.read(process.stdout.fileno(), 65536)
+                if not chunk:
+                    try:
+                        process.wait(timeout=max(0, deadline - time.monotonic()))
+                    except subprocess.TimeoutExpired:
+                        raise Stalled(argv, idle_seconds) from None
+                    break
+                chunks.append(chunk)
+                if b"\n" in chunk:
+                    deadline = time.monotonic() + idle_seconds
+                elif time.monotonic() >= deadline:
+                    raise Stalled(argv, idle_seconds)
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+        diagnostics.seek(0)
+        return subprocess.CompletedProcess(argv, process.returncode,
+            b"".join(chunks).decode("utf-8", "replace"), diagnostics.read().decode("utf-8", "replace"))
 
 
 class PreflightError(Exception):
@@ -333,17 +370,17 @@ class PreflightError(Exception):
 
 
 def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFORT,
-                max_turns=MAX_TURNS, writable=False, timeout_seconds=TIMEOUT_S,
+                max_turns=None, writable=False, idle_seconds=IDLE_SECONDS,
                 invoke=invoke_cli, preflight=None, fixture=None, require_identity=True,
                 receipt_path=None, model=MODEL) -> dict:
     """One execution owns URL validation, provider outcome codes and private receipts.
 
-    Every prompt URL must be public and free of embedded credentials before
+    Retrieval URLs must be public and free of embedded credentials before
     invocation. Retrieval output requires explicit opt-in and source text;
     local files cannot establish provenance.
     """
     prompt_urls = requested_urls(task)
-    outcome = retrieval_request_error(prompt_urls) if prompt_urls or retrieval else None
+    outcome = retrieval_request_error(prompt_urls) if retrieval else None
     urls = prompt_urls if retrieval else []
     cli_version = None
     if outcome is None:
@@ -355,7 +392,7 @@ def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFOR
                 if preflight:
                     cli_version = preflight()
                 proc = invoke(prompt, cwd=cwd, effort=effort, max_turns=max_turns,
-                              writable=writable, timeout_seconds=timeout_seconds)
+                              writable=writable, idle_seconds=idle_seconds)
                 raw, returncode, stderr = proc.stdout or "", proc.returncode, proc.stderr or ""
             outcome = parse_result(
                 raw, returncode, stderr=stderr, urls=urls, effort=effort,
@@ -365,11 +402,13 @@ def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFOR
         except PreflightError as error:
             outcome = {"status": "failed", "code": error.code,
                        "detail": "grok_sign_in_required" if error.code == 3 else "grok_preflight_failed"}
+        except Stalled:
+            outcome = {"status": "stalled", "code": 7, "detail": "grok_cli_stalled"}
         except FileNotFoundError:
             outcome = {"status": "failed", "code": 4, "detail": "grok_cli_unavailable"}
         except subprocess.TimeoutExpired:
             outcome = {"status": "timed_out", "code": 4,
-                       "detail": "grok_preflight_timeout" if cli_version is None and preflight else "grok_cli_timeout"}
+                       "detail": "grok_preflight_timeout"}
         except (OSError, ValueError):
             outcome = {"status": "failed", "code": 4, "detail": "grok_invocation_failed"}
     metadata = outcome.get("provider_metadata", {})
@@ -377,7 +416,7 @@ def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFOR
                "effort": effort, "status": outcome["status"],
                "code": outcome["code"], "detail": outcome.get("detail"),
                "task_sha256": hashlib.sha256(task.encode()).hexdigest(), "max_turns": max_turns,
-               "sandbox": "workspace" if writable else "read-only", "timeout_seconds": timeout_seconds,
+               "sandbox": "workspace" if writable else "read-only", "idle_seconds": idle_seconds,
                "retrieval_status": outcome.get("retrieval", {}).get("status"),
                "actual_model": metadata.get("actual_model"), "model_calls": metadata.get("model_calls"),
                "diagnostic_path": None}

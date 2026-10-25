@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 
 
@@ -57,7 +58,7 @@ class ApprovedControlMigrationTests(unittest.TestCase):
                         check=True, capture_output=True)
         with psycopg.connect(cls.dsn, autocommit=True) as conn:
             conn.execute('create role neondb_owner')
-        source = subprocess.check_output(['git', 'show', 'origin/main:db/schema.sql'], cwd=ROOT, text=True)
+        source = (ROOT / 'db/schema.sql').read_text()
         loaded = subprocess.run([str(cls.bins / 'psql'), cls.dsn, '-X', '-v', 'ON_ERROR_STOP=1', '-q'],
                                 input=source, env=cls.child, capture_output=True, text=True, timeout=120)
         if loaded.returncode:
@@ -146,6 +147,35 @@ class ApprovedControlMigrationTests(unittest.TestCase):
             with self.assertRaisesRegex(self.psycopg.errors.RaiseException, 'append-only'):
                 with conn.transaction():
                     conn.execute('delete from ops.rule_approval_receipt where rule_id=%s', (rule,))
+
+
+class SnapshotRevisionTests(unittest.TestCase):
+    def test_fixture_uses_checkout_when_remote_main_has_a_newer_migration(self):
+        if shadow.find_pg18(None) is None:
+            self.skipTest('disposable PostgreSQL 18 is unavailable')
+        with tempfile.TemporaryDirectory(prefix='control-snapshot-revision.') as directory:
+            clone = Path(directory) / 'checkout'
+            child = shadow.local_pg.scrub_cloud_environment(os.environ)
+            subprocess.run(['git', 'clone', '--shared', '--quiet', str(ROOT), str(clone)],
+                           check=True, capture_output=True, env=child)
+            schema = clone / 'db/schema.sql'
+            header = 'COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;\n'
+            schema.write_text(schema.read_text().replace(header, header +
+                '9999_future_fixture.sql\t' + '0' * 64 + '\t1970-01-01 00:00:00+00\n', 1))
+            subprocess.run(['git', 'add', 'db/schema.sql'], cwd=clone, env=child, check=True)
+            tree = subprocess.check_output(['git', 'write-tree'], cwd=clone, env=child, text=True).strip()
+            ahead = subprocess.check_output(['git', '-c', 'user.name=jbookout', '-c',
+                'user.email=jbookout@users.noreply.github.com', 'commit-tree', tree, '-p', 'HEAD'],
+                input='Advance the remote schema fixture\n', cwd=clone, env=child, text=True).strip()
+            subprocess.run(['git', 'update-ref', 'refs/remotes/origin/main', ahead],
+                           cwd=clone, env=child, check=True)
+            subprocess.run(['git', 'restore', '--source=HEAD', '--staged', '--worktree', 'db/schema.sql'],
+                           cwd=clone, env=child, check=True)
+            script = clone / 'tools/test_migrate_control_metadata.py'
+            script.write_bytes(Path(__file__).read_bytes())
+            result = subprocess.run([sys.executable, str(script), 'ApprovedControlMigrationTests'],
+                cwd=clone, env=child, capture_output=True, text=True, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == '__main__':

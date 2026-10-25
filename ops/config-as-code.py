@@ -20,6 +20,7 @@ import tempfile
 import time
 import hashlib
 import secrets
+from xml.sax.saxutils import escape
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -27,6 +28,7 @@ from lib.machine_prerequisites import machine_prerequisites, prerequisite_failur
 from lib import machine_role
 from lib import launchd_calendar
 from lib import launchd_hold
+from lib.outlook_settings import SettingsError
 
 HOME = os.path.expanduser("~")
 # THE CHECKOUT THIS FILE SITS IN — the source of the tracked copies to compare.
@@ -394,12 +396,23 @@ def missing_targets(body):
 
 
 def portable(text):
+    if '<plist' in text and (launchd_calendar.plist_label(text) or '').startswith('com.carr.outlook-'):
+        from lib.outlook_settings import load_settings
+        settings = load_settings(Path(HOME))
+        settings.require_repo(Path(REPO))
+        for token, value in sorted(settings.plist_replacements.items(), key=lambda item: len(item[1]), reverse=True):
+            text = text.replace(escape(value), token)
     for tok, real in TOKENS:
         text = text.replace(real, tok)
     return text
 
 
 def concrete(text):
+    if '{{COPY_HELPER}}' in text or '{{EXECUTABLE_PATH}}' in text:
+        from lib.outlook_settings import load_settings
+        settings = load_settings(Path(HOME))
+        settings.require_repo(Path(REPO))
+        text = settings.render_plist(text.encode()).decode()
     for tok, real in TOKENS:
         text = text.replace(tok, real)
     if '<plist' in text:
@@ -962,7 +975,7 @@ def launchd_off_reason(filename, body, holds=None):
 
 def pairs(holds=None):
     """(label, live_text, repo_path) for every tracked item. live_text is
-    already portable; repo contents are compared verbatim against it."""
+    already portable, or SettingsError when private settings refuse capture."""
     holds = launchd_hold.read_holds(HOME) if holds is None else holds
     out = []
 
@@ -1003,8 +1016,12 @@ def pairs(holds=None):
         # It is reported separately, by presence, in cmd_check.
         if launchd_off_reason(f, read(launchd_repo_path(f)), holds):
             continue
-        out.append((f"launchd {f}", portable(read(os.path.join(LAUNCHD_SRC, f))),
-                    launchd_repo_path(f)))
+        live = read(os.path.join(LAUNCHD_SRC, f))
+        try:
+            live = portable(live) if live is not None else None
+        except SettingsError as exc:
+            live = exc
+        out.append((f"launchd {f}", live, launchd_repo_path(f)))
     return out
 
 
@@ -1174,7 +1191,12 @@ def cmd_check_launchd_main_paths():
 def launchd_template_refusal(source_text):
     """The first reason install must not render this template, or None."""
     problems = launchd_calendar.audit_template(source_text or "")
-    return problems[0] if problems else launchd_path_refusal(concrete(source_text or ""))
+    if problems:
+        return problems[0]
+    try:
+        return launchd_path_refusal(concrete(source_text or ""))
+    except SettingsError as exc:
+        return str(exc)
 
 
 def cmd_check():
@@ -1239,12 +1261,20 @@ def _cmd_check(holds):
     missing, untracked, different = [], [], []
     for label, live, repo_path in configured_pairs:
         have = read(repo_path)
-        if live is None:
+        if isinstance(live, SettingsError):
+            different.append((label, f"SETTINGS REFUSED: {live}"))
+        elif live is None:
             missing.append((label, "on disk: MISSING; in repo: present"))
         elif have is None:
             untracked.append((label, "on disk: present; in repo: NOT TRACKED"))
-        elif not tracked_text_match(label, live, have):
-            different.append((label, "TRACKED BUT DIFFERENT from the live copy"))
+        else:
+            try:
+                matches = tracked_text_match(label, live, have)
+            except SettingsError as exc:
+                different.append((label, str(exc)))
+                continue
+            if not matches:
+                different.append((label, "TRACKED BUT DIFFERENT from the live copy"))
     # A hook script the settings block invokes but git does not track is a
     # separate failure from a settings mismatch, and it used to be invisible
     # because this tool only ever compared the block itself. It is reported as
@@ -1365,6 +1395,9 @@ def cmd_pull(apply):
     wrote = 0
     for label, live, repo_path in configured_pairs:
         if repo_path in (HOOKS_REPO, CODEX_HOOKS_REPO):
+            continue
+        if isinstance(live, SettingsError):
+            print(f"  REFUSED  {label}: {live}; left in the repo")
             continue
         if live is None:
             print(f"  SKIP  {label} (not on this machine; left in the repo)")
