@@ -42,6 +42,7 @@ import subprocess
 import shutil
 import sys
 import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -178,11 +179,125 @@ def unreachable_db_env() -> dict:
     # its idempotency cache from CARR_REPO_ROOT when set, so pointing it at a
     # throwaway tree keeps concurrent ci.sh runs from sharing one out/ dir.
     env["CARR_REPO_ROOT"] = PRIVATE_ROOT
+    env["HOME"] = PRIVATE_ROOT
     return env
+
+
+
+def check_receipt_retry() -> None:
+    with tempfile.TemporaryDirectory(prefix="scheduled-receipt-retry.") as td:
+        root = Path(td)
+        recorder = root / "recorder.py"
+        recorder.write_text(
+            "import json, pathlib, sys, time\n"
+            "root = pathlib.Path(__file__).parent\n"
+            "with (root / 'attempts.jsonl').open('a') as fh: fh.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            "while (root / 'hold').exists(): time.sleep(0.01)\n"
+            "sys.exit(int((root / 'exit-code').read_text()))\n")
+        (root / "exit-code").write_text("1")
+        transcript = fixture_trailing_tool_error(sid="retry-session")
+        payload: dict = {"hook_event_name": "Stop", "session_id": "retry-session",
+                   "transcript_path": transcript}
+        harness = (
+            "import runpy, sys; from lib import scheduled_run; "
+            "scheduled_run.OPS_RECORD = sys.argv[1]; "
+            "scheduled_run.LOG = sys.argv[2]; "
+            "runpy.run_path(sys.argv[3], run_name='__main__')")
+        env = dict(os.environ, CARR_REPO_ROOT=td, HOME=td)
+
+        command = [PY, "-c", harness, str(recorder), str(root / "hook.log"), HOOK]
+
+        def invoke():
+            return subprocess.run(
+                command,
+                input=json.dumps(payload), text=True, capture_output=True,
+                timeout=30, cwd=REPO, env=env)
+
+        try:
+            first = invoke()
+            with open(transcript, "a") as fh:
+                fh.write(json.dumps({"message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "later interactive recovery"}]}}) + "\n")
+            (root / "exit-code").write_text("0")
+            second = invoke()
+            third = invoke()
+            attempts = [json.loads(line) for line in
+                        (root / "attempts.jsonl").read_text().splitlines()]
+            check("an unavailable recorder is retried on the next Stop",
+                  len(attempts) == 2, f"attempts={len(attempts)}")
+            check("retry preserves the first Stop's exact failed receipt",
+                  len(attempts) == 2 and attempts[0] == attempts[1]
+                  and attempts[1][attempts[1].index("--state") + 1] == "failed")
+            check("recording outage and retry never block the session",
+                  all(p.returncode == 0 and not p.stdout for p in (first, second, third)))
+            check("the receipt carries a stable correlation identity",
+                  "--correlation" in attempts[0]
+                  and str(uuid.UUID(attempts[0][attempts[0].index("--correlation") + 1]))
+                  == attempts[0][attempts[0].index("--correlation") + 1])
+
+            payload["session_id"] = "overlapping-session"
+            (root / "hold").touch()
+            process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE, text=True, cwd=REPO, env=env)
+            assert process.stdin is not None
+            process.stdin.write(json.dumps(payload))
+            process.stdin.close()
+            try:
+                deadline = time.monotonic() + 10
+                while len((root / "attempts.jsonl").read_text().splitlines()) < 3:
+                    if time.monotonic() >= deadline:
+                        raise AssertionError("first overlapping Stop did not reach recorder")
+                    time.sleep(0.01)
+                overlapping = invoke()
+            finally:
+                (root / "hold").unlink()
+                process.wait(timeout=10)
+            after_overlap = invoke()
+            check("overlapping Stops deliver once and never wait for the recorder lock",
+                  overlapping.returncode == after_overlap.returncode == process.returncode == 0
+                  and len((root / "attempts.jsonl").read_text().splitlines()) == 3)
+
+            cache = root / "out" / "scheduled-run-record-cache"
+            (cache / "legacy-session").write_text("recorded\n")
+            payload["session_id"] = "legacy-session"
+            legacy = invoke()
+            payload["session_id"] = "ignored-session"
+            payload["stop_hook_active"] = True
+            active = invoke()
+            payload["stop_hook_active"] = False
+            payload["hook_event_name"] = "PreToolUse"
+            other_event = invoke()
+            payload["hook_event_name"] = "Stop"
+            ordinary = fixture_not_scheduled()
+            payload["transcript_path"] = ordinary
+            try:
+                interactive = invoke()
+            finally:
+                os.unlink(ordinary)
+            check("legacy stamps, active Stop hooks, other events and interactive sessions stay silent",
+                  all(p.returncode == 0 and not p.stdout
+                      for p in (legacy, active, other_event, interactive))
+                  and len((root / "attempts.jsonl").read_text().splitlines()) == 3
+                  and not (cache / "ignored-session.lock").exists())
+
+            blocked_root = root / "blocked-root"
+            (blocked_root / "out").mkdir(parents=True)
+            (blocked_root / "out" / "scheduled-run-record-cache").touch()
+            env["CARR_REPO_ROOT"] = str(blocked_root)
+            payload["session_id"] = "disk-unavailable"
+            payload["transcript_path"] = transcript
+            blocked = invoke()
+            check("unwritable receipt storage prevents delivery without blocking the session",
+                  blocked.returncode == 0 and not blocked.stdout
+                  and len((root / "attempts.jsonl").read_text().splitlines()) == 3)
+        finally:
+            os.unlink(transcript)
 
 
 def main() -> int:
     print("TIER 1 — pure logic + subprocess, no real database\n")
+
+    check_receipt_retry()
 
     # ── task identification ──────────────────────────────────────────────
     print("1. launch-marker task identification")
@@ -259,16 +374,19 @@ def main() -> int:
                         env=unreachable_db_env())
     check("a scheduled session with an unreachable DB: hook still exits 0 "
           "(never blocks/crashes the run)", rc == 0)
-    check("...and marks the session recorded (idempotency cache written)",
-          os.path.exists(cache_file))
+    check("failed recording remains pending instead of suppressing retries",
+          not os.path.exists(cache_file) and os.path.exists(cache_file + ".pending"))
 
     rc2, out2 = run_hook({"hook_event_name": "Stop", "session_id": sid,
                            "transcript_path": p, "stop_hook_active": False},
                           env=unreachable_db_env())
-    check("a SECOND Stop of the same session is a no-op (per-session idempotency)",
+    check("a SECOND Stop retries without blocking or output",
           rc2 == 0 and out2.strip() == "")
     if os.path.exists(cache_file):
         os.unlink(cache_file)
+    for suffix in (".pending", ".lock"):
+        if os.path.exists(cache_file + suffix):
+            os.unlink(cache_file + suffix)
     os.unlink(p)
 
     rc, out = run_hook({"hook_event_name": "PreToolUse", "session_id": "wrong-event",

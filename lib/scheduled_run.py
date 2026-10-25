@@ -331,26 +331,30 @@ def run_ops_record(argv: list[str]) -> tuple[int, str, str]:
         return 1, "", f"scheduled-run-record: could not invoke ops-record.py: {exc}"
 
 
-def record_from_transcript(transcript_path: str, correlation: str | None = None,
-                            source_ref: str = "hooks/scheduled-run-record.py") -> dict:
-    """The one entry point both the hook and the manual CLI call.
-
-    Returns a dict describing what happened (for logging/printing), and never
-    raises — a recording failure must fail LOUD in its own output, never
-    corrupt or block the scheduled task's own run.
-    """
+def prepare_from_transcript(transcript_path: str, correlation: str | None = None,
+                            source_ref: str = "hooks/scheduled-run-record.py") -> dict | None:
+    """Freeze the outcome and recorder arguments at the scheduled session's Stop."""
     task = quick_launched_task(transcript_path)
     if not task:
-        return {"recorded": False, "reason": "not a scheduled-task session (no launch marker)"}
+        return None
 
     records = load_records(transcript_path)
     raw_text = load_raw(transcript_path)
     state, failure_class, detail = compute_outcome(records, raw_text)
     started_at = launch_timestamp(records)
     ended_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {
+        "argv": build_run_args(task, state, failure_class, started_at, ended_at,
+                               detail, correlation, source_ref),
+        "task": task, "state": state, "failure_class": failure_class, "detail": detail,
+    }
 
-    argv = build_run_args(task, state, failure_class, started_at, ended_at,
-                           detail, correlation, source_ref)
+
+def record_prepared_run(receipt: dict) -> dict:
+    """Deliver the same frozen receipt on each attempt."""
+    argv = receipt["argv"]
+    task, state = receipt["task"], receipt["state"]
+    failure_class, detail = receipt["failure_class"], receipt["detail"]
     rc, out, err = run_ops_record(argv)
     result = {
         "recorded": rc == 0,
@@ -369,3 +373,12 @@ def record_from_transcript(transcript_path: str, correlation: str | None = None,
     else:
         log(f"FAIL(exit={rc}) task={task} state={state} — {err.strip()[:300]}")
     return result
+
+
+def record_from_transcript(transcript_path: str, correlation: str | None = None,
+                            source_ref: str = "hooks/scheduled-run-record.py") -> dict:
+    """Record one scheduled transcript without blocking the scheduled task."""
+    receipt = prepare_from_transcript(transcript_path, correlation, source_ref)
+    if receipt is None:
+        return {"recorded": False, "reason": "not a scheduled-task session (no launch marker)"}
+    return record_prepared_run(receipt)
