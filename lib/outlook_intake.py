@@ -82,7 +82,7 @@ REFRESH_INTERVAL = timedelta(minutes=30)
 COPY_WINDOW = 86_400
 VERIFIED_MIN = 0.95
 MODEL_BODY_CHARS = 12_000
-BALL_OWNERS = re.compile(r'^ball → (joe|joe-local):')
+BALL_OWNER = 'joe'
 
 
 def resolve_store(home: Path) -> Path:
@@ -96,13 +96,14 @@ def resolve_store(home: Path) -> Path:
 ERROR_CODES = frozenset({'timeout', 'auth_refused', 'key_reuse', 'transport_oversized',
                          'no_acknowledgement', 'reply_unreadable', 'transport_error',
                          'invalid_request', 'subject_unresolved', 'database_refused',
-                         'setup_failed', 'contacts_empty', 'contacts_read_failed'})
+                         'setup_failed', 'contacts_empty', 'contacts_read_failed', 'next_action_conflict',
+                         'legacy_action_guard_required'})
 BLOCKED_ERRORS = frozenset({'key_reuse', 'transport_oversized', 'invalid_request', 'subject_unresolved'})
 
 
 def _reply_error(reply: dict) -> str:
     error = reply.get('error')
-    if error == 'key_reuse':
+    if error in ('key_reuse', 'next_action_conflict'):
         return error
     if error in ('unauthorized', 'forbidden'):
         return 'auth_refused'
@@ -385,7 +386,7 @@ class Run:
                                       'writes_deferred', 'requests_blocked')}
         self.written: list[tuple[str, str, str, str]] = []
         self.unmatched: set[tuple[str, str, str]] = set()
-        self.balls: dict[str, int] = {}
+        self.balls: dict[str, tuple[str, int, int]] = {}
         self.attempted: set[str] = set()
 
     def write(self, verb: str, args: dict, who: str, note: str = '') -> bool:
@@ -411,6 +412,12 @@ class Run:
                 if not isinstance(reply, dict) or reply.get('ok') is not True:
                     raise CarrError(code=_reply_error(reply) if isinstance(reply, dict) else 'reply_unreadable')
             except CarrError as error:
+                if verb == 'set-next-action' and error.code == 'next_action_conflict':
+                    request.update(acknowledged=True, disposition='superseded', retry_at=None,
+                                   error_code=None)
+                    self.counts['balls_kept'] += 1
+                    _save(self.out, self.state)
+                    return True
                 blocked = error.code in BLOCKED_ERRORS
                 request.update(error_code=error.code, disposition='blocked' if blocked else 'retry',
                                retry_at=None if blocked else int(self.now.timestamp()) +
@@ -418,48 +425,49 @@ class Run:
                 self.counts['writes_failed'] += 1
                 _save(self.out, self.state)
                 return False
+            if verb == 'set-next-action':
+                request['next_action_id'] = reply.get('next_action_id')
             request.update(acknowledged=True, disposition='acknowledged', retry_at=None, error_code=None)
             _save(self.out, self.state)
         self.written.append((who, args['ref'], verb, note))
         return True
 
-    def open_ball(self, ref: str) -> int | None:
-        """When the newest open ball on ref was set (unix), or None."""
-        if ref in self.balls:
-            return self.balls[ref]
-        closed_after: dict[str, int] = {}
-        seen_owners: set[str] = set()
-        for row in sorted(self.ports.carr('catch-me-up', {'ref': ref, 'limit': 30}).get('timeline') or [],
-                          key=lambda r: r.get('occurred_at') or '', reverse=True):
-            at = int(datetime.fromisoformat(row['occurred_at']).timestamp())
-            if row.get('verb') in ('complete-action', 'log-outreach'):
-                actor = row.get('actor')
-                if actor:
-                    closed_after.setdefault(actor, at)
-            elif row.get('verb') == 'set-next-action':
-                owner_match = BALL_OWNERS.match(row.get('summary') or '')
-                if owner_match and owner_match[1] not in seen_owners:
-                    owner = owner_match[1]
-                    seen_owners.add(owner)
-                    if closed_after.get(owner, 0) < at:
-                        return at
-        return None
+    def open_ball(self, ref: str) -> dict | None:
+        """Read Joe's canonical ordinary action, including its replacement version."""
+        reply = self.ports.carr('get-next-action', {'ref': ref, 'owner': BALL_OWNER})
+        if reply.get('ok') is not True or reply.get('owner') != BALL_OWNER or 'action' not in reply:
+            raise CarrError(code='reply_unreadable')
+        action = reply['action']
+        if action is not None:
+            try:
+                if not isinstance(action['id'], str) or not isinstance(action['version'], int):
+                    raise ValueError('invalid action identity')
+                datetime.fromisoformat(action['updated_at'])
+            except (KeyError, TypeError, ValueError):
+                raise CarrError(code='reply_unreadable') from None
+        return action
 
     def ball(self, ref: str, who: str, description: str, due_on: str, item_at: int, source: str,
              only_if_none: bool = False) -> bool:
-        """Set the ball unless a newer one stands; True once nothing is left to do."""
-        existing = self.open_ball(ref)
+        """Set the ball only while the canonical action read still holds."""
+        action = self.open_ball(ref)
+        existing = int(datetime.fromisoformat(action['updated_at']).timestamp()) if action else None
+        if action and ref in self.balls and self.balls[ref][:2] == (action['id'], action['version']):
+            existing = self.balls[ref][2]
         if existing is not None and (only_if_none or existing >= item_at):
             self.counts['balls_kept'] += 1
             self.written.append((who, ref, 'set-next-action', 'kept newer ball'))
             return True
         note = 'no prior ball' if existing is None else 'replaced ball'
         args = {'idempotency_key': key('set-next-action', ref, source), 'ref': ref,
-                'description': description, 'due_on': due_on}
+                'description': description, 'due_on': due_on, 'owner': BALL_OWNER,
+                'expected_action': {k: action[k] for k in ('id', 'version')} if action else None}
         if not self.write('set-next-action', args, who, note):
             return False
-        self.counts['balls_set'] += 1
-        self.balls[ref] = item_at
+        request = self.state['requests'][args['idempotency_key']]
+        if request.get('disposition') != 'superseded':
+            self.counts['balls_set'] += 1
+            self.balls[ref] = (request.get('next_action_id'), 1, item_at)
         return True
 
     # emails
@@ -809,11 +817,10 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         for request in list(state.get('requests', {}).values()):
             if not request['acknowledged']:
                 args = json.loads(request['payload'])
-                if request['verb'] == 'set-next-action':
-                    existing = work.open_ball(args['ref'])
-                    if existing is not None and existing >= request['created_at']:
-                        del state['requests'][args['idempotency_key']]
-                        continue
+                if request['verb'] == 'set-next-action' and (
+                        args.get('owner') != BALL_OWNER or 'expected_action' not in args):
+                    request.update(disposition='blocked', retry_at=None,
+                                   error_code='legacy_action_guard_required')
                 work.write(request['verb'], args, 'pending write')
         matcher = matcher or Matcher(ports.contacts())
         work.emails(mails, matcher, since)

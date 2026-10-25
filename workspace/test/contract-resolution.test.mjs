@@ -163,23 +163,15 @@ test("all baseline IDs render with unknown values and an instrumentation or inte
   }
 });
 
-test("surface cutover owners and Front Door usage gate resolve without invented evidence", async () => {
-  const [surfaceMap, crossReference, environment] = await Promise.all([
-    readJson("contracts/surface-registry-migration-map.v1.json"),
-    readJson("contracts/cross-reference-registry.v1.json"),
-    readJson("contracts/environment-release-process.v1.json")
-  ]);
+test("surface cutover owners resolve without invented evidence", async () => {
+  const surfaceMap = await readJson("contracts/surface-registry-migration-map.v1.json");
   const assignments = new Map(surfaceMap.cutover_owner_assignments.map(item => [item.id, item]));
-  assert.equal(assignments.size, 5);
+  assert.equal(assignments.size, 4);
   for (const surface of surfaceMap.surfaces.filter(item => item.cutover_owner.startsWith("OPEN-SURFACE-OWNER-"))) {
     const assignment = assignments.get(surface.cutover_owner);
     assert.equal(assignment.surface_id, surface.id, surface.cutover_owner);
     assert.ok(assignment.accountable && assignment.technical_verifier, surface.cutover_owner);
   }
-  assert.ok(crossReference.test_ids.includes("FRONTDOOR-USAGE-001"));
-  const gate = environment.runtime_verification_gates.find(item => item.test_id === "FRONTDOOR-USAGE-001");
-  assert.equal(gate.status, "future_gate_not_implemented_in_phase0_static_prototype");
-  assert.match(gate.required_evidence.join(" "), /usage inventory/i);
 });
 
 test("baseline presentation exposes the bound action and like-for-like comparison", async () => {

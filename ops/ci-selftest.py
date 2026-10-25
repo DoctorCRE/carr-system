@@ -1277,12 +1277,52 @@ log.write_text(json.dumps(state))
                           remaining.is_file() and remaining.read_bytes() == b"cached-zsh-common")
 
 
+def test_worktree_python_selection():
+    with tempfile.TemporaryDirectory(prefix="carr-python-") as directory:
+        root = pathlib.Path(directory)
+        main, work = root / "main checkout", root / "worktree"
+        main.mkdir()
+        def git(*args):
+            subprocess.run(["git", *args], cwd=main, env=fixture_env(),
+                           check=True, capture_output=True)
+        git("init")
+        git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+            "commit", "--allow-empty", "-m", "fixture")
+        git("worktree", "add", "-b", "fixture", str(work))
+        fallback = root / "bin"
+        fallback.mkdir()
+        marker = root / "selected"
+        for relative in ("ops/ci.sh", "ops/githooks/pre-push"):
+            target = work / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO / relative, target)
+        for available in (False, True):
+            interpreters = [(fallback / "python3", "fallback"),
+                            (work / ".venv/bin/python", "worktree")]
+            if available:
+                interpreters.append((main / ".venv/bin/python", "main"))
+            for path, name in interpreters:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"#!/bin/sh\nprintf '{name}' > '{marker}'\nexit 73\n")
+                path.chmod(0o755)
+            for relative, args, code in (("ops/ci.sh", ["--doc-drift"], 73),
+                                         ("ops/githooks/pre-push", [], 1)):
+                result = subprocess.run(["bash", str(work / relative), *args],
+                    cwd=work, env={**fixture_env(), "PATH": str(fallback) + os.pathsep + os.defpath},
+                    input="", text=True, capture_output=True, timeout=15)
+                check(f"{relative} selects {'main venv' if available else 'python3 fallback'}",
+                      result.returncode == code and marker.exists()
+                      and marker.read_text() == ("main" if available else "fallback"), result.stderr)
+                marker.unlink(missing_ok=True)
+
+
 def main(argv=None):
     if (sys.argv[1:] if argv is None else argv) == ["--collection-only"]:
         test_every_test_file_in_the_tree_is_collected()
         test_each_class_runs_in_exactly_one_hosted_group()
         return 1 if any(not ok for _, ok, _ in RESULTS) else 0
-    for fn in (test_freshness_checks_the_tree_without_requiring_main_ancestry,
+    for fn in (test_worktree_python_selection,
+               test_freshness_checks_the_tree_without_requiring_main_ancestry,
                test_no_green_without_running,
                test_strict_turns_skip_into_failure,
                test_unknown_class_refuses,

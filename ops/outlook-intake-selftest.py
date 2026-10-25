@@ -96,6 +96,7 @@ class Fake:
         self.fixture = None
         self.parties = {}
         self.timeline = {}
+        self.actions = {}
         self.fail_verbs = set()
         self.model_reply = {'next_step': None, 'due_on': None}
         self.contacts_rows = [CLIENT, LEAD]
@@ -109,7 +110,18 @@ class Fake:
         if verb == 'find':
             return {'parties': self.parties.get(args['query'], []), 'deals': []}
         if verb == 'catch-me-up':
-            return {'timeline': self.timeline.get(args['ref'], [])}
+            return {'timeline': self.timeline.get(args['ref'], [])[:args['limit']]}
+        if verb == 'get-next-action':
+            return {'ok': True, 'owner': args['owner'], 'action': self.actions.get((args['ref'], args['owner']))}
+        if verb == 'set-next-action':
+            current = self.actions.get((args['ref'], args.get('owner', 'runtime')))
+            expected = {k: current[k] for k in ('id', 'version')} if current else None
+            if 'expected_action' in args and args['expected_action'] != expected:
+                raise intake.CarrError(code='next_action_conflict')
+            action_id = str(uuid.uuid4())
+            self.actions[args['ref'], args.get('owner', 'runtime')] = {
+                'id': action_id, 'version': 1, 'updated_at': self.now.isoformat()}
+            return {'ok': True, 'next_action_id': action_id}
         return {'ok': True}
 
     def contacts(self):
@@ -721,6 +733,25 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(opened[ident(first)], NOW.isoformat())
         self.assertEqual(len(opened), 2)
 
+    def test_meeting_keeps_open_action_hidden_by_thirty_newer_timeline_rows(self):
+        self.fake.timeline['C-901'] = [
+            {'verb': 'log-activity', 'occurred_at': NOW.isoformat(), 'summary': 'Synthetic note'}
+            for _ in range(31)]
+        action = {'id': 'synthetic-action', 'version': 2,
+                  'updated_at': (NOW - timedelta(days=3)).isoformat()}
+        original = self.fake.carr
+        def server(verb, args):
+            if verb == 'get-next-action':
+                self.assertEqual(args, {'ref': 'C-901', 'owner': 'joe'})
+                return {'ok': True, 'owner': 'joe', 'action': action}
+            return original(verb, args)
+        self.fake.carr = server
+        result = self.run_intake(events=[event('G-protected', timedelta(days=2),
+                                  attendees=[('Pat Example', 'pat@example.test')])])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(self.fake.writes('set-next-action'), [])
+        self.assertEqual(result.counts['balls_kept'], 1)
+
     def test_one_model_call_per_new_matched_email_and_none_for_unmatched(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1)),
                          mail('stranger@example.test', -timedelta(hours=1), subject='Spam')])
@@ -739,50 +770,84 @@ class IntakeTest(unittest.TestCase):
 
     def test_a_ball_newer_than_the_email_is_kept(self):
         self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
-        self.fake.timeline['C-901'] = [{'verb': 'set-next-action', 'summary': 'ball → joe-local: call back',
-                                        'occurred_at': (NOW - timedelta(minutes=10)).isoformat()}]
+        self.fake.actions['C-901', 'joe'] = {'id': 'current', 'version': 1,
+            'updated_at': (NOW - timedelta(minutes=10)).isoformat()}
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual(self.fake.writes('set-next-action'), [])
         self.assertIn('kept newer ball', self.report_text())
 
-    def test_a_ball_older_than_the_email_is_replaced(self):
+    def test_a_ball_older_than_the_email_is_replaced_conditionally(self):
         self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
-        self.fake.timeline['C-901'] = [{'verb': 'set-next-action', 'summary': 'ball → joe: call back',
-                                        'occurred_at': (NOW - timedelta(days=3)).isoformat()}]
+        self.fake.actions['C-901', 'joe'] = {'id': 'older', 'version': 3,
+            'updated_at': (NOW - timedelta(days=3)).isoformat()}
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         [(_, args)] = self.fake.writes('set-next-action')
-        self.assertEqual(args['due_on'], '2026-10-20', 'an undated step is due today, so it shows today')
+        self.assertEqual(args['due_on'], '2026-10-20')
+        self.assertEqual(args['owner'], 'joe')
+        self.assertEqual(args['expected_action'], {'id': 'older', 'version': 3})
         self.assertIn('replaced ball', self.report_text())
 
-    def test_a_completed_ball_counts_as_no_ball(self):
+    def test_another_owners_ball_is_untouched(self):
         self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
-        self.fake.timeline['C-901'] = [
-            {'verb': 'complete-action', 'actor': 'joe', 'summary': 'done', 'occurred_at': (NOW - timedelta(minutes=5)).isoformat()},
-            {'verb': 'set-next-action', 'summary': 'ball → joe: call back',
-             'occurred_at': (NOW - timedelta(minutes=10)).isoformat()}]
+        other = {'id': 'other', 'version': 4, 'updated_at': NOW.isoformat()}
+        self.fake.actions['C-901', 'dell'] = other.copy()
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
+        [(_, args)] = self.fake.writes('set-next-action')
+        self.assertEqual((args['owner'], args['expected_action']), ('joe', None))
+        self.assertEqual(self.fake.actions['C-901', 'dell'], other)
+
+    def test_intervening_human_action_is_kept_and_conflict_is_not_retried(self):
+        self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
+        original = self.fake.carr
+        human = {'id': 'human', 'version': 1, 'updated_at': NOW.isoformat()}
+        def server(verb, args):
+            if verb == 'set-next-action':
+                self.fake.actions[args['ref'], 'joe'] = human.copy()
+            return original(verb, args)
+        self.fake.carr = server
+        m = mail('pat@example.test', -timedelta(hours=1))
+        result = self.run_intake([m])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual((result.counts['balls_kept'], result.counts['balls_set']), (1, 0))
+        self.assertEqual(self.fake.actions['C-901', 'joe'], human)
+        request = json.loads((self.out() / intake.STATE).read_text())['requests'][
+            intake.key('set-next-action', 'C-901', f'next|{ident(m)}')]
+        self.assertEqual(request['disposition'], 'superseded')
+        self.fake.now += timedelta(minutes=30)
+        self.run_intake([m], touch=False)
         self.assertEqual(len(self.fake.writes('set-next-action')), 1)
 
-    def test_completions_close_only_the_corresponding_owners_ball(self):
-        self.fake.model_reply = {'next_step': 'Older email task', 'due_on': None}
-        mails = [mail('pat@example.test', -timedelta(hours=1))]
-        for completion in ('complete-action', 'log-outreach'):
-            for actor, owner, should_replace in (('dell', 'joe-local', False),
-                                                  ('joe', 'joe-local', False),
-                                                  ('joe-local', 'joe', False),
-                                                  ('joe-local', 'joe-local', True),
-                                                  ('joe', 'joe', True),
-                                                  (None, 'joe-local', False)):
-                with self.subTest(completion=completion, actor=actor, owner=owner):
-                    shutil.rmtree(self.out(), ignore_errors=True)
-                    self.fake.calls.clear()
-                    self.fake.timeline['C-901'] = [
-                        {'verb': completion, 'summary': 'done', 'actor': actor,
-                         'occurred_at': (NOW - timedelta(minutes=5)).isoformat()},
-                        {'verb': 'set-next-action', 'summary': f'ball → {owner}: Newer local task',
-                         'actor': 'joe-local', 'occurred_at': (NOW - timedelta(minutes=10)).isoformat()}]
-                    self.assertEqual(self.run_intake(mails).state, 'succeeded')
-                    self.assertEqual(len(self.fake.writes('set-next-action')), int(should_replace))
+    def test_human_revision_of_same_action_between_emails_is_kept(self):
+        self.fake.model_reply = {'next_step': 'Reply to email', 'due_on': None}
+        original = self.fake.carr
+        human = None
+        def server(verb, args):
+            nonlocal human
+            result = original(verb, args)
+            if verb == 'set-next-action' and human is None:
+                human = {**self.fake.actions[args['ref'], 'joe'], 'version': 2,
+                         'updated_at': NOW.isoformat()}
+                self.fake.actions[args['ref'], 'joe'] = human.copy()
+            return result
+        self.fake.carr = server
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=2), subject='First'),
+                                  mail('pat@example.test', -timedelta(hours=1), subject='Second')])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('set-next-action')), 1)
+        self.assertEqual(self.fake.actions['C-901', 'joe'], human)
+
+    def test_unreadable_canonical_action_never_defaults_to_empty(self):
+        self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
+        original = self.fake.carr
+        for reply in ({'ok': False}, {'ok': True, 'owner': 'joe'},
+                      {'ok': True, 'owner': 'dell', 'action': None},
+                      {'ok': True, 'owner': 'joe', 'action': {}}):
+            with self.subTest(reply=reply):
+                shutil.rmtree(self.out(), ignore_errors=True)
+                self.fake.calls.clear()
+                self.fake.carr = lambda verb, args: reply if verb == 'get-next-action' else original(verb, args)
+                self.assertEqual(self.run_intake([mail('pat@example.test', -timedelta(hours=1))]).state, 'failed')
+                self.assertEqual(self.fake.writes('set-next-action'), [])
 
     def test_the_later_of_two_emails_in_one_run_owns_the_ball(self):
         self.fake.model_reply = {'next_step': 'Reply', 'due_on': None}
@@ -820,31 +885,54 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(keys[0], keys[1], 'the retry reuses the key')
         self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
-    def test_a_failed_action_retry_preserves_an_intervening_newer_joe_local_action(self):
+    def test_a_failed_action_retry_preserves_an_intervening_newer_joe_action(self):
         mails = [mail('pat@example.test', -timedelta(hours=1))]
         self.fake.model_reply = {'next_step': 'Send old plan', 'due_on': None}
         self.fake.fail_verbs = {'set-next-action'}
-        original = self.fake.carr
-
-        def server(verb, args):
-            result = original(verb, args)
-            if verb == 'set-next-action':
-                self.fake.timeline[args['ref']] = [{
-                    'verb': verb, 'summary': f"ball → joe-local: {args['description']}",
-                    'occurred_at': self.fake.now.isoformat()}]
-            return result
-
-        self.fake.carr = server
         self.assertEqual(self.run_intake(mails).state, 'failed')
-        newer = [{'verb': 'set-next-action', 'summary': 'ball → joe-local: Call about new plan',
-                  'occurred_at': (NOW + timedelta(minutes=10)).isoformat()}]
-        self.fake.timeline['C-901'] = list(newer)
+        newer = {'id': 'human-newer', 'version': 2,
+                 'updated_at': (NOW + timedelta(minutes=10)).isoformat()}
+        self.fake.actions['C-901', 'joe'] = newer.copy()
         self.fake.fail_verbs.clear()
         self.fake.now += timedelta(minutes=30)
         self.assertEqual(self.run_intake(mails, touch=False).state, 'succeeded')
-        self.assertEqual(self.fake.timeline['C-901'], newer, 'the newer action survives the retry')
-        self.assertEqual(len(self.fake.writes('set-next-action')), 1, 'no stale action is replayed')
+        self.assertEqual(self.fake.actions['C-901', 'joe'], newer)
         self.assertEqual(self.run_intake(mails, touch=False).reason, 'store_unchanged')
+
+    def test_conditional_conflict_from_transport_is_a_safe_code(self):
+        response = subprocess.CompletedProcess([], 1, '',
+            'TOOL ERROR {"error":"next_action_conflict","detail":"PRIVATE-SENTINEL"}')
+        with patch('subprocess.run', return_value=response):
+            with self.assertRaises(intake.CarrError) as raised:
+                intake._carr(self.repo)('set-next-action', {'idempotency_key': 'synthetic'})
+        self.assertEqual(raised.exception.code, 'next_action_conflict')
+        self.assertNotIn('PRIVATE-SENTINEL', str(raised.exception))
+
+    def test_legacy_unguarded_action_request_is_not_replayed(self):
+        m = mail('pat@example.test', -timedelta(hours=1))
+        self.fake.model_reply = {'next_step': 'Send the old plan', 'due_on': None}
+        self.fake.fail_verbs = {'set-next-action'}
+        self.assertEqual(self.run_intake([m]).state, 'failed')
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        request = state['requests'][intake.key('set-next-action', 'C-901', f'next|{ident(m)}')]
+        args = json.loads(request['payload'])
+        del args['expected_action']
+        del args['owner']
+        request['payload'] = json.dumps(args)
+        path.write_text(json.dumps(state))
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=30)
+        self.fake.calls.clear()
+        self.assertEqual(self.run_intake([m], touch=False).reason, 'request_blocked')
+        self.assertEqual(self.fake.writes('set-next-action'), [])
+        saved = json.loads(path.read_text())
+        pending = saved['requests'][args['idempotency_key']]
+        self.assertFalse(pending['acknowledged'])
+        self.assertEqual(pending['disposition'], 'blocked')
+        self.assertEqual(pending['error_code'], 'legacy_action_guard_required')
+        self.assertEqual(pending['payload'], request['payload'])
+        self.assertIn(ident(m), saved['steps'])
 
     def test_pending_action_survives_two_write_failures_then_a_model_failure(self):
         mails = [mail('pat@example.test', -timedelta(hours=1))]
