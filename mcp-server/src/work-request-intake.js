@@ -759,7 +759,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     // exists to report.
     "decline-work-request": {
       write: true,
-      description: "A human partner or sponsored agent may withdraw one sourced Work Request from captured or triaged by declining it, recording why and preserving its intake history. It never withdraws ready or later work, triages, assigns, dispatches, approves, executes, or names a successor.",
+      description: "A human partner or sponsored agent may withdraw one sourced Work Request from captured or triaged, or ready with no claim, execution assignment, or start. Declining records why and preserves its plan and receipts as history. It never withdraws claimed or later work, triages, assigns, dispatches, approves, executes, or names a successor.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string", pattern: "^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$" },
         human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$", minLength: 4, maxLength: 15 },
@@ -775,6 +775,9 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         // Bind replays to the authenticated actor without admitting actor data
         // into the closed client schema.
         return withEnvelope(c, actor, "decline-work-request", { ...args, _server_actor_id: actor.id }, async () => {
+          const subject = await c.query(
+            `select id, state from ops.work_request where ref = $1 for update
+               /* work-request-intake:withdrawn-subject */`, [args.human_ref]);
           let result;
           try {
             result = await c.query(
@@ -786,20 +789,14 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
             const name = /^([a-z_]+):/.exec(detail)?.[1];
             if (name === "work_request_version_conflict")
               throw new ToolError({ error: "version_conflict", human_ref: args.human_ref, detail,
-                resolution: "re-read the Work Request card; only its current captured or triaged version may be declined" });
+                resolution: "re-read the Work Request card; only its current captured, triaged, or unstarted ready version may be declined" });
             if (DECLINE_REFUSALS.has(name))
               throw new ToolError({ error: name, human_ref: args.human_ref, detail });
             throw error;
           }
           const row = result.rows[0];
-          // The function returns the card fields, not the row id, and event
-          // .subject_id is NOT NULL — so the id is read back by ref rather than
-          // the audit link being dropped.
-          const subject = await c.query(
-            `select id, triaged_at is not null as was_triaged from ops.work_request where ref = $1
-               /* work-request-intake:withdrawn-subject */`, [row.ref]);
           await writeEvent(c, actor, "decline-work-request", "ops_work_request", subject.rows[0].id, {
-            field: "state", old: { state: subject.rows[0].was_triaged ? "triaged" : "captured", version: args.base_version },
+            field: "state", old: { state: subject.rows[0].state, version: args.base_version },
             new: { state: "declined", version: Number(row.version), exit_reason: row.exit_reason },
             idempotency_key: args.idempotency_key,
           });

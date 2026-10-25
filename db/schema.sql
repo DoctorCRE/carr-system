@@ -10983,8 +10983,8 @@ begin
   if v_id is null then
     raise exception 'work_request_not_found: no Work Request %', p_work_request;
   end if;
-  if v_state not in ('captured','triaged') or not v_sourced then
-    raise exception 'work_request_not_declinable: % is in state %; only captured or triaged sourced requests may be declined',
+  if v_state not in ('captured','triaged','ready') or not v_sourced then
+    raise exception 'work_request_not_declinable: % is in state %; only captured, triaged, or unstarted ready sourced requests may be declined',
       p_work_request, v_state;
   end if;
   if v_version <> p_base_version then
@@ -64068,7 +64068,15 @@ begin
     return new;
   end if;
 
-  if old.state = 'triaged'
+  if old.state = 'ready' and new.state = 'declined' and (
+       old.claimed_at is not null or old.executor_actor is not null or old.started_at is not null
+       or exists (select 1 from ops.work_request_execution_assignment a where a.work_request_id = old.id)
+       or current_setting('transaction_isolation') <> 'read committed'
+     ) then
+    raise exception 'work_request_not_declinable: % is ready with downstream execution or outside read committed', old.ref;
+  end if;
+
+  if old.state in ('triaged','ready')
      and new.state = 'declined'
      and new.version = old.version + 1
      and (to_jsonb(new) - array['state','exit_reason','closed_at','version','updated_at'])
@@ -64083,7 +64091,7 @@ begin
     return new;
   end if;
 
-  raise exception 'sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged, triaged shape-disposition, triaged-to-ready, captured-to-withdrawn, or triaged-to-withdrawn transitions';
+  raise exception 'sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged, triaged shape-disposition, triaged-to-ready, captured-to-withdrawn, or triaged-to-withdrawn or ready-to-declined transitions';
 end;
 $$;
 
@@ -121968,6 +121976,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0967_retire_cost_refusal.sql	27ec72ffa788024603c1ca5a80994dca0c43e79a739de544af63dcc6acc3e07f	1970-01-01 00:00:00+00
 0970_vendor_relationship_read_indexes.sql	51988621bb715075a772cd1b6985c814df24b6c96c47ac0cbb4976624318aca3	1970-01-01 00:00:00+00
 0971_retire_cache_observations.sql	d14e2a48c38ddc7a1ad347bc4fceeff48cd7b32b381c966cfc464dcc38b8ba2b	1970-01-01 00:00:00+00
+0972_decline_unstarted_ready_work_request.sql	3239ce5774f8ae8b80542f1b962495bd4ffd843b1910a72b157b93e23c4c4493	1970-01-01 00:00:00+00
 \.
 
 
