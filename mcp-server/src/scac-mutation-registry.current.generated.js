@@ -875,6 +875,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "get-next-action": {
+    "ingress_key": "mcp-tool:get-next-action",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "63787d4ab663cde75739db3ec6fc1a8c177d171dbfcaf84aa5be2a5603c6be7e",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "governance-queue": {
     "ingress_key": "mcp-tool:governance-queue",
     "source_locator": "mcp-server/src/tools.js",
@@ -2412,7 +2421,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "set-next-action": {
     "ingress_key": "mcp-tool:set-next-action",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "6c54567055fcfc20c8e3246d9cfc663b9584b04a6cc00278850cd07be93a9101",
+    "schema_digest": "9c7139155f314a1dca649f7a6785ec280cf6fccb84114c96d165947608ecbce0",
     "write": true,
     "human_only": false,
     "authority_only": false,
