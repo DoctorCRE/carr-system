@@ -1,3 +1,4 @@
+// Test standing-context territory text and provenance.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { executeRegisteredTool } from '../src/tools.js';
