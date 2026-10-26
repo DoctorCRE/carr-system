@@ -22,8 +22,10 @@
 //! subject is the field written twice, and subject, location, organizer name
 //! and organizer address sit together in that order.
 //!
-//! Identity is Global Object ID plus start: a recurring series shares one ID
-//! and materializes each occurrence with its own start.
+//! Global Object ID plus start groups observed schedule candidates. It cannot
+//! distinguish a moved occurrence from a recurring exception. Cancellation,
+//! deletion, revision ordering, recurrence and response semantics are unverified.
+//! No candidate establishes current schedule state or attendance.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -60,10 +62,10 @@ pub struct Event {
     pub attendees: Vec<Attendee>,
 }
 
-/// Every calendar item seen in the store, merged across revisions.
+/// Distinct serialized candidates, never combined into an invented revision.
 #[derive(Default)]
 pub struct Index {
-    pub events: BTreeMap<(String, i64), Event>,
+    pub events: BTreeMap<Vec<u8>, Event>,
     /// Identities seen on any revision, whether or not one fully decoded.
     pub identities: BTreeSet<(String, i64)>,
     pub objects: usize,
@@ -78,12 +80,7 @@ impl Index {
             self.objects += 1;
             self.identities.insert((goid.clone(), start));
             let Some(ev) = parse(obj, goid, start, end) else { continue };
-            match self.events.get_mut(&(ev.goid.clone(), start)) {
-                Some(prev) => merge(prev, ev),
-                None => {
-                    self.events.insert((ev.goid.clone(), start), ev);
-                }
-            }
+            self.events.entry(obj.to_vec()).or_insert(ev);
         }
     }
 }
@@ -230,27 +227,6 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
     })
 }
 
-/// Combine a later revision into the copy already held, field by field.
-fn merge(prev: &mut Event, ev: Event) {
-    prev.end_unix = prev.end_unix.max(ev.end_unix);
-    for (slot, value) in [
-        (&mut prev.subject, ev.subject),
-        (&mut prev.location, ev.location),
-        (&mut prev.organizer_name, ev.organizer_name),
-        (&mut prev.organizer_email, ev.organizer_email),
-    ] {
-        if slot.is_none() {
-            *slot = value;
-        }
-    }
-    if ev.body.as_ref().map_or(0, String::len) > prev.body.as_ref().map_or(0, String::len) {
-        prev.body = ev.body;
-    }
-    if ev.attendees.len() > prev.attendees.len() {
-        prev.attendees = ev.attendees;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,13 +316,31 @@ mod tests {
     }
 
     #[test]
-    fn revisions_merge_into_one_event() {
+    fn distinct_revisions_remain_separate_candidates() {
         let mut idx = Index::default();
         let one = envelope(&object(true, &[]));
         let two = envelope(&object(true, &[("Bo Example", "bo@example.test")]));
         idx.observe(&[one, two].concat());
         assert_eq!(idx.objects, 2, "both revisions seen");
-        assert_eq!(idx.events.len(), 1, "one identity");
-        assert_eq!(idx.events.values().next().unwrap().attendees.len(), 1, "the fuller attendee list wins");
+        assert_eq!(idx.events.len(), 2, "an attendee removal must not be merged with an older list");
+        let sizes: BTreeSet<_> = idx.events.values().map(|e| e.attendees.len()).collect();
+        assert_eq!(sizes, BTreeSet::from([0, 1]));
     }
+
+    #[test]
+    fn opaque_lifecycle_and_response_changes_remain_separate_candidates() {
+        let original = object(true, &[("Bo Example", "bo@example.test")]);
+        let mut changed_metadata = original.clone();
+        changed_metadata[100] = 1;
+        let mut changed_response = original.clone();
+        let at = changed_response.len() - STATUS_BYTES;
+        changed_response[at] = 1;
+        let mut idx = Index::default();
+        for candidate in [&original, &changed_metadata, &changed_response, &original] {
+            idx.observe(&envelope(candidate));
+        }
+        assert_eq!(idx.objects, 4);
+        assert_eq!(idx.events.len(), 3, "unknown bytes cannot establish equivalent current state");
+    }
+
 }
