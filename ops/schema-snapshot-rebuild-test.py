@@ -102,8 +102,10 @@ def main():
         actual = sql(rebuilt, "select retry_policy->>'base_seconds' from ops.job_definition where key='engineering-slice' and version=1")
         assert actual == "31", f"refreshed snapshot lost applied seed update: expected 31, rebuilt {actual}"
         print("PASS: refreshed snapshot preserves a later migration's seed update")
-        assert sql(dsn, "select ops.siep_manifest_digest()") == sql(rebuilt, "select ops.siep_manifest_digest()")
-        print("PASS: refreshed snapshot preserves the sealed SIEP manifest")
+        siep_rows = ("select md5(string_agg(to_jsonb(w)::text, ',' order by w.ref)) from ops.work_request w"
+                     " where w.program_key='carr-system-integrity-elimination-v1'")
+        assert sql(dsn, siep_rows) == sql(rebuilt, siep_rows)
+        print("PASS: refreshed snapshot preserves the SIEP program work requests")
         run([bindir / "psql", rebuilt, "-Xq", "-v", "ON_ERROR_STOP=1", "-f",
              ROOT / "pipelines/staging-isolation-proof.sql"], "rebuild business-data isolation")
         print("PASS: refreshed snapshot excludes business data")
