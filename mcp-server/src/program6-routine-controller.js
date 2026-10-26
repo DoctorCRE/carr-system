@@ -4,6 +4,7 @@
 // The actual database/authority choice stays in mcp.js's callTool(), so this is
 // a route adapter rather than a second mutation implementation.
 import { callTool } from "./mcp.js";
+import { needsJoeAdvisory } from "./jev-needs-joe-advisory.js";
 import { ToolError } from "./tools.js";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
@@ -92,7 +93,10 @@ export function createProgram6RoutineController(overrides = {}) {
         if (route.tool === "current-work-requests") {
           try {
             const result = await dependencies.callToolFn(env, actor, route.tool, {}, "full");
-            return json({ ok: true, data: result });
+            if (url.searchParams.get("advisory") !== "jev") return json({ ok: true, data: result });
+            return json({ ok: true, data: result, advisory: await needsJoeAdvisory(result, {
+              apiKey: env.TYPESAFE_API_KEY, fetchImpl: dependencies.jevFetch,
+            }) });
           } catch (error) {
             if (error instanceof ToolError) return json(error.payload, errorStatus(error.payload));
             return json({ error: "system_work_read_failed" }, 500);
