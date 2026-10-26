@@ -1,6 +1,6 @@
 import { observeBoardLinkage, unavailableLinkage } from './work-linkage.js';
 // System design/build projection of the existing work inventory federation.
-import { readableWorkRequestSql } from './work-request-read.js';
+import { readableWorkRequestSql } from './work-request-read.ts';
 import { canonicalJson } from './artifact-trust.js';
 import { createHash } from 'node:crypto';
 import { organizationTenantForActor, personalScopeForActor } from './identity.js';

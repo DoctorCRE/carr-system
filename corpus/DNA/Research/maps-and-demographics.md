@@ -1,6 +1,6 @@
 # CARR Mapping & Demographics — What's Available and How to Request
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Created 2026-07-07 by Claude Code, from CARR's Nov 2024 team Q&A (source in the ingestion ledger). Reference for the map/demographic reports CARR's mapping team produces for clients. Complements `DNA/Research/costar-how-to.md` (some of this — demographics — is also pullable in CoStar). Turnaround ~4–7 days (the team does hundreds/month), so set a ~1-week expectation with the client.*
 

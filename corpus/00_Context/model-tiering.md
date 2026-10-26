@@ -1,6 +1,6 @@
 # Model tiering — which brain does which work
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Joe-personal operating doctrine, created 2026-07-24 (orchestrator migration, the model-tiering lane; Joe's go same day). Task-loaded: read when running a recurring pipeline task, spawning subagents, or designing an automation. The plan behind it: DNA/Deal Management/system-evolution-plan.md. Joe's framing (7/24 handoff, verbatim): "fable is not doing anything except reasoning ... it's a little overkill and expensive for a lot of the task."*
 

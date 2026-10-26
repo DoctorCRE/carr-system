@@ -5,7 +5,7 @@ description: Finds the strategic crux BEFORE anyone generates options — the st
 
 # /crux — always solve the right problem
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 Adapted 2026-07-31 from George Nurijanian's "/find-the-strategic-crux" (prodmgmt.world, x.com/nurijanian/status/2072998065972420806), generalized for any domain. The core claim adopted whole: AI's best strategy role is ENFORCING THE SEQUENCE, not generating options. A longer option list on top of an empty diagnosis is worse than no help at all.
 

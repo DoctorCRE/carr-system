@@ -3,7 +3,7 @@
 // whether a legacy scheduler is enabled. Cadence deadlines are explicitly
 // labelled estimates, never represented as a provider's exact next fire.
 import { personalScopeForActor } from "./identity.js";
-import { ToolError } from "./tool-error.js";
+import { ToolError } from "./tool-error.ts";
 
 const SERVICE_SQL = `
   select s.key, s.name, s.runtime, s.owner_actor,

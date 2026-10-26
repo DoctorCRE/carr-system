@@ -1,4 +1,4 @@
-import { ToolError } from './tool-error.js';
+import { ToolError } from './tool-error.ts';
 
 const DEAL_VENDOR_ROLES = ['lender','contractor','architect','attorney','title','inspector','landlord_rep'];
 

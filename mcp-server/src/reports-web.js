@@ -6,7 +6,7 @@
 // its injected record-layer seams. MapLibre is self-hosted and consumes only
 // the separately scoped, entrance-verified public map projection.
 
-import { APP_STAGING_HOST, CARR_STAGING_HOST, isStagingBrowserEnvironment } from "./staging-browser.js";
+import { APP_STAGING_HOST, CARR_STAGING_HOST, isStagingBrowserEnvironment } from "./staging-browser.ts";
 
 export const REPORTS_ORIGIN = "https://reports.doctorcre.com";
 

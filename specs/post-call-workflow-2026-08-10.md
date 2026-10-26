@@ -93,8 +93,33 @@ remain a separate app change after this server contract is live.
 
 ### Human gates
 
-- Record changes: existing capture candidate confirmation.
+- Record changes: existing capture candidate confirmation, except the
+  automatic changes below.
 - Joe/Dell assignment: explicit owner-aware action confirmation.
+
+### Automatic changes from the weekly call (WR-000433 AC4, added 2026-10-26)
+
+Joe's ruling, 2026-10-26: "the approval cards are probably good for
+non-obvious decisions ... But a summary of the changes it applied
+automatically would still need to be recorded and presented just in case they
+were wrong".
+
+- A deal's next step (with a stated date) and phase move (with a stated start
+  date, when given) apply without a confirm when the distiller leaves
+  `needs_review` null, the evidence quote appears word for word in the
+  transcript, the call stated only one version of that change, and Jev's
+  RIGHT DEAL check did not pick another deal. Everything else stays a card
+  with its reason.
+- The capture bridge applies each one right after filing, through
+  `resolve-candidate` with `automatic: true`, as the recording partner's own
+  local identity (`tools/call-verb.py`, joe-local or dell-local). It is
+  base-guarded and audited like a Deal Room confirm; a refusal leaves a card.
+- `read-call-outcomes` returns each unreviewed call: the applied changes with
+  their evidence quote and the deal's current version, and the cards still
+  open. `undo-call-change` reverts one applied change (base_version-guarded;
+  refused once the card changed again). `review-call-outcome` takes the call
+  off Home.
+- Tasks, email drafts and anything outbound never apply automatically.
 - External draft: explicit per-draft approval before Outlook Draft creation.
 - Send: always performed by a human in Outlook.
 

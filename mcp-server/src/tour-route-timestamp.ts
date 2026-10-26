@@ -1,7 +1,7 @@
 // Route appointments round-trip through PostgreSQL timestamptz JSON, which
 // uses numeric offsets and up to six fractional digits. Keep that precision
 // intact for the database's locked-appointment equality check.
-export function validRouteTimestamp(value) {
+export function validRouteTimestamp(value: unknown): boolean {
   if (typeof value !== "string" || value.length > 64) return false;
   const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?(Z|[+-](\d{2}):(\d{2}))$/.exec(value);
   // PostgreSQL has no year zero and accepts displacements only through 15:59.
@@ -17,7 +17,7 @@ export function validRouteTimestamp(value) {
 
 // Call only after validRouteTimestamp. Date.parse retains milliseconds; add
 // the remaining digits with integer arithmetic, including before the epoch.
-export function routeTimestampMicroseconds(value) {
+export function routeTimestampMicroseconds(value: string): bigint {
   const fraction = /\.(\d{1,6})/.exec(value)?.[1] || "";
   return BigInt(Date.parse(value)) * 1000n + BigInt(fraction.padEnd(6, "0").slice(3));
 }
