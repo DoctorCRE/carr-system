@@ -13,13 +13,12 @@ import json
 from pathlib import Path
 
 home = Path.home()
-repo = Path.cwd().resolve()
 print(json.dumps({
     'owner': 'joe',
     'account': 'joe.bookout@carr.us',
     'internal_domain': 'carr.us',
     'timezone': 'America/Chicago',
-    'repo': str(repo),
+    'repo': str(home / 'carr-local/outlook-repo'),
     'profile': str(home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity'),
     'vendor': str(home / 'carr-local/hxstore-reverse-engineering'),
     'copy_helper': str(home / 'carr-local/bin/outlook-intake-copy'),
@@ -62,7 +61,7 @@ There are no identity, address, profile or credential fallbacks.
 | `account` | Lowercase mailbox address used for window and Sent Items checks. |
 | `internal_domain` | Lowercase domain used for internal email matching. |
 | `timezone` | IANA timezone used for local windows, reports and the daily send limit. |
-| `repo` | Absolute checkout path, canonicalized when loaded. |
+| `repo` | Absolute path of the checkout the Outlook jobs run from, canonicalized when loaded. Only `bin/install-outlook-intake.sh` creates or moves it, so pulling the canonical checkout ships no Outlook code. |
 | `profile` | Absolute Outlook profile directory. Only its HxStore and EFMData files enter the private snapshot. |
 | `vendor` | Absolute pinned decoder checkout. The decoder lives at `hxprobe/target/release/hxprobe` inside it. |
 | `copy_helper`, `driver`, `folder_guide`, `send_state` | Absolute paths to the granted helper, local UI driver, private folder guide and send ledger directory. |
