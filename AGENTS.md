@@ -180,6 +180,11 @@ gh pr create --base main --head <name> --title "..." --body "..."
 gh pr merge <n> --squash --delete-branch
 ```
 
+PR branches are never rebased or force-pushed, `--force-with-lease` included.
+To catch up with main, merge `origin/main` into the branch. This overrides the
+rebase and force-push steps in the tstack skills (`modernize`, `full-send`,
+`full-stop`); Joe 2026-10-26: "Keep never-rebase/never-force-push."
+
 **And do not COMMIT on main either.** `ops/githooks/pre-commit` refuses it. The
 push half was always blocked; the commit half was not, so a commit made on main
 in `~/carr-system` simply stranded there — that checkout reached NINE unpushed
