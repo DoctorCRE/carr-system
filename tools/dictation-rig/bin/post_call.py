@@ -33,6 +33,7 @@ DRAFTS_FILE = "outlook-drafts.json"
 PUSH_FILE = "backend-push.json"
 LOCK_FILE = ".post-call.lock"
 OUTLOOK_URL_LIMIT = 1900
+CALL_PHASES = ("pending", "research", "site_selection", "negotiation", "legal", "due_diligence", "closing")
 
 
 def distiller_json_schema() -> dict[str, Any]:
@@ -67,11 +68,14 @@ def distiller_json_schema() -> dict[str, Any]:
             }, ["title", "deal_id", "participant_ids", "evidence", "due_on"])},
             "deal_updates": {"type": "array", "items": item({
                 **common, "summary": {"type": "string"},
+                "phase_move": {"anyOf": [{"type": "null"}, item({
+                    "value": {"type": "string", "enum": list(CALL_PHASES)},
+                }, ["value"])]},
                 "next_step": {"anyOf": [{"type": "null"}, item({
                     "text": {"type": "string", "minLength": 1, "maxLength": 500},
                     "next_date": {"type": ["string", "null"], "format": "date"},
                 }, ["text", "next_date"])]},
-            }, ["deal_id", "summary", "participant_ids", "evidence", "next_step"])},
+            }, ["deal_id", "summary", "participant_ids", "evidence", "next_step", "phase_move"])},
             "draft_proposals": {"type": "array", "items": item({
                 **common, "recipient_party_id": {"type": "string"},
                 "subject": {"type": "string"}, "body": {"type": "string"},
@@ -291,7 +295,7 @@ def _validate_distillation(value: Any) -> dict[str, Any]:
             if not isinstance(item, dict):
                 raise ContractError(f"{list_name} item must be an object")
             is_action = list_name in {"joe_tasks", "dell_tasks"}
-            _strict_keys(item, required, {"due_on"} if is_action else {"next_step"} if list_name == "deal_updates" else set())
+            _strict_keys(item, required, {"due_on"} if is_action else {"next_step", "phase_move"} if list_name == "deal_updates" else set())
             if is_action:
                 _calendar_date_or_none(item.setdefault("due_on", None), f"{list_name}.due_on")
             step = item.get("next_step") if list_name == "deal_updates" else None
@@ -303,6 +307,13 @@ def _validate_distillation(value: Any) -> dict[str, Any]:
                 if len(text) > 500:
                     raise ContractError("deal_updates.next_step.text exceeds 500 characters")
                 _calendar_date_or_none(step["next_date"], "deal_updates.next_step.next_date")
+            phase = item.get("phase_move") if list_name == "deal_updates" else None
+            if phase is not None:
+                if not isinstance(phase, dict):
+                    raise ContractError("deal_updates.phase_move must be an object or null")
+                _strict_keys(phase, {"value"})
+                if phase["value"] not in CALL_PHASES:
+                    raise ContractError("deal_updates.phase_move.value must be a supported open phase")
             for key in required - {"deal_id", "participant_ids"}:
                 _string(item[key], f"{list_name}.{key}")
             if not isinstance(item["deal_id"], str) or not item["deal_id"].strip():
@@ -408,7 +419,10 @@ def _distiller_instruction() -> str:
         "When Dell says he/I/we will do something, create a dell_tasks item. "
         "For each task, use due_on as YYYY-MM-DD only when the transcript states an unambiguous calendar date, including the year. "
         "Use null when no date is stated. For relative dates or dates with an unclear year, use null and add a question to review_questions; never guess a date. "
-        "A deal status statement creates a deal_updates item with next_step null. "
+        "A deal status statement creates a deal_updates item with next_step and phase_move null. "
+        "Only an explicitly agreed phase change sets phase_move to an object with value. "
+        "Use exactly one of pending, research, site_selection, negotiation, legal, due_diligence, closing. "
+        "Do not infer a phase from a general status update. Closure, loss and invoicing become review_questions. "
         "Only an explicitly agreed replacement for the deal card's next step sets next_step to an object with text and next_date. "
         "Use the exact agreed step text. Apply the task date rules to next_date, using null for missing or ambiguous dates. "
         "Null next_date clears the card's current date on confirmation. Do not turn every assigned task into a replacement next step. "
@@ -422,7 +436,7 @@ def _distiller_instruction() -> str:
         '"report": {"summary": "<string>", "decisions": ["<string>", ...], "open_questions": ["<string>", ...]}, '
         '"joe_tasks": [{"title": "<string>", "due_on": null, "deal_id": "<exact deal id>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
         '"dell_tasks": [{"title": "<string>", "due_on": null, "deal_id": "<exact deal id>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
-        '"deal_updates": [{"deal_id": "<exact deal id>", "summary": "<string>", "next_step": null, "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
+        '"deal_updates": [{"deal_id": "<exact deal id>", "summary": "<string>", "next_step": null, "phase_move": null, "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
         '"draft_proposals": [{"recipient_party_id": "<exact party id>", "deal_id": "<exact deal id>", "subject": "<string>", "body": "<string>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
         '"review_questions": ["<string>", ...]}\n'
         "If there is nothing for a section, use an empty array. Never omit schema_version or report. "
@@ -526,7 +540,8 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
 
 def _report_candidates(report: dict[str, Any]) -> list[dict[str, Any]]:
     items = [item for key in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals") for item in report.get(key, [])]
-    return items + [update["next_step"] for update in report.get("deal_updates", []) if update.get("next_step") is not None]
+    return items + [update[field] for update in report.get("deal_updates", [])
+                    for field in ("next_step", "phase_move") if update.get(field) is not None]
 
 
 def apply_candidate_statuses(session_dir: Path, statuses: dict[str, str]) -> dict[str, Any]:
@@ -575,6 +590,9 @@ def report_for_deal_room(session_dir: Path) -> dict[str, Any]:
     # draft as though it had never been made.
     visible = json.loads(json.dumps(report))
     for update in visible.get("deal_updates", []):
+        phase = update.get("phase_move")
+        if phase is not None:
+            update["summary"] += f"\nMove phase to: {phase['value']}"
         step = update.get("next_step")
         if step is not None:
             next_date = step["next_date"] or "not set (clears the current date)"
@@ -649,6 +667,14 @@ def sanitized_candidates(session_dir: Path) -> dict[str, Any]:
                 "evidence_quote": update["evidence"], "confidence": 0.5,
             })
             bindings.append({**_candidate_binding("deal_updates", index, "legacy"), "field": "next_step"})
+        phase = update.get("phase_move")
+        if phase is not None and not phase.get("candidate_id"):
+            legacy_items.append({
+                "kind": "phase_move",
+                "payload": {"deal": update["deal_id"], "field": "phase", "value": phase["value"]},
+                "evidence_quote": update["evidence"], "confidence": 0.5,
+            })
+            bindings.append({**_candidate_binding("deal_updates", index, "legacy"), "field": "phase_move"})
     for index, draft in enumerate(report.get("draft_proposals", [])):
         if draft.get("candidate_id"):
             continue
@@ -687,7 +713,7 @@ def apply_candidate_ids(session_dir: Path, bindings: list[dict[str, Any]], candi
         target = items[index]
         field = binding.get("field")
         if field is not None:
-            if list_name != "deal_updates" or field != "next_step" or not isinstance(target.get(field), dict):
+            if list_name != "deal_updates" or field not in {"next_step", "phase_move"} or not isinstance(target.get(field), dict):
                 raise ContractError("candidate binding is invalid")
             target = target[field]
         if target.get("candidate_id") not in {None, candidate_id}:
