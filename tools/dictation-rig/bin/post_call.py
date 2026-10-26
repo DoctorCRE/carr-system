@@ -34,6 +34,7 @@ DRAFTS_FILE = "outlook-drafts.json"
 PUSH_FILE = "backend-push.json"
 LOCK_FILE = ".post-call.lock"
 OUTLOOK_URL_LIMIT = 1900
+LOG_PATH = Path(os.environ.get("CARR_CALL_MODE_LOG") or Path.home() / "Library" / "Logs" / "carr-call-mode.log")
 CALL_PHASES = ("pending", "research", "site_selection", "negotiation", "legal", "due_diligence", "closing")
 
 
@@ -566,8 +567,17 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         jev_context = {**context, "speaker_labels": stored_context.get("speaker_labels"),
                        "local_partner": stored_context.get("recorder")}
         result = post_call_jev.check_distillation(result, jev_context, transcript, client=_jev_fixture_client())
-    except Exception:
-        pass  # Jev never blocks the pack; a change without a passing deal check stays a card.
+    except Exception as exc:
+        exception_class = type(exc).__name__
+        deal_check_status = {"status": "unavailable", "exception_class": exception_class}
+        result["deal_check"] = deal_check_status
+        try:
+            LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with LOG_PATH.open("a", encoding="utf-8") as handle:
+                handle.write(f"{now()} deal check unavailable session={session_dir.name} "
+                             f"exception={exception_class}\n")
+        except OSError:
+            pass
     result = mark_automatic(result, transcript, context)
     write_private(session_dir / REPORT_FILE, result)
     # Context is single-use: no later caller gets a searchable customer index.
@@ -692,6 +702,9 @@ def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any], 
         return "The call stated more than one version of this change."
     # Jev's RIGHT DEAL answers "unclear which deal". Its RIGHT DETAILS judges
     # the update's summary, not this change, so it stays advisory here.
+    unavailable = report.get("deal_check")
+    if isinstance(unavailable, dict) and unavailable.get("status") == "unavailable":
+        return f"Deal check unavailable ({unavailable['exception_class']})."
     deal_check = (update.get("checks") or {}).get("deal")
     if not isinstance(deal_check, dict):
         return "The automatic deal check did not run."
