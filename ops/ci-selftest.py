@@ -37,7 +37,7 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/node_test_summary.py",
+            "ops/ci.sh", "ops/ci-pushfloor.py", "ops/node_test_summary.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
             "ops/hook-deletion-check.py", "ops/githooks/path-hygiene-check.py",
@@ -587,12 +587,6 @@ UNCOLLECTED_BY_DECISION = {
         "store, drives 20 concurrent sessions, and runs for 15 minutes by "
         "default. Network, database and wall-clock all disqualify it from a "
         "merge gate; it is run deliberately before a release.",
-    "tools/dictation-rig/tests/test_call_mode.py":
-        "Offline and correct, but not evaluated by this unit — it is a "
-        "unittest package under tools/dictation-rig/tests/ that this lane did "
-        "not run or vouch for. Named here so it is a known gap with an owner "
-        "rather than an invisible one; collecting it is a follow-up that must "
-        "run it first.",
     "tools/doc-convo/bin/test-brain-stream.sh":
         "Not evaluated by this unit. It lives in a bin/ directory beside the "
         "convo server rather than in a tests/ directory, and the three "
@@ -1053,6 +1047,40 @@ def test_push_floor_distinguishes_imported_main_paths_from_branch_changes():
           rc != 0 and owned_name in out and "path-hygiene" in out, out[-900:])
 
 
+def test_push_floor_reports_missing_atlas_packages_without_blaming_registry():
+    with ci_fixture() as root:
+        tests = root / "mcp-server/test"
+        tests.mkdir()
+        paths = [tests / f"atlas-inventory-graph-{kind}.test.mjs"
+                 for kind in ("read", "web")]
+        source = "import 'atlas-fixture-dependency';\nthrow new Error('Atlas contract fixture failure');\n"
+        for path in paths:
+            path.write_text(source)
+        changed = ["mcp-server/src/scac-mutation-registry.current.generated.js"]
+        with _stub_git_answering_the_floor(changed) as stub_env:
+            rc, out = run(["--only", "pushfloor"],
+                          env={"CARR_CI_RANGE": FIXTURE_RANGE, **stub_env}, root=root)
+            check("missing Atlas packages fail with the actual dependency and npm ci",
+                  rc != 0 and "Cannot find package 'atlas-fixture-dependency'" in out
+                  and "npm ci" in out and "mcp-server" in out, out[-1200:])
+            check("missing Atlas packages do not prescribe registry repair",
+                  "active registry changed" not in out, out[-1200:])
+            package = root / "mcp-server/node_modules/atlas-fixture-dependency"
+            package.mkdir(parents=True)
+            (package / "package.json").write_text(
+                '{"type":"module","exports":"./index.js"}')
+            (package / "index.js").write_text("export const ready = true;\n")
+            rc, out = run(["--only", "pushfloor"],
+                          env={"CARR_CI_RANGE": FIXTURE_RANGE, **stub_env}, root=root)
+            check("installed packages preserve the Atlas contract failure and remedy",
+                  rc != 0 and "active registry changed" in out and "npm ci" not in out, out[-1200:])
+            for path in paths:
+                path.write_text("import 'atlas-fixture-dependency';\n")
+            rc, out = run(["--only", "pushfloor"],
+                          env={"CARR_CI_RANGE": FIXTURE_RANGE, **stub_env}, root=root)
+            check("passing Atlas tests still pass the push floor", rc == 0, out[-1200:])
+
+
 def _hosted_workflow(filename="ci.yml"):
     """Workflow as a dict, parsed by the js-yaml the server already carries."""
     import json
@@ -1070,7 +1098,7 @@ def test_hosted_draft_lifecycle():
     """Execute YAML conditions and verdict commands against same-head event fixtures.
 
     This models the scheduler inputs, not GitHub's remote check selection. In
-    particular, ready_for_review must schedule fresh lanes without a new SHA.
+    particular, CI readiness metadata must not schedule a new run at the same SHA.
     """
     def evaluate(expression, context):
         expression = str(expression)
@@ -1092,9 +1120,11 @@ def test_hosted_draft_lifecycle():
             ("doc-drift.yml", ("check",), "verdict", "drift-verdict")):
         wf = _hosted_workflow(filename)
         events = wf["on"]
-        check(f"{filename}: all PR lifecycle triggers survive",
-              set(events["pull_request"]["types"]) == {
-                  "opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft"})
+        expected_actions = {"opened", "synchronize", "reopened", "converted_to_draft"}
+        if filename != "ci.yml":
+            expected_actions.add("ready_for_review")
+        check(f"{filename}: only intended PR lifecycle events schedule runs",
+              set(events["pull_request"]["types"]) == expected_actions)
         check(f"{filename}: all non-PR full-suite triggers survive",
               {"merge_group", "schedule", "workflow_dispatch"} <= set(events))
         jobs = wf["jobs"]
@@ -1122,6 +1152,8 @@ def test_hosted_draft_lifecycle():
                     (True, "converted_to_draft", "a" * 40), (False, "ready_for_review", "a" * 40),
                     (False, "reopened", "a" * 40), (False, "synchronize", "a" * 40),
                     (False, "synchronize", "b" * 40)):
+                if action not in events["pull_request"]["types"]:
+                    continue
                 ctx = context(draft=draft, action=action, sha=sha)
                 groups.append(evaluate(wf["concurrency"]["group"], ctx))
                 check(f"{filename}: {action} draft={draft} SHA={sha[:7]} schedules correct lanes",
@@ -1530,6 +1562,7 @@ def main(argv=None):
                test_gates_selftests_have_a_process_group_watchdog,
                test_push_floor_defers_the_gates_class_instead_of_running_it,
                test_push_floor_distinguishes_imported_main_paths_from_branch_changes,
+               test_push_floor_reports_missing_atlas_packages_without_blaming_registry,
                test_hosted_zsh_setup_does_not_refresh_working_indexes,
                test_hosted_zsh_cache_requires_authenticated_bytes):
         try:

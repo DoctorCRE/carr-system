@@ -119,6 +119,10 @@ def fixture_env(base=None):
     teardown cannot race a detached writer.
     """
     env = scrubbed_env(base)
+    # Workflow context can redirect fixture gates and output writes.
+    for var in tuple(env):
+        if var.startswith("GITHUB_"):
+            env.pop(var)
     for var in GIT_CONFIG_VARS:
         env.pop(var, None)
     env["GIT_CONFIG_NOSYSTEM"] = "1"

@@ -81,6 +81,9 @@ def main():
         text, drifted = summary(report, json.loads(args.baseline.read_text()))
         with args.summary.open('a') as handle:
             handle.write(text)
+        if drifted:
+            print(text + 'Refresh scripts/doc-drift/baseline.json with --write-baseline only after repairing or accepting these claims.',
+                  file=sys.stderr)
         return 1 if drifted else 0
     if not args.output or args.report.resolve() == args.output.resolve():
         parser.error('artifact publication requires a distinct output path')

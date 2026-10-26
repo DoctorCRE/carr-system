@@ -44,8 +44,10 @@ no third-party imports, so no venv is needed to run it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -69,7 +71,7 @@ FALLBACK_MODEL_PATH = Path(
     "/Users/booko/.cache/whisper-cpp/models/ggml-small.en.bin"
 )
 
-ENGINE_LABEL = "whisper.cpp large-v3-turbo (carr dictation-rig)"
+ENGINE_LABEL = "whisper.cpp (carr dictation-rig)"
 
 DEFAULT_SPEAKER_LABELS: dict[str, str] = {"mic": "Me", "system": "Other participant"}
 
@@ -102,6 +104,7 @@ class Segment(TypedDict):
 class TranscriptJson(TypedDict):
     engine: str
     model: str
+    model_sha256: str
     vocab_prompt: bool
     generated: str
     consent: Any
@@ -223,6 +226,20 @@ def resolve_model(log: LogFunc) -> Path:
     raise TranscribeError(
         f"no whisper model found: tried {candidate} and {FALLBACK_MODEL_PATH}"
     )
+
+
+def verify_model_pin(model_sha256: str, log: LogFunc) -> None:
+    expected = os.environ.get("CARR_WHISPER_MODEL_SHA256")
+    if expected is None:
+        return
+    expected = expected.strip().lower()
+    if re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+        raise TranscribeError("CARR_WHISPER_MODEL_SHA256 must be 64 hexadecimal characters")
+    if model_sha256 != expected:
+        raise TranscribeError(
+            f"selected model SHA-256 {model_sha256} does not match configured pin {expected}"
+        )
+    log(f"MODEL pin verified sha256={expected}")
 
 
 def load_prompt() -> str:
@@ -350,6 +367,13 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
     consent = read_consent(session_dir)
     speaker_labels = read_speaker_labels(session_dir)
     model_path = resolve_model(log)
+    digest = hashlib.sha256()
+    with model_path.open("rb") as model_file:
+        for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    model_sha256 = digest.hexdigest()
+    log(f"MODEL path={model_path} sha256={model_sha256}")
+    verify_model_pin(model_sha256, log)
     prompt = load_prompt()
 
     all_segments: list[Segment] = []
@@ -397,6 +421,7 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
     transcript: TranscriptJson = {
         "engine": ENGINE_LABEL,
         "model": str(model_path),
+        "model_sha256": model_sha256,
         "vocab_prompt": True,
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "consent": consent,

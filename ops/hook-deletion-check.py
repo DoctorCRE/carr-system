@@ -11,7 +11,7 @@ import subprocess
 from git_env import scrubbed_env
 
 WIRING = ('ops/config/hooks.json', 'ops/config/codex-hooks.json',
-          '.claude/settings.json')
+          '.claude/settings.json', '.codex/hooks.json')
 
 
 def command_target(command, repo):

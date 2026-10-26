@@ -1,6 +1,6 @@
 # Pipeline Craft — Our Playbook (how top producers build the book)
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Our unified pipeline-building doctrine (consolidated July 8, 2026; sources in the ingestion ledger): producer habits and channels (Part A, organized by topic), sourcing in tight-inventory markets (Part B), and national accounts (Part C — a SEPARATE business model from the territory business, kept in its own part on Joe's directive, Jul 11, 2026; never blend it into the territory doctrine of Parts A–B). Companion to `lead-system.md` (the SOP layer — this is the craft layer). New training sessions MERGE into the topic sections below — do not add per-producer or per-session sections.*
 

@@ -20,6 +20,15 @@ loop #243 / decision f799fd49.
 Both modes share ONE transcription engine: `/opt/homebrew/bin/whisper-cli`,
 ggml-large-v3-turbo, `vocab-prompt.txt`. Never a second engine.
 
+Meeting transcription records the selected local model path and `model_sha256`
+in the private `<session>/transcript.json` and logs that identity in `transcribe.log`.
+The hash is computed once per session before inference, including fallback and
+custom models. Set `CARR_WHISPER_MODEL_SHA256` in the transcription process
+environment to require that exact 64-character SHA-256 before inference. A
+malformed pin or mismatch fails the session before any audio is transcribed.
+With no pin, existing model selection remains unchanged. The digest identifies
+the bytes observed before inference and does not prevent later file replacement.
+
 ## Deal Room Call Mode
 
 The Deal Room is a second control surface for meeting mode. The existing Quill
@@ -97,9 +106,9 @@ live-corrected 2026-08-07):
   (046d:c52b) reports its immediate-right Command as HID Right Control and
   its farther-right Control as HID Right GUI, `bin/logitech-keymap.sh` +
   launchd `com.carr.logitech-keymap` swap those two usages for that
-  vendor/product only, so the physical Command immediately right of space is
+  vendor and product only, so the physical Command immediately right of space is
   Quill and the farther-right Control remains an ordinary Control key. The
-  receiver's vendor/product ids cannot tell two different physical Logitech
+  receiver's vendor and product ids cannot tell two different physical Logitech
   keyboards apart, so a keyboard that already reports those keys correctly
   (measured on Joe's Mac Studio, 2026-09-23) opts out per machine: if
   `$HOME/.config/carr/logitech-keymap.off` exists, the script clears any
@@ -266,7 +275,7 @@ In order, on his Mac:
 7. His one-time permission clicks: mic + Screen & System Audio Recording
    (quill), mic + Accessibility (quill-dictate).
 8. **Trigger keys are per-keyboard**: hold-to-talk defaults to right-cmd (54).
-   Joe's Logitech-specific E4/E7 swap is scoped by receiver vendor/product;
+   Joe's Logitech-specific E4/E7 swap is scoped by receiver vendor and product;
    another keyboard that emits a different keycode can add it to
    `trigger_key_codes` in `~/.config/quill-dictate/config.json`. If his Mac
    binds Siri to a command double-press, the agent's event consumption already

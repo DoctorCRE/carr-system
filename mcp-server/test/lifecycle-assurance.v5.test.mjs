@@ -426,12 +426,14 @@ function moduleImports(directory) {
   const script = `
     const { readdirSync, readFileSync } = require("node:fs");
     const { join } = require("node:path");
+    const { stripTypeScriptTypes } = require("node:module");
     const vm = require("node:vm");
     const dir = process.argv[1];
     const out = {};
     for (const name of readdirSync(dir).sort()) {
-      if (!name.endsWith(".js")) continue;
-      const source = readFileSync(join(dir, name), "utf8");
+      if (!/\.[jt]s$/.test(name)) continue;
+      const text = readFileSync(join(dir, name), "utf8");
+      const source = name.endsWith(".ts") ? stripTypeScriptTypes(text) : text;
       out[name] = new vm.SourceTextModule(source, { identifier: name }).dependencySpecifiers;
     }
     process.stdout.write(JSON.stringify(out));
@@ -457,7 +459,7 @@ test("ISOLATION: no module in src names a specifier under the test directory", (
   const directory = fileURLToPath(new URL("../src", import.meta.url));
   const imports = moduleImports(directory);
   assert.ok(Object.hasOwn(imports, "lifecycle-assurance.v5.js"));
-  assert.ok(Object.hasOwn(imports, "gate-zero-assurance.v5.js"));
+  assert.ok(Object.hasOwn(imports, "gate-zero-assurance.v5.ts"));
   assert.ok(Object.keys(imports).length > 100, "every module in src must have been parsed");
 
   const offenders = Object.entries(imports)
@@ -469,7 +471,7 @@ test("ISOLATION: no module in src names a specifier under the test directory", (
 
   assert.deepEqual(imports["lifecycle-assurance.v5.js"],
     ["./artifact-trust.js", "./global-boundaries.v5.js", "./identity.js",
-      "./gate-zero-assurance.v5.js"]);
+      "./gate-zero-assurance.v5.ts"]);
 });
 
 test("ISOLATION: no public export maps a conditional token back to a state", () => {

@@ -164,6 +164,12 @@
         "retire-rule",
         "teach"
       ]
+    },
+    {
+      "reference": "Joe approved retiring the WR-AI/WR-SIEP program catalogs (2026-10-26); catalog-audit WR-SIEP-26",
+      "verbs": [
+        "cancel-capability-session"
+      ]
     }
   ]
 }

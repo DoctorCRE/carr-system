@@ -63,6 +63,44 @@ def capture(cur, section_id, revision_id, origin_ref):
     ).fetchone()
 
 
+def check_unsourced_transitions(cur, joe_id):
+    for analysis in (None, "missing", "stale"):
+        request_id = cur.execute(
+            """insert into ops.work_request
+               (ref,title,requester_actor,state,version,shape_disposition,shape_rationale,
+                shape_decided_by_actor_id,shape_decided_at)
+               values (%s,'Shape retirement fixture','joe','captured',2,%s,%s,%s,%s) returning id""",
+            (f"WR-SHAPE-{uuid.uuid4().hex}", "required" if analysis else None,
+             "Historical analysis" if analysis else None, joe_id if analysis else None,
+             "2026-01-01T00:00:00Z" if analysis else None),
+        ).fetchone()[0]
+        if analysis == "stale":
+            cur.execute(
+                """insert into ops.work_shape_revision
+                   (work_request_id,work_request_version,version,trinity,hidden_assumption,repo_searches,
+                    maintained_repos,archetypes,chosen_key,mind_changing_fact,builder_brief,created_by_actor_id)
+                   values (%s,1,1,'{}','historical','[]','[]','[]','stored','stored','{}',%s)""",
+                (request_id, joe_id),
+            )
+        cur.execute("update ops.work_request set state='ready',version=version+1 where id=%s", (request_id,))
+        if analysis:
+            refuse(cur, "update ops.work_request set state='claimed',shape_rationale='rewritten' where id=%s",
+                   (request_id,), "historical shape rewrite during claim")
+        cur.execute("update ops.work_request set state='claimed',version=version+1 where id=%s", (request_id,))
+        if analysis:
+            refuse(cur, "update ops.work_request set shape_rationale='rewritten' where id=%s",
+                   (request_id,), "historical shape rewrite after claim")
+        ready = cur.execute(
+            "update ops.work_request set state='ready',version=version+1 where id=%s returning state,shape_disposition",
+            (request_id,),
+        ).fetchone()
+        if ready != ("ready", "required" if analysis else None):
+            raise RuntimeError(f"shape history prevented or changed lifecycle transition: {ready}")
+    refuse(cur,
+           "insert into ops.work_request(ref,title,requester_actor,state) values (%s,'Invalid direct start','joe','claimed')",
+           (f"WR-SHAPE-{uuid.uuid4().hex}",), "direct implementation insert")
+
+
 def main() -> int:
     dsn = os.environ.get("DATABASE_URL", "")
     if not dsn:
@@ -73,6 +111,7 @@ def main() -> int:
             if not joe:
                 return fail("seeded active human actor joe is required")
             joe_id = joe[0]
+            check_unsourced_transitions(cur, joe_id)
             cur.execute("""do $$ begin
               if not exists (select 1 from pg_roles where rolname='carr_authority_joe') then create role carr_authority_joe login; end if;
             end $$""")
@@ -133,15 +172,6 @@ def main() -> int:
                          shape_rationale='tampered',version=version+1,updated_at=now() where id=%s""",
                    (request_id,), "sourced disposition tamper")
 
-            # A required disposition must survive the strict human ready-plan
-            # acceptance, provided its analysis is fresh for the exact version.
-            cur.execute(
-                """insert into ops.work_shape_revision
-                   (work_request_id,work_request_version,version,trinity,hidden_assumption,repo_searches,maintained_repos,
-                    archetypes,chosen_key,mind_changing_fact,builder_brief,created_by_actor_id)
-                   values (%s,%s,1,'{}','freshness gate','[]','[]','[]','hybrid','falsifier','{}',%s)""",
-                (request_id, shaped[3], joe_id),
-            )
             runbook = cur.execute(
                 """select s.section_key from doctrine_document d join doctrine_section s on s.document_id=d.id
                      join doctrine_revision r on r.id=s.current_revision_id and r.section_id=s.id
@@ -163,7 +193,7 @@ def main() -> int:
                          values (%s,'shape-acceptance','Program 6 shape acceptance',10,'active',1) returning id""",
                     (runbook_document,),
                 ).fetchone()[0]
-                runbook_body = "A fresh receipt-backed shape disposition must survive ready-plan acceptance."
+                runbook_body = "Historical shape evidence must survive ready-plan acceptance."
                 runbook_revision = cur.execute(
                     """insert into doctrine_revision (section_id,version,actor_id,body,plain_text,content_hash,commit_message)
                          values (%s,1,%s,%s,%s,%s,'Program 6 runbook fixture') returning id""",
@@ -174,7 +204,7 @@ def main() -> int:
                 runbook = ("shape-acceptance",)
             plan = cur.execute(
                 "select * from ops.propose_sourced_work_request_plan(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (ref, shaped[3], "Preserve the fresh required shape through ready acceptance.",
+                (ref, shaped[3], "Preserve historical shape without requiring an analysis revision.",
                  f"doctrine:runbook#{runbook[0]}", Jsonb([]), "safe:recovery:shape", "safe:observability:shape",
                  Jsonb({"max_steps": 1, "max_duration_minutes": 1}), uuid.uuid4()),
             ).fetchone()
@@ -187,7 +217,26 @@ def main() -> int:
             cur.execute("reset session authorization")
             if not accepted or accepted[2:4] != ("ready", shaped[3] + 1) or accepted[9] != "required" or accepted[10] is not None:
                 return fail(f"ready-plan acceptance overwrote required shape: {accepted}")
-        print("PASS: sourced shape disposition is receipt-backed, idempotent, tamper-resistant, and preserved through ready acceptance")
+            set_local_role(cur, "carr_writer")
+            feedback = cur.execute(
+                "select * from ops.propose_sourced_work_request_outcome_feedback(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (ref, accepted[3], plan[2], Jsonb([{"id": "SHAPE", "result": "met"}]),
+                 Jsonb(["safe:fixture:shape-retirement"]), "none", "Historical shape remains inspectable.",
+                 1, "mcp", False, 0, uuid.uuid4()),
+            ).fetchone()
+            cur.execute("reset role")
+            cur.execute("set session authorization carr_authority_joe")
+            outcome = cur.execute(
+                "select * from ops.accept_sourced_work_request_outcome_feedback(%s,%s,%s,%s)",
+                (ref, accepted[3], feedback[2], uuid.uuid4()),
+            ).fetchone()
+            cur.execute("reset session authorization")
+            if outcome[9] != "criteria_met":
+                return fail(f"shape history blocked the sourced outcome: {outcome}")
+            refuse(cur,
+                   "update ops.sourced_work_request_shape_disposition_receipt set rationale='rewritten' where work_request_id=%s",
+                   (request_id,), "historical shape receipt rewrite after outcome")
+        print("PASS: readiness and implementation ignore shape requirements; sourced plans/outcomes preserve receipt-backed history")
         return 0
     except Exception as exc:
         return fail(str(exc))

@@ -5,7 +5,7 @@ on:
   merge_group:
     types: [checks_requested]
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+    types: [opened, synchronize, reopened, converted_to_draft]
   schedule:
     # 06:20 UTC daily. Sits after the nightly backup (02:35 UTC) and the 05:10
     # edge-liveness slot.
@@ -174,7 +174,7 @@ jobs:
           # Excludes the checks whose dependency cannot exist on a runner
           # (installed Claude Code settings, macOS launchd). Each one prints its
           # reason in the output; nothing is dropped silently.
-          CARR_CI_DATABASE_URL: ${{ contains(matrix.classes, 'unit') && 'postgres://carr_ci:postgres@localhost:5432/carr_ci' || '' }} # ci-secret-scan: allow - disposable loopback fixture
+          CARR_CI_DATABASE_URL: ${{ contains(matrix.classes, 'unit') && 'postgres://carr_ci:postgres@127.0.0.1:5432/carr_ci' || '' }} # ci-secret-scan: allow - disposable loopback fixture
           GH_TOKEN: ${{ github.token }}
           CARR_CI_PORTABLE_ONLY: "1"
           CARR_LOCAL_PG_ALLOW_HOSTED: "1"

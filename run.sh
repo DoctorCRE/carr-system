@@ -92,6 +92,7 @@ case "${1:-}" in
   salesforce-diff) sf_diff "$@" ;;
   salesforce-sync) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -m lib.salesforce_deal_sync "$@" ;;
   section-index) shift; section_index "$@" ;;
+  regen)        shift; "$PY" "$REPO/tools/regen.py" "$@" ;;
   registry-audit) registry_audit "$@" ;;
   review-queue) review_queue "$@" ;;
   brief-pack)   brief_pack "$@" ;;
@@ -126,5 +127,37 @@ case "${1:-}" in
   local-db-ci)  shift; "$PY" "$REPO/ops/local-pg-ci.py" "$@" ;;
   outlook-send) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["send", *sys.argv[1:]]))' "$@" ;;
   outlook-event) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["event", *sys.argv[1:]]))' "$@" ;;
-  *) echo "usage: run.sh map [--missing]|deal-room|lead-board|lead-promote [--count N] [--county X] [--segment X]|renewal-feed|all|corroborate|graph|graph-system|graph-health [--verbose]|section-index [each supports --recovery --reason WHY [--vault PATH]]|space-search <folder>|salesforce-diff [--apply]|registry-audit [--verbose] [--recovery --reason WHY [--vault PATH]]|review-queue [--fixture f.json]|brief-pack [--section all|one-thing|prebriefs|capacity|monday-agenda|renewal-shortlist] [--quiet] [--recovery [--vault PATH]]|retrieve [--recovery [--vault PATH]] <question>|health [--act] [--recovery --reason WHY [--vault PATH]]|config [check|pull|install] [--apply]|lint <file> [--surface email|social|proposal|web]|restore-rehearse --backup-run-id RUN-or-latest [--preflight] [--verify-only] [--identity PATH] [--keep-branch]|key-recovery-test [--backup-run-id RUN-or-latest]|migrate [--apply] [--yes]|export [--only <target>] [--bootstrap]|call [--branch <name>] <verb> '<json args>'|call-mode [serve|state|start|stop]|local-db-ci [--class migration|strict] [--port N]|worktree <name> [--from B]|--list|--remove <name|path>"; exit 2 ;;
+  *)
+    printf '%s' \
+      "usage: run.sh regen registry|" \
+      "map [--missing]|" \
+      "deal-room|" \
+      "lead-board|" \
+      "lead-promote [--count N] [--county X] [--segment X]|" \
+      "renewal-feed|" \
+      "all|" \
+      "corroborate|" \
+      "graph|" \
+      "graph-system|" \
+      "graph-health [--verbose]|" \
+      "section-index [each supports --recovery --reason WHY [--vault PATH]]|" \
+      "space-search <folder>|" \
+      "salesforce-diff [--apply]|" \
+      "registry-audit [--verbose] [--recovery --reason WHY [--vault PATH]]|" \
+      "review-queue [--fixture f.json]|" \
+      "brief-pack [--section all|one-thing|prebriefs|capacity|monday-agenda|renewal-shortlist] [--quiet] [--recovery [--vault PATH]]|" \
+      "retrieve [--recovery [--vault PATH]] <question>|" \
+      "health [--act] [--recovery --reason WHY [--vault PATH]]|" \
+      "config [check|pull|install] [--apply]|" \
+      "lint <file> [--surface email|social|proposal|web]|" \
+      "restore-rehearse --backup-run-id RUN-or-latest [--preflight] [--verify-only] [--identity PATH] [--keep-branch]|" \
+      "key-recovery-test [--backup-run-id RUN-or-latest]|" \
+      "migrate [--apply] [--yes]|" \
+      "export [--only <target>] [--bootstrap]|" \
+      "call [--branch <name>] <verb> '<json args>'|" \
+      "call-mode [serve|state|start|stop]|" \
+      "local-db-ci [--class migration|strict] [--port N]|" \
+      "worktree <name> [--from B]|--list|--remove <name|path>"
+    printf '\n'
+    exit 2 ;;
 esac

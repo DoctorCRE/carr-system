@@ -14,13 +14,14 @@
 // with the findings in the error payload, precise enough to self-repair.
 
 import { organizationTenantForActor, personalScopeForActor } from "./identity.js";
-import { embedDoctrineRevisions, backfillDoctrineEmbeddings } from "./doctrine-embeddings.js";
+import { embedDoctrineRevisions, backfillDoctrineEmbeddings } from "./doctrine-embeddings.ts";
 import { searchDoctrineSituations, retrievalVisibilityActorId } from "./situation-retrieval.js";
 import { CORE_RULE_IDS, CORE_RULE_COUNT, CORE_RULE_TRIAGE_SOURCE } from "./core-rule-ids.js";
 import { ruleBootPage } from "./rule-boot.js";
-import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.js";
+import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.ts";
 
 const CORE_RULE_ID_SET = new Set(CORE_RULE_IDS);
+const TERRITORY_SECTION_ID = "aa3868ef-d0a2-4bc2-9954-525ad418636b";
 
 /** Read the count banner emitted by the generated personal/shared rule renders. */
 export function generatedRuleCount(rendered) {
@@ -1051,6 +1052,14 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
                    where kind = 'action_required' and status = 'open'
                 ) a) as action_required,
              (select generation from doctrine_meta where id=1) as doctrine_generation,
+             (select to_jsonb(t) from (
+                select s.id as section_id,d.slug as doc_slug,s.section_key,s.title,
+                       s.current_version as version,r.body,r.content_hash,s.review_after
+                  from doctrine_section s
+                  join doctrine_document d on d.id=s.document_id
+                  join doctrine_revision r on r.id=s.current_revision_id and r.section_id=s.id
+                 where s.id=$2::uuid and s.status='active' and d.visibility='shared'
+              ) t) as territory,
              (select coalesce(jsonb_agg(to_jsonb(d)
                                 order by d.caught_by_human desc,d.occurrences desc,d.last_seen desc),
                               '[]'::jsonb)
@@ -1062,7 +1071,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
                    limit 5
                 ) d) as defect_classes
              /* standing-context:baseline-batch */`,
-          [who]);
+          [who, TERRITORY_SECTION_ID]);
         const optionalSnapshotPromise = c.query(
           `with guidance_registry as (
              select state,manifest_digest from ops.v_guidance_registry_state limit 1
@@ -1380,6 +1389,10 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
             human_only_authority: actor.human === true,
           },
           detail,
+          territory: baseline.territory
+            ? { status: "available", ...baseline.territory,
+                version: version(baseline.territory.version) }
+            : { status: "unavailable", section_id: TERRITORY_SECTION_ID },
           ...(retired.length ? { rule_ids_retired: retired } : {}),
           ...(missing.length ? { rule_ids_not_found: missing } : {}),
           ...(detail === "gist" ? { hint_full_text:

@@ -12,7 +12,7 @@
 // reading. It creates no worktree, runs no git command, opens no shell, holds
 // no lock, claims no lease and merges nothing. It is a PURE EVALUATOR over
 // typed observations the caller supplies, in the shape of
-// command-supervisor-admission.v5.js: every result is a frozen answer carrying
+// command-supervisor-admission.v5.ts: every result is a frozen answer carrying
 // `effects: V5_NO_EFFECTS`, and an `allow` says the registered negatives did
 // not fire on the facts as reported.
 //

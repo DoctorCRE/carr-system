@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
+import subprocess
 import sys
 import time
 import uuid
@@ -47,10 +49,15 @@ import post_call
 
 # --- constants -------------------------------------------------------------
 
-CONFIG_PATH = Path.home() / ".config" / "carr-capture" / "config.json"
-LOG_PATH = Path.home() / "Library" / "Logs" / "capture-bridge.log"
+CONFIG_PATH = Path(os.environ.get("CARR_CAPTURE_CONFIG") or Path.home() / ".config" / "carr-capture" / "config.json")
+LOG_PATH = Path(os.environ.get("CARR_CAPTURE_LOG") or Path.home() / "Library" / "Logs" / "capture-bridge.log")
 
 HTTP_TIMEOUT_SECONDS = 10
+VERB_TIMEOUT_SECONDS = 60
+# The partner's own record-layer door on this Mac (joe-local or dell-local):
+# the same identity `./run.sh call` uses, so automatic changes need no new
+# authority. The rehearsal points this at a disposable record layer.
+REPO_ROOT = Path(__file__).resolve().parents[3]
 CALL_CONTEXT_WAIT_SECONDS = 8
 
 
@@ -458,7 +465,62 @@ def publish_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         f"PUBLISHED session={session_dir.name} "
         f"post_call={marker['post_call_count']} legacy={marker['legacy_count']}"
     )
-    return 0
+    return 0 if apply_automatic(session_dir) else 1
+
+
+def call_verb(verb: str, args: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+    command = os.environ.get("CARR_POST_CALL_VERB_COMMAND")
+    argv = shlex.split(command) if command else [sys.executable, str(REPO_ROOT / "tools" / "call-verb.py")]
+    try:
+        done = subprocess.run(argv + [verb, json.dumps(args)], capture_output=True, text=True,
+                              timeout=VERB_TIMEOUT_SECONDS, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, {"error": type(exc).__name__}
+    reply: dict[str, Any] = {}
+    for line in reversed(done.stdout.strip().splitlines()):
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            reply = parsed
+            break
+    return done.returncode == 0 and reply.get("ok") is True, reply
+
+
+def apply_automatic(session_dir: Path) -> bool:
+    """Apply the call's plainly stated next steps and phases (Joe, 2026-10-26).
+
+    Each one goes through resolve-candidate as the partner's local identity,
+    so it lands base-guarded and audited exactly like a confirm in the Deal
+    Room. A refusal (a newer edit, a conflict, an unreachable record layer)
+    leaves that change as an ordinary card with the reason attached.
+    """
+    report = post_call.read_json(session_dir / post_call.REPORT_FILE) or {}
+    pending = post_call.automatic_candidates(session_dir)
+    if not pending and (report.get("automatic") or {}).get("finished_at"):
+        return True
+    call_day = str(report.get("generated_at") or iso_now_utc())[:10]
+    outcomes: dict[str, str | None] = {}
+    for change in pending:
+        candidate_id = change["candidate_id"]
+        ok, reply = call_verb("resolve-candidate", {
+            "idempotency_key": str(uuid.uuid5(uuid.NAMESPACE_URL, f"post-call-auto:{session_dir.name}:{candidate_id}")),
+            "candidate_id": candidate_id, "accept": True, "automatic": True,
+            "note": f"Applied automatically from the {call_day} pipeline call",
+        })
+        if ok and reply.get("status", reply.get("already")) == "confirmed":
+            outcomes[candidate_id] = None
+        else:
+            error = reply.get("error") or "the record layer refused it"
+            outcomes[candidate_id] = f"Could not apply automatically ({error}); review it here."
+        log_line(f"AUTO session={session_dir.name} candidate={candidate_id} applied={outcomes[candidate_id] is None}")
+    try:
+        post_call.record_automatic(session_dir, outcomes)
+    except post_call.ContractError as exc:
+        log_line(f"ERROR auto-apply receipt session={session_dir.name}: {exc}")
+        return False
+    return True
 
 
 def sync_candidate_statuses(session_dir: Path, response: dict[str, Any]) -> None:
@@ -509,6 +571,9 @@ def file_post_call_report(
 
 def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     name = session_dir.name
+    retired_marker = session_dir / ".capture-retired.json"
+    if retired_marker.is_file():
+        return Outcome.VERIFIED
     capture_marker = session_dir / ".capture.json"
     marker = read_json(capture_marker)
     if marker is None:
@@ -538,6 +603,10 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         log_line(f"ERROR poll network failure session={name}: {exc}")
         return Outcome.UNAVAILABLE
 
+    if status == 404:
+        log_line(f"ERROR poll session gone(404) session={name}")
+        write_json_atomic(retired_marker, {"retired_at": iso_now_utc(), "status": 404}, mode=0o600)
+        return Outcome.UNAVAILABLE
     if status == 401:
         log_line(f"ERROR poll unauthorized(401) session={name} (session token invalid/expired?)")
         return Outcome.UNAVAILABLE

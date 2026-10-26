@@ -68,7 +68,7 @@ a new case "diagnosis checklist" → `runbook#diagnosis-checklist-in-order-2-min
 must go red before the change and green after.
 
 **Then RE-BASELINE:** re-run the full golden suite, write a new dated baseline
-file beside `evals/retrieval/baselines/doctrine-fts.2026-08-15.v1.json`. The
+file beside `evals/retrieval/baselines/doctrine-fts.2026-08-16.title-v1.json`. The
 concept bridge (Phase 1) is credited only with misses that survive Phase 0 —
 that ordering is part of the council ruling.
 

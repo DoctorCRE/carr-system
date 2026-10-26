@@ -43,12 +43,30 @@ class CaptureOutcomesTests(unittest.TestCase):
         self.assertTrue((self.session / "mic.caf").exists())
         self.assertFalse((self.session / "ingested.json").exists())
 
+    def test_poll_retires_missing_session_after_one_visible_404(self) -> None:
+        with patch.object(bridge, "http_request", return_value=(404, {})) as request:
+            self.assertNotEqual(bridge.poll_cmd(self.cfg, self.session), 0)
+            first_log = bridge.LOG_PATH.read_text()
+            self.assertIn("session=synthetic-session", first_log)
+            self.assertIn("404", first_log)
+            self.assertEqual(bridge.poll_cmd(self.cfg, self.session), 0)
+            self.assertEqual(bridge.poll_cmd(self.cfg, self.session), 0)
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(bridge.LOG_PATH.read_text(), first_log)
+        self.assertTrue((self.session / ".capture.json").exists())
+        self.assertTrue((self.session / "mic.caf").exists())
+        self.assertFalse((self.session / "ingested.json").exists())
+        self.assertFalse((self.session / ".capture-health.json").exists())
+
     def test_poll_auth_refusal_and_bad_reply_fail_without_releasing_files(self) -> None:
         replies: tuple[tuple[int, dict[str, object]], ...] = ((401, {}), (503, {}), (200, {}))
         for reply in replies:
             with self.subTest(reply=reply), patch.object(bridge, "http_request", return_value=reply):
                 self.assertNotEqual(bridge.poll_cmd(self.cfg, self.session), 0)
                 self.assertFalse((self.session / "ingested.json").exists())
+        with patch.object(bridge, "http_request", return_value=(200, {"state": "recording", "meeting_record": None})) as request:
+            self.assertEqual(bridge.poll_cmd(self.cfg, self.session), 0)
+        request.assert_called_once()
         self.assertTrue((self.session / "mic.caf").exists())
 
     def test_claim_outage_remains_retryable_with_same_nonce(self) -> None:

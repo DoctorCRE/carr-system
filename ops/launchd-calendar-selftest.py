@@ -193,6 +193,14 @@ for path in templates:
     found = lc.audit_template(path.read_text(encoding="utf-8"))
     check(f"{rel} carries no StartInterval and matches the converter", found == [], found)
 
+pull = plistlib.loads((REPO / "ops/launchd/com.carr.checkout-pull.plist").read_bytes())
+check("checkout-pull fast-forwards every five minutes and at load",
+      pull["StartCalendarInterval"] == [{"Minute": m} for m in range(0, 60, 5)]
+      and pull.get("RunAtLoad") is True, pull)
+check("checkout-pull runs git directly, with no wrapper",
+      pull["ProgramArguments"] == ["/usr/bin/git", "-C", "{{REPO}}", "pull", "--ff-only", "--quiet"],
+      pull["ProgramArguments"])
+
 # The dictation-rig keeps its own copies of three agents. Their bodies differ
 # on purpose (different prose), but a schedule that differs between the twins
 # would mean one installer path brings back a cadence the other retired.

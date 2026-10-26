@@ -118,8 +118,10 @@ def installed_hook_file_regressions():
         existing = root / "kept.py"
         existing.touch()
         missing = root / "deleted-wrapper.py"
-        paths = [root / "claude.json", root / "codex.json", root / ".claude/settings.json"]
+        paths = [root / "claude.json", root / "codex.json", root / ".claude/settings.json",
+                 root / ".codex/hooks.json"]
         paths[2].parent.mkdir()
+        paths[3].parent.mkdir()
         for path in paths:
             path.write_text(json.dumps({"hooks": {"PreToolUse": [{"hooks": [{
                 "command": f"python3 {missing} -- python3 {existing}"
@@ -127,12 +129,12 @@ def installed_hook_file_regressions():
         with patch.object(mod, "SETTINGS", str(paths[0])), patch.object(
                 mod, "CODEX_HOOKS_SRC", str(paths[1])), patch.object(mod, "REPO", directory):
             problems = mod.installed_hook_missing_files()
-            assert len(problems) == 3, problems
+            assert len(problems) == 4, problems
             assert all(str(missing) in reason for _, reason in problems)
             missing.touch()
             assert mod.installed_hook_missing_files() == []
             existing.unlink()
-            assert len(mod.installed_hook_missing_files()) == 3
+            assert len(mod.installed_hook_missing_files()) == 4
         with patch.dict(os.environ, {"HOME": directory}):
             block = {"SessionStart": [{"hooks": [{"command":
                 'r="${HOME}"; exec python3 "$r/deleted-wrapper.py"'}]}]}

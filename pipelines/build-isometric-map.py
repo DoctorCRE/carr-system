@@ -107,7 +107,7 @@ MODULES: dict[str, dict[str, Any]] = {
         cites=["mcp-server/src/identity.js", "mcp-server/src/partner-authority.js", "mcp-server/src/agent-profiles.js", "mcp-server/src/mcp.js"],
         note="Profiles reduce blast radius; they do not replace the authenticated grant or human-only checks."),
     "RG": dict(name="Tool registry", grid=(4.0, 2.8), foot=(1.3, 1.3), shape="stack",
-        glob=["mcp-server/src/tools.js", "mcp-server/src/*.js"],
+        glob=["mcp-server/src/tools.js", "mcp-server/src/*.js", "mcp-server/src/*.ts"],
         blurb="The registry binds verb names to schemas and handlers, then composes doctrine, investigation, work-shape, room, memory and engineering tool packs into one surface.",
         cites=["mcp-server/src/tools.js", "mcp-server/src/doctrine.js", "mcp-server/src/situation-retrieval.js", "mcp-server/src/engineering-runtime.js"],
         note="The broad module count is source files only; dependencies and build output are excluded by the glob."),

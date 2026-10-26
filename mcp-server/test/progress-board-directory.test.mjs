@@ -84,3 +84,27 @@ test("the needs-Joe source snapshot is readable but absent from the board direct
     ({ rows: sql.includes("from board_snapshot") ? [snapshots[1]] : [] }) }, actor, { board_id: "needs-joe-local" });
   assert.equal(local.snapshot.board_id, "needs-joe-local");
 });
+
+test("directory transport excludes large snapshot detail while preserving summaries", async () => {
+  const { postgresDatabase } = await import("./helpers/postgres-database.mjs");
+  const database = await postgresDatabase("board-directory-");
+  try {
+    const db = database.client;
+    await db.query(`create temporary table board_snapshot (
+      organization_tenant_id text, sponsoring_human_slug text, board_id text,
+      snapshot_json jsonb, updated_at text)`);
+    await db.query(`insert into board_snapshot values ('carr-internal','joe','demo',$1::jsonb,$2)`,
+      [JSON.stringify({ title: "Synthetic board", project: "demo", task_counts: { done: 7 },
+        tasks: { large: { detail: "x".repeat(1024 * 1024) } } }), "2026-10-01T12:00:00Z"]);
+    const client = { async query(sql, params) {
+      const result = await db.query(sql, params);
+      assert.ok(JSON.stringify(result.rows).length < 1024,
+        "database response must exclude task detail before transport");
+      return result;
+    } };
+    assert.deepEqual(await TOOLS["list-progress-boards"].handler(client, actor, {}), {
+      ok: true, schema: "progress-board-directory.v1", boards: [{ board_id: "demo",
+        title: "Synthetic board", project: "demo", task_counts: { done: 7 }, updated_at: "2026-10-01T12:00:00Z" }],
+    });
+  } finally { await database.close(); }
+});

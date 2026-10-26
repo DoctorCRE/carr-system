@@ -195,7 +195,13 @@ class ProcessSessionWiringTest(unittest.TestCase):
             transcribe_session.RawSegment(0, 1000, f"{wav.stem} one"),
             transcribe_session.RawSegment(1000, 2000, f"{wav.stem} two"),
         ])
-        self.stub(transcribe_session, "resolve_model", lambda log: Path("/models/stub.bin"))
+        self.model = self.session / "model.bin"
+        self.model.write_bytes(b"abc")
+        self.stub(transcribe_session, "DEFAULT_MODEL_PATH", self.model)
+        self.stub(transcribe_session, "FALLBACK_MODEL_PATH", self.session / "fallback.bin")
+        config = mock.patch.dict("os.environ", {}, clear=True)
+        config.start()
+        self.addCleanup(config.stop)
         self.stub(transcribe_session, "load_prompt", lambda: "")
         self.stub(transcribe_session.post_call, "run_session", lambda session_dir: {"state": "stubbed"})
 
@@ -205,8 +211,84 @@ class ProcessSessionWiringTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def transcript(self) -> dict:
-        transcribe_session.process_session(self.session, lambda _line: None)
+        self.lines: list[str] = []
+        transcribe_session.process_session(self.session, self.lines.append)
         return json.loads((self.session / "transcript.json").read_text())
+
+    def test_transcript_identifies_selected_model_bytes(self) -> None:
+        self.stub(speaker_split, "run_diarizer", lambda *_a: [])
+        consent = {"announcement_fired_at": "synthetic", "played_by": "fixture"}
+        (self.session / "announcement.json").write_text(json.dumps(consent))
+        t = self.transcript()
+        self.assertEqual(t["model_sha256"],
+                         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        self.assertEqual(t["model"], str(self.model))
+        self.assertIn(f"MODEL path={self.model} sha256={t['model_sha256']}", self.lines)
+        self.assertEqual(t["engine"], "whisper.cpp (carr dictation-rig)")
+        self.assertEqual(t["consent"], consent)
+        self.assertEqual((self.session / "transcript.json").stat().st_mode & 0o777, 0o600)
+
+    def test_configured_model_pin_refuses_changed_model_before_transcription(self) -> None:
+        self.stub(speaker_split, "run_diarizer", lambda *_a: [])
+        with mock.patch.dict("os.environ", {"CARR_WHISPER_MODEL_SHA256": "0" * 64}):
+            with mock.patch.object(transcribe_session.subprocess, "run") as run:
+                with self.assertRaisesRegex(transcribe_session.TranscribeError, "does not match"):
+                    transcribe_session.process_session(self.session, lambda _line: None)
+                run.assert_not_called()
+
+        self.assertFalse((self.session / "transcript.json").exists())
+
+    def test_matching_model_pin_allows_private_transcript(self) -> None:
+        self.stub(speaker_split, "run_diarizer", lambda *_a: [])
+        with mock.patch.dict("os.environ", {
+            "CARR_WHISPER_MODEL_SHA256":
+                "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD",
+        }):
+            transcript = self.transcript()
+
+        self.assertEqual(transcript["model_sha256"],
+                         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        self.assertTrue(any("MODEL pin verified" in line for line in self.lines))
+
+    def test_malformed_model_pin_fails_without_transcribing(self) -> None:
+        with mock.patch.dict("os.environ", {"CARR_WHISPER_MODEL_SHA256": "not-a-hash"}):
+            with self.assertRaisesRegex(transcribe_session.TranscribeError, "64 hexadecimal"):
+                transcribe_session.process_session(self.session, lambda _line: None)
+
+        self.assertFalse((self.session / "transcript.json").exists())
+
+    def test_fallback_model_has_its_own_provenance(self) -> None:
+        self.stub(speaker_split, "run_diarizer", lambda *_a: [])
+        self.model.unlink()
+        fallback = self.session / "fallback.bin"
+        fallback.write_bytes(b"")
+        t = self.transcript()
+        self.assertEqual(t["model"], str(fallback))
+        self.assertEqual(t["model_sha256"],
+                         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        self.assertEqual(t["engine"], "whisper.cpp (carr dictation-rig)")
+        self.assertTrue(any("falling back" in line for line in self.lines))
+
+    def test_custom_model_has_its_own_provenance(self) -> None:
+        self.stub(speaker_split, "run_diarizer", lambda *_a: [])
+        custom = self.session / "custom.bin"
+        custom.write_bytes(b"")
+        with mock.patch.dict("os.environ", {"CARR_WHISPER_MODEL": str(custom)}):
+            t = self.transcript()
+        self.assertEqual(t["model"], str(custom))
+        self.assertEqual(t["model_sha256"],
+                         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        self.assertEqual(t["engine"], "whisper.cpp (carr dictation-rig)")
+
+    def test_replacing_model_bytes_at_same_path_changes_provenance(self) -> None:
+        self.stub(speaker_split, "run_diarizer", lambda *_a: [])
+        before = self.transcript()
+        self.model.write_bytes(b"")
+        after = self.transcript()
+        self.assertEqual(before["model"], after["model"])
+        self.assertNotEqual(before["model_sha256"], after["model_sha256"])
+        self.assertEqual(after["model_sha256"],
+                         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
 
     def test_two_voices_on_the_system_track_get_numbered_labels(self) -> None:
         def diarize(wav, _tmp, _log):
