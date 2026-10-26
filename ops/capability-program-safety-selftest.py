@@ -33,7 +33,7 @@ class CapabilityDatabaseSafety(unittest.TestCase):
 
     def test_canary_fixture_reaches_the_connection(self):
         workflow = (ROOT / '.github/workflows/main-canary.yml').read_text()
-        target = re.search(r'^\s+CARR_CI_DATABASE_URL: (\S+)', workflow, re.M)
+        target = re.search(r"^\s+CARR_CI_DATABASE_URL: .*?'?(postgres://[^'\s]+)", workflow, re.M)
         self.assertIsNotNone(target)
         assert target is not None
         self.run_proof(target.group(1)).assert_called_once()
