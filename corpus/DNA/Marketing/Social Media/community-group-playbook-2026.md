@@ -1,6 +1,6 @@
 # Community Group Playbook 2026 — the regional practice-owner community
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Created July 18, 2026 (Joe activated the group idea his Facebook strategy already anticipated). A private, vetted Facebook GROUP: a neutral regional community for healthcare practice owners across the whole territory (South Alabama and the Florida Panhandle) and all verticals, hosted transparently by Joe Bookout and Dell McCraney as CARR agents but deliberately NOT about CARR. SHARED CARR asset: one group, both admin. This governs purpose, membership, moderation, and content. Claude designs, drafts, and plans; Joe and Dell operate the live front (approve, post, moderate, be present). Built from a research pass on community-building authorities plus current Facebook-group best practice. Voice and bans from DNA/writing-rules.md and DNA/brand-voice.md. Refresh roughly every two quarters.*
 

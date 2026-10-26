@@ -1,6 +1,6 @@
 {
   "schema": "doc-drift-baseline/v1",
-  "source_sha": "c992a50908d0eb83a368dc68355de23e7e9935dc",
+  "source_sha": "700e097d4e61588aea5fa9626c43f71166142c58",
   "findings": [
     {
       "file": ".agents/skills/codebase-design/UPSTREAM.md",
@@ -13,9 +13,34 @@
       "target": "agents/openai.yaml"
     },
     {
-      "file": "README.md",
+      "file": ".agents/skills/scrawl/SKILL.md",
       "kind": "path",
-      "target": "CRITIQUE-LOG.md"
+      "target": "scrawl.json"
+    },
+    {
+      "file": ".agents/skills/scrawl/SKILL.md",
+      "kind": "path",
+      "target": "scrawl.json"
+    },
+    {
+      "file": ".agents/skills/scrawl/SKILL.md",
+      "kind": "path",
+      "target": "scrawl.json"
+    },
+    {
+      "file": ".claude/skills/scrawl/SKILL.md",
+      "kind": "path",
+      "target": "scrawl.json"
+    },
+    {
+      "file": ".claude/skills/scrawl/SKILL.md",
+      "kind": "path",
+      "target": "scrawl.json"
+    },
+    {
+      "file": ".claude/skills/scrawl/SKILL.md",
+      "kind": "path",
+      "target": "scrawl.json"
     },
     {
       "file": "README.md",
@@ -36,91 +61,6 @@
       "file": "README.md",
       "kind": "path",
       "target": "renewal-radar.json"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": ".cursor/automations/benny/skills/setup-benny/SKILL.md"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": ".cursor/benny/configuration.yaml"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": ".cursor/benny/feature-map.md"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": ".cursor/benny/routing.md"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": ".cursor/settings.json"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": ".cursor/settings.json"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": ".cursor/settings.json"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": "FOR_AGENTS.md"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": "FOR_AGENTS.md"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": "FOR_AGENTS.md"
-    },
-    {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
-      "kind": "path",
-      "target": "FOR_AGENTS.md"
-    },
-    {
-      "file": "_to_delete/benny-skills/triage-issue-reports/SKILL.md",
-      "kind": "path",
-      "target": "trigger.ts"
-    },
-    {
-      "file": "_to_delete/benny-skills/triage-issue-reports/references/routing.example.md",
-      "kind": "path",
-      "target": ".cursor/benny/routing.md"
     },
     {
       "file": "claude-tree/agents/README.md",
@@ -1143,124 +1083,14 @@
       "target": "docs/adr"
     },
     {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "migrations/0454-0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "migrations/0454-0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "migrations/0454-0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "migrations/0454-0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/cs-review-trail.md",
-      "kind": "path",
-      "target": "db-tap.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/cs-review-trail.md",
-      "kind": "path",
-      "target": "db-tap.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "breakglass-run.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "docs/frontier-finding/breakglass-run.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "gen-breakglass-run.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "gen-census-matrix.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "gen-frontier-manifest.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "migrations/0467"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "migrations/0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/target-identity-contract.md",
-      "kind": "path",
-      "target": "migrations/0454"
-    },
-    {
-      "file": "evals/rule-delivery/README.md",
-      "kind": "path",
-      "target": "lib/rule_delivery_preuse.semantic_delivery"
-    },
-    {
-      "file": "evals/rule-delivery/README.md",
-      "kind": "path",
-      "target": "ops/rule_trigger_delivery.advise"
-    },
-    {
-      "file": "hooks/SETTINGS-BLOCK.md",
-      "kind": "path",
-      "target": "gate-baseline.json"
-    },
-    {
-      "file": "hooks/SETTINGS-BLOCK.md",
-      "kind": "path",
-      "target": "hooks/install-record-home-gate.py"
-    },
-    {
-      "file": "hooks/SETTINGS-BLOCK.md",
-      "kind": "path",
-      "target": "hooks/ledger-boundary-sweep.py"
-    },
-    {
-      "file": "hooks/SETTINGS-BLOCK.md",
-      "kind": "path",
-      "target": "ledger-boundary-sweep.py"
-    },
-    {
-      "file": "hooks/SETTINGS-BLOCK.md",
-      "kind": "path",
-      "target": "settings.json"
-    },
-    {
       "file": "migrations/0066_marketing_campaign_and_measurement_spec.md",
       "kind": "path",
       "target": "pull_placement_metrics.py"
     },
     {
-      "file": "migrations/README.md",
+      "file": "ops/fixtures/brief-check/gap1.md",
       "kind": "path",
-      "target": "bin/migrate-prod.sh --through NNNN_name.sql"
-    },
-    {
-      "file": "migrations/README.md",
-      "kind": "path",
-      "target": "record-layer/schema-draft-2026-07-30.sql"
+      "target": "ops/release-pipeline.py"
     },
     {
       "file": "ops/fixtures/brief-check/gap17.md",
@@ -1268,14 +1098,34 @@
       "target": "are"
     },
     {
+      "file": "ops/fixtures/brief-check/gap9.md",
+      "kind": "path",
+      "target": "ops/claude-continuity-hook.py"
+    },
+    {
+      "file": "ops/fixtures/brief-check/gap9.md",
+      "kind": "path",
+      "target": "ops/claude-continuity-selftest.py"
+    },
+    {
+      "file": "ops/fixtures/brief-check/gap9.md",
+      "kind": "path",
+      "target": "ops/fixtures/real-replay/hook-advisories.jsonl"
+    },
+    {
+      "file": "ops/fixtures/brief-check/gatefix.md",
+      "kind": "path",
+      "target": "hooks/escalation-gate.py"
+    },
+    {
+      "file": "ops/fixtures/brief-check/gatefix.md",
+      "kind": "path",
+      "target": "hooks/escalation-gate.py"
+    },
+    {
       "file": "ops/scheduled-tasks/ai-capability-builder.SKILL.md",
       "kind": "path",
       "target": "SKILL.md"
-    },
-    {
-      "file": "ops/scheduled-tasks/cc-update-audit.SKILL.md",
-      "kind": "path",
-      "target": "repos/anthropics/claude-code/contents/CHANGELOG.md"
     },
     {
       "file": "ops/scheduled-tasks/linkedin-engagement-daily.SKILL.md",
@@ -1438,34 +1288,14 @@
       "target": "weekly-learning-latest.md"
     },
     {
-      "file": "runbooks/rollback-worker.md",
-      "kind": "path",
-      "target": "server/wrangler.toml"
-    },
-    {
-      "file": "runbooks/rollback-worker.md",
-      "kind": "path",
-      "target": "wrangler.toml"
-    },
-    {
-      "file": "runbooks/rollback-worker.md",
-      "kind": "path",
-      "target": "wrangler.toml"
-    },
-    {
-      "file": "runbooks/rollback-worker.md",
-      "kind": "path",
-      "target": "wrangler.toml"
-    },
-    {
-      "file": "runbooks/rollback-worker.md",
-      "kind": "path",
-      "target": "wrangler.toml"
-    },
-    {
       "file": "secrets-inventory.md",
       "kind": "path",
       "target": "google-oidc.js"
+    },
+    {
+      "file": "spec/outlook/studio-settings-migration.md",
+      "kind": "path",
+      "target": ".config/carr/outlook-nightly-sweep.folders.md"
     },
     {
       "file": "specs/agent-write-attribution.md",
@@ -1791,31 +1621,6 @@
       "file": "tools/doc-convo/README.md",
       "kind": "path",
       "target": "assets/hot-context.md"
-    },
-    {
-      "file": "tools/link-model-bakeoff/README.md",
-      "kind": "path",
-      "target": "results.json"
-    },
-    {
-      "file": "tools/partner-line/README.md",
-      "kind": "path",
-      "target": "partner_ping.py"
-    },
-    {
-      "file": "tools/partner-line/README.md",
-      "kind": "path",
-      "target": "partner_ping.py"
-    },
-    {
-      "file": "tools/partner-line/README.md",
-      "kind": "path",
-      "target": "partner_ping.py"
-    },
-    {
-      "file": "tools/partner-line/README.md",
-      "kind": "path",
-      "target": "partner_ping.py"
     },
     {
       "file": "vendor-patches/README.md",

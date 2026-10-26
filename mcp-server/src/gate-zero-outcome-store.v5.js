@@ -20,7 +20,7 @@
 //
 // AND THE RECEIPT IS NOT A CALLER'S (2026-09-13, PR 1014 correction). The verb
 // takes ONE argument, `idempotency_key`, and gets the receipt by invoking the
-// bound producer seam: `emitGateZeroOutcome()` in gate-zero-assurance.v5.js,
+// bound producer seam: `emitGateZeroOutcome()` in gate-zero-assurance.v5.ts,
 // which calls Step A's zero-argument producer and hands back what it emitted.
 // The first draft of this slice accepted a `receipt` object from the caller and
 // persisted it, which made the durable row a statement about whatever the caller
@@ -102,12 +102,12 @@
 
 import { digest } from "./artifact-trust.js";
 import { authenticatedIdentity, authorizationClassForActor } from "./identity.js";
-import { ToolError } from "./tool-error.js";
+import { ToolError } from "./tool-error.ts";
 import { V5_A02_GATE_ZERO_PRODUCER_REGISTRATION } from "./gate-zero-producer-registration.v5.js";
 
 /**
  * AMENDMENT 2'S CLOSED SHAPE FOR AN EXPORTED CALLABLE, lifted from
- * gate-zero-assurance.v5.js and gate-zero-producer.v5.js rather than retyped,
+ * gate-zero-assurance.v5.ts and gate-zero-producer.v5.js rather than retyped,
  * because a retyped guard is a second implementation that passes because it was
  * written from the same misunderstanding as the code it checks.
  *

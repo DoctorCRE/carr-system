@@ -2103,7 +2103,7 @@ const OUTBOUND_CAPABILITY =
 function sendCapableModules() {
   const capable = [];
   for (const file of readdirSync(SRC_DIR)) {
-    if (!file.endsWith(".js")) continue;
+    if (!/\.[jt]s$/.test(file)) continue;
     // The module under test is the subject, not a candidate: its matches are the
     // patterns it REFUSES ("smtp:", "mailto:"), not capabilities it holds. Its own
     // purity is asserted separately below.

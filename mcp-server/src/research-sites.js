@@ -9,7 +9,7 @@
 // exists. Research workflows read it first, search the open web beyond it, and
 // add what they find. Every verb is open to every caller, sessions and scheduled
 // runs included — Joe ruled he does not want to be involved in adding sites.
-import { ToolError } from "./tool-error.js";
+import { ToolError } from "./tool-error.ts";
 
 export const RESEARCH_SITE_WRITE_VERBS = new Set(["add-research-site", "remove-research-site"]);
 

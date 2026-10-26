@@ -52,7 +52,7 @@ fn candidate(data: &[u8], at: usize) -> Option<Candidate> {
             tail: None,
         });
     }
-    let (_, object) = folder::envelopes(data, 0x02c8, 0x00bf)
+    let (_, object) = folder::envelopes(data, folder::METADATA)
         .into_iter()
         .find(|(start, _)| *start == at)?;
     Some(Candidate {

@@ -1,6 +1,6 @@
 # Marketing Playbook — transferable persuasion & content techniques
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Created July 7, 2026 (Joe's request: give marketing craft a home so it COMPOUNDS with usage instead of evaporating). This is the accumulator: every persuasion technique, hook, or content structure harvested from articles/videos Joe feeds the system lands here — each with its source and, crucially, how it applies to healthcare CRE specifically. Shared-tier (technique transfers regardless of voice; Joe's and Dell's VOICE stays personal, the CRAFT is shared). write-content reads this before drafting. Add to it whenever a real technique surfaces — dated, sourced, mapped to CARR.*
 

@@ -23,7 +23,7 @@
 // unique index party_org_identity_uniq enforces; minting goes through
 // org_party_id(), the shared find-or-create (rule a8c55a47: one job, one code
 // path). Neither is re-implemented here.
-import { ToolError } from "./tool-error.js";
+import { ToolError } from "./tool-error.ts";
 
 export const PARTY_IDENTITY_FIELDS = Object.freeze(["name", "org", "state"]);
 const CORROBORATING_FIELDS = Object.freeze(["firm", "email_domain", "city", "phone", "address", "npi"]);

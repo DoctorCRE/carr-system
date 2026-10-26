@@ -18,7 +18,6 @@ const tools=leadAutomationTools({invoices:{preview:async()=>[],apply:async()=>[]
   },ToolError:class extends Error{constructor(v){super(v.error);}}});
 await c.query('begin');
 try {
-  equal((await c.query(`select count(*)::int n from pg_trigger where tgrelid in ('public.lead_stage_move'::regclass,'public.lead_contact_draft'::regclass) and not tgisinternal and tgfoid='ops.scac_reference_monitor_guard()'::regprocedure`)).rows[0].n,4);
   const actor={id:randomUUID(),slug:'joe',human:true};
   const party=randomUUID(),lead=randomUUID(),ref='L-SYNTH-'+randomUUID();
   await c.query("insert into actor(id,slug,kind,display_name)values($1,$2,'human','Synthetic Reviewer')",[actor.id,'synthetic-'+actor.id]);

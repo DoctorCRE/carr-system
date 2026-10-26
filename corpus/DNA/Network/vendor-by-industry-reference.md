@@ -1,6 +1,6 @@
 # Vendor Info by Industry — CARR corporate approach reference (all 12 categories)
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file PR ([AGENTS.md#guidance-changes](../../../AGENTS.md#guidance-changes)), the record-layer verbs or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Logged July 7, 2026 from CARR's corporate "Vendor Info by Industry" one-pager Joe provided (source PDF: `DNA/Network/CARR_VendorInfoByIndustry_source.pdf`, © CARR 2021). This is the FOUNDATIONAL, generic "how to approach each vendor category" layer — the pitch angle, conversation starters, meeting playbook, and conflict/overlap awareness for every referral-partner type. Two categories (bankers, supply reps) have DEEPER doctrine in `vendor-relationship-craft.md` Parts A–B — work from those; this file fills in the other ten and gives the one-screen version of all twelve. The per-category Conflicts/Overlap notes feed `introduction-rules.md` (see its "Cross-category service overlaps" block).*
 
@@ -34,9 +34,9 @@ Great source of **project deals** (start-ups, relocations, additional offices). 
 - **Meeting playbook:** find the natural tie into how we cross-paths, give the 30-second CARR commercial (posture, multiple options), lean on renewals, bring a Savings Summary crediting the rep, mention the 20-30% relocate/purchase = more merch/equipment for them.
 - **Conflicts/overlap:** Lenders (in-house equipment financing can compete with a lender, though most reps don't care how it's financed).
 
-### How the distributor channel actually works (added 2026-07-31, from open-source research on the Brandvold C-153 referral)
+### How the distributor channel actually works (added 2026-07-31, from open-source research on a recent equipment-specialist referral)
 
-*Researched after Gabriel Arroyo, a Patterson Equipment & CAD/CAM Specialist, introduced Dr. Mike Brandvold to Dell and stayed in the deal. Sources: Patterson's own job postings and services pages, Cirrus Consulting Group, industry cost data. Merged here rather than filed separately, per the growth-by-merge rule.*
+*Researched after a distributor's equipment & CAD/CAM specialist introduced a dentist client to Dell and stayed in the deal. Sources: Patterson's own job postings and services pages, Cirrus Consulting Group, industry cost data. Merged here rather than filed separately, per the growth-by-merge rule.*
 
 **The two roles, and they are genuinely different jobs at the same company.**
 
@@ -56,11 +56,11 @@ Great source of **project deals** (start-ups, relocations, additional offices). 
 
 **That is why an equipment rep hunts property on nights and weekends,** and it is the sharpest version of the incentive this file already describes. Their payday is gated entirely on the doctor securing space. **Our interests are not merely compatible with theirs, they are identical, and we should say so out loud.** Compare the merchandise rep, whose interest in the same project is a slower, smaller lift in recurring consumables.
 
-**⚠️ Qualifies the existing "lead with the merchandise rep" guidance** (`vendor-relationship-craft.md` Part B, Q&A). That rule reflects the norm, where the doctor treats the local merch rep as ringleader. **The Brandvold deal inverted it: the equipment specialist sourced the client, made the introduction, and is running the project.** On a project deal (start-up, second office, relocation) the equipment specialist may well be the ringleader. Lead with the merch rep on an ESTABLISHED account; lead with the equipment specialist on a PROJECT.
+**⚠️ Qualifies the existing "lead with the merchandise rep" guidance** (`vendor-relationship-craft.md` Part B, Q&A). That rule reflects the norm, where the doctor treats the local merch rep as ringleader. **That second-office deal inverted it: the equipment specialist sourced the client, made the introduction, and is running the project.** On a project deal (start-up, second office, relocation) the equipment specialist may well be the ringleader. Lead with the merch rep on an ESTABLISHED account; lead with the equipment specialist on a PROJECT.
 
 ### 🔴 The competitor nobody had recorded: Cirrus Consulting Group
 
-**Patterson's official "Build" program routes lease negotiation to Cirrus Consulting Group, and Henry Schein promotes a lease-negotiation service too.** Cirrus lists both distributors as partners, alongside the ADA, AGD, Bank of America and TD Bank. **This is the incumbent real-estate answer inside the distributor channel, and it is national.**
+**Patterson's official "Build" program routes lease negotiation to Cirrus Consulting Group, and the other major distributor promotes a lease-negotiation service too.** Cirrus lists both distributors as partners, alongside national dental associations and national banks. **This is the incumbent real-estate answer inside the distributor channel, and it is national.**
 
 **What Cirrus is, from their own site:** lease review and negotiation for healthcare practices, "created by doctors for doctors," national and remote. They negotiate terms and expose bad lease clauses.
 
@@ -70,9 +70,9 @@ Great source of **project deals** (start-ups, relocations, additional offices). 
 - **National and remote.** No local submarket knowledge, no relationships with local listing agents, no ability to walk a building.
 - **No disclosed real estate licensure**, and no fee structure published.
 
-**How to hold this in a conversation with a Patterson or Schein rep,** without attacking a partner their employer promotes: Cirrus reads a lease the doctor has already been handed. We find the options in the first place, create competition between landlords, and we handle purchases and land, which they do not touch at all. On a second-office purchase like Brandvold there is no overlap to argue about.
+**How to hold this in a conversation with a Patterson or Schein rep,** without attacking a partner their employer promotes: Cirrus reads a lease the doctor has already been handed. We find the options in the first place, create competition between landlords, and we handle purchases and land, which they do not touch at all. On a second-office purchase like that one there is no overlap to argue about.
 
-**Standing implication:** corporate is pointing reps at Cirrus. Every local equipment-rep relationship is therefore a relationship held against a corporate default, which makes those relationships more valuable and more fragile than they look. Dell's ten years with Gabriel is the moat. Treat it as one.
+**Standing implication:** corporate is pointing reps at Cirrus. Every local equipment-rep relationship is therefore a relationship held against a corporate default, which makes those relationships more valuable and more fragile than they look. Dell's ten-year relationship with that specialist is the moat. Treat it as one.
 
 ## 2. Attorneys
 A vital part of every CARR agent's network — we advise every client to use a good real estate attorney, so you want **multiple** relationships. Target **real estate** attorneys (not family/litigation); healthcare-specialized RE attorneys are even better.

@@ -1,6 +1,6 @@
 import { randomString } from "./google-oidc.js";
-import { publicError } from "./public-errors.js";
-import { isCalendarDate } from "./calendar-date.js";
+import { publicError } from "./public-errors.ts";
+import { isCalendarDate } from "./calendar-date.ts";
 
 const JSON_HEADERS = { "content-type": "application/json" };
 const json = (body, status = 200) =>
@@ -213,9 +213,10 @@ function validatePostCallLegacyItems(items) {
         item.evidence_quote.length > 500)
       return { error: "invalid_post_call_candidate" };
     if (item.kind === "phase_move") {
-      if (Object.keys(item.payload).some(key => !["deal", "field", "value"].includes(key)) ||
+      if (Object.keys(item.payload).some(key => !["deal", "field", "value", "started_on"].includes(key)) ||
           !isUuid(item.payload.deal) || item.payload.field !== "phase" ||
-          !POST_CALL_PHASES.has(item.payload.value))
+          !POST_CALL_PHASES.has(item.payload.value) ||
+          (item.payload.started_on != null && !isCalendarDate(item.payload.started_on)))
         return { error: "invalid_post_call_phase_move" };
       continue;
     }
