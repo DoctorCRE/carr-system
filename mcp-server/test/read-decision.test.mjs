@@ -4,7 +4,7 @@ import { TOOLS } from '../src/tools.js';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { readMigration } from './migration-source.testhelper.mjs';
 
-const decisionId = 'c63224d0-0000-4000-8000-000000000001';
+const decisionId = '4825f2a3-0000-4000-8000-000000000001';
 const eventId = '10000000-0000-4000-8000-000000000001';
 const actorId = '20000000-0000-4000-8000-000000000001';
 const rationale = 'Synthetic reasoning with unicode café. '.repeat(30) + 'The final paragraph must survive.';
@@ -24,7 +24,7 @@ test('read-decision returns one complete recorded decision', async t => {
     const migration = readMigration('0110_decision_entry_occurred_at.sql');
     await c.query(migration.slice(migration.indexOf('create or replace view v_decision_entry as'),
       migration.indexOf('comment on view v_decision_entry is')));
-    await c.query('grant select on v_decision_entry, event to carr_reader');
+    await c.query('grant select on v_decision_entry to carr_reader');
     await c.query('insert into actor values($1, $2)', [actorId, 'synthetic-partner']);
     await c.query(`insert into event(id,subject_id,actor_id,verb,occurred_at,new_value,human_quote,agent_rationale,cause)
       values($1,$2,$3,'log-decision','2026-08-01T12:00:00Z',$4,$5,$6,'human_request')`,
@@ -53,17 +53,21 @@ test('read-decision returns one complete recorded decision', async t => {
     await t.test('an eight-character prefix reads the same decision and latest corrected text', async () => {
       await c.query('update event set agent_rationale=$1 where id=$2', ['Corrected synthetic rationale.', eventId]);
       await c.query('set role carr_reader');
-      const out = await TOOLS['read-decision'].handler(c, {}, {decision_id:' C63224D0 '});
-      await c.query('reset role');
-      assert.equal(out.decision.decision_id, decisionId);
-      assert.equal(out.decision.agent_rationale, 'Corrected synthetic rationale.');
+      try {
+        const out = await TOOLS['read-decision'].handler(c, {}, {decision_id:' 4825F2A3 '});
+        assert.equal(out.decision.decision_id, decisionId);
+        assert.equal(out.decision.agent_rationale, 'Corrected synthetic rationale.');
+      } finally { await c.query('reset role'); }
     });
 
     await t.test('missing full IDs and prefixes return decision_not_found', async () => {
-      for (const decision_id of ['ffffffff-0000-4000-8000-000000000001', 'ffffffff', eventId]) {
-        await assert.rejects(TOOLS['read-decision'].handler(c, {}, {decision_id}),
-          error => error.payload?.error === 'decision_not_found');
-      }
+      await c.query('set role carr_reader');
+      try {
+        for (const decision_id of ['ffffffff-0000-4000-8000-000000000001', 'ffffffff', eventId]) {
+          await assert.rejects(TOOLS['read-decision'].handler(c, {}, {decision_id}),
+            error => error.payload?.error === 'decision_not_found');
+        }
+      } finally { await c.query('reset role'); }
     });
 
     await t.test('blank and malformed IDs have actionable errors', async () => {
@@ -74,15 +78,20 @@ test('read-decision returns one complete recorded decision', async t => {
     });
 
     await t.test('ambiguous prefixes refuse with both candidate IDs', async () => {
-      const otherId = 'c63224d0-0000-4000-8000-000000000002';
+      const otherId = '4825f2a3-0000-4000-8000-000000000002';
       await c.query(`insert into event(id,subject_id,actor_id,verb,new_value)
         values('10000000-0000-4000-8000-000000000002',$1,$2,'log-decision','{"title":"Another synthetic decision"}')`,
       [otherId, actorId]);
-      await assert.rejects(TOOLS['read-decision'].handler(c, {}, {decision_id:'c63224d0'}), error => {
-        assert.equal(error.payload?.error, 'ambiguous_decision_id');
-        assert.deepEqual(error.payload.candidates.map(row => row.decision_id), [decisionId, otherId]);
-        return true;
-      });
+      await c.query(`insert into record_source values('synthetic#session-two',
+        '10000000-0000-4000-8000-000000000002','event','decision-history')`);
+      await c.query('set role carr_reader');
+      try {
+        await assert.rejects(TOOLS['read-decision'].handler(c, {}, {decision_id:'4825f2a3'}), error => {
+          assert.equal(error.payload?.error, 'ambiguous_decision_id');
+          assert.deepEqual(error.payload.candidates.map(row => row.decision_id), [decisionId, otherId]);
+          return true;
+        });
+      } finally { await c.query('reset role'); }
     });
 
     await t.test('absent optional facts stay null instead of being invented', async () => {

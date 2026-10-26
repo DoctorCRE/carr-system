@@ -2093,7 +2093,7 @@ async function resolveRuleId(c, value, field = "rule_id") {
 // AMBIGUITY IS REPORTED, NEVER GUESSED, for a sharper reason than the rules
 // case: amending the wrong decision rewrites a settled ruling's stated
 // rationale, and the entry it overwrote gives no sign it was ever different.
-async function resolveDecisionId(c, value, field = "decision_id") {
+async function resolveDecisionId(c, value, field = "decision_id", source = "event") {
   const raw = String(value || "").trim();
   if (!raw) throw new ToolError({ error: "decision_id_required", field });
 
@@ -2104,13 +2104,19 @@ async function resolveDecisionId(c, value, field = "decision_id") {
       hint: "a decision id is either the full 36-character uuid or the 8-character short " +
             "form this system prints, e.g. 'f58ffba8'" });
 
-  const m = await c.query(
-    `select distinct on (subject_id) subject_id::text as id,
-            left(coalesce(new_value->>'title', '(untitled)'), 70) as title,
-            recorded_at
-       from event
-      where verb = 'log-decision' and subject_id::text like $1 || '%'
-      order by subject_id, recorded_at`, [raw.toLowerCase()]);
+  const m = source === "read_view"
+    ? await c.query(
+      `select decision_id::text as id, left(coalesce(title, '(untitled)'), 70) as title
+         from v_decision_entry
+        where decision_id::text like $1::text || '%'
+        order by decision_id`, [raw.toLowerCase()])
+    : await c.query(
+      `select distinct on (subject_id) subject_id::text as id,
+              left(coalesce(new_value->>'title', '(untitled)'), 70) as title,
+              recorded_at
+         from event
+        where verb = 'log-decision' and subject_id::text like $1 || '%'
+        order by subject_id, recorded_at`, [raw.toLowerCase()]);
   if (!m.rows.length)
     throw new ToolError({ error: "decision_not_found", field, got: raw,
       hint: "no decision id begins with that prefix — check decision-history, and note " +
@@ -10099,7 +10105,7 @@ registerTools({
       decision_id: { type: "string", description: "Full decision UUID or an unambiguous prefix, including the 8-character short form." } },
       required: ["decision_id"], additionalProperties: false },
     handler: async (c, _a, args) => {
-      const decisionId = await resolveDecisionId(c, args.decision_id);
+      const decisionId = await resolveDecisionId(c, args.decision_id, "decision_id", "read_view");
       const decision = (await c.query(
         `select decision_id, event_id, entry_date, occurred_at, title, human_quote,
                 agent_rationale, provenance, author, session_key, source_file,
