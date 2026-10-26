@@ -20,6 +20,12 @@ loop #243 / decision f799fd49.
 Both modes share ONE transcription engine: `/opt/homebrew/bin/whisper-cli`,
 ggml-large-v3-turbo, `vocab-prompt.txt`. Never a second engine.
 
+Meeting transcription records the selected local model path and `model_sha256`
+in private `transcript.json` and logs that identity in `transcribe.log`.
+The hash is computed once per session before inference, including fallback and
+custom models. It identifies the file bytes observed at that point. It does not
+enforce a model pin or prevent replacement of the file during inference.
+
 ## Deal Room Call Mode
 
 The Deal Room is a second control surface for meeting mode. The existing Quill
