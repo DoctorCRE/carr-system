@@ -6931,7 +6931,12 @@ export const TOOLS = {
       const aboutRefs = args.about
         ? (Array.isArray(args.about) ? args.about : [args.about]).map(r => String(r || "").trim()).filter(Boolean)
         : [];
-      for (const ref of aboutRefs) await resolveSubject(c, ref);
+      for (const ref of aboutRefs) {
+        if (/^WR-/i.test(ref))
+          throw new ToolError({ error: "unsupported_decision_about", field: "about", ref,
+            hint: "Work Request refs are not supported in about. Use a lead, client, vendor, party or deal ref. For a system-wide ruling, omit about and name the Work Request in the rationale." });
+        await resolveSubject(c, ref);
+      }
 
       // [idea 68, 0085] BOTH HALVES OF A PRICE OR NEITHER. A cost with no
       // quality number is a complaint and a quality number with no cost is a
