@@ -785,14 +785,14 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
                       'candidates': len(group), 'conflict': conflict})
     items.sort(key=lambda i: (i['start'], i['title'], i['key']))
     undecoded = max(0, (meta.get('event_identities') or 0) - len({(e['goid'], e['start_unix']) for e in events}))
-    warnings = [{'code': 'responses_unverified'}, {'code': 'group_invites_not_shown'}]
+    warnings: list[dict] = [{'code': 'responses_unverified'}, {'code': 'group_invites_not_shown'}]
     if undecoded:
         warnings.append({'code': 'undecoded', 'count': undecoded})
     if counts['calendar_agenda_time_changed']:
         warnings.append({'code': 'time_changed', 'count': counts['calendar_agenda_time_changed']})
     if counts['calendar_agenda_recurring']:
         warnings.append({'code': 'recurring_unverified', 'count': counts['calendar_agenda_recurring']})
-    snapshot = {'schema': AGENDA_SCHEMA, 'source': 'outlook_hxstore', 'lifecycle': 'unverified',
+    snapshot: dict = {'schema': AGENDA_SCHEMA, 'source': 'outlook_hxstore', 'lifecycle': 'unverified',
                 'observed_at': now.astimezone(timezone.utc).isoformat(),
                 'window_start': _iso(lo), 'window_end': _iso(hi), 'time_zone': str(tz),
                 'warnings': warnings, 'items': items}
