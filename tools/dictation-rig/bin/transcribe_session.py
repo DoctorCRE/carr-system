@@ -44,6 +44,7 @@ no third-party imports, so no venv is needed to run it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -69,7 +70,7 @@ FALLBACK_MODEL_PATH = Path(
     "/Users/booko/.cache/whisper-cpp/models/ggml-small.en.bin"
 )
 
-ENGINE_LABEL = "whisper.cpp large-v3-turbo (carr dictation-rig)"
+ENGINE_LABEL = "whisper.cpp (carr dictation-rig)"
 
 DEFAULT_SPEAKER_LABELS: dict[str, str] = {"mic": "Me", "system": "Other participant"}
 
@@ -102,6 +103,7 @@ class Segment(TypedDict):
 class TranscriptJson(TypedDict):
     engine: str
     model: str
+    model_sha256: str
     vocab_prompt: bool
     generated: str
     consent: Any
@@ -350,6 +352,12 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
     consent = read_consent(session_dir)
     speaker_labels = read_speaker_labels(session_dir)
     model_path = resolve_model(log)
+    digest = hashlib.sha256()
+    with model_path.open("rb") as model_file:
+        for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    model_sha256 = digest.hexdigest()
+    log(f"MODEL path={model_path} sha256={model_sha256}")
     prompt = load_prompt()
 
     all_segments: list[Segment] = []
@@ -397,6 +405,7 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
     transcript: TranscriptJson = {
         "engine": ENGINE_LABEL,
         "model": str(model_path),
+        "model_sha256": model_sha256,
         "vocab_prompt": True,
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "consent": consent,
