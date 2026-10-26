@@ -1,7 +1,7 @@
 import { sha256 } from './sha256.ts';
 import { isCalendarDate } from './calendar-date.ts';
 import { ToolError } from './tool-error.ts';
-import type { Actor, Db, DelegatedHandler, LockDealField, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
+import type { Actor, Db, DelegatedHandler, LockDealField, ResolveEmailProposal, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
 
 const properties = {
   deal: { type: 'string', format: 'uuid' },
@@ -15,9 +15,9 @@ const schema = (extra: Record<string, object>) => ({ type: 'object', additionalP
   properties: { ...properties, ...extra },
   required: [...Object.keys(properties).filter(key => key !== 'owner'), ...Object.keys(extra)] });
 
-export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, setNextStep, setNextAction }: {
+export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, setNextStep, setNextAction, resolveEmailProposal }: {
   withEnvelope: WithEnvelope; writeEvent: WriteEvent; lockDealField: LockDealField;
-  setNextStep: DelegatedHandler; setNextAction: DelegatedHandler;
+  setNextStep: DelegatedHandler; setNextAction: DelegatedHandler; resolveEmailProposal: ResolveEmailProposal;
 }) {
   const fail: (error: string) => never = error => { throw new ToolError({ error }); };
   async function proposal(c: Db, args: VerbInputs['preview-email-next-step'], lock = false) {
@@ -82,7 +82,8 @@ export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, se
               cause: 'human_stated', idempotency_key: args.idempotency_key });
           return { ...current, status: 'confirmed', requires_confirmation: false,
             ...(current.owner === 'joe' ? { next_step_id: result.next_step_id } : {}),
-            next_action_id: result.next_action_id };
+            next_action_id: result.next_action_id,
+            email_proposal_id: await resolveEmailProposal(c, actor, 'next_step', current.deal, current.source.activity_id) };
         });
       },
     },

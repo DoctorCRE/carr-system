@@ -1,6 +1,6 @@
 import { sha256 } from './sha256.ts';
 import { ToolError } from './tool-error.ts';
-import type { Actor, Db, DelegatedHandler, LockDealField, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
+import type { Actor, Db, DelegatedHandler, LockDealField, ResolveEmailProposal, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
 
 type ProgressRule = { instrument: RegExp; excludedInstrument?: RegExp; dealTypes?: string[]; additionalEvidence: RegExp[] };
 
@@ -27,8 +27,9 @@ const properties = {
 const schema = (extra: Record<string, object>) => ({ type: 'object', additionalProperties: false,
   properties: { ...properties, ...extra }, required: [...Object.keys(properties), ...Object.keys(extra)] });
 
-export function emailDealProgressTools({ withEnvelope, writeEvent, lockDealField, updateDeal }: {
+export function emailDealProgressTools({ withEnvelope, writeEvent, lockDealField, updateDeal, resolveEmailProposal }: {
   withEnvelope: WithEnvelope; writeEvent: WriteEvent; lockDealField: LockDealField; updateDeal: DelegatedHandler;
+  resolveEmailProposal: ResolveEmailProposal;
 }) {
   const fail: (error: string) => never = error => { throw new ToolError({ error }); };
   async function proposal(c: Db, args: VerbInputs['preview-email-deal-progress'], lock = false) {
@@ -77,7 +78,8 @@ export function emailDealProgressTools({ withEnvelope, writeEvent, lockDealField
               activity_id: current.source.activity_id, evidence_ref: current.source.evidence_ref,
               evidence_quote: current.evidence_quote, proposal_digest: current.proposal_digest },
               cause: 'human_stated', idempotency_key: args.idempotency_key });
-          return { ...current, status: 'confirmed', requires_confirmation: false };
+          return { ...current, status: 'confirmed', requires_confirmation: false,
+            email_proposal_id: await resolveEmailProposal(c, actor, 'phase_move', current.deal, current.source.activity_id) };
         });
       },
     },

@@ -25,3 +25,7 @@ export type DelegatedHandler = (c: Db, actor: Actor, args: Record<string, unknow
 /** tools.js writeEvent: one append-only event row for a changed subject. */
 export type WriteEvent = (c: Db, actor: Actor, verb: string, subjectType: string,
   subjectId: string, fields?: Record<string, unknown>) => Promise<unknown>;
+
+/** email-proposals resolveEmailProposal: confirms the matching pending email proposal and returns its id, or null. */
+export type ResolveEmailProposal = (c: Db, actor: Actor, kind: string, deal: string,
+  activityId: string) => Promise<string | null>;

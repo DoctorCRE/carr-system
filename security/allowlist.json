@@ -316,13 +316,6 @@
       "sha256": "8e2322438ef700c25df8c6f8333c5ee0b4a674565928d8f02c0cacc37a2cb5d3",
       "rule": "pii-email",
       "reason": "Historical research-helper README at 2b1643b8 names the operator-designated TEST mailbox, not a client contact or credential. The literal is removed from the current README; this exception binds only these exact historical documentation bytes."
-    },
-    {
-      "path": "mcp-server/src/tour-property-evidence.ts",
-      "sha256": "58a1661246dedcee6feac6294a5e8facd807be8548628010fdc19f569b26eccc",
-      "rule": "client-data",
-      "value_sha256": "eca5f4dc9bfccefc5a304b36d2e54b9f54bf59886b9c44ce83cdc349529d3451",
-      "reason": "Public county name in the FIVE_COUNTIES set of the Tour property-evidence verb (the same reviewed value hash as the lead_signals territory entries), not a client identity, contact or street address. The file was renamed from tour-property-evidence.js, which the guard scans as all-new. This exception binds only that value hash and these exact source bytes."
     }
   ]
 }
