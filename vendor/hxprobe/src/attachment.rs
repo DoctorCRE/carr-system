@@ -39,7 +39,7 @@ pub struct Attachment {
 pub struct Index {
     pub attachments: BTreeMap<u64, Attachment>,
     pub objects: usize,
-    conflicting_owners: BTreeSet<u64>,
+    conflicting_metadata: BTreeSet<u64>,
 }
 
 fn u64_at(data: &[u8], at: usize) -> Option<u64> {
@@ -157,12 +157,12 @@ impl Index {
         for (_, object) in envelopes(data, ATTACHMENT) {
             self.objects += 1;
             let Some(a) = parse(object) else { continue };
-            if self.conflicting_owners.contains(&a.id) {
+            if self.conflicting_metadata.contains(&a.id) {
                 continue;
             }
-            if self.attachments.get(&a.id).is_some_and(|prev| prev.message_key != a.message_key) {
+            if self.attachments.get(&a.id).is_some_and(|prev| prev.message_key != a.message_key || prev.name != a.name) {
                 self.attachments.remove(&a.id);
-                self.conflicting_owners.insert(a.id);
+                self.conflicting_metadata.insert(a.id);
                 continue;
             }
             match self.attachments.get_mut(&a.id) {
@@ -284,6 +284,17 @@ mod tests {
             let mut index = Index::default();
             for owner in owners {
                 index.observe(&envelope(&object(7, owner, 1, "a[1].pdf", "a.pdf", "application/pdf")));
+            }
+            assert!(index.attachments.is_empty());
+        }
+    }
+
+    #[test]
+    fn conflicting_display_names_are_not_selected_by_observation_order() {
+        for names in [["before.pdf", "after.pdf"], ["after.pdf", "before.pdf"]] {
+            let mut index = Index::default();
+            for name in names {
+                index.observe(&envelope(&object(7, 70, 1, &name.replace(".pdf", "[1].pdf"), name, "application/pdf")));
             }
             assert!(index.attachments.is_empty());
         }

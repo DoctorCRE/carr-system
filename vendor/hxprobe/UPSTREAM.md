@@ -208,7 +208,7 @@ The maintained decoder exports `attachments.content_id` from the UTF-16LE string
 after the standalone filename, whose sort key ends in `01 01 01 01 00`. Missing,
 truncated, whitespace-containing and revision-conflicting values stay NULL.
 This is an inferred string-run selector, not an established wire field ID.
-Attachment IDs whose cached revisions disagree on their owning message are omitted.
+Attachment IDs whose cached revisions disagree on their owning message or filename are omitted.
 Intake joins only local keys naming exactly one decoded message row.
 
 Intake email dictionaries carry `attachments` containing id, name, size, declared
