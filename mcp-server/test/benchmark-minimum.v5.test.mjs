@@ -1,3 +1,4 @@
+// Test benchmark minimum gate manifests, evidence, and admission.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { digest } from "../src/artifact-trust.js";
