@@ -694,7 +694,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       fi
     fi
 
-    for proof in doc-conversation notifications session-identity dispatch-spine meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
+    for proof in doc-conversation notifications session-identity dispatch-spine governed-correspondence-thread-postgres meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
       if [ -f "mcp-server/test/$proof.test.mjs" ]; then
         if ! DATABASE_URL="$dsn" \
              CARR_DOC_CONVERSATION_DB_REQUIRED=1 CARR_R03_DB_REQUIRED=1 \
@@ -704,6 +704,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
              CARR_A02_RULE_COVERAGE_DB_REQUIRED=1 \
              CARR_RW02_DB_REQUIRED=1 \
              CARR_VENDOR_DIRECTORY_DB_REQUIRED=1 CARR_RELATIONSHIP_DB_REQUIRED=1 \
+             CARR_CORRESPONDENCE_DB_REQUIRED=1 \
              run_quiet "$LOGDIR/$proof-db.log" \
              node --test "mcp-server/test/$proof.test.mjs"; then
           tail -30 "$LOGDIR/$proof-db.log" >&2

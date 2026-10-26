@@ -266,8 +266,9 @@ test("agent token matches per-slug, so one tool's secret is not another's", () =
   assert.equal(agentActorForToken("Bearer grok-secret-fixture", AGENT_TOKENS).slug, "grok");
 });
 
-test("agent token accepts the bare token as well as the Bearer form", () => {
-  assert.equal(agentActorForToken("grok-secret-fixture", AGENT_TOKENS).slug, "grok");
+test("agent token refuses the bare token and accepts any Bearer scheme case (WR-000527)", () => {
+  assert.equal(agentActorForToken("grok-secret-fixture", AGENT_TOKENS), null);
+  assert.equal(agentActorForToken("bearer grok-secret-fixture", AGENT_TOKENS).slug, "grok");
 });
 
 test("agent token fails closed on every bad input", () => {
