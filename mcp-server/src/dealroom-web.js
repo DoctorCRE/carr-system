@@ -31,6 +31,7 @@ import { executeRegisteredTool } from "./tools.js";
 import { readDealWithJev } from "./jev-deal-reading.js";
 import { callTool } from "./mcp.js";
 import { isStagingBrowserEnvironment } from "./staging-browser.ts";
+import { bearerCredential } from "./bearer.ts";
 import { prepareStagingLoopFixtures } from "./staging-loop-fixtures.js";
 
 export const DEALROOM_ASSET_DIRECTORY = "../out/doctorcre-artifacts/current"; // mirrors wrangler.toml [assets]
@@ -400,7 +401,7 @@ async function e2eSession(request, env, dependencies) {
   if (typeof secret !== "string" || secret.length < 32 || !env.OAUTH_KV) {
     return json({ error: "e2e_session_not_configured" }, 503);
   }
-  const bearer = request.headers.get("authorization")?.match(/^Bearer (\S+)$/i)?.[1];
+  const bearer = bearerCredential(request.headers.get("authorization"));
   if (!bearer || !equalStrings(await sha256(bearer), await sha256(secret))) {
     return json({ error: "unauthorized" }, 401);
   }

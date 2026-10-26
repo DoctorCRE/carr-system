@@ -52,6 +52,7 @@ export function mcpInventory(tools = defaultTools) {
       source_digest: sourceDigest(tool.registrySource),
       write,
       human_only: humanOnly,
+      human_caller_only: tool.humanCallerOnly === true,
       authority_only: authorityOnly,
       principal_mode: authorityOnly ? "server_verified_partner_authority" : humanOnly
         ? tool.humanCallerOnly === true ? "server_verified_human" : "server_verified_human_or_native_agent" : "authenticated_registered_principal",
@@ -525,7 +526,7 @@ export function renderCurrentContracts(tools, source) {
   const rows = mcpInventory(tools);
   const operations = Object.fromEntries(rows.map(row => [row.operation,
     Object.fromEntries(["ingress_key", "source_locator", "schema_digest",
-      "write", "human_only", "authority_only", "delegates_to"].map(key => [key, row[key]])),
+      "write", "human_only", "human_caller_only", "authority_only", "delegates_to"].map(key => [key, row[key]])),
   ]));
   return source
     .replace(/export const SCAC_MUTATION_OPERATIONS = Object.freeze\(\{[\s\S]*?\n\}\);/,
@@ -538,7 +539,7 @@ export function assertCurrentContracts(tools) {
     throw new Error("current MCP operation set drifted");
   for (const row of rows) {
     const expected = SCAC_MUTATION_OPERATIONS[row.operation];
-    for (const field of ["ingress_key", "source_locator", "schema_digest", "write", "human_only", "authority_only", "delegates_to"])
+    for (const field of ["ingress_key", "source_locator", "schema_digest", "write", "human_only", "human_caller_only", "authority_only", "delegates_to"])
       if (JSON.stringify(row[field]) !== JSON.stringify(expected?.[field]))
         throw new Error(`current MCP contract drifted: ${row.operation}.${field}`);
   }
