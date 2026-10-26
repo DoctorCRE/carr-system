@@ -34,6 +34,7 @@ const PUBLIC_ERRORS = new Map([
   ["unparseable_args", "Supply a valid JSON argument object."],
   ["args_not_an_object", "Supply an argument object."],
   ["database_refused_the_statement", "The operation could not be completed. Quote the correlation_id when reporting it."],
+  ["doctrine_version_invalid", "The doctrine document contains a version that cannot be represented safely. Quote the correlation_id when reporting it."],
 ]);
 
 const CANDIDATE_SHAPES = [
