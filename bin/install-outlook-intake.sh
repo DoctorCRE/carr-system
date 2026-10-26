@@ -9,13 +9,45 @@
 # it renders the plist, creates the launchd log at 0600, and prints the two
 # commands the operator runs to load it.
 #
+# The Outlook jobs run from the settings `repo`, a checkout that only this
+# installer moves. Run from any other checkout, it first fetches its own HEAD
+# commit into that path (detached), links .venv, out and mcp-server/node_modules
+# back to the installing checkout the first time only, then re-runs itself from
+# there. Pulling the canonical checkout therefore never ships Outlook code, and
+# the granted helper's compiled paths stay the same on every later run.
+#
 # Usage: ./bin/install-outlook-intake.sh
 
 set -eu
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$REPO"
 PY="$REPO/.venv/bin/python"
+RUNTIME="$("$PY" -m lib.outlook_settings field repo)"
+if [ "$REPO" != "$RUNTIME" ]; then
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+  SHA="$(git rev-parse HEAD)"
+  if [ -e "$RUNTIME" ]; then
+    if [ "$(git -C "$RUNTIME" rev-parse --show-toplevel 2>/dev/null)" != "$RUNTIME" ] \
+       || [ -n "$(git -C "$RUNTIME" status --porcelain --untracked-files=no)" ]; then
+      print -u2 -- "install-outlook-intake: $RUNTIME must be a clean checkout that only this installer moves"
+      exit 1
+    fi
+  else
+    mkdir -p "$(dirname "$RUNTIME")"
+    git init --quiet "$RUNTIME"
+  fi
+  git -C "$RUNTIME" fetch --quiet --depth=1 "$REPO" "$SHA"
+  git -C "$RUNTIME" checkout --quiet --detach "$SHA"
+  mkdir -p "$REPO/out"
+  for shared in .venv out mcp-server/node_modules; do
+    if [ ! -e "$RUNTIME/$shared" ] && [ ! -L "$RUNTIME/$shared" ] && [ -e "$REPO/$shared" ]; then
+      ln -s "$(cd "$REPO/$shared" && pwd -P)" "$RUNTIME/$shared"
+    fi
+  done
+  print -- "install-outlook-intake: Outlook jobs run from $RUNTIME at $SHA"
+  exec /bin/zsh "$RUNTIME/bin/install-outlook-intake.sh"
+fi
 "$PY" -m lib.outlook_settings service intake
 "$PY" -m lib.outlook_settings service refresh
 LABEL="com.carr.outlook-intake"
@@ -70,7 +102,7 @@ settings.require_repo(repo)
 
 source = repo / 'tools/outlook-intake-copy.c'
 helper = settings.copy_helper
-work_root = settings.repo / 'out/outlook-intake'
+work_root = (settings.repo / 'out/outlook-intake').resolve()
 flags = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
          f'-DOUTLOOK_PROFILE={json.dumps(str(settings.profile))}',
          f'-DOUTLOOK_WORK_ROOT={json.dumps(str(work_root))}',

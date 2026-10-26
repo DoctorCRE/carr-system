@@ -21,7 +21,7 @@ request takes `base_version` from a fresh `work-request-card` read.
   classification and Joe records it. See `triage-labels.md`.
 - **Withdraw**: `decline-work-request` with an `exit_reason` works from
   `captured`, `triaged`, or `ready` with no claim, execution assignment, or start.
-  It preserves plans, triage receipts, and withdrawal history.
+  It also accepts the old program refs (`WR-AI-*`, `WR-SIEP-*`). It preserves plans, triage receipts, and withdrawal history.
   Declining requires a human partner or a human-sponsored agent at both the
   registered handler and database function.
   `supersede-work-request` names the replacement request and works from `captured`,
