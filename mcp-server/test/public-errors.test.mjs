@@ -170,3 +170,47 @@ for (const column of [null, "subject_id"]) test(`MCP does not blame input for an
   assert.equal(payload.fields, undefined);
   assert.doesNotMatch(payload.hint, /Check the named fields/);
 });
+
+for (const delegated of [false, true]) test(`${delegated ? 'delegated' : 'direct'} Call Mode refusal names only unavailable deal IDs`, async t => {
+  const { neonConfig } = await import('@neondatabase/serverless');
+  const available = 'd170d000-0000-4000-8000-000000000041';
+  const unavailable = 'd170d000-0000-4000-8000-000000000042';
+  const previous = neonConfig.fetchFunction;
+  t.after(() => { neonConfig.fetchFunction = previous; });
+  t.mock.method(console, 'error', () => {});
+  neonConfig.fetchFunction = async () => Response.json({
+    fields: [{ name: 'deal_id', dataTypeID: 25 }], rows: [[available]],
+    rowCount: 1, command: 'SELECT', rowAsArray: true,
+  });
+  const args = { deal_ids: [available, unavailable] };
+  const request = new Request('https://synthetic.example/mcp', { method: 'POST',
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: delegated
+      ? { name: 'call-verb', arguments: { verb: 'get-call-context', args } }
+      : { name: 'get-call-context', arguments: args } }),
+  });
+  const body = await (await dispatch(request, { CORRELATION_ID: correlationId,
+    DATABASE_URL_READER: 'postgres://fixture@synthetic.invalid/fixture' }, {},
+  { slug: 'joe', human: true })).json();
+  assert.equal(body.result.isError, true);
+  const payload = JSON.parse(body.result.content[0].text);
+  assert.equal(payload.error, 'invalid_call_context_deals');
+  assert.deepEqual(payload.invalid_deal_ids, [unavailable]);
+  assert.equal(payload.correlation_id, correlationId);
+});
+
+test('Call Mode refusal exposes only bounded UUIDs and no diagnostic payload', async t => {
+  const { publicError } = await import('../src/public-errors.ts');
+  t.mock.method(console, 'error', () => {});
+  const id = 'd170d000-0000-4000-8000-000000000042';
+  const payload = publicError(new ToolError({ error: 'invalid_call_context_deals',
+    invalid_deal_ids: [id, privateText, null, { id }, id],
+    detail: privateText, hint: privateText, nested: { stack: privateText },
+  }), { env: { CORRELATION_ID: correlationId } });
+  assert.equal(payload.error, 'invalid_call_context_deals');
+  assert.deepEqual(payload.invalid_deal_ids, [id]);
+  assert.doesNotMatch(JSON.stringify(payload), /stack|SELECT|private_table|private_constraint|synthetic-private-row/i);
+  assert.equal(publicError(new ToolError({ error: 'invalid_call_context_deals',
+    invalid_deal_ids: Array.from({ length: 60 }, (_, i) =>
+      `d170d000-0000-4000-8000-${String(i).padStart(12, '0')}`),
+  })).invalid_deal_ids.length, 50);
+});

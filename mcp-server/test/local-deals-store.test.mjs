@@ -90,7 +90,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query('create sequence ref_client_seq start 900000');
     await c.query('alter table tool_call add primary key(idempotency_key);');
     await c.query("create view v_last_touch as select null::text subject_type, null::uuid subject_id, null::date last_touch where false;");
-    for (const name of ['v_client_account', 'v_deal_board', 'v_deal_room_board', 'v_deal_room_account', 'v_deal_room_event', 'v_deal_room_session', 'v_deal_reconciliation_read', 'v_deal_room_note', 'v_deal_room_critical_date', 'v_deal_room_action', 'v_deal_room_activity', 'v_deal_room_participant', 'v_deal_room_premises', 'v_deal_room_negotiation', 'v_deal_room_document', 'v_deal_room_phase_change', 'v_deal_room_current_lease', 'v_invoice_tracker', 'v_client_engagement_status', 'v_lead_board', 'v_lead_board_stage', 'v_lead_client_link', 'v_lead_stage_transition', 'v_lead_prospect_engagement', 'v_lead_workspace_lifecycle', 'v_lead_workspace', 'v_lead_workspace_detail', 'v_lead_workspace_correspondence', 'v_lead_workspace_stage_history']) {
+    for (const name of ['v_client_account', 'v_deal_board', 'v_deal_room_board', 'v_open_deal_room_board', 'v_deal_room_account', 'v_deal_room_event', 'v_deal_room_session', 'v_deal_reconciliation_read', 'v_deal_room_note', 'v_deal_room_critical_date', 'v_deal_room_action', 'v_deal_room_activity', 'v_deal_room_participant', 'v_deal_room_premises', 'v_deal_room_negotiation', 'v_deal_room_document', 'v_deal_room_phase_change', 'v_deal_room_current_lease', 'v_invoice_tracker', 'v_client_engagement_status', 'v_lead_board', 'v_lead_board_stage', 'v_lead_client_link', 'v_lead_stage_transition', 'v_lead_prospect_engagement', 'v_lead_workspace_lifecycle', 'v_lead_workspace', 'v_lead_workspace_detail', 'v_lead_workspace_correspondence', 'v_lead_workspace_stage_history']) {
       const view = schema.match(new RegExp(`CREATE VIEW public\\.${name} AS[\\s\\S]*?;`))?.[0];
       assert.ok(view, name);
       await c.query(view);
@@ -895,6 +895,8 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query('drop view v_client_engagement_status, v_lead_prospect_engagement');
       await c.query('alter table client drop column prospect_engagement_status cascade');
       await c.query(readFileSync(path.join(root,'migrations/0920_prospect_engagement_status.sql'),'utf8'));
+      await c.query(schema.match(/CREATE VIEW public\.v_open_deal_room_board AS[\s\S]*?;/)[0]);
+      await c.query('grant select on v_open_deal_room_board to carr_reader,carr_writer');
       await c.query(schema.match(/CREATE VIEW public\.v_deal_room_account AS[\s\S]*?;/)[0]);
       await fixture(false);
       await c.query("update client set status='prospect' where id=$1",[id(3)]);
@@ -1087,7 +1089,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     const rowsOf = result => result.deals || [result];
     const snapshotPath = path.join(root, 'mcp-server/test/fixtures/deal-invoice-reads-before.json');
     for (const outcome of [null, 'won']) await t.test(
-      outcome ? 'invoice reads return null invoiced_on on a closed deal and preserve prior snapshots'
+      outcome ? 'invoice reads preserve closed metadata and keep the deal in history'
         : 'invoice reads return four date and status fields and preserve prior snapshots',
       async () => transaction(async () => {
         await fixture(false);
@@ -1097,6 +1099,17 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         const reads = await readInvoiceDeals();
         const baseline = JSON.parse(readFileSync(snapshotPath, 'utf8'))[outcome || 'open'];
         for (const [name, result] of Object.entries(reads)) {
+          if (name === 'deal-board' && outcome) {
+            assert.deepEqual(result.deals, [], 'closed deals leave the open pipeline');
+            continue;
+          }
+          if (name === 'deal-room-board' && outcome) {
+            assert.deepEqual(result.deals, [], 'closed deals leave the working list');
+            assert.deepEqual(result.closed_deals.map(row => Object.fromEntries(
+              ['id','outcome','closed_on','invoiced_on'].map(field => [field,row[field]]))),
+            [{ id:id(4), outcome:'won', closed_on:'2026-10-01', invoiced_on:null }]);
+            continue;
+          }
           assert.deepEqual(rowsOf(result).map(row => Object.fromEntries(invoiceFields.map(field => [field, row[field]]))), [{
             invoiced_on: null, closed_on: outcome ? '2026-10-01' : null, lane: 'territory', outcome,
           }], name);
@@ -1256,12 +1269,12 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.deepEqual(await TOOLS['deal-board'].handler(c), { deals: [] });
       await c.query('reset role');
       await fixture(false);
-      await c.query("update deal set outcome='won',phase='closed',operating_state='parked',parking_reason='other',parking_note='Synthetic pause',parked_at=now(),parked_by=$1 where id=$2", [actor.id, id(4)]);
+      await c.query("update deal set operating_state='parked',parking_reason='other',parking_note='Synthetic pause',parked_at=now(),parked_by=$1 where id=$2", [actor.id, id(4)]);
       await c.query('set local role carr_reader');
       const row = (await TOOLS['deal-board'].handler(c)).deals[0];
       assert.equal(row.id, id(4));
       assert.equal(row.client_name, 'Synthetic Practice');
-      assert.equal(row.phase_sort, 4);
+      assert.equal(row.phase_sort, 1);
       assert.equal(row.operating_state, 'parked');
       assert.equal(row.parking_note, 'Synthetic pause');
       assert.equal(row.invoiced_on, null);
@@ -1330,7 +1343,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.notEqual(stale.conflict.event_a, written.event_id);
     }));
 
-    await t.test('account counters agree with the invoice-eligible board across outcome and parking states', async () => transaction(async () => {
+    await t.test('account counters agree with the open board across outcome and parking states', async () => transaction(async () => {
       await fixture(true);
       for (const outcome of [null, 'won', 'lost', 'paused']) {
         for (const parked of [false, true]) {
@@ -1341,13 +1354,14 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
               parked_at=case when $3 then now() else null end,parked_by=case when $3 then $4::uuid else null end where id=$5`, [outcome, invoiced, parked, actor.id, id(4)]);
             await c.query('set local role carr_reader');
             const board = await TOOLS['deal-room-board'].handler(c, actor, { workspace: 'national_account', account_client_id: id(6) });
-            assert.equal(board.deals.length, invoiced ? 0 : 1);
+            const eligible = outcome === null && !invoiced;
+            assert.equal(board.deals.length, eligible ? 1 : 0);
             const account = board.accounts.find(row => row.account_client_id === id(6));
-            const active = !invoiced && !parked ? 1 : 0;
+            const active = eligible && !parked ? 1 : 0;
             for (const field of ['open_deals', 'attention_deals', 'overdue_deals', 'stale_deals']) {
               assert.equal(Number(account[field]), active, `${field}: ${outcome}/${parked}/${invoiced}`);
             }
-            assert.equal(Number(account.parked_deals), !invoiced && parked ? 1 : 0);
+            assert.equal(Number(account.parked_deals), eligible && parked ? 1 : 0);
             await c.query('reset role');
           }
         }

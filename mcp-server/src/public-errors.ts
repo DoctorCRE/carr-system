@@ -5,7 +5,7 @@ import { isValidCorrelationId, logLine } from "./correlation.js";
 type PublicError = {
   error: string; correlation_id: string; hint: string;
   candidates?: Record<string, string | null>[]; retired_aliases?: Record<string, string | null>[];
-  current_version?: number; fields?: unknown[];
+  current_version?: number; fields?: unknown[]; invalid_deal_ids?: string[];
 };
 type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSchema };
 
@@ -20,6 +20,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["personal_doc_not_owner", "This personal doctrine belongs to another owner."],
   ["personal_loop_not_owner", "This personal loop belongs to another owner."],
   ["unauthorized", "Authentication is required."],
+  ["invalid_call_context_deals", "Choose only open, active deal UUIDs from the current deal board."],
   ["invalid_field_value", "Check the named fields against the tool's documented input."],
   ["validation_error", "Check the named fields against the tool's documented input."],
   ["value_not_in_declared_vocabulary", "Use a value from the field's documented vocabulary."],
@@ -115,6 +116,9 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
     if (Array.isArray(payload?.retired_aliases))
       result.retired_aliases = publicCandidates(payload.retired_aliases, [["ref", "name"]]);
   }
+  if (code === "invalid_call_context_deals")
+    result.invalid_deal_ids = [...new Set((Array.isArray(payload?.invalid_deal_ids) ? payload.invalid_deal_ids : [])
+      .filter(id => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id)))].slice(0, 50);
   if (code === "version_conflict" && Number.isSafeInteger(payload?.current_version) && (payload!.current_version as number) >= 0)
     result.current_version = payload!.current_version as number;
   if (["invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields"].includes(code)) {
