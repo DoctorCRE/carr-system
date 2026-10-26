@@ -6,9 +6,9 @@ import { runInNewContext } from 'node:vm';
 const workflowUrl = new URL('../../workflows/lead-sweep.workflow.js', import.meta.url);
 const fixtureUrl = new URL('./pairs.v1.json', import.meta.url);
 
-export async function scorecard() {
+export async function scorecard(fixture) {
   const source = await readFile(workflowUrl, 'utf8');
-  const fixture = JSON.parse(await readFile(fixtureUrl, 'utf8'));
+  fixture ??= JSON.parse(await readFile(fixtureUrl, 'utf8'));
   const counts = { pairs: 0, duplicate: 0, distinct: 0,
     true_merge: 0, true_split: 0, false_merge: 0, false_split: 0 };
   const cases = [];
