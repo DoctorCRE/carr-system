@@ -101,6 +101,9 @@ class Fake:
         self.actions = {}
         self.fail_verbs = set()
         self.model_reply = {'next_step': None, 'due_on': None}
+        self.intent_calls = []
+        self.intent_reply = {'business': False, 'summary': None}
+        self.lead_reply = {'ok': True, 'proposed': True, 'status': 'pool'}
         self.contacts_rows = [CLIENT, LEAD]
         self.now = NOW
         self.on_decode = None
@@ -113,6 +116,8 @@ class Fake:
             return {'parties': self.parties.get(args['query'], []), 'deals': []}
         if verb == 'catch-me-up':
             return {'timeline': self.timeline.get(args['ref'], [])[:args['limit']]}
+        if verb == 'propose-email-lead':
+            return self.lead_reply
         if verb == 'get-next-action':
             return {'ok': True, 'owner': args['owner'], 'action': self.actions.get((args['ref'], args['owner']))}
         if verb == 'set-next-action':
@@ -135,6 +140,12 @@ class Fake:
             raise self.model_reply
         return self.model_reply
 
+    def lead_intent(self, mail, today):
+        self.intent_calls.append(mail)
+        if isinstance(self.intent_reply, Exception):
+            raise self.intent_reply
+        return self.intent_reply
+
     def decode(self, store_copy, files_copy, db_path):
         self.decodes += 1
         self.test.assertTrue(store_copy.exists(), 'decoder reads a copy')
@@ -150,8 +161,11 @@ class Fake:
         db_path.write_bytes(self.fixture.read_bytes())
 
     def ports(self):
-        return intake.Ports(carr=self.carr, contacts=self.contacts, next_step=self.next_step,
-                            decode=self.decode, now=lambda: self.now)
+        ports = dict(carr=self.carr, contacts=self.contacts, next_step=self.next_step,
+                     decode=self.decode, now=lambda: self.now)
+        if 'lead_intent' in intake.Ports.__dataclass_fields__:  # parity runs older intake builds too
+            ports['lead_intent'] = self.lead_intent
+        return intake.Ports(**ports)
 
     def writes(self, verb=None):
         return [(v, a) for v, a in self.calls if v in intake.WRITE_VERBS and (verb is None or v == verb)]
@@ -1206,6 +1220,194 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(len(keys), 2)
         self.assertEqual(keys[0], keys[1], 'the retry reuses the key')
 
+    # ---- sender classes: second addresses, automated senders, lead candidates ----
+
+    def test_every_address_in_a_record_email_field_is_a_contact(self):
+        rows = intake.record_contacts('Pat Example <PAT@a.test>; pat.home@b.test, note: office', 'C-901', 'Pat')
+        self.assertEqual(rows, [intake.Contact('pat@a.test', 'C-901', 'Pat'),
+                                intake.Contact('pat.home@b.test', 'C-901', 'Pat')])
+        self.assertEqual(intake.record_contacts('call the office', 'C-901', 'Pat'), [])
+        self.assertEqual(intake.record_contacts('Info@practice.test', 'C-901', 'Pat'),
+                         [intake.Contact('info@practice.test', 'C-901', 'Pat')], 'a lone address stays exact')
+
+    def test_a_shared_role_address_in_a_multi_address_field_is_flagged_not_matched(self):
+        rows = intake.record_contacts('pat@practice.test; frontdesk@practice.test', 'C-901', 'Pat')
+        self.assertEqual(rows, [intake.Contact('pat@practice.test', 'C-901', 'Pat'),
+                                intake.Contact('frontdesk@practice.test', 'C-901', 'Pat', exact=False)])
+        self.fake.contacts_rows += rows
+        result = self.run_intake([mail('frontdesk@practice.test', -timedelta(hours=1))])
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(self.fake.intent_calls, [], 'a flagged role address is never a lead')
+        self.assertEqual(result.counts['mapping_shared_role'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 1)
+        self.assertIn('shared_role', self.report_text())
+
+    def test_a_second_address_on_the_same_record_logs_to_that_record(self):
+        self.fake.contacts_rows.append(intake.Contact('pat.home@example.test', 'C-901', 'Pat Example'))
+        result = self.run_intake([mail('pat.home@example.test', -timedelta(hours=1))])
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['ref'], 'C-901')
+        self.assertEqual(result.counts['unmatched'], 0)
+
+    def test_a_role_address_flagged_on_one_record_is_not_exact_on_any_record(self):
+        self.fake.contacts_rows += intake.record_contacts('pat@practice.test; info@practice.test', 'C-901', 'Pat')
+        self.fake.contacts_rows += intake.record_contacts('info@practice.test', 'L-905', 'Practice Office')
+        result = self.run_intake([mail('info@practice.test', -timedelta(hours=1))])
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(result.counts['mapping_shared_role'], 1)
+
+    def test_unresolved_mail_expires_after_thirty_days_and_is_counted(self):
+        old = mail('old@example.test', -timedelta(days=31), subject='Old')
+        recent = mail('recent@example.test', -timedelta(days=29), subject='Recent')
+        unresolved = {}
+        for m in (old, recent):
+            ck = intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'])[0]
+            unresolved[ident(m)] = {'ck': ck, 'sent': m['sent_unix'], 'participants': {m['sender']: 'missing'}}
+        self.out().mkdir(parents=True)
+        (self.out() / intake.STATE).write_text(json.dumps({'mail_unresolved': unresolved}))
+        self.assertEqual(self.run_intake([old, recent]).state, 'succeeded')
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual(list(state['mail_unresolved']), [ident(recent)])
+        result = self.run_intake([old, recent])
+        self.assertEqual(result.counts['unresolved_expired'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 1)
+        self.fake.contacts_rows.append(intake.Contact('old@example.test', 'L-911', 'Old Sender'))
+        self.run_intake([old, recent], touch=False)
+        self.assertEqual(self.fake.writes('log-activity'), [], 'expired mail is not revived')
+
+    def test_machine_senders_are_skipped_as_not_business(self):
+        mails = [mail('no-reply@vendor.test', -timedelta(hours=1), subject='Receipt'),
+                 mail('Bounce+abc@service.test', -timedelta(hours=1), subject='Bounce'),
+                 mail('mailer-daemon@relay.test', -timedelta(hours=1), subject='Undeliverable')]
+        result = self.run_intake(mails)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(self.fake.calls, [])
+        self.assertEqual(self.fake.intent_calls, [])
+        self.assertEqual(result.counts['skipped_automated'], 3)
+        self.assertEqual(result.counts['unresolved_messages'], 0)
+        self.assertEqual(result.counts['unresolved_addresses'], 0)
+        self.assertEqual(result.counts['unmatched'], 0)
+        self.assertNotIn('vendor.test', self.report_text())
+        result = self.run_intake(mails)
+        self.assertEqual(self.fake.calls, [])
+        self.assertEqual(result.counts['skipped_automated'], 3, 'a count of retained mail, not per run')
+
+    def test_role_and_human_senders_are_never_skipped_as_machines(self):
+        for address in ('marketing.director@practice.test', 'news.desk@paper.test', 'updates@practice.test',
+                        'alerts.team@practice.test', 'notifications@practice.test', 'info@practice.test'):
+            self.assertFalse(intake.automated(address), address)
+        for address in ('noreply@x.test', 'no_reply@x.test', 'do-not-reply@x.test', 'donotreply@x.test',
+                        'mailer-daemon@x.test', 'postmaster@x.test', 'bounces+123@x.test'):
+            self.assertTrue(intake.automated(address), address)
+
+    def test_skipped_machine_mail_logs_once_a_record_carries_the_address(self):
+        m = mail('noreply@vendor.test', -timedelta(hours=1))
+        self.assertEqual(self.run_intake([m]).counts['skipped_automated'], 1)
+        self.fake.contacts_rows.append(intake.Contact('noreply@vendor.test', 'V-903', 'Portal Vendor'))
+        result = self.run_intake([m], touch=False)
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['ref'], 'V-903')
+        self.assertEqual(result.counts['skipped_automated'], 0)
+
+    def test_a_machine_address_with_a_mapping_problem_is_reported_not_hidden(self):
+        self.fake.contacts_rows += [intake.Contact('noreply@vendor.test', 'V-903', 'A'),
+                                    intake.Contact('noreply@vendor.test', 'V-904', 'B')]
+        result = self.run_intake([mail('noreply@vendor.test', -timedelta(hours=1))])
+        self.assertEqual(result.counts['skipped_automated'], 0)
+        self.assertEqual(result.counts['mapping_ambiguous'], 1)
+        self.assertIn('ambiguous', self.report_text())
+
+    def test_an_unknown_sender_with_business_intent_is_queued_once_for_review(self):
+        self.fake.intent_reply = {'business': True, 'summary': 'Wants a clinic suite near the hospital.'}
+        first = mail('new.doctor@practice.test', -timedelta(hours=2), name='Dana Doctor')
+        result = self.run_intake([first])
+        self.assertEqual(result.state, 'succeeded')
+        [(verb, args)] = self.fake.writes()
+        self.assertEqual(verb, 'propose-email-lead')
+        self.assertEqual({k: v for k, v in args.items() if k != 'idempotency_key'},
+                         {'address': 'new.doctor@practice.test', 'display_name': 'Dana Doctor',
+                          'summary': 'Wants a clinic suite near the hospital.',
+                          'first_seen_at': intake._iso(first['sent_unix']), 'message_ref': ident(first)})
+        self.assertEqual(result.counts['lead_proposed'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 1, 'the mail waits for the promoted record')
+        self.assertNotIn('Wants a clinic', self.report_text())
+        second = mail('new.doctor@practice.test', -timedelta(hours=1), subject='Following up')
+        self.run_intake([first, second])
+        self.assertEqual(len(self.fake.writes('propose-email-lead')), 1)
+        self.assertEqual(len(self.fake.intent_calls), 1)
+        self.fake.contacts_rows.append(intake.Contact('new.doctor@practice.test', 'L-910', 'Dana Doctor'))
+        self.run_intake([first, second], touch=False)
+        self.assertEqual(sorted(a['ref'] for _, a in self.fake.writes('log-activity')), ['L-910', 'L-910'])
+
+    def test_an_unknown_sender_without_business_intent_is_not_queued_or_asked_again(self):
+        m = mail('friend@example.test', -timedelta(hours=1))
+        result = self.run_intake([m])
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(result.counts['lead_not_business'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 1)
+        self.run_intake([m])
+        self.assertEqual(len(self.fake.intent_calls), 1)
+
+    def test_a_sender_already_on_a_party_is_reported_not_proposed_again(self):
+        self.fake.intent_reply = {'business': True, 'summary': 'Asks about a renewal.'}
+        self.fake.lead_reply = {'ok': True, 'proposed': False, 'reason': 'known_party'}
+        m = mail('known@example.test', -timedelta(hours=1))
+        result = self.run_intake([m])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['lead_known_party'], 1)
+        self.run_intake([m, mail('known@example.test', -timedelta(minutes=30), subject='Again')])
+        self.assertEqual(len(self.fake.writes('propose-email-lead')), 1)
+
+    def test_outbound_mail_to_an_unknown_recipient_is_never_a_lead(self):
+        self.fake.intent_reply = {'business': True, 'summary': 'x'}
+        self.run_intake([mail(OWNER, -timedelta(hours=1), recipients='someone@example.test')])
+        self.assertEqual(self.fake.intent_calls, [])
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_an_intent_failure_fails_the_run_and_is_asked_again(self):
+        self.fake.intent_reply = RuntimeError('model down')
+        m = mail('new@example.test', -timedelta(hours=1))
+        self.assertEqual(self.run_intake([m]).reason, 'model_failed')
+        self.fake.intent_reply = {'business': True, 'summary': 'Needs space.'}
+        self.assertEqual(self.run_intake([m], touch=False).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('propose-email-lead')), 1)
+
+    def test_a_sender_the_queue_cannot_take_is_never_proposed_and_does_not_fail_the_run(self):
+        self.fake.intent_reply = {'business': True, 'summary': 'Needs space.'}
+        for sender in ('/o=exchangelabs/ou=exchange administrative group/cn=recipients/cn=abc',
+                       'dr.müller@praxis.test'):
+            self.assertFalse(intake.proposable(sender), sender)
+        result = self.run_intake([mail('/o=exchangelabs/ou=group/cn=recipients/cn=abc', -timedelta(hours=1)),
+                                  mail('dr.müller@praxis.test', -timedelta(hours=1), subject='Space')])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(self.fake.writes('propose-email-lead'), [])
+        self.assertEqual(self.fake.intent_calls, [])
+
+    def test_a_permanent_refusal_is_terminal_not_a_failed_run(self):
+        self.fake.intent_reply = {'business': True, 'summary': 'Needs space.'}
+        self.fake.fail_verbs.add('propose-email-lead')
+        refused = intake.CarrError(code='invalid_request')
+        with patch.object(self.fake, 'carr', side_effect=lambda verb, args: (_ for _ in ()).throw(refused)
+                          if verb == 'propose-email-lead' else {'ok': True}):
+            m = mail('new@example.test', -timedelta(hours=1))
+            result = self.run_intake([m])
+            self.assertEqual(result.state, 'succeeded')
+            self.assertEqual(result.counts['lead_refused'], 1)
+            result = self.run_intake([m])
+            self.assertEqual(result.state, 'succeeded')
+            self.assertEqual(result.counts['lead_refused'], 0)
+        self.assertEqual(intake._reply_error({'error': 'email_lead_input_invalid'}), 'invalid_request')
+
+    def test_lead_intent_reply_parsing_accepts_only_the_schema(self):
+        self.assertEqual(intake.parse_intent({'is_error': False, 'structured_output': {'business': True, 'summary': ' Needs space. '}}),
+                         {'business': True, 'summary': 'Needs space.'})
+        self.assertEqual(intake.parse_intent({'is_error': False, 'structured_output': {'business': True, 'summary': None}}),
+                         {'business': False, 'summary': None})
+        for bad in ({'is_error': False, 'structured_output': {'business': 'yes', 'summary': None}},
+                    {'is_error': True, 'structured_output': {'business': True, 'summary': 'x'}}, {}):
+            with self.assertRaises(ValueError):
+                intake.parse_intent(bad)
+
     def test_a_held_lock_skips(self):
         self.out().mkdir(parents=True)
         with open(self.out() / 'lock', 'w') as held:
@@ -1220,6 +1422,62 @@ class IntakeTest(unittest.TestCase):
         for secret in ('pat@example.test', 'Pat Example', 'Suite question', 'C-901'):
             self.assertNotIn(secret, line)
         self.assertTrue(line.startswith('outlook-intake succeeded'))
+
+
+class FolderTest(unittest.TestCase):
+    FOLDERS = """
+    CREATE TABLE folders (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, name TEXT,
+      block INTEGER NOT NULL, parent_status TEXT NOT NULL, parent_id INTEGER);
+    CREATE TABLE message_folders (message_id INTEGER NOT NULL, folder_id INTEGER NOT NULL);
+    """
+
+    def db(self, folders, links, columns=True):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / 'store.db'
+        write_db(path, [mail('pat@example.test', -timedelta(hours=1), subject=f'm{i}', copy_key=f'k{i}')
+                        for i in range(1, 6)])
+        con = sqlite3.connect(path)
+        con.executescript(self.FOLDERS if columns else self.FOLDERS.replace(
+            ',\n      block INTEGER NOT NULL, parent_status TEXT NOT NULL, parent_id INTEGER', ', block INTEGER'))
+        for row in folders:
+            con.execute('INSERT INTO folders VALUES (?,?,?,?,?,?)' if columns
+                        else 'INSERT INTO folders VALUES (?,?,?,?)', row if columns else row[:3] + (0,))
+        con.executemany('INSERT INTO message_folders VALUES (?,?)', links)
+        con.commit()
+        con.close()
+        _, mails, _ = intake._load(path)
+        return {m['subject']: m['folders'] for m in mails}
+
+    def test_messages_carry_full_folder_paths(self):
+        found = self.db([(1, 7, 'Inbox', 0, 'top', None), (2, 7, 'Sent Items', 0, 'top', None),
+                         (3, 7, 'Active Deals', 0, 'top', None), (4, 7, 'Deal A', 0, 'folder', 3)],
+                        [(1, 1), (2, 2), (3, 4), (3, 1)])
+        self.assertEqual(found, {'m1': ['Inbox'], 'm2': ['Sent Items'], 'm3': ['Active Deals/Deal A', 'Inbox'],
+                                 'm4': [], 'm5': []})
+
+    def test_unresolved_ancestors_give_no_path(self):
+        found = self.db([(1, 7, None, 0, 'top', None), (2, 7, 'Child', 0, 'folder', 1),
+                         (3, 7, 'Moved', 0, 'unknown', None), (4, 7, 'Loop', 0, 'folder', 5),
+                         (5, 7, 'Back', 0, 'folder', 4), (6, 7, 'Orphan', 0, 'folder', 99)],
+                        [(1, 2), (2, 3), (3, 4), (4, 6)])
+        self.assertEqual(set(map(tuple, found.values())), {()})
+
+    def test_older_decoders_without_parents_or_folders_load(self):
+        self.assertEqual(set(map(tuple, self.db([(1, 7, 'Inbox', 0, 'top', None)], [(1, 1)],
+                                                columns=False).values())), {()})
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        write_db(Path(tmp.name) / 'old.db', [mail('pat@example.test', -timedelta(hours=1))])
+        _, [m], _ = intake._load(Path(tmp.name) / 'old.db')
+        self.assertEqual(m['folders'], [])
+
+    def test_collapsed_copies_keep_every_folder(self):
+        rows = [dict(mail('pat@example.test', -timedelta(hours=1), copy_key='k'), folders=['Inbox']),
+                dict(mail('pat@example.test', -timedelta(hours=1) + timedelta(seconds=5), copy_key='k'),
+                     folders=['Active Deals/Deal A'])]
+        [best] = intake._best_copies(rows)
+        self.assertEqual(best['folders'], ['Active Deals/Deal A', 'Inbox'])
 
 
 class ScheduleTest(unittest.TestCase):

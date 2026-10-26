@@ -210,6 +210,31 @@ test("an empty reason, an unknown field and a self-supersession refuse before an
   }
 });
 
+test("a receipt-key conflict reaches the caller by name and writes no event", async () => {
+  const detail = `withdrawal_receipt_conflict: idempotency key ${KEY} already holds a withdrawal receipt; nothing was declined`;
+  const db = new WithdrawFake({ refusal: detail });
+  const out = await rejected(() => executeRegisteredTool(db, JOE, "decline-work-request", structuredClone(DECLINE)));
+  assert.deepEqual(out, { error: "withdrawal_receipt_conflict", human_ref: DECLINE.human_ref, detail });
+  assert.equal(db.calls.some(x => x.sql.startsWith("insert into event")), false);
+});
+
+test("decline passes the old program catalogs' refs to the database and refuses other shapes", async () => {
+  // 0982 lets the database decline unstarted WR-AI-* and WR-SIEP-* program rows.
+  for (const human_ref of ["WR-AI-002", "WR-SIEP-06A", "WR-SIEP-B0"]) {
+    const db = new WithdrawFake();
+    await executeRegisteredTool(db, JOE, "decline-work-request", { ...structuredClone(DECLINE), human_ref });
+    const call = db.calls.find(x => x.sql.includes("decline_sourced_work_request"));
+    assert.equal(call.params[0], human_ref);
+  }
+  for (const human_ref of ["WR-XYZ-002", "WR-AI-02", "WR-SIEP-1234", "wr-ai-002"]) {
+    const db = new WithdrawFake();
+    const out = await rejected(() => executeRegisteredTool(db, JOE, "decline-work-request",
+      { ...structuredClone(DECLINE), human_ref }));
+    assert.equal(out.error, "invalid_decline_work_request", human_ref);
+    assert.equal(db.calls.length, 0);
+  }
+});
+
 test("a replayed key returns the stored withdrawal and makes no second transition", async () => {
   const db = new WithdrawFake();
   const first = await executeRegisteredTool(db, JOE, "decline-work-request", structuredClone(DECLINE));

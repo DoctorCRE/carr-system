@@ -72,19 +72,19 @@ diff --git a/hxprobe/Cargo.lock b/hxprobe/Cargo.lock
  name = "once_cell"
  version = "1.21.4"
  source = "registry+https://github.com/rust-lang/crates.io-index"
-@@ -162,6 +198,12 @@
- version = "2.0.1"
- source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -164,6 +200,12 @@
  checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
-+
-+[[package]]
+ 
+ [[package]]
 +name = "simd-adler32"
 +version = "0.3.10"
 +source = "registry+https://github.com/rust-lang/crates.io-index"
 +checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
- 
- [[package]]
++
++[[package]]
  name = "smallvec"
+ version = "1.15.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
 diff --git a/hxprobe/Cargo.toml b/hxprobe/Cargo.toml
 --- a/hxprobe/Cargo.toml
 +++ b/hxprobe/Cargo.toml
@@ -97,6 +97,279 @@ diff --git a/hxprobe/Cargo.toml b/hxprobe/Cargo.toml
  
  [profile.release]
  opt-level = 3
+diff --git a/hxprobe/src/attachment.rs b/hxprobe/src/attachment.rs
+new file mode 100644
+--- /dev/null
++++ b/hxprobe/src/attachment.rs
+@@ -0,0 +1,268 @@
++//! Attachment objects (class 016a) in verified HxStore block payloads.
++//!
++//! Each object names its message by a typed message reference at +360 and its
++//! locally cached file by a profile-relative path such as
++//! `~/Files/S0/<n>/Attachments/<k>/<name>[<digits>].<ext>`. Outlook writes that
++//! file only once the attachment is cached, so a decoded row does not prove the
++//! bytes exist. Bytes are never read here; the caller resolves the path against
++//! its own private copy of the profile's Files folder.
++
++use std::collections::BTreeMap;
++
++use crate::folder::{envelopes, message_key};
++
++/// Envelope tags observed for attachment objects (2026-10 Studio build).
++pub(crate) const ATTACHMENT: (&[u16], u16) = (&[0x0318], 0x016a);
++
++const MESSAGE_AT: usize = 360;
++const SIZE_AT: usize = 558;
++const MAX_TEXT_UNITS: usize = 1024;
++const PATH_PREFIX: &str = "~/Files/S0/";
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct Attachment {
++    pub id: u64,
++    pub message_key: u64,
++    /// The file name with Outlook's `[<digits>]` cache suffix removed.
++    pub name: String,
++    /// True when that name also appears as its own string in the object.
++    pub name_verified: bool,
++    /// The sender's declared MIME type, as stored; not a detected type.
++    pub content_type: Option<String>,
++    pub size: u64,
++    /// Profile-relative cache path; None when cached revisions disagree.
++    pub path: Option<String>,
++}
++
++#[derive(Default)]
++pub struct Index {
++    pub attachments: BTreeMap<u64, Attachment>,
++    pub objects: usize,
++}
++
++fn u64_at(data: &[u8], at: usize) -> Option<u64> {
++    Some(u64::from_le_bytes(data.get(at..at.checked_add(8)?)?.try_into().ok()?))
++}
++
++/// The NUL-terminated UTF-16LE string starting at `at`, bounded and printable.
++fn utf16z(data: &[u8], at: usize) -> Option<String> {
++    let mut units = Vec::new();
++    let mut p = at;
++    loop {
++        let u = u16::from_le_bytes([*data.get(p)?, *data.get(p + 1)?]);
++        if u == 0 {
++            break;
++        }
++        units.push(u);
++        if units.len() > MAX_TEXT_UNITS {
++            return None;
++        }
++        p += 2;
++    }
++    let s = String::from_utf16(&units).ok()?;
++    (!s.is_empty() && !s.chars().any(char::is_control)).then_some(s)
++}
++
++fn utf16_bytes(s: &str) -> Vec<u8> {
++    s.encode_utf16().flat_map(u16::to_le_bytes).collect()
++}
++
++/// `~/Files/S0/<digits>/Attachments/<digits>/<file>`, with no other segments.
++fn cache_path(object: &[u8]) -> Option<(usize, String)> {
++    let at = memchr::memmem::find(object, &utf16_bytes(PATH_PREFIX))?;
++    let path = utf16z(object, at)?;
++    let parts: Vec<_> = path.split('/').collect();
++    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
++    let ok = parts.len() == 7
++        && parts[..3] == ["~", "Files", "S0"]
++        && digits(parts[3])
++        && parts[4] == "Attachments"
++        && digits(parts[5])
++        && !parts[6].is_empty()
++        && parts[6] != "."
++        && parts[6] != ".."
++        && !parts[6].contains('\\');
++    ok.then_some((at, path))
++}
++
++/// Remove the `[<digits>]` Outlook appends before the extension.
++fn display_name(file: &str) -> Option<String> {
++    let (stem, ext) = match file.rfind('.') {
++        Some(dot) if file[dot..].find(['[', ']']).is_none() => file.split_at(dot),
++        _ => (file, ""),
++    };
++    let open = stem.strip_suffix(']')?.rfind('[')?;
++    let digits = &stem[open + 1..stem.len() - 1];
++    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) || open == 0 {
++        return None;
++    }
++    let name = format!("{}{}", &stem[..open], ext);
++    (name != "." && name != "..").then_some(name)
++}
++
++/// The first short ASCII `type/subtype` string between the fixed header and the path.
++fn declared_type(object: &[u8], end: usize) -> Option<String> {
++    let region = object.get(MESSAGE_AT + 40..end)?;
++    let mut i = 0;
++    while i + 2 <= region.len() {
++        if let Some(s) = utf16z(region, i).filter(|s| s.len() >= 3 && s.len() <= 127) {
++            let mut parts = s.splitn(2, '/');
++            let (a, b) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
++            let token = |t: &str| !t.is_empty() && t.bytes().all(|c| c.is_ascii_alphanumeric() || b".+-".contains(&c));
++            if token(a) && token(b) && a.bytes().all(|c| c.is_ascii_alphabetic()) {
++                return Some(s.to_ascii_lowercase());
++            }
++            i += 2 * (s.encode_utf16().count() + 1);
++        } else {
++            i += 2;
++        }
++    }
++    None
++}
++
++pub(crate) fn parse(object: &[u8]) -> Option<Attachment> {
++    if !object.starts_with(&ATTACHMENT.1.to_le_bytes()) || object.get(2..10)? != [0; 8] {
++        return None;
++    }
++    // The object's own key repeats at +30; +38 repeats its owner instead.
++    let id = u64_at(object, 10).filter(|&id| id != 0 && Some(id) == u64_at(object, 30))?;
++    let message_key = message_key(object.get(MESSAGE_AT..)?, 0x00ca)?;
++    let (path_at, path) = cache_path(object)?;
++    let name = display_name(path.rsplit('/').next()?)?;
++    let mut needle = utf16_bytes(&name);
++    needle.extend([0, 0]);
++    let name_verified = memchr::memmem::find_iter(object, &needle).any(|at| at % 2 == path_at % 2 && at != path_at);
++    Some(Attachment {
++        id,
++        message_key,
++        name,
++        name_verified,
++        content_type: declared_type(object, path_at),
++        size: u64_at(object, SIZE_AT)?,
++        path: Some(path),
++    })
++}
++
++impl Index {
++    pub fn observe(&mut self, data: &[u8]) {
++        for (_, object) in envelopes(data, ATTACHMENT) {
++            self.objects += 1;
++            let Some(a) = parse(object) else { continue };
++            match self.attachments.get_mut(&a.id) {
++                None => {
++                    self.attachments.insert(a.id, a);
++                }
++                Some(prev) => {
++                    // Revisions agree on the message; anything else is
++                    // taken conservatively rather than by block order.
++                    if prev.message_key != a.message_key || prev.path != a.path {
++                        prev.path = None;
++                    }
++                    prev.size = prev.size.max(a.size);
++                    prev.name_verified &= a.name_verified;
++                    if prev.content_type != a.content_type {
++                        prev.content_type = None;
++                    }
++                }
++            }
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn put64(b: &mut [u8], p: usize, v: u64) {
++        b[p..p + 8].copy_from_slice(&v.to_le_bytes());
++    }
++    fn sig(class: u16) -> [u8; 10] {
++        let mut s = [0; 10];
++        s[..2].copy_from_slice(&class.to_le_bytes());
++        s
++    }
++    fn text(s: &str) -> Vec<u8> {
++        let mut b = utf16_bytes(s);
++        b.extend([0, 0]);
++        b
++    }
++    pub(crate) fn object(id: u64, message: u64, size: u64, file: &str, name: &str, mime: &str) -> Vec<u8> {
++        let mut b = vec![0; 600];
++        b[..10].copy_from_slice(&sig(0x016a));
++        put64(&mut b, 10, id);
++        put64(&mut b, 22, 99);
++        put64(&mut b, 30, id);
++        put64(&mut b, 38, 99);
++        b[MESSAGE_AT..MESSAGE_AT + 10].copy_from_slice(&sig(0x00ca));
++        for at in [10, 30, 38] {
++            put64(&mut b, MESSAGE_AT + at, message);
++        }
++        put64(&mut b, SIZE_AT, size);
++        b.extend(text(mime));
++        b.extend([1, 0]);
++        b.extend(text(&format!("~/Files/S0/42/Attachments/0/{file}")));
++        b.extend([9, 9, 1, 1]);
++        b.extend(text(name));
++        b
++    }
++    pub(crate) fn envelope(b: &[u8]) -> Vec<u8> {
++        let mut v = vec![5, 0];
++        v.extend(0x0318u16.to_le_bytes());
++        v.extend(((b.len() + 10) as u32).to_le_bytes());
++        v.extend([0, 0]);
++        v.extend(b);
++        v
++    }
++
++    #[test]
++    fn decodes_message_link_name_type_size_and_cache_path() {
++        let mut index = Index::default();
++        index.observe(&envelope(&object(7, 70, 4096, "Lease draft[123].pdf", "Lease draft.pdf", "application/pdf")));
++        let a = &index.attachments[&7];
++        assert_eq!((a.message_key, a.size), (70, 4096));
++        assert_eq!(a.name, "Lease draft.pdf");
++        assert!(a.name_verified);
++        assert_eq!(a.content_type.as_deref(), Some("application/pdf"));
++        assert_eq!(a.path.as_deref(), Some("~/Files/S0/42/Attachments/0/Lease draft[123].pdf"));
++    }
++
++    #[test]
++    fn cache_suffix_rules() {
++        assert_eq!(display_name("a.b[1].pdf").as_deref(), Some("a.b.pdf"));
++        assert_eq!(display_name("README[22]").as_deref(), Some("README"));
++        assert_eq!(display_name("x[].pdf"), None);
++        assert_eq!(display_name("[5].pdf"), None);
++        assert_eq!(display_name("plain.pdf"), None);
++        assert_eq!(display_name(".[1]"), None);
++        assert_eq!(display_name("..[1]"), None);
++        assert_eq!(display_name(".[1]."), None);
++    }
++
++    #[test]
++    fn rejects_traversal_unlinked_and_truncated_objects() {
++        for file in ["..", "a/../b[1].pdf", "a\\b[1].pdf"] {
++            let mut index = Index::default();
++            index.observe(&envelope(&object(7, 70, 1, file, "x", "text/plain")));
++            assert!(index.attachments.is_empty(), "{file}");
++        }
++        let mut unlinked = object(7, 70, 1, "a[1].pdf", "a.pdf", "application/pdf");
++        put64(&mut unlinked, MESSAGE_AT + 30, 71);
++        let good = envelope(&object(7, 70, 1, "a[1].pdf", "a.pdf", "application/pdf"));
++        let mut index = Index::default();
++        index.observe(&envelope(&unlinked));
++        for cut in 0..good.len() {
++            index.observe(&good[..cut]);
++        }
++        assert!(index.attachments.is_empty());
++    }
++
++    #[test]
++    fn disagreeing_revisions_drop_the_path_and_keep_the_larger_size() {
++        let mut index = Index::default();
++        let first = object(7, 70, 10, "a[1].pdf", "a.pdf", "application/pdf");
++        let moved = object(7, 70, 20, "a[2].pdf", "a.pdf", "application/pdf");
++        index.observe(&[envelope(&first), envelope(&moved)].concat());
++        assert_eq!(index.attachments[&7].path, None);
++        assert_eq!(index.attachments[&7].size, 20);
++    }
++}
 diff --git a/hxprobe/src/body.rs b/hxprobe/src/body.rs
 new file mode 100644
 --- /dev/null
@@ -671,6 +944,320 @@ new file mode 100644
 +    }
 +
 +}
+diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
+--- a/hxprobe/src/folder.rs
++++ b/hxprobe/src/folder.rs
+@@ -6,15 +6,42 @@
+ 
+ use std::collections::{BTreeMap, BTreeSet};
+ 
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum Parent {
++    /// A null reference: the folder sits at the top of its account.
++    Top,
++    Folder(u64),
++    /// No recognized reference, or cached revisions disagree.
++    Unknown,
++}
++
+ #[derive(Debug)]
+ pub struct Folder {
+     pub id: u64,
+     pub account_id: u64,
+     /// Conflicting names in cached revisions are left unresolved.
+     pub name: Option<String>,
++    pub parent: Parent,
+     pub block: usize,
+ }
+ 
++/// Offset of the parent reference in a folder object (2026-10 Studio build).
++const PARENT_AT: usize = 792;
++
++/// A typed folder reference in the same account, or ten zero bytes for none.
++fn parent(object: &[u8], account_id: u64) -> Parent {
++    match object.get(PARENT_AT..PARENT_AT + 10) {
++        Some(sig) if sig == [0; 10] => Parent::Top,
++        Some(_) => match object.get(PARENT_AT..).and_then(|r| reference(r, 0x004d, &[2, 0x02ac])) {
++            Some((id, account)) if account == account_id && id != u64_at(object, 10).unwrap_or(0) => {
++                Parent::Folder(id)
++            }
++            _ => Parent::Unknown,
++        },
++        None => Parent::Unknown,
++    }
++}
++
+ #[derive(Default)]
+ pub struct Index {
+     pub folders: BTreeMap<u64, Folder>,
+@@ -40,9 +67,23 @@
+     s
+ }
+ 
++/// Envelope tags observed per object class. A tag changes between Outlook
++/// builds while the class and object layout stay put: the first tag of each
++/// pair is the pinned upstream build, the second the 2026-10 Studio build.
++const FOLDER: (&[u16], u16) = (&[0x04c2, 0x04d8], 0x004d);
++const VIEW: (&[u16], u16) = (&[0x0430], 0x004f);
++const MESSAGE: (&[u16], u16) = (&[0x0740, 0x074e], 0x00ca);
++const METADATA: (&[u16], u16) = (&[0x02c8, 0x02b8], 0x00bf);
++
+ /// `[05 00, tag:u16, length:u32, 00 00, object...]`.
+ /// Length includes the ten-byte envelope, not its enclosing transaction.
+-fn envelopes(data: &[u8], tag: u16, class: u16) -> Vec<(usize, &[u8])> {
++pub(crate) fn envelopes<'a>(data: &'a [u8], (tags, class): (&[u16], u16)) -> Vec<(usize, &'a [u8])> {
++    let mut found: Vec<_> = tags.iter().flat_map(|&tag| tagged(data, tag, class)).collect();
++    found.sort_unstable_by_key(|(start, _)| *start);
++    found
++}
++
++fn tagged(data: &[u8], tag: u16, class: u16) -> Vec<(usize, &[u8])> {
+     let tag_bytes = tag.to_le_bytes();
+     let needle = [5, 0, tag_bytes[0], tag_bytes[1]];
+     memchr::memmem::find_iter(data, &needle)
+@@ -75,7 +116,7 @@
+     .then_some((id, owner))
+ }
+ 
+-fn message_key(data: &[u8], class: u16) -> Option<u64> {
++pub(crate) fn message_key(data: &[u8], class: u16) -> Option<u64> {
+     if !data.starts_with(&signature(class)) {
+         return None;
+     }
+@@ -116,22 +157,27 @@
+ impl Index {
+     /// First pass: gather the catalog and message/view membership references.
+     pub fn observe(&mut self, block: usize, data: &[u8]) {
+-        for (_, object) in envelopes(data, 0x04c2, 0x004d) {
++        for (_, object) in envelopes(data, FOLDER) {
+             let Some((id, account_id)) = reference(object, 0x004d, &[2, 0x02ac]) else {
+                 continue;
+             };
+             let Some(name) = trailing_name(object) else {
+                 continue;
+             };
++            let up = parent(object, account_id);
+             let folder = self.folders.entry(id).or_insert_with(|| Folder {
+                 id,
+                 account_id,
+                 name: Some(name.clone()),
++                parent: up,
+                 block,
+             });
+             if folder.name.as_ref() != Some(&name) || folder.account_id != account_id {
+                 folder.name = None;
+             }
++            if folder.parent != up {
++                folder.parent = Parent::Unknown;
++            }
+             // Two copies of the folder's view-collection reference. Require
+             // each reference's duplicated key, not an arbitrary nearby u64.
+             for at in [160, 360] {
+@@ -145,7 +191,7 @@
+                 }
+             }
+         }
+-        for (_, object) in envelopes(data, 0x02c8, 0x00bf) {
++        for (_, object) in envelopes(data, METADATA) {
+             let Some(key) = message_key(object, 0x00bf) else {
+                 continue;
+             };
+@@ -167,7 +213,7 @@
+     /// Resolve IPM.Note anchor positions to observed folders within this block.
+     pub fn links(&self, data: &[u8], needle: &[u8]) -> BTreeMap<usize, BTreeSet<u64>> {
+         let mut links = BTreeMap::new();
+-        for (start, object) in envelopes(data, 0x0430, 0x004f) {
++        for (start, object) in envelopes(data, VIEW) {
+             let Some((_, owner)) = reference(object, 0x004f, &[4]) else {
+                 continue;
+             };
+@@ -175,7 +221,7 @@
+                 self.link_single_anchor(&mut links, start, object, needle, folders);
+             }
+         }
+-        for (start, object) in envelopes(data, 0x0740, 0x00ca) {
++        for (start, object) in envelopes(data, MESSAGE) {
+             let Some(key) = message_key(object, 0x00ca) else {
+                 continue;
+             };
+@@ -184,36 +230,9 @@
+             }
+         }
+         // Expanded message objects embedded in transaction wrappers include
+-        // a full typed folder reference at +408. Unlike compact objects, they
+-        // do not have an individual length envelope. Bound the header by the
+-        // next message object, and only take its first ItemClass anchor.
+-        let starts: Vec<_> = memchr::memmem::find_iter(data, &signature(0x00ca))
+-            .filter(|&p| message_key(&data[p..], 0x00ca).is_some())
+-            .collect();
+-        let boundaries: BTreeSet<_> = [
+-            (0x04c2, 0x004d),
+-            (0x0430, 0x004f),
+-            (0x0740, 0x00ca),
+-            (0x02c8, 0x00bf),
+-        ]
+-        .into_iter()
+-        .flat_map(|(tag, class)| envelopes(data, tag, class).into_iter().map(|(p, _)| p - 10))
+-        .collect();
+-        for (i, &start) in starts.iter().enumerate() {
+-            let next_envelope = boundaries
+-                .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
+-                .next()
+-                .copied()
+-                .unwrap_or(data.len());
+-            let end = starts
+-                .get(i + 1)
+-                .copied()
+-                .unwrap_or(data.len())
+-                .min(next_envelope)
+-                .min(start.saturating_add(4096));
+-            let Some(object) = data.get(start..end) else {
+-                continue;
+-            };
++        // a full typed folder reference at +408. Only take their first
++        // ItemClass anchor.
++        for (start, object) in expanded(data) {
+             let Some(field) = object.get(408..) else {
+                 continue;
+             };
+@@ -241,6 +260,31 @@
+         links
+     }
+ 
++    /// Resolve IPM.Note anchor positions to the local message key of the
++    /// message object holding them, so other objects can name the message.
++    pub fn keys(&self, data: &[u8], needle: &[u8]) -> BTreeMap<usize, u64> {
++        let mut keys = BTreeMap::new();
++        for (start, object) in envelopes(data, MESSAGE) {
++            let Some(key) = message_key(object, MESSAGE.1) else { continue };
++            let mut anchors = memchr::memmem::find_iter(object, needle);
++            if let (Some(anchor), None) = (anchors.next(), anchors.next()) {
++                keys.insert(start + anchor, key);
++            }
++        }
++        for (start, object) in expanded(data) {
++            // Only a real message header carries its typed folder reference;
++            // a bare message reference inside another object does not.
++            if object.get(408..).and_then(|f| reference(f, 0x004d, &[2, 0x02ac])).is_none() {
++                continue;
++            }
++            let Some(key) = message_key(object, MESSAGE.1) else { continue };
++            if let Some(rel) = memchr::memmem::find(object, needle).filter(|&rel| rel >= 454) {
++                keys.entry(start + rel).or_insert(key);
++            }
++        }
++        keys
++    }
++
+     fn link_single_anchor(
+         &self,
+         links: &mut BTreeMap<usize, BTreeSet<u64>>,
+@@ -265,6 +309,36 @@
+     }
+ }
+ 
++/// Expanded message objects have no length envelope of their own. Bound each
++/// header by the next message object, the next known envelope, or 4 KiB.
++fn expanded(data: &[u8]) -> Vec<(usize, &[u8])> {
++    let starts: Vec<_> = memchr::memmem::find_iter(data, &signature(0x00ca))
++        .filter(|&p| message_key(&data[p..], 0x00ca).is_some())
++        .collect();
++    let boundaries: BTreeSet<_> = [FOLDER, VIEW, MESSAGE, METADATA]
++        .into_iter()
++        .flat_map(|kind| envelopes(data, kind).into_iter().map(|(p, _)| p - 10))
++        .collect();
++    starts
++        .iter()
++        .enumerate()
++        .filter_map(|(i, &start)| {
++            let next_envelope = boundaries
++                .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
++                .next()
++                .copied()
++                .unwrap_or(data.len());
++            let end = starts
++                .get(i + 1)
++                .copied()
++                .unwrap_or(data.len())
++                .min(next_envelope)
++                .min(start.saturating_add(4096));
++            Some((start, data.get(start..end)?))
++        })
++        .collect()
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -394,7 +468,68 @@
+         assert_eq!(index.links(&expanded, &note())[&610], BTreeSet::from([51]));
+     }
+ 
++    /// A 2026-10 build folder: envelope tag 0x04d8 and a parent slot at +792.
++    fn current_folder(id: u64, account: u64, name: &str, parent: Option<(u64, u64)>) -> Vec<u8> {
++        let mut b = object(0x4d, id, 2, account, 840);
++        if let Some((pid, paccount)) = parent {
++            b[792..838].copy_from_slice(&object(0x4d, pid, 2, paccount, 46));
++        }
++        b.extend([1, 1, 1, 1, 0]);
++        b.extend(name.encode_utf16().chain([0]).flat_map(u16::to_le_bytes));
++        envelope(0x4d8, &b)
++    }
++
+     #[test]
++    fn current_build_tags_and_parent_references() {
++        let mut index = Index::default();
++        index.observe(0, &current_folder(50, 7, "Active Deals", None));
++        index.observe(0, &current_folder(51, 7, "Deal A", Some((50, 7))));
++        index.observe(0, &current_folder(52, 7, "Elsewhere", Some((50, 8))));
++        index.observe(0, &current_folder(53, 7, "Self", Some((53, 7))));
++        assert_eq!(index.folders[&50].parent, Parent::Top);
++        assert_eq!(index.folders[&51].parent, Parent::Folder(50));
++        assert_eq!(index.folders[&52].parent, Parent::Unknown);
++        assert_eq!(index.folders[&53].parent, Parent::Unknown);
++        // An older-layout folder has no parent slot to read.
++        index.observe(0, &folder(60, 61, "Inbox"));
++        assert_eq!(index.folders[&60].parent, Parent::Unknown);
++
++        let mut metadata = object(0xbf, 70, 0, 70, 120);
++        metadata[61..66].copy_from_slice(&[0, 9, 0, 46, 0]);
++        put64(&mut metadata, 112, 51);
++        index.observe(0, &envelope(0x2b8, &metadata));
++        let mut msg = object(0xca, 70, 0, 70, 100);
++        msg.extend(note());
++        assert_eq!(index.links(&envelope(0x74e, &msg), &note())[&110], BTreeSet::from([51]));
++    }
++
++    #[test]
++    fn anchors_resolve_to_their_message_key() {
++        let index = Index::default();
++        let mut compact = object(0xca, 70, 0, 70, 100);
++        compact.extend(note());
++        assert_eq!(index.keys(&envelope(0x74e, &compact), &note()), BTreeMap::from([(110, 70)]));
++        let mut twice = compact.clone();
++        twice.extend(note());
++        assert!(index.keys(&envelope(0x74e, &twice), &note()).is_empty());
++        let mut expanded = object(0xca, 71, 0, 71, 500);
++        expanded.extend(note());
++        // A bare message reference with no folder reference at +408 is not a header.
++        assert!(index.keys(&expanded, &note()).is_empty());
++        expanded[408..454].copy_from_slice(&object(0x4d, 50, 2, 7, 46));
++        assert_eq!(index.keys(&expanded, &note()), BTreeMap::from([(500, 71)]));
++    }
++
++    #[test]
++    fn moved_folder_revisions_leave_the_parent_unknown() {
++        let mut index = Index::default();
++        index.observe(0, &current_folder(51, 7, "Deal A", Some((50, 7))));
++        index.observe(1, &current_folder(51, 7, "Deal A", None));
++        assert_eq!(index.folders[&51].parent, Parent::Unknown);
++        assert_eq!(index.folders[&51].name.as_deref(), Some("Deal A"));
++    }
++
++    #[test]
+     fn conflicting_folder_names_are_not_silently_overwritten() {
+         let mut index = Index::default();
+         index.observe(0, &folder(50, 60, "Old"));
 diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 --- a/hxprobe/src/main.rs
 +++ b/hxprobe/src/main.rs
@@ -686,16 +1273,18 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
  //!   hxprobe map    <file> [n]        dump the named field map for n records
  //!   hxprobe find   <file> <term>     show records whose text contains <term>
  //! ```
-@@ -25,6 +28,8 @@
+@@ -24,7 +27,10 @@
+ 
  use memmap2::Mmap;
  
++mod attachment;
  mod block;
 +mod body;
 +mod calendar;
  mod folder;
  mod header;
  mod lz;
-@@ -202,7 +207,7 @@
+@@ -202,7 +208,7 @@
  }
  
  /// Parse the whole store into a SQLite database with a full-text index.
@@ -704,20 +1293,35 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      let mm = map(path);
      let needle = record::anchor_needle();
      let offs = block::find_all(&mm);
-@@ -210,9 +215,12 @@
+@@ -210,9 +216,14 @@
  
      // Folder catalogs and membership metadata can occur after the messages.
      let mut folders = folder::Index::default();
 +    let mut events = calendar::Index::default();
++    let mut attachments = attachment::Index::default();
 +    let mut sidecars = files_dir.map(|d| body::Sidecars::open(std::path::Path::new(d))).unwrap_or_default();
      for &o in &offs {
          if let Some(b) = block::parse(&mm, o) {
              folders.observe(o, &b.data);
 +            events.observe(&b.data);
++            attachments.observe(&b.data);
          }
      }
  
-@@ -249,7 +257,13 @@
+@@ -227,7 +238,11 @@
+              id               INTEGER PRIMARY KEY, -- local store key
+              account_id       INTEGER NOT NULL,    -- local account key
+              name             TEXT,                -- NULL if revisions disagree
+-             block            INTEGER NOT NULL
++             block            INTEGER NOT NULL,
++             -- 'top' (no parent), 'folder' (parent_id is set) or 'unknown'
++             -- (no recognized reference, or revisions disagree).
++             parent_status    TEXT NOT NULL,
++             parent_id        INTEGER              -- may name an unlisted folder
+          );
+          CREATE TABLE messages (
+              id           INTEGER PRIMARY KEY,
+@@ -249,7 +264,13 @@
               sent_utc     TEXT,
               -- 1 when the subject came from another record in the same
               -- conversation, because this record stores none of its own.
@@ -732,8 +1336,29 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
           );
           CREATE TABLE message_folders (
               message_id INTEGER NOT NULL REFERENCES messages(id),
-@@ -259,6 +273,28 @@
+@@ -257,8 +278,49 @@
+              PRIMARY KEY (message_id, folder_id)
+          );
           CREATE INDEX message_folders_folder ON message_folders(folder_id);
++         -- Local store keys of each message's objects; attachments name these.
++         CREATE TABLE message_keys (
++             message_id INTEGER NOT NULL REFERENCES messages(id),
++             local_key  INTEGER NOT NULL,
++             PRIMARY KEY (message_id, local_key)
++         );
++         CREATE INDEX message_keys_key ON message_keys(local_key);
++         -- Attachment metadata. No bytes: path is the profile-relative cache
++         -- file (~/Files/S0/...), present only once Outlook has cached it.
++         CREATE TABLE attachments (
++             id            INTEGER PRIMARY KEY, -- local store key
++             message_key   INTEGER NOT NULL,    -- message_keys.local_key
++             name          TEXT NOT NULL,
++             name_verified INTEGER NOT NULL,    -- name also stored on its own
++             content_type  TEXT,                -- declared by the sender
++             size          INTEGER NOT NULL,
++             path          TEXT                 -- NULL if revisions disagree
++         );
++         CREATE INDEX attachments_message ON attachments(message_key);
           CREATE INDEX messages_sent ON messages(sent_unix);
           CREATE INDEX messages_sender ON messages(sender);
 +         CREATE TABLE events (
@@ -761,7 +1386,20 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
           CREATE VIRTUAL TABLE messages_fts USING fts5(
               sender, sender_name, recipients, subject, body,
               content='messages', content_rowid='id', tokenize='porter unicode61'
-@@ -314,9 +349,17 @@
+@@ -278,10 +340,12 @@
+         let Some(b) = block::parse(&mm, o) else { continue };
+         blocks_ok += 1;
+         let folder_links = folders.links(&b.data, &needle);
++        let key_links = folders.keys(&b.data, &needle);
+ 
+         for loc in records(&b.data, &needle) {
+             let mut r = record::parse(o, &b.data, loc.anchor);
+             r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
++            r.local_keys = key_links.get(&loc.anchor).into_iter().copied().collect();
+             let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);
+ 
+             // The named map is authoritative for every field it covers: it
+@@ -314,9 +378,17 @@
                  .filter(|t| Some(**t) != r.sender.as_deref())
                  .map(|t| t.to_string())
                  .collect();
@@ -781,10 +1419,13 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
                  }
              }
  
-@@ -389,9 +432,80 @@
-         }
-     }
- 
+@@ -386,22 +458,100 @@
+     for r in best.values_mut() {
+         if r.sender_name.is_some() && r.sender_name == r.subject {
+             r.sender_name = None;
++        }
++    }
++
 +    // Collapse the copies `sender + send time` could not join. See body.rs.
 +    let mut by_time: Vec<record::Record> = best.into_values().collect();
 +    by_time.sort_by_key(|r| r.sent_unix);
@@ -845,8 +1486,8 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 +            best[j].sent_unix = sent;
 +            absorbed[i] = true;
 +            collapsed += 1;
-+        }
-+    }
+         }
+     }
 +    let mut keep = absorbed.iter().map(|a| !a);
 +    best.retain(|_| keep.next().unwrap_or(true));
 +    println!(
@@ -855,7 +1496,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 +        sidecars.rejected,
 +        sidecars.len()
 +    );
-+
+ 
      let stored = best.len();
 -    let with_folder = best.values().filter(|r| !r.folder_ids.is_empty()).count();
 -    let multi_folder = best.values().filter(|r| r.folder_ids.len() > 1).count();
@@ -864,7 +1505,46 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      println!("  {} folders; {with_folder}/{stored} messages linked ({multi_folder} with multiple observed folders)", folders.folders.len());
      let tx = db.transaction().expect("tx");
      {
-@@ -414,13 +528,13 @@
+         let mut ins_folder = tx
+             .prepare(
+-                "INSERT INTO folders(id,account_id,name,block) VALUES (?1,?2,?3,?4)"
++                "INSERT INTO folders(id,account_id,name,block,parent_status,parent_id)
++                 VALUES (?1,?2,?3,?4,?5,?6)"
+             )
+             .expect("prepare folders");
+         for f in folders.folders.values() {
+-            ins_folder.execute(rusqlite::params![f.id as i64, f.account_id as i64, f.name, f.block as i64])
++            let (status, parent) = match f.parent {
++                folder::Parent::Top => ("top", None),
++                folder::Parent::Folder(id) => ("folder", Some(id as i64)),
++                folder::Parent::Unknown => ("unknown", None),
++            };
++            ins_folder
++                .execute(rusqlite::params![f.id as i64, f.account_id as i64, f.name, f.block as i64, status, parent])
+                 .expect("insert folder");
+         }
+         let mut ins_link = tx
+@@ -409,18 +559,33 @@
+                 "INSERT INTO message_folders(message_id,folder_id) VALUES (?1,?2)"
+             )
+             .expect("prepare folder links");
++        let mut ins_key = tx
++            .prepare("INSERT OR IGNORE INTO message_keys(message_id,local_key) VALUES (?1,?2)")
++            .expect("prepare message keys");
++        let mut ins_attachment = tx
++            .prepare(
++                "INSERT INTO attachments(id,message_key,name,name_verified,content_type,size,path)
++                 VALUES (?1,?2,?3,?4,?5,?6,?7)"
++            )
++            .expect("prepare attachments");
++        for a in attachments.attachments.values() {
++            ins_attachment
++                .execute(rusqlite::params![a.id as i64, a.message_key as i64, a.name, a.name_verified as i64,
++                                           a.content_type, a.size as i64, a.path])
++                .expect("insert attachment");
++        }
+         let mut ins = tx
+             .prepare(
                  "INSERT INTO messages
                     (block,sender,sender_name,recipients,subject,message_id,body,
                      html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
@@ -881,7 +1561,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
              ins.execute(rusqlite::params![
                  r.offset as i64,
                  r.sender,
-@@ -435,6 +549,10 @@
+@@ -435,6 +600,10 @@
                  if r.html.is_some() { "full" } else { "preview" },
                  r.sent_unix,
                  r.subject_inherited as i64,
@@ -892,8 +1572,14 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
              ])
              .expect("insert");
              let message_id = tx.last_insert_rowid();
-@@ -444,6 +562,54 @@
+@@ -442,8 +611,65 @@
+                 ins_link.execute(rusqlite::params![message_id, *folder_id as i64])
+                     .expect("insert folder link");
              }
++            for key in &r.local_keys {
++                ins_key.execute(rusqlite::params![message_id, *key as i64])
++                    .expect("insert message key");
++            }
          }
      }
 +    {
@@ -934,6 +1620,11 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 +            ("event_identities", events.identities.len()),
 +            ("events_decoded", events.events.len()),
 +            ("calendar_lifecycle_unsupported", events.events.len()),
++            ("folders", folders.folders.len()),
++            ("messages_with_folder", with_folder),
++            ("attachment_objects", attachments.objects),
++            ("attachments", attachments.attachments.len()),
++            ("messages_with_key", best.iter().filter(|r| !r.local_keys.is_empty()).count()),
 +        ] {
 +            ins_meta.execute(rusqlite::params![key, value as i64]).expect("insert meta");
 +        }
@@ -947,10 +1638,11 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      tx.commit().expect("commit");
  
      db.execute_batch(
-@@ -474,6 +638,10 @@
+@@ -474,6 +700,11 @@
  /// Combine a later revision of a message into the copy already held.
  fn merge(prev: &mut record::Record, r: record::Record) {
      prev.folder_ids.extend(r.folder_ids);
++    prev.local_keys.extend(r.local_keys);
 +    prev.copies += r.copies;
 +    if prev.preview.is_none() {
 +        prev.preview = r.preview;
@@ -958,7 +1650,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      if prev.subject.is_none() {
          prev.subject = r.subject;
      }
-@@ -491,11 +659,14 @@
+@@ -491,11 +722,14 @@
          (Some(a), Some(b)) => b.len() > a.len(),
          _ => false,
      };
@@ -975,7 +1667,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      }
  }
  
-@@ -504,7 +675,9 @@
+@@ -504,7 +738,9 @@
  
  usage:
    hxprobe blocks <file>              verify every block, report coverage
@@ -986,7 +1678,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
    hxprobe map    <file> [n]          dump the field map for n records (0 = stats)
    hxprobe find   <file> <term> [n]   show records whose text contains <term>
  
-@@ -521,7 +694,11 @@
+@@ -521,7 +757,11 @@
  
      match args[1].as_str() {
          "blocks" => cmd_blocks(&args[2]),
@@ -1002,7 +1694,16 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 diff --git a/hxprobe/src/record.rs b/hxprobe/src/record.rs
 --- a/hxprobe/src/record.rs
 +++ b/hxprobe/src/record.rs
-@@ -40,6 +40,13 @@
+@@ -29,6 +29,8 @@
+     pub recipients: Vec<String>,
+     /// Folder keys observed across cached revisions; this is not a live view.
+     pub folder_ids: std::collections::BTreeSet<u64>,
++    /// Local message keys of the message objects this record was read from.
++    pub local_keys: std::collections::BTreeSet<u64>,
+     pub subject: Option<String>,
+     pub message_id: Option<String>,
+     /// Plain text, tags stripped and entities decoded.
+@@ -40,6 +42,13 @@
      /// True when the subject came from a sibling record in the same
      /// conversation rather than from this record's own bytes.
      pub subject_inherited: bool,
@@ -1016,7 +1717,7 @@ diff --git a/hxprobe/src/record.rs b/hxprobe/src/record.rs
  }
  
  /// Selecting the send time from the ticks in a record.
-@@ -513,7 +520,7 @@
+@@ -513,7 +522,7 @@
  /// used to be duplicated; this one is kept because the body is not a UTF-16LE
  /// run and so is not part of the named map.
  pub fn parse(offset: usize, blob: &[u8], anchor: usize) -> Record {

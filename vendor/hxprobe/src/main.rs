@@ -27,6 +27,7 @@ use std::fs::File;
 
 use memmap2::Mmap;
 
+mod attachment;
 mod block;
 mod body;
 mod calendar;
@@ -220,11 +221,13 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     // Folder catalogs and membership metadata can occur after the messages.
     let mut folders = folder::Index::default();
     let mut events = calendar::Index::default();
+    let mut attachments = attachment::Index::default();
     let mut sidecars = files_dir.map(|d| body::Sidecars::open(std::path::Path::new(d))).unwrap_or_default();
     for &o in &offs {
         if let Some(b) = block::parse(&mm, o) {
             folders.observe(o, &b.data);
             events.observe(&b.data);
+            attachments.observe(&b.data);
         }
     }
 
@@ -239,7 +242,11 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              id               INTEGER PRIMARY KEY, -- local store key
              account_id       INTEGER NOT NULL,    -- local account key
              name             TEXT,                -- NULL if revisions disagree
-             block            INTEGER NOT NULL
+             block            INTEGER NOT NULL,
+             -- 'top' (no parent), 'folder' (parent_id is set) or 'unknown'
+             -- (no recognized reference, or revisions disagree).
+             parent_status    TEXT NOT NULL,
+             parent_id        INTEGER              -- may name an unlisted folder
          );
          CREATE TABLE messages (
              id           INTEGER PRIMARY KEY,
@@ -275,6 +282,25 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              PRIMARY KEY (message_id, folder_id)
          );
          CREATE INDEX message_folders_folder ON message_folders(folder_id);
+         -- Local store keys of each message's objects; attachments name these.
+         CREATE TABLE message_keys (
+             message_id INTEGER NOT NULL REFERENCES messages(id),
+             local_key  INTEGER NOT NULL,
+             PRIMARY KEY (message_id, local_key)
+         );
+         CREATE INDEX message_keys_key ON message_keys(local_key);
+         -- Attachment metadata. No bytes: path is the profile-relative cache
+         -- file (~/Files/S0/...), present only once Outlook has cached it.
+         CREATE TABLE attachments (
+             id            INTEGER PRIMARY KEY, -- local store key
+             message_key   INTEGER NOT NULL,    -- message_keys.local_key
+             name          TEXT NOT NULL,
+             name_verified INTEGER NOT NULL,    -- name also stored on its own
+             content_type  TEXT,                -- declared by the sender
+             size          INTEGER NOT NULL,
+             path          TEXT                 -- NULL if revisions disagree
+         );
+         CREATE INDEX attachments_message ON attachments(message_key);
          CREATE INDEX messages_sent ON messages(sent_unix);
          CREATE INDEX messages_sender ON messages(sender);
          CREATE TABLE events (
@@ -318,10 +344,12 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         let Some(b) = block::parse(&mm, o) else { continue };
         blocks_ok += 1;
         let folder_links = folders.links(&b.data, &needle);
+        let key_links = folders.keys(&b.data, &needle);
 
         for loc in records(&b.data, &needle) {
             let mut r = record::parse(o, &b.data, loc.anchor);
             r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
+            r.local_keys = key_links.get(&loc.anchor).into_iter().copied().collect();
             let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);
 
             // The named map is authoritative for every field it covers: it
@@ -516,11 +544,18 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     {
         let mut ins_folder = tx
             .prepare(
-                "INSERT INTO folders(id,account_id,name,block) VALUES (?1,?2,?3,?4)"
+                "INSERT INTO folders(id,account_id,name,block,parent_status,parent_id)
+                 VALUES (?1,?2,?3,?4,?5,?6)"
             )
             .expect("prepare folders");
         for f in folders.folders.values() {
-            ins_folder.execute(rusqlite::params![f.id as i64, f.account_id as i64, f.name, f.block as i64])
+            let (status, parent) = match f.parent {
+                folder::Parent::Top => ("top", None),
+                folder::Parent::Folder(id) => ("folder", Some(id as i64)),
+                folder::Parent::Unknown => ("unknown", None),
+            };
+            ins_folder
+                .execute(rusqlite::params![f.id as i64, f.account_id as i64, f.name, f.block as i64, status, parent])
                 .expect("insert folder");
         }
         let mut ins_link = tx
@@ -528,6 +563,21 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 "INSERT INTO message_folders(message_id,folder_id) VALUES (?1,?2)"
             )
             .expect("prepare folder links");
+        let mut ins_key = tx
+            .prepare("INSERT OR IGNORE INTO message_keys(message_id,local_key) VALUES (?1,?2)")
+            .expect("prepare message keys");
+        let mut ins_attachment = tx
+            .prepare(
+                "INSERT INTO attachments(id,message_key,name,name_verified,content_type,size,path)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7)"
+            )
+            .expect("prepare attachments");
+        for a in attachments.attachments.values() {
+            ins_attachment
+                .execute(rusqlite::params![a.id as i64, a.message_key as i64, a.name, a.name_verified as i64,
+                                           a.content_type, a.size as i64, a.path])
+                .expect("insert attachment");
+        }
         let mut ins = tx
             .prepare(
                 "INSERT INTO messages
@@ -564,6 +614,10 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             for folder_id in &r.folder_ids {
                 ins_link.execute(rusqlite::params![message_id, *folder_id as i64])
                     .expect("insert folder link");
+            }
+            for key in &r.local_keys {
+                ins_key.execute(rusqlite::params![message_id, *key as i64])
+                    .expect("insert message key");
             }
         }
     }
@@ -605,6 +659,11 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("event_identities", events.identities.len()),
             ("events_decoded", events.events.len()),
             ("calendar_lifecycle_unsupported", events.events.len()),
+            ("folders", folders.folders.len()),
+            ("messages_with_folder", with_folder),
+            ("attachment_objects", attachments.objects),
+            ("attachments", attachments.attachments.len()),
+            ("messages_with_key", best.iter().filter(|r| !r.local_keys.is_empty()).count()),
         ] {
             ins_meta.execute(rusqlite::params![key, value as i64]).expect("insert meta");
         }
@@ -645,6 +704,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
 /// Combine a later revision of a message into the copy already held.
 fn merge(prev: &mut record::Record, r: record::Record) {
     prev.folder_ids.extend(r.folder_ids);
+    prev.local_keys.extend(r.local_keys);
     prev.copies += r.copies;
     if prev.preview.is_none() {
         prev.preview = r.preview;

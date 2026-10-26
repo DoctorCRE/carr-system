@@ -89,6 +89,20 @@ class CostPublication(unittest.TestCase):
                 self.assertEqual(json.loads(output.read_text()), newer)
                 self.assertEqual(publish.call_count, 1)
 
+    def test_exit_status_ignores_partial_coverage_but_fails_unreadable_sources(self):
+        def run(providers, state):
+            report = {**costs.unavailable(), 'state': state, 'providers': providers,
+                      'through': '2026-10-25', 'observed_at': '2026-10-26T07:00:00+00:00'}
+            with tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                config = root / 'config.json'
+                config.write_text('{}')
+                with patch.object(costs, 'ROOT', root), patch.object(costs, 'collect', return_value=report), \
+                     patch.object(costs, 'read_tokens', return_value={}), redirect_stdout(io.StringIO()):
+                    return costs.main(['--config', str(config), '--output', str(root / 'costs.json')])
+        self.assertEqual(run([{'state': 'ready'}, {'state': 'partial'}], 'partial'), 0)
+        self.assertEqual(run([{'state': 'ready'}, {'state': 'unavailable'}], 'partial'), 1)
+
     def test_first_publish_creates_cost_board_and_reads_back_collected_evidence(self):
         now = datetime.now(timezone.utc)
         report = costs.summarize({'budget_usd': 100, 'providers': {

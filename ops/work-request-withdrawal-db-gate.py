@@ -627,6 +627,71 @@ def main() -> int:
             if card[:2] != ("declined", "obsolete") or card[2] is None:
                 raise RuntimeError(f"declined ready card lost withdrawal history: {card}")
 
+            # --- 0982: unstarted program rows decline through the same door ----
+            cur.execute("""insert into ops.work_request
+                (ref,title,state,requester_actor,owner_actor,organization_tenant_id,program_key,program_ordinal)
+                values ('WR-AI-999','Gate program row','ready','joe','joe','carr-internal',
+                        'carr-ai-engineering-suite-v1',999)""")
+            for program_ref in ("WR-AI-999", "WR-SIEP-26"):
+                version = cur.execute("select version from ops.work_request where ref=%s",
+                                      (program_ref,)).fetchone()
+                if version is None:
+                    raise RuntimeError(f"program fixture {program_ref} is missing")
+                version = version[0]
+                if program_ref.startswith("WR-SIEP-"):
+                    # Only the SIEP catalog has a transition guard; AI rows never did.
+                    refuses(cur, "update ops.work_request set state='declined',exit_reason='forged',"
+                                 "closed_at=now(),version=version+1 where ref=%s", (program_ref,),
+                            f"unreceipted {program_ref} decline")
+                cur.execute("savepoint program_started")
+                cur.execute("alter table ops.work_request disable trigger user")
+                cur.execute("update ops.work_request set claimed_at=now() where ref=%s", (program_ref,))
+                cur.execute("alter table ops.work_request enable trigger user")
+                refuses_named(cur,
+                    "select ops.decline_sourced_work_request(%s,%s,'retired','joe',%s)",
+                    (program_ref, version, uuid.uuid4()), "work_request_not_declinable:",
+                    f"declining claimed program row {program_ref}")
+                cur.execute("rollback to savepoint program_started")
+                row = cur.execute(
+                    "select state,version,exit_reason from ops.decline_sourced_work_request(%s,%s,'retired','joe',%s)",
+                    (program_ref, version, uuid.uuid4())).fetchone()
+                if row != ("declined", version + 1, "retired"):
+                    raise RuntimeError(f"unstarted program decline of {program_ref} did not land: {row}")
+                refuses_named(cur,
+                    "select ops.decline_sourced_work_request(%s,%s,'again','joe',%s)",
+                    (program_ref, version + 1, uuid.uuid4()), "work_request_not_declinable:",
+                    f"declining declined program row {program_ref}")
+            cur.execute("alter table ops.work_request disable trigger user")
+            cur.execute("""insert into ops.work_request
+                (ref,title,state,requester_actor,owner_actor,organization_tenant_id,program_key,program_ordinal)
+                values ('WR-AI-998','Gate verifying row','verification','joe','joe','carr-internal',
+                        'carr-ai-engineering-suite-v1',998)""")
+            cur.execute("alter table ops.work_request enable trigger user")
+            refuses_named(cur,
+                "select ops.decline_sourced_work_request('WR-AI-998',1,'retired','joe',%s)",
+                (uuid.uuid4(),), "work_request_not_declinable:", "declining a verifying program row")
+            # 0983: a reused key must not decline a second row without its own receipt,
+            # and a captured program row declines like a ready one.
+            cur.execute("""insert into ops.work_request
+                (ref,title,state,requester_actor,owner_actor,organization_tenant_id,program_key,program_ordinal)
+                values ('WR-AI-997','Gate captured row','captured','joe','joe','carr-internal',
+                        'carr-ai-engineering-suite-v1',997),
+                       ('WR-AI-996','Gate reused-key row','ready','joe','joe','carr-internal',
+                        'carr-ai-engineering-suite-v1',996)""")
+            reused = uuid.uuid4()
+            row = cur.execute(
+                "select state,version from ops.decline_sourced_work_request('WR-AI-997',1,'retired','joe',%s)",
+                (reused,)).fetchone()
+            if row != ("declined", 2):
+                raise RuntimeError(f"captured program decline did not land: {row}")
+            refuses_named(cur,
+                "select ops.decline_sourced_work_request('WR-AI-996',1,'retired','joe',%s)",
+                (reused,), "withdrawal_receipt_conflict:", "declining with another decline's receipt key")
+            if cur.execute("select state,version from ops.work_request where ref='WR-AI-996'").fetchone() != ("ready", 1):
+                raise RuntimeError("a receipt-key conflict changed the program row")
+            print("PASS: unstarted program rows decline with a receipt; claimed, verifying and declined program rows "
+                  "refuse; a reused receipt key refuses without declining")
+
 
         print(f"PASS: decline and supersede land with receipts; a withdrawn request stays "
               f"readable on the card with reason, closing time and successor; both leave the "
