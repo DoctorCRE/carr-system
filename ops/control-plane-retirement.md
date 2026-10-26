@@ -2,25 +2,19 @@
 
 The generic tick, scheduler, ledger CLI, dispatcher, collectors, provider calls,
 watchdog overlap check, deployment definition, and their tests are removed.
-Applied migrations and captured audit evidence remain unchanged. No tables are
-dropped and no production changes are performed by this PR.
+Applied migrations and captured audit evidence remain unchanged.
 
-The following tables have no remaining runtime consumer in the repository.
-Historical SQL functions and schema tests still reference them. A later migration
-must review those dependencies before dropping anything.
-
-- `ops.provider_route`
-- `ops.provider_observation`
-- `ops.cognition_job`
-- `ops.cognition_result_cache`
-- `ops.cognition_cache_observation`
-- `ops.cost_reservation`
-- `ops.cost_refusal`
+Forward migrations retire the unused cost-refusal and cache-observation ledgers.
+`0991_retire_scheduler_contracts.sql` retires the remaining provider, cognition,
+cache, and cost-reservation tables, their exclusive functions, and the three
+writerless legacy schedule contracts. Native schedulers remain unchanged.
 
 `ops.job_definition`, `ops.job`, `ops.job_attempt`, and `ops.job_receipt` remain
 shared with on-demand engineering claims and receipts. `ops.workflow_acceptance`
-and the `ops.legacy_schedule_*` tables remain inputs to native scheduler
-observations and assurance checks. They are not unused tables.
+and the historical legacy schedule observation and disable receipts remain
+inputs to schedule-board and health readers. Their append-only controls remain.
+Staging approval receipts also remain as historical evidence. Staging release
+records no longer require a separate typed approval.
 
 `tools/workflow-registry.py sync` retains only the contract bootstrap needed by
 those shared consumers and disposable database reconstruction. It cannot enqueue,

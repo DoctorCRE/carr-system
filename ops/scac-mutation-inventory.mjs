@@ -480,7 +480,6 @@ export function workflowDefinitionInventory() {
     const legacySurface = legacyByPlist.get(source_locator);
     if (legacySurface) {
       assertLegacyLaunchdSource(legacySurface, source_locator, plist);
-      physicalAuthorityRefs.push(`ops.legacy_schedule_launchd_contract:${legacySurface.surface_id}`);
     }
     return {
       ingress_key: `launchd-workflow:${label || source_locator.split("/").at(-1)}`,
