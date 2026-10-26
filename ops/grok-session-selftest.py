@@ -30,8 +30,12 @@ class GrokSessionTests(unittest.TestCase):
         import health_breach
         path = ROOT / "tools/health-check.py"
         fake = ModuleType("grok_session")
-        for status, code in [("OK", 0), ("WARN", 0), ("FAIL", 1)]:
-            fake.health_row = lambda: status + " Grok session — synthetic timestamps · run grok login"
+        # A refused sign-in is a warning (Joe 2026-10-26: switch models); a broken check stays red.
+        for status, code, shown, detail in [
+                ("OK", 0, "OK", "synthetic timestamps"), ("WARN", 0, "WARN", "synthetic timestamps"),
+                ("FAIL", 0, "WARN", "authentication refused"), ("FAIL", 1, "FAIL", "credential timestamps unavailable"),
+                ("FAIL", 1, "FAIL", "authentication refused · incident action FAILED")]:
+            fake.health_row = lambda: status + " Grok session — " + detail + " · run grok login"
             with mock.patch.dict(sys.modules, grok_session=fake), \
                     mock.patch.object(sys, "argv", [str(path), "--section", "grok-session"]), \
                     mock.patch.object(health_breach, "record_door", return_value=SimpleNamespace(ok=True, reply={"loops": []})), \
@@ -43,13 +47,13 @@ class GrokSessionTests(unittest.TestCase):
                 process.assert_not_called()
             result = subprocess.CompletedProcess([], exited.exception.code, stdout.getvalue(), stderr.getvalue())
             self.assertEqual(result.returncode, code, result.stderr)
-            self.assertIn(status + " Grok session", result.stdout)
+            self.assertIn(shown + " Grok session", result.stdout)
             self.assertTrue(result.stdout.rstrip().endswith(
                 "Projection freshness/tamper checks are recovery evidence; use --recovery --reason <why>."))
             self.assertNotIn("jev paid cap", result.stdout)
             self.assertNotIn("credential health", result.stdout)
             self.assertNotIn("jev spend", result.stdout)
-            self.assertEqual("CANONICAL_FINDING grok_session" in result.stdout, status == "FAIL")
+            self.assertEqual("CANONICAL_FINDING grok_session" in result.stdout, code == 1 and status == "FAIL")
 
     def test_nested_timestamp_storage_is_supported_without_retaining_scope_keys(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -547,4 +547,8 @@ def main(argv=None):
                         raise
             progress_board.publish_board('system-costs', costs=published_costs)
     print(health_row(report, loop_result))
-    return 0 if report['state'] == 'ready' and not refusals else 1
+    # Partial coverage (a billing token not provisioned) is reported by the health row and
+    # its loop, not by failing the nightly chain every night. A provider whose source is
+    # unreadable, or a refused loop write, is a real collection failure.
+    broken = any(p.get('state') == 'unavailable' for p in report.get('providers', []))
+    return 1 if broken or refusals or report['state'] == 'unavailable' else 0

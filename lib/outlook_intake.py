@@ -26,6 +26,9 @@ action stays pending in the state file until the verb acknowledges it and the
 retry replays the same key. A run with any write, model or cleanup failure
 reports failed and does not advance its watermark.
 
+Each decoded email carries its observed folder paths (Inbox, Sent Items, user
+subfolders such as Active Deals/<deal>) as `folders`; nothing is written from them yet.
+
 An email whose body is still only Outlook's preview is logged with the preview,
 flagged preview_only, and listed in out/outlook-intake/needs-refresh.json for the
 same-host refresh worker to open. The file is a JSON array, mode 0600, one object per
@@ -229,14 +232,51 @@ def in_window(now: datetime) -> bool:
 
 # ---- the decoded store -------------------------------------------------------
 
+def _folder_paths(con: sqlite3.Connection) -> dict[int, list[str]]:
+    """Message row id -> sorted observed folder paths ("Inbox/Active Deals/Deal A").
+
+    Cached revisions can still place a moved message in its previous folder too. A folder
+    with an unnamed, unknown or cyclic ancestor has no path. Older decoders export no parents."""
+    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if not {'folders', 'message_folders'} <= tables:
+        return {}
+    columns = {r[1] for r in con.execute('PRAGMA table_info(folders)')}
+    parents = 'parent_status, parent_id' if 'parent_id' in columns else "'unknown', NULL"
+    folders = {r[0]: (r[1], r[2], r[3]) for r in con.execute(f'SELECT id, name, {parents} FROM folders')}
+
+    def path(folder: int) -> str | None:
+        names, seen = [], set()
+        while folder in folders and folder not in seen:
+            seen.add(folder)
+            name, status, parent = folders[folder]
+            if not name:
+                return None
+            names.append(name)
+            if status == 'top':
+                return '/'.join(reversed(names))
+            if status != 'folder':
+                return None
+            folder = parent
+        return None
+
+    found: dict[int, set[str]] = {}
+    for message, folder in con.execute('SELECT message_id, folder_id FROM message_folders'):
+        if (p := path(folder)) is not None:
+            found.setdefault(message, set()).add(p)
+    return {message: sorted(paths) for message, paths in found.items()}
+
+
 def _load(db: Path) -> tuple[dict, list[dict], list[dict]]:
     con = sqlite3.connect(db)
     con.row_factory = sqlite3.Row
     try:
         meta = {r['key']: r['value'] for r in con.execute('SELECT key, value FROM meta')}
+        paths = _folder_paths(con)
         mails = [dict(r) for r in con.execute(
-            'SELECT sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key '
+            'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key '
             'FROM messages WHERE sent_unix IS NOT NULL AND sender IS NOT NULL')]
+        for m in mails:
+            m['folders'] = paths.get(m.pop('id'), [])
         events = [dict(r) for r in con.execute('SELECT * FROM events')]
         attendees: dict[int, list] = {}
         for r in con.execute('SELECT event_id, name, email FROM event_attendees'):
@@ -296,6 +336,7 @@ def _best_copies(mails: list[dict]) -> list[dict]:
     for m in rows:
         last = out[-1] if out else None
         if last and last['ck'] == m['ck'] and m['sent_unix'] - last['first_sent'] <= COPY_WINDOW:
+            m['folders'] = last['folders'] = sorted(set(last.get('folders', [])) | set(m.get('folders', [])))
             if (m['full'], len(m['text'])) > (last['full'], len(last['text'])):
                 m['first_sent'], m['sent_unix'], m['ident'] = last['first_sent'], last['sent_unix'], last['ident']
                 out[-1] = m

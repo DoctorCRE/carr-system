@@ -29,7 +29,7 @@ Archive SHA-256:
 `bbffd167a42081abc7de2f6ef6d44e14e7af2a7a004d3f060c62eb3c1a45e21c`
 
 Patch SHA-256:
-`a1ca5a3dd93a46216c9a88b42c917f83b87f23a4d1152bfc2bab36279416293a`
+`9cdb71f06e159a85bac6e0037970eb919b0717425623d74a3d9e77673e4b4567`
 
 Cargo.lock retains all 31 registry package checksums. The crate is copied into
 the repository as editable source. Transitive dependencies stay on crates.io;
@@ -50,7 +50,7 @@ This result covers the checked lockfile against that advisory revision.
 The `hxprobe` class in `ops/ci.sh` runs `cargo test --locked` followed by
 `cargo build --release --locked` from this directory. The PR and main-canary
 workflows register that class. A test failure stops the build and fails CI.
-The crate's 22 tests use synthetic data. Every example email address uses
+The crate's 27 tests use synthetic data. Every example email address uses
 `@example.test`. No private Outlook store or profile is needed.
 
 For updates, retain a separate upstream import and CARR patch commit, review
