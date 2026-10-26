@@ -81,6 +81,22 @@ with tempfile.TemporaryDirectory() as temp:
     refs, uncovered, multiple = inventory.audit(root, duplicate)
     assert any(ref.file == "bin/run.sh" and ids == ["one", "two"] for ref, ids in multiple)
     passed += 1
+
+    registry_path = root / inventory.DEFAULT_REGISTRY
+    for candidate, expected_exit, expected_output in (
+        (all_entries, 0, "references exactly classified"),
+        (registry(entry("task", "ops/config/task.json")), 1, "UNCOVERED bin/run.sh:1"),
+        (registry(*all_entries["entries"], entry("duplicate-shell", "bin/run.sh")),
+         1, "MULTIPLE bin/run.sh:1: shell, duplicate-shell"),
+    ):
+        registry_path.write_text(json.dumps(candidate))
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "ops/drive-dependency-inventory.py"), "--root", str(root)],
+            capture_output=True, text=True, env=fixture_env(), check=False,
+        )
+        assert result.returncode == expected_exit and expected_output in result.stdout + result.stderr, (
+            result.returncode, result.stdout, result.stderr)
+        passed += 1
     # A source row whose file was deleted covers nothing; it must not pass silently.
     try:
         inventory.audit(root, registry(entry("task", "ops/config/task.json"), entry("gone", "pipelines/deleted.py")))
@@ -182,4 +198,4 @@ assert all(by_id[item] in inventory.OPERATIONAL_CLASSES for item in (
     "scheduled-settings-render"))
 passed += 1
 
-print(f"drive dependency inventory selftest: {passed}/14 passed")
+print(f"drive dependency inventory selftest: {passed}/17 passed")
