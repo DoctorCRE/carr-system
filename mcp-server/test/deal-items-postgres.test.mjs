@@ -212,21 +212,39 @@ test('due checklist pings reach only the owner feed and replay without duplicate
     }
     await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic other partner') on conflict(slug) do update set active=true");
     const date = (await c.query("insert into critical_date(deal_id,kind,due_on,source,created_by) values($1,'attorney_review','2000-01-01','synthetic:lease',$2) returning id", [deal,actor.id])).rows[0].id;
+    await c.query("update next_action set due_on='2099-01-01' where subject_type='deal' and subject_id=$1", [deal]);
+    const stored = await executeRegisteredTool(c, actor, 'record-deal-item', {
+      deal, ...item('Synthetic vendor follow-up'), due_on: '2000-01-01', idempotency_key: randomUUID(),
+    });
+    const future = await executeRegisteredTool(c, actor, 'record-deal-item', {
+      deal, ...item('Future vendor follow-up'), due_on: '2099-01-01', idempotency_key: randomUUID(),
+    });
+    const nonce = randomUUID();
+    const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,session_token_hash,expires_at,state_at)
+      values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now()) returning id`, [nonce,actor.id])).rows[0].id;
+    const candidate = (await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,item_index,kind,deal_id,assignee_slug,action_description,due_on,evidence_quote,confidence)
+      values($1,$2,'synthetic',0,'assigned_action',$3,'dell','Call the synthetic vendor','2000-01-01','Call the vendor',0.9) returning id`, [session,randomUUID(),deal])).rows[0].id;
     await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
     await c.query('set local role carr_writer');
+    const captured = await executeRegisteredTool(c, actor, 'resolve-post-call-candidate', {
+      candidate_id: candidate, accept: true, idempotency_key: randomUUID(),
+    });
     const key = randomUUID();
     const ping = key => executeRegisteredTool(c, actor, 'ping-deal-checklist', { deal, idempotency_key: key });
     const first = await ping(key);
-    assert.equal(first.queued, 1);
+    assert.equal(first.queued, 3);
+    assert.deepEqual(first.notifications.map(n => n.checklist_item_id).sort(),
+      [`critical-date:${date}`, `deal-item:${stored.item.id}`, `deal-item:${captured.ref}`].sort());
+    assert.ok(!first.notifications.some(n => n.checklist_item_id === `deal-item:${future.item.id}`));
     assert.equal((await ping(key)).replayed, true);
     const retry = await ping(randomUUID());
     assert.equal(retry.queued, 0);
-    assert.equal(retry.deduplicated, 1);
+    assert.equal(retry.deduplicated, 3);
     assert.equal(retry.notifications[0].notification_id, first.notifications[0].notification_id);
     const feed = await executeRegisteredTool(c, actor, 'notification-feed', {});
-    assert.equal(feed.unread_count, 1);
-    assert.deepEqual(feed.notifications.map(n => [n.id,n.subject_type,n.subject_ref,n.severity]),
-      [[first.notifications[0].notification_id,'deal',deal,'action_required']]);
+    assert.equal(feed.unread_count, 3);
+    assert.deepEqual(feed.notifications.map(n => [n.id,n.subject_type,n.subject_ref,n.severity]).sort(),
+      first.notifications.map(n => [n.notification_id,'deal',deal,'action_required']).sort());
     assert.deepEqual(feed.notifications[0].delivery, [{ channel: 'in_app', state: 'pending' }]);
     await c.query('savepoint failed_ping');
     const failedKey = randomUUID();
@@ -239,6 +257,16 @@ test('due checklist pings reach only the owner feed and replay without duplicate
     assert.deepEqual(unchanged, feed);
     assert.equal((await c.query('select count(*)::int as count from event where idempotency_key=$1', [failedKey])).rows[0].count, 0);
     assert.equal((await c.query('select count(*)::int as count from tool_call where idempotency_key=$1', [failedKey])).rows[0].count, 0);
+
+    for (const id of [stored.item.id, captured.ref]) {
+      await executeRegisteredTool(c, actor, 'complete-deal-item', {
+        deal, item_id: id, idempotency_key: randomUUID(),
+      });
+    }
+    const afterCompletion = await ping(randomUUID());
+    assert.equal(afterCompletion.queued, 0);
+    assert.deepEqual(afterCompletion.notifications.map(n => n.checklist_item_id), [`critical-date:${date}`]);
+    assert.equal((await executeRegisteredTool(c, actor, 'notification-feed', {})).unread_count, 3);
 
     await c.query("select set_config('carr.acting_actor_slug','dell',true), set_config('carr.verified_human_actor_slug','dell',true)");
     assert.equal((await executeRegisteredTool(c, { ...actor, slug: 'dell' }, 'notification-feed', {})).unread_count, 0);

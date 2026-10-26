@@ -6,7 +6,7 @@ import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeatur
 import { isCalendarDate } from "./calendar-date.js";
 import { readDealChecklist } from "./deal-checklist.js";
 import { factObservationTools } from "./fact-observations.js";
-import { dealItemTools, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.js";
+import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.js";
 import { bindReferralDeal } from "./relationship-network.js";
 import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
 import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLeadLifecycle } from "./lead-workspace.js";
@@ -8985,7 +8985,7 @@ registerTools({
 
   "ping-deal-checklist": {
     write: true,
-    description: "Queue action-required notifications for one active deal's due and overdue standard checklist items. The recorded deal owner must be Joe or Dell. Uses current doctrine, sourced deadlines, quiet hours and recipient/item/date deduplication. Returns queued notification receipts, never a delivery claim. Does not schedule, send a device message or change deal facts.",
+    description: "Queue action-required notifications for one active deal's due and overdue standard checklist deadlines and open sourced stored checklist items. The recorded deal owner must be Joe or Dell. Uses current doctrine, sourced deadlines, quiet hours and recipient/item/date deduplication. Returns queued notification receipts, never a delivery claim. Does not schedule, send a device message or change deal facts.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       deal: { type: "string" }, idempotency_key: { type: "string" },
     }, required: ["deal", "idempotency_key"] },
@@ -9006,7 +9006,11 @@ registerTools({
       const checklist = await readDealChecklist(c, { ...deal, critical_dates: dates });
       if (!["current", "deal_type_unknown"].includes(checklist.template_state))
         throw new ToolError({ error: "deal_checklist_unavailable", template_state: checklist.template_state });
-      for (const item of checklist.due_items) {
+      const storedDue = (await readDealItems(c, deal.id))
+        .filter(item => item.status === "open" && item.source_ref?.trim()
+          && isCalendarDate(item.due_on) && item.due_on <= checklist.observed_on)
+        .map(item => ({ id: `deal-item:${item.id}`, due_on: item.due_on }));
+      for (const item of [...checklist.due_items, ...storedDue]) {
         await writeEvent(c, actor, "ping-deal-checklist", "deal", deal.id, {
           field: "checklist_ping", new: { checklist_item_id: item.id, due_on: item.due_on, recipient: deal.owner },
           cause: "automation_job", idempotency_key: args.idempotency_key,
