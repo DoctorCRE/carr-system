@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
+import { Pool, neonConfig } from '@neondatabase/serverless';
+import { callTool } from '../src/mcp.js';
+import { authenticatedIdentity } from '../src/identity.js';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
@@ -17,7 +20,8 @@ test('a password opens only its client portal and the live deal roadmap', async 
     await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader; grant usage on schema ops to dot_reader; alter default privileges in schema ops grant select on tables to dot_reader; create extension pgcrypto');
     await c.query(await readFile(new URL('../../migrations/0975_client_portal.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/0976_client_portal_binding.sql', import.meta.url), 'utf8'));
-    await c.query(await readFile(new URL('../../migrations/0979_client_portal_attempt_limit.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/0980_client_portal_attempt_limit.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/0981_client_portal_writer_denials.sql', import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')", [actor.id]);
     await c.query("insert into client_status(slug,label) values('active','Active'); insert into deal_phase(slug,label,sort) values('research','Research',1),('negotiation','Negotiation',2)");
     const party = (await c.query("insert into party(kind,name,notes_path,created_by,updated_by) values('person','Synthetic client A','INTERNAL_A',$1,$1) returning id", [actor.id])).rows[0].id;
@@ -26,7 +30,7 @@ test('a password opens only its client portal and the live deal roadmap', async 
     await c.query("insert into ops.client_portal(slug,client_id,deal_id,password_hash) values('synthetic-a',$1,$2,crypt(encode(digest('synthetic-password-a','sha256'),'hex'),gen_salt('bf',12)))", [client, deal]);
     await c.query("insert into ops.client_portal_material(portal_slug,kind,title,content,shared_at) values('synthetic-a','report','Shared A report','Synthetic A report content',now())");
     const read = async (slug = 'synthetic-a', password = 'synthetic-password-a', extra = {}) => {
-      await c.query('set role carr_reader');
+      await c.query('set role carr_writer');
       try { return await executeRegisteredTool(c, actor, 'read-client-portal', { slug, password, ...extra }); }
       finally { await c.query('reset role'); }
     };
@@ -35,7 +39,44 @@ test('a password opens only its client portal and the live deal roadmap', async 
       portal: { slug: 'synthetic-a', roadmap: { current_phase: 'research', phases: [{ slug: 'research', label: 'Research' }, { slug: 'negotiation', label: 'Negotiation' }] }, materials: [{ kind: 'report', title: 'Shared A report', content: 'Synthetic A report content' }] },
     };
     assert.deepEqual(await read(), expected);
-    const denied = error => { assert.deepEqual(error.payload, { error: 'portal_access_denied' }); return true; };
+    const denied = { ok: false, error: 'portal_access_denied' };
+
+    await t.test('the real writer route commits denials and locks the portal after five failures', async t => {
+      await c.query('create role carr_jobs; alter role carr_writer login; grant select on actor to carr_writer');
+      const writer = new pg.Client({ ...c.connectionParameters, user: 'carr_writer' });
+      await writer.connect();
+      t.mock.method(Pool.prototype, 'connect', async () => ({ query: writer.query.bind(writer), release() {} }));
+      t.mock.method(Pool.prototype, 'end', async () => {});
+      const previousFetch = neonConfig.fetchFunction;
+      neonConfig.fetchFunction = async () => { throw new Error('portal authentication must use the writer route'); };
+      t.after(() => { neonConfig.fetchFunction = previousFetch; });
+      const call = password => callTool({ DATABASE_URL_READER: 'postgresql://carr_reader@fixture.invalid/postgres', DATABASE_URL_WRITER: 'postgresql://carr_writer@fixture.invalid/postgres' },
+        authenticatedIdentity.connectionForGrant({ slug: 'joe' }), 'read-client-portal', { slug: 'synthetic-a', password });
+      try {
+        assert.deepEqual(await call('synthetic-password-a'), expected);
+        for (let attempt = 0; attempt < 5; attempt++)
+          assert.deepEqual(await call('wrong-password'), { ok: false, error: 'portal_access_denied' });
+        assert.deepEqual(await call('synthetic-password-a'), { ok: false, error: 'portal_access_denied' });
+        assert.equal((await c.query("select failed_attempts from ops.client_portal where slug='synthetic-a'")).rows[0].failed_attempts, 5);
+      } finally {
+        await writer.end();
+        await c.query("update ops.client_portal set failed_attempts=0,attempt_window_started_at=null where slug='synthetic-a'");
+      }
+    });
+
+    await t.test('locked and unknown slugs both pay for one bcrypt verification', async () => {
+      await c.query('begin');
+      try {
+        await c.query("set local track_functions='all'");
+        await c.query("update ops.client_portal set failed_attempts=5,attempt_window_started_at=clock_timestamp() where slug='synthetic-a'");
+        const hashes = async () => Number((await c.query("select coalesce(sum(calls),0) as calls from pg_stat_xact_user_functions where funcid='public.crypt(text,text)'::regprocedure")).rows[0].calls);
+        for (const slug of ['missing', 'synthetic-a']) {
+          const before = await hashes();
+          assert.equal((await c.query('select ops.read_client_portal($1,$2) as portal', [slug, 'wrong-password'])).rows[0].portal, null);
+          assert.equal(await hashes() - before, 1, `${slug} denial must pay the bcrypt cost`);
+        }
+      } finally { await c.query('rollback'); }
+    });
 
     await t.test('the installed grant contract matches the runtime contract', async () => {
       assert.deepEqual((await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract, SCAC_MUTATION_CURRENT_DB_GRANTS);
@@ -57,16 +98,16 @@ test('a password opens only its client portal and the live deal roadmap', async 
       assert.deepEqual(await read('synthetic-b', 'synthetic-password-b'), {
         ...expected, portal: { slug: 'synthetic-b', roadmap: { ...expected.portal.roadmap, current_phase: 'negotiation' }, materials: [{ kind: 'tour', title: 'Shared B tour', content: 'Synthetic B tour content' }] },
       });
-      await assert.rejects(read('synthetic-a', 'synthetic-password-b'), denied);
-      await assert.rejects(read('synthetic-b', 'synthetic-password-a'), denied);
-      await assert.rejects(read('missing', 'synthetic-password-a'), denied);
+      assert.deepEqual(await read('synthetic-a', 'synthetic-password-b'), denied);
+      assert.deepEqual(await read('synthetic-b', 'synthetic-password-a'), denied);
+      assert.deepEqual(await read('missing', 'synthetic-password-a'), denied);
       assert.deepEqual(await read(), expected);
     });
 
     await t.test('five failed passwords lock only that slug even with its correct password', async () => {
       for (let attempt = 0; attempt < 5; attempt++)
-        await assert.rejects(read('synthetic-a', 'wrong-password'), denied);
-      await assert.rejects(read(), denied);
+        assert.deepEqual(await read('synthetic-a', 'wrong-password'), denied);
+      assert.deepEqual(await read(), denied);
       assert.equal((await read('synthetic-b', 'synthetic-password-b')).portal.slug, 'synthetic-b');
       await c.query("update ops.client_portal set attempt_window_started_at=clock_timestamp()-interval '16 minutes' where slug='synthetic-a'");
       assert.deepEqual(await read(), expected);
@@ -75,7 +116,7 @@ test('a password opens only its client portal and the live deal roadmap', async 
     await t.test('a correct password resets the failed password allowance before lockout', async () => {
       for (let round = 0; round < 2; round++) {
         for (let attempt = 0; attempt < 4; attempt++)
-          await assert.rejects(read('synthetic-a', 'wrong-password'), denied);
+          assert.deepEqual(await read('synthetic-a', 'wrong-password'), denied);
         assert.deepEqual(await read(), expected);
       }
     });
@@ -85,12 +126,12 @@ test('a password opens only its client portal and the live deal roadmap', async 
       try {
         await Promise.all(callers.map(async caller => {
           await caller.connect();
-          await caller.query('set role carr_reader');
-          await assert.rejects(executeRegisteredTool(caller, actor, 'read-client-portal', {
+          await caller.query('set role carr_writer');
+          assert.deepEqual(await executeRegisteredTool(caller, actor, 'read-client-portal', {
             slug: 'synthetic-a', password: 'wrong-password',
           }), denied);
         }));
-        await assert.rejects(read(), denied);
+        assert.deepEqual(await read(), denied);
       } finally {
         await Promise.all(callers.map(caller => caller.end()));
         await c.query("update ops.client_portal set attempt_window_started_at=clock_timestamp()-interval '16 minutes' where slug='synthetic-a'");
@@ -135,26 +176,26 @@ test('a password opens only its client portal and the live deal roadmap', async 
 
     await t.test('disabled portals and tombstoned clients use the same refusal', async () => {
       await c.query("update ops.client_portal set disabled_at=now() where slug='synthetic-a'");
-      await assert.rejects(read(), denied);
+      assert.deepEqual(await read(), denied);
       await c.query("update ops.client_portal set disabled_at=null where slug='synthetic-a'");
       await c.query('update party set deleted_at=now() where id=$1', [party]);
-      await assert.rejects(read(), denied);
+      assert.deepEqual(await read(), denied);
       await c.query('update party set deleted_at=null,merged_into=(select id from party where id<>$1 limit 1) where id=$1', [party]);
-      await assert.rejects(read(), denied);
+      assert.deepEqual(await read(), denied);
       await c.query('update party set merged_into=null where id=$1', [party]);
       assert.deepEqual(await read(), expected);
     });
 
     await t.test('a merged client cannot keep reading through its previous portal', async () => {
       await c.query('update client set merged_into=(select id from client where id<>$1 limit 1) where id=$1', [client]);
-      await assert.rejects(read(), denied);
+      assert.deepEqual(await read(), denied);
       await c.query('update client set merged_into=null where id=$1', [client]);
       assert.deepEqual(await read(), expected);
     });
 
     await t.test('reassigning the deal cannot move its new client into the old portal', async () => {
       await c.query('update deal set client_id=(select id from client where id<>$1 limit 1) where id=$2', [client, deal]);
-      await assert.rejects(read(), denied);
+      assert.deepEqual(await read(), denied);
       await c.query('update deal set client_id=$1 where id=$2', [client, deal]);
       assert.deepEqual(await read(), expected);
     });
@@ -185,12 +226,12 @@ test('a password opens only its client portal and the live deal roadmap', async 
       const prefix = 'é'.repeat(40);
       await c.query("update ops.client_portal set password_hash=crypt(encode(digest($1,'sha256'),'hex'),gen_salt('bf',12)) where slug='synthetic-a'", [prefix + 'a']);
       assert.deepEqual(await read('synthetic-a', prefix + 'a'), expected);
-      await assert.rejects(read('synthetic-a', prefix + 'b'), denied);
+      assert.deepEqual(await read('synthetic-a', prefix + 'b'), denied);
       await c.query("update ops.client_portal set password_hash=crypt(encode(digest('synthetic-password-a','sha256'),'hex'),gen_salt('bf',12)) where slug='synthetic-a'");
     });
 
-    await t.test('the reader can use the contract without accessing raw material or verifiers', async () => {
-      await c.query('set role carr_reader');
+    await t.test('the writer can use the contract without accessing raw material or verifiers', async () => {
+      await c.query('set role carr_writer');
       try {
         for (const table of ['ops.client_portal', 'ops.client_portal_material', 'public.deal', 'public.party'])
           await assert.rejects(c.query(`select * from ${table}`), { code: '42501' });
@@ -204,7 +245,7 @@ test('a password opens only its client portal and the live deal roadmap', async 
 
     await t.test('an oversized shared library refuses instead of silently hiding material', async () => {
       await c.query("insert into ops.client_portal_material(portal_slug,kind,title,content,shared_at) select 'synthetic-a','report','Synthetic report '||n,'Synthetic content',now() from generate_series(1,100) n");
-      await assert.rejects(read(), denied);
+      assert.deepEqual(await read(), denied);
     });
   } finally { await db.close(); }
 });

@@ -2,6 +2,7 @@ const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 export function clientPortalTools({ ToolError }) {
   return {
     'read-client-portal': {
+      write: true,
       description: 'Read one password-protected client-portal.v1 roadmap and explicitly shared text material. Requires authenticated CARR access. This is not a public login endpoint. The server locks a slug after five failed passwords within 15 minutes. Never accepts client or deal selectors.',
       inputSchema: {
         type: 'object', additionalProperties: false,
@@ -15,7 +16,7 @@ export function clientPortalTools({ ToolError }) {
           throw new ToolError({ error: 'invalid_portal_request' });
         const rows = await c.query('select ops.read_client_portal($1::text,$2::text) as portal', [args.slug, args.password]);
         const portal = rows.rows[0]?.portal;
-        if (!portal) throw new ToolError({ error: 'portal_access_denied' });
+        if (!portal) return { ok: false, error: 'portal_access_denied' };
         return { ok: true, schema_version: 'client-portal.v1', portal };
       },
     },
