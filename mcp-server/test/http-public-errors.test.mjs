@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { publicError } from "../src/public-errors.ts";
+import { bearerCredential } from "../src/bearer.ts";
 import { createCaptureHandler } from "../src/capture.js";
 
 const source = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
@@ -27,7 +28,7 @@ for (const route of ["health", "ingest", "pipeline", "capture"]) {
     const neon = () => { throw failure(); };
     if (route === "health") response = await lift("health", "env", { neon, json, publicError })(env);
     if (route === "ingest") response = await lift("ingest", "request, env", {
-      neon, json, publicError, INGEST_TRANSPORT: { max_body_bytes: 1024 },
+      neon, json, publicError, bearerCredential, INGEST_TRANSPORT: { max_body_bytes: 1024 },
     })(new Request("https://synthetic.example/ingest", { method: "POST",
       headers: { authorization: "Bearer synthetic" }, body: "{}" }), env);
     if (route === "pipeline") response = await lift("pipelineApi", "request, env, actor", {

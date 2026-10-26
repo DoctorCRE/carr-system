@@ -1,4 +1,5 @@
 #!/bin/bash
+# Run the repository's canonical CI classes and report their verified results.
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /bin/bash "$0" "$@"
 fi
@@ -247,17 +248,9 @@ check_gates() {
   local failures="" count=0 skiplist="" gates_timed_out=0 gate_index=0
   export CARR_HOOK_FIXTURE=1
 
-  # Flip this warning to a failure after the machinery purge finishes.
-  local codemap_rc=0 codemap_count
-  "$PY" tools/codemap.py --missing >"$LOGDIR/codemap-missing.log" \
-    2>"$LOGDIR/codemap-error.log" || codemap_rc=$?
-  if [ "$codemap_rc" -le 1 ]; then
-    codemap_count="$(wc -l < "$LOGDIR/codemap-missing.log" | tr -d '[:space:]')"
-    printf '        WARN codemap: %s scripts lack opening descriptions (warning only during machinery purge)\n' "$codemap_count"
-    cat "$LOGDIR/codemap-missing.log"
-  else
-    printf '        WARN codemap: missing-description count unavailable (tool exited %s; warning only)\n' "$codemap_rc"
-    cat "$LOGDIR/codemap-error.log" >&2
+  if ! run_quiet "$LOGDIR/codemap.log" "$PY" tools/codemap.py --check; then
+    failures="$failures codemap"
+    fail_tail "$LOGDIR/codemap.log"
   fi
 
   # rustup installs the pinned toolchain before concurrent HxStore builds.
@@ -726,7 +719,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       fi
     fi
 
-    for proof in doc-conversation notifications session-identity dispatch-spine meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
+    for proof in doc-conversation notifications session-identity dispatch-spine governed-correspondence-thread-postgres meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
       if [ -f "mcp-server/test/$proof.test.mjs" ]; then
         if ! DATABASE_URL="$dsn" \
              CARR_DOC_CONVERSATION_DB_REQUIRED=1 CARR_R03_DB_REQUIRED=1 \
@@ -736,6 +729,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
              CARR_A02_RULE_COVERAGE_DB_REQUIRED=1 \
              CARR_RW02_DB_REQUIRED=1 \
              CARR_VENDOR_DIRECTORY_DB_REQUIRED=1 CARR_RELATIONSHIP_DB_REQUIRED=1 \
+             CARR_CORRESPONDENCE_DB_REQUIRED=1 \
              run_quiet "$LOGDIR/$proof-db.log" \
              node --test "mcp-server/test/$proof.test.mjs"; then
           tail -30 "$LOGDIR/$proof-db.log" >&2
