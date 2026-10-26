@@ -9,6 +9,7 @@ from contextlib import contextmanager
 import atexit
 import fcntl
 import os
+import pwd
 from pathlib import Path
 import shutil
 import signal
@@ -45,6 +46,73 @@ _depth = 0
 _fixtures: list['DisposablePostgres'] = []
 _main_launches = 0
 _pending_signal = None
+
+
+def _orphan_segments():
+    rows = {}
+    columns = set()
+    commands = [['ipcs', '-m', '-a']] if sys.platform == 'darwin' else [
+        ['ipcs', '-m'], ['ipcs', '-m', '-p']]
+    for command in commands:
+        result = subprocess.run(command, capture_output=True, text=True,
+                                timeout=5, check=True, env={**os.environ, 'LC_ALL': 'C'})
+        header = []
+        for line in result.stdout.splitlines():
+            fields = line.split()
+            names = [field.lower() for field in fields]
+            if 'owner' in names and ('id' in names or 'shmid' in names):
+                header = ['id' if field == 'shmid' else field for field in names]
+                columns.update(header)
+                continue
+            if not header or len(fields) <= max(header.index('id'), header.index('owner')):
+                continue
+            row = dict(zip(header, fields))
+            if not row['id'].isdigit():
+                continue
+            previous = rows.setdefault(row['id'], row)
+            if previous['owner'] != row['owner']:
+                raise ValueError('shared-memory owner changed during inspection')
+            previous.update(row)
+    if not {'id', 'owner', 'nattch', 'cpid'} <= columns:
+        raise ValueError('unrecognized shared-memory table')
+    owner = pwd.getpwuid(os.getuid()).pw_name
+    orphans = set()
+    for ident, row in rows.items():
+        if row['owner'] not in (owner, str(os.getuid())) or row.get('nattch') != '0':
+            continue
+        creator = int(row.get('cpid', '0'))
+        if creator <= 0:
+            continue
+        try:
+            os.kill(creator, 0)
+        except ProcessLookupError:
+            orphans.add((ident, creator))
+        except PermissionError:
+            pass
+    return orphans
+
+
+def _reclaim_orphan_segments():
+    try:
+        for ident, creator in _orphan_segments():
+            if (ident, creator) in _orphan_segments():
+                subprocess.run(['ipcrm', '-m', ident], capture_output=True, text=True,
+                               timeout=5, check=True)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        print(f'disposable PostgreSQL shared-memory preflight unavailable: {exc}', file=sys.stderr)
+
+
+def _diagnose_shared_memory_failure(output):
+    output = str(output).lower()
+    if 'no space left on device' not in output or not any(
+            term in output for term in ('shared memory', 'shared-memory', 'shmget')):
+        return
+    try:
+        count = f'{len(_orphan_segments())} orphan segments (owned, unattached, dead creator)'
+    except (OSError, ValueError, subprocess.SubprocessError):
+        count = 'orphan segment count unavailable'
+    raise RuntimeError(
+        f'disposable PostgreSQL environment fault: System V shared-memory exhaustion; {count}; {output}')
 
 
 def _close_all():
@@ -93,6 +161,18 @@ class DisposablePostgres:
         if data not in self._data:
             self._data.append(data)
 
+    def _failure_output(self, args, output):
+        try:
+            if '-l' in args:
+                log = Path(args[args.index('-l') + 1]).resolve()
+                if log.is_relative_to(self.root) and log.is_file():
+                    with log.open('rb') as handle:
+                        handle.seek(max(0, log.stat().st_size - 8192))
+                        output += str(handle.read())
+        except OSError:
+            pass
+        return output
+
     def run(self, command, **kwargs):
         global _main_launches, _pending_signal
         args = [str(arg) for arg in command]
@@ -114,7 +194,21 @@ class DisposablePostgres:
                 # not drop LC_ALL: PostgreSQL 17 on recent macOS refuses to start
                 # ("postmaster became multithreaded") without a valid locale.
                 kwargs['env'] = {**(kwargs.get('env') or self.env), 'LC_ALL': 'C'}
-                return (self.runner or subprocess.run)(args, **kwargs)
+                if launch:
+                    _reclaim_orphan_segments()
+                try:
+                    result = (self.runner or subprocess.run)(args, **kwargs)
+                except Exception as exc:
+                    if launch:
+                        _diagnose_shared_memory_failure(
+                            self._failure_output(args,
+                                f'{exc} {getattr(exc, "stdout", "")} {getattr(exc, "stderr", "")}'))
+                    raise
+                if launch and result.returncode:
+                    _diagnose_shared_memory_failure(
+                        self._failure_output(args,
+                            f'{getattr(result, "stdout", "")} {getattr(result, "stderr", "")}'))
+                return result
             finally:
                 if main_launch:
                     _main_launches -= 1
