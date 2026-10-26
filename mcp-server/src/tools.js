@@ -6,6 +6,7 @@ import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeatur
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
 import { factObservationTools } from "./fact-observations.ts";
+import { actionClosureTools } from "./action-closure.ts";
 import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.ts";
 import { bindReferralDeal } from "./relationship-network.js";
 import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
@@ -8914,6 +8915,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
 
 
 const TOOL_REGISTRATION_SOURCE = Object.freeze({
+  'action-closure': 'mcp-server/src/action-closure.ts',
   'deal-items': 'mcp-server/src/deal-items.ts',
   'feature-switches':'mcp-server/src/feature-switches.js',
   "inline": "mcp-server/src/tools.js",
@@ -10283,6 +10285,7 @@ registerTools(partyIdentityTools({ withEnvelope, writeEvent, versionGuard, resol
 registerTools(scheduleBoardTools(), "schedule-board");
 registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject,
   canExercisePartnerAuthority, partnerAuthoritySlugForActor }), "deal-items");
+registerTools(actionClosureTools({ withEnvelope, writeEvent, canExercisePartnerAuthority }), "action-closure");
 
 // WR-AI-006: curation proposals are machine-callable; approval and retirement
 // remain human-only inside their handlers and the dispatcher boundary.
