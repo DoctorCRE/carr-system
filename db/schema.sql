@@ -122138,7 +122138,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0979_decline_unstarted_ready_work_request.sql	f343b16316d6a744dcf6c20073bedfb9e38695d5f06c56d292ba8797b9c261d6	1970-01-01 00:00:00+00
 0981_client_portal_writer_denials.sql	2380f08e4b75a3ed447b5b99854cfb8b9348308dab81a24c74986602feb56b86	1970-01-01 00:00:00+00
 0982_decline_unstarted_program_work_request.sql	b9d3cc1923fff53794725307d647fc59452669e5246c6b7121e79282a64b2741	1970-01-01 00:00:00+00
-0986_decline_requires_its_receipt.sql	0b26e8e8ce4d3e8247ffa672d22dac73158b9b160fa760206560cf7e4d5db928	1970-01-01 00:00:00+00
+0986_decline_requires_its_receipt.sql	293e6e21f95341bf47a2b8a10a9ab0f4f27024358843fa7182056d4fe96f7868	1970-01-01 00:00:00+00
 \.
 
 
