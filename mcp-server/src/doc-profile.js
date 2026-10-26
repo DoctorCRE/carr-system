@@ -3,7 +3,7 @@
 export const DOC_TOOL_NAMES = Object.freeze([
   "whats-new",
   "catch-me-up", "today-triage", "find", "find-and-catch-up", "deal-board",
-  "get-deal-room", "vendor-assignment-context", "who-do-we-know", "counterparty-history", "lead-board",
+  "get-deal-room", "ping-deal-checklist", "vendor-assignment-context", "who-do-we-know", "counterparty-history", "lead-board",
   "schedule-board", "search-tour-properties", "read-doctrine", "search-doctrine",
   "recall-memory", "add-deal-note", "log-activity", "set-next-step", "add-critical-date", "log-capture",
 ]);
@@ -23,6 +23,7 @@ export const DOC_INSTRUCTIONS =
   "before discussing a record. Writes use a fresh idempotency_key for each intended action; " +
   "keep that key on retries and preserve any base_version required by the tool. " +
   "Ask the partner about version_conflict or needs_confirm; never retry them automatically. " +
+  "Use ping-deal-checklist to queue due checklist reminders for the recorded partner owner; queued never means delivered. " +
   "Only the listed tools are available. This endpoint cannot send messages or delete records.";
 
 // These verbs query the private record store; none browses or contacts outside

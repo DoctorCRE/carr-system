@@ -332,7 +332,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["set-next-step", "set-market-agent", "set-national-account-owner"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
@@ -8977,6 +8977,53 @@ registerTools({
         premises: premises.rows, negotiation_rounds: negotiation.rows,
         documents: documents.rows, events: history.rows });
     },
+  },
+
+  "ping-deal-checklist": {
+    write: true,
+    description: "Queue action-required notifications for one active deal's due and overdue standard checklist items. The recorded deal owner must be Joe or Dell. Uses current doctrine, sourced deadlines, quiet hours and recipient/item/date deduplication. Returns queued notification receipts, never a delivery claim. Does not schedule, send a device message or change deal facts.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      deal: { type: "string" }, idempotency_key: { type: "string" },
+    }, required: ["deal", "idempotency_key"] },
+    handler: async (c, actor, args) => withEnvelope(c, actor, "ping-deal-checklist", args, async () => {
+      const subject = await resolveSubject(c, args.deal);
+      if (subject.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: subject });
+      const deal = (await c.query(
+        `select id, type, owner, phase, operating_state, outcome, closed_on, invoiced_on
+           from v_deal_room_board where id=$1`, [subject.id])).rows[0];
+      const result = { ok: true, schema_version: "deal-checklist-pings.v1", deal_id: subject.id,
+        queued: 0, deduplicated: 0, notifications: [] };
+      if (!deal || deal.operating_state !== "active" || deal.outcome != null || deal.closed_on || deal.invoiced_on || ["closed", "invoiced"].includes(deal.phase))
+        return { ...result, reason: "deal_not_active" };
+      if (!PARTNER_SLUGS.includes(deal.owner)) return { ...result, reason: "partner_owner_not_recorded" };
+      const dates = (await c.query(
+        "select id, kind, due_on::text as due_on, source, status from critical_date where deal_id=$1 order by due_on, id",
+        [deal.id])).rows;
+      const checklist = await readDealChecklist(c, { ...deal, critical_dates: dates });
+      if (!["current", "deal_type_unknown"].includes(checklist.template_state))
+        throw new ToolError({ error: "deal_checklist_unavailable", template_state: checklist.template_state });
+      for (const item of checklist.due_items) {
+        await writeEvent(c, actor, "ping-deal-checklist", "deal", deal.id, {
+          field: "checklist_ping", new: { checklist_item_id: item.id, due_on: item.due_on, recipient: deal.owner },
+          cause: "automation_job", idempotency_key: args.idempotency_key,
+        });
+        const eventId = (await c.query(
+          `select id from event where subject_type='deal' and subject_id=$1 and verb='ping-deal-checklist'
+             and field='checklist_ping' and idempotency_key=$2 and new_value->>'checklist_item_id'=$3
+           order by recorded_at desc,id desc limit 1`, [deal.id, args.idempotency_key, item.id])).rows[0]?.id;
+        const minted = (await c.query(
+          "select ops.mint_notification($1,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11) as result",
+          ["event", eventId, "deal", deal.id, "A deal checklist item is due. Open the deal checklist for details.",
+            "action_required", "/notifications", `deal-checklist:${deal.id}:${item.id}:${item.due_on}`,
+            deal.owner, false, false])).rows[0]?.result;
+        if (!minted?.ok || !minted.notification_id)
+          throw new ToolError({ error: "deal_checklist_notification_unavailable" });
+        result[minted.deduplicated ? "deduplicated" : "queued"]++;
+        result.notifications.push({ checklist_item_id: item.id, due_on: item.due_on,
+          notification_id: minted.notification_id, deduplicated: minted.deduplicated === true });
+      }
+      return result;
+    }),
   },
 
   "read-home-agenda": {
