@@ -6,6 +6,7 @@ Intake removes the item after decoding and acknowledging its full-text note.
 from datetime import datetime, timedelta, timezone
 import fcntl
 import os
+import sys
 from pathlib import Path
 
 from lib import outlook_intake as intake
@@ -61,8 +62,15 @@ def run(repo: Path, now: datetime, waits: Waits = Waits(),
             window.show_folder_pane(True)
     except ValueError:
         return Outcome('failed', 'refresh_list_invalid')
-    except (OSError, UiError, CuaError):
-        return Outcome('failed', 'refresh_failed')
+    except (OSError, UiError, CuaError) as exc:
+        if isinstance(exc, UiError):
+            reason, message = 'ui_error', 'Outlook UI interaction failed'
+        elif isinstance(exc, CuaError):
+            reason, message = 'cua_error', 'Computer automation call failed'
+        else:
+            reason, message = 'os_error', 'Operating system operation failed'
+        print(f'outlook-refresh {type(exc).__name__}: {message}', file=sys.stderr)
+        return Outcome('failed', reason)
     finally:
         os.close(fd)
 

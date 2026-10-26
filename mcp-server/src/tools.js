@@ -1,3 +1,4 @@
+import { vendorMeetingTools } from "./vendor-meetings.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
@@ -8978,6 +8979,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "doc-suggestions": "mcp-server/src/doc-suggestions.js",
   "whats-new": "mcp-server/src/whats-new.js",
   "invoice-tracker": "mcp-server/src/invoice-tracker.js",
+  "vendor-meetings": "mcp-server/src/vendor-meetings.js",
 });
 
 function bindToolSource(tool, source) {
@@ -10463,5 +10465,7 @@ registerTools(assuranceHealthStoreTools({ withEnvelope, ToolError }), "assurance
 // to receive server-established actor/sponsor transaction settings; its tool
 // contract remains read-only and the SQL function is stable.
 registerTools(ruleContextRuntimeTools({ withEnvelope, ToolError }), "rule-context-runtime");
+
+registerTools(vendorMeetingTools(), "vendor-meetings");
 
 Object.freeze(TOOLS);
