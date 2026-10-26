@@ -72,6 +72,15 @@ trap 'rm -f "$TALLY"' EXIT
 tally_reset() { : > "$TALLY"; }
 tally_count() { wc -l < "$TALLY" | tr -d ' '; }
 
+# THE WRITER IS SCHEDULED LATE, on purpose. curl_auth() pipes its config into
+# curl with printf, and pipefail makes printf's status part of the exit code
+# call() retries on. A stub that returns without reading stdin closes the pipe,
+# and printf then dies of SIGPIPE whenever it happens to write second: a
+# spurious retry, so "a successful call is issued exactly once" read 2 only on
+# loaded hosted runners (WR-000504). Delaying the writer makes "second" certain,
+# so a stub that does not drain stdin fails every run instead of some runs.
+printf() { sleep 0.2; builtin printf "$@"; }
+
 print -r -- "call() transport handling -> $SRC"
 print -r --
 
