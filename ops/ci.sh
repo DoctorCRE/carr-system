@@ -59,7 +59,7 @@ class_desc() {
     pushfloor)  echo "seeded defect that must not leave the machine (local pre-push floor)" ;;
     unit)       echo "seeded failing unit test" ;;
     types)      echo "seeded shape mistake in a data hand-off" ;;
-    contract)   echo "seeded auth/schema contract break" ;;
+    contract)   echo "seeded PostgreSQL path outside the disposable fixture resolver" ;;
     gates)      echo "seeded enforcement-layer regression" ;;
     secret)     echo "seeded credential in the tree" ;;
     dependency) echo "seeded unpinned or vulnerable dependency" ;;
@@ -196,26 +196,16 @@ check_types() {
 }
 
 check_contract() {
-  local failures=""
+  # The unit class owns the Node contract suites (control-room tests and
+  # workspace/contracts/validate.mjs through workspace/test). This class owns
+  # only the PostgreSQL-path boundary.
   local pg_paths rc=0
   pg_paths="$(git grep -n -F '/opt/homebrew/opt/postgresql@17' -- '*.py' ':!lib/disposable_pg_fixture.py')" || rc=$?
   if [ "$rc" -ne 1 ]; then
-    failures="$failures PostgreSQL-paths"
     printf '%s\n' "PostgreSQL paths must use lib/disposable_pg_fixture.py (grep exit $rc)" "$pg_paths" >&2
-  fi
-  if [ -f workspace/contracts/validate.mjs ]; then
-    run_quiet "$LOGDIR/contract-workspace.log" node workspace/contracts/validate.mjs \
-      || { failures="$failures workspace/contracts"; tail -20 "$LOGDIR/contract-workspace.log" >&2; }
-  fi
-  for t in control-room/test/contracts.test.mjs control-room/test/work-request-projection.test.mjs; do
-    [ -f "$t" ] || continue
-    run_quiet "$LOGDIR/contract-$(basename "$t").log" node --test "$t" \
-      || { failures="$failures $t"; tail -20 "$LOGDIR/contract-$(basename "$t").log" >&2; }
-  done
-  if [ -n "$failures" ]; then
-    bad contract "contract checks failed:$failures"
+    bad contract "PostgreSQL paths bypass lib/disposable_pg_fixture.py"
   else
-    ok contract "workspace + control-room contracts validate"
+    ok contract "PostgreSQL paths resolve through lib/disposable_pg_fixture.py"
   fi
 }
 
@@ -260,6 +250,9 @@ check_gates() {
 import json, os, sys
 scope, name, portable = sys.argv[1], sys.argv[2], sys.argv[3] == "1" or os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
 d = json.load(open(scope))
+for e in d.get("run_by", []):
+    if e["check"] == name and os.path.isfile(os.path.join("ops", e["owner"])):
+        print("RUN BY " + e["owner"] + ": " + e["reason"]); sys.exit(0)
 if portable:
     for e in d.get("local_only", []):
         if e["check"] == name:
@@ -277,6 +270,10 @@ PYEOF
     [ -f "$t" ] || continue
     local base; base="$(basename "$t")"
     local why; why="$(excluded_reason "$base")"
+    case "$why" in "RUN BY "*)
+      printf '        owned    %s — %s\n' "$base" "$why" >&2
+      continue ;;
+    esac
     if [ -n "$why" ]; then
       skiplist="$skiplist $base"
       printf '        \033[33mnot run\033[0m  %s — %s\n' "$base" "$why" >&2
@@ -289,11 +286,20 @@ PYEOF
   done
   local pooled_timeout=$(( CI_SELFTEST_TIMEOUT_SECONDS * ${CARR_CI_GATE_JOBS:-4} ))
   export CI_TIMEOUT_HELPER CI_SELFTEST_TIMEOUT_SECONDS LOGDIR PY pooled_timeout
+  # Each suite gets its own TMPDIR; a passing suite that leaves anything in it
+  # fails (exit 75). This runner is the one owner of fixture-cleanup proof.
   printf '%s\n' $eligible | xargs -P "${CARR_CI_GATE_JOBS:-4}" -n1 bash -c '
-    b="$(basename "$1")"
-    "$PY" "$CI_TIMEOUT_HELPER" "$pooled_timeout" "$PY" "$1" \
+    b="$(basename "$1")"; tmp="$LOGDIR/tmp-$b"; mkdir -p "$tmp"
+    TMPDIR="$tmp" TMP="$tmp" TEMP="$tmp" \
+      "$PY" "$CI_TIMEOUT_HELPER" "$pooled_timeout" "$PY" "$1" \
       >"$LOGDIR/gate-$b.log" 2>&1
-    echo $? >"$LOGDIR/gate-$b.rc"
+    rc=$?
+    if [ "$rc" -eq 0 ] && [ -n "$(ls -A "$tmp")" ]; then
+      echo "leaked temporary fixtures: $(ls -A "$tmp" | head -5 | tr "\n" " ")" >>"$LOGDIR/gate-$b.log"
+      rc=75
+    fi
+    rm -rf "$tmp"
+    echo "$rc" >"$LOGDIR/gate-$b.rc"
   ' _
   local grc
   for t in $eligible; do
@@ -340,16 +346,17 @@ PYEOF
       failures="$failures $sbase"; fail_tail "$LOGDIR/gate-$sbase.log"
     fi
   done; fi
-  run_quiet "$LOGDIR/safety-hooks.log" "$PY" hooks/gate-integrity.py --strict \
-    || { failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
-
-  for inv in audit-queue-freshness-check \
-             stale-count-check \
-             rule-load-layer-check rule-classification-parity-check \
-             selftest-git-isolation-check \
-             sync-core-rule-ids rule-route-coverage \
-             migration-order-gate \
-             migration-safety-gate; do
+  # Shard 1 owns the repository-wide invariants; shard 2 used to rerun them.
+  local invariants=""
+  if [ "$GATE_SHARD" -eq 1 ]; then
+    run_quiet "$LOGDIR/safety-hooks.log" "$PY" hooks/gate-integrity.py --strict \
+      || { failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
+    invariants="audit-queue-freshness-check stale-count-check
+      rule-load-layer-check rule-classification-parity-check
+      selftest-git-isolation-check sync-core-rule-ids rule-route-coverage
+      migration-order-gate migration-safety-gate"
+  fi
+  for inv in $invariants; do
     [ -f "ops/$inv.py" ] || continue
     local inv_args=()
     case "$inv" in
@@ -498,7 +505,10 @@ check_migration() {
     bad migration "an earlier PR or main owns a migration slot; choose a forward filename and update its references"
     return
   fi
-  if ! run_quiet "$LOGDIR/migration-baseline.log" "$PY" -m unittest discover -s tools -p 'test_migr*.py'; then
+  # The proofs partition (inside all/core) owns the static migration tests;
+  # gates-* and acceptance partitions used to rediscover them each.
+  if [[ "$MIGRATION_PART" = all || "$MIGRATION_PART" = core || "$MIGRATION_PART" = proofs ]] \
+     && ! run_quiet "$LOGDIR/migration-baseline.log" "$PY" -m unittest discover -s tools -p 'test_migr*.py'; then
     tail -30 "$LOGDIR/migration-baseline.log" >&2
     bad migration "migration baseline identity or historical source checks failed before database work"
     return
