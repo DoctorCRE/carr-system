@@ -140,3 +140,99 @@ test('invalid comparison input reaches callers as a public validation error', as
     return true;
   });
 });
+
+test('conflicting auto-accept observations produce one high-priority review item', async () => {
+  const out = await compare([
+    observation('lease'), observation('counter', { value: '25' }), observation('revision', { value: '25' }),
+  ]);
+  assert.deepEqual(out.review_items, [{
+    entity_ref: 'synthetic-deal-1', fact_key: 'base_rent_per_sf', priority: 'high',
+    observation_ids: ['lease', 'counter', 'revision'], reasons: ['conflict'],
+  }]);
+  assert.equal(out.canonical, false);
+  assert.equal(out.records_written, 0);
+});
+
+test('review tiers route once per field with high priority before verify-band fields', async () => {
+  const economic = (id, fact_key, value, unit, confidence_tier) => {
+    const item = observation(id, { fact_key, value, unit, confidence_tier });
+    delete item.expense_basis;
+    return item;
+  };
+  const out = await compare([
+    economic('term-verify', 'term_months', '60', 'months', 'verify_band'),
+    observation('rent-review', { confidence_tier: 'human_review' }),
+    observation('rent-verify', { confidence_tier: 'verify_band' }),
+    economic('ti-review', 'landlord_ti_per_sf', '50', 'USD/SF', 'human_review'),
+    economic('free-verify', 'free_rent_months', '1', 'months', 'verify_band'),
+  ]);
+  assert.deepEqual(out.review_items, [
+    { entity_ref: 'synthetic-deal-1', fact_key: 'base_rent_per_sf', priority: 'high',
+      observation_ids: ['rent-review', 'rent-verify'], reasons: ['human_review', 'verify_band'] },
+    { entity_ref: 'synthetic-deal-1', fact_key: 'landlord_ti_per_sf', priority: 'high',
+      observation_ids: ['ti-review'], reasons: ['human_review'] },
+    { entity_ref: 'synthetic-deal-1', fact_key: 'term_months', priority: 'normal',
+      observation_ids: ['term-verify'], reasons: ['verify_band'] },
+    { entity_ref: 'synthetic-deal-1', fact_key: 'free_rent_months', priority: 'normal',
+      observation_ids: ['free-verify'], reasons: ['verify_band'] },
+  ]);
+});
+
+test('mixed text and OCR fields require OCR human review without changing supplied evidence', async () => {
+  const text = observation('text');
+  const ocr = observation('ocr', { method: 'ocr', fact_key: 'term_months', value: '60', unit: 'months' });
+  delete ocr.expense_basis;
+  const input = [text, ocr];
+  const original = structuredClone(input);
+  const out = await compare(input);
+  assert.deepEqual(out.observations.map(o => o.effective_confidence_tier), ['auto_accept', 'human_review']);
+  assert.deepEqual(out.observations.map(o => o.input), original);
+  assert.deepEqual(input, original);
+  assert.deepEqual(out.review_items, [{
+    entity_ref: 'synthetic-deal-1', fact_key: 'term_months', priority: 'high',
+    observation_ids: ['ocr'], reasons: ['human_review', 'ocr'],
+  }]);
+  assert.equal(out.canonical, false);
+  assert.equal(out.records_written, 0);
+});
+
+test('registered dispatch routes all OCR tiers to human review even when values agree', async () => {
+  for (const confidence_tier of ['auto_accept', 'verify_band', 'human_review']) {
+    const args = { entity_ref: 'synthetic-dispatch-deal', observations: [
+      observation('text'), observation('scan', { method: 'ocr', confidence_tier }),
+    ] };
+    const out = await executeRegisteredTool(db, actor, 'compare-fact-observations', args);
+    assert.equal(out.fields[0].status, 'agreement');
+    assert.deepEqual(out.observations.map(o => o.effective_confidence_tier), ['auto_accept', 'human_review']);
+    assert.deepEqual(out.review_items, [{
+      entity_ref: 'synthetic-dispatch-deal', fact_key: 'base_rent_per_sf', priority: 'high',
+      observation_ids: ['text', 'scan'], reasons: ['human_review', 'ocr'],
+    }]);
+    assert.deepEqual(out.observations.map(o => o.input), args.observations);
+    assert.equal(out.evidence_independence, 'not_assessed');
+    assert.equal(out.canonical, false);
+    assert.equal(out.records_written, 0);
+  }
+});
+
+test('conflict and tier reasons share one review item containing every competing observation', async () => {
+  const out = await compare([
+    observation('scan', { method: 'ocr' }),
+    observation('verify', { value: '25', confidence_tier: 'verify_band' }),
+    observation('review', { value: '26', confidence_tier: 'human_review' }),
+  ]);
+  assert.deepEqual(out.review_items, [{
+    entity_ref: 'synthetic-deal-1', fact_key: 'base_rent_per_sf', priority: 'high',
+    observation_ids: ['scan', 'verify', 'review'], reasons: ['conflict', 'human_review', 'verify_band', 'ocr'],
+  }]);
+});
+
+test('text-layer auto-accept agreement and single observations create no review item or canonical fact', async () => {
+  for (const observations of [[observation('single')], [observation('a'), observation('b')]]) {
+    const out = await compare(observations);
+    assert.deepEqual(out.review_items, []);
+    assert.deepEqual(out.observations.map(o => o.effective_confidence_tier), observations.map(() => 'auto_accept'));
+    assert.equal(out.canonical, false);
+    assert.equal(out.records_written, 0);
+  }
+});
