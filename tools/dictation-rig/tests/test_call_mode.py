@@ -188,7 +188,7 @@ class CallModeTests(unittest.TestCase):
         self.assertEqual(result["state"], "needs_attention")
         self.assertEqual(result["extraction_attempts"], 3)
         self.assertNotIn("reason", result)
-        self.assertIn("Needs attention", call_mode.PAGE)
+        self.assertIn("Needs attention", call_mode.CALL_MODE_HTML)
 
     def test_stale_partial_session_is_not_reported_as_recording(self) -> None:
         session = self.session("stale-partial")
@@ -677,6 +677,37 @@ class PostCallTests(unittest.TestCase):
         self.assertFalse((self.session / post_call.REPORT_FILE).exists())
         self.assertIsNotNone(post_call.context_from_session(self.session))
 
+    def test_interrupted_extraction_consumes_attempt_and_saved_report_wins(self) -> None:
+        post_call.store_context(self.session, self.context)
+
+        def interrupted(_request):
+            raise KeyboardInterrupt()
+
+        with patch.object(post_call, "now", return_value="2026-10-26T12:00:00Z"):
+            with self.assertRaises(KeyboardInterrupt):
+                post_call.process_session(self.session, interrupted)
+            status = post_call.process_session(self.session, interrupted)
+        self.assertEqual(status["extraction_attempts"], 1)
+        self.assertEqual(status["next_attempt_at"], "2026-10-26T12:05:00Z")
+        post_call.write_private(self.session / post_call.STATUS_FILE, {
+            **status, "state": "needs_attention", "extraction_attempts": 3,
+        })
+        post_call.write_private(self.session / post_call.REPORT_FILE, self.output())
+        status = post_call.process_session(self.session, interrupted)
+        self.assertEqual(status["state"], "ready_review")
+        self.assertEqual(status["extraction_attempts"], 3)
+        self.assertIsNone(post_call.context_from_session(self.session))
+
+    def test_retry_can_succeed_without_erasing_its_attempt_history(self) -> None:
+        post_call.store_context(self.session, self.context)
+        with patch.object(post_call, "now", return_value="2026-10-26T12:00:00Z"):
+            post_call.process_session(self.session, lambda _request: {})
+        with patch.object(post_call, "now", return_value="2026-10-26T12:05:00Z"):
+            status = post_call.process_session(self.session, lambda _request: self.output())
+        self.assertEqual(status["state"], "ready_review")
+        self.assertEqual(status["extraction_attempts"], 2)
+        self.assertIsNone(status["next_attempt_at"])
+
     def test_context_allows_same_party_on_different_deals_but_exact_output_attaches_to_its_deal(self) -> None:
         post_call.validate_context(self.context, self.session.name)
         bad = self.output(joe_tasks=[{"title": "Wrong", "deal_id": "deal-a", "participant_ids": ["missing"], "evidence": "One two."}])
@@ -846,6 +877,7 @@ class PostCallTests(unittest.TestCase):
                       {"value": "legal", "base_event_id": None})
         for phase in invalid_phases:
             with self.subTest(phase=phase):
+                (self.session / post_call.STATUS_FILE).unlink(missing_ok=True)
                 (self.session / post_call.REPORT_FILE).unlink(missing_ok=True)
                 post_call.store_context(self.session, self.context)
                 output = self.output(deal_updates=[{
@@ -854,6 +886,7 @@ class PostCallTests(unittest.TestCase):
                 }])
                 self.assertEqual(post_call.process_session(self.session, distiller=lambda _request: output)["state"], "blocked")
                 self.assertFalse((self.session / post_call.REPORT_FILE).exists())
+        (self.session / post_call.STATUS_FILE).unlink(missing_ok=True)
         output = self.output(deal_updates=[{
             "deal_id": "unknown-deal", "summary": "Update", "participant_ids": [],
             "evidence": "Move the deal to legal", "phase_move": {"value": "legal"},
@@ -1116,6 +1149,7 @@ class PostCallTests(unittest.TestCase):
         ]
         for stdout in cases:
             with self.subTest(stdout=stdout):
+                (self.session / post_call.STATUS_FILE).unlink(missing_ok=True)
                 post_call.store_context(self.session, self.context)
                 with patch.dict(os.environ, {"CARR_POST_CALL_DISTILLER_COMMAND": ""}), \
                      patch.object(post_call.subprocess, "run", return_value=SimpleNamespace(
@@ -1131,6 +1165,7 @@ class PostCallTests(unittest.TestCase):
     def test_sonnet_execution_failures_block_without_a_report(self) -> None:
         for failure in (OSError("missing CLI"), subprocess.TimeoutExpired("claude", 180)):
             with self.subTest(failure=type(failure).__name__):
+                (self.session / post_call.STATUS_FILE).unlink(missing_ok=True)
                 post_call.store_context(self.session, self.context)
                 with patch.dict(os.environ, {"CARR_POST_CALL_DISTILLER_COMMAND": ""}), \
                      patch.object(post_call.subprocess, "run", side_effect=failure):

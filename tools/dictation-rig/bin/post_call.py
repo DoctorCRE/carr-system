@@ -21,7 +21,7 @@ import sys
 import tempfile
 import urllib.parse
 import fcntl
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -36,6 +36,7 @@ DRAFTS_FILE = "outlook-drafts.json"
 PUSH_FILE = "backend-push.json"
 LOCK_FILE = ".post-call.lock"
 OUTLOOK_URL_LIMIT = 1900
+EXTRACTION_RETRY_DELAYS = (300, 900)
 CALL_PHASES = ("pending", "research", "site_selection", "negotiation", "legal", "due_diligence", "closing")
 
 
@@ -602,7 +603,8 @@ def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, An
         stored = read_json(session_dir / CONTEXT_FILE) or {}
         stored.pop("call_context", None)
         write_private(session_dir / CONTEXT_FILE, stored)
-    status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "ready_review", "updated_at": now(), "review_questions": len(report["review_questions"]), "candidate_counts": {k: len(report[k]) for k in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals")}}
+    existing = read_json(session_dir / STATUS_FILE) or {}
+    status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "ready_review", "updated_at": now(), "extraction_attempts": existing.get("extraction_attempts", 0), "next_attempt_at": None, "review_questions": len(report["review_questions"]), "candidate_counts": {k: len(report[k]) for k in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals")}}
     write_private(session_dir / STATUS_FILE, status)
     return status
 
@@ -616,6 +618,15 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         if report is None:
             raise ContractError("post-call report is unreadable")
         return _complete_session(session_dir, report)
+    existing = read_json(session_dir / STATUS_FILE) or {}
+    attempts = existing.get("extraction_attempts", 0)
+    if attempts >= len(EXTRACTION_RETRY_DELAYS) + 1:
+        existing.update({"state": "needs_attention", "next_attempt_at": None})
+        write_private(session_dir / STATUS_FILE, existing)
+        return existing
+    timestamp = now()
+    if existing.get("next_attempt_at") and timestamp < existing["next_attempt_at"]:
+        return existing
     context = context_from_session(session_dir)
     metadata = read_json(session_dir / CONTEXT_FILE) or {}
     transcript = read_json(session_dir / "transcript.json")
@@ -627,7 +638,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
             reason = str(exc)
             context = context_from_session(session_dir)
     if context is None:
-        status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "awaiting_context", "updated_at": now()}
+        status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "awaiting_context", "updated_at": now(), "extraction_attempts": attempts, "next_attempt_at": None}
         if reason:
             status["reason"] = reason
         write_private(session_dir / STATUS_FILE, status)
@@ -635,10 +646,23 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
     if transcript is None:
         raise ContractError("transcript.json is required before post-call processing")
     request = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "context": context, "transcript": transcript}
+    attempts += 1
+    next_attempt_at = None
+    if attempts <= len(EXTRACTION_RETRY_DELAYS):
+        next_attempt_at = (datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                           + timedelta(seconds=EXTRACTION_RETRY_DELAYS[attempts - 1])).strftime("%Y-%m-%dT%H:%M:%SZ")
+    status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "blocked", "updated_at": timestamp,
+              "extraction_attempts": attempts, "next_attempt_at": next_attempt_at, "reason": "Extraction attempt did not finish."}
+    write_private(session_dir / STATUS_FILE, status)
     try:
         result = normalize_distillation(distiller(request), context, session_dir.name)
-    except (RuntimeError, ContractError) as exc:
-        status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "blocked", "updated_at": now(), "reason": str(exc)}
+    except (RuntimeError, ContractError, OSError, subprocess.SubprocessError) as exc:
+        failed_at = now()
+        if next_attempt_at is not None:
+            next_attempt_at = (datetime.fromisoformat(failed_at.replace("Z", "+00:00"))
+                               + timedelta(seconds=EXTRACTION_RETRY_DELAYS[attempts - 1])).strftime("%Y-%m-%dT%H:%M:%SZ")
+        status.update({"state": "needs_attention" if next_attempt_at is None else "blocked", "updated_at": failed_at,
+                       "next_attempt_at": next_attempt_at, "reason": str(exc)})
         write_private(session_dir / STATUS_FILE, status)
         return status
     try:
