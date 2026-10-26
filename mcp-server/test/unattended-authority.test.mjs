@@ -181,13 +181,16 @@ test("the Worker checks the unattended door before the local-token door", () => 
 
 // ---------- the humanCallerOnly flag ----------
 
-test("identity merges, retrieval, board answers and partner-only deal transitions require literal human callers", () => {
+test("identity merges, retrieval, board answers, partner-only deal acts and human receipts require literal human callers", () => {
   assert.equal(TOOLS["confirm-merge"].humanCallerOnly, true);
   assert.equal(TOOLS["confirm-merge"].humanOnly, true);
   const flagged = Object.keys(TOOLS).filter(name => TOOLS[name].humanCallerOnly === true);
-  assert.deepEqual(flagged.sort(), ["answer-board-question", "approve-retrieval-proposals", "cancel-pending-deal", "commit-winning-property",
-    "confirm-email-deal-progress", "confirm-email-next-step", "confirm-merge", "dismiss-email-proposal", "record-deal-closing",
-    "retire-retrieval-curation"]);
+  assert.deepEqual(flagged.sort(), ["answer-board-question", "answer-work-request-for-joe",
+    "append-tour-entrance-verification-receipt", "approve-retrieval-proposals", "cancel-pending-deal", "commit-winning-property",
+    "confirm-email-deal-progress", "confirm-email-next-step", "confirm-merge", "dismiss-email-proposal",
+    "record-artifact-preservation-hold", "record-deal-closing", "record-evidence-subject-link", "record-lifecycle-correction",
+    "record-partner-lifecycle-fact", "record-tour-map-promotion-receipt", "record-tour-pdf-human-review",
+    "register-record-source-authority-policy", "retire-retrieval-curation"]);
 });
 
 test("confirm-merge refuses the unattended actor before database access", async () => {
