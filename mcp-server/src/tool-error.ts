@@ -9,6 +9,9 @@
 // importing ToolError back out of tools.js would be a cycle. Keeping the class
 // here lets any module — including ones tools.js depends on — throw a typed,
 // self-naming failure. tools.js re-exports it so existing imports keep working.
+export type ToolErrorPayload = { error: string; [field: string]: unknown };
+
 export class ToolError extends Error {
-  constructor(payload) { super(payload.error); this.payload = payload; }
+  declare payload: ToolErrorPayload;
+  constructor(payload: ToolErrorPayload) { super(payload.error); this.payload = payload; }
 }

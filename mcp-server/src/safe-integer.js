@@ -1,4 +1,4 @@
-import { ToolError } from "./tool-error.js";
+import { ToolError } from "./tool-error.ts";
 
 export function safeInteger(value, error, { allowString = true, minimum = 1 } = {}) {
   const normalized = allowString && typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value)

@@ -23,8 +23,8 @@ Printed numbers and model confidence do not prove complete or correct extraction
 The script lab missed real records and clauses despite plausible counts and Jev
 scores. More planning and one semantic call per phrase also performed worse.
 
-The detailed evidence archive is the supplied `job-flash-knowledge/flash-knowledge.md`
-report. Its results are historical observations, not fresh benchmarks. Exact
+The detailed evidence archive is the supplied Flash knowledge report (not kept in this
+repository). Its results are historical observations, not fresh benchmarks. Exact
 [scorecard tasks](https://github.com/DoctorCRE/carr-system/blob/c9ab378856ace1bb30d94d962eb3e016e9daeb72/ops/config/flash-scorecard-tasks.v1.json)
 remain in git. Hard cases included chained arithmetic, a Dijkstra node named
 `None`, incomplete SemVer suffixes and leap-year boundaries. See the

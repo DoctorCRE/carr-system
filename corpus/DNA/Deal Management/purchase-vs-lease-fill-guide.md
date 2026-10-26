@@ -1,6 +1,6 @@
 # Purchase vs. Lease — CARR's Fill & Interpret Methodology
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Created 2026-07-07 by Claude Code (watch-video skill), from CARR's official tool-walkthrough video (presenter a senior CARR agent; "available on Agent Central"). This is the JUDGMENT layer the other Deal Management docs were missing: `deal-analysis-toolkit.md` says WHAT each tool models and `fill-engine/fill-it-in-workflow.md` says HOW to populate cells mechanically — this says HOW CARR says to choose the inputs and read the outputs. The tool itself is already in the system: `Templates/PurchaseVsLeaseComparison_TEMPLATE.xlsx` (confirmed identical to the portal's current file). Most principles here apply to all four client-facing worksheets, not just Purchase-vs-Lease. Timestamps index the source transcript in the appendix.*
 

@@ -1,7 +1,7 @@
 // The deliberately small Program 6 bridge: source a problem from the current
 // deterministic situation index, capture it, and expose a safe read card. It
 // does not own a lifecycle transition, an executor, or an approval.
-import { WORK_REQUEST_PROJECTION_STATE, WORK_REQUEST_READ_STATES, readableWorkRequestSql } from "./work-request-read.js";
+import { WORK_REQUEST_PROJECTION_STATE, WORK_REQUEST_READ_STATES, readableWorkRequestSql } from "./work-request-read.ts";
 import { searchDoctrineSituations } from "./situation-retrieval.js";
 import { authorizationClassForActor, organizationTenantForActor } from "./identity.js";
 import { deriveRuleDeliverySource, normalizeRuleMapDigest } from "./rule-delivery-source.js";

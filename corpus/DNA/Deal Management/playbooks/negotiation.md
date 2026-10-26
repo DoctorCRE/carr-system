@@ -1,6 +1,6 @@
 # Negotiation — Our Playbook (posture · landlord mindset · offers & documents)
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Our unified negotiation doctrine (consolidated July 8, 2026; sources in the ingestion ledger). ⚠️ The posture tactics, objection scripts, and financial-underwriting sections are INTERNAL — never client-facing, never content. The doctor-facing concepts (move-out math, options, "don't fixate on rate") are already routed to the content bank; the tactics stay here.*
 

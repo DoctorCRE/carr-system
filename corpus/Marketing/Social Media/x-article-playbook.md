@@ -1,6 +1,6 @@
 # X Article Playbook — long-form Articles for @joebookout
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Created 2026-07-16 (local Claude Code session). Doctrine for Joe's X PREMIUM+ ARTICLES (the native long-form format), distinct from X POSTS (governed by `x-strategy-2026.md`, standalone-first). Articles = the evergreen, authority-building, bookmark-worthy long-form; posts = the daily conversation engine. This file governs how Articles get RESEARCHED, BUILT, and PUBLISHED. Voice + bans are unchanged and still apply on top: `DNA/writing-rules.md` (Zero-Tolerance AI-tell list) + `00_Context/voice-profile.md` (Joe's flavor + §8 craft) + `x-strategy-2026.md` (X positioning: national field-expert, private-practice-advocate throughline, CARR as background credibility only).*
 

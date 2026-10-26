@@ -10,7 +10,7 @@ export const WORK_REQUEST_READ_STATES = Object.freeze(Object.keys(WORK_REQUEST_P
 
 // The alias is supplied by these queries, never by a caller. Private doctrine
 // requests stay private in both the census and the card.
-export function readableWorkRequestSql(alias) {
+export function readableWorkRequestSql(alias: string): string {
   return `${alias}.state in (${WORK_REQUEST_READ_STATES.map(state => `'${state}'`).join(",")})
     and (${alias}.doctrine_section_id is null or exists (
       select 1 from public.doctrine_section readable_section

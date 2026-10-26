@@ -224,7 +224,7 @@ cd ~/carr-system && printf "select stage, count(*), max(updated_at)::date from d
 ### lane = `vendors` (seat: Vendor network & introductions)
 
 **Generated files, nightly.** `DNA/Network/vendors.xlsx` and `DNA/Network/introduction-rules.md`
-are exports; the latter also rides an hourly `bin/refresh-rules.sh`. Both are watched by
+are exports. Both are watched by
 `run.sh health` at a 26h cadence. Never hand-edit either.
 
 **Network anomalies.** `run.sh graph-health` covers the whole record graph; the vendor-relevant
@@ -311,13 +311,6 @@ cd ~/carr-system && git status --short && git log --oneline -10 && git log origi
 Unpushed commits are AMBER: Dell reads the repo, and a commit that never left the Mac has not
 propagated. Uncommitted changes to files listed in `manifest.tsv` are RED, because the vault copy
 is the runtime and it has drifted from the source.
-
-**Code and output drift between repo and vault.** Read-only; runs nothing, changes nothing.
-```
-cd ~/carr-system && ./run.sh check
-```
-It diffs every `manifest.tsv` row (repo file versus live vault copy) and the committed baselines
-against the vault's pipeline outputs.
 
 **The MCP read verbs.** Run after every Worker deploy; a proof only covers what it touched, and
 two verbs shipped broken from build day because nothing exercised them.

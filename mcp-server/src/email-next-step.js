@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { isCalendarDate } from './calendar-date.js';
+import { isCalendarDate } from './calendar-date.ts';
 
 const properties = {
   deal: { type: 'string', format: 'uuid' },
