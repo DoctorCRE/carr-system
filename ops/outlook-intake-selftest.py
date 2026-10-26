@@ -1222,6 +1222,62 @@ class IntakeTest(unittest.TestCase):
         self.assertTrue(line.startswith('outlook-intake succeeded'))
 
 
+class FolderTest(unittest.TestCase):
+    FOLDERS = """
+    CREATE TABLE folders (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, name TEXT,
+      block INTEGER NOT NULL, parent_status TEXT NOT NULL, parent_id INTEGER);
+    CREATE TABLE message_folders (message_id INTEGER NOT NULL, folder_id INTEGER NOT NULL);
+    """
+
+    def db(self, folders, links, columns=True):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / 'store.db'
+        write_db(path, [mail('pat@example.test', -timedelta(hours=1), subject=f'm{i}', copy_key=f'k{i}')
+                        for i in range(1, 6)])
+        con = sqlite3.connect(path)
+        con.executescript(self.FOLDERS if columns else self.FOLDERS.replace(
+            ',\n      block INTEGER NOT NULL, parent_status TEXT NOT NULL, parent_id INTEGER', ', block INTEGER'))
+        for row in folders:
+            con.execute('INSERT INTO folders VALUES (?,?,?,?,?,?)' if columns
+                        else 'INSERT INTO folders VALUES (?,?,?,?)', row if columns else row[:3] + (0,))
+        con.executemany('INSERT INTO message_folders VALUES (?,?)', links)
+        con.commit()
+        con.close()
+        _, mails, _ = intake._load(path)
+        return {m['subject']: m['folders'] for m in mails}
+
+    def test_messages_carry_full_folder_paths(self):
+        found = self.db([(1, 7, 'Inbox', 0, 'top', None), (2, 7, 'Sent Items', 0, 'top', None),
+                         (3, 7, 'Active Deals', 0, 'top', None), (4, 7, 'Deal A', 0, 'folder', 3)],
+                        [(1, 1), (2, 2), (3, 4), (3, 1)])
+        self.assertEqual(found, {'m1': ['Inbox'], 'm2': ['Sent Items'], 'm3': ['Active Deals/Deal A', 'Inbox'],
+                                 'm4': [], 'm5': []})
+
+    def test_unresolved_ancestors_give_no_path(self):
+        found = self.db([(1, 7, None, 0, 'top', None), (2, 7, 'Child', 0, 'folder', 1),
+                         (3, 7, 'Moved', 0, 'unknown', None), (4, 7, 'Loop', 0, 'folder', 5),
+                         (5, 7, 'Back', 0, 'folder', 4), (6, 7, 'Orphan', 0, 'folder', 99)],
+                        [(1, 2), (2, 3), (3, 4), (4, 6)])
+        self.assertEqual(set(map(tuple, found.values())), {()})
+
+    def test_older_decoders_without_parents_or_folders_load(self):
+        self.assertEqual(set(map(tuple, self.db([(1, 7, 'Inbox', 0, 'top', None)], [(1, 1)],
+                                                columns=False).values())), {()})
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        write_db(Path(tmp.name) / 'old.db', [mail('pat@example.test', -timedelta(hours=1))])
+        _, [m], _ = intake._load(Path(tmp.name) / 'old.db')
+        self.assertEqual(m['folders'], [])
+
+    def test_collapsed_copies_keep_every_folder(self):
+        rows = [dict(mail('pat@example.test', -timedelta(hours=1), copy_key='k'), folders=['Inbox']),
+                dict(mail('pat@example.test', -timedelta(hours=1) + timedelta(seconds=5), copy_key='k'),
+                     folders=['Active Deals/Deal A'])]
+        [best] = intake._best_copies(rows)
+        self.assertEqual(best['folders'], ['Active Deals/Deal A', 'Inbox'])
+
+
 class ScheduleTest(unittest.TestCase):
     def test_intake_runs_only_on_the_studio_primary_role(self):
         from lib.launchd_scope import allowed_on_machine
