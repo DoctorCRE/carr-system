@@ -39,6 +39,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 from typing import Callable
 import uuid
 
@@ -138,7 +139,8 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
         if verb not in VERBS:
             raise PermissionError(f'email router may not call {verb}')
         return carr(verb, args)
-    clock = clock or (lambda: datetime.now(timezone.utc))
+    started = time.monotonic()
+    clock = clock or (lambda: now + timedelta(seconds=time.monotonic() - started))
     counts = {k: 0 for k in ('emails', 'routed', 'model_failed', 'abandoned', 'recorded', 'refused',
                              'dropped', 'write_failed', 'queue_failed', 'more', 'out_of_time')}
     routed, attempts = state.setdefault('routed', {}), state.setdefault('attempts', {})
