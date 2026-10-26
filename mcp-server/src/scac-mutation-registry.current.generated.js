@@ -2893,6 +2893,24 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:public.doctrine_embedding:carr_writer:insert",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.email_proposal",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.email_proposal:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.email_proposal",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.email_proposal:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
     }
   ],
   "secdef_execute": [
@@ -3020,8 +3038,8 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
   "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
   "registry_version": "scac-mutation-registry.v118",
   "runtime_dml_grants": {
-    "count": 339,
-    "digest": "sha256:a210dbda8843ef57aecf1985cb0b97f7ab6fac5e1e99df0926542eb2945254bc"
+    "count": 341,
+    "digest": "sha256:417178cb46966205a188bafec1ceb5d7490249d9dd924264c6f811fb31697ed1"
   },
   "retired_secdef_execute": [
     {
