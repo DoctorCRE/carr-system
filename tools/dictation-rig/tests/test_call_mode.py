@@ -22,6 +22,7 @@ from email.message import Message
 from pathlib import Path
 from unittest.mock import Mock, patch
 from types import SimpleNamespace
+from typing import Any
 from typesafe_sdk import TypeSafeError
 
 
@@ -57,7 +58,7 @@ _CLIENT_PATCHES = (
 
 
 _LOG_DIR = tempfile.TemporaryDirectory()
-_CLIENT_PATCHES += (
+_LOG_PATCHES = (
     # Keep test lines out of the live companion and bridge logs on the Studio.
     patch.object(call_mode, "LOG_PATH", Path(_LOG_DIR.name) / "call-mode.log"),
     patch.object(capture_bridge, "LOG_PATH", Path(_LOG_DIR.name) / "capture-bridge.log"),
@@ -69,9 +70,13 @@ def setUpModule() -> None:
     # Injected ask functions and loopback distiller fakes still run normally.
     for client_patch in _CLIENT_PATCHES:
         client_patch.start()
+    for log_patch in _LOG_PATCHES:
+        log_patch.start()
 
 
 def tearDownModule() -> None:
+    for log_patch in reversed(_LOG_PATCHES):
+        log_patch.stop()
     for client_patch in reversed(_CLIENT_PATCHES):
         client_patch.stop()
 
@@ -1031,7 +1036,7 @@ class AutomaticApplyTests(unittest.TestCase):
     def step(self, **extra: object) -> dict[str, object]:
         return {"text": "Send the lease draft", "next_date": "2026-11-06", "needs_review": None, **extra}
 
-    def mark(self, *updates: dict[str, object]) -> dict[str, object]:
+    def mark(self, *updates: dict[str, object]) -> Any:
         return post_call.mark_automatic({"deal_updates": list(updates), "review_questions": []}, self.transcript)
 
     def test_plainly_stated_change_is_automatic(self) -> None:

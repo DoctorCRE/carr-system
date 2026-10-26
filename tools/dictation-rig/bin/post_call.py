@@ -628,7 +628,7 @@ def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any], 
     model cannot place is kicked back as an approval card. Confident here is
     deterministic and checkable, never the model's own say-so.
     """
-    value = update.get(field)
+    value: dict[str, Any] = update[field]
     if value.get("needs_review"):
         return str(value["needs_review"])
     if field == "next_step" and not value.get("next_date"):
