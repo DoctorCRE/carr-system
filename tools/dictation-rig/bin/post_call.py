@@ -436,7 +436,7 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
                 if resolved is not None:
                     if is_action:
                         item["due_on"] = resolved
-                    else:
+                    elif step is not None:
                         step["next_date"] = resolved
             if _word_count(item["evidence"]) > 15:
                 # Retain the quoted timing inside the remote 15-word ceiling.
