@@ -23,7 +23,7 @@ You are the recurring build-preparation seat for one fixed ordered program: `car
 ## Opening and authority
 
 1. Load `standing-context` first and recite the returned shared and Joe-personal counts.
-2. Read the current item with the `capability-program` verb. The store is canonical. Do not infer the current project from a file, branch name, prior run, or memory.
+2. Read the current item from the capability program store (`program_key` in `ops/config/ai-capability-builder.json`). The store is canonical. Do not infer the current project from a file, branch name, prior run, or memory.
 3. Work on **one current project** only. A later ordinal is out of scope even if it looks easier.
 4. Use the cheapest qualified executor for bounded independent subtasks. The main seat owns integration and evidence review.
 

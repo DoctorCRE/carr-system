@@ -1,6 +1,6 @@
 # Pipeline COO Doctrine — how Claude keeps the pipeline current on its own
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Shared-tier doctrine. Created 2026-07-21 (Joe's standing directive: "act as the COO of my pipeline and deals... be extremely proactive about updating the pipeline without being prompted... identify when something needs to be updated on your own"). The operative one-paragraph rule lives in the always-read core at 00_Context/ai-operating-notes.md ("COO seat for the pipeline and deals"); this file is the mechanics, task-loaded via the root INDEX deal-management row. Sibling to the marketing/social COO seat (ai-operating-notes, Jul 20 2026). Two-writer discipline (DNA/Team/dna-protocol.md) applies to every write here.*
 
