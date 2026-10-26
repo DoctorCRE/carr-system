@@ -348,10 +348,12 @@ def _load(db: Path, account: str | None = None) -> tuple[dict, list[dict], list[
         mails = [dict(r) for r in con.execute(
             'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key, '
             f'{local_keys} FROM messages WHERE sent_unix IS NOT NULL AND sender IS NOT NULL')]
+        mail_count = len(mails)
         if account is not None:
             account = account.lower()
             mails = [m for m in mails if account == m['sender'].lower()
                      or account in _addresses(m['recipients'])]
+        meta['mail_other_accounts'] = mail_count - len(mails)
         for m in mails:
             message_id = m.pop('id')
             m['folders'] = paths.get(message_id, [])
@@ -1123,12 +1125,13 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     pending_writes = any(not r['acknowledged'] and r.get('disposition') != 'calendar_unsupported'
                          for r in state.get('requests', {}).values())
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
-    if state.get('store') == signature and not hydration_due and not contacts_changed and not state.get('steps') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY:
+    if 'mail_other_accounts' in state and state.get('store') == signature and not hydration_due and not contacts_changed and not state.get('steps') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY:
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _refresh_list(out, state['pending_full'])
             _save(out, state)
-        counts = {**mapping_counts(state), **calendar_counts(state)}
+        counts = {**mapping_counts(state), **calendar_counts(state),
+                  'mail_other_accounts': state['mail_other_accounts']}
         return Outcome('succeeded', 'store_unchanged', counts)
     try:
         meta, mails, events = _decode(home, out, ports.decode)
@@ -1147,6 +1150,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     mails = _best_copies(mails)
     state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
     work = Run(ports, state, now, out, settings)
+    work.counts['mail_other_accounts'] = meta['mail_other_accounts']
     try:
         _quarantine_calendar_requests(state)
         _save(out, state)
@@ -1163,7 +1167,8 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         work.leads()
         work.full_text(mails)
         work.next_steps(mails)
-        mail_processed = bool(work.written or any(work.counts.values()))
+        mail_processed = bool(work.written or any(value for key, value in work.counts.items()
+                                                  if key != 'mail_other_accounts'))
         work.events(events, matcher, since)
         snapshot, agenda_counts = agenda(events, meta, settings, now)
         work.counts.update(agenda_counts)
@@ -1192,7 +1197,8 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     if failed:
         _save(out, state)
         return Outcome('failed', failed, counts)
-    state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint())
+    state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint(),
+                 mail_other_accounts=meta['mail_other_accounts'])
     _prune(state, now)
     _save(out, state)
     counts.update(mapping_counts(state))  # a run that expires items reports them itself

@@ -262,8 +262,34 @@ class IntakeTest(unittest.TestCase):
         business = mail('lee@example.test', -timedelta(hours=1), subject='Configured mailbox')
         result = self.run_intake([personal, business])
         self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['mail_other_accounts'], 1)
         [(_, activity)] = self.fake.writes('log-activity')
         self.assertEqual(activity['summary'], 'Email from lee@example.test: Configured mailbox')
+
+    def test_receipt_counts_header_exclusions_without_claiming_mail_was_processed(self):
+        excluded = [mail('lee@example.test', -timedelta(hours=1),
+                         subject='Synthetic BCC or alias delivery', recipients=recipient)
+                    for recipient in ('undisclosed-recipients:;', 'alias@example.test', 'list@example.test')]
+        result = self.run_intake(excluded)
+        self.assertEqual((result.state, result.reason), ('succeeded', 'nothing_new'))
+        self.assertEqual(result.counts['mail_other_accounts'], 3)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+        quiet = self.run_intake(excluded, touch=False)
+        self.assertEqual(quiet.reason, 'store_unchanged')
+        self.assertEqual(quiet.counts['mail_other_accounts'], 3)
+        accepted = self.run_intake([mail('lee@example.test', -timedelta(hours=1))])
+        self.assertEqual(accepted.counts['mail_other_accounts'], 0)
+
+    def test_first_run_after_upgrade_measures_exclusions_even_when_store_is_unchanged(self):
+        excluded = [mail('lee@example.test', -timedelta(hours=1), recipients='alias@example.test')]
+        self.run_intake(excluded)
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        state.pop('mail_other_accounts')
+        path.write_text(json.dumps(state))
+        result = self.run_intake(excluded, touch=False)
+        self.assertEqual(result.counts['mail_other_accounts'], 1)
+        self.assertEqual(self.fake.decodes, 2)
 
     def test_transient_backoff_and_blocked_requests_preserve_frozen_payloads(self):
         m = mail('pat@example.test', -timedelta(hours=1))
@@ -1750,7 +1776,7 @@ class AttachmentMetadataTest(unittest.TestCase):
         con.execute('UPDATE messages SET recipients=? WHERE id=2',
                     ('Other <other@example.test>, Business <BUSINESS@example.test>',))
         con.execute('UPDATE messages SET recipients=? WHERE id=3',
-                    ('notbusiness@example.test, business@example.test.foreign',))
+                    ('notbusiness@example.test, business@example.test.invalid',))
         con.commit()
         con.close()
         _, mails, _ = intake._load(self.path, account='business@example.test')
