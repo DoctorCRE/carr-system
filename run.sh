@@ -129,7 +129,7 @@ case "${1:-}" in
   outlook-event) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["event", *sys.argv[1:]]))' "$@" ;;
   *)
     printf '%s' \
-      "usage: run.sh regen registry|" \
+      "usage: run.sh regen registry|schema|" \
       "map [--missing]|" \
       "deal-room|" \
       "lead-board|" \
