@@ -28,14 +28,13 @@ class CostRefusalRetirementTests(unittest.TestCase):
         child = shadow.local_pg.scrub_cloud_environment(os.environ)
         cls.fixture = shadow.local_pg.DisposablePostgres('cost-refusal.', bins / 'pg_ctl', child)
         cls.addClassCleanup(cls.fixture.close)
-        port = shadow.free_port(55900)
-        cls.dsn = f'postgres://carr_ci@127.0.0.1:{port}/carr_ci'
+        cls.dsn = f'host={cls.fixture.root} port=5432 user=carr_ci dbname=carr_ci'
         cls.fixture.run([bins / 'initdb', '-D', cls.fixture.root / 'data', '-U', 'carr_ci',
                          '--auth=trust', '--encoding=UTF8', '--no-locale'], check=True, capture_output=True)
         cls.fixture.run([bins / 'pg_ctl', '-D', cls.fixture.root / 'data', '-l', cls.fixture.root / 'postgres.log',
-                         '-o', f'-h 127.0.0.1 -p {port} -k {cls.fixture.root}', '-w', 'start'],
+                         '-o', f"-h '' -p 5432 -k {cls.fixture.root}", '-w', 'start'],
                         check=True, capture_output=True)
-        cls.fixture.run([bins / 'createdb', '-h', '127.0.0.1', '-p', str(port), '-U', 'carr_ci', 'carr_ci'],
+        cls.fixture.run([bins / 'createdb', '-h', cls.fixture.root, '-p', '5432', '-U', 'carr_ci', 'carr_ci'],
                         check=True, capture_output=True)
         with psycopg.connect(cls.dsn, autocommit=True) as conn:
             conn.execute('create role carr_reader; create role carr_writer; create role carr_jobs')

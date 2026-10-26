@@ -32,6 +32,7 @@ mod body;
 mod calendar;
 mod folder;
 mod header;
+mod identity;
 mod lz;
 mod locate;
 mod study;
@@ -690,6 +691,21 @@ rewrites the file while it runs.";
 
 fn main() {
     let raw: Vec<_> = env::args_os().collect();
+    if raw.get(1).is_some_and(|arg| arg == "identity-compare") {
+        let result = if raw.len() == 7 && raw[2] == "--immutable-copies" {
+            identity::run(&raw[3], &raw[4], &raw[5], &raw[6])
+        } else {
+            Err(())
+        };
+        match result {
+            Ok(json) => println!("{json}"),
+            Err(()) => {
+                eprintln!("identity comparison input rejected");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
     if raw.get(1).is_some_and(|arg| arg == "study-diff") {
         let result = if raw.len() == 4 { study::run(&raw[2], &raw[3]) } else { Err(()) };
         match result {

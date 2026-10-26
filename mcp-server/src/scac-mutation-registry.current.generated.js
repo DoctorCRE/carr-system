@@ -566,6 +566,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "confirm-email-deal-progress": {
+    "ingress_key": "mcp-tool:confirm-email-deal-progress",
+    "source_locator": "mcp-server/src/email-deal-progress.js",
+    "schema_digest": "8fcdab540e2c25d37e00d0d25975dc1e4d5d3aca7112c326b59eb64bd051a722",
+    "write": true,
+    "human_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "confirm-merge": {
     "ingress_key": "mcp-tool:confirm-merge",
     "source_locator": "mcp-server/src/tools.js",
@@ -1377,6 +1386,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "eba5b6e5177efcabd49e5c8b255a6ef0d187e6574638cb42c69e56b544682795",
     "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "preview-email-deal-progress": {
+    "ingress_key": "mcp-tool:preview-email-deal-progress",
+    "source_locator": "mcp-server/src/email-deal-progress.js",
+    "schema_digest": "01563165207c5295db5f140cf83fcfc593ba0e9e8973a033244709709a4c2d25",
+    "write": false,
     "human_only": false,
     "authority_only": false,
     "delegates_to": []
