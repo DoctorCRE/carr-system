@@ -19,7 +19,7 @@ import { searchDoctrineSituations, retrievalVisibilityActorId } from "./situatio
 import { CORE_RULE_IDS, CORE_RULE_COUNT, CORE_RULE_TRIAGE_SOURCE } from "./core-rule-ids.js";
 import { ruleBootPage } from "./rule-boot.js";
 import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.ts";
-import { isPersonalRecordOwner } from "./personal-record-ownership.js";
+import { isPersonalRecordOwner } from "./personal-record-ownership.ts";
 
 const CORE_RULE_ID_SET = new Set(CORE_RULE_IDS);
 const TERRITORY_SECTION_ID = "aa3868ef-d0a2-4bc2-9954-525ad418636b";

@@ -60,7 +60,7 @@ import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./
 import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
          permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
-import { isPersonalRecordOwner } from "./personal-record-ownership.js";
+import { isPersonalRecordOwner } from "./personal-record-ownership.ts";
 import { assertRegisteredOperation, mutationManifestIdentity, MutationRegistryRefusal } from "./mutation-registry.js";
 import { readRuleEnforcementCoverage } from "./lifecycle-assurance.v5.js";
 import { recordSourceAuthorityStoreTools } from "./record-source-authority-store.v5.js";
