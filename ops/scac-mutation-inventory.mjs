@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Build and verify the SCAC mutation inventory.
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
