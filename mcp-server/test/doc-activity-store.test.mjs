@@ -1,3 +1,4 @@
+// Test Doc activity store queries, cursor serialization, and database roles.
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';

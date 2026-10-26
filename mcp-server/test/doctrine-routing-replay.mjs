@@ -1,3 +1,4 @@
+// Replay doctrine routing queries against retrieval acceptance cases.
 import { readFileSync, writeFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { doctrineRoutingFixture } from './helpers/doctrine-routing.mjs';

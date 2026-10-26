@@ -1,3 +1,4 @@
+// Test Doc outcome card contracts, states, and source-bound reads.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";

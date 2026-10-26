@@ -1,3 +1,4 @@
+// Test DoctorCRE v5 review source, identity, and activation validation.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
