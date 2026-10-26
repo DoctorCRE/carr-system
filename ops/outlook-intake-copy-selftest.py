@@ -171,6 +171,54 @@ class InstallerTest(unittest.TestCase):
         self.install()
         self.assertEqual(self.helper.stat().st_mtime_ns, before, 'an unchanged helper retains its privacy identity')
 
+    def git(self, checkout, *args):
+        return subprocess.run(['git', '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.test',
+                               *args], cwd=checkout, check=True, capture_output=True, text=True).stdout.strip()
+
+    def test_jobs_run_from_a_checkout_only_the_installer_moves_without_rebuilding_the_helper(self):
+        (self.repo / '.gitignore').write_text('.venv/\nout\n')
+        self.git(self.repo, 'init', '--quiet')
+        self.git(self.repo, 'add', '-A')
+        self.git(self.repo, 'commit', '--quiet', '-m', 'fixture')
+        runtime = self.home / 'carr-local/outlook-repo'
+        write_settings(self.home, runtime, profile=str(self.profile), vendor=str(self.vendor),
+                       copy_helper=str(self.helper))
+        result = self.install()
+        first = self.git(self.repo, 'rev-parse', 'HEAD')
+        self.assertIn(f'Outlook jobs run from {runtime} at {first}', result.stdout)
+        self.assertEqual(self.git(runtime, 'rev-parse', 'HEAD'), first)
+        self.assertEqual(self.git(runtime, 'status', '--porcelain', '--untracked-files=no'), '')
+        self.assertEqual((runtime / 'out').resolve(), self.repo / 'out')
+        self.assertEqual((runtime / '.venv').resolve(), self.repo / '.venv')
+        intake = plistlib.loads((self.repo / 'out/com.carr.outlook-intake.plist').read_bytes())
+        self.assertEqual(intake['WorkingDirectory'], str(runtime))
+        scope = subprocess.run([str(self.helper), '--scope'], capture_output=True, text=True, check=True)
+        self.assertEqual(scope.stdout.splitlines(), [str(self.profile), str(self.repo / 'out/outlook-intake'), str(runtime)])
+        load_settings(self.home).verify_helper()
+        self.profile.mkdir(parents=True)
+        (self.profile / 'HxStore.hxd').write_bytes(b'runtime-fixture')
+        out = runtime / 'out/outlook-intake'
+        out.mkdir(mode=0o700)
+        work = Path(tempfile.mkdtemp(prefix='work-', dir=out))
+        subprocess.run([str(self.helper)], cwd=work, capture_output=True, check=True)
+        self.assertEqual((work / 'store.hxd').read_bytes(), b'runtime-fixture')
+
+        (self.repo / 'lib/later_change.py').write_text('LATER = True\n')
+        self.git(self.repo, 'add', '-A')
+        self.git(self.repo, 'commit', '--quiet', '-m', 'later')
+        second = self.git(self.repo, 'rev-parse', 'HEAD')
+        self.assertEqual(self.git(runtime, 'rev-parse', 'HEAD'), first, 'moving the canonical checkout ships nothing')
+        before = self.helper.stat().st_mtime_ns
+        self.install()
+        self.assertEqual(self.git(runtime, 'rev-parse', 'HEAD'), second)
+        self.assertTrue((runtime / 'lib/later_change.py').is_file())
+        self.assertEqual(self.helper.stat().st_mtime_ns, before, 'a re-run keeps the granted helper and its compiled paths')
+
+        (runtime / 'lib/later_change.py').write_text('LATER = False\n')
+        refused = self.install(check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('must be a clean checkout', refused.stderr)
+
     def test_invalid_settings_refuse_both_installers_before_build_or_launchagent_writes(self):
         self.config.unlink()
         for service in ('intake', 'triage'):

@@ -80,7 +80,7 @@ class OutlookSettings:
             result = subprocess.run([str(self.copy_helper), '--scope'], capture_output=True, text=True, timeout=10)
         except (OSError, subprocess.SubprocessError):
             raise SettingsError(f'{self.source}: field copy_helper: cannot read compiled scope; run the intake installer') from None
-        if result.returncode or result.stdout.splitlines() != [str(self.profile), str(self.repo / 'out/outlook-intake'), str(self.repo)]:
+        if result.returncode or result.stdout.splitlines() != [str(self.profile), str((self.repo / 'out/outlook-intake').resolve()), str(self.repo)]:
             raise SettingsError(f'{self.source}: field copy_helper: compiled profile/repo scope differs; run the intake installer')
 
 
