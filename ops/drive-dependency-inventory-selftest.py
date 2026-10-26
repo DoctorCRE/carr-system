@@ -66,11 +66,12 @@ with tempfile.TemporaryDirectory() as temp:
     # non-repository fallback used by earlier fixture tests.
     subprocess.run(["git", "init", "-q", str(root)], check=True, env=fixture_env())
     subprocess.run(["git", "-C", str(root), "add", "--all"], check=True, env=fixture_env())
-    all_entries = registry(
+    entries = [
         entry("task", "ops/config/task.json"), entry("plist", "ops/launchd/task.plist"), entry("shell", "bin/run.sh"),
         entry("python", "pipelines/read.py"), entry("prose", "README.md", kind="prose_only"),
         entry("extensionless", "extensionless", kind="prose_only"), entry("yaml", "config.yaml", kind="prose_only"),
-        entry("utf16", "utf16.txt", kind="prose_only"), entry("tracked-out", "out/runtime.py"))
+        entry("utf16", "utf16.txt", kind="prose_only"), entry("tracked-out", "out/runtime.py")]
+    all_entries = registry(*entries)
     refs, uncovered, multiple = inventory.audit(root, all_entries)
     assert len(refs) == 9 and any(ref.file == "out/runtime.py" for ref in refs) and not uncovered and not multiple
     passed += 1
@@ -86,7 +87,7 @@ with tempfile.TemporaryDirectory() as temp:
     for candidate, expected_exit, expected_output in (
         (all_entries, 0, "references exactly classified"),
         (registry(entry("task", "ops/config/task.json")), 1, "UNCOVERED bin/run.sh:1"),
-        (registry(*all_entries["entries"], entry("duplicate-shell", "bin/run.sh")),
+        (registry(*entries, entry("duplicate-shell", "bin/run.sh")),
          1, "MULTIPLE bin/run.sh:1: shell, duplicate-shell"),
     ):
         registry_path.write_text(json.dumps(candidate))
