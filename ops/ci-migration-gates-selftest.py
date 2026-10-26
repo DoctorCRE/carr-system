@@ -202,6 +202,9 @@ class Wr258Overlap(unittest.TestCase):
             with patch.object(runner,'snapshot',side_effect=AssertionError('no isolated gate, no snapshot')), \
                     patch.object(runner,'run_gate',side_effect=lambda g,d,l,e:(l.write_text('') or (g,0,0,l))):
                 self.assertEqual(runner.run_gates('postgres://owner@127.0.0.1:9/carr_ci', gates, root/'logs', rollback_only=set()),0)
+            rows=[line.split('\t') for line in (root/'logs/programs.tsv').read_text().splitlines()]
+            self.assertEqual(sorted(r[1] for r in rows), sorted(f'db-gate-{g.name}' for g in gates),
+                             'every executed DB gate has its own program record')
 
 class Wr258Coverage(unittest.TestCase):
     """A sharded run that skips, repeats or invents a scenario or call is a failure."""
@@ -276,6 +279,9 @@ class Wr258SqlProofRunner(unittest.TestCase):
                 bad=root/'bad.sql'
                 bad.write_text("\\set ON_ERROR_STOP on\nselect 1/0;\n")
                 self.assertEqual(runner.run_sql_proofs(source,[(bad,1)],root/'logs3',str(bins/'psql')),1)
+                records=lambda d:sorted(tuple(l.split('\t')[1:3]) for l in (root/d/'programs.tsv').read_text().splitlines())
+                self.assertEqual(records('logs'),[('good.sql.shard0','0'),('good.sql.shard1','0')])
+                self.assertEqual(records('logs3'),[('bad.sql','3')],'a failed proof keeps its own exit')
             finally:
                 fixture.close()
 

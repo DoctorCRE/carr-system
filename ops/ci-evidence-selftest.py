@@ -205,5 +205,76 @@ class Reuse(unittest.TestCase):
             root.rename(target / root.name)
 
 
+class ProgramRecords(unittest.TestCase):
+    """WR-000542: per-program exit and elapsed records bound to the tested source."""
+    ENV = {'GITHUB_RUN_ID': '41', 'GITHUB_RUN_ATTEMPT': '2', 'GITHUB_JOB': 'classes'}
+
+    def write(self, directory, rows, output, environ=None):
+        path = pathlib.Path(directory) / 'rows.tsv'
+        path.write_text(''.join('\t'.join(map(str, row)) + '\n' for row in rows))
+        with patch.object(evidence, 'git', side_effect=lambda value, root=None: 'tree' if '^' in value else 'sha'), \
+                patch.object(evidence, 'contract_digest', return_value='contract'):
+            return evidence.program_records(path, output, environ=environ or self.ENV)
+
+    def test_rows_bind_source_attempt_and_keep_first_failure_and_timeout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / 'programs.json'
+            self.write(directory, [('gates', 'gate-a-selftest.py', 1, '10.5', '12.0'),
+                                   ('gates', 'gate-a-selftest.py', 0, '12.0', '12.25'),
+                                   ('gates', 'gate-b-selftest.py', 124, '10', '130'),
+                                   ('gates', 'gate-c-selftest.py', 78, '1,0', '1,5')], output)
+            record = json.loads(output.read_text())
+            self.assertEqual({k: record[k] for k in ('schema', 'run_id', 'run_attempt', 'job',
+                                                     'tested_sha', 'tree_sha', 'contract')},
+                             {'schema': 'carr-ci-programs/v1', 'run_id': 41, 'run_attempt': 2,
+                              'job': 'classes', 'tested_sha': 'sha', 'tree_sha': 'tree',
+                              'contract': 'contract'})
+            self.assertEqual([(p['program'], p['exit'], p['elapsed_s']) for p in record['programs']],
+                             [('gate-a-selftest.py', 1, 1.5), ('gate-a-selftest.py', 0, 0.25),
+                              ('gate-b-selftest.py', 124, 120.0), ('gate-c-selftest.py', 78, 0.5)])
+
+    def test_same_run_extends_and_another_attempt_replaces(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / 'programs.json'
+            self.write(directory, [('migration', 'db-gate-a.py', 0, 0, 3)], output)
+            self.write(directory, [('migration', 'acceptance-leads', 1, 0, 4)], output)
+            self.assertEqual([p['program'] for p in json.loads(output.read_text())['programs']],
+                             ['db-gate-a.py', 'acceptance-leads'])
+            self.write(directory, [], output, {**self.ENV, 'GITHUB_RUN_ATTEMPT': '3'})
+            self.assertEqual(json.loads(output.read_text())['programs'], [])
+
+    def test_ci_sh_records_every_gate_program_with_its_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            for rel in ('ops/a-selftest.py', 'ops/b-selftest.py', 'tools/test-c.sh'):
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text('')
+            (root / 'hooks').mkdir()
+            (root / 'hooks/gate-integrity.py').write_text('')
+            (root / 'logs').mkdir()
+            (root / 'timeout.py').write_text(
+                "import sys\nsys.exit({'ops/a-selftest.py': 124, 'tools/test-c.sh': 3}.get(sys.argv[-1], 0))\n")
+            source = (ROOT / 'ops/ci.sh').read_text()
+            body = source[source.index('\nrecord_program() {'):source.index('\nLOGDIR=')]
+            body += source[source.index('\ncheck_gates() {'):source.index('\ncheck_secret() {')]
+            prefix = '\n'.join(('set -uo pipefail', f'PY={sys.executable}', f'LOGDIR={root / "logs"}',
+                                'CI_SELFTEST_TIMEOUT_SECONDS=1', f'CI_TIMEOUT_HELPER={root / "timeout.py"}',
+                                'GATE_SHARD=1', 'GATE_SHARDS=1', '_class_name=gates',
+                                'tree_fingerprint() { echo static; }', 'ok() { :; }', 'bad() { :; }',
+                                'fail_tail() { :; }'))
+            result = subprocess.run(['bash', '-c', prefix + body + '\ncheck_gates'], cwd=root,
+                                    capture_output=True, text=True, timeout=60,
+                                    env={'PATH': os.environ['PATH']})
+            records = root / 'logs/programs.tsv'
+            self.assertTrue(records.is_file(), result.stderr)
+            rows = {line.split('\t')[1]: line.split('\t')[2] for line in records.read_text().splitlines()}
+            self.assertEqual(rows.get('gate-a-selftest.py'), '124', rows)
+            self.assertEqual(rows.get('gate-b-selftest.py'), '0', rows)
+            self.assertEqual(rows.get('safety-hooks'), '0', 'run_quiet programs are recorded too')
+            # The timeout stops the shell suites, so test-c.sh has no row: a
+            # program that did not run is a missing record, never a pass.
+            self.assertNotIn('gate-test-c.sh', rows)
+
+
 if __name__=='__main__':
     unittest.main()

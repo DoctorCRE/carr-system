@@ -277,6 +277,7 @@ def run_gates(dsn, gates, logdir, *, rollback_only=ROLLBACK_ONLY_GATES):
         if rc:
             failures.append(gate.name)
             print('\n'.join(lines[-20:]), file=sys.stderr)
+    record_programs(logdir, [(f'db-gate-{g.name}', rc, s) for g, rc, s, _ in results])
     print('db-gate-timing:' + ' '.join(f'{g.stem}={s}s' for g, _, s, _ in sorted(results, key=lambda r: -r[2])))
     wall = int(time.monotonic() - started)
     summed = sum(s for _, _, s, _ in results) + sum(sum(v) - max(v) for v in SHARD_SECONDS.values())
@@ -287,6 +288,12 @@ def run_gates(dsn, gates, logdir, *, rollback_only=ROLLBACK_ONLY_GATES):
     if failures:
         print('db-gate-failed: ' + ' '.join(failures), file=sys.stderr)
     return int(bool(failures))
+
+
+def record_programs(logdir, rows):
+    """Append (name, exit, seconds) rows to ops/ci.sh's per-program record (WR-000542)."""
+    with (logdir / 'programs.tsv').open('a') as out:
+        out.writelines(f'migration\t{name}\t{rc}\t0\t{seconds}\n' for name, rc, seconds in rows)
 
 
 def clone_dsn(dsn, database):
@@ -366,6 +373,8 @@ def run_sql_proofs(dsn, proofs, logdir, psql='psql'):
         timings.append(f'{path.stem}={max(seconds)}s' + (f'[{"/".join(f"{s}s" for s in seconds)}]' if len(seconds) > 1 else ''))
         if len(runs) > 1:
             (logdir / f'{path.stem}.log').write_text('\n'.join(texts))
+    record_programs(logdir, [(path.name + (f'.shard{k}' if shards > 1 else ''), rc, seconds)
+                             for path, k, shards, rc, seconds, _ in outcomes])
     wall = int(time.monotonic() - started)
     summed = sum(s for *_, s, _ in outcomes)
     print(f'sql-proof-timing: {" ".join(timings)} clone-setup={setup_seconds}s wall={wall}s '

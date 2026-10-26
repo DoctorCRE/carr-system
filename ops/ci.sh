@@ -39,7 +39,8 @@ while [ "$#" -gt 0 ]; do
       shift ;;
     --migration-part) MIGRATION_PART="${2:-}"; shift ;;
     --list)   LIST=1 ;;
-    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|gates-serial|gates-isolated|acceptance|fixtures|reconstruction|equivalence|shadow] [--gate-shard 1/2|2/2] [--list]"; exit 0 ;;
+    --gate-programs) GATE_PROGRAMS=1 ;;
+    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|gates-serial|gates-isolated|acceptance|fixtures|reconstruction|equivalence|shadow] [--gate-shard 1/2|2/2] [--list] [--gate-programs]"; exit 0 ;;
     *) echo "ci.sh: unknown argument: $1" >&2; exit 64 ;;
   esac
   shift
@@ -87,17 +88,34 @@ ok()   { RAN=$((RAN+1)); printf '  \033[32mOK\033[0m    %-11s %s\n' "$1" "${2:-}
 bad()  { RAN=$((RAN+1)); printf '  \033[31mFAIL\033[0m  %-11s %s\n' "$1" "${2:-}"; FAILED=$((FAILED+1)); FAILED_CLASSES="$FAILED_CLASSES $1"; }
 skip() { RAN=$((RAN+1)); printf '  \033[33mSKIP\033[0m  %-11s %s\n' "$1" "${2:-}"; SKIPPED=$((SKIPPED+1)); SKIPPED_CLASSES="$SKIPPED_CLASSES $1"; }
 
+# Per-program evidence (WR-000542): one row per executed program, as
+# class, log name, exit, start, end. Only names and numbers, never output or
+# environment values. CARR_CI_PROGRAM_RECORDS names the JSON that
+# ops/ci-evidence.py writes at exit; it is consumed here so a nested ci.sh run
+# (selftest fixtures) cannot overwrite this run's record.
+PROGRAM_RECORDS="${CARR_CI_PROGRAM_RECORDS:-}"
+unset CARR_CI_PROGRAM_RECORDS
+record_program() {  # record_program <name> <exit> <start>
+  printf '%s\t%s\t%s\t%s\t%s\n' "${_class_name:-}" "$1" "$2" "$3" "${EPOCHREALTIME:-$(date +%s)}" \
+    >>"$LOGDIR/programs.tsv"
+}
+
 run_quiet() {  # run_quiet <logfile> <cmd...>  — capture output, return status
-  local log="$1" rc; shift
+  local log="$1" rc start="${EPOCHREALTIME:-$(date +%s)}"; shift
   "$@" >"$log" 2>&1
   rc=$?
   printf '%s\n' "$rc" >"$log.rc"
+  record_program "$(basename "$log" .log)" "$rc" "$start"
   return "$rc"
 }
 
 LOGDIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/carr-ci.XXXXXX")" || exit 1
 trap '
   rc=$?
+  if [ -n "$PROGRAM_RECORDS" ] && ! "$PY" "$REPO/ops/ci-evidence.py" programs --rows "$LOGDIR/programs.tsv" \
+      --output "$PROGRAM_RECORDS" >/dev/null; then
+    printf "ci-program-records: NOT WRITTEN to %s\n" "$PROGRAM_RECORDS" >&2
+  fi
   if [ "$rc" -eq 0 ]; then
     rm -rf "$LOGDIR"
   else
@@ -268,13 +286,8 @@ PYEOF
   }
 
   local eligible=""
-  for t in ops/*-selftest.py tools/test-*.py tools/test_*.py tools/*-selftest.py \
-           tools/room-bridge/test_*_unit.py \
-           tools/room-bridge/test_activation_reliability.py \
-           tools/dictation-rig/tests/test_call_mode_runtime.py \
-           tools/dictation-rig/tests/test_call_mode.py \
-           test/doc_drift/test_*.py test/doc_drift_product/test_*.py; do
-    [ -f "$t" ] || continue
+  for t in $(gate_programs); do
+    case "$t" in *.py) ;; *) continue ;; esac
     local base; base="$(basename "$t")"
     local why; why="$(excluded_reason "$base")"
     if [ -n "$why" ]; then
@@ -290,10 +303,13 @@ PYEOF
   local pooled_timeout=$(( CI_SELFTEST_TIMEOUT_SECONDS * ${CARR_CI_GATE_JOBS:-4} ))
   export CI_TIMEOUT_HELPER CI_SELFTEST_TIMEOUT_SECONDS LOGDIR PY pooled_timeout
   printf '%s\n' $eligible | xargs -P "${CARR_CI_GATE_JOBS:-4}" -n1 bash -c '
-    b="$(basename "$1")"
+    b="$(basename "$1")" start="${EPOCHREALTIME:-$(date +%s)}"
     "$PY" "$CI_TIMEOUT_HELPER" "$pooled_timeout" "$PY" "$1" \
       >"$LOGDIR/gate-$b.log" 2>&1
-    echo $? >"$LOGDIR/gate-$b.rc"
+    rc=$?
+    echo "$rc" >"$LOGDIR/gate-$b.rc"
+    printf "gates\tgate-%s\t%s\t%s\t%s\n" "$b" "$rc" "$start" "${EPOCHREALTIME:-$(date +%s)}" \
+      >>"$LOGDIR/programs.tsv"
   ' _
   local grc
   for t in $eligible; do
@@ -315,8 +331,8 @@ PYEOF
     fi
   done
 
-  if [ "$gates_timed_out" -eq 0 ]; then for t in tools/test-*.sh tools/test_*.sh; do
-    [ -f "$t" ] || continue
+  if [ "$gates_timed_out" -eq 0 ]; then for t in $(gate_programs); do
+    case "$t" in *.sh) ;; *) continue ;; esac
     local sbase; sbase="$(basename "$t")"
     local swhy; swhy="$(excluded_reason "$sbase")"
     if [ -n "$swhy" ]; then
@@ -381,6 +397,22 @@ PYEOF
   else
     ok gates "$count selftest suites + safety hook installation"
   fi
+}
+
+# The one executed gate inventory. ops/selftest-git-isolation-check.py reads it
+# through --gate-programs, so its qualification cannot drift from what runs.
+gate_programs() {
+  local t
+  for t in ops/*-selftest.py tools/test-*.py tools/test_*.py tools/*-selftest.py \
+           tools/room-bridge/test_*_unit.py \
+           tools/room-bridge/test_activation_reliability.py \
+           tools/dictation-rig/tests/test_call_mode_runtime.py \
+           tools/dictation-rig/tests/test_call_mode.py \
+           test/doc_drift/test_*.py test/doc_drift_product/test_*.py \
+           tools/test-*.sh tools/test_*.sh; do
+    [ -f "$t" ] || continue
+    printf '%s\n' "$t"
+  done
 }
 
 check_secret() {
@@ -964,6 +996,11 @@ check_artifact() {
     bad artifact "verb loss against base ${base:0:12} does not match the committed retirement ledger"
   fi
 }
+
+if [ "${GATE_PROGRAMS:-0}" = "1" ]; then
+  gate_programs
+  exit 0
+fi
 
 echo "carr-system CI — $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"
 [ "$STRICT" = "1" ] && echo "  strict: a SKIP counts as a failure"
