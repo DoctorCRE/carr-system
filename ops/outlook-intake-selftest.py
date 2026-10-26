@@ -1310,6 +1310,14 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(outcome.counts['calendar_agenda_recurring'], 2)
         self.assertIn('recurring_unverified', self.codes())
 
+    def test_a_series_with_no_stored_occurrence_in_the_window_still_warns(self):
+        master = self.gid(7)
+        self.run_intake(events=[event(master, -timedelta(days=30), subject='Synthetic weekly'),
+                                event(self.gid(7, '07EA0A0D'), -timedelta(days=7), subject='Synthetic weekly'),
+                                event(self.gid(8), timedelta(hours=3), subject='Synthetic one-off')])
+        self.assertEqual([i['title'] for i in self.fake.agenda['items']], ['Synthetic one-off'])
+        self.assertIn({'code': 'recurring_unverified', 'count': 1}, self.fake.agenda['warnings'])
+
     def test_unread_calendar_items_are_counted_in_the_snapshot(self):
         outcome = self.run_intake(events=[event(self.gid(1), timedelta(hours=3))], identities=4)
         self.assertEqual(self.fake.agenda['warnings'][-1], {'code': 'undecoded', 'count': 3})

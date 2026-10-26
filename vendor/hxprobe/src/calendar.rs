@@ -167,17 +167,36 @@ fn is_text(s: &str) -> bool {
     total == 0 || latin * 5 >= total * 4
 }
 
+/// True when the object's last field is a NUL-terminated copy of an earlier text field.
+fn ends_at_repeated_subject(obj: &[u8], g: usize) -> bool {
+    let len = obj.len();
+    if len < g + 6 || obj[len - 2..] != [0, 0] {
+        return false;
+    }
+    let lo = g + (len - g) % 2;
+    let fields: Vec<String> = utf16(&obj[lo..len - 2]).split(|u| *u == 0).map(String::from_utf16_lossy).collect();
+    let Some((last, earlier)) = fields.split_last() else { return false };
+    last.chars().count() >= 2 && is_text(last) && earlier.iter().any(|f| f.ends_with(last.as_str()))
+}
+
 fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
     let g = memchr::memmem::find(obj, &GOID_PREFIX.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>())?;
     // The earliest block that parses to the end. Scanning from the end instead
     // stops at the trailing status bytes, which read as a count of zero.
-    // An item with no attendees (Joe's own appointment, a block of time, some
-    // recurring series) carries no attendee block: its NUL-terminated fields
-    // run to the object end.
+    // An item with no attendees (an own appointment, a block of time) carries
+    // no attendee block: its NUL-terminated fields run to the object end, which
+    // is then the subject written a second time. Anything else at the end is an
+    // attendee list this parser could not read, so the item stays undecoded and
+    // counted rather than becoming a meeting with nobody in it. A zero-count
+    // block is held to the same test, since stray zero bytes read as one.
     let (ap, attendees) = (g + 2..obj.len().saturating_sub(3))
         .filter(|p| obj[p - 2..*p] == [0, 0])
-        .find_map(|p| attendees_at(obj, p).map(|a| (p, a)))
-        .or_else(|| obj.ends_with(&[0, 0]).then(|| (obj.len(), Vec::new())))?;
+        .find_map(|p| {
+            attendees_at(obj, p)
+                .filter(|a| !a.is_empty() || ends_at_repeated_subject(&obj[..p], g))
+                .map(|a| (p, a))
+        })
+        .or_else(|| ends_at_repeated_subject(obj, g).then(|| (obj.len(), Vec::new())))?;
     // The length-prefixed time-zone strings shift byte parity, so the field
     // run is aligned to where it ends, not to where the object starts.
     let lo = g + (ap - g) % 2;
@@ -325,6 +344,18 @@ mod tests {
         assert_eq!(ev.location.as_deref(), Some("Example Room"));
         assert_eq!(ev.organizer_email.as_deref(), Some("ada@example.test"));
         assert!(ev.attendees.is_empty());
+    }
+
+    #[test]
+    fn an_unreadable_attendee_list_stays_undecoded() {
+        // Joe as attendee plus two stray zero bytes: the attendee block no longer
+        // parses to the end, and it must not turn into a meeting with no one in it.
+        let mut obj = object(true, &[("Joe Example", "joe@example.test")]);
+        obj.extend([0, 0]);
+        let mut idx = Index::default();
+        idx.observe(&envelope(&obj));
+        assert_eq!(idx.objects, 1, "the identity is still counted");
+        assert!(idx.events.is_empty(), "and left undecoded");
     }
 
     #[test]

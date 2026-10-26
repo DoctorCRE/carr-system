@@ -790,8 +790,9 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
         warnings.append({'code': 'undecoded', 'count': undecoded})
     if counts['calendar_agenda_time_changed']:
         warnings.append({'code': 'time_changed', 'count': counts['calendar_agenda_time_changed']})
-    if counts['calendar_agenda_recurring']:
-        warnings.append({'code': 'recurring_unverified', 'count': counts['calendar_agenda_recurring']})
+    if with_occurrences:
+        # Any stored series may have occurrences Outlook has not written yet, in this window or not.
+        warnings.append({'code': 'recurring_unverified', 'count': len(with_occurrences)})
     snapshot: dict = {'schema': AGENDA_SCHEMA, 'source': 'outlook_hxstore', 'lifecycle': 'unverified',
                 'observed_at': now.astimezone(timezone.utc).isoformat(),
                 'window_start': _iso(lo), 'window_end': _iso(hi), 'time_zone': str(tz),
