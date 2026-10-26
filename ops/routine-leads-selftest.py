@@ -208,6 +208,71 @@ class LeadTests(unittest.TestCase):
                 leads.fetch_weekly_files([old], lambda url: (_ for _ in ()).throw(
                     urllib.error.HTTPError(url, 500, "Server Error", {}, None)))
 
+    def test_synthetic_listing_skips_expired_404_and_keeps_live_archive(self):
+        import urllib.error
+        old = "https://download.cms.gov/nppes/NPPES_Data_Dissemination_101226_101826_Weekly_V2.zip"
+        live = "https://download.cms.gov/nppes/NPPES_Data_Dissemination_101926_102526_Weekly_V2.zip"
+        listing = f'<a href="{old}">old</a><a href="{live}">live</a>'
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as output:
+            output.writestr("npidata_pfile_weekly.csv", "NPI,Entity Type Code,Provider Enumeration Date,Provider Business Practice Location Address Postal Code\n")
+
+        def fetch(url):
+            if url == old:
+                raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+            return archive.getvalue()
+
+        with patch.object(leads, "_today", return_value=date(2026, 10, 26)), \
+                patch("sys.stderr", new_callable=io.StringIO) as errors:
+            urls = leads.weekly_files(listing, date(2026, 10, 26))
+            payloads = leads.fetch_weekly_files(urls, fetch)
+
+        self.assertEqual(payloads, [(archive.getvalue(), live)])
+        self.assertIn("expired_weekly_file", errors.getvalue())
+        self.assertEqual(leads.parse_weekly_zip(payloads[0][0], as_of=date(2026, 10, 26), source=live), [])
+
+    def test_main_records_failure_loop_after_synthetic_source_abort(self):
+        import urllib.error
+        listing = ('<a href="NPPES_Data_Dissemination_101226_101826_Weekly_V2.zip">old</a>'
+                   '<a href="NPPES_Data_Dissemination_101926_102526_Weekly_V2.zip">current</a>')
+        calls = []
+
+        def transport(verb, payload):
+            calls.append((verb, payload))
+            reply = {"loops": []} if verb == "loop-board" else {"ok": True}
+            return VerbResult(verb, OK, reply)
+
+        original_context = runtime.Context
+        abort_time = datetime.fromisoformat("2026-10-26T07:00:00-05:00")
+
+        def context_at_fixture_time(ident, **kwargs):
+            kwargs["now"] = abort_time
+            return original_context(ident, **kwargs)
+
+        def run_job(ctx):
+            return runtime.run_module(ctx, leads)
+
+        def fetch(url):
+            if url == leads.INDEX_URL:
+                return listing.encode()
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(runtime, "ROOT", Path(folder)), \
+                patch.object(runtime, "Context", side_effect=context_at_fixture_time), \
+                patch.object(runtime, "execute", side_effect=run_job), \
+                patch.object(runtime, "due", return_value=True), \
+                patch.object(runtime, "call_verb", side_effect=transport), \
+                patch.object(leads, "_fetch", side_effect=fetch), \
+                patch.object(leads, "_today", return_value=abort_time.date()), \
+                patch("sys.argv", ["runtime.py", "lead-signals-weekly"]), \
+                patch("sys.stderr", new_callable=io.StringIO) as errors:
+            self.assertEqual(runtime.main(), 1)
+
+        self.assertIn("HTTPError", errors.getvalue())
+        self.assertEqual([verb for verb, _ in calls], ["loop-board", "add-loop"])
+        self.assertIn("HTTP Error 404", calls[1][1]["body"])
+
     def test_secondary_practice_location_archive_parser(self):
         raw = copy.deepcopy(FIXTURE["nppes_rows"][2])
         location = {"NPI": raw["NPI"], "Provider Secondary Practice Location Address - City Name": "Pensacola", "Provider Secondary Practice Location Address - State Name": "FL", "Provider Secondary Practice Location Address - Postal Code": "32501"}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove the two fixture-heavy selftests leave a repo-local TMPDIR clean."""
+"""Prove the fixture-heavy selftests leave a repo-local TMPDIR clean."""
 from __future__ import annotations
 
 import os
@@ -9,7 +9,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-for name in ("built-unclosed-selftest.py", "session-brief-selftest.py",
+for name in ("session-brief-selftest.py",
              "backup-workflow-selftest.py",
              "hook-env-isolation-selftest.py",
              "../test/doc_drift/test_checker.py",
@@ -43,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix="compat-tmp-") as compat_root:
         [sys.executable, "-c", """
 import os, runpy, tempfile
 here = os.environ['SELFTEST_OPS']
-for name in ('built-unclosed-selftest.py', 'session-brief-selftest.py'):
+for name in ('session-brief-selftest.py',):
     runpy.run_path(os.path.join(here, name))
     d = tempfile.mkdtemp('.suffix', 'positional-')
     fd, path = tempfile.mkstemp('.log', 'positional-', None, False)

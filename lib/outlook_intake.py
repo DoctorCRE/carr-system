@@ -2,8 +2,8 @@
 
 Every 30 minutes from 07:00 to 19:00 local (com.carr.outlook-intake) this reads
 a private copy of the configured profile's HxStore.hxd and its EFMData body sidecars,
-never the live files, decodes it with the pinned hxprobe fork
-(vendor-patches/hxprobe-calendar-and-bodies.patch), and writes what it finds
+never the live files, decodes it with the vendored hxprobe decoder
+(vendor/hxprobe), and writes what it finds
 through the named record-layer verbs:
 
 - an email to or from a known address becomes log-activity email_in/email_out

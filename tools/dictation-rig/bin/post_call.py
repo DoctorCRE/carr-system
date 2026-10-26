@@ -695,9 +695,11 @@ def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any], 
     deal_check = (update.get("checks") or {}).get("deal")
     if not isinstance(deal_check, dict):
         return "The automatic deal check did not run."
-    if deal_check.get("pass") is not True:
+    if deal_check.get("pass") is True:
+        return None
+    if deal_check.get("pass") is False and deal_check.get("value") not in (None, "", "none"):
         return "The automatic check matched these words to a different deal."
-    return None
+    return "The automatic check could not confirm which deal this is."
 
 
 def mark_automatic(result: dict[str, Any], transcript: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
