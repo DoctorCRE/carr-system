@@ -821,6 +821,27 @@ test('stored proposals need literal email evidence and refuse instructions to th
   assert.deepEqual(await listed(), []);
 });
 
+test('the router queue holds recent inbound email for a single open deal until a proposal exists', async () => {
+  await c.query('delete from email_proposal');
+  const source = await email();
+  const queue = async () => (await command('email-router-queue', { days: 3 }, router(), 'carr_reader')).emails
+    .filter(row => row.activity_id === source.activity_id);
+  const [row] = await queue();
+  assert.equal(row.deal, deal);
+  assert.equal(row.deal_name, 'Synthetic coastal purchase');
+  assert.equal(row.phase, 'site_selection');
+  assert.equal(row.body, `${quote} Please review the proposed terms.`);
+  await record({ kind: 'phase_move', activity_id: source.activity_id, evidence_quote: quote });
+  assert.deepEqual(await queue(), []);
+  const other = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
+    summary: 'Second deal email', detail: askQuote });
+  const second = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) select 'Synthetic second deal',client_id,'purchase','research','joe',$2,$2 from deal where id=$1 returning id", [deal, actor.id])).rows[0].id;
+  try {
+    const rows = (await command('email-router-queue', { days: 3 }, router(), 'carr_reader')).emails;
+    assert.equal(rows.some(item => item.activity_id === other.activity_id), false);
+  } finally { await c.query("update deal set phase='closed' where id=$1", [second]); }
+});
+
 test('a proposal the deal has outgrown stays listed with its refusal so a partner can dismiss it', async () => {
   await c.query('delete from email_proposal');
   const source = await email();

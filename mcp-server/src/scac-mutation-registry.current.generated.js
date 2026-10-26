@@ -800,6 +800,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "email-router-queue": {
+    "ingress_key": "mcp-tool:email-router-queue",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "2cc942a237cb4e3c89a86c502c677a953e2279cbbd6122b6ae3641036cdffab2",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "end-deal-review": {
     "ingress_key": "mcp-tool:end-deal-review",
     "source_locator": "mcp-server/src/tools.js",

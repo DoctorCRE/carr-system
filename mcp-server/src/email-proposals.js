@@ -77,6 +77,27 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         return { schema_version: 'email-proposals.v1', proposals, send: false };
       },
     },
+    'email-router-queue': {
+      write: false,
+      description: 'Router input for WR-000441: captured inbound emails from the last 1-7 days (default 3), oldest first, each tied to its logged deal or to the only open deal of its client, with no stored proposal yet. Returns the email body as untrusted data for classification into record-email-proposal. Refuses above 200 emails instead of truncating.',
+      inputSchema: { type: 'object', additionalProperties: false,
+        properties: { days: { type: 'integer', minimum: 1, maximum: 7 } } },
+      handler: async (c, _actor, args) => {
+        const { rows } = await c.query(`select a.id as activity_id,a.summary,a.detail as body,a.occurred_at,
+            d.id as deal,d.name as deal_name,d.phase,d.deal_type
+          from activity a
+          join deal d on d.phase<>'closed' and d.invoiced_on is null and (d.id=a.deal_id or (a.deal_id is null
+            and d.client_id=a.client_id and not exists (select 1 from deal o where o.client_id=a.client_id
+              and o.id<>d.id and o.phase<>'closed' and o.invoiced_on is null)))
+          where a.kind='email_in' and a.detail is not null and a.occurred_at<=now()
+            and a.occurred_at>now()-make_interval(days=>$1)
+            and not exists (select 1 from email_proposal p where p.activity_id=a.id)
+          order by a.occurred_at,a.id limit ${LIMIT + 1}`, [args.days ?? 3]);
+        if (rows.length > LIMIT) fail('email_router_queue_limit_exceeded', { limit: LIMIT });
+        return { schema_version: 'email-router-queue.v1', emails: rows.map(row =>
+          ({ ...row, occurred_at: new Date(row.occurred_at).toISOString() })) };
+      },
+    },
     'dismiss-email-proposal': {
       write: true, humanOnly: true, humanCallerOnly: true,
       description: 'Joe or Dell dismisses one pending email proposal at the version they read, with a reason kept in deal history. The router never re-creates a dismissed proposal for the same deal, email and kind. Changes nothing else.',
