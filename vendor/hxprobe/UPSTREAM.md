@@ -49,6 +49,11 @@ WHAT CARR ADDS to `hxprobe db <file> [out.db] [files-dir]`:
   subject and preview opening within a day. A preview-only copy then joins the
   one full copy with the same sender and opening. The full body always wins,
   and `copy_key` is stored as the identity the copies share.
+- Store-local message keys (WR-000502). `messages.local_keys` lists, comma-separated,
+  the key of every message object merged into the row; more than one means the
+  copy join merged distinct store items. `messages_with_key` and
+  `local_key_conflicts` count them. See
+  [the identity study](../../spec/outlook/stable-message-id-research.md).
 - Folders for the 2026-10 Outlook build (WR-000469). Its folder, compact-message
   and metadata envelopes use new tags (`04d8`, `074e`, `02b8`); the old tags stay
   accepted. `folders.parent_status` and `parent_id` come from the parent reference
@@ -105,7 +110,7 @@ This result covers the checked lockfile against that advisory revision.
 The `hxprobe` class in `ops/ci.sh` runs `cargo test --locked` followed by
 `cargo build --release --locked` from this directory. The PR and main-canary
 workflows register that class. A test failure stops the build and fails CI.
-The crate's 32 tests use synthetic data. Every example email address uses
+The crate's 34 tests use synthetic data. Every example email address uses
 `@example.test`. No private Outlook store or profile is needed.
 
 For updates, retain a separate upstream import and CARR change commit, review
@@ -148,6 +153,13 @@ The extraction selectors and SQLite contracts retain their existing behavior.
 `python3 ops/hxstore-atlas-selftest.py` rebuilds a temporary copy after an atlas
 rename and checks the actual `map` output using a synthetic block.
 The repository gates class discovers this test alongside the existing surface tests.
+
+## Local message keys
+
+WR-000502 adds `messages.local_keys` to `db`. Each IPM.Note anchor inside a
+bounded `00ca` message header takes that header's repeated u64 key. The intake
+installer builds it from this tree like every other change. [The identity study](../../spec/outlook/stable-message-id-research.md)
+records which operations the key was observed to survive.
 
 ## Calendar lifecycle limits
 

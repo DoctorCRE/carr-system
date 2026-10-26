@@ -1,4 +1,6 @@
-export async function readBriefAssurance(c, sponsor) {
+import type { ClientBase } from "@neondatabase/serverless";
+
+export async function readBriefAssurance(c: Pick<ClientBase, "query">, sponsor: string) {
   if (sponsor !== 'joe' && sponsor !== 'dell') throw new Error('assurance_partner_required');
   const recipient = (await c.query(
     "select public.retrieval_visibility_actor_id($1) as id", [sponsor])).rows[0];

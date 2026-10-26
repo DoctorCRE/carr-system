@@ -1,4 +1,4 @@
-import { readableWorkRequestSql } from './work-request-read.js';
+import { readableWorkRequestSql } from './work-request-read.ts';
 const text=value=>typeof value==='string' && !!value.trim() && !/[\u0000-\u001f]/.test(value);
 const record=value=>value && typeof value==='object' && !Array.isArray(value);
 const pullRequestUrl=value=>typeof value==='string'&&/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]*$/.test(value);

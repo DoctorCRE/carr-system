@@ -1,4 +1,4 @@
-import { isCalendarDate } from './calendar-date.js';
+import { isCalendarDate } from './calendar-date.ts';
 export const DEAL_ITEMS_SCHEMA = 'deal-items.v1';
 
 export function shortDealHeading(deal) {

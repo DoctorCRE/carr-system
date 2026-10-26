@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { callTool } from '../src/mcp.js';
 import { tourSharingTools } from '../src/tour-sharing.js';
-import { ToolError } from '../src/tool-error.js';
+import { ToolError } from '../src/tool-error.ts';
 
 const actor = { id: randomUUID(), slug: 'joe', human: true, via: 'test' };
 const args = () => ({ idempotency_key: randomUUID(), projection_id: randomUUID(),

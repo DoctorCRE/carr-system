@@ -93,7 +93,7 @@ test('both evidence lanes blend while personal, retired, class and stale revisio
 test('backfill embeds bounded current revisions once',async()=>{
   const { doctrineEmbeddingDatabase }=await import('./helpers/doctrine-embedding-postgres.mjs');
   const { doctrineTools }=await import('../src/doctrine.js');
-  const { ToolError }=await import('../src/tool-error.js');
+  const { ToolError }=await import('../src/tool-error.ts');
   const verbs=doctrineTools({withEnvelope:async(_c,_a,_n,_args,fn)=>fn(),writeEvent:async()=>{},ToolError});
   assert.ok(verbs['backfill-doctrine-embeddings'],'backfill is an authenticated write verb');
   assert.equal(verbs['backfill-doctrine-embeddings'].write,true);
@@ -169,7 +169,7 @@ test('embedding storage errors roll back only optional vectors and allow a later
 
 test('backfill rejects invalid batch bounds before querying',async()=>{
   const { doctrineTools }=await import('../src/doctrine.js');
-  const { ToolError }=await import('../src/tool-error.js');
+  const { ToolError }=await import('../src/tool-error.ts');
   const verbs=doctrineTools({withEnvelope:async(_c,_a,_n,_args,fn)=>fn(),writeEvent:async()=>{},ToolError});
   for(const limit of [0,17,-1,1.5,'16']) {
     await assert.rejects(()=>verbs['backfill-doctrine-embeddings'].handler({query:async()=>assert.fail('invalid batch queried')},actor,
@@ -180,7 +180,7 @@ test('backfill rejects invalid batch bounds before querying',async()=>{
 for (const verb of ['write-doctrine-section','change-doctrine-sections'])
   test(`${verb} embeds the new revision through the ordinary write handler`,async()=>{
     const { doctrineTools }=await import('../src/doctrine.js');
-    const { ToolError }=await import('../src/tool-error.js');
+    const { ToolError }=await import('../src/tool-error.ts');
     const verbs=doctrineTools({withEnvelope:async(_c,_a,_n,_args,fn)=>fn(),writeEvent:async()=>{},ToolError});
     const modelCalls=[],stored=[];
     const revision=fixtureIds[25];
