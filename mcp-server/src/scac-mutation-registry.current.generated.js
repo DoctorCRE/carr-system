@@ -395,15 +395,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
       "*registered_operation"
     ]
   },
-  "cancel-capability-session": {
-    "ingress_key": "mcp-tool:cancel-capability-session",
-    "source_locator": "mcp-server/src/capability-program.js",
-    "schema_digest": "41fbf99f4a3a8242ba65ad32896c93a43959a6035ec9edd65ae2e1b3fbf9b505",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
   "cancel-pending-deal": {
     "ingress_key": "mcp-tool:cancel-pending-deal",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
