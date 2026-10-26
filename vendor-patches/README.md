@@ -26,7 +26,10 @@ WHAT THE PATCH ADDS to `hxprobe db <file> [out.db] [files-dir]`:
   start and end, subject, location, organizer and attendees. Byte-distinct
   candidates remain separate; only exact serialized copies collapse. GOID and
   start are observed grouping fields. Every row exports unsupported lifecycle
-  status. Current occurrence state and attendance remain unverified. See
+  status. Current occurrence state and attendance remain unverified. An item
+  with no attendee block (an own appointment, some recurring series) decodes
+  with no attendees; on the 2026-10-21 study copies that took decoded GOID/start
+  groups from 169 to all 191, including the TEST account's new appointment. See
   [calendar lifecycle limits](../vendor/hxprobe/UPSTREAM.md#calendar-lifecycle-limits).
 - Full bodies from EFMData sidecars (`src/body.rs`). These are gzip files at
   `Files/S0/<N>/EFMData/<id>.dat`. `<N>` is 845 on Joe's machine, so every

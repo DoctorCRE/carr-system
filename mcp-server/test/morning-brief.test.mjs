@@ -23,7 +23,7 @@ function costFixture() {
     alerts: [], action: "Finance Ops: inspect provider and driver; verify the next complete day; auto-clear when thresholds pass." };
 }
 
-function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, localUpdatedAt = new Date().toISOString() } = {}) {
+function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, localUpdatedAt = new Date().toISOString(), calendar = null } = {}) {
   const queries = [];
   return {
     queries,
@@ -56,6 +56,8 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
         { display_name: "Renewal Safe", city: "Pensacola", est_lease_event: "2027-01-01",
           tier_status: "t1", flag_status: "clear", has_channel: true },
       ] };
+      if (sql.includes("from board_snapshot") && params[2] === "calendar-agenda")
+        return { rows: calendar === null ? [] : [{ snapshot_json: calendar }] };
       if (sql.includes("from board_snapshot") && params[2] === "system-costs")
         return { rows: costs === null ? [] : [{ snapshot_json: { costs } }] };
       if (sql.includes("ops.v5_a05_assurance_cadence_batch")) return { rows: [{ batch: [] }] };
@@ -383,4 +385,59 @@ test("a failed cost board read never exposes driver error details", async () => 
   assert.equal(result.sections.costs.state, "unavailable");
   assert.match(result.sections.costs.action, /owner orchestrator.*verify.*auto-clear/);
   assert.doesNotMatch(JSON.stringify(result), /fixture source unavailable/);
+});
+
+function calendarFixture(now = Date.now(), observedAt = new Date(now).toISOString()) {
+  const at = (hours) => new Date(now + hours * 3600000).toISOString();
+  return { schema: "carr-calendar-agenda.v1", source: "outlook_hxstore", lifecycle: "unverified",
+    observed_at: observedAt, items: [
+      { start: at(-30), end: at(-29), title: "Synthetic finished review", attendees: [] },
+      { start: at(26), end: at(27), title: "Synthetic site tour", location: "Example Suite 100",
+        organizer: { name: "Ada Example", email: "Ada@Example.test" },
+        attendees: [{ name: "Bo Example", email: "bo@example.test" }], attendee_count: 1, conflict: true },
+      { start: at(2), end: at(3), title: "Synthetic lender call", location: null, attendees: [] },
+      { start: at(24 * 8), end: at(24 * 8 + 1), title: "Synthetic next-week meeting", attendees: [] },
+    ] };
+}
+
+test("morning-brief shows the partner's own published calendar for the next seven days, soonest first", async () => {
+  const c = client({ calendar: calendarFixture() });
+  const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
+  const calendar = result.sections.calendar;
+  assert.equal(result.state, "ready");
+  assert.equal(calendar.state, "ready");
+  assert.equal(calendar.lifecycle, "unverified");
+  assert.deepEqual(calendar.items.map((row) => row.title), ["Synthetic lender call", "Synthetic site tour"]);
+  assert.deepEqual(calendar.items[1].organizer, { name: "Ada Example", email: "ada@example.test" });
+  assert.deepEqual(calendar.items[1].attendees, [{ name: "Bo Example", email: "bo@example.test" }]);
+  assert.equal(calendar.items[1].location, "Example Suite 100");
+  assert.equal(calendar.items[1].conflict, true);
+  const read = c.queries.find(({ params }) => params[2] === "calendar-agenda");
+  assert.deepEqual(read.params.slice(1), ["joe", "calendar-agenda"], "sponsor comes from authentication");
+  assert.ok(result.coverage.required_sections.some((row) => row.key === "calendar" && row.counts.items === 2));
+});
+
+test("morning-brief omits the calendar for a partner with no published calendar, and never calls it empty", async () => {
+  const result = await executeRegisteredTool(client(), DELL, "morning-brief", {});
+  assert.equal(result.sections.calendar, undefined);
+  assert.equal(result.state, "ready");
+});
+
+test("a stale, malformed or unreadable calendar is partial or unavailable, never ready", async () => {
+  const day = 86400000;
+  const stale = await executeRegisteredTool(client({ calendar: calendarFixture(Date.now(), new Date(Date.now() - day).toISOString()) }), JOE, "morning-brief", {});
+  assert.equal(stale.sections.calendar.state, "partial");
+  assert.deepEqual(stale.sections.calendar.sources, { outlook_calendar: { state: "stale" } });
+  const broken = calendarFixture();
+  broken.items.push({ start: "not a time", end: null, title: "" });
+  const malformed = await executeRegisteredTool(client({ calendar: broken }), JOE, "morning-brief", {});
+  assert.equal(malformed.sections.calendar.state, "partial");
+  assert.equal(malformed.sections.calendar.malformed_items, 1);
+  for (const calendar of [{ schema: "other" }, { ...calendarFixture(), observed_at: "never" }]) {
+    const result = await executeRegisteredTool(client({ calendar }), JOE, "morning-brief", {});
+    assert.equal(result.sections.calendar.state, "unavailable");
+    assert.equal(result.state, "unavailable");
+  }
+  const failed = await executeRegisteredTool(client({ unavailable: "board_id=$3" }), JOE, "morning-brief", {});
+  assert.equal(failed.sections.calendar.state, "unavailable");
 });

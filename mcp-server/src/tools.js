@@ -44,6 +44,7 @@ import { resourceObservationTools } from "./resource-observation.v5.js";
 import { invoiceAutomation } from "./invoice-automation.js";
 import { emailDealProgressTools } from "./email-deal-progress.js";
 import { emailNextStepTools } from "./email-next-step.js";
+import { CALENDAR_AGENDA_BOARD, calendarSection } from "./brief-calendar.js";
 import { leadAutomationTools } from "./lead-automation.js";
 import { workflowCutoverTools } from "./workflow-cutover.v5.js";
 import { engineeringRuntimeTools } from "./engineering-runtime.js";
@@ -3468,7 +3469,7 @@ export const TOOLS = {
 
   "morning-brief": {
     write: false,
-    description: "The record-native morning brief for the authenticated Joe or Dell context. It composes Needs Joe when applicable, live triage, claim-card, deal-room, loop-board, the redacted renewal decision queue, assurance cadence, and published system costs. Sections preserve ready, empty, partial, or unavailable. Coverage names every required section, points to its response content, and counts returned rows only, never queue totals. Unavailable is never rewritten as empty. Takes no audience, sponsor, or partner argument.",
+    description: "The record-native morning brief for the authenticated Joe or Dell context. It composes Needs Joe when applicable, live triage, claim-card, deal-room, loop-board, the redacted renewal decision queue, assurance cadence, published system costs, and, once the partner's own Outlook intake has published one, the next seven days of calendar meetings (Outlook local store; attendance and cancellations unverified). Sections preserve ready, empty, partial, or unavailable. Coverage names every required section, points to its response content, and counts returned rows only, never queue totals. Unavailable is never rewritten as empty. Takes no audience, sponsor, or partner argument.",
     inputSchema: { type: "object", properties: {} },
     handler: async (c, actor, args) => {
       // This is an audience boundary, not a convenience filter.  A shared-only
@@ -3606,8 +3607,21 @@ export const TOOLS = {
           [organizationTenantForActor(actor), scope.sponsor, "system-costs"]);
         return morningCostSnapshot(result.rows[0]?.snapshot_json?.costs);
       }) };
+      // Present only for a partner whose own Outlook intake has published a
+      // calendar; a partner without one has no calendar source, not an empty day.
+      let calendar = null;
+      try {
+        const result = await c.query(
+          `select snapshot_json from board_snapshot
+            where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`,
+          [organizationTenantForActor(actor), scope.sponsor, CALENDAR_AGENDA_BOARD]);
+        calendar = calendarSection(result.rows[0]?.snapshot_json);
+      } catch {
+        calendar = { state: "unavailable", reason: "source_unavailable", items: [] };
+      }
       const sections = { ...(needsJoe ? { needs_joe: needsJoe } : {}),
-        today, claim_card: claimCard, deals, loops, renewals, assurance_cadence: assuranceCadence, costs };
+        today, ...(calendar ? { calendar } : {}), claim_card: claimCard, deals, loops, renewals,
+        assurance_cadence: assuranceCadence, costs };
       const coverage = {
         schema: "morning-brief-coverage.v1", count_scope: "returned_rows_only",
         required_sections: Object.entries(sections).map(([key, value]) => ({

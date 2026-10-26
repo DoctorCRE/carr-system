@@ -105,8 +105,14 @@ Synthetic tests prove candidate separation and fail-closed labeling only.
 Native decoder validation and controlled test-account format research are still
 required before current calendar lifecycle or completeness can be claimed.
 
+An object whose NUL-terminated fields run to its end, with no attendee count,
+decodes with no attendees. The 2026-10-21 TEST-account study pair showed such an
+appointment added one GOID/start identity and, before this, no decoded candidate.
+
 Intake stores opaque candidate hashes and provisional schedule timestamps in its
-private state. It does not create reminders or contact activities from these
+private state. Separately it publishes the next fourteen days of internal-domain
+meetings as a display snapshot (board `calendar-agenda`) for the morning brief,
+labelled lifecycle-unverified, with no notes or bodies. It does not create reminders or contact activities from these
 rows. Existing unacknowledged calendar activities and next actions without
 established mail provenance remain quarantined with their frozen payloads.
 Mail continues independently. Status reasons remain `processed`, `nothing_new`,

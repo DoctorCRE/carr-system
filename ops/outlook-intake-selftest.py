@@ -32,7 +32,8 @@ CREATE TABLE messages (id INTEGER PRIMARY KEY, block INTEGER, sender TEXT, sende
   preview TEXT, body_source TEXT, copies INTEGER, copy_key TEXT);
 CREATE TABLE events (id INTEGER PRIMARY KEY, goid TEXT NOT NULL, start_unix INTEGER NOT NULL,
   end_unix INTEGER NOT NULL, start_utc TEXT NOT NULL, end_utc TEXT NOT NULL, subject TEXT,
-  location TEXT, organizer_name TEXT, organizer_email TEXT, body TEXT, UNIQUE (goid, start_unix));
+  location TEXT, organizer_name TEXT, organizer_email TEXT, body TEXT,
+  lifecycle_status TEXT NOT NULL DEFAULT 'unsupported', lifecycle_reason TEXT NOT NULL DEFAULT 'hxstore_lifecycle_unverified');
 CREATE TABLE event_attendees (event_id INTEGER NOT NULL, name TEXT, email TEXT);
 CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
 """
@@ -104,8 +105,14 @@ class Fake:
         self.contacts_rows = [CLIENT, LEAD]
         self.now = NOW
         self.on_decode = None
+        self.board_calls = []
+        self.agenda = None
+        self.agenda_version = 0
+        self.board_conflicts = 0
 
     def carr(self, verb, args):
+        if verb in ('read-progress-board', 'publish-board-snapshot'):
+            return self.board(verb, args)
         self.calls.append((verb, args))
         if verb in self.fail_verbs:
             raise intake.CarrError()
@@ -124,6 +131,21 @@ class Fake:
             self.actions[args['ref'], args.get('owner', 'runtime')] = {
                 'id': action_id, 'version': 1, 'updated_at': self.now.isoformat()}
             return {'ok': True, 'next_action_id': action_id}
+        return {'ok': True}
+
+    def board(self, verb, args):
+        """The display-snapshot store, kept apart from record writes."""
+        self.board_calls.append((verb, args))
+        if verb in self.fail_verbs:
+            raise intake.CarrError()
+        if verb == 'read-progress-board':
+            return {'ok': True, 'snapshot': self.agenda and {'version': self.agenda_version}}
+        if self.board_conflicts:
+            self.board_conflicts -= 1
+            self.agenda_version += 1
+            raise intake.CarrError(code='agenda_version_conflict')
+        self.test.assertEqual(args['base_version'], self.agenda_version if self.agenda else 0)
+        self.agenda, self.agenda_version = args['snapshot'], args['base_version'] + 1
         return {'ok': True}
 
     def contacts(self):
@@ -1220,6 +1242,75 @@ class IntakeTest(unittest.TestCase):
         for secret in ('pat@example.test', 'Pat Example', 'Suite question', 'C-901'):
             self.assertNotIn(secret, line)
         self.assertTrue(line.startswith('outlook-intake succeeded'))
+
+
+    # calendar agenda: the display snapshot the morning brief shows
+
+    def test_agenda_publishes_the_next_fourteen_days_of_internal_meetings(self):
+        tester = ('Synthetic Tester', 'tester@example.test')
+        events = [
+            event('g-call', timedelta(hours=2), subject='Synthetic lender call', attendees=[('Pat', 'pat@example.test')]),
+            event('g-tour', timedelta(days=3), subject='Synthetic tour'),
+            event('g-own', timedelta(days=1), subject='Synthetic test-account item', organizer=tester),
+            event('g-late', timedelta(days=15), subject='Synthetic far meeting'),
+            event('g-done', -timedelta(days=2), subject='Synthetic past meeting'),
+        ]
+        outcome = self.run_intake(events=events)
+        self.assertEqual(outcome.state, 'succeeded')
+        snapshot = self.fake.agenda
+        self.assertEqual(snapshot['schema'], intake.AGENDA_SCHEMA)
+        self.assertEqual(snapshot['lifecycle'], 'unverified')
+        self.assertEqual([i['title'] for i in snapshot['items']], ['Synthetic lender call', 'Synthetic tour'])
+        call = snapshot['items'][0]
+        self.assertEqual(call['start'], intake._iso(ts(timedelta(hours=2))))
+        self.assertEqual(call['location'], 'Example Room')
+        self.assertEqual(call['organizer'], {'name': 'Owner', 'email': OWNER})
+        self.assertEqual(call['attendees'], [{'name': 'Pat', 'email': 'pat@example.test'}])
+        self.assertNotIn('Agenda', json.dumps(snapshot), 'meeting notes never leave the private copy')
+        self.assertEqual(outcome.counts['calendar_agenda_items'], 2)
+        self.assertEqual(outcome.counts['calendar_agenda_other_accounts'], 1)
+        self.assertEqual(outcome.counts['calendar_agenda_published'], 1)
+        self.assertEqual(self.fake.writes(), [], 'the agenda never becomes a reminder or an activity')
+        self.assertEqual([v for v, _ in self.fake.board_calls], ['read-progress-board', 'publish-board-snapshot'])
+
+    def test_agenda_hides_cancelled_groups_and_flags_disagreeing_candidates(self):
+        start = timedelta(days=2)
+        events = [
+            event('g-moved', start, subject='Synthetic review'),
+            event('g-moved', start, minutes=90, subject='Synthetic review', attendees=[('Pat', 'pat@example.test')]),
+            event('g-off', start + timedelta(hours=3), subject='Synthetic budget'),
+            event('g-off', start + timedelta(hours=3), subject='Canceled: Synthetic budget'),
+        ]
+        outcome = self.run_intake(events=events)
+        [item] = self.fake.agenda['items']
+        self.assertEqual((item['candidates'], item['conflict'], item['attendee_count']), (2, True, 1))
+        self.assertEqual(item['end'], intake._iso(ts(start + timedelta(minutes=90))))
+        self.assertEqual(outcome.counts['calendar_agenda_canceled'], 1)
+        self.assertEqual(outcome.counts['calendar_agenda_conflicts'], 1)
+
+    def test_agenda_publish_failure_fails_the_run_after_mail_and_retries_next_run(self):
+        m = mail('pat@example.test', -timedelta(hours=1))
+        self.fake.fail_verbs.add('publish-board-snapshot')
+        outcome = self.run_intake([m], [event('g-1', timedelta(hours=4))])
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'calendar_agenda_failed'))
+        self.assertEqual(outcome.counts['calendar_agenda_published'], 0)
+        self.assertEqual([(v, a.get('kind')) for v, a in self.fake.writes()], [('log-activity', 'email_in')])
+        self.fake.fail_verbs.clear()
+        retried = self.run_intake([m], [event('g-1', timedelta(hours=4))], touch=False)
+        self.assertEqual(retried.state, 'succeeded')
+        self.assertEqual(len(self.fake.agenda['items']), 1)
+        self.assertEqual(len(self.fake.writes()), 1, 'mail is not logged twice')
+
+    def test_agenda_replaces_the_prior_snapshot_and_rereads_once_on_a_version_conflict(self):
+        self.run_intake(events=[event('g-1', timedelta(hours=4))])
+        self.fake.board_conflicts = 1
+        self.fake.now += timedelta(minutes=30)
+        outcome = self.run_intake(events=[event('g-2', timedelta(hours=5), subject='Synthetic second')])
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertEqual([i['title'] for i in self.fake.agenda['items']], ['Synthetic second'])
+        self.fake.board_conflicts = 2
+        self.fake.now += timedelta(minutes=30)
+        self.assertEqual(self.run_intake(events=[event('g-3', timedelta(hours=6))]).reason, 'calendar_agenda_failed')
 
 
 class ScheduleTest(unittest.TestCase):

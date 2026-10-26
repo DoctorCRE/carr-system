@@ -171,9 +171,13 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
     let g = memchr::memmem::find(obj, &GOID_PREFIX.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>())?;
     // The earliest block that parses to the end. Scanning from the end instead
     // stops at the trailing status bytes, which read as a count of zero.
+    // An item with no attendees (Joe's own appointment, a block of time, some
+    // recurring series) carries no attendee block: its NUL-terminated fields
+    // run to the object end.
     let (ap, attendees) = (g + 2..obj.len().saturating_sub(3))
         .filter(|p| obj[p - 2..*p] == [0, 0])
-        .find_map(|p| attendees_at(obj, p).map(|a| (p, a)))?;
+        .find_map(|p| attendees_at(obj, p).map(|a| (p, a)))
+        .or_else(|| obj.ends_with(&[0, 0]).then(|| (obj.len(), Vec::new())))?;
     // The length-prefixed time-zone strings shift byte parity, so the field
     // run is aligned to where it ends, not to where the object starts.
     let lo = g + (ap - g) % 2;
@@ -305,6 +309,22 @@ mod tests {
         idx.observe(&envelope(&object(true, &[])));
         assert_eq!(idx.events.len(), 1, "a zero-attendee block is still a block");
         assert!(idx.events.values().next().unwrap().attendees.is_empty());
+    }
+
+    #[test]
+    fn an_appointment_without_an_attendee_block_decodes() {
+        // Observed on a TEST-account appointment (2026-10-21 study pair): the
+        // object ends at the repeated subject, with no attendee count at all.
+        let mut obj = object(true, &[]);
+        obj.truncate(obj.len() - 4);
+        let mut idx = Index::default();
+        idx.observe(&envelope(&obj));
+        assert_eq!(idx.events.len(), 1, "the identity decodes instead of vanishing");
+        let ev = idx.events.values().next().unwrap();
+        assert_eq!(ev.subject.as_deref(), Some("Quarterly Site Review"));
+        assert_eq!(ev.location.as_deref(), Some("Example Room"));
+        assert_eq!(ev.organizer_email.as_deref(), Some("ada@example.test"));
+        assert!(ev.attendees.is_empty());
     }
 
     #[test]

@@ -10,6 +10,9 @@ through the named record-layer verbs:
   with the full deduplicated plain-text body as its detail;
 - calendar rows remain provisional schedule candidates in a private evidence index;
   unsupported lifecycle rows never establish a reminder or completed contact;
+- the next fourteen days of meetings that involve the internal domain are published
+  as one display snapshot (publish-board-snapshot, board "calendar-agenda") that the
+  morning brief shows; it is replaced on every decode and labelled lifecycle-unverified;
 - one isolated haiku call per new matched email proposes a next step, which
   becomes a ball when the record has none or only an older one.
 
@@ -65,7 +68,7 @@ REFRESH_LIST = 'needs-refresh.json'
 STATE = 'state.json'
 WORK_PREFIX = 'work-'
 WINDOW = (time(7, 0), time(19, 30))
-WRITE_VERBS = frozenset({'log-activity', 'set-next-action'})
+WRITE_VERBS = frozenset({'log-activity', 'set-next-action', 'publish-board-snapshot'})
 RECORD_REF = re.compile(r'^[CLV]-')
 EXIT = {'succeeded': 0, 'skipped': 78, 'failed': 1}
 
@@ -77,6 +80,12 @@ REFRESH_INTERVAL = timedelta(minutes=30)
 COPY_WINDOW = 86_400
 VERIFIED_MIN = 0.95
 MODEL_BODY_CHARS = 12_000
+AGENDA_BOARD = 'calendar-agenda'
+AGENDA_SCHEMA = 'carr-calendar-agenda.v1'
+AGENDA_DAYS = 14
+AGENDA_ATTENDEES = 100
+CALENDAR_POLICY = 3
+CANCELED = re.compile(r'\s*cancell?ed\s*:', re.I)
 
 
 def resolve_store(home: Path) -> Path:
@@ -91,12 +100,14 @@ ERROR_CODES = frozenset({'timeout', 'auth_refused', 'key_reuse', 'transport_over
                          'no_acknowledgement', 'reply_unreadable', 'transport_error',
                          'invalid_request', 'subject_unresolved', 'database_refused',
                          'setup_failed', 'contacts_empty', 'contacts_read_failed', 'next_action_conflict',
-                         'legacy_action_guard_required'})
+                         'legacy_action_guard_required', 'agenda_version_conflict'})
 BLOCKED_ERRORS = frozenset({'key_reuse', 'transport_oversized', 'invalid_request', 'subject_unresolved'})
 
 
 def _reply_error(reply: dict) -> str:
     error = reply.get('error')
+    if error == 'board_version_conflict':
+        return 'agenda_version_conflict'
     if error in ('key_reuse', 'next_action_conflict'):
         return error
     if error in ('unauthorized', 'forbidden'):
@@ -385,6 +396,7 @@ class Run:
         self.unmatched: set[tuple[str, str, str]] = set()
         self.balls: dict[str, tuple[str, int, int]] = {}
         self.attempted: set[str] = set()
+        self.agenda_error: str | None = None
 
     def write(self, verb: str, args: dict, who: str, note: str = '') -> bool:
         requests = self.state.setdefault('requests', {})
@@ -628,7 +640,7 @@ class Run:
                     reason = matcher.reason(email)
                     if reason is not None:
                         self.unmatched.add((name or '(no name)', _domain(email), reason))
-        self.state.update(calendar_evidence=evidence, calendar_unresolved=unresolved, calendar_policy=2)
+        self.state.update(calendar_evidence=evidence, calendar_unresolved=unresolved, calendar_policy=CALENDAR_POLICY)
         self.state.pop('calendar_due_at', None)
         self.state.pop('upcoming', None)
         self.counts.update(calendar_counts(self.state))
@@ -700,6 +712,69 @@ def calendar_counts(state: dict) -> dict:
                                                  for r in state.get('requests', {}).values())}
 
 
+def agenda(events: list[dict], settings: OutlookSettings, now: datetime) -> tuple[dict, dict]:
+    """The display snapshot of upcoming meetings, and its counts.
+
+    One row per observed (GOID, start) group. A group whose candidates include an
+    Outlook "Canceled:" subject is left out. Candidates that disagree are flagged
+    `conflict`, and the row shows the candidate with the most attendees. Only
+    groups with a participant at the internal domain are shown, which keeps the
+    TEST account's items out. No notes or bodies leave the private copy.
+    """
+    tz = settings.timezone
+    start = datetime.combine(now.astimezone(tz).date(), time(), tz)
+    lo, hi = int(start.timestamp()), int((start + timedelta(days=AGENDA_DAYS)).timestamp())
+    groups: dict[tuple[str, int], list[dict]] = {}
+    for e in events:
+        if e['end_unix'] > lo and e['start_unix'] < hi:
+            groups.setdefault((e['goid'], e['start_unix']), []).append(e)
+    counts = dict.fromkeys(('calendar_agenda_items', 'calendar_agenda_canceled',
+                            'calendar_agenda_conflicts', 'calendar_agenda_other_accounts'), 0)
+    items = []
+    for (goid, start_unix), group in groups.items():
+        addresses = {(a or '').lower() for e in group
+                     for a in [e['organizer_email'], *(email for _, email in e['attendees'])] if a}
+        if not any(_internal(a, settings.internal_domain) for a in addresses):
+            counts['calendar_agenda_other_accounts'] += 1
+            continue
+        if any(CANCELED.match(e['subject'] or '') for e in group):
+            counts['calendar_agenda_canceled'] += 1
+            continue
+        shown = max(group, key=lambda e: (len(e['attendees']), len(e['subject'] or ''), e['end_unix']))
+        conflict = len({json.dumps([e['subject'], e['location'], e['end_unix'], sorted((n or '', m or '') for n, m in e['attendees'])])
+                        for e in group}) > 1
+        counts['calendar_agenda_conflicts'] += conflict
+        attendees = [{'name': name or None, 'email': email or None} for name, email in shown['attendees']]
+        items.append({'key': _hash(f'{goid}|{start_unix}')[:16],
+                      'start': _iso(start_unix), 'end': _iso(shown['end_unix']),
+                      'title': shown['subject'] or 'Meeting', 'location': shown['location'] or None,
+                      'organizer': {'name': shown['organizer_name'] or None,
+                                    'email': (shown['organizer_email'] or '').lower() or None},
+                      'attendees': attendees[:AGENDA_ATTENDEES], 'attendee_count': len(attendees),
+                      'candidates': len(group), 'conflict': conflict})
+    items.sort(key=lambda i: (i['start'], i['title'], i['key']))
+    counts['calendar_agenda_items'] = len(items)
+    return {'schema': AGENDA_SCHEMA, 'source': 'outlook_hxstore', 'lifecycle': 'unverified',
+            'observed_at': now.astimezone(timezone.utc).isoformat(),
+            'window_start': _iso(lo), 'window_end': _iso(hi), 'time_zone': str(tz), 'items': items}, counts
+
+
+def publish_agenda(carr: Callable[[str, dict], dict], snapshot: dict) -> None:
+    """Replace the display snapshot; one re-read covers a concurrent publish."""
+    for attempt in (1, 2):
+        current = carr('read-progress-board', {'board_id': AGENDA_BOARD}).get('snapshot')
+        base = current['version'] if isinstance(current, dict) and isinstance(current.get('version'), int) else 0
+        try:
+            carr('publish-board-snapshot', {
+                'idempotency_key': key('publish-board-snapshot', AGENDA_BOARD,
+                                       f'{snapshot["observed_at"]}|{base}'),
+                'board_id': AGENDA_BOARD, 'base_version': base, 'snapshot': snapshot})
+            return
+        except CarrError as error:
+            if error.code != 'agenda_version_conflict' or attempt == 2:
+                raise
+
+
 def _quarantine_calendar_requests(state: dict) -> None:
     """Retain legacy assertions; replay next actions only with established mail provenance."""
     for ident, request in state.get('requests', {}).items():
@@ -769,7 +844,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     pending_writes = any(not r['acknowledged'] and r.get('disposition') != 'calendar_unsupported'
                          for r in state.get('requests', {}).values())
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
-    if state.get('store') == signature and not hydration_due and not contacts_changed and not state.get('steps') and not pending_writes and state.get('calendar_policy') == 2:
+    if state.get('store') == signature and not hydration_due and not contacts_changed and not state.get('steps') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY:
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _refresh_list(out, state['pending_full'])
@@ -810,6 +885,14 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         work.next_steps(mails)
         mail_processed = bool(work.written or any(work.counts.values()))
         work.events(events, matcher, since)
+        snapshot, agenda_counts = agenda(events, settings, now)
+        work.counts.update(agenda_counts)
+        try:
+            publish_agenda(ports.carr, snapshot)
+            work.counts['calendar_agenda_published'] = 1
+        except CarrError as error:
+            work.counts['calendar_agenda_published'] = 0
+            work.agenda_error = error.code
     except CarrError as error:
         _save(out, state)
         return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code, work.counts)
@@ -825,7 +908,8 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
                                                ('requests_blocked', 'request_blocked'),
                                                ('writes_deferred', 'writes_deferred'),
                                                ('model_failed', 'model_failed')) if work.counts[count]),
-                  'steps_pending' if state.get('steps') else None)
+                  'steps_pending' if state.get('steps') else
+                  'calendar_agenda_failed' if work.agenda_error else None)
     if failed:
         _save(out, state)
         return Outcome('failed', failed, counts)
