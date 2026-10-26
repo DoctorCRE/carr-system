@@ -622,6 +622,31 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(update["next_step"]["candidate_status"], "skipped")
         self.assertIsNotNone(post_call.retention_ready(self.session, "report-hash"))
 
+    def test_explicit_phase_move_reaches_review_and_waits_for_its_own_disposition(self) -> None:
+        post_call.store_context(self.session, self.context)
+        output = self.output(joe_tasks=[], dell_tasks=[], draft_proposals=[], deal_updates=[{
+            "deal_id": "deal-a", "summary": "LOI terms agreed.", "participant_ids": [],
+            "evidence": "Move the deal to legal.", "phase_move": {"value": "legal"},
+        }])
+        self.assertEqual(post_call.process_session(self.session, distiller=lambda _request: output)["state"], "ready_review")
+        update = post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0]
+        self.assertIn("Move phase to: legal", update["summary"])
+        shaped = post_call.sanitized_candidates(self.session)
+        self.assertEqual(shaped["legacy_items"], [{
+            "kind": "activity", "payload": {"ref": "deal-a", "kind": "note", "summary": "LOI terms agreed."},
+            "evidence_quote": "Move the deal to legal.", "confidence": 0.5,
+        }, {
+            "kind": "phase_move", "payload": {"deal": "deal-a", "field": "phase", "value": "legal"},
+            "evidence_quote": "Move the deal to legal.", "confidence": 0.5,
+        }])
+        post_call.apply_candidate_ids(self.session, shaped["bindings"], ["note-candidate", "phase-candidate"])
+        self.assertEqual(post_call.sanitized_candidates(self.session)["legacy_items"], [])
+        post_call.apply_candidate_statuses(self.session, {"note-candidate": "confirmed"})
+        self.assertIsNone(post_call.retention_ready(self.session, "report-hash"))
+        post_call.apply_candidate_statuses(self.session, {"phase-candidate": "skipped"})
+        self.assertEqual(post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0]["phase_move"]["candidate_status"], "skipped")
+        self.assertIsNotNone(post_call.retention_ready(self.session, "report-hash"))
+
     def test_maximum_length_next_step_keeps_activity_summary_unchanged(self) -> None:
         post_call.store_context(self.session, self.context)
         output = self.output(deal_updates=[{
