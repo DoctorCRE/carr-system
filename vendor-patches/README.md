@@ -39,6 +39,11 @@ WHAT THE PATCH ADDS to `hxprobe db <file> [out.db] [files-dir]`:
   subject and preview opening within a day. A preview-only copy then joins the
   one full copy with the same sender and opening. The full body always wins,
   and `copy_key` is stored as the identity the copies share.
+- Store-local message keys (WR-000502). `messages.local_keys` lists, comma-separated,
+  the key of every message object merged into the row; more than one means the
+  copy join merged distinct store items. `messages_with_key` and
+  `local_key_conflicts` count them. See
+  [the identity study](../spec/outlook/stable-message-id-research.md).
 - Folders for the 2026-10 Outlook build (WR-000469). Its folder, compact-message
   and metadata envelopes use new tags (`04d8`, `074e`, `02b8`); the old tags stay
   accepted. `folders.parent_status` and `parent_id` come from the parent reference
