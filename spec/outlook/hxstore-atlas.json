@@ -515,6 +515,26 @@
       "first_seen_version": null
     },
     {
+      "id": "envelope.tag.04d8",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "envelope_tag",
+        "value": 1240
+      },
+      "name": "Folder envelope, 2026-10 build",
+      "wire_type": "u16le",
+      "decoder": "folder::Index::observe",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::observe"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Observed on 2026-10-21 Studio TEST-campaign store copies, where every object of this class used this tag."
+    },
+    {
       "id": "object.class.004d",
       "parent": "envelope",
       "identifier": {
@@ -593,6 +613,26 @@
       "first_seen_version": null
     },
     {
+      "id": "envelope.tag.074e",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "envelope_tag",
+        "value": 1870
+      },
+      "name": "Compact message envelope, 2026-10 build",
+      "wire_type": "u16le",
+      "decoder": "folder::Index::links",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::links"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Observed on 2026-10-21 Studio TEST-campaign store copies, where every object of this class used this tag."
+    },
+    {
       "id": "object.class.00ca",
       "parent": "envelope",
       "identifier": {
@@ -630,6 +670,26 @@
         }
       ],
       "first_seen_version": null
+    },
+    {
+      "id": "envelope.tag.02b8",
+      "parent": "envelope",
+      "identifier": {
+        "kind": "envelope_tag",
+        "value": 696
+      },
+      "name": "Message metadata envelope, 2026-10 build",
+      "wire_type": "u16le",
+      "decoder": "folder::Index::observe",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "Index::observe"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Observed on 2026-10-21 Studio TEST-campaign store copies, where every object of this class used this tag."
     },
     {
       "id": "object.class.00bf",
@@ -1317,6 +1377,26 @@
         }
       ],
       "first_seen_version": null
+    },
+    {
+      "id": "object.class.004d.offset.792",
+      "parent": "object.class.004d",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 792
+      },
+      "name": "Parent folder reference",
+      "wire_type": "typed-reference",
+      "decoder": "folder::parent",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/folder.rs",
+          "symbol": "parent"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Ten zero bytes mean a top-level folder. Otherwise a typed class 004d reference in the same account. On the 2026-10-21 copies 208 of 236 named folders resolved to a listed parent and 28 were top-level."
     },
     {
       "id": "object.class.00ca.offset.408",

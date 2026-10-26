@@ -577,6 +577,25 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 
 - [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
+## Folder envelope, 2026-10 build (envelope.tag.04d8)
+
+```json
+{
+  "parent": "envelope",
+  "identifier": {
+    "kind": "envelope_tag",
+    "value": 1240
+  },
+  "wire_type": "u16le",
+  "decoder": "folder::Index::observe",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "Observed on 2026-10-21 Studio TEST-campaign store copies, where every object of this class used this tag."
+}
+```
+
+- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+
 ## Folder (object.class.004d)
 
 ```json
@@ -651,6 +670,25 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 
 - [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::links`.
 
+## Compact message envelope, 2026-10 build (envelope.tag.074e)
+
+```json
+{
+  "parent": "envelope",
+  "identifier": {
+    "kind": "envelope_tag",
+    "value": 1870
+  },
+  "wire_type": "u16le",
+  "decoder": "folder::Index::links",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "Observed on 2026-10-21 Studio TEST-campaign store copies, where every object of this class used this tag."
+}
+```
+
+- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::links`.
+
 ## Compact message (object.class.00ca)
 
 ```json
@@ -683,6 +721,25 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   "decoder": "folder::Index::observe",
   "confidence": "inferred",
   "first_seen_version": null
+}
+```
+
+- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+
+## Message metadata envelope, 2026-10 build (envelope.tag.02b8)
+
+```json
+{
+  "parent": "envelope",
+  "identifier": {
+    "kind": "envelope_tag",
+    "value": 696
+  },
+  "wire_type": "u16le",
+  "decoder": "folder::Index::observe",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "Observed on 2026-10-21 Studio TEST-campaign store copies, where every object of this class used this tag."
 }
 ```
 
@@ -1338,6 +1395,25 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 ```
 
 - [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+
+## Parent folder reference (object.class.004d.offset.792)
+
+```json
+{
+  "parent": "object.class.004d",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 792
+  },
+  "wire_type": "typed-reference",
+  "decoder": "folder::parent",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "Ten zero bytes mean a top-level folder. Otherwise a typed class 004d reference in the same account. On the 2026-10-21 copies 208 of 236 named folders resolved to a listed parent and 28 were top-level."
+}
+```
+
+- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `parent`.
 
 ## Expanded folder reference (object.class.00ca.offset.408)
 

@@ -14,6 +14,9 @@ const TRIAGE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "
 const TRIAGE_CLASSES = new Set(["operational", "needs_judgment", "safety_review"]);
 const JOE_ANSWER_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "answer_text", "scope_confirmed", "evidence_ref"]);
 const DECLINE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "exit_reason"]);
+// Decline also admits the two old program catalogs' refs (WR-AI-002, WR-SIEP-06A).
+const DECLINE_REF_PATTERN = "^WR-(?:[0-9]{1,12}|AI-[0-9]{3}|SIEP-[0-9A-Z]{2,3})$";
+const DECLINE_REF = new RegExp(DECLINE_REF_PATTERN);
 const SUPERSEDE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "exit_reason", "superseded_by"]);
 const DECLINE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor", "sponsored_actor_required", "work_request_not_declinable", "work_request_not_found"]);
 const SUPERSEDE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor", "successor_not_found",
@@ -182,7 +185,7 @@ function validateJoeAnswer(args, ToolError) {
 // stops a blank reason before the idempotency lock turns it into I/O.
 function validateDecline(args, ToolError) {
   if (Object.keys(args).some(key => !DECLINE_FIELDS.has(key))) throw new ToolError({ error: "invalid_decline_work_request_fields" });
-  if (!UUID.test(args.idempotency_key || "") || !/^WR-[0-9]{1,12}$/.test(args.human_ref || "") ||
+  if (!UUID.test(args.idempotency_key || "") || !DECLINE_REF.test(args.human_ref || "") ||
       !Number.isInteger(args.base_version) || args.base_version < 1 ||
       !text(args.exit_reason) || text(args.exit_reason).length > 500)
     throw new ToolError({ error: "invalid_decline_work_request" });
@@ -759,10 +762,10 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     // exists to report.
     "decline-work-request": {
       write: true,
-      description: "A human partner or sponsored agent may withdraw one sourced Work Request from captured or triaged, or ready with no claim, execution assignment, or start. Declining records why and preserves its plan and receipts as history. It never withdraws claimed or later work, triages, assigns, dispatches, approves, executes, or names a successor.",
+      description: "A human partner or sponsored agent may withdraw one sourced or program (WR-AI-*, WR-SIEP-*) Work Request from captured or triaged, or ready with no claim, execution assignment, or start. Declining records why and preserves its plan and receipts as history. It never withdraws claimed or later work, triages, assigns, dispatches, approves, executes, or names a successor.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string", pattern: "^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$" },
-        human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$", minLength: 4, maxLength: 15 },
+        human_ref: { type: "string", pattern: DECLINE_REF_PATTERN, minLength: 4, maxLength: 15 },
         base_version: { type: "integer", minimum: 1 },
         exit_reason: { type: "string", minLength: 1, maxLength: 500 },
       }, required: ["idempotency_key", "human_ref", "base_version", "exit_reason"] },
