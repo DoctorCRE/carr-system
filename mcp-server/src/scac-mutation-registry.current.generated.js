@@ -1687,6 +1687,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-post-call-followups": {
+    "ingress_key": "mcp-tool:read-post-call-followups",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-profiles": {
     "ingress_key": "mcp-tool:read-profiles",
     "source_locator": "mcp-server/src/agent-profiles.js",

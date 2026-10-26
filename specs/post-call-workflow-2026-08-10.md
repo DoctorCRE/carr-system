@@ -70,6 +70,27 @@ The pack has these top-level sections:
 - `unresolved`: the source reference and the question a human must answer;
 - `call_summary`: an attributed aggregate narrative that replaces the raw call.
 
+### Pending follow-ups for Home
+
+`read-post-call-followups` accepts `{}` and returns `post-call-followups.v1`
+with `candidates` and `send: false`. Each candidate has `id`, `session_id`,
+`deal_id`, `deal_name`, `kind`, `payload`, `evidence_quote`, and `created_at`.
+Task payloads contain `deal_id`, `assignee`, `action`, and nullable `due_on`.
+Email payloads contain `deal_id`, `recipient_party_id`, `recipient_ref`,
+`subject`, and `body_sha256`. Email bodies and session tokens are excluded.
+
+The read includes pending proposals for current active board deals from
+unexpired post-call sessions at the distilling stage. It covers both partners
+and both workspaces, orders by creation time and ID, and refuses above 1,000
+candidates with `post_call_followups_limit_exceeded`. It uses the existing
+writer grants inside a read-only transaction. No migration is required.
+
+Use the existing `resolve-post-call-candidate` for a human decision. Email
+confirmation records metadata only. Outlook draft creation still needs the
+local report and companion. The aggregate filing report cannot gate this read
+because filing requires all candidates to have a disposition. Home controls
+remain a separate app change after this server contract is live.
+
 ### Human gates
 
 - Record changes: existing capture candidate confirmation.

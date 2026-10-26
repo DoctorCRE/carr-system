@@ -3764,6 +3764,33 @@ export const TOOLS = {
         order by confidence desc, created_at, id`)).rows }),
   },
 
+  "read-post-call-followups": {
+    writerConnection: true,
+    description: "Read pending Call Mode task and email-draft metadata for Home review across active deals. Includes only unexpired post-call sessions that reached distilling. Proposals remain unconfirmed; email bodies stay local and nothing is sent. Refuses above 1000 candidates instead of truncating.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    handler: async (c) => {
+      const { rows } = await c.query(`
+        select c.id, c.session_id, c.kind, c.deal_id, b.name as deal_name,
+               case c.kind when 'assigned_action' then jsonb_build_object(
+                 'deal_id', c.deal_id, 'assignee', c.assignee_slug,
+                 'action', c.action_description, 'due_on', to_jsonb(c.due_on)#>>'{}')
+               else jsonb_build_object('deal_id', c.deal_id,
+                 'recipient_party_id', c.recipient_party_id, 'recipient_ref', c.recipient_ref,
+                 'subject', c.email_subject, 'body_sha256', c.body_sha256) end as payload,
+               c.evidence_quote, to_jsonb(c.created_at)#>>'{}' as created_at
+          from capture_post_call_candidate c
+          join capture_session s on s.id=c.session_id
+          join v_deal_room_board b on b.id=c.deal_id
+         where c.status='pending' and s.post_call and s.state='distilling' and s.expires_at > now()
+           and b.operating_state='active' and b.phase not in ('closed', 'invoiced')
+           and b.outcome is null and b.closed_on is null and b.invoiced_on is null
+         order by c.created_at, c.id limit 1001`);
+      if (rows.length > 1000)
+        throw new ToolError({ error: "post_call_followups_limit_exceeded", limit: 1000 });
+      return { schema_version: "post-call-followups.v1", candidates: rows, send: false };
+    },
+  },
+
   "mail-contact-policy": {
     write: false,
     description: "Read existing party do-not-contact and lead suppression instructions for exact email addresses. Returns one blocked boolean per normalized address, including unknown addresses. This is suppression evidence only, never permission to send. No contact details or reasons leave the record layer.",
