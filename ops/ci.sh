@@ -508,8 +508,13 @@ check_pushfloor() {
       mcp-server/test/atlas-inventory-graph-read.test.mjs \
       mcp-server/test/atlas-inventory-graph-web.test.mjs \
       || { tail -18 "$LOGDIR/pushfloor-scac-atlas.log" >&2
-           floor_fail scac-atlas \
-             "active registry changed; update the Atlas version contract or repair its reader before push"; }
+           if grep -m 1 -E "Error.*Cannot find package '" "$LOGDIR/pushfloor-scac-atlas.log" >&2; then
+             floor_fail scac-atlas \
+               "missing Node packages; run npm ci --prefix mcp-server before push"
+           else
+             floor_fail scac-atlas \
+               "active registry changed; update the Atlas version contract or repair its reader before push"
+           fi; }
   fi
 
   local gate_surface=""
