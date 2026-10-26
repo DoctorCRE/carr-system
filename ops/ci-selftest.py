@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Exercise CI classes, fixture isolation, collection, and failure behavior.
 
 import contextlib
 import hashlib
@@ -37,7 +38,7 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/ci-pushfloor.py", "ops/node_test_summary.py",
+            "ops/ci.sh", "ops/ci-pushfloor.py", "ops/node_test_summary.py", "tools/codemap.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
             "ops/hook-deletion-check.py", "ops/githooks/path-hygiene-check.py",
@@ -218,6 +219,8 @@ def test_gates_build_hxprobe_before_parallel_selftests():
         (root / "ops/config").mkdir(parents=True)
         (root / "vendor/hxprobe").mkdir(parents=True)
         (root / "bin").mkdir()
+        (root / "tools").mkdir()
+        shutil.copy2(REPO / "tools/codemap.py", root / "tools/codemap.py")
         for name in ("ci.sh", "node_test_summary.py", "git_env.py",
                      "ci-secret-scan.py", "pii_guard.py"):
             shutil.copy2(REPO / "ops" / name, root / "ops" / name)
@@ -244,6 +247,8 @@ def test_gates_build_hxprobe_before_parallel_selftests():
         subprocess.run(["git", "-C", str(root), "add", "ops/ci.sh"], env=env, check=True)
         subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture", "-c",
                         "user.email=fixture@example.invalid", "commit", "-qm", "fixture"], env=env, check=True)
+        subprocess.run(["git", "-C", str(root), "update-ref", "refs/remotes/origin/main", "HEAD"],
+                       env=env, check=True)
         for failure in ("0", "1"):
             for name in ("worker-built", "gate-ran"):
                 (root / name).unlink(missing_ok=True)
@@ -458,6 +463,12 @@ def test_gate_shards_execute_a_disjoint_complete_inventory():
             (root / name).mkdir()
         inventory = {"ops/a-selftest.py", "ops/b-selftest.py", "ops/c-selftest.py",
                      "tools/test-d.py", "tools/test-e.sh", "tools/test-f.sh"}
+        shutil.copy2(REPO / "tools/codemap.py", root / "tools/codemap.py")
+        for args in (("init", "-q"),
+                     ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                      "commit", "--allow-empty", "-qm", "Synthetic shard baseline"),
+                     ("update-ref", "refs/remotes/origin/main", "HEAD")):
+            subprocess.run(["git", *args], cwd=root, env=fixture_env(), check=True, capture_output=True)
         for path in inventory:
             (root / path).write_text("")
         (root / "hooks/gate-integrity.py").write_text("")

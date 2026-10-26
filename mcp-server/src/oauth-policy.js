@@ -1,5 +1,7 @@
 // Shared authorization policy around the pinned provider. No OAuth cryptography
 // is duplicated here; the provider remains responsible for codes and tokens.
+import { bearerCredential } from "./bearer.ts";
+
 export function validateAuthorizationRequest(request, auth) {
   const params = new URL(request.url).searchParams;
   for (const name of ["response_type", "client_id", "redirect_uri", "code_challenge", "code_challenge_method", "resource"])
@@ -82,7 +84,10 @@ async function policyFetch(provider, request, env, ctx) {
   if (isSharedOAuthPath(url.pathname)) {
     const refused = mcpOriginRefusal(request, env);
     if (refused) return refused;
-    const bearer = request.headers.get("authorization")?.match(/^Bearer (.+)$/i)?.[1];
+    const authorization = request.headers.get("authorization");
+    const bearer = bearerCredential(authorization);
+    // A present but malformed header is refused here, never handed on unparsed.
+    if (authorization !== null && !bearer) return oauthError(request, 401, "invalid_token");
     if (bearer) {
       // Null means invalid/expired; operational errors reach the existing
       // server-failure boundary and its failure recorder.
