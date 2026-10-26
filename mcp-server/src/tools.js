@@ -80,6 +80,7 @@ import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
 import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.js";
 import { partyIdentityTools } from "./party-identity.js";
+import { partyDuplicateCandidateTools } from "./party-duplicate-candidates.js";
 import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.js";
 import { readBriefAssurance } from "./brief-assurance.js";
 import { readNeedsJoe } from "./needs-joe.js";
@@ -8837,6 +8838,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "board-answers": "mcp-server/src/board-answers.js",
   "research-sites": "mcp-server/src/research-sites.js",
   "party-identity": "mcp-server/src/party-identity.js",
+  "party-duplicate-candidates": "mcp-server/src/party-duplicate-candidates.js",
   "schedule-board": "mcp-server/src/schedule-board.js",
   "doc-suggestions": "mcp-server/src/doc-suggestions.js",
   "whats-new": "mcp-server/src/whats-new.js",
@@ -10015,6 +10017,7 @@ registerTools(systemWorkTools(), "system-work-census");
 registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
 registerTools(researchSiteTools({ withEnvelope, writeEvent }), "research-sites");
 registerTools(partyIdentityTools({ withEnvelope, writeEvent, versionGuard, resolvePartyForWrite }), "party-identity");
+registerTools(partyDuplicateCandidateTools(), "party-duplicate-candidates");
 registerTools(scheduleBoardTools(), "schedule-board");
 registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject, ToolError,
   canExercisePartnerAuthority, partnerAuthoritySlugForActor }), "deal-items");
