@@ -10959,9 +10959,7 @@ CREATE FUNCTION ops.decline_sourced_work_request(p_work_request text, p_base_ver
 declare
   v_id uuid;
   v_actor public.actor%rowtype;
-  v_state text;
-  v_version integer;
-  v_sourced boolean;
+  v_row ops.work_request%rowtype;
   v_now timestamp with time zone := now();
 begin
   if p_exit_reason is null or btrim(p_exit_reason) = '' then
@@ -10980,19 +10978,22 @@ begin
       using errcode = '42501';
   end if;
 
-  select w.id, w.state, w.version, w.capture_idempotency_key is not null
-    into v_id, v_state, v_version, v_sourced from ops.work_request w
-   where w.ref = p_work_request for update;
+  select w.* into v_row from ops.work_request w where w.ref = p_work_request for update;
+  v_id := v_row.id;
   if v_id is null then
     raise exception 'work_request_not_found: no Work Request %', p_work_request;
   end if;
-  if v_state not in ('captured','triaged','ready') or not v_sourced then
-    raise exception 'work_request_not_declinable: % is in state %; only captured, triaged, or unstarted ready sourced requests may be declined',
-      p_work_request, v_state;
+  if v_row.state not in ('captured','triaged','ready')
+     or (v_row.capture_idempotency_key is null and v_row.program_key is null)
+     or (v_row.state = 'ready' and (
+          v_row.claimed_at is not null or v_row.executor_actor is not null or v_row.started_at is not null
+          or exists (select 1 from ops.work_request_execution_assignment a where a.work_request_id = v_id))) then
+    raise exception 'work_request_not_declinable: % is in state %; only captured, triaged, or unstarted ready sourced or program requests may be declined',
+      p_work_request, v_row.state;
   end if;
-  if v_version <> p_base_version then
+  if v_row.version <> p_base_version then
     raise exception 'work_request_version_conflict: % is in state % at version %, not version %',
-      p_work_request, v_state, v_version, p_base_version;
+      p_work_request, v_row.state, v_row.version, p_base_version;
   end if;
 
   insert into ops.work_request_withdrawal_receipt
@@ -62363,6 +62364,7 @@ CREATE FUNCTION ops.siep_program_identity_guard() RETURNS trigger
     AS $$
 begin
   if old.program_key='carr-system-integrity-elimination-v1'
+     and not (old.state='ready' and new.state='declined')
      and (to_jsonb(new)-array['state','executor_actor','claimed_at','started_at','closed_at','updated_at','version',
                                   'completion_kind','completion_evidence','verification_accepted_at','verification_evidence_ref'])
          is distinct from
@@ -62384,6 +62386,20 @@ CREATE FUNCTION ops.siep_program_transition_guard() RETURNS trigger
     AS $$
 begin
   if old.program_key is distinct from 'carr-system-integrity-elimination-v1' then return new; end if;
+  if old.state='ready' and new.state='declined' then
+    if new.version<>old.version+1
+       or old.executor_actor is not null or old.claimed_at is not null or old.started_at is not null
+       or (to_jsonb(new)-array['state','exit_reason','closed_at','version','updated_at'])
+          is distinct from (to_jsonb(old)-array['state','exit_reason','closed_at','version','updated_at'])
+       or not exists (
+         select 1 from ops.work_request_withdrawal_receipt r
+          where r.work_request_id=old.id and r.base_version=old.version
+            and r.result_version=new.version and r.final_state='declined'
+            and r.exit_reason=new.exit_reason and r.superseded_by is null) then
+      raise exception 'SIEP package decline requires an unstarted ready package and its withdrawal receipt';
+    end if;
+    return new;
+  end if;
   if old.state='confirmed_closed' and new is distinct from old then raise exception 'closed SIEP package is immutable'; end if;
   if old.state is not distinct from new.state and new is distinct from old then raise exception 'SIEP package mutations require a typed state transition'; end if;
   if old.state is distinct from new.state and (old.state,new.state) not in (
@@ -122623,6 +122639,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0978_doctrine_title_topic_ranking.sql	852b8da1601a9277e7f9e2cd5fbf1385785af2356b4a08bc92438378c994c72b	1970-01-01 00:00:00+00
 0979_decline_unstarted_ready_work_request.sql	f343b16316d6a744dcf6c20073bedfb9e38695d5f06c56d292ba8797b9c261d6	1970-01-01 00:00:00+00
 0981_client_portal_writer_denials.sql	2380f08e4b75a3ed447b5b99854cfb8b9348308dab81a24c74986602feb56b86	1970-01-01 00:00:00+00
+0982_decline_unstarted_program_work_request.sql	b9d3cc1923fff53794725307d647fc59452669e5246c6b7121e79282a64b2741	1970-01-01 00:00:00+00
 0983_fact_store.sql	13f97f25f7cdee1ed5dbcdeb2b45764e4018765edbad37c4b5e6c021e6f8ad04	1970-01-01 00:00:00+00
 \.
 
