@@ -19,6 +19,7 @@ from lib import outlook_intake as current
 from lib.outlook_settings import SettingsError, load_settings
 from outlook_test_support import write_settings
 
+
 def fixture_module():
     spec = importlib.util.spec_from_file_location('outlook_parity_fixtures', ROOT / 'ops/outlook-intake-selftest.py')
     module = importlib.util.module_from_spec(spec)

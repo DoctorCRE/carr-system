@@ -678,19 +678,21 @@ class IntakeTest(unittest.TestCase):
                                  'subject_hash': hashlib.sha256(b'Suite question').hexdigest(),
                                  'sender_email': 'pat@example.test'})
 
-    def test_hydration_rechecks_sidecars_and_infers_only_from_full_text(self):
+    def test_hydration_rechecks_sidecars_despite_unsupported_calendar(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='Hello', kind='preview', copy_key='hydrate')
-        self.assertEqual(self.run_intake([preview]).state, 'succeeded')
+        events = [event('unsupported', timedelta(days=1), attendees=[('Pat', 'pat@example.test')])]
+        self.assertEqual(self.run_intake([preview], events).reason, 'calendar_lifecycle_unsupported')
         self.assertEqual(self.fake.model_calls, [], 'a preview cannot settle an obligation')
         self.fake.now += timedelta(minutes=30)
         full = {**preview, 'body': 'Hello. Send the floor plan by Thursday.', 'body_kind': 'full'}
         self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': '2026-10-22'}
-        self.assertEqual(self.run_intake([full], touch=False).state, 'succeeded')
+        self.assertEqual(self.run_intake([full], events, touch=False).state, 'succeeded')
         self.assertEqual([m['text'] for m in self.fake.model_calls], [full['body']])
         self.assertEqual([a['description'] for _, a in self.fake.writes('set-next-action')], ['Send the floor plan'])
         self.assertEqual(json.loads((self.out() / intake.REFRESH_LIST).read_text()), [])
-        self.run_intake([full], touch=False)
+        self.run_intake([full], events, touch=False)
         self.assertEqual(len(self.fake.model_calls), 1)
+        self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['email_in', 'note'])
 
     def test_expired_hydration_remains_visible_and_can_recover(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='Hello', kind='preview', copy_key='expired')
