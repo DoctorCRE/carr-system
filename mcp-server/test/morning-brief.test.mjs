@@ -40,7 +40,7 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
         { display_name: "Candidate Safe", city: "Mobile", has_channel: true, pool_id: "opaque-handler-id" },
       ] };
       if (sql.includes("dealroom:closed-deals")) return { rows: [] };
-      if (sql.includes("from v_deal_room_board")) return { rows: dealRows || [
+      if (sql.includes("from v_open_deal_room_board")) return { rows: dealRows || [
         { name: "Example Deal", owner: "joe", attention: true },
       ] };
       if (sql.includes("from v_deal_room_account")) return { rows: accounts };
@@ -87,7 +87,7 @@ test("morning-brief derives Joe's sponsor from authenticated context and compose
   const sql = c.queries.map(({ sql }) => sql).join("\n");
   assert.match(sql, /v_today_triage/);
   assert.match(sql, /v_claim_card/);
-  assert.match(sql, /v_deal_room_board/);
+  assert.match(sql, /v_open_deal_room_board/);
   assert.match(sql, /loop_item/);
   assert.match(sql, /v_renewal_decision_queue/);
   const renewalQueries = c.queries.filter(({ sql }) => sql.includes("v_renewal_decision_queue"));

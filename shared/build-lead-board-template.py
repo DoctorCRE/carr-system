@@ -358,8 +358,13 @@ unowned = [r for r in registry_all if not r["owner"]]
 decisions_path = os.path.join(AUTO, "lead-board-decisions.json")
 DECISIONS = json.load(open(decisions_path)) if os.path.exists(decisions_path) else []
 hot_path = os.path.join(AUTO, "lead-board-hot.json")
-HOT = json.load(open(hot_path)) if os.path.exists(hot_path) else {"ranked":[],"proposed":[],"holds":[],"signals":[]}
-hot_n = len(HOT.get("ranked",[])) + len(HOT.get("proposed",[]))
+try:
+    with open(hot_path, encoding="utf-8") as hot_file:
+        HOT = json.load(hot_file)
+except (OSError, ValueError) as exc:
+    raise SystemExit(f"lead-board: Hot source unavailable at {hot_path} ({exc}); "
+                     "refusing to render Hot 0 without source data") from exc
+hot_n = len(HOT.get("ranked",[])) + (len(HOT.get("proposed",[])) if isinstance(HOT.get("proposed"), list) else 0)
 
 # ── Already-worked marking (2026-07-27) ────────────────────────────────────────
 # 34 router rows matched a registry contact by name and carried NO mark, so the

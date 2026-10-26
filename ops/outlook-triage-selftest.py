@@ -684,6 +684,28 @@ class RefreshTest(FakeOutlookCase):
         self.assertNotIn('opened_at', entries[1])
         self.assertEqual(len(entries), 2, 'opening is not a body-decoded acknowledgement')
 
+    def test_refresh_failure_logs_category_without_exception_content(self):
+        from lib import outlook_refresh
+        from lib.outlook_ui import CuaError, UiError
+        self.given([self.READ_BODY])
+        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        for error, reason, message in (
+                (UiError, 'ui_error', 'Outlook UI interaction failed'),
+                (OSError, 'os_error', 'Operating system operation failed'),
+                (CuaError, 'cua_error', 'Computer automation call failed')):
+            with self.subTest(error=error.__name__):
+                output = io.StringIO()
+                with patch.dict(os.environ, self.env, clear=True), \
+                        patch('lib.outlook_refresh.Window.front',
+                              side_effect=error('private subject sender body\nsecret')), \
+                        redirect_stderr(output), redirect_stdout(output):
+                    result = outlook_refresh.run(
+                        self.repo, EVENING.replace(hour=10),
+                        waits=Waits(0, 0, 0, 0, 0, 0, 0))
+                self.assertEqual((result.state, result.reason), ('failed', reason))
+                self.assertEqual(output.getvalue(),
+                                 f'outlook-refresh {error.__name__}: {message}\n')
+
     def test_refresh_worker_refuses_wrong_account_and_active_user(self):
         from lib import outlook_refresh
         self.given([self.READ_BODY])

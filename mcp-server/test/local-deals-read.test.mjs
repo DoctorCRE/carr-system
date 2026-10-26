@@ -11,7 +11,7 @@ test('deal-board exposes parking fields and excludes invoiced deals in its execu
   const result = await TOOLS['deal-board'].handler({query:async sql => {query=sql;return {rows};}});
   assert.deepEqual(result.deals,rows);
   assert.match(query,/d\.operating_state, d\.parking_note/);
-  assert.match(query,/join v_deal_room_board d on d\.id=b\.id/);
+  assert.match(query,/join v_open_deal_room_board d on d\.id=b\.id/);
   assert.doesNotMatch(query,/join deal\b|invoiced_on is null/);
 });
 
@@ -58,7 +58,8 @@ test('deal room includes closed and invoiced history from the all-deal read', as
   assert.deepEqual(result.closed_deals,[archived]);
   assert.match(archiveQuery,/from v_deal_board b/);
   assert.doesNotMatch(archiveQuery,/join v_deal_room_board/);
-  assert.match(archiveQuery,/b.phase = 'closed'/);
+  assert.match(archiveQuery,/b\.phase in \('closed', 'invoiced'\)/);
+  assert.match(archiveQuery,/b\.closed_on is not null/);
   assert.match(archiveQuery,/b.outcome is not null/);
   assert.match(archiveQuery,/b.invoiced_on is not null/);
 });
@@ -67,6 +68,6 @@ test('deal room includes closed and invoiced history from the all-deal read', as
 test('lost outcomes stay separate from won and ambiguous historical closures',async()=>{
  const rows=[{id:'demo-won',outcome:'won',phase:'closed'},{id:'demo-lost',outcome:'lost',phase:'pending'},{id:'demo-unknown',phase:'closed',outcome:null},{id:'demo-paused',phase:'closed',outcome:'paused',closed_on:'2026-10-01'}];
  const value=await TOOLS['deal-room-board'].handler({query:async sql=>({rows:sql.includes('dealroom:closed-deals')?rows:[]})},{slug:'joe'},{});
- assert.deepEqual(value.closed_deals.map(d=>d.id),['demo-won']);
+ assert.deepEqual(value.closed_deals.map(d=>d.id),['demo-won','demo-unknown','demo-paused']);
  assert.deepEqual(value.lost_deals.map(d=>d.id),['demo-lost']);
 });
