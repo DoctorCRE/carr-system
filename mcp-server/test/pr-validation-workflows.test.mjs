@@ -111,7 +111,7 @@ test("only unit fixtures provision the shared PostgreSQL service", () => {
     if (group.split(" ").includes("unit")) {
       assert.equal(image, read("main-canary.yml").jobs.classes.services.postgres.image);
       assert.match(image, /@sha256:[0-9a-f]{64}$/);
-      assert.equal(new URL(dsn).hostname, "localhost");
+      assert.equal(new URL(dsn).hostname, "127.0.0.1");
       assert.equal(new URL(dsn).username, "carr_ci");
       assert.equal(new URL(dsn).password, job.services.postgres.env.POSTGRES_PASSWORD);
     } else {
