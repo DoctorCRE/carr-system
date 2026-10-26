@@ -1098,15 +1098,23 @@ class AutomaticApplyTests(unittest.TestCase):
         post_call.write_private(self.session / "transcript.json", self.transcript)
         raw = {"schema_version": 1, "report": {"summary": "", "decisions": [], "open_questions": []},
                "joe_tasks": [], "dell_tasks": [], "draft_proposals": [], "review_questions": [],
-               "deal_updates": [self.update(next_step=self.step())]}
+               "deal_updates": [
+                   self.update(next_step=self.step()),
+                   self.update(next_step=self.step(next_date=None, needs_review="Dell has not agreed.")),
+                   self.update(phase_move={"value": "negotiation", "started_on": None,
+                                           "needs_review": "The phase is unclear."}),
+               ]}
         log_path = Path(self.tmp.name) / "call-mode.log"
-        with patch.dict(sys.modules, {"post_call_jev": None}), patch.object(post_call, "LOG_PATH", log_path, create=True):
+        with patch.dict(sys.modules, {"post_call_jev": None}), patch.object(post_call, "LOG_PATH", log_path):
             post_call.process_session(self.session, distiller=lambda _request: raw)
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
-        step = report["deal_updates"][0]["next_step"]
         self.assertEqual(report["deal_check"], {"status": "unavailable", "exception_class": "ModuleNotFoundError"})
-        self.assertEqual((step["apply"], step["review_reason"]),
-                         ("review", "Deal check unavailable (ModuleNotFoundError)."))
+        changes = [update[field] for update in report["deal_updates"]
+                   for field in ("next_step", "phase_move") if update[field] is not None]
+        self.assertEqual(len(changes), 3)
+        self.assertTrue(all(change["apply"] == "review" for change in changes))
+        self.assertTrue(all(change["review_reason"] == "Deal check unavailable (ModuleNotFoundError)."
+                            for change in changes))
         self.assertEqual(post_call.automatic_candidates(self.session), [])
         log_lines = log_path.read_text().splitlines()
         self.assertEqual(len(log_lines), 1)
