@@ -110,9 +110,18 @@ decodes with no attendees. The 2026-10-21 TEST-account study pair showed such an
 appointment added one GOID/start identity and, before this, no decoded candidate.
 
 Intake stores opaque candidate hashes and provisional schedule timestamps in its
-private state. Separately it publishes the next fourteen days of internal-domain
-meetings as a display snapshot (board `calendar-agenda`) for the morning brief,
-labelled lifecycle-unverified, with no notes or bodies. It does not create reminders or contact activities from these
+private state. Separately it publishes the next fourteen days of meetings that
+name the configured account in every stored copy as a display snapshot (board
+`calendar-agenda`) for the morning brief, with no notes or bodies.
+
+Observed on the 2026-10-21 study copies (Joe's shared profile, not yet the TEST
+account): each recurring occurrence is a separate object whose Global Object ID
+carries its local instance date in bytes 16-19 (111 of 111 rows matched their
+start date); the series master keeps zero there. Only one ID appeared at two
+starts, which reads as a moved meeting. Not decoded yet, so the snapshot always
+warns about them: attendee responses (declines), deleted-items or folder
+membership, the owning account, revision order, and whether every occurrence of
+a series is materialized. It does not create reminders or contact activities from these
 rows. Existing unacknowledged calendar activities and next actions without
 established mail provenance remain quarantined with their frozen payloads.
 Mail continues independently. Status reasons remain `processed`, `nothing_new`,

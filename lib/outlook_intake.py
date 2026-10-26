@@ -10,9 +10,10 @@ through the named record-layer verbs:
   with the full deduplicated plain-text body as its detail;
 - calendar rows remain provisional schedule candidates in a private evidence index;
   unsupported lifecycle rows never establish a reminder or completed contact;
-- the next fourteen days of meetings that involve the internal domain are published
+- the next fourteen days of meetings that name the configured account are published
   as one display snapshot (publish-board-snapshot, board "calendar-agenda") that the
-  morning brief shows; it is replaced on every decode and labelled lifecycle-unverified;
+  morning brief shows; it is replaced on every decode, carries its known gaps as
+  warnings, and a failed publish never fails mail;
 - one isolated haiku call per new matched email proposes a next step, which
   becomes a ball when the record has none or only an older one.
 
@@ -83,7 +84,8 @@ MODEL_BODY_CHARS = 12_000
 AGENDA_BOARD = 'calendar-agenda'
 AGENDA_SCHEMA = 'carr-calendar-agenda.v1'
 AGENDA_DAYS = 14
-AGENDA_ATTENDEES = 100
+AGENDA_ATTENDEES = 50
+AGENDA_MAX_BYTES = 200_000
 CALENDAR_POLICY = 3
 CANCELED = re.compile(r'\s*cancell?ed\s*:', re.I)
 
@@ -396,7 +398,6 @@ class Run:
         self.unmatched: set[tuple[str, str, str]] = set()
         self.balls: dict[str, tuple[str, int, int]] = {}
         self.attempted: set[str] = set()
-        self.agenda_error: str | None = None
 
     def write(self, verb: str, args: dict, who: str, note: str = '') -> bool:
         requests = self.state.setdefault('requests', {})
@@ -712,51 +713,97 @@ def calendar_counts(state: dict) -> dict:
                                                  for r in state.get('requests', {}).values())}
 
 
-def agenda(events: list[dict], settings: OutlookSettings, now: datetime) -> tuple[dict, dict]:
-    """The display snapshot of upcoming meetings, and its counts.
+def _instance(goid: str) -> str:
+    """The instance date Outlook writes into an occurrence's Global Object ID (zero for a single item or a series)."""
+    return goid[32:40] if len(goid) >= 40 else '00000000'
 
-    One row per observed (GOID, start) group. A group whose candidates include an
-    Outlook "Canceled:" subject is left out. Candidates that disagree are flagged
-    `conflict`, and the row shows the candidate with the most attendees. Only
-    groups with a participant at the internal domain are shown, which keeps the
-    TEST account's items out. No notes or bodies leave the private copy.
+
+def _series(goid: str) -> str:
+    return goid[:32] + '00000000' + goid[40:] if len(goid) >= 40 else goid
+
+
+def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datetime) -> tuple[dict, dict]:
+    """The display snapshot of Joe's upcoming meetings, and its counts.
+
+    Joe is the configured account. A meeting shows only when every stored copy
+    names him as organizer or attendee, so TEST-account, personal and other
+    partners' items never show; an invite sent only to a group he belongs to is
+    left out and the snapshot says so. Copies are collapsed by Global Object ID.
+    Outlook writes each recurring occurrence under its own ID (the instance date
+    sits in bytes 16-19), so the series master is skipped once occurrences exist.
+    Revision order is not decoded: an ID seen at more than one start is one row
+    flagged time_changed with every observed time. Attendee responses and folder
+    membership are not decoded either, so every snapshot carries that warning;
+    the brief turns warnings into plain sentences and never reports them ready.
+    No notes or bodies leave the private copy.
     """
     tz = settings.timezone
-    start = datetime.combine(now.astimezone(tz).date(), time(), tz)
-    lo, hi = int(start.timestamp()), int((start + timedelta(days=AGENDA_DAYS)).timestamp())
-    groups: dict[tuple[str, int], list[dict]] = {}
+    day = datetime.combine(now.astimezone(tz).date(), time(), tz)
+    lo, hi = int(day.timestamp()), int((day + timedelta(days=AGENDA_DAYS)).timestamp())
+    account = settings.account
+    with_occurrences = {_series(e['goid']) for e in events if _instance(e['goid']) != '00000000'}
+    by_goid: dict[str, list[dict]] = {}
     for e in events:
-        if e['end_unix'] > lo and e['start_unix'] < hi:
-            groups.setdefault((e['goid'], e['start_unix']), []).append(e)
-    counts = dict.fromkeys(('calendar_agenda_items', 'calendar_agenda_canceled',
-                            'calendar_agenda_conflicts', 'calendar_agenda_other_accounts'), 0)
+        by_goid.setdefault(e['goid'], []).append(e)
+    counts = dict.fromkeys(('calendar_agenda_items', 'calendar_agenda_canceled', 'calendar_agenda_conflicts',
+                            'calendar_agenda_other_accounts', 'calendar_agenda_time_changed',
+                            'calendar_agenda_recurring', 'calendar_agenda_trimmed'), 0)
     items = []
-    for (goid, start_unix), group in groups.items():
-        addresses = {(a or '').lower() for e in group
-                     for a in [e['organizer_email'], *(email for _, email in e['attendees'])] if a}
-        if not any(_internal(a, settings.internal_domain) for a in addresses):
+    for goid, group in by_goid.items():
+        if _instance(goid) == '00000000' and goid in with_occurrences:
+            continue
+        current = [e for e in group if e['end_unix'] > lo and e['start_unix'] < hi]
+        if not current:
+            continue
+        if not all(account in {(e['organizer_email'] or '').lower(), *((m or '').lower() for _, m in e['attendees'])}
+                   for e in group):
             counts['calendar_agenda_other_accounts'] += 1
             continue
         if any(CANCELED.match(e['subject'] or '') for e in group):
             counts['calendar_agenda_canceled'] += 1
             continue
-        shown = max(group, key=lambda e: (len(e['attendees']), len(e['subject'] or ''), e['end_unix']))
-        conflict = len({json.dumps([e['subject'], e['location'], e['end_unix'], sorted((n or '', m or '') for n, m in e['attendees'])])
-                        for e in group}) > 1
+        shown = max(current, key=lambda e: (len(e['attendees']), len(e['subject'] or ''), e['end_unix']))
+        starts = sorted({e['start_unix'] for e in group})
+        conflict = len({json.dumps([e['subject'], e['location'], e['end_unix'] - e['start_unix'],
+                                    sorted((n or '', m or '') for n, m in e['attendees'])]) for e in group}) > 1
+        recurring = _instance(goid) != '00000000'
+        start = min(e['start_unix'] for e in current)
+        local = datetime.fromtimestamp(start, tz)
+        length = shown['end_unix'] - shown['start_unix']
         counts['calendar_agenda_conflicts'] += conflict
-        attendees = [{'name': name or None, 'email': email or None} for name, email in shown['attendees']]
-        items.append({'key': _hash(f'{goid}|{start_unix}')[:16],
-                      'start': _iso(start_unix), 'end': _iso(shown['end_unix']),
+        counts['calendar_agenda_time_changed'] += len(starts) > 1
+        counts['calendar_agenda_recurring'] += recurring
+        attendees = [{'name': name or None, 'email': (email or '').lower() or None} for name, email in shown['attendees']]
+        items.append({'key': _hash(goid)[:16], 'start': _iso(start), 'end': _iso(start + length),
+                      'all_day': length > 0 and length % 86_400 == 0 and local.time() == time(),
                       'title': shown['subject'] or 'Meeting', 'location': shown['location'] or None,
                       'organizer': {'name': shown['organizer_name'] or None,
                                     'email': (shown['organizer_email'] or '').lower() or None},
                       'attendees': attendees[:AGENDA_ATTENDEES], 'attendee_count': len(attendees),
+                      'recurring': recurring, 'time_changed': len(starts) > 1,
+                      'times': [_iso(t) for t in starts] if len(starts) > 1 else [],
                       'candidates': len(group), 'conflict': conflict})
     items.sort(key=lambda i: (i['start'], i['title'], i['key']))
-    counts['calendar_agenda_items'] = len(items)
-    return {'schema': AGENDA_SCHEMA, 'source': 'outlook_hxstore', 'lifecycle': 'unverified',
-            'observed_at': now.astimezone(timezone.utc).isoformat(),
-            'window_start': _iso(lo), 'window_end': _iso(hi), 'time_zone': str(tz), 'items': items}, counts
+    undecoded = max(0, (meta.get('event_identities') or 0) - len({(e['goid'], e['start_unix']) for e in events}))
+    warnings = [{'code': 'responses_unverified'}, {'code': 'group_invites_not_shown'}]
+    if undecoded:
+        warnings.append({'code': 'undecoded', 'count': undecoded})
+    if counts['calendar_agenda_time_changed']:
+        warnings.append({'code': 'time_changed', 'count': counts['calendar_agenda_time_changed']})
+    if counts['calendar_agenda_recurring']:
+        warnings.append({'code': 'recurring_unverified', 'count': counts['calendar_agenda_recurring']})
+    snapshot = {'schema': AGENDA_SCHEMA, 'source': 'outlook_hxstore', 'lifecycle': 'unverified',
+                'observed_at': now.astimezone(timezone.utc).isoformat(),
+                'window_start': _iso(lo), 'window_end': _iso(hi), 'time_zone': str(tz),
+                'warnings': warnings, 'items': items}
+    while len(json.dumps(snapshot)) > AGENDA_MAX_BYTES and snapshot['items']:
+        snapshot['items'].pop()
+        counts['calendar_agenda_trimmed'] += 1
+    if counts['calendar_agenda_trimmed']:
+        warnings.append({'code': 'trimmed', 'count': counts['calendar_agenda_trimmed']})
+    counts['calendar_agenda_items'] = len(snapshot['items'])
+    counts['calendar_agenda_undecoded'] = undecoded
+    return snapshot, counts
 
 
 def publish_agenda(carr: Callable[[str, dict], dict], snapshot: dict) -> None:
@@ -885,14 +932,14 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         work.next_steps(mails)
         mail_processed = bool(work.written or any(work.counts.values()))
         work.events(events, matcher, since)
-        snapshot, agenda_counts = agenda(events, settings, now)
+        snapshot, agenda_counts = agenda(events, meta, settings, now)
         work.counts.update(agenda_counts)
         try:
             publish_agenda(ports.carr, snapshot)
-            work.counts['calendar_agenda_published'] = 1
-        except CarrError as error:
-            work.counts['calendar_agenda_published'] = 0
-            work.agenda_error = error.code
+            work.counts.update(calendar_agenda_published=1, calendar_agenda_failed=0)
+        except CarrError:
+            # Display only: mail and its watermark carry on; the next decode republishes.
+            work.counts.update(calendar_agenda_published=0, calendar_agenda_failed=1)
     except CarrError as error:
         _save(out, state)
         return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code, work.counts)
@@ -908,8 +955,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
                                                ('requests_blocked', 'request_blocked'),
                                                ('writes_deferred', 'writes_deferred'),
                                                ('model_failed', 'model_failed')) if work.counts[count]),
-                  'steps_pending' if state.get('steps') else
-                  'calendar_agenda_failed' if work.agenda_error else None)
+                  'steps_pending' if state.get('steps') else None)
     if failed:
         _save(out, state)
         return Outcome('failed', failed, counts)

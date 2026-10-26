@@ -387,15 +387,16 @@ test("a failed cost board read never exposes driver error details", async () => 
   assert.doesNotMatch(JSON.stringify(result), /fixture source unavailable/);
 });
 
-function calendarFixture(now = Date.now(), observedAt = new Date(now).toISOString()) {
+function calendarFixture(now = Date.now(), observedAt = new Date(now).toISOString(), warnings = []) {
   const at = (hours) => new Date(now + hours * 3600000).toISOString();
   return { schema: "carr-calendar-agenda.v1", source: "outlook_hxstore", lifecycle: "unverified",
-    observed_at: observedAt, items: [
+    observed_at: observedAt, warnings, items: [
       { start: at(-30), end: at(-29), title: "Synthetic finished review", attendees: [] },
       { start: at(26), end: at(27), title: "Synthetic site tour", location: "Example Suite 100",
         organizer: { name: "Ada Example", email: "Ada@Example.test" },
-        attendees: [{ name: "Bo Example", email: "bo@example.test" }], attendee_count: 1, conflict: true },
-      { start: at(2), end: at(3), title: "Synthetic lender call", location: null, attendees: [] },
+        attendees: [{ name: "Bo Example", email: "bo@example.test" }], attendee_count: 1,
+        time_changed: true, times: [at(26), at(30)] },
+      { start: at(2), end: at(3), title: "Synthetic lender call", location: null, attendees: [], recurring: true },
       { start: at(24 * 8), end: at(24 * 8 + 1), title: "Synthetic next-week meeting", attendees: [] },
     ] };
 }
@@ -405,16 +406,43 @@ test("morning-brief shows the partner's own published calendar for the next seve
   const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
   const calendar = result.sections.calendar;
   assert.equal(result.state, "ready");
-  assert.equal(calendar.state, "ready");
-  assert.equal(calendar.lifecycle, "unverified");
+  assert.equal(calendar.state, "ready", "no known gap, fresh");
+  assert.deepEqual(calendar.notes, []);
   assert.deepEqual(calendar.items.map((row) => row.title), ["Synthetic lender call", "Synthetic site tour"]);
+  assert.equal(calendar.items[0].recurring, true);
   assert.deepEqual(calendar.items[1].organizer, { name: "Ada Example", email: "ada@example.test" });
   assert.deepEqual(calendar.items[1].attendees, [{ name: "Bo Example", email: "bo@example.test" }]);
   assert.equal(calendar.items[1].location, "Example Suite 100");
-  assert.equal(calendar.items[1].conflict, true);
+  assert.equal(calendar.items[1].time_changed, true);
+  assert.equal(calendar.items[1].times.length, 2);
   const read = c.queries.find(({ params }) => params[2] === "calendar-agenda");
   assert.deepEqual(read.params.slice(1), ["joe", "calendar-agenda"], "sponsor comes from authentication");
   assert.ok(result.coverage.required_sections.some((row) => row.key === "calendar" && row.counts.items === 2));
+});
+
+test("every known gap becomes a plain sentence and the section is partial, never ready", async () => {
+  const warnings = [{ code: "responses_unverified" }, { code: "group_invites_not_shown" },
+    { code: "undecoded", count: 3 }, { code: "time_changed", count: 1 }, { code: "recurring_unverified", count: 2 },
+    { code: "trimmed", count: 4 }, { code: "something_new" }];
+  const result = await executeRegisteredTool(client({ calendar: calendarFixture(Date.now(), undefined, warnings) }), JOE, "morning-brief", {});
+  const calendar = result.sections.calendar;
+  assert.equal(calendar.state, "partial");
+  assert.equal(result.state, "partial");
+  assert.deepEqual(calendar.notes, [
+    "May include meetings you declined or that were cancelled or deleted. Check Outlook.",
+    "Invites sent only to a group you belong to are not shown.",
+    "3 calendar items in Outlook couldn't be read, so meetings may be missing.",
+    "1 meeting has more than one stored time. Check Outlook for the current time.",
+    "Recurring meetings show only the occurrences Outlook stored; some may be missing.",
+    "4 later meetings were left out to keep the brief small.",
+    "This calendar has a gap the brief cannot describe. Check Outlook.",
+  ]);
+  assert.ok(result.coverage.required_sections.some((row) => row.key === "calendar"
+    && row.incomplete_sources.some((source) => source.key === "outlook_calendar")));
+  const empty = calendarFixture(Date.now(), undefined, [{ code: "recurring_unverified" }]);
+  empty.items = [];
+  const none = await executeRegisteredTool(client({ calendar: empty }), JOE, "morning-brief", {});
+  assert.equal(none.sections.calendar.state, "partial", "an empty day with unexpanded series is not empty");
 });
 
 test("morning-brief omits the calendar for a partner with no published calendar, and never calls it empty", async () => {

@@ -71,13 +71,15 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertFalse(list((self.root / "out").glob("outlook-intake-receipt.*")))
 
     def test_calendar_receipts_preserve_counts_and_failure_class(self):
-        for reason, code in (('writes_failed', 1), ('calendar_lifecycle_unsupported', 0),
-                             ('calendar_agenda_failed', 1)):
+        for reason, code in (('writes_failed', 1), ('calendar_lifecycle_unsupported', 0)):
             receipt = {'state': 'failed' if code else 'succeeded', 'reason': reason,
                        'counts': {'calendar_lifecycle_unsupported': 4,
                                   'calendar_agenda_items': 5, 'calendar_agenda_canceled': 1,
                                   'calendar_agenda_conflicts': 1, 'calendar_agenda_other_accounts': 2,
-                                  'calendar_agenda_published': 0, 'error_agenda_version_conflict': 0,
+                                  'calendar_agenda_published': 0, 'calendar_agenda_failed': 1,
+                                  'calendar_agenda_time_changed': 1, 'calendar_agenda_recurring': 2,
+                                  'calendar_agenda_trimmed': 0, 'calendar_agenda_undecoded': 3,
+                                  'error_agenda_version_conflict': 0,
                                   'calendar_requests_quarantined': 2,
                                   'hydration_pending': 1, 'hydration_expired': 0,
                                   'error_next_action_conflict': 0, 'error_legacy_action_guard_required': 0}}

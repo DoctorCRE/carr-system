@@ -1246,71 +1246,117 @@ class IntakeTest(unittest.TestCase):
 
     # calendar agenda: the display snapshot the morning brief shows
 
-    def test_agenda_publishes_the_next_fourteen_days_of_internal_meetings(self):
-        tester = ('Synthetic Tester', 'tester@example.test')
+    def gid(self, n, instance='00000000'):
+        return f'040000008200E00074C5B7101A82E008{instance}{n:012X}'
+
+    def codes(self):
+        return [w['code'] for w in self.fake.agenda['warnings']]
+
+    def test_agenda_shows_only_meetings_that_name_joe(self):
         events = [
-            event('g-call', timedelta(hours=2), subject='Synthetic lender call', attendees=[('Pat', 'pat@example.test')]),
-            event('g-tour', timedelta(days=3), subject='Synthetic tour'),
-            event('g-own', timedelta(days=1), subject='Synthetic test-account item', organizer=tester),
-            event('g-late', timedelta(days=15), subject='Synthetic far meeting'),
-            event('g-done', -timedelta(days=2), subject='Synthetic past meeting'),
+            event(self.gid(1), timedelta(hours=2), subject='Synthetic lender call', attendees=[('Pat', 'pat@example.test')]),
+            event(self.gid(2), timedelta(days=3), subject='Synthetic partner meeting', organizer=('Partner', PARTNER),
+                  attendees=[('Owner', OWNER)]),
+            event(self.gid(3), timedelta(days=1), subject='Synthetic test-account item', organizer=('Tester', 'tester@example.test')),
+            event(self.gid(4), timedelta(days=1), subject='Synthetic partner-only block', organizer=('Partner', PARTNER)),
+            event(self.gid(5), timedelta(days=15), subject='Synthetic far meeting'),
+            event(self.gid(6), -timedelta(days=2), subject='Synthetic past meeting'),
         ]
         outcome = self.run_intake(events=events)
         self.assertEqual(outcome.state, 'succeeded')
         snapshot = self.fake.agenda
         self.assertEqual(snapshot['schema'], intake.AGENDA_SCHEMA)
-        self.assertEqual(snapshot['lifecycle'], 'unverified')
-        self.assertEqual([i['title'] for i in snapshot['items']], ['Synthetic lender call', 'Synthetic tour'])
+        self.assertEqual([i['title'] for i in snapshot['items']], ['Synthetic lender call', 'Synthetic partner meeting'])
         call = snapshot['items'][0]
-        self.assertEqual(call['start'], intake._iso(ts(timedelta(hours=2))))
-        self.assertEqual(call['location'], 'Example Room')
+        self.assertEqual((call['start'], call['location']), (intake._iso(ts(timedelta(hours=2))), 'Example Room'))
         self.assertEqual(call['organizer'], {'name': 'Owner', 'email': OWNER})
         self.assertEqual(call['attendees'], [{'name': 'Pat', 'email': 'pat@example.test'}])
         self.assertNotIn('Agenda', json.dumps(snapshot), 'meeting notes never leave the private copy')
-        self.assertEqual(outcome.counts['calendar_agenda_items'], 2)
-        self.assertEqual(outcome.counts['calendar_agenda_other_accounts'], 1)
+        self.assertEqual(self.codes(), ['responses_unverified', 'group_invites_not_shown'])
+        self.assertEqual((outcome.counts['calendar_agenda_items'], outcome.counts['calendar_agenda_other_accounts']), (2, 2))
         self.assertEqual(outcome.counts['calendar_agenda_published'], 1)
         self.assertEqual(self.fake.writes(), [], 'the agenda never becomes a reminder or an activity')
-        self.assertEqual([v for v, _ in self.fake.board_calls], ['read-progress-board', 'publish-board-snapshot'])
 
-    def test_agenda_hides_cancelled_groups_and_flags_disagreeing_candidates(self):
-        start = timedelta(days=2)
+    def test_a_copy_without_joe_keeps_the_meeting_out(self):
+        self.run_intake(events=[event(self.gid(1), timedelta(days=1), attendees=[('Owner', OWNER)], organizer=('Partner', PARTNER)),
+                                event(self.gid(1), timedelta(days=1), organizer=('Partner', PARTNER))])
+        self.assertEqual(self.fake.agenda['items'], [])
+
+    def test_agenda_collapses_by_id_hides_cancelled_and_flags_moved_meetings(self):
         events = [
-            event('g-moved', start, subject='Synthetic review'),
-            event('g-moved', start, minutes=90, subject='Synthetic review', attendees=[('Pat', 'pat@example.test')]),
-            event('g-off', start + timedelta(hours=3), subject='Synthetic budget'),
-            event('g-off', start + timedelta(hours=3), subject='Canceled: Synthetic budget'),
+            event(self.gid(1), timedelta(days=2), subject='Synthetic review'),
+            event(self.gid(1), timedelta(days=2), minutes=90, subject='Synthetic review', attendees=[('Pat', 'pat@example.test')]),
+            event(self.gid(2), timedelta(days=3), subject='Synthetic budget'),
+            event(self.gid(2), timedelta(days=3), subject='Canceled: Synthetic budget'),
+            event(self.gid(3), timedelta(days=4), subject='Synthetic moved'),
+            event(self.gid(3), timedelta(days=5), subject='Synthetic moved'),
         ]
         outcome = self.run_intake(events=events)
-        [item] = self.fake.agenda['items']
-        self.assertEqual((item['candidates'], item['conflict'], item['attendee_count']), (2, True, 1))
-        self.assertEqual(item['end'], intake._iso(ts(start + timedelta(minutes=90))))
+        review, moved = self.fake.agenda['items']
+        self.assertEqual((review['candidates'], review['conflict'], review['time_changed']), (2, True, False))
+        self.assertEqual(review['end'], intake._iso(ts(timedelta(days=2, minutes=90))))
+        self.assertEqual((moved['title'], moved['time_changed']), ('Synthetic moved', True))
+        self.assertEqual(moved['times'], [intake._iso(ts(timedelta(days=4))), intake._iso(ts(timedelta(days=5)))])
         self.assertEqual(outcome.counts['calendar_agenda_canceled'], 1)
-        self.assertEqual(outcome.counts['calendar_agenda_conflicts'], 1)
+        self.assertIn('time_changed', self.codes())
 
-    def test_agenda_publish_failure_fails_the_run_after_mail_and_retries_next_run(self):
+    def test_recurring_occurrences_show_without_their_series_master(self):
+        master = self.gid(9)
+        events = [event(master, -timedelta(days=30), subject='Synthetic weekly'),
+                  event(self.gid(9, '07EA0A15'), timedelta(days=1), subject='Synthetic weekly'),
+                  event(self.gid(9, '07EA0A1C'), timedelta(days=8), subject='Synthetic weekly')]
+        outcome = self.run_intake(events=events)
+        self.assertEqual([i['recurring'] for i in self.fake.agenda['items']], [True, True])
+        self.assertEqual(outcome.counts['calendar_agenda_recurring'], 2)
+        self.assertIn('recurring_unverified', self.codes())
+
+    def test_unread_calendar_items_are_counted_in_the_snapshot(self):
+        outcome = self.run_intake(events=[event(self.gid(1), timedelta(hours=3))], identities=4)
+        self.assertEqual(self.fake.agenda['warnings'][-1], {'code': 'undecoded', 'count': 3})
+        self.assertEqual(outcome.counts['calendar_agenda_undecoded'], 3)
+
+    def test_an_all_day_event_is_marked_and_kept_for_its_whole_day(self):
+        local = NOW.astimezone(load_settings(self.home).timezone)
+        midnight = local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        e = event(self.gid(1), midnight - NOW, minutes=24 * 60, subject='Synthetic conference')
+        self.run_intake(events=[e])
+        [item] = self.fake.agenda['items']
+        self.assertTrue(item['all_day'])
+        self.assertEqual(item['start'], intake._iso(int(midnight.timestamp())))
+
+    def test_a_large_agenda_is_trimmed_to_fit_and_says_so(self):
+        crowd = [(f'Guest {n}', f'guest{n}@example.test') for n in range(60)] + [('Owner', OWNER)]
+        events = [event(self.gid(n), timedelta(hours=n + 1), subject='Synthetic ' + 'x' * 2000, attendees=crowd)
+                  for n in range(120)]
+        outcome = self.run_intake(events=events)
+        self.assertLessEqual(len(json.dumps(self.fake.agenda)), intake.AGENDA_MAX_BYTES)
+        self.assertTrue(all(len(i['attendees']) == intake.AGENDA_ATTENDEES for i in self.fake.agenda['items']))
+        self.assertGreater(outcome.counts['calendar_agenda_trimmed'], 0)
+        self.assertEqual(self.fake.agenda['warnings'][-1]['code'], 'trimmed')
+
+    def test_agenda_publish_failure_never_fails_mail_and_republishes_on_the_next_decode(self):
         m = mail('pat@example.test', -timedelta(hours=1))
         self.fake.fail_verbs.add('publish-board-snapshot')
-        outcome = self.run_intake([m], [event('g-1', timedelta(hours=4))])
-        self.assertEqual((outcome.state, outcome.reason), ('failed', 'calendar_agenda_failed'))
-        self.assertEqual(outcome.counts['calendar_agenda_published'], 0)
+        outcome = self.run_intake([m], [event(self.gid(1), timedelta(hours=4))])
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertEqual((outcome.counts['calendar_agenda_published'], outcome.counts['calendar_agenda_failed']), (0, 1))
         self.assertEqual([(v, a.get('kind')) for v, a in self.fake.writes()], [('log-activity', 'email_in')])
         self.fake.fail_verbs.clear()
-        retried = self.run_intake([m], [event('g-1', timedelta(hours=4))], touch=False)
-        self.assertEqual(retried.state, 'succeeded')
+        self.fake.now += timedelta(minutes=30)
+        self.assertEqual(self.run_intake([m], [event(self.gid(1), timedelta(hours=4))]).counts['calendar_agenda_published'], 1)
         self.assertEqual(len(self.fake.agenda['items']), 1)
         self.assertEqual(len(self.fake.writes()), 1, 'mail is not logged twice')
 
-    def test_agenda_replaces_the_prior_snapshot_and_rereads_once_on_a_version_conflict(self):
-        self.run_intake(events=[event('g-1', timedelta(hours=4))])
+    def test_agenda_rereads_once_on_a_version_conflict(self):
+        self.run_intake(events=[event(self.gid(1), timedelta(hours=4))])
         self.fake.board_conflicts = 1
         self.fake.now += timedelta(minutes=30)
-        outcome = self.run_intake(events=[event('g-2', timedelta(hours=5), subject='Synthetic second')])
-        self.assertEqual(outcome.state, 'succeeded')
+        outcome = self.run_intake(events=[event(self.gid(2), timedelta(hours=5), subject='Synthetic second')])
+        self.assertEqual(outcome.counts['calendar_agenda_published'], 1)
         self.assertEqual([i['title'] for i in self.fake.agenda['items']], ['Synthetic second'])
         self.fake.board_conflicts = 2
         self.fake.now += timedelta(minutes=30)
-        self.assertEqual(self.run_intake(events=[event('g-3', timedelta(hours=6))]).reason, 'calendar_agenda_failed')
+        self.assertEqual(self.run_intake(events=[event(self.gid(3), timedelta(hours=6))]).counts['calendar_agenda_failed'], 1)
 
 
 class ScheduleTest(unittest.TestCase):

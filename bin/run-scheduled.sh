@@ -75,8 +75,7 @@ reasons = frozenset("outside_window previous_run_active cleanup_failed store_mis
                     "writes_failed model_failed steps_pending processed nothing_new writes_deferred "
                     "request_blocked full_disk_access_required contacts_empty contacts_read_failed timeout auth_refused "
                     "key_reuse transport_oversized no_acknowledgement reply_unreadable transport_error "
-                    "invalid_request subject_unresolved database_refused setup_failed calendar_lifecycle_unsupported "
-                    "calendar_agenda_failed".split())
+                    "invalid_request subject_unresolved database_refused setup_failed calendar_lifecycle_unsupported".split())
 counts = frozenset("emails events_past events_upcoming logged preview_only full_text_notes balls_set "
                    "balls_kept unmatched model_failed steps_pending writes_failed needs_refresh_listed "
                    "calendar_lifecycle_unsupported calendar_requests_quarantined hydration_pending hydration_expired "
@@ -87,7 +86,9 @@ counts = frozenset("emails events_past events_upcoming logged preview_only full_
                    "error_setup_failed error_contacts_empty error_contacts_read_failed "
                    "error_next_action_conflict error_legacy_action_guard_required error_agenda_version_conflict "
                    "calendar_agenda_items calendar_agenda_canceled calendar_agenda_conflicts "
-                   "calendar_agenda_other_accounts calendar_agenda_published".split())
+                   "calendar_agenda_other_accounts calendar_agenda_published calendar_agenda_failed "
+                   "calendar_agenda_time_changed calendar_agenda_recurring calendar_agenda_trimmed "
+                   "calendar_agenda_undecoded".split())
 receipt = None
 with open(sys.argv[1]) as output:
     for line in output:
