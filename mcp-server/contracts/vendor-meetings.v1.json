@@ -1,0 +1,54 @@
+{
+  "schema": "vendor-meetings.v1",
+  "version": "1.0.0",
+  "operation": "read-vendor-meetings",
+  "write": false,
+  "audience": "Authenticated Joe or Dell. Shared canonical facts, never caller-supplied identity or tenant.",
+  "query": {
+    "view": "suggested by default, or research",
+    "q": "Literal case-insensitive substring, at most 80 characters. Searches recorded names, ref, company, category, service coverage, city/state and address finding fields. Search never promotes an address to verified.",
+    "limit": "Integer 1 through 50, default 25",
+    "cursor": "Opaque live keyset cursor, at most 2000 characters, scoped to view and exact query. Restart traversal after records change. Order is vendor UUID then contact UUID, with missing contacts first."
+  },
+  "response": {
+    "schema": "vendor-meetings.v1",
+    "view": "suggested or research",
+    "total": "Exact candidate count matching view and query before cursor. Multiple exact contacts on one vendor are separate meeting candidates.",
+    "items": "At most limit meeting candidates",
+    "has_more": "Whether a subsequent page exists in this snapshot",
+    "next_cursor": "Opaque cursor or null",
+    "consistency": "live_keyset; restart after record changes"
+  },
+  "candidate": {
+    "vendor_id": "Exact live vendor UUID",
+    "ref": "Recorded vendor reference or null",
+    "party_id": "Exact live vendor party UUID",
+    "company": "Exact live organization {id,name} or null",
+    "contact": "Exact live person {id,name,email,phone,cell} or null. Missing email and phone do not prevent a suggestion.",
+    "category": "Recorded vendor category slug or null",
+    "category_label": "Recorded category label or null",
+    "service_coverage": "Recorded vendor territory, distinct from office location",
+    "reason": "Recorded vendor offers text. No inferred meeting benefit.",
+    "missing": "Unmet requirements from named_contact, company, category, meeting_reason, verified_office, contact_permission",
+    "office": "Verified {street_address,city,state,finding_id,source,observed_at,expires_on} or null",
+    "research": "{status,finding_id,observed_at,expires_on}. Status is not_researched, needs_review or office_verified. It describes the latest address finding, not an invented enrichment job."
+  },
+  "identity": "Uses v_vendor_assignment_context. Person vendors select themselves. Organization vendors select only existing live people whose org_id is that organization. An organization without a person remains in Research with contact null.",
+  "office_evidence": {
+    "store": "Existing record-finding, subject_kind party, subject the exact contact's party ref, kind address. No new write path.",
+    "value": {
+      "found": true,
+      "epistemic_status": "source_backed",
+      "location_type": "office",
+      "street_address": "Nonblank string",
+      "city": "Nonblank string",
+      "state": "Nonblank string"
+    },
+    "provenance": "Existing source locator, observed_at not in the future, expires_on absent or not before the server current date. internal true and any proposes_correction field refuse readiness.",
+    "latest": "Select the contact's newest address finding by observed_at then finding UUID before checking validity. A negative, expired, future, disputed, malformed or proposed-correction finding cannot revive an older verified office.",
+    "no_inheritance": "City, service territory, another person or company office never establishes this person's office. Missing office remains null."
+  },
+  "readiness": "Suggested requires no missing requirements. Research is the inverse. Both remain searchable and paginated. Current contact holds, any live avoid vendor row and any suppressed or do_not_contact lead role on the vendor, contact or company prevent suggestions.",
+  "effects": "Read-only. Does not change identities, source findings, relationship facts or approved client needs. Does not compose or send messages.",
+  "errors": ["AUTHORIZATION_REFUSED", "vendor_meetings_query_invalid", "vendor_meetings_unavailable"]
+}
