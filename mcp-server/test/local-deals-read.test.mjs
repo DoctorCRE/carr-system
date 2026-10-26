@@ -1,3 +1,4 @@
+// Test Local Deals board and room reads, lifecycle evidence and invoice fields.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
