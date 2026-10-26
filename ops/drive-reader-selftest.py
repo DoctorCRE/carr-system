@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Control-plane check: records mode must not require retired Drive feeds.
 
-The files remain a deliberate recovery surface until the Drive retirement gate
-has accepted evidence.  This check protects the normal code path: choosing
+The files remain an explicit, noncanonical recovery surface.
+This check protects the normal code path: choosing
 records must read the canonical pool/views without first globbing a deprecated
 file merely to render a label or feed a second writer.
 """

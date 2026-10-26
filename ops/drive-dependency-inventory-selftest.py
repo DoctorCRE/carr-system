@@ -66,11 +66,12 @@ with tempfile.TemporaryDirectory() as temp:
     # non-repository fallback used by earlier fixture tests.
     subprocess.run(["git", "init", "-q", str(root)], check=True, env=fixture_env())
     subprocess.run(["git", "-C", str(root), "add", "--all"], check=True, env=fixture_env())
-    all_entries = registry(
+    entries = [
         entry("task", "ops/config/task.json"), entry("plist", "ops/launchd/task.plist"), entry("shell", "bin/run.sh"),
         entry("python", "pipelines/read.py"), entry("prose", "README.md", kind="prose_only"),
         entry("extensionless", "extensionless", kind="prose_only"), entry("yaml", "config.yaml", kind="prose_only"),
-        entry("utf16", "utf16.txt", kind="prose_only"), entry("tracked-out", "out/runtime.py"))
+        entry("utf16", "utf16.txt", kind="prose_only"), entry("tracked-out", "out/runtime.py")]
+    all_entries = registry(*entries)
     refs, uncovered, multiple = inventory.audit(root, all_entries)
     assert len(refs) == 9 and any(ref.file == "out/runtime.py" for ref in refs) and not uncovered and not multiple
     passed += 1
@@ -81,6 +82,22 @@ with tempfile.TemporaryDirectory() as temp:
     refs, uncovered, multiple = inventory.audit(root, duplicate)
     assert any(ref.file == "bin/run.sh" and ids == ["one", "two"] for ref, ids in multiple)
     passed += 1
+
+    registry_path = root / inventory.DEFAULT_REGISTRY
+    for candidate, expected_exit, expected_output in (
+        (all_entries, 0, "references exactly classified"),
+        (registry(entry("task", "ops/config/task.json")), 1, "UNCOVERED bin/run.sh:1"),
+        (registry(*entries, entry("duplicate-shell", "bin/run.sh")),
+         1, "MULTIPLE bin/run.sh:1: shell, duplicate-shell"),
+    ):
+        registry_path.write_text(json.dumps(candidate))
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "ops/drive-dependency-inventory.py"), "--root", str(root)],
+            capture_output=True, text=True, env=fixture_env(), check=False,
+        )
+        assert result.returncode == expected_exit and expected_output in result.stdout + result.stderr, (
+            result.returncode, result.stdout, result.stderr)
+        passed += 1
     # A source row whose file was deleted covers nothing; it must not pass silently.
     try:
         inventory.audit(root, registry(entry("task", "ops/config/task.json"), entry("gone", "pipelines/deleted.py")))
@@ -182,4 +199,4 @@ assert all(by_id[item] in inventory.OPERATIONAL_CLASSES for item in (
     "scheduled-settings-render"))
 passed += 1
 
-print(f"drive dependency inventory selftest: {passed}/14 passed")
+print(f"drive dependency inventory selftest: {passed}/17 passed")
