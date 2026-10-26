@@ -923,6 +923,7 @@ class PostCallTests(unittest.TestCase):
         )
         for step in invalid_steps:
             with self.subTest(step=step):
+                (self.session / post_call.STATUS_FILE).unlink(missing_ok=True)
                 (self.session / post_call.REPORT_FILE).unlink(missing_ok=True)
                 post_call.store_context(self.session, self.context)
                 output = self.output(deal_updates=[{
@@ -983,6 +984,7 @@ class PostCallTests(unittest.TestCase):
         for owner in ("joe", "dell"):
             for due_on in invalid_dates:
                 with self.subTest(owner=owner, due_on=due_on):
+                    (self.session / post_call.STATUS_FILE).unlink(missing_ok=True)
                     (self.session / post_call.REPORT_FILE).unlink(missing_ok=True)
                     post_call.store_context(self.session, self.context)
                     output = self.output(joe_tasks=[], dell_tasks=[])
