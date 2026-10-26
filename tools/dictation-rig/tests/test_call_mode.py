@@ -648,9 +648,10 @@ class PostCallTests(unittest.TestCase):
         self.assertIsNotNone(post_call.retention_ready(self.session, "report-hash"))
 
     def test_phase_proposals_reject_unsupported_shapes_and_quarantine_unknown_deals(self) -> None:
-        for phase in ({}, "legal", {"value": "closed"}, {"value": "invoiced"},
+        invalid_phases: tuple[object, ...] = ({}, "legal", {"value": "closed"}, {"value": "invoiced"},
                       {"value": "not-a-phase"}, {"value": True}, {"value": []},
-                      {"value": "legal", "base_event_id": None}):
+                      {"value": "legal", "base_event_id": None})
+        for phase in invalid_phases:
             with self.subTest(phase=phase):
                 (self.session / post_call.REPORT_FILE).unlink(missing_ok=True)
                 post_call.store_context(self.session, self.context)
