@@ -1,3 +1,4 @@
+// Parse, validate, and manage deal checklist items.
 import { isCalendarDate } from './calendar-date.ts';
 import { ToolError } from './tool-error.ts';
 import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';

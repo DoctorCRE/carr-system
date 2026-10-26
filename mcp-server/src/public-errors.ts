@@ -1,3 +1,4 @@
+// Convert internal errors into closed public error responses.
 import { ToolError } from "./tool-error.ts";
 import { isValidCorrelationId, logLine } from "./correlation.js";
 

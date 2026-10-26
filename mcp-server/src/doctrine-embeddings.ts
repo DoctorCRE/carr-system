@@ -1,3 +1,4 @@
+// Embed doctrine revisions and search their vectors.
 import type { Db } from './verb-contract.ts';
 
 const DOCTRINE_EMBEDDING_MODEL = '@cf/baai/bge-small-en-v1.5';
