@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import os
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,7 @@ class WorktreeMigrationOrder(unittest.TestCase):
             repo = Path(temp) / 'primary'
             peer = Path(temp) / 'peer'
             repo.mkdir()
-            env = fixture_env()
+            env = fixture_env({**os.environ, 'GITHUB_BASE_REF': 'some/stacked-branch'})
 
             def git(tree, *args):
                 return subprocess.run(['git', '-C', str(tree), *args], check=True,

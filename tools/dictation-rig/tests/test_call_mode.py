@@ -1057,6 +1057,7 @@ class AutomaticApplyTests(unittest.TestCase):
             "invented evidence": self.update(next_step=self.step(), evidence="we will sign the lease today"),
             "wrong deal": self.update(next_step=self.step(), checks={"deal": {"pass": False}}),
             "deal check did not run": self.update(next_step=self.step(), checks={"unavailable": True}),
+            "deal check inconclusive": self.update(next_step=self.step(), checks={"deal": {"value": "none", "pass": False}}),
             "no deal check at all": self.update(next_step=self.step(), checks=None),
             "one-word quote": self.update(next_step=self.step(), evidence="Bayside"),
             "quote never names the deal": self.update(next_step=self.step(), evidence="send the lease draft by November 6, 2026"),
@@ -1072,6 +1073,13 @@ class AutomaticApplyTests(unittest.TestCase):
                 self.assertTrue(change["review_reason"])
         twice = self.mark(self.update(next_step=self.step()), self.update(next_step=self.step(text="Other")))
         self.assertEqual({u["next_step"]["apply"] for u in twice["deal_updates"]}, {"review"})
+
+    def test_hold_reasons_tell_a_different_deal_from_an_unconfirmed_one(self) -> None:
+        reason = lambda deal: self.mark(self.update(next_step=self.step(), checks={"deal": deal}))[  # noqa: E731
+            "deal_updates"][0]["next_step"]["review_reason"]
+        self.assertEqual(reason({"value": "deal-b", "pass": False}), "The automatic check matched these words to a different deal.")
+        for inconclusive in ({"value": "none", "pass": False}, {"value": None, "pass": None}):
+            self.assertEqual(reason(inconclusive), "The automatic check could not confirm which deal this is.")
 
     def test_a_missing_needs_review_flag_fails_closed(self) -> None:
         raw = {"schema_version": 1, "report": {"summary": "", "decisions": [], "open_questions": []},

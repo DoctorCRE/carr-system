@@ -395,15 +395,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
       "*registered_operation"
     ]
   },
-  "cancel-capability-session": {
-    "ingress_key": "mcp-tool:cancel-capability-session",
-    "source_locator": "mcp-server/src/capability-program.js",
-    "schema_digest": "41fbf99f4a3a8242ba65ad32896c93a43959a6035ec9edd65ae2e1b3fbf9b505",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
   "cancel-pending-deal": {
     "ingress_key": "mcp-tool:cancel-pending-deal",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
@@ -755,6 +746,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "dismiss-email-proposal": {
+    "ingress_key": "mcp-tool:dismiss-email-proposal",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "374acfe499aada092f73ae6412b0efc1b05faf0dca6160f29e95c25daf2f6f62",
+    "write": true,
+    "human_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "doctrine-index": {
     "ingress_key": "mcp-tool:doctrine-index",
     "source_locator": "mcp-server/src/doctrine.js",
@@ -1086,6 +1086,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:list-doc-suggestions",
     "source_locator": "mcp-server/src/doc-suggestions.js",
     "schema_digest": "6c5c048e4c820047cf7a98970e4f98629908254b5e1400d9dd0f7308db51ffc5",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "list-email-proposals": {
+    "ingress_key": "mcp-tool:list-email-proposals",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
     "authority_only": false,
@@ -2029,6 +2038,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "record-email-proposal": {
+    "ingress_key": "mcp-tool:record-email-proposal",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "d053ef06d1b93756dca0e7680244994bb447b94583e2e68f392919eb90ec3944",
+    "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "record-evidence-subject-link": {
     "ingress_key": "mcp-tool:record-evidence-subject-link",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
@@ -2929,6 +2947,24 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:public.doctrine_embedding:carr_writer:insert",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.email_proposal",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.email_proposal:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.email_proposal",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.email_proposal:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
     }
   ],
   "secdef_execute": [
@@ -3101,8 +3137,8 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
   "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
   "registry_version": "scac-mutation-registry.v118",
   "runtime_dml_grants": {
-    "count": 339,
-    "digest": "sha256:a210dbda8843ef57aecf1985cb0b97f7ab6fac5e1e99df0926542eb2945254bc"
+    "count": 341,
+    "digest": "sha256:417178cb46966205a188bafec1ceb5d7490249d9dd924264c6f811fb31697ed1"
   },
   "retired_secdef_execute": [
     {
