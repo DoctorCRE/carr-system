@@ -86,6 +86,7 @@ export function tourMapPromotionTools({ withEnvelope, writeEvent, ToolError }) {
       write: true,
       authorityOnly: true,
       humanOnly: true,
+      humanCallerOnly: true,
       description: "Record an immutable verified-human Tour map promotion decision bound to exact projection, dataset, route, provider-rights, component, mobile, native-navigation, offline, and doctrine-check evidence. Approvals require every check to pass; rejections require a failed check and a reason. This receipt alone does not issue a share.",
       inputSchema: {
         type: "object", additionalProperties: false,

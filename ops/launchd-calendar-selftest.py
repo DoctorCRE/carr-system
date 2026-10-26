@@ -185,7 +185,7 @@ check("two interval markers in one template are refused",
 # 3. The real tree.
 # --------------------------------------------------------------------------
 templates = lc.carr_templates(REPO)
-check("the template roster covers ops/launchd and the dictation-rig copies",
+check("the template roster covers ops/launchd and the Call Mode override",
       any(p.parent.name == "launchd" and p.parent.parent.name == "ops" for p in templates)
       and any("dictation-rig" in str(p) for p in templates), len(templates))
 for path in templates:
@@ -201,9 +201,6 @@ check("checkout-pull runs git directly, with no wrapper",
       pull["ProgramArguments"] == ["/usr/bin/git", "-C", "{{REPO}}", "pull", "--ff-only", "--quiet"],
       pull["ProgramArguments"])
 
-# The dictation-rig keeps its own copies of three agents. Their bodies differ
-# on purpose (different prose), but a schedule that differs between the twins
-# would mean one installer path brings back a cadence the other retired.
 by_name: dict[str, list[Path]] = {}
 for path in templates:
     by_name.setdefault(path.name, []).append(path)

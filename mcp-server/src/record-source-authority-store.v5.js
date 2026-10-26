@@ -2287,7 +2287,9 @@ export function recordSourceAuthorityStoreTools({
       // already ran here, and the two authorityOnly verbs still route to the
       // partner's authority login (connectionRouteForTool checks that first).
       writerConnection: true,
-      ...(humanOnly ? { humanOnly: true } : {}),
+      // assertOperationAuthority refuses a humanOnly operation to any principal
+      // that is not human, so every such verb is a literal-human act (WR-000529).
+      ...(humanOnly ? { humanOnly: true, humanCallerOnly: true } : {}),
       ...(authorityOnly ? { authorityOnly: true } : {}),
       description: TOOL_DESCRIPTIONS[name],
       inputSchema: v5F01ToolInputSchema(name),

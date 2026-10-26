@@ -57,7 +57,8 @@ for (const [code, extra] of [
   ["version_conflict", { current_version: 3 }], ["needs_confirm", {}],
   ["not_found", {}], ["unauthorized", {}], ["loop_not_open", {}],
   ["value_not_in_declared_vocabulary", { field: "filter" }],
-  ["tour_share_scope_invalid", {}],
+  ["AUTHORIZATION_REFUSED", {}], ["vendor_meetings_query_invalid", {}], ["vendor_meetings_unavailable", {}],
+  ["tour_share_scope_invalid", {}], ["personal_doc_not_owner", {}], ["personal_loop_not_owner", {}],
 ]) test(`MCP preserves the public ${code} contract`, async t => {
   const payload = await failure(t, new ToolError({ error: code, ...extra,
     detail: privateText, hint: privateText, nested: { stack: privateText } }));

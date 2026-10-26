@@ -26,8 +26,8 @@ import { TOOLS, ToolError } from "../src/tools.js";
 // shape as amend-closed-loop-mutants.test.mjs's own mutate()/loadMutant() —
 // duplicated rather than imported because that file's real DATABASE_URL-free
 // suite must stay import-side-effect-free, and this one only needs it for
-// ONE mutant that a fake client cannot exercise: removing versionGuard's
-// `for update` is invisible to a single-threaded fake, and only shows up
+// ONE mutant that a fake client cannot exercise: removing the target and version
+// `for update` locks is invisible to a single-threaded fake, and only shows up
 // against two REAL concurrent Postgres sessions racing the same row.
 const MUTANT_SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const MUTANT_FILE = "tools.js";
@@ -42,7 +42,10 @@ async function loadForUpdateRemovedMutant() {
   const anchor = "for update`, [id]);";
   const count = source.split(anchor).length - 1;
   assert.equal(count, 1, `mutant anchor must occur exactly once in ${MUTANT_FILE}`);
-  const mutated = relinkMutant(source.replace(anchor, "`, [id]);"));
+  const targetLock = 'const lock = opts.actor ? " for update of li" : "";';
+  assert.equal(source.split(targetLock).length - 1, 1, "target-lock mutant anchor must occur once");
+  const mutated = relinkMutant(source.replace(anchor, "`, [id]);")
+    .replace(targetLock, 'const lock = "";'));
   const path = join(mutantWork, `${Date.now()}-tools.mjs`);
   writeFileSync(path, mutated);
   return import(pathToFileURL(path).href);
@@ -120,7 +123,8 @@ function holdVersionReadsUntilOverlap(admin, clientA, clientB) {
           const waiting = await admin.query(
             `select 1 from pg_stat_activity
               where pid = $1 and wait_event_type = 'Lock'
-                and query like 'select version from loop_item%'
+                and (query like 'select version from loop_item%'
+                     or query like 'select li.id, li.kind, li.number%')
                 and $2::int = any(pg_blocking_pids(pid))`,
             [other.processID, client.processID]);
           if (waiting.rows.length) { state.lockWaitObserved = true; return result; }
@@ -453,7 +457,7 @@ test("DB: for update really serializes two concurrent amends against the same ba
     const { loop_id, version } = await freshClosedLoop(admin, actor, { outcome: "x" });
 
     // Two separate sessions, each in its own transaction, racing the SAME
-    // base_version. versionGuard's `select ... for update` is what makes this
+    // base_version. The target lock followed by versionGuard makes this
     // safe: the second session's lock acquisition blocks behind the first's
     // until the first commits (bumping the row's version), so the second
     // sees the NEW version and gets version_conflict rather than also
@@ -485,7 +489,7 @@ test("DB: for update really serializes two concurrent amends against the same ba
       "read the same stale version and both succeed, producing two rows that both record prior_outcome 'x'");
     assert.equal(trail.rows[0].prior_outcome, "x");
     assert.equal(overlap.lockWaitObserved, true,
-      "the losing session's version read must have been OBSERVED waiting on the winner's row lock — " +
+      "the losing session's target or version read must have been OBSERVED waiting on the winner's row lock — " +
       "otherwise this run proved a lucky ordering, not the lock");
   } finally {
     await a.end();
@@ -494,7 +498,7 @@ test("DB: for update really serializes two concurrent amends against the same ba
   }
 });
 
-test("DB MUTANT: removing versionGuard's `for update` breaks the concurrency proof above — two rows, both prior_outcome 'x'", async (t) => {
+test("DB MUTANT: removing target and version `for update` locks breaks the concurrency proof above — two rows, both prior_outcome 'x'", async (t) => {
   const pg = await database(t); if (!pg) return;
   const mutant = await loadForUpdateRemovedMutant();
   const a = await connect(pg);
