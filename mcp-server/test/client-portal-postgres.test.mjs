@@ -21,8 +21,10 @@ test('a password opens only its client portal and the live deal roadmap', async 
     await c.query(await readFile(new URL('../../migrations/0975_client_portal.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/0976_client_portal_binding.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/0981_client_portal_writer_denials.sql', import.meta.url), 'utf8'));
-    // The current grant contract also carries later registered definers.
+    // The current grant contract also carries later registered definers and writer grants.
     await c.query(await readFile(new URL('../../migrations/0983_fact_store.sql', import.meta.url), 'utf8'));
+    await c.query('create function ops.scac_reference_monitor_guard() returns trigger language plpgsql as $$begin return coalesce(new,old); end$$');
+    await c.query(await readFile(new URL('../../migrations/0987_email_proposal.sql', import.meta.url), 'utf8'));
     // ...and 0988's retired SIEP grants; its precondition catalog is not built here.
     const siepDrop = await readFile(new URL('../../migrations/0988_drop_siep_program_leftovers.sql', import.meta.url), 'utf8');
     await c.query("create function ops.scac_mutation_catalog_v118_current() returns boolean language sql as 'select true'");
