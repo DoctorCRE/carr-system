@@ -60,7 +60,7 @@ jobs:
         image: pgvector/pgvector:0.8.7-pg17-trixie@sha256:7a7e9f22015b67edb4bef5c59daeebcd7e74bfa570df6ce60ae01237c8648a84
         env:
           POSTGRES_USER: carr_ci
-          POSTGRES_PASSWORD: carr_ci
+          POSTGRES_PASSWORD: postgres
           POSTGRES_DB: carr_ci
         ports: ["5432:5432"]
         options: >-
@@ -158,7 +158,7 @@ jobs:
         # defeats the point of rehearsing. Creating it here models Neon's
         # environment rather than editing a migration that is already applied.
         env:
-          PGPASSWORD: carr_ci
+          PGPASSWORD: postgres
         run: |
           psql -h localhost -U carr_ci -d carr_ci -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
@@ -175,7 +175,7 @@ jobs:
         env:
           # ops/ci.sh refuses any DSN that is not loopback. This one is the
           # service container above.
-          CARR_CI_DATABASE_URL: postgres://carr_ci:carr_ci@127.0.0.1:5432/carr_ci # ci-secret-scan: allow — throwaway container credential, loopback only, dies with the runner
+          CARR_CI_DATABASE_URL: postgres://carr_ci:postgres@127.0.0.1:5432/carr_ci # ci-secret-scan: allow — throwaway container credential, loopback only, dies with the runner
           # Excludes the checks whose dependency cannot exist on a runner
           # (installed Claude Code settings, macOS launchd). Each one prints its
           # reason in the output; nothing is dropped silently.
