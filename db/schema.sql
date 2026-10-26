@@ -10986,8 +10986,8 @@ begin
   if v_id is null then
     raise exception 'work_request_not_found: no Work Request %', p_work_request;
   end if;
-  if v_state not in ('captured','triaged') or not v_sourced then
-    raise exception 'work_request_not_declinable: % is in state %; only captured or triaged sourced requests may be declined',
+  if v_state not in ('captured','triaged','ready') or not v_sourced then
+    raise exception 'work_request_not_declinable: % is in state %; only captured, triaged, or unstarted ready sourced requests may be declined',
       p_work_request, v_state;
   end if;
   if v_version <> p_base_version then
@@ -64115,7 +64115,15 @@ begin
     return new;
   end if;
 
-  if old.state = 'triaged'
+  if old.state = 'ready' and new.state = 'declined' and (
+       old.claimed_at is not null or old.executor_actor is not null or old.started_at is not null
+       or exists (select 1 from ops.work_request_execution_assignment a where a.work_request_id = old.id)
+       or current_setting('transaction_isolation') <> 'read committed'
+     ) then
+    raise exception 'work_request_not_declinable: % is ready with downstream execution or outside read committed', old.ref;
+  end if;
+
+  if old.state in ('triaged','ready')
      and new.state = 'declined'
      and new.version = old.version + 1
      and (to_jsonb(new) - array['state','exit_reason','closed_at','version','updated_at'])
@@ -64130,7 +64138,7 @@ begin
     return new;
   end if;
 
-  raise exception 'sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged, triaged shape-disposition, triaged-to-ready, captured-to-withdrawn, or triaged-to-withdrawn transitions';
+  raise exception 'sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged, triaged shape-disposition, triaged-to-ready, captured-to-withdrawn, or triaged-to-withdrawn or ready-to-declined transitions';
 end;
 $$;
 
@@ -122103,6 +122111,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0976_client_portal_binding.sql	ddca815f5bccff21ea9ad828e928a56ca318fdbc3dd7d9fe74106aa3b7f00a44	1970-01-01 00:00:00+00
 0977_retire_work_shape_admission.sql	1a9b2f3abd4b673b073a2fa57fca31be046447c33c1f6309b2d034b775b726f3	1970-01-01 00:00:00+00
 0978_doctrine_title_topic_ranking.sql	852b8da1601a9277e7f9e2cd5fbf1385785af2356b4a08bc92438378c994c72b	1970-01-01 00:00:00+00
+0979_decline_unstarted_ready_work_request.sql	f343b16316d6a744dcf6c20073bedfb9e38695d5f06c56d292ba8797b9c261d6	1970-01-01 00:00:00+00
 0980_client_portal_attempt_limit.sql	dfef0aa50b05a7124ee3aa54775bf0fe1fb6a17f18a3655658112b530432f648	1970-01-01 00:00:00+00
 0981_client_portal_writer_denials.sql	ee180c356db754ecb6f7a1ee7490923133968ef448cf112ae8db078c383e2571	1970-01-01 00:00:00+00
 \.
