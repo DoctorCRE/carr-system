@@ -139,10 +139,10 @@ or an applied-file SHA mismatch.
 
 `tools/migration_number_contract.py` freezes the exact filename sets for every
 historical duplicate prefix, and `tools/migrate.py` refuses any new or altered
-collision. `tools/next-migration.py` reports the frozen sets and still allocates
-above the highest four-digit claim across `origin/main` and every local worktree.
-The rule going forward is therefore simple: preserve the frozen history and use
-the allocator immediately before creating every new migration.
+collision. A new migration takes the next number above `origin/main`, and the
+migration-open-pr check names the slot when main moves (see the resync steps above).
+The rule going forward is therefore simple: preserve the frozen history and take the
+next number immediately before creating every new migration.
 
 ### Exact pre-renumber ledger aliases
 

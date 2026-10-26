@@ -1,6 +1,6 @@
 # CARR Training — Dental Vertical Reference (build-out, sizing, creditworthiness, landlord pitch)
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Captured July 7, 2026 from CARR's internal Agent Training Portal (`training.carr.us/sessions/…`). This is CARR's proprietary agent knowledge — internal use. The portal's "Sample Layout" floorplans are marked "do not print/distribute to clients." Use this to size a client's space, run healthcare-specific due diligence, and negotiate TI/free rent. Source pages listed at the bottom.*
 

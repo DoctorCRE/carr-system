@@ -78,8 +78,19 @@ class Refusal(ValueError):
     """A refusal whose message names no value and is safe to print."""
 
 
+# The team's territory is public geography that source and doctrine name freely. A client
+# record can hold a bare county or city name as an address field, so these windows are never
+# client data, whether "Santa Rosa" or "Santa Rosa County".
+PUBLIC_PLACES = frozenset(
+    tuple(name.split()) + suffix
+    for name in ('escambia', 'santa rosa', 'okaloosa', 'walton', 'bay')
+    for suffix in ((), ('county',)))
+
+
 def client_window(window):
-    """All-digit windows match only when phone-shaped (10 or 11 digits)."""
+    """All-digit windows match only when phone-shaped (10 or 11 digits); public places never match."""
+    if tuple(window) in PUBLIC_PLACES:
+        return False
     return not all(token.isdigit() for token in window) or sum(map(len, window)) in (10, 11)
 
 

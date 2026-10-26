@@ -1,6 +1,6 @@
 # CARR Training — Medical Vertical Reference (build-out, sizing, space-type fit)
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Captured July 7, 2026 from CARR's internal Agent Training Portal (`training.carr.us/sessions/…`), Medical branch. This is CARR's proprietary agent knowledge — internal use. Use it to size a physician client's space, run healthcare-specific due diligence, and steer site selection (MOB vs. retail vs. stand-alone). The General Practice page + 20 specialty pages are the source; listed at the bottom. Companion to `dental-vertical-guide.md`.*
 

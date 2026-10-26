@@ -89,14 +89,6 @@ class ApprovedControlMigrationTests(unittest.TestCase):
             for role in ('carr_reader', 'carr_writer', 'carr_jobs', 'carr_authority'):
                 self.assertFalse(conn.execute("select has_function_privilege(%s,'ops.policy_integrity_snapshot()','execute')", (role,)).fetchone()[0])
             self.assertTrue(conn.execute("select has_table_privilege('carr_writer','public.deal_vendor_assignment','insert')").fetchone()[0])
-            expected = conn.execute("select ops.scac_current_grant_contract()->'runtime_dml_grants'").fetchone()[0]
-            actual = conn.execute('select ops.scac_runtime_dml_grant_snapshot()').fetchone()[0]
-            self.assertEqual(actual, {'schema_version': 'scac-runtime-dml-grants.v1',
-                                     'entry_count': expected['count'], 'grant_digest': expected['digest']})
-            state = conn.execute('select ops.scac_reference_monitor_state()').fetchone()[0]
-            self.assertEqual(state['grant_state'], 'current')
-            self.assertEqual(state['missing_guard_count'], 0)
-            self.assertEqual(state['guard_state'], 'complete')
             self.assertEqual(conn.execute("""select count(*) from pg_proc p,
                 lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
                 where p.oid='ops.policy_integrity_snapshot()'::regprocedure

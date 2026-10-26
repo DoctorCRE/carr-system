@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { needsJoeAdvisory } from "../src/jev-needs-joe-advisory.js";
+import { needsJoeAdvisory } from "../src/jev-needs-joe-advisory.ts";
 
 const NOW = new Date("2026-10-25T12:00:00Z");
 const first = { human_ref: "WR-000123", title: "Review synthetic queue advice", state: "ready",

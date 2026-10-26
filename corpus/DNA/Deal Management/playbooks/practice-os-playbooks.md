@@ -1,6 +1,6 @@
 # Practice OS — Vertical Playbooks
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Created July 13, 2026 (scale-vision §4 "Practice OS" ramp step 2, following intro-graph queries in engine.md §6). This is the managed-playbook layer scale-vision describes: "site selection → deal → build-out → lender → CPA → IT → marketing, with CARR at the center orchestrating introductions." Five playbooks, one per vertical (Dental, Medical, Veterinary, Vision, Other Healthcare). Each is a run-down-live checklist for a broker sitting with a client of that vertical: which vendor CATEGORY gets pulled in, roughly when, and why — not which specific vendor. Names go stale; categories + the matching rule don't.*
 

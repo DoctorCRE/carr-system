@@ -22,7 +22,7 @@ NOW = datetime.fromisoformat('2026-10-05T07:00:00-05:00')
 
 
 class RunnerTests(unittest.TestCase):
-    def record_transport(self, calls, *, revoke_after_board=False):
+    def record_transport(self, calls):
         run = subprocess.run
         node = shutil.which('node')
 
@@ -40,13 +40,13 @@ class RunnerTests(unittest.TestCase):
             calls.append((verb, credential))
             if not credential['hasToken']:
                 return subprocess.CompletedProcess(argv, 1, '', 'missing ' + credential['tokenVariable'])
-            if revoke_after_board and verb == 'loop-board':
-                os.environ.pop('CARR_MCP_UNATTENDED_TOKEN', None)
             return subprocess.CompletedProcess(argv, 0, json.dumps({'ok': True, 'loops': []}), '')
 
         return transport
 
-    def test_all_record_calls_select_unattended_credentials(self):
+    def test_all_record_calls_use_the_local_machine_credential(self):
+        # The unattended profile was never provisioned on the Studio; routines use
+        # the same door as every other scheduled job, even if a profile is inherited.
         calls = []
         env = {'CARR_MCP_CLIENT_PROFILE': 'unattended',
                'CARR_MCP_LOCAL_TOKEN': 'fixture-local', 'CARR_MCP_UNATTENDED_TOKEN': 'fixture-unattended'}
@@ -56,21 +56,18 @@ class RunnerTests(unittest.TestCase):
             ctx.read('find', {})
             ctx.write('add-loop', {'title': 'Fixture proposal'}, 'proposal')
             ctx.failure('fixture failure')
-        self.assertEqual(calls, [(verb, {'profile': 'unattended',
-            'tokenVariable': 'CARR_MCP_UNATTENDED_TOKEN', 'hasToken': True, 'borrowedLocal': False})
+        self.assertEqual(calls, [(verb, {'profile': 'local',
+            'tokenVariable': 'CARR_MCP_LOCAL_TOKEN', 'hasToken': True, 'borrowedLocal': True})
             for verb in ['find', 'add-loop', 'loop-board', 'add-loop']])
 
-    def test_missing_unattended_token_never_borrows_local_for_records_or_failure(self):
-        for operation in ['read', 'write', 'failure', 'failure-write']:
+    def test_missing_local_token_fails_visibly_for_records_and_failure(self):
+        for operation in ['read', 'write', 'failure']:
             with self.subTest(operation=operation):
                 calls = []
-                env = {'CARR_MCP_CLIENT_PROFILE': 'unattended', 'CARR_MCP_LOCAL_TOKEN': 'fixture-local'}
-                if operation == 'failure-write':
-                    env['CARR_MCP_UNATTENDED_TOKEN'] = 'fixture-unattended'
-                transport = self.record_transport(calls, revoke_after_board=operation == 'failure-write')
-                with patch.dict(os.environ, env, clear=True), patch.object(record_call, '_run_process', transport):
+                transport = self.record_transport(calls)
+                with patch.dict(os.environ, {}, clear=True), patch.object(record_call, '_run_process', transport):
                     ctx = runtime.Context('lead-signals-weekly', now=NOW)
-                    with self.assertRaisesRegex(RuntimeError, 'missing CARR_MCP_UNATTENDED_TOKEN'):
+                    with self.assertRaisesRegex(RuntimeError, 'missing CARR_MCP_LOCAL_TOKEN'):
                         if operation == 'read':
                             ctx.read('find', {})
                         elif operation == 'write':
@@ -78,10 +75,7 @@ class RunnerTests(unittest.TestCase):
                         else:
                             ctx.failure('fixture failure')
                 self.assertEqual([verb for verb, _ in calls], {
-                    'read': ['find'], 'write': ['add-loop'], 'failure': ['loop-board'],
-                    'failure-write': ['loop-board', 'add-loop']}[operation])
-                self.assertEqual(calls[-1][1], {'profile': 'unattended',
-                    'tokenVariable': 'CARR_MCP_UNATTENDED_TOKEN', 'hasToken': False, 'borrowedLocal': False})
+                    'read': ['find'], 'write': ['add-loop'], 'failure': ['loop-board']}[operation])
 
     def test_due_respects_chicago_schedule_and_completion(self):
         self.assertFalse(runtime.due('lead-signals-weekly', NOW.replace(hour=6, minute=59), False))

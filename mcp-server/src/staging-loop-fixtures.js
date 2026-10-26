@@ -1,5 +1,5 @@
 import { Pool } from "@neondatabase/serverless";
-import { isStagingBrowserEnvironment } from "./staging-browser.js";
+import { isStagingBrowserEnvironment } from "./staging-browser.ts";
 import { setWriterActorContext } from "./mcp.js";
 
 const SECTIONS = [
