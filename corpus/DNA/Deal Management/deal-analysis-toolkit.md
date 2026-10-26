@@ -1,6 +1,6 @@
 # Deal-Analysis Toolkit — Reference
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *How Joe & Dell present deal economics to clients. Added July 7, 2026. Reference only — this documents the standard worksheets so any session understands how deals are framed for clients and can populate them for a real prospect on request. Master files live in `DNA/Deal Management/Templates/`.*
 
