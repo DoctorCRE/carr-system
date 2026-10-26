@@ -5,7 +5,7 @@ import { canonicalJson } from './artifact-trust.js';
 import { createHash } from 'node:crypto';
 import { organizationTenantForActor, personalScopeForActor } from './identity.js';
 import { closureProjection } from './engineering-runtime.js';
-import { safeInteger } from './safe-integer.js';
+import { safeInteger } from './safe-integer.ts';
 
 const base = (source, kind, sql, note = null) => ({ source, kind, sql, note });
 // Every SELECT has the same typed columns. Source states are preserved, never

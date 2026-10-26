@@ -148,7 +148,7 @@ for (const candidate of [
   { id: 'synthetic-building', address: '1 Fixture', city: 'Fixture' },
   { name: 'Synthetic' }, { ref: 'P-1', name: 'Synthetic' },
 ]) test(`disambiguation curates the ${Object.keys(candidate).join('/')} candidate shape`, async t => {
-  const { publicError } = await import('../src/public-errors.js');
+  const { publicError } = await import('../src/public-errors.ts');
   t.mock.method(console, 'error', () => {});
   const payload = publicError(new ToolError({ error: 'needs_disambiguation',
     candidates: [{ ...candidate, detail: privateText, stack: privateText, nested: { cause: privateText } }],
@@ -198,7 +198,7 @@ for (const delegated of [false, true]) test(`${delegated ? 'delegated' : 'direct
 });
 
 test('Call Mode refusal exposes only bounded UUIDs and no diagnostic payload', async t => {
-  const { publicError } = await import('../src/public-errors.js');
+  const { publicError } = await import('../src/public-errors.ts');
   t.mock.method(console, 'error', () => {});
   const id = 'd170d000-0000-4000-8000-000000000042';
   const payload = publicError(new ToolError({ error: 'invalid_call_context_deals',

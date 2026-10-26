@@ -4,8 +4,8 @@
 import { WORK_REQUEST_PROJECTION_STATE, WORK_REQUEST_READ_STATES, readableWorkRequestSql } from "./work-request-read.ts";
 import { searchDoctrineSituations } from "./situation-retrieval.js";
 import { authorizationClassForActor, organizationTenantForActor } from "./identity.js";
-import { deriveRuleDeliverySource, normalizeRuleMapDigest } from "./rule-delivery-source.js";
-import { publicError } from "./public-errors.js";
+import { deriveRuleDeliverySource, normalizeRuleMapDigest } from "./rule-delivery-source.ts";
+import { publicError } from "./public-errors.ts";
 
 const FIELDS = new Set(["idempotency_key", "situation", "title", "desired_outcome", "acceptance_criteria"]);
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;

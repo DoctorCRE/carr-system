@@ -7,8 +7,8 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
-import { readDealItems } from '../src/deal-items.js';
-import { CHECKLIST_SOURCES } from '../src/deal-checklist.js';
+import { readDealItems } from '../src/deal-items.ts';
+import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
 
 let fixture, admin, database, c, actor, deal;
 before(async () => {

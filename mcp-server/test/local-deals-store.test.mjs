@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
-import { CHECKLIST_SOURCES } from '../src/deal-checklist.js';
+import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
 import { readCommandCenterSummary } from '../src/workspace-command-center.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));

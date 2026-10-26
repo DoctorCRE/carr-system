@@ -1,12 +1,12 @@
-import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.js";
+import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
-import { safeInteger, integerFields } from "./safe-integer.js";
+import { safeInteger, integerFields } from "./safe-integer.ts";
 import { invoiceTrackerTools } from "./invoice-tracker.js";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
-import { readDealChecklist } from "./deal-checklist.js";
-import { factObservationTools } from "./fact-observations.js";
-import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.js";
+import { readDealChecklist } from "./deal-checklist.ts";
+import { factObservationTools } from "./fact-observations.ts";
+import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.ts";
 import { bindReferralDeal } from "./relationship-network.js";
 import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
 import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLeadLifecycle } from "./lead-workspace.js";
@@ -35,17 +35,17 @@ import { workPortfolioTools } from "./work-portfolio.js";
 import { leaseTermComparisonTools } from "./lease-term-comparison.js";
 import { partnerRoomTools } from "./partner-room.js";
 import { agentProfileTools } from "./agent-profiles.js";
-import { clientPortalTools } from "./client-portal.js";
+import { clientPortalTools } from "./client-portal.ts";
 import { memoryTools } from "./memory.js";
 import { codexContinuityTools } from "./codex-continuity.js";
 import { incidentTools } from "./incident.js";
 import { resourceObservationTools } from "./resource-observation.v5.js";
 import { invoiceAutomation } from "./invoice-automation.js";
-import { emailDealProgressTools } from "./email-deal-progress.js";
-import { emailNextStepTools } from "./email-next-step.js";
+import { emailDealProgressTools } from "./email-deal-progress.ts";
+import { emailNextStepTools } from "./email-next-step.ts";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { CALENDAR_AGENDA_BOARD, calendarSection } from "./brief-calendar.js";
-import { emailLeadProposalTools } from "./email-lead-proposal.js";
+import { emailLeadProposalTools } from "./email-lead-proposal.ts";
 import { leadAutomationTools } from "./lead-automation.js";
 import { workflowCutoverTools } from "./workflow-cutover.v5.js";
 import { engineeringRuntimeTools } from "./engineering-runtime.js";
@@ -8916,7 +8916,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
 
 
 const TOOL_REGISTRATION_SOURCE = Object.freeze({
-  'deal-items': 'mcp-server/src/deal-items.js',
+  'deal-items': 'mcp-server/src/deal-items.ts',
   'feature-switches':'mcp-server/src/feature-switches.js',
   "inline": "mcp-server/src/tools.js",
   "deal-room-inline": "mcp-server/src/tools.js",
@@ -8934,17 +8934,17 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "work-shape": "mcp-server/src/work-shape.js",
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
-  "fact-observations": "mcp-server/src/fact-observations.js",
+  "fact-observations": "mcp-server/src/fact-observations.ts",
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
-  "client-portal": "mcp-server/src/client-portal.js",
+  "client-portal": "mcp-server/src/client-portal.ts",
   "resource-observation": "mcp-server/src/resource-observation.v5.js",
   "lead-automation": "mcp-server/src/lead-automation.js",
   "invoice-automation": "mcp-server/src/invoice-automation.js",
-  "email-deal-progress": "mcp-server/src/email-deal-progress.js",
-  "email-next-step": "mcp-server/src/email-next-step.js",
+  "email-deal-progress": "mcp-server/src/email-deal-progress.ts",
+  "email-next-step": "mcp-server/src/email-next-step.ts",
   "email-proposals": "mcp-server/src/email-proposals.js",
-  "email-lead-proposal": "mcp-server/src/email-lead-proposal.js",
+  "email-lead-proposal": "mcp-server/src/email-lead-proposal.ts",
   "workflow-cutover": "mcp-server/src/workflow-cutover.v5.js",
   "memory": "mcp-server/src/memory.js",
   "codex-continuity": "mcp-server/src/codex-continuity.js",
@@ -9830,7 +9830,7 @@ registerTools({
       const item = validateDealItem({ ...proposed[0], bullets: [
         ...proposed.flatMap(i => i.bullets),
         ...shortFacts(candidate.evidence_quote).map(text => ({ date: null, kind: 'call', text })),
-      ] }, ToolError);
+      ] });
       const action = await c.query(
         `insert into capture_post_call_action (candidate_id,deal_id,owner_id,due_on,description,accepted_by,item_title,item_bullets,source_ref)
          values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) returning id
@@ -10282,7 +10282,7 @@ registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
 registerTools(researchSiteTools({ withEnvelope, writeEvent }), "research-sites");
 registerTools(partyIdentityTools({ withEnvelope, writeEvent, versionGuard, resolvePartyForWrite }), "party-identity");
 registerTools(scheduleBoardTools(), "schedule-board");
-registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject, ToolError,
+registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject,
   canExercisePartnerAuthority, partnerAuthoritySlugForActor }), "deal-items");
 
 // WR-AI-006: curation proposals are machine-callable; approval and retirement
@@ -10357,25 +10357,25 @@ registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 
 // Pure workbook-derived lease economics. No database, model, or write path.
 registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
-registerTools(factObservationTools({ ToolError }), "fact-observations");
+registerTools(factObservationTools(), "fact-observations");
 
 // The partner room (Idea 78): shared AI-to-AI transcript both Macs poll; raw
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
 registerTools(agentProfileTools(), "agent-profile");
-registerTools(clientPortalTools({ ToolError }), "client-portal");
+registerTools(clientPortalTools(), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
 // src/resource-observation.v5.js.
 registerTools(resourceObservationTools({ withEnvelope, ToolError }), "resource-observation");
-registerTools(emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lockDealField, resolveEmailProposal,
+registerTools(emailDealProgressTools({ withEnvelope, writeEvent, lockDealField, resolveEmailProposal,
   updateDeal: (c, actor, args) => TOOLS["update-deal"].handler(c, actor, args) }), "email-deal-progress");
-registerTools(emailNextStepTools({ ToolError, withEnvelope, writeEvent, lockDealField, resolveEmailProposal,
+registerTools(emailNextStepTools({ withEnvelope, writeEvent, lockDealField, resolveEmailProposal,
   setNextStep: (c, actor, args) => TOOLS["set-next-step"].handler(c, actor, args),
   setNextAction: (c, actor, args) => TOOLS["set-next-action"].handler(c, actor, args) }), "email-next-step");
 registerTools(emailProposalTools({ ToolError, withEnvelope, writeEvent,
   preview: (c, actor, verb, args) => TOOLS[verb].handler(c, actor, args) }), "email-proposals");
-registerTools(emailLeadProposalTools({ ToolError, withEnvelope, writeEvent }), "email-lead-proposal");
+registerTools(emailLeadProposalTools({ withEnvelope, writeEvent }), "email-lead-proposal");
 const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealField,
   updateDeal:(c,actor,args)=>TOOLS["update-deal"].handler(c,actor,args),
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});

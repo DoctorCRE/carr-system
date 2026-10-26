@@ -73,7 +73,7 @@
 // built against.
 
 import { TOOLS } from "./tools.js";
-import { publicError } from "./public-errors.js";
+import { publicError } from "./public-errors.ts";
 import { mutationManifestIdentity } from "./mutation-registry.js";
 import { program6ActionPosture } from "./program6-feature-flag.js";
 import { workspaceCommandCenterPosture } from "./workspace-feature-flag.js";

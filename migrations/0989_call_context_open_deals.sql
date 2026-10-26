@@ -74,7 +74,7 @@ returns table (
 )
 language sql
 security definer
-set search_path = pg_catalog, public
+set search_path = pg_catalog, public, pg_temp
 as $$
   select d.id, d.name, d.owner, d.operating_state, dp.party_id, p.ref, p.name, p.email, dp.role
     from public.v_deal_room_board d

@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
-import { CONTRACTS } from '../src/fact-observations.js';
+import { CONTRACTS } from '../src/fact-observations.ts';
 import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
 
 // WR-000039 E09a. Synthetic tenants, entities, documents, and actors only.

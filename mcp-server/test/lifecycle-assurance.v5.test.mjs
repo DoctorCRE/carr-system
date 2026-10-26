@@ -459,7 +459,7 @@ test("ISOLATION: no module in src names a specifier under the test directory", (
   const directory = fileURLToPath(new URL("../src", import.meta.url));
   const imports = moduleImports(directory);
   assert.ok(Object.hasOwn(imports, "lifecycle-assurance.v5.js"));
-  assert.ok(Object.hasOwn(imports, "gate-zero-assurance.v5.js"));
+  assert.ok(Object.hasOwn(imports, "gate-zero-assurance.v5.ts"));
   assert.ok(Object.keys(imports).length > 100, "every module in src must have been parsed");
 
   const offenders = Object.entries(imports)
@@ -471,7 +471,7 @@ test("ISOLATION: no module in src names a specifier under the test directory", (
 
   assert.deepEqual(imports["lifecycle-assurance.v5.js"],
     ["./artifact-trust.js", "./global-boundaries.v5.js", "./identity.js",
-      "./gate-zero-assurance.v5.js"]);
+      "./gate-zero-assurance.v5.ts"]);
 });
 
 test("ISOLATION: no public export maps a conditional token back to a state", () => {

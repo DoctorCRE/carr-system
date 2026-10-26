@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { pipelineChanges } from "../src/dealroom.js";
 import { TOOLS } from "../src/tools.js";
 import { docActivityEntry } from "../src/doc-activity.js";
-import { CHECKLIST_SOURCES } from '../src/deal-checklist.js';
+import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
 
 const ids = {
   deal: "10000000-0000-0000-0000-000000000001",
