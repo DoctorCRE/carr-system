@@ -161,8 +161,11 @@ class Fake:
         db_path.write_bytes(self.fixture.read_bytes())
 
     def ports(self):
-        return intake.Ports(carr=self.carr, contacts=self.contacts, next_step=self.next_step,
-                            decode=self.decode, now=lambda: self.now, lead_intent=self.lead_intent)
+        ports = dict(carr=self.carr, contacts=self.contacts, next_step=self.next_step,
+                     decode=self.decode, now=lambda: self.now)
+        if 'lead_intent' in intake.Ports.__dataclass_fields__:  # parity runs older intake builds too
+            ports['lead_intent'] = self.lead_intent
+        return intake.Ports(**ports)
 
     def writes(self, verb=None):
         return [(v, a) for v, a in self.calls if v in intake.WRITE_VERBS and (verb is None or v == verb)]
