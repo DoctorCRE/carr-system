@@ -254,6 +254,15 @@ class IntakeTest(unittest.TestCase):
     def report_text(self):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
 
+    def test_mail_intake_processes_only_the_configured_account(self):
+        personal = mail('lee@example.test', -timedelta(hours=1),
+                        subject='Foreign mailbox', recipients='personal@example.test')
+        business = mail('lee@example.test', -timedelta(hours=1), subject='Configured mailbox')
+        result = self.run_intake([personal, business])
+        self.assertEqual(result.state, 'succeeded')
+        [(_, activity)] = self.fake.writes('log-activity')
+        self.assertEqual(activity['summary'], 'Email from lee@example.test: Configured mailbox')
+
     def test_transient_backoff_and_blocked_requests_preserve_frozen_payloads(self):
         m = mail('pat@example.test', -timedelta(hours=1))
         self.fake.fail_verbs.add('log-activity')
@@ -1631,6 +1640,99 @@ class IntakeTest(unittest.TestCase):
         self.fake.board_conflicts = 2
         self.fake.now += timedelta(minutes=30)
         self.assertEqual(self.run_intake(events=[event(self.gid(3), timedelta(hours=6))]).counts['calendar_agenda_failed'], 1)
+class AttachmentMetadataTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / 'store.db'
+        write_db(self.path, [mail('pat@example.test', -timedelta(hours=1), subject=f'm{i}',
+                                  copy_key=f'k{i}', local_keys=str(70 + i)) for i in range(3)])
+
+    def test_messages_carry_only_their_linked_attachment_metadata(self):
+        con = sqlite3.connect(self.path)
+        con.executescript('''
+            CREATE TABLE message_keys (message_id INTEGER, local_key INTEGER);
+            CREATE TABLE attachments (id INTEGER, message_key INTEGER, name TEXT, size INTEGER,
+              content_type TEXT, content_id TEXT, path TEXT);
+            INSERT INTO message_keys VALUES (1,70),(1,71),(2,72),(3,73);
+            INSERT INTO attachments VALUES
+              (9,71,'Lease.pdf',4096,'application/pdf',NULL,'private-cache-path'),
+              (8,70,'Logo.png',128,'image/png','logo@example.test','another-private-path'),
+              (10,72,'Plan.docx',8192,'application/vnd.openxmlformats-officedocument.wordprocessingml.document',NULL,NULL),
+              (11,999,'Unlinked.pdf',99,'application/pdf',NULL,NULL);
+        ''')
+        con.close()
+        _, mails, _ = intake._load(self.path)
+        self.assertEqual([m['attachments'] for m in mails], [
+            [{'id': 8, 'name': 'Logo.png', 'size': 128, 'content_type': 'image/png',
+              'content_id': 'logo@example.test'},
+             {'id': 9, 'name': 'Lease.pdf', 'size': 4096, 'content_type': 'application/pdf',
+              'content_id': None}],
+            [{'id': 10, 'name': 'Plan.docx', 'size': 8192,
+              'content_type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              'content_id': None}], []])
+
+    def test_ambiguous_message_keys_do_not_attribute_attachments(self):
+        con = sqlite3.connect(self.path)
+        con.executescript('''
+            CREATE TABLE message_keys (message_id INTEGER, local_key INTEGER);
+            CREATE TABLE attachments (id INTEGER, message_key INTEGER, name TEXT, size INTEGER,
+              content_type TEXT, content_id TEXT);
+            INSERT INTO message_keys VALUES (1,70),(2,70),(3,73);
+            INSERT INTO attachments VALUES
+              (8,70,'Ambiguous.pdf',128,'application/pdf',NULL),
+              (9,73,'Certain.pdf',256,'application/pdf',NULL);
+        ''')
+        con.close()
+        _, mails, _ = intake._load(self.path)
+        self.assertEqual([m['attachments'] for m in mails], [[], [], [
+            {'id': 9, 'name': 'Certain.pdf', 'size': 256,
+             'content_type': 'application/pdf', 'content_id': None}]])
+
+    def test_configured_account_excludes_foreign_and_substring_addresses(self):
+        con = sqlite3.connect(self.path)
+        con.execute('UPDATE messages SET sender=?, recipients=? WHERE id=1',
+                    ('BUSINESS@example.test', 'other@example.test'))
+        con.execute('UPDATE messages SET recipients=? WHERE id=2',
+                    ('Other <other@example.test>, Business <BUSINESS@example.test>',))
+        con.execute('UPDATE messages SET recipients=? WHERE id=3',
+                    ('notbusiness@example.test, business@example.test.foreign',))
+        con.commit()
+        con.close()
+        _, mails, _ = intake._load(self.path, account='business@example.test')
+        self.assertEqual([m['subject'] for m in mails], ['m0', 'm1'])
+        _, foreign, _ = intake._load(self.path, account='personal@example.test')
+        self.assertEqual(foreign, [])
+
+    def test_collapsed_copies_keep_each_attachment_when_the_full_body_wins(self):
+        logo = {'id': 8, 'name': 'Logo.png', 'size': 128, 'content_type': 'image/png',
+                'content_id': 'logo@example.test'}
+        lease = {'id': 9, 'name': 'Lease.pdf', 'size': 4096, 'content_type': 'application/pdf',
+                 'content_id': None}
+        rows = [dict(mail('pat@example.test', -timedelta(hours=1), kind='preview', copy_key='same'),
+                     attachments=[lease, logo]),
+                dict(mail('pat@example.test', -timedelta(hours=1) + timedelta(seconds=5), copy_key='same'),
+                     attachments=[lease])]
+        [best] = intake._best_copies(rows)
+        self.assertTrue(best['full'])
+        self.assertEqual(best['attachments'], [logo, lease])
+
+    def test_older_decoders_supply_empty_metadata_or_unknown_content_id(self):
+        _, mails, _ = intake._load(self.path)
+        self.assertEqual([m['attachments'] for m in mails], [[], [], []])
+        con = sqlite3.connect(self.path)
+        con.executescript('''
+            CREATE TABLE message_keys (message_id INTEGER, local_key INTEGER);
+            CREATE TABLE attachments (id INTEGER, message_key INTEGER, name TEXT, size INTEGER, content_type TEXT);
+            INSERT INTO message_keys VALUES (1,70);
+            INSERT INTO attachments VALUES (9,70,'Lease.pdf',4096,'application/pdf');
+        ''')
+        con.close()
+        _, mails, _ = intake._load(self.path)
+        self.assertEqual(mails[0]['attachments'], [{'id': 9, 'name': 'Lease.pdf', 'size': 4096,
+                                                   'content_type': 'application/pdf', 'content_id': None}])
+
+
 class FolderTest(unittest.TestCase):
     FOLDERS = """
     CREATE TABLE folders (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, name TEXT,

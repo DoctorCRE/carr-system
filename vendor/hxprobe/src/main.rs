@@ -301,6 +301,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              name          TEXT NOT NULL,
              name_verified INTEGER NOT NULL,    -- name also stored on its own
              content_type  TEXT,                -- declared by the sender
+             content_id    TEXT,                -- nullable MIME part identifier
              size          INTEGER NOT NULL,
              path          TEXT                 -- NULL if revisions disagree
          );
@@ -572,14 +573,14 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             .expect("prepare message keys");
         let mut ins_attachment = tx
             .prepare(
-                "INSERT INTO attachments(id,message_key,name,name_verified,content_type,size,path)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7)"
+                "INSERT INTO attachments(id,message_key,name,name_verified,content_type,size,path,content_id)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)"
             )
             .expect("prepare attachments");
         for a in attachments.attachments.values() {
             ins_attachment
                 .execute(rusqlite::params![a.id as i64, a.message_key as i64, a.name, a.name_verified as i64,
-                                           a.content_type, a.size as i64, a.path])
+                                           a.content_type, a.size as i64, a.path, a.content_id])
                 .expect("insert attachment");
         }
         let mut ins = tx

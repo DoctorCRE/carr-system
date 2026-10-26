@@ -63,7 +63,7 @@ WHAT CARR ADDS to `hxprobe db <file> [out.db] [files-dir]`:
 - Attachment metadata (WR-000469 AC-ATTACH, `src/attachment.rs`). Class `016a`
   objects (tag `0318`) give `attachments`: message key (typed reference at +360),
   name (the cache file name without Outlook's `[<digits>]` suffix), declared MIME
-  type, size (+558) and the profile-relative cache path
+  type, size (+558), nullable content ID and the profile-relative cache path
   `~/Files/S0/<n>/Attachments/<k>/<file>`. `message_keys` maps message rows to the
   local keys of their message objects. No bytes are read; `lib/outlook_attachments.py`
   reads, type-checks by magic bytes, caps and hashes cached files from a private
@@ -201,3 +201,19 @@ established mail provenance remain quarantined with their frozen payloads.
 Mail continues independently. Status reasons remain `processed`, `nothing_new`,
 or `store_unchanged`. Calendar status appears only in the
 `calendar_lifecycle_unsupported` and `calendar_requests_quarantined` counts.
+
+## Attachment metadata intake
+
+The maintained decoder exports `attachments.content_id` from the UTF-16LE string
+after the standalone filename, whose sort key ends in `01 01 01 01 00`. Missing,
+truncated, whitespace-containing and revision-conflicting values stay NULL.
+This is an inferred string-run selector, not an established wire field ID.
+Attachment IDs whose cached revisions disagree on their owning message are omitted.
+Intake joins only local keys naming exactly one decoded message row.
+
+Intake email dictionaries carry `attachments` containing id, name, size, declared
+content_type and nullable content_id. Copy collapse preserves their union by local
+attachment ID. The activity record contract and model prompt remain unchanged.
+No attachment bytes or cache paths enter those dictionaries. Production mail
+loading requires the configured address as sender or recipient. BCC-only mail
+without that evidence is omitted.
