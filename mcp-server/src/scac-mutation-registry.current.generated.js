@@ -1351,6 +1351,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "ping-deal-checklist": {
+    "ingress_key": "mcp-tool:ping-deal-checklist",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "64552a9a85436ffd0b8b029f9f29c80cb626db73990b0834933e15b0fc271b0d",
+    "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "prepare-conversation": {
     "ingress_key": "mcp-tool:prepare-conversation",
     "source_locator": "mcp-server/src/tools.js",
