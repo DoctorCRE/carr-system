@@ -1,3 +1,4 @@
+// Test successor admission for unfinished work and activity.
 import test from 'node:test';
 import {assertAdmits} from './helpers/registry-admission.mjs';
 

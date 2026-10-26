@@ -1,3 +1,4 @@
+// Test system work census counts and pagination.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readSystemWorkCensus,SYSTEM_WORK_LEGS,SYSTEM_WORK_KINDS,systemWorkActions,systemWorkTools} from '../src/system-work-census.v5.js';

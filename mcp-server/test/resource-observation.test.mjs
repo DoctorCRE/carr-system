@@ -1,3 +1,4 @@
+// Test resource observations and dashboard reporting.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ToolError, executeRegisteredTool } from "../src/tools.js";
