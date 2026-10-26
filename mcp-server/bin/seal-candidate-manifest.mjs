@@ -50,8 +50,9 @@
 
 import { execFileSync } from "node:child_process";
 import { canonicalJson, digest } from "../src/artifact-trust.js";
-import { CANDIDATE_MANIFEST_SCHEMA } from "../src/build-stamp.js";
 
+/** The schema the stamped manifest declares. A manifest without it is refused. */
+const CANDIDATE_MANIFEST_SCHEMA = "carr-gate-zero-candidate-manifest.v1";
 /** The candidate directory, as repository-relative path segments. */
 const CANDIDATE_PATH = "mcp-server/src";
 /** The environment matrix ops/environment-matrix-selftest.py holds the tree to. */

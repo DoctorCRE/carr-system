@@ -1,3 +1,5 @@
+import { ToolError } from "./tool-error.js";
+
 const compare = (a, b) => {
   for (let i = 0; i < a.length; i++) {
     if (a[i] < b[i]) return -1;
@@ -6,7 +8,7 @@ const compare = (a, b) => {
   return 0;
 };
 
-export async function briefQueuePage(items, { limit = 50, cursor, scope, key, ToolError }) {
+export async function briefQueuePage(items, { limit = 50, cursor, scope, key }) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 50)
     throw new ToolError({ error: 'brief_queue_page_invalid' });
   let after;
