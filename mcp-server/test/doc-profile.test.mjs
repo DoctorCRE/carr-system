@@ -9,7 +9,7 @@ const READS = ["catch-me-up", "today-triage", "find", "find-and-catch-up",
   "deal-board", "get-deal-room", "vendor-assignment-context", "who-do-we-know", "counterparty-history",
   "lead-board", "schedule-board", "search-tour-properties", "read-doctrine",
   "search-doctrine", "recall-memory"];
-const WRITES = ["add-deal-note", "log-activity", "set-next-step", "add-critical-date", "log-capture"];
+const WRITES = ["ping-deal-checklist", "add-deal-note", "log-activity", "set-next-step", "add-critical-date", "log-capture"];
 const ACKNOWLEDGEMENTS = ['whats-new'];
 const actor = () => authenticatedIdentity.connectionForGrant({ slug: "joe" });
 async function rpc(path, method, params) {

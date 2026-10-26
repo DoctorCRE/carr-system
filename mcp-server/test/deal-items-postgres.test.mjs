@@ -8,6 +8,7 @@ import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { readDealItems } from '../src/deal-items.js';
+import { CHECKLIST_SOURCES } from '../src/deal-checklist.js';
 
 let fixture, admin, database, c, actor, deal;
 before(async () => {
@@ -199,4 +200,58 @@ test('accepting an ordinary captured next step creates structured sourced items'
   assert.equal(accepted.status,'confirmed');
   const items = await readDealItems(c,deal);
   assert.ok(items.some(i => i.source_ref === `capture_candidate:${candidate}` && i.title === 'Vendor Introductions'));
+});
+
+
+test('due checklist pings reach only the owner feed and replay without duplicate delivery', async () => {
+  await c.query('begin');
+  try {
+    const document = (await c.query("insert into doctrine_document(slug,title,content_class) values('synthetic-checklist','Synthetic checklist','reference') returning id")).rows[0].id;
+    for (const source of CHECKLIST_SOURCES) {
+      await c.query("insert into doctrine_section(id,document_id,section_key,body_hash) values($1::uuid,$2,$1::text,$3)", [source.section_id, document, source.content_hash]);
+    }
+    await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic other partner') on conflict(slug) do update set active=true");
+    const date = (await c.query("insert into critical_date(deal_id,kind,due_on,source,created_by) values($1,'attorney_review','2000-01-01','synthetic:lease',$2) returning id", [deal,actor.id])).rows[0].id;
+    await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
+    await c.query('set local role carr_writer');
+    const key = randomUUID();
+    const ping = key => executeRegisteredTool(c, actor, 'ping-deal-checklist', { deal, idempotency_key: key });
+    const first = await ping(key);
+    assert.equal(first.queued, 1);
+    assert.equal((await ping(key)).replayed, true);
+    const retry = await ping(randomUUID());
+    assert.equal(retry.queued, 0);
+    assert.equal(retry.deduplicated, 1);
+    assert.equal(retry.notifications[0].notification_id, first.notifications[0].notification_id);
+    const feed = await executeRegisteredTool(c, actor, 'notification-feed', {});
+    assert.equal(feed.unread_count, 1);
+    assert.deepEqual(feed.notifications.map(n => [n.id,n.subject_type,n.subject_ref,n.severity]),
+      [[first.notifications[0].notification_id,'deal',deal,'action_required']]);
+    assert.deepEqual(feed.notifications[0].delivery, [{ channel: 'in_app', state: 'pending' }]);
+    await c.query('savepoint failed_ping');
+    const failedKey = randomUUID();
+    const failingStore = { query: (sql, args) => sql.includes('ops.mint_notification')
+      ? c.query('select 1/0') : c.query(sql, args) };
+    await assert.rejects(executeRegisteredTool(failingStore, actor, 'ping-deal-checklist',
+      { deal, idempotency_key: failedKey }));
+    await c.query('rollback to savepoint failed_ping');
+    const unchanged = await executeRegisteredTool(c, actor, 'notification-feed', {});
+    assert.deepEqual(unchanged, feed);
+    assert.equal((await c.query('select count(*)::int as count from event where idempotency_key=$1', [failedKey])).rows[0].count, 0);
+    assert.equal((await c.query('select count(*)::int as count from tool_call where idempotency_key=$1', [failedKey])).rows[0].count, 0);
+
+    await c.query("select set_config('carr.acting_actor_slug','dell',true), set_config('carr.verified_human_actor_slug','dell',true)");
+    assert.equal((await executeRegisteredTool(c, { ...actor, slug: 'dell' }, 'notification-feed', {})).unread_count, 0);
+    await c.query('reset role');
+    const event = (await c.query('select e.subject_id,e.new_value from event e join ops.notification n on n.event_ref=e.id where n.id=$1', [first.notifications[0].notification_id])).rows[0];
+    assert.equal(event.subject_id, deal);
+    assert.deepEqual(event.new_value, { checklist_item_id: `critical-date:${date}`, due_on: '2000-01-01', recipient: 'joe' });
+    await c.query("insert into client_status(slug,label) values('prospect','Synthetic prospect') on conflict do nothing");
+    await c.query("update client set status='prospect',prospect_engagement_status='inactive' where id=(select client_id from deal where id=$1)", [deal]);
+    await c.query('set local role carr_writer');
+    const inactive = await ping(randomUUID());
+    assert.equal(inactive.reason, 'deal_not_active');
+    assert.equal(inactive.queued, 0);
+
+  } finally { await c.query('rollback'); }
 });
