@@ -2180,7 +2180,7 @@ else:
 
     def _live_refs(_n):
         _h = subprocess.run(["grep", "-rlw", _n, REPO_ROOT, "--include=*.py",
-                             "--include=*.js", "--include=*.sh", *_SKIP_DIRS],
+                             "--include=*.js", "--include=*.ts", "--include=*.sh", *_SKIP_DIRS],
                             capture_output=True, text=True)
         _out = []
         for _f in _h.stdout.splitlines():
