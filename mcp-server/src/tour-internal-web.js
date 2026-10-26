@@ -3,7 +3,7 @@
 // gate: it owns no identity, authority selection, database, routing, or map
 // implementation.
 
-import { validRouteTimestamp, routeTimestampMicroseconds } from "./tour-route-timestamp.js";
+import { validRouteTimestamp, routeTimestampMicroseconds } from "./tour-route-timestamp.ts";
 
 export const TOUR_INTERNAL_ASSET_DIRECTORY = "../out/doctorcre-artifacts/current/tours";
 

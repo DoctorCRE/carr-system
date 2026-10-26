@@ -1,4 +1,4 @@
-import { ToolError } from "./tool-error.js";
+import { ToolError } from "./tool-error.ts";
 import { isValidCorrelationId, logLine } from "./correlation.js";
 
 // Public shapes are deliberately closed. Never copy messages, hints, wrapped

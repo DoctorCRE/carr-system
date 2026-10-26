@@ -2,7 +2,7 @@
 // consumes those dated activities; it never opens a mailbox or sends a message.
 import { createHash } from "node:crypto";
 import { canExercisePartnerAuthority } from "./partner-authority.js";
-import { isCalendarDate } from "./calendar-date.js";
+import { isCalendarDate } from "./calendar-date.ts";
 export const LEAD_AUTOMATION_CONTRACT = "lead-automation.v1";
 const bodyDigest = body => createHash("sha256").update(body).digest("hex");
 const ACTIVE = ["new", "qualified", "outreach_active", "engaged"];

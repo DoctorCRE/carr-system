@@ -1,6 +1,6 @@
 import { randomString } from "./google-oidc.js";
 import { publicError } from "./public-errors.js";
-import { isCalendarDate } from "./calendar-date.js";
+import { isCalendarDate } from "./calendar-date.ts";
 
 const JSON_HEADERS = { "content-type": "application/json" };
 const json = (body, status = 200) =>

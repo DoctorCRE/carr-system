@@ -1,6 +1,6 @@
 // Facts-only Tour projection contracts. Rendering and publication authority
 // are deliberately elsewhere.
-import { sha256 } from "./sha256.js";
+import { sha256 } from "./sha256.ts";
 
 export const PUBLIC_TOUR_FIELD_KEYS = new Set([
   "display.name", "display.address", "suite", "property_type", "size",

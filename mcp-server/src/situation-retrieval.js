@@ -7,7 +7,7 @@
 import { searchDoctrineWithEmbeddings } from "./doctrine-embeddings.js";
 import { personalScopeForActor } from "./identity.js";
 import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.js";
-import { ToolError } from "./tool-error.js";
+import { ToolError } from "./tool-error.ts";
 
 const POLICIES = new Set(["lexical-dominant-v1", "coequal-normalized-v1"]);
 

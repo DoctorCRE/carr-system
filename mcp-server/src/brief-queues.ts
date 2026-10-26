@@ -1,6 +1,12 @@
-import { ToolError } from "./tool-error.js";
+import type { ClientBase } from "@neondatabase/serverless";
+import { ToolError } from "./tool-error.ts";
 
-const compare = (a, b) => {
+/** A keyset sort key: four strings compared left to right. */
+type QueueKey = string[];
+type Instant = string | number | Date | null | undefined;
+type QueueCursor = { v: number; scope: string; key: QueueKey };
+
+const compare = (a: QueueKey, b: QueueKey) => {
   for (let i = 0; i < a.length; i++) {
     if (a[i] < b[i]) return -1;
     if (a[i] > b[i]) return 1;
@@ -8,14 +14,16 @@ const compare = (a, b) => {
   return 0;
 };
 
-export async function briefQueuePage(items, { limit = 50, cursor, scope, key }) {
+export async function briefQueuePage<T>(items: T[], { limit = 50, cursor, scope, key }: {
+  limit?: number; cursor?: string; scope: string; key: (item: T) => QueueKey | Promise<QueueKey>;
+}) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 50)
     throw new ToolError({ error: 'brief_queue_page_invalid' });
-  let after;
+  let after: QueueCursor | undefined;
   if (cursor !== undefined) {
     try {
       if (typeof cursor !== 'string' || !cursor.length || cursor.length > 8000) throw Error();
-      after = JSON.parse(decodeURIComponent(atob(cursor)));
+      after = JSON.parse(decodeURIComponent(atob(cursor))) as QueueCursor;
       if (after.v !== 1 || after.scope !== scope || !Array.isArray(after.key)
           || after.key.length !== 4 || !after.key.every(value => typeof value === 'string' && value.length <= 256)) throw Error();
     } catch { throw new ToolError({ error: 'brief_queue_cursor_invalid' }); }
@@ -28,12 +36,12 @@ export async function briefQueuePage(items, { limit = 50, cursor, scope, key }) 
   return {
     items: page.map(row => row.item), total: sorted.length, returned: page.length, remaining,
     has_more: remaining > 0,
-    next_cursor: remaining ? btoa(encodeURIComponent(JSON.stringify({ v: 1, scope, key: page.at(-1).key }))) : null,
+    next_cursor: remaining ? btoa(encodeURIComponent(JSON.stringify({ v: 1, scope, key: page.at(-1)!.key }))) : null,
     consistency: 'live_keyset; changed rows may move; restart for a fresh full traversal',
   };
 }
 
-export async function readBriefLoops(c) {
+export async function readBriefLoops(c: Pick<ClientBase, "query">) {
   return (await c.query(`select number, kind, domain, status, owner, marker, title,
       coalesce(nullif(title, ''),
         nullif(regexp_replace(split_part(body, E'\\n', 1), '\\*\\*', '', 'g'), '')) as label,
@@ -43,17 +51,20 @@ export async function readBriefLoops(c) {
     .map(row => ({ ...row, owner_partner: row.owner.toLowerCase() }));
 }
 
-const fingerprint = async value => {
+const fingerprint = async (value: string) => {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 };
-export const briefLoopKey = sponsor => async row => [row.due_on || '~',
+type BriefLoopRow = { due_on: string | null; owner_partner: string; kind: unknown; number: unknown };
+export const briefLoopKey = (sponsor: string) => async (row: BriefLoopRow) => [row.due_on || '~',
   row.owner_partner === sponsor ? '0' : '1', String(row.kind), await fingerprint(String(row.number))];
-const tier = { work: '0', capability: '1', pending: '2' };
-const timestamp = value => value != null && Number.isFinite(new Date(value).getTime()) ? new Date(value).toISOString() : '~';
-export const briefNeedsJoeKey = async row => {
+const tier: Record<string, string> = { work: '0', capability: '1', pending: '2' };
+const timestamp = (value: Instant) => value != null && Number.isFinite(new Date(value).getTime()) ? new Date(value).toISOString() : '~';
+type NeedsJoeRow = { key: unknown; title: unknown; blocks: { tier: string }; since: Instant; source: string };
+export const briefNeedsJoeKey = async (row: NeedsJoeRow) => {
   const identity = await fingerprint(JSON.stringify([row.key, row.title]));
   return [tier[row.blocks.tier], timestamp(row.since), row.source, identity];
 };
-export const briefAssuranceKey = row => [({ failure: '0', action_required: '1', completion: '2' })[row.severity] || '3',
+type AssuranceRow = { severity: string; created_at: Instant; notification_id: string };
+export const briefAssuranceKey = (row: AssuranceRow) => [({ failure: '0', action_required: '1', completion: '2' } as Record<string, string>)[row.severity] || '3',
   timestamp(row.created_at), '', row.notification_id];
