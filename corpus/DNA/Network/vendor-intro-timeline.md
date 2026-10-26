@@ -1,6 +1,6 @@
 # Vendor Intro Timeline — introducing the client to the right vendor, at the right stage
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Added July 7, 2026 from Joe's "Vendor Intro Timeline." Source PDF filed alongside. This is the **concierge layer**: as a deal moves forward, the tenant rep connects the client to the right vendor category at the right moment. It's one of the concrete ways Joe & Dell add value beyond the lease itself.*
 

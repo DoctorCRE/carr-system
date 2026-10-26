@@ -101,7 +101,7 @@ The count-only observation command below supplies the next criterion.
 
 ## Count-only store observation
 
-`vendor/hxprobe/target/release/hxprobe observe <immutable-store-copy>` emits
+The release build of `vendor/hxprobe` (`cargo build --release`) runs `hxprobe observe <immutable-store-copy>` and emits
 `hxprobe-observation/v1` JSON. The orchestrator supplies the private copy.
 This desk uses only generated synthetic fixtures. The command opens one file read-only,
 never reads sidecars, and writes only aggregate JSON to stdout.
@@ -174,7 +174,7 @@ The research helper copies `HxStore.hxd` and the intake helper's body sidecars
 (`Files/S0/*/EFMData/*.dat`) from the fixed Main Identity profile. It accepts no
 arguments, runs no other command, and performs no networking or intake. Snapshots
 land in `~/carr-local/outlook-research/snap-<UTC timestamp>/`, owned by the user
-with mode 0700. Files have mode 0600. `manifest.json` records each source-relative
+with mode 0700. Files have mode 0600. `<snapshot>/manifest.json` records each source-relative
 path, source size and nanosecond mtime, and SHA-256 of the copied bytes. Keep these
 private. The shared profile can contain accounts beyond the designated TEST account.
 Only TEST-account changes are authorized research experiments. Microsoft Graph
@@ -190,7 +190,7 @@ the two load commands. It does not load or run the helper.
 5. Run the printed `launchctl bootstrap gui/$(id -u) ...` command to load the on-demand job.
 6. Quit Outlook after the intended TEST-account change has synced, before taking a research snapshot.
 7. Run `launchctl kickstart gui/$(id -u)/com.carr.outlook-research-copy` for each snapshot.
-8. Check `launchctl print gui/$(id -u)/com.carr.outlook-research-copy` for exit code 0 and a new snapshot containing `manifest.json`.
+8. Check `launchctl print gui/$(id -u)/com.carr.outlook-research-copy` for exit code 0 and a new snapshot containing `<snapshot>/manifest.json`.
 
 The job has no schedule and no RunAtLoad. Rebuilding or replacing the binary
 requires re-granting Full Disk Access. An unchanged pinned build preserves the

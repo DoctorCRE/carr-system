@@ -1,4 +1,6 @@
-const CONTRACTS = {
+import { authorizationClassForActor, organizationTenantForActor } from './identity.js';
+
+export const CONTRACTS = {
   base_rent_per_sf: { units: { 'USD/SF/year': 1, 'USD/SF/month': 12 }, unit: 'USD/SF/year', expenseBasis: true },
   landlord_ti_per_sf: { units: { 'USD/SF': 1 }, unit: 'USD/SF' },
   term_months: { units: { months: 1, years: 12 }, unit: 'months' },
@@ -7,7 +9,9 @@ const CONTRACTS = {
 const EXPENSE_BASES = ['nnn', 'modified_gross', 'full_service_gross', 'gross'];
 const DECIMAL = /^(?:0|[1-9][0-9]{0,29})(?:\.[0-9]{1,18})?$/;
 const CONTENT_HASH = /^[a-fA-F0-9]{64}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const text = maxLength => ({ type: 'string', minLength: 1, maxLength });
+const uuid = { type: 'string', pattern: UUID.source, minLength: 36, maxLength: 36 };
 const sourceSchema = { type: 'object', additionalProperties: false, properties: {
   document_ref: text(200), page_start: { type: 'integer', minimum: 1, maximum: 100000 },
   page_end: { type: 'integer', minimum: 1, maximum: 100000 }, cited_text: text(4000),
@@ -43,7 +47,7 @@ function normalize(value, multiplier) {
   return `${scaled.slice(0, -fractional.length)}.${scaled.slice(-fractional.length)}`.replace(/0+$/, '').replace(/\.$/, '');
 }
 
-function validate(args, ToolError) {
+function validate(args, ToolError, extra = []) {
   const invalid = () => { throw new ToolError({ error: 'validation_error' }); };
   const object = (value, allowed, required = allowed) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -53,7 +57,8 @@ function validate(args, ToolError) {
   const string = (value, max) => {
     if (typeof value !== 'string' || !value.trim() || value.length > max) invalid();
   };
-  object(args, ['entity_ref', 'observations']);
+  object(args, ['entity_ref', 'observations', ...extra]);
+  for (const key of extra) if (!UUID.test(args[key])) invalid();
   string(args.entity_ref, 200);
   if (!Array.isArray(args.observations) || !args.observations.length || args.observations.length > 100) invalid();
   const ids = new Set();
@@ -161,6 +166,58 @@ export function factObservationTools({ ToolError }) {
           evidence_independence: 'not_assessed', observations, review_items, shared_source_groups, shared_extraction_groups,
           fields, conflicts: fields.filter(f => f.status === 'conflict').map(({ fact_key, observation_ids }) => ({ fact_key, observation_ids })),
         };
+      },
+    },
+    'record-fact-observations': {
+      write: true,
+      description: 'Store extracted economic fact observations for one entity as immutable rows with their source document, page span, cited text, method, extractor version, optional document lineage and extraction pass, and confidence tier. The extraction-job door: verified partners, probes, and reviewers are refused, and human values reach canonical only through promote-fact human review. Recording never promotes anything. Idempotent per idempotency_key; reusing a key with different input is refused. Cited text is kept 365 days for review, then purged to null while its SHA-256 remains.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {
+        idempotency_key: { ...uuid, description: 'A fresh UUID per intended batch; retries reuse the same key.' },
+        entity_ref: { ...text(200), description: 'The entity these observations describe, such as a deal or lease reference.' },
+        observations: { type: 'array', minItems: 1, maxItems: 100, items: observationSchema },
+      }, required: ['idempotency_key', 'entity_ref', 'observations'] },
+      handler: async (c, actor, args) => {
+        if (['verified_partner', 'probe_agent', 'review_agent'].includes(authorizationClassForActor(actor)))
+          throw new ToolError({ error: 'not_in_profile' });
+        validate(args, ToolError, ['idempotency_key']);
+        const out = (await c.query('select ops.record_fact_observations($1,$2,$3,$4,$5::jsonb) as r',
+          [organizationTenantForActor(actor), actor.id, args.idempotency_key, args.entity_ref, JSON.stringify(args.observations)])).rows[0].r;
+        if (!out.ok) throw new ToolError({ error: out.error });
+        return { ...out, schema_version: 'fact-observation-record.v1', canonical: false };
+      },
+    },
+    'promote-fact': {
+      write: true,
+      description: 'Promote one entity-field to its next canonical version from stored observations. basis independent_agreement is the deterministic kernel rule: at least two agreeing auto-accept text-layer observations, no disagreeing observation on the field, and at least one pair proven independent by a different document, different content hash, disjoint document family and derivation chain, and a different extraction pass or model. A single AI observation never promotes by rule. basis human_review promotes exactly one observation and requires a verified partner. base_version is the current canonical version (0 when none); a stale value is refused with current_version. Every promotion is an append-only receipt naming the basis, actor, and exact observation ids. Refusals return ok false with the reason.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {
+        idempotency_key: { ...uuid, description: 'A fresh UUID per intended promotion; retries reuse the same key.' },
+        entity_ref: text(200), fact_key: { type: 'string', enum: Object.keys(CONTRACTS) },
+        basis: { type: 'string', enum: ['independent_agreement', 'human_review'] },
+        observation_ids: { type: 'array', minItems: 1, maxItems: 100, uniqueItems: true, items: uuid },
+        base_version: { type: 'integer', minimum: 0, maximum: 0x7ffffffe },
+      }, required: ['idempotency_key', 'entity_ref', 'fact_key', 'basis', 'observation_ids', 'base_version'] },
+      handler: async (c, actor, args) => {
+        if (args.basis === 'human_review' && authorizationClassForActor(actor) !== 'verified_partner')
+          throw new ToolError({ error: 'human_only_verb_requires_verified_partner' });
+        const out = (await c.query('select ops.promote_fact($1,$2,$3,$4,$5,$6,$7::uuid[],$8) as r',
+          [organizationTenantForActor(actor), actor.id, args.idempotency_key, args.entity_ref, args.fact_key,
+            args.basis, args.observation_ids, args.base_version])).rows[0].r;
+        if (['version_conflict', 'key_reuse', 'not_found'].includes(out.error))
+          throw new ToolError({ error: out.error, current_version: out.current_version });
+        return { ...out, schema_version: 'fact-promotion.v1' };
+      },
+    },
+    'list-fact-conflicts': {
+      write: false,
+      description: 'List unresolved fact conflicts: entity-fields whose stored observations normalize to more than one value (expense basis included), newest first, each with every competing observation, its cited source, lineage, tier, and the current canonical version to pass as base_version. A conflict closes only when a human-review promotion is recorded after its newest observation. Expired cited text reads as null; its SHA-256 remains.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {
+        entity_ref: { ...text(200), description: 'Limit to one entity.' },
+        limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
+      } },
+      handler: async (c, actor, args) => {
+        const out = (await c.query('select ops.list_fact_conflicts($1,$2,$3) as r',
+          [organizationTenantForActor(actor), args.entity_ref ?? null, args.limit ?? 50])).rows[0].r;
+        return { ...out, schema_version: 'fact-conflicts.v1' };
       },
     },
   };

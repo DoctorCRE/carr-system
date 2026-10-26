@@ -1,6 +1,6 @@
 # UX Doctrine — how every surface stays friendly
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *SHARED-TIER design law, created 2026-07-13 (Joe's directive, "do all of this now"). Governs every surface a human touches (Joe or Dell) and every Claude reply that hands a human a choice: artifacts, the daily heartbeat, the Monday brief, digests, boards, and chat. Task-loaded via the root INDEX router on any user-facing build; the always-on parts (one action, feedback, plain language) are also pointed from the compiled rules (DNA/compiled-rules-shared.md) and DNA/writing-rules.md. On a writing surface this sits ON TOP of writing-rules.md: writing-rules governs the prose, this governs the structure and the interaction.*
 
