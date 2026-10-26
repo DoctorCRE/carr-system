@@ -14,6 +14,93 @@ const compare = observations => TOOLS['compare-fact-observations'].handler(db, a
   entity_ref: 'synthetic-deal-1', observations,
 });
 
+test('matching extraction pass and model expose shared failure domains across documents and extractor versions', async () => {
+  const extraction = { pass: 'schema', model: 'synthetic-model-v1' };
+  const inputs = [
+    observation('lease', { extraction }),
+    observation('counter', { extraction, extractor_version: 'synthetic-v2',
+      source: { ...observation('x').source, document_ref: 'synthetic-counter' } }),
+  ];
+  const original = structuredClone(inputs);
+  const out = await compare(inputs);
+  assert.deepEqual(out.shared_extraction_groups, [{ fact_key: 'base_rent_per_sf', ...extraction,
+    observation_ids: ['lease', 'counter'] }]);
+  assert.deepEqual(out.observations.map(o => o.input), original);
+  assert.deepEqual(inputs, original);
+  assert.deepEqual(out.shared_source_groups, []);
+  assert.equal(out.fields[0].status, 'agreement');
+  assert.deepEqual(out.review_items, []);
+  assert.equal(out.evidence_independence, 'not_assessed');
+  assert.equal(out.source_verification, 'unverified');
+  assert.equal(out.canonical, false);
+  assert.equal(out.records_written, 0);
+});
+
+test('different passes or models and unknown metadata never establish independence or join fields', async () => {
+  const extraction = { pass: 'schema', model: 'synthetic-model-v1' };
+  const term = observation('term', { fact_key: 'term_months', value: '60', unit: 'months', extraction });
+  delete term.expense_basis;
+  for (const inputs of [
+    [observation('first', { extraction }), observation('other-pass', { extraction: { ...extraction, pass: 'verify' } })],
+    [observation('first', { extraction }), observation('other-model', { extraction: { ...extraction, model: 'synthetic-model-v2' } })],
+    [observation('first', { extraction }), term],
+    [observation('first', { extraction }), observation('unknown')],
+    [observation('unknown'), observation('also-unknown')],
+    [observation('single', { extraction })],
+    [observation('a', { extraction: { pass: 'schema|verify', model: 'model' } }),
+      observation('b', { extraction: { pass: 'schema', model: 'verify|model' } })],
+  ]) {
+    const out = await compare(inputs);
+    assert.deepEqual(out.shared_extraction_groups, []);
+    assert.equal(out.evidence_independence, 'not_assessed');
+    assert.equal(out.canonical, false);
+    assert.equal(out.records_written, 0);
+  }
+});
+
+test('malformed extraction metadata refuses publicly without exposing supplied evidence', async t => {
+  t.mock.method(console, 'error', () => {});
+  for (const extraction of [null, undefined, [], 'schema', {}, { pass: 'schema' }, { model: 'model' },
+    { pass: 'schema', model: 'model', verified: true },
+    ...['', ' ', null, 42, [], 'x'.repeat(101)].flatMap(value => [
+      { pass: value, model: 'model' }, { pass: 'schema', model: value },
+    ]),
+  ]) await assert.rejects(() => executeRegisteredTool(db, actor, 'compare-fact-observations', {
+    entity_ref: 'synthetic-deal-1', observations: [observation('bad', { extraction })],
+  }), error => {
+    assert.equal(error.payload?.error, 'validation_error');
+    const out = publicError(error, { inputSchema: TOOLS['compare-fact-observations'].inputSchema });
+    assert.equal(out.error, 'validation_error');
+    assert.equal(JSON.stringify(out).includes('Base rent is'), false);
+    return true;
+  });
+  const extraction = { pass: 'p'.repeat(100), model: 'm'.repeat(100) };
+  const out = await compare([observation('bounded', { extraction })]);
+  assert.deepEqual(out.observations[0].input.extraction, extraction);
+});
+
+test('serialized registered extraction groups preserve conflict evidence and OCR review routing', async () => {
+  const extraction = { pass: ' schema ', model: 'Synthetic-Model' };
+  const inputs = [observation('lease', { extraction }),
+    observation('scan', { extraction, value: '25', method: 'ocr' }),
+    observation('other', { extraction: { pass: 'schema', model: 'Synthetic-Model' } })];
+  const args = { entity_ref: 'synthetic-deal-1', observations: inputs };
+  const original = structuredClone(args);
+  const out = JSON.parse(JSON.stringify(await executeRegisteredTool(db, actor, 'compare-fact-observations', args)));
+  assert.deepEqual(out.shared_extraction_groups, [{ fact_key: 'base_rent_per_sf', ...extraction,
+    observation_ids: ['lease', 'scan'] }]);
+  assert.deepEqual(out.review_items[0].observations.map(o => o.input), original.observations);
+  assert.deepEqual(out.review_items[0].reasons, ['conflict', 'human_review', 'ocr']);
+  assert.equal(out.review_items[0].priority, 'high');
+  assert.equal(out.review_items[0].observations[1].effective_confidence_tier, 'human_review');
+  assert.equal(out.fields[0].status, 'conflict');
+  assert.deepEqual(out.shared_source_groups[0].observation_ids, ['lease', 'scan', 'other']);
+  assert.deepEqual(args, original);
+  assert.equal(out.evidence_independence, 'not_assessed');
+  assert.equal(out.canonical, false);
+  assert.equal(out.records_written, 0);
+});
+
 test('repeated document evidence is reported without treating agreement as independent support', async () => {
   const out = await compare([observation('annual'), observation('monthly', { value: '2', unit: 'USD/SF/month' })]);
   assert.deepEqual(out.shared_source_groups, [{
