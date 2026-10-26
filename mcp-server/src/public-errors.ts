@@ -42,6 +42,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["no_recursion", "Nested dispatcher calls are unavailable."],
   ["unparseable_args", "Supply a valid JSON argument object."],
   ["args_not_an_object", "Supply an argument object."],
+  ["dispatch_ack_not_authorized", "Only the dispatch's delivering desk or its target session may acknowledge it."],
   ["tour_share_scope_invalid", "Choose one or more documented tour share scopes, each once."],
   ["database_refused_the_statement", "The operation could not be completed. Quote the correlation_id when reporting it."],
   ["doctrine_version_invalid", "The doctrine document contains a version that cannot be represented safely. Quote the correlation_id when reporting it."],

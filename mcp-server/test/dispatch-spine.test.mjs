@@ -69,7 +69,7 @@ async function seeded(pg, fn) {
   const session = `wr119-${tag}`;
   const intruder = `wr119-${tag}-intruder`;
   const ids = {
-    session, intruder,
+    session, intruder, owner: `wr119-${tag}-owner`,
     turnAlpha: randomUUID(), turnBeta: randomUUID(), turnGamma: randomUUID(),
     refAlpha: randomUUID(), refBeta: randomUUID(), refAbsent: randomUUID(),
   };
@@ -77,7 +77,14 @@ async function seeded(pg, fn) {
     await client.query("begin");
     await client.query(
       `insert into public.actor(slug, kind, display_name, active)
-       values ($1,'automation','WR119 intruder',true)`, [intruder]);
+       values ($1,'automation','WR119 intruder',true), ($2,'automation','WR119 session owner',true)`,
+      [intruder, ids.owner]);
+    // WR-000528: the target session's owner is a recorded fact, its continuity leaf.
+    await client.query(
+      `insert into public.claude_continuity_leaf(organization_tenant_id, surface_principal_actor_id,
+         owner_actor_id, session_id, transcript_path_digest, project_affinity)
+       select 'carr-internal', a.id, a.id, $2, repeat('a', 64), 'wr119 fixture'
+         from public.actor a where a.slug = $1`, [ids.owner, session]);
     await client.query(
       `insert into public.partner_room_turn(room_id, sponsor, seat, kind, body, msg_id,
          origin_channel, origin_actor, at)
@@ -96,9 +103,11 @@ async function seeded(pg, fn) {
     await client.query(
       "select ops.acknowledge_dispatch($1::uuid,'received','desk alpha log offset 4096')",
       [ids.refAlpha]);
+    await actorOf(client)(ids.owner);
     await client.query(
       "select ops.acknowledge_dispatch($1::uuid,'acknowledged','took the turn up')",
       [ids.refAlpha]);
+    await actorOf(client)("hermes-pilot");
     return await fn(client, ids);
   } finally {
     await client.query("rollback").catch(() => {});
@@ -239,21 +248,52 @@ test("AC-DS-ACK: the ack stamps the derived caller and a restatement is one row"
   if (!pg) return;
   await seeded(pg, async (client, ids) => {
     // The SAME ack from a DIFFERENT derived identity: by_actor follows the
-    // context, which is what makes the evidence first-hand.
-    await actorOf(client)(ids.intruder);
+    // context, which is what makes the evidence first-hand. The target
+    // session's owner may record the desk stage for a dispatch to its session.
+    await actorOf(client)(ids.owner);
     const beta = await tools["acknowledge-dispatch"].handler(wrap(client), {}, {
       dispatch_ref: ids.refBeta, stage: "received", evidence: "desk beta log offset 512" });
     assert.equal(beta.deduplicated, false);
-    assert.equal(beta.by_actor, ids.intruder, "the ack did not stamp its own caller");
+    assert.equal(beta.by_actor, ids.owner, "the ack did not stamp its own caller");
+    // An AUTHORIZED restatement by the other permitted party (the minting desk)
+    // is still one row and names its first, truthful author.
+    await actorOf(client)("hermes-pilot");
     const again = await tools["acknowledge-dispatch"].handler(wrap(client), {}, {
       dispatch_ref: ids.refBeta, stage: "received", evidence: "desk beta log offset 512" });
     assert.equal(again.deduplicated, true, "a restated ack was appended twice");
     assert.equal(again.ack_id, beta.ack_id);
+    assert.equal(again.by_actor, ids.owner);
     const rows = await client.query(
       "select count(*)::int as n from public.room_dispatch_ack where dispatch_ref = $1 and stage = 'received'",
       [ids.refBeta]);
     assert.equal(rows.rows[0].n, 1);
+  });
+});
+
+// WR-000528: an authenticated identity that is neither the dispatch's desk nor
+// its target session is refused BEFORE the insert and before deduplication, so
+// it can neither reserve a stage nor be handed another party's receipt.
+test("AC-DS-ACK: an unrelated identity is refused before insertion or deduplication", async t => {
+  const pg = await skipUnlessDatabase(t);
+  if (!pg) return;
+  await seeded(pg, async (client, ids) => {
+    await actorOf(client)(ids.intruder);
+    for (const [ref, stage] of [[ids.refBeta, "received"], [ids.refAlpha, "received"],
+      [ids.refAlpha, "acknowledged"], [ids.refBeta, "acknowledged"]]) {
+      await assert.rejects(tools["acknowledge-dispatch"].handler(wrap(client), {}, {
+        dispatch_ref: ref, stage, evidence: "not mine" }),
+      e => e.error === "dispatch_ack_not_authorized" && e.by_actor === undefined, `${stage} ${ref}`);
+    }
+    // The bridge delivers into the desk; it does not speak for the session.
     await actorOf(client)("hermes-pilot");
+    await assert.rejects(tools["acknowledge-dispatch"].handler(wrap(client), {}, {
+      dispatch_ref: ids.refBeta, stage: "acknowledged" }),
+    e => e.error === "dispatch_ack_not_authorized");
+    const rows = await client.query(
+      `select count(*)::int as n from public.room_dispatch_ack
+        where dispatch_ref = any($1::uuid[]) and by_actor not in ('hermes-pilot', $2)`,
+      [[ids.refAlpha, ids.refBeta], ids.owner]);
+    assert.equal(rows.rows[0].n, 0, "a refused acknowledgement wrote a row");
   });
 });
 
@@ -476,5 +516,71 @@ for (const [verb, args, row, sqlMark] of [
     const other = await t[verb].handler(client, {}, { ...withKey, idempotency_key: randomUUID() });
     assert.equal(other.replayed, undefined);
     assert.equal(client.calls.filter(q => q.includes(sqlMark)).length, 2);
+  });
+}
+
+test("WR-000528: the acknowledgement refusal keeps its public code", async () => {
+  const { publicError } = await import("../src/public-errors.ts");
+  const { ToolError: RealToolError } = await import("../src/tool-error.ts");
+  const body = publicError(new RealToolError({ error: "dispatch_ack_not_authorized" }));
+  assert.equal((body.payload ?? body).error, "dispatch_ack_not_authorized");
+});
+
+// ===========================================================================
+// WR-000528 at the REAL REGISTERED BOUNDARY: executeRegisteredTool, as the
+// carr_writer role, with the actor context setWriterActorContext installs for
+// each identity. The target session is Joe's Claude leaf, surfaced by
+// joe-local. Valid arguments every time; only the identity changes.
+// ===========================================================================
+
+const SPONSORED = (slug, sponsor) => ({ slug, human: false, agent: true, via: "local-token",
+  client_id: null, sponsoring_human_slug: sponsor, human_slug: sponsor, sponsor_required: false,
+  native_agent_verified: true });
+const BOUNDARY_IDENTITIES = [
+  ["Joe, the human session owner", { slug: "joe", human: true, via: "oauth-google" }, true],
+  ["joe-local, verified-sponsored surface of the session", SPONSORED("joe-local", "joe"), true],
+  ["claude sponsored by Dell, unrelated to the session", SPONSORED("claude", "dell"), false],
+  ["codex, an unsponsored machine", { slug: "codex", human: false, agent: true, via: "agent-token",
+    client_id: null }, false],
+];
+
+for (const [label, identity, admitted] of BOUNDARY_IDENTITIES) {
+  test(`AC-DS-ACK registered boundary: ${label} ${admitted ? "acknowledges" : "is refused"}`, async t => {
+    const pg = await skipUnlessDatabase(t);
+    if (!pg) return;
+    const { setWriterActorContext } = await import("../src/mcp.js");
+    const { executeRegisteredTool } = await import("../src/tools.js");
+    await seeded(pg, async (client, ids) => {
+      const session = `wr528-${ids.session}`;
+      const turn = randomUUID();
+      const ref = randomUUID();
+      await client.query(
+        `insert into public.partner_room_turn(room_id, sponsor, seat, kind, body, msg_id, origin_channel, origin_actor)
+         values ('partner-line','joe','hermes','turn',$1,$2,'mcp','hermes-pilot')`, [`dispatch for ${session}`, turn]);
+      await client.query(
+        `insert into public.claude_continuity_leaf(organization_tenant_id, surface_principal_actor_id,
+           owner_actor_id, session_id, transcript_path_digest, project_affinity)
+         select 'carr-internal', s.id, o.id, $1, repeat('b', 64), 'wr528 fixture'
+           from public.actor s, public.actor o where s.slug = 'joe-local' and o.slug = 'joe'`, [session]);
+      await client.query("select ops.record_dispatch_link($1::uuid,$2::text,null,$3::uuid)", [turn, session, ref]);
+      const actor = { ...identity,
+        id: (await client.query("select id from public.actor where slug = $1", [identity.slug])).rows[0].id };
+      await client.query("set local role carr_writer");
+      await setWriterActorContext(client, actor);
+      const call = executeRegisteredTool(client, actor, "acknowledge-dispatch",
+        { idempotency_key: randomUUID(), dispatch_ref: ref, stage: "acknowledged", evidence: "took it up" });
+      if (admitted) {
+        const result = await call;
+        assert.equal(result.ok, true);
+        assert.equal(result.by_actor, identity.slug, "attribution is not the authenticated caller");
+        return;
+      }
+      // A fail-closed refusal: no row, no receipt, never another identity's authority.
+      await assert.rejects(call, e => (e.payload?.error ?? e.error) === "dispatch_ack_not_authorized");
+      await client.query("reset role");
+      const rows = await client.query(
+        "select count(*)::int as n from public.room_dispatch_ack where dispatch_ref = $1", [ref]);
+      assert.equal(rows.rows[0].n, 0);
+    });
   });
 }
