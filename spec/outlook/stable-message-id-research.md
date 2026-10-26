@@ -4,8 +4,12 @@ Status, 2026-10-26: the `00ca` local object key is a CANDIDATE stable email ID,
 scoped to one store item in one `HxStore.hxd`. On TEST-account copies it stayed
 the same across every observed edit of two revised messages. It differed between
 two distinct messages with identical sender, subject and preview, and between a
-reply and its parent. Moves, an Outlook restart or resync, deletion followed by
-key reuse, and a store rebuild are untested; see [what is still open](#still-open).
+reply and its parent. Across a reboot, an Outlook restart and five days of sync,
+surviving keys kept their Message-IDs. Eight moves made outside this study kept
+their keys, and no key was reused. One case may be a key change and is
+unexplained. Controlled moves, deletes and a store rebuild remain untested; see
+[the five-day comparison](#five-day-comparison-2026-10-21-to-2026-10-26) and
+[what is still open](#still-open).
 Intake now records the key on every email record that has one. Audit
 [#2196](https://github.com/DoctorCRE/carr-system/pull/2196) slice B2 may record
 it but must not rely on it for undo, deduplication or proposal links until those
@@ -187,14 +191,51 @@ Rows without a key keep the existing intake ID: a 20-hex hash of `copy_key`
 was observed to merge W1 and W2, so B2 must not treat it as unique. It remains
 the fallback for the rows the key does not reach.
 
+## Five-day comparison, 2026-10-21 to 2026-10-26
+
+At 09:19 CDT on 2026-10-26 the research snapshot helper succeeded after Joe's
+Full Disk Access grant, writing `snap-20261026T141948-152240000Z`. The request
+to control Outlook for scripted moves and deletes was denied again, so no
+controlled TEST-account change ran. This comparison instead uses what happened
+naturally between `012-control` (2026-10-21) and that snapshot. Studio rebooted
+at 07:28 CDT on 2026-10-25, and Outlook has run since 07:29 CDT that day, so the
+interval covers a restart and five days of sync. The decoder build includes the
+WR-000469 folder catalog. A temporary, uncommitted command emitted hashed
+fields, folder IDs and account IDs. Only counts and the standard folder names
+below were read.
+
+| Check | Result |
+| --- | --- |
+| TEST draft D, welcome W1 and welcome W2 | Same key, same Message-ID and same folder (Drafts, Inbox, Inbox) after the restart |
+| TEST reply R and control X | Left the store; their keys did not reappear |
+| Surviving keys with Message-IDs in both copies | 438 of 438 kept the same Message-ID set |
+| Keys whose folder changed | 13 of 435; all 13 kept their Message-ID set |
+| Moves to a disjoint folder | 8, all from the work Inbox to custom folders; key unchanged |
+| Keys that left the store | 348 |
+| Keys that arrived | 63, all above every 2026-10-21 key, so none reused |
+| Accounts | 2; no key linked to folders of both; the TEST and work key ranges interleave |
+
+Two Message-IDs lost all of their 2026-10-21 keys and appeared under new keys:
+
+- **Not a key change.** One is held by new messages with a different subject
+  and later send times. It is a thread reference, not the same email.
+- **Unexplained.** The other matches sender, subject and send time. Its old key
+  was in the work Inbox. Its two new keys are in Sent Items and in a custom
+  folder that also received one of the eight key-preserving moves. A sent copy
+  and a filed copy fit, but this was not established. Treat it as a possible key
+  change on move or delete.
+
+These moves and deletes were made outside this study, so their exact operation
+is unknown. The result is consistent with one increasing, store-wide counter
+that survives restart and resync.
+
 ## Still open
 
-The following are untested. Each needs a fresh capture before and after one
-TEST-account change, using the snapshot helper after Joe re-grants Full Disk
-Access to `~/carr-local/bin/outlook-research-copy`.
+The snapshot helper works as of 2026-10-26. Each item below needs a capture
+before and after one TEST-account change, which requires Joe to approve Outlook
+control. That approval was denied twice on 2026-10-26.
 
-- Moving a message between folders.
-- Quitting and restarting Outlook, and a full resync.
+- A controlled move between folders, to settle the unexplained case above.
 - Deleting a message, then checking that no later item takes its key.
 - A store rebuild or account removal, which may renumber every key.
 - Two drafts with identical text and different recipients, as the original plan
