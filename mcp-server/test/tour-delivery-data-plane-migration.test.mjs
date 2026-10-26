@@ -1,3 +1,4 @@
+// Tests Tour delivery migration contracts, projections, and search pagination.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
