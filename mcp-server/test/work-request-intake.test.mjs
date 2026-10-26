@@ -118,18 +118,24 @@ test("report-problem refuses no-hit and bounded or injection-shaped input before
   noHit.noHits = true;
   const noHitOut = await rejected(() => executeRegisteredTool(noHit, { ...ACTOR }, "report-problem", structuredClone(REQUEST)));
   assert.equal(noHitOut.error, "current_situation_source_not_found");
+  assert.equal(noHitOut.field, "situation");
+  assert.match(noHitOut.hint, /provide a situation with a current shared source/i);
   assert.equal(noHit.calls.some(call => call.sql.includes("capture_sourced_work_request")), false);
   assert.equal(noHit.calls.some(call => call.sql.startsWith("insert into event")), false);
 
-  for (const args of [
-    { ...REQUEST, idempotency_key: "not-a-uuid" },
-    { ...REQUEST, title: "x".repeat(201) },
-    { ...REQUEST, acceptance_criteria: [{ id: "not-valid", text: "a" }] },
-    { ...REQUEST, acceptance_criteria: [{ id: "AC-1", text: "a" }, { id: "AC-1", text: "b" }] },
+  for (const [args, field, shape] of [
+    [{ ...REQUEST, idempotency_key: "not-a-uuid" }, "idempotency_key", /UUID/],
+    [{ ...REQUEST, situation: " " }, "situation", /non-empty.*1000 characters/],
+    [{ ...REQUEST, title: "x".repeat(201) }, "title", /non-empty.*200 characters/],
+    [{ ...REQUEST, desired_outcome: " " }, "desired_outcome", /non-empty.*2000 characters/],
+    [{ ...REQUEST, acceptance_criteria: [] }, "acceptance_criteria", /array of 1 through 12.*unique uppercase id/],
+    [{ ...REQUEST, acceptance_criteria: [{ id: "not-valid", text: "a" }] }, "acceptance_criteria", /unique uppercase letters/],
+    [{ ...REQUEST, acceptance_criteria: [{ id: "AC-1", text: "a" }, { id: "AC-1", text: "b" }] }, "acceptance_criteria", /unique uppercase letters/],
   ]) {
     const db = new IntakeFake();
     const out = await rejected(() => executeRegisteredTool(db, { ...ACTOR }, "report-problem", args));
-    assert.ok(["invalid_report_problem", "invalid_acceptance_criteria"].includes(out.error));
+    assert.ok(out.field === field || out.field.startsWith(`${field}[`));
+    assert.match(out.hint, shape);
     assert.equal(db.calls.length, 0);
   }
 
