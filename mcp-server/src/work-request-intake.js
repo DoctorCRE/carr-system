@@ -1,7 +1,7 @@
 // The deliberately small Program 6 bridge: source a problem from the current
 // deterministic situation index, capture it, and expose a safe read card. It
 // does not own a lifecycle transition, an executor, or an approval.
-import { WORK_REQUEST_PROJECTION_STATE, WORK_REQUEST_READ_STATES, readableWorkRequestSql } from "./work-request-read.js";
+import { WORK_REQUEST_PROJECTION_STATE, WORK_REQUEST_READ_STATES, readableWorkRequestSql } from "./work-request-read.ts";
 import { searchDoctrineSituations } from "./situation-retrieval.js";
 import { authorizationClassForActor, organizationTenantForActor } from "./identity.js";
 import { deriveRuleDeliverySource, normalizeRuleMapDigest } from "./rule-delivery-source.js";
@@ -778,9 +778,14 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         // Bind replays to the authenticated actor without admitting actor data
         // into the closed client schema.
         return withEnvelope(c, actor, "decline-work-request", { ...args, _server_actor_id: actor.id }, async () => {
+          // No FOR UPDATE: carr_writer's RLS update policy hides SIEP program
+          // rows from row-locking reads, so a lock here returned no row. The
+          // definer function below locks the row and checks base_version.
           const subject = await c.query(
-            `select id, state from ops.work_request where ref = $1 for update
+            `select id, state from ops.work_request where ref = $1
                /* work-request-intake:withdrawn-subject */`, [args.human_ref]);
+          if (!subject.rows.length)
+            throw new ToolError({ error: "work_request_not_found", human_ref: args.human_ref });
           let result;
           try {
             result = await c.query(

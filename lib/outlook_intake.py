@@ -25,7 +25,8 @@ lookback. Records are never created, merged or renamed.
 
 A role address (front desk, info, office...) that shares a record's email field
 with other addresses is flagged shared_role, never matched: it may serve many people.
-Unresolved mail expires after 30 days (counted in unresolved_expired). Mail
+Unresolved mail and calendar candidates expire after 30 days (unresolved_expired,
+calendar_unresolved_expired). Mail
 whose only unknown participants are machine senders (no-reply, mailer-daemon,
 postmaster, bounces) is not business: it is retained, uncounted as unresolved, and
 logs if a record later carries the address. Any other unknown inbound sender gets
@@ -318,9 +319,12 @@ def _load(db: Path) -> tuple[dict, list[dict], list[dict]]:
     try:
         meta = {r['key']: r['value'] for r in con.execute('SELECT key, value FROM meta')}
         paths = _folder_paths(con)
+        # Decoders built before WR-000502 export no local_keys column.
+        columns = {r['name'] for r in con.execute('PRAGMA table_info(messages)')}
+        local_keys = 'local_keys' if 'local_keys' in columns else 'NULL AS local_keys'
         mails = [dict(r) for r in con.execute(
-            'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key '
-            'FROM messages WHERE sent_unix IS NOT NULL AND sender IS NOT NULL')]
+            'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key, '
+            f'{local_keys} FROM messages WHERE sent_unix IS NOT NULL AND sender IS NOT NULL')]
         for m in mails:
             m['folders'] = paths.get(m.pop('id'), [])
         events = [dict(r) for r in con.execute('SELECT * FROM events')]
@@ -374,6 +378,7 @@ def _best_copies(mails: list[dict]) -> list[dict]:
     rows = []
     for m in mails:
         m['ck'], m['ident'] = mail_identity(m['copy_key'], m['sender'], m['subject'] or '', m['sent_unix'])
+        m['local_keys'] = sorted(set((m['local_keys'] or '').split(',')) - {''})
         m['full'] = m['body_kind'] == 'full' and bool((m['body'] or '').strip())
         m['text'] = (m['body'] or '').strip() or (m['preview'] or '').strip()
         rows.append(m)
@@ -382,6 +387,7 @@ def _best_copies(mails: list[dict]) -> list[dict]:
     for m in rows:
         last = out[-1] if out else None
         if last and last['ck'] == m['ck'] and m['sent_unix'] - last['first_sent'] <= COPY_WINDOW:
+            m['local_keys'] = last['local_keys'] = sorted(set(last['local_keys']) | set(m['local_keys']))
             m['folders'] = last['folders'] = sorted(set(last.get('folders', [])) | set(m.get('folders', [])))
             if (m['full'], len(m['text'])) > (last['full'], len(last['text'])):
                 m['first_sent'], m['sent_unix'], m['ident'] = last['first_sent'], last['sent_unix'], last['ident']
@@ -618,6 +624,7 @@ class Run:
         unresolved = self.state.setdefault('mail_unresolved', {})
         pending = self.state.setdefault('pending_full', {})
         steps = self.state.setdefault('steps', {})
+        keys = self.state.setdefault('mail_keys', {})
         retries: dict[str, list] = {}
         for ident, item in unresolved.items():
             retries.setdefault(item['ck'], []).append((ident, item['sent']))
@@ -630,6 +637,8 @@ class Run:
                 continue
             if m['ident'] not in unresolved and any(abs(t - m['sent_unix']) <= COPY_WINDOW for t in done.get(m['ck'], [])):
                 continue
+            if m['local_keys']:
+                keys[m['ident']] = sorted(set(keys.get(m['ident'], [])) | set(m['local_keys']))
             outbound = _internal(m['sender'], self.settings.internal_domain)
             parties = ([(a, None) for a in _addresses(m['recipients']) if not _internal(a, self.settings.internal_domain)] if outbound
                        else [(m['sender'].lower(), _clean_name(m['sender_name'], m['subject']))])
@@ -795,6 +804,8 @@ class Run:
         """Keep opaque schedule evidence, never infer attendance or current lifecycle."""
         evidence = {}
         unresolved = {}
+        expired = 0
+        oldest = self.now.timestamp() - UNRESOLVED_DAYS.total_seconds()
         for e in events:
             candidate = _hash(json.dumps(e, sort_keys=True))
             evidence[candidate] = {'status': 'unsupported', 'reason': 'hxstore_lifecycle_unverified',
@@ -806,14 +817,17 @@ class Run:
                 people.append((org, e['organizer_name']))
             people = [(email, name) for email, name in people if matcher.classify(email) != 'automated']
             missing = {_hash(email): matcher.reason(email) for email, _ in people if matcher.reason(email)}
-            if missing:
+            if missing and e['end_unix'] < oldest:
+                expired += 1
+            elif missing:
                 unresolved[candidate] = {'participants': missing}
             if e['end_unix'] >= since and e['start_unix'] <= (self.now + UPCOMING).timestamp():
                 for email, name in people:
                     reason = matcher.reason(email)
                     if reason is not None:
                         self.unmatched.add((name or '(no name)', _domain(email), reason))
-        self.state.update(calendar_evidence=evidence, calendar_unresolved=unresolved, calendar_policy=CALENDAR_POLICY)
+        self.state.update(calendar_evidence=evidence, calendar_unresolved=unresolved, calendar_policy=CALENDAR_POLICY,
+                          calendar_unresolved_expired=expired)
         self.state.pop('calendar_due_at', None)
         self.state.pop('upcoming', None)
         self.counts.update(calendar_counts(self.state))
@@ -868,6 +882,7 @@ def mapping_counts(state: dict) -> dict:
             'hydration_expired': sum(bool(p.get('expired')) for p in state.get('pending_full', {}).values()),
             'unresolved_messages': len(mail) - machine_only, 'skipped_automated': machine_only,
             'unresolved_expired': state.get('unresolved_expired', 0),
+            'calendar_unresolved_expired': state.get('calendar_unresolved_expired', 0),
             'unresolved_calendar': len(calendar), 'unresolved_addresses': len(participants),
             'unmatched': len(participants),
             **{'mapping_' + reason: list(participants.values()).count(reason)
@@ -884,6 +899,8 @@ def _prune(state: dict, now: datetime) -> None:
     state['unresolved_expired'] = state.get('unresolved_expired', 0) + len(expired)
     state['mail_done'] = {ck: ts for ck, ts in ((ck, [t for t in v if t >= horizon])
                                                  for ck, v in state.get('mail_done', {}).items()) if ts}
+    state['mail_keys'] = {ident: k for ident, k in state.get('mail_keys', {}).items()
+                          if int(ident.rsplit(':', 1)[1]) >= horizon}
     state['requests'] = {k: r for k, r in state.get('requests', {}).items()
                          if not r['acknowledged'] or r['created_at'] >= horizon}
     for name in ('events_logged', 'events_balled'):
@@ -1147,6 +1164,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint())
     _prune(state, now)
     _save(out, state)
+    counts.update(mapping_counts(state))  # a run that expires items reports them itself
     return Outcome('succeeded', 'processed' if mail_processed else 'nothing_new', counts)
 
 

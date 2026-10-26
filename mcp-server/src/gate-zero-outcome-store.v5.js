@@ -102,7 +102,7 @@
 
 import { digest } from "./artifact-trust.js";
 import { authenticatedIdentity, authorizationClassForActor } from "./identity.js";
-import { ToolError } from "./tool-error.js";
+import { ToolError } from "./tool-error.ts";
 import { V5_A02_GATE_ZERO_PRODUCER_REGISTRATION } from "./gate-zero-producer-registration.v5.js";
 
 /**

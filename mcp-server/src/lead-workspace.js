@@ -1,4 +1,4 @@
-import { isCalendarDate } from "./calendar-date.js";
+import { isCalendarDate } from "./calendar-date.ts";
 
 // Optional authenticated Leads workspace; the legacy board has live callers.
 export const LEAD_WORKSPACE_VERSION = "lead-workspace.v1";

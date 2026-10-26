@@ -1,5 +1,5 @@
 import { observeBoardLinkage } from './work-linkage.js';
-import { ToolError } from "./tool-error.js";
+import { ToolError } from "./tool-error.ts";
 import { organizationTenantForActor } from "./identity.js";
 import { NEEDS_JOE_LOCAL_BOARD } from "./needs-joe.js";
 import { partnerAuthoritySlugForActor } from "./partner-authority.js";

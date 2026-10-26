@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { agentProfileTools } from "../src/agent-profiles.js";
-import { ToolError } from "../src/tool-error.js";
+import { ToolError } from "../src/tool-error.ts";
 
 async function withEnvelope(_c, _actor, _verb, args, fn) {
   if (!args.idempotency_key) throw new ToolError({ error: "missing_idempotency_key" });

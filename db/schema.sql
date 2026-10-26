@@ -83095,13 +83095,18 @@ CREATE TABLE public.capture_candidate (
     resulting_ref text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     resolved_at timestamp with time zone,
+    applied_automatically boolean DEFAULT false NOT NULL,
+    undone_at timestamp with time zone,
+    undone_by uuid,
+    CONSTRAINT capture_candidate_automatic_check CHECK (((NOT applied_automatically) OR (status = 'confirmed'::text))),
     CONSTRAINT capture_candidate_check CHECK ((((status = 'pending'::text) AND (resolved_by IS NULL) AND (resolved_at IS NULL) AND (resulting_ref IS NULL)) OR ((status = 'skipped'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL) AND (resulting_ref IS NULL)) OR ((status = 'confirmed'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL) AND (resulting_ref IS NOT NULL)))),
     CONSTRAINT capture_candidate_confidence_check CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))),
     CONSTRAINT capture_candidate_evidence_quote_check CHECK ((array_length(regexp_split_to_array(btrim(evidence_quote), '\s+'::text), 1) <= 15)),
     CONSTRAINT capture_candidate_item_index_check CHECK ((item_index >= 0)),
     CONSTRAINT capture_candidate_kind_check CHECK ((kind = ANY (ARRAY['phase_move'::text, 'next_step'::text, 'new_deal'::text, 'activity'::text, 'meeting_record'::text]))),
     CONSTRAINT capture_candidate_payload_check CHECK ((jsonb_typeof(payload) = 'object'::text)),
-    CONSTRAINT capture_candidate_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'confirmed'::text, 'skipped'::text])))
+    CONSTRAINT capture_candidate_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'confirmed'::text, 'skipped'::text]))),
+    CONSTRAINT capture_candidate_undo_check CHECK ((((undone_at IS NULL) = (undone_by IS NULL)) AND ((undone_at IS NULL) OR applied_automatically)))
 );
 
 
@@ -83223,7 +83228,10 @@ CREATE TABLE public.capture_session (
     state_detail text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     post_call boolean DEFAULT false NOT NULL,
+    outcome_reviewed_at timestamp with time zone,
+    outcome_reviewed_by uuid,
     CONSTRAINT capture_session_mode_check CHECK ((mode = 'meeting'::text)),
+    CONSTRAINT capture_session_outcome_review_check CHECK (((outcome_reviewed_at IS NULL) = (outcome_reviewed_by IS NULL))),
     CONSTRAINT capture_session_state_check CHECK ((state = ANY (ARRAY['recording'::text, 'transcribing'::text, 'distilling'::text, 'done'::text, 'failed'::text])))
 );
 
@@ -114631,6 +114639,14 @@ ALTER TABLE ONLY public.capture_candidate
 
 
 --
+-- Name: capture_candidate capture_candidate_undone_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.capture_candidate
+    ADD CONSTRAINT capture_candidate_undone_by_fkey FOREIGN KEY (undone_by) REFERENCES public.actor(id);
+
+
+--
 -- Name: capture_post_call_action capture_post_call_action_accepted_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -114708,6 +114724,14 @@ ALTER TABLE ONLY public.capture_post_call_report
 
 ALTER TABLE ONLY public.capture_session
     ADD CONSTRAINT capture_session_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES public.actor(id);
+
+
+--
+-- Name: capture_session capture_session_outcome_reviewed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.capture_session
+    ADD CONSTRAINT capture_session_outcome_reviewed_by_fkey FOREIGN KEY (outcome_reviewed_by) REFERENCES public.actor(id);
 
 
 --
@@ -122746,7 +122770,8 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0981_client_portal_writer_denials.sql	2380f08e4b75a3ed447b5b99854cfb8b9348308dab81a24c74986602feb56b86	1970-01-01 00:00:00+00
 0982_decline_unstarted_program_work_request.sql	b9d3cc1923fff53794725307d647fc59452669e5246c6b7121e79282a64b2741	1970-01-01 00:00:00+00
 0983_fact_store.sql	13f97f25f7cdee1ed5dbcdeb2b45764e4018765edbad37c4b5e6c021e6f8ad04	1970-01-01 00:00:00+00
-0984_email_proposal.sql	c0ab5328442e86d95e28c629575002b6b73ef28dd0d183f7ddee253bcaea77fd	1970-01-01 00:00:00+00
+0985_call_mode_auto_apply.sql	df11b5b4b02f9062ff62c77c692e39263f5d6be59a1884143487cdde21f93f3f	1970-01-01 00:00:00+00
+0987_email_proposal.sql	c0ab5328442e86d95e28c629575002b6b73ef28dd0d183f7ddee253bcaea77fd	1970-01-01 00:00:00+00
 \.
 
 
