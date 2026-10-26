@@ -92,7 +92,7 @@ before(async () => {
   c = new pg.Client(connection);
   await c.connect();
   await c.query('do $$ begin create role neondb_owner; exception when duplicate_object then null; end $$;');
-  const files = ['db/schema.sql', 'migrations/0984_call_mode_auto_apply.sql'].map(f => path.join(REPO, f));
+  const files = ['db/schema.sql'].map(f => path.join(REPO, f));
   for (const file of files) {
     const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', file];
     if (ciDsn) await run('psql', [connection.connectionString, ...restore], { maxBuffer: 4 * 1024 * 1024 });
