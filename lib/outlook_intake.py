@@ -21,7 +21,8 @@ lookback. Records are never created, merged or renamed.
 
 A role address (front desk, info, office...) that shares a record's email field
 with other addresses is flagged shared_role, never matched: it may serve many people.
-Mail whose only unknown participants are machine senders (no-reply, mailer-daemon,
+Unresolved mail expires after 30 days (counted in unresolved_expired). Mail
+whose only unknown participants are machine senders (no-reply, mailer-daemon,
 postmaster, bounces) is not business: it is retained, uncounted as unresolved, and
 logs if a record later carries the address. Any other unknown inbound sender gets
 one isolated haiku call; business intent queues the address once on the claim card
@@ -87,6 +88,7 @@ BACKFILL = timedelta(hours=48)
 LOOKBACK = timedelta(hours=6)
 UPCOMING = timedelta(days=7)
 REFRESH_DAYS = timedelta(days=7)
+UNRESOLVED_DAYS = timedelta(days=30)
 REFRESH_INTERVAL = timedelta(minutes=30)
 COPY_WINDOW = 86_400
 VERIFIED_MIN = 0.95
@@ -392,6 +394,9 @@ class Matcher:
                     self.by_email.setdefault(c.email.lower(), set()).add(c.ref)
                 else:
                     self.unsupported.add(c.email.lower())
+        for address in self.shared:  # a possibly shared inbox is never exact, on any record
+            self.by_email.pop(address, None)
+            self.unsupported.discard(address)
 
     def fingerprint(self) -> str:
         return _hash(json.dumps({'supported': {a: sorted(refs) for a, refs in self.by_email.items()},
@@ -849,6 +854,7 @@ def mapping_counts(state: dict) -> dict:
     return {'hydration_pending': len(state.get('pending_full', {})),
             'hydration_expired': sum(bool(p.get('expired')) for p in state.get('pending_full', {}).values()),
             'unresolved_messages': len(mail) - machine_only, 'skipped_automated': machine_only,
+            'unresolved_expired': state.get('unresolved_expired', 0),
             'unresolved_calendar': len(calendar), 'unresolved_addresses': len(participants),
             'unmatched': len(participants),
             **{'mapping_' + reason: list(participants.values()).count(reason)
@@ -857,6 +863,12 @@ def mapping_counts(state: dict) -> dict:
 
 def _prune(state: dict, now: datetime) -> None:
     horizon = now.timestamp() - (BACKFILL + UPCOMING).total_seconds() - 2 * COPY_WINDOW
+    oldest = now.timestamp() - UNRESOLVED_DAYS.total_seconds()
+    unresolved = state.get('mail_unresolved', {})
+    expired = [ident for ident, item in unresolved.items() if item['sent'] < oldest]
+    for ident in expired:
+        del unresolved[ident]
+    state['unresolved_expired'] = state.get('unresolved_expired', 0) + len(expired)
     state['mail_done'] = {ck: ts for ck, ts in ((ck, [t for t in v if t >= horizon])
                                                  for ck, v in state.get('mail_done', {}).items()) if ts}
     state['requests'] = {k: r for k, r in state.get('requests', {}).items()

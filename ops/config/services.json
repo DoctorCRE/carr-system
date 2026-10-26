@@ -206,7 +206,7 @@
         {
           "environment": "staging",
           "endpoint": "carr-mcp-staging.joe-bookout-carr-us.workers.dev",
-          "deploy_mechanism": "external console ownership; retained only as a foundation assurance evidence origin"
+          "deploy_mechanism": ".github/workflows/deploy.yml (staging job)"
         }
       ]
     },
@@ -223,6 +223,10 @@
         {
           "environment": "production",
           "deploy_mechanism": ".github/workflows/deploy.yml"
+        },
+        {
+          "environment": "staging",
+          "deploy_mechanism": ".github/workflows/deploy.yml (staging job, STAGING_DATABASE_URL)"
         }
       ]
     },

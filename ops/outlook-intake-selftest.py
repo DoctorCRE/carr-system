@@ -1250,6 +1250,32 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(args['ref'], 'C-901')
         self.assertEqual(result.counts['unmatched'], 0)
 
+    def test_a_role_address_flagged_on_one_record_is_not_exact_on_any_record(self):
+        self.fake.contacts_rows += intake.record_contacts('pat@practice.test; info@practice.test', 'C-901', 'Pat')
+        self.fake.contacts_rows += intake.record_contacts('info@practice.test', 'L-905', 'Practice Office')
+        result = self.run_intake([mail('info@practice.test', -timedelta(hours=1))])
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(result.counts['mapping_shared_role'], 1)
+
+    def test_unresolved_mail_expires_after_thirty_days_and_is_counted(self):
+        old = mail('old@example.test', -timedelta(days=31), subject='Old')
+        recent = mail('recent@example.test', -timedelta(days=29), subject='Recent')
+        unresolved = {}
+        for m in (old, recent):
+            ck = intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'])[0]
+            unresolved[ident(m)] = {'ck': ck, 'sent': m['sent_unix'], 'participants': {m['sender']: 'missing'}}
+        self.out().mkdir(parents=True)
+        (self.out() / intake.STATE).write_text(json.dumps({'mail_unresolved': unresolved}))
+        self.assertEqual(self.run_intake([old, recent]).state, 'succeeded')
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual(list(state['mail_unresolved']), [ident(recent)])
+        result = self.run_intake([old, recent])
+        self.assertEqual(result.counts['unresolved_expired'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 1)
+        self.fake.contacts_rows.append(intake.Contact('old@example.test', 'L-911', 'Old Sender'))
+        self.run_intake([old, recent], touch=False)
+        self.assertEqual(self.fake.writes('log-activity'), [], 'expired mail is not revived')
+
     def test_machine_senders_are_skipped_as_not_business(self):
         mails = [mail('no-reply@vendor.test', -timedelta(hours=1), subject='Receipt'),
                  mail('Bounce+abc@service.test', -timedelta(hours=1), subject='Bounce'),
