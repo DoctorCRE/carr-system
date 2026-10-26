@@ -217,7 +217,7 @@ class Wr258Coverage(unittest.TestCase):
         self.assertIn('disagree', runner.scenario_coverage([self.DECLARED, 'gate-scenarios-declared: a b\n']))
     def test_a_red_shard_makes_the_sharded_gate_red_and_the_log_names_each_shard(self):
         with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory); log=root/'db-gate-x.log'; gate=root/'siep12-policy-epoch-local-pg-gate.py'
+            root=Path(directory); log=root/'db-gate-x.log'; gate=root/'sharded-local-pg-gate.py'
             outcomes={'0/2':0,'1/2':3}
             def run_gate(g,dsn,l,env):
                 l.write_text(self.DECLARED+('gate-scenario-ran: a\ngate-scenario-ran: b\ngate-scenario-ran: c\n' if env['CARR_GATE_SHARD']=='0/2' else ''))
@@ -228,7 +228,7 @@ class Wr258Coverage(unittest.TestCase):
             self.assertIn('==== shard 1/2 ====',log.read_text())
     def test_a_missing_scenario_fails_a_sharded_gate_that_every_shard_passed(self):
         with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory); log=root/'db-gate-x.log'; gate=root/'siep12-policy-epoch-local-pg-gate.py'
+            root=Path(directory); log=root/'db-gate-x.log'; gate=root/'sharded-local-pg-gate.py'
             def run_gate(g,dsn,l,env):
                 l.write_text(self.DECLARED+'gate-scenario-ran: a\ngate-scenario-ran: b\n')   # nobody ran c
                 return g,0,1,l
@@ -243,22 +243,6 @@ class Wr258Coverage(unittest.TestCase):
         self.assertEqual(runner.scenario_coverage(ok),'')
         self.assertIn('not run: g(text,text)',runner.scenario_coverage(ok[:1]))
         self.assertIn('run more than once: f(int)',runner.scenario_coverage(ok+[declared+notice('gate-scenario-ran: f(int)')]))
-
-class Wr258Siep12Plan(unittest.TestCase):
-    def test_every_scenario_lands_in_exactly_one_shard_for_any_shard_count(self):
-        import sys as _sys
-        _sys.path.insert(0,str(ROOT/'ops'))
-        gspec=importlib.util.spec_from_file_location('siep12_gate',ROOT/'ops/siep12-policy-epoch-local-pg-gate.py')
-        gate=importlib.util.module_from_spec(gspec); gspec.loader.exec_module(gate)
-        self.assertEqual(len(set(gate.ALL_SCENARIO_NAMES)),len(gate.ALL_SCENARIO_NAMES))
-        self.assertEqual(gate.ALL_SCENARIO_NAMES[-1],'runtime_role_privileges','the privilege scenario leaves grants behind and must stay last')
-        for shards in range(1,6):
-            plan=gate.plan_shards(shards)
-            flat=[n for shard in plan for n in shard]
-            self.assertEqual(sorted(flat),sorted(gate.ALL_SCENARIO_NAMES),f'{shards} shards')
-            self.assertIn(gate.STATIC_SCENARIO[0],plan[0])
-        self.assertEqual(gate.parse_shard('1/3'),(1,3))
-        with self.assertRaises(ValueError): gate.parse_shard('3/3')
 
 class Wr258SqlProofRunner(unittest.TestCase):
     PROOF="""\\if :{?shards}\n\\else\n\\set shards 1\n\\set shard 0\n\\endif\nbegin;\ninsert into marks values (:shard);\n"""

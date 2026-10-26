@@ -29,7 +29,6 @@ import { MEETING_MODE_WRITE_VERBS, meetingModeTools } from "./meeting-mode.js";
 import { notificationTools } from "./notifications.js";
 import { sessionIdentityTools } from "./session-identity.js";
 import { dispatchSpineTools } from "./dispatch-spine.js";
-import { capabilityProgramTools } from "./capability-program.js";
 import { workShapeTools } from "./work-shape.js";
 import { workRequestIntakeTools } from "./work-request-intake.js";
 import { workPortfolioTools } from "./work-portfolio.js";
@@ -6934,7 +6933,12 @@ export const TOOLS = {
       const aboutRefs = args.about
         ? (Array.isArray(args.about) ? args.about : [args.about]).map(r => String(r || "").trim()).filter(Boolean)
         : [];
-      for (const ref of aboutRefs) await resolveSubject(c, ref);
+      for (const ref of aboutRefs) {
+        if (/^WR-/i.test(ref))
+          throw new ToolError({ error: "unsupported_decision_about", field: "about", ref,
+            hint: "Work Request refs are not supported in about. Use a lead, client, vendor, party or deal ref. For a system-wide ruling, omit about and name the Work Request in the rationale." });
+        await resolveSubject(c, ref);
+      }
 
       // [idea 68, 0085] BOTH HALVES OF A PRICE OR NEITHER. A cost with no
       // quality number is a complaint and a quality number with no cost is a
@@ -8918,7 +8922,6 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "session-identity": "mcp-server/src/session-identity.js",
   "dispatch-spine": "mcp-server/src/dispatch-spine.js",
   "doc-outcome-cards": "mcp-server/src/tools.js",
-  "capability-program": "mcp-server/src/capability-program.js",
   "work-shape": "mcp-server/src/work-shape.js",
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
@@ -10335,9 +10338,6 @@ registerTools({
     handler: async (c, _actor, args) => docOutcomeCardsProjection((await c.query("select ops.read_doc_outcome_cards_successor($1::text,$2::integer) as facts", [args.cursor ?? null, args.limit ?? null])).rows[0]?.facts, ToolError),
   },
 }, "doc-outcome-cards");
-
-// One fixed ordered AI-capability portfolio over canonical Work Requests.
-registerTools(capabilityProgramTools({ withEnvelope, writeEvent, ToolError }), "capability-program");
 
 // Evidence-backed implementation form, linked to canonical Work Requests.
 registerTools(workShapeTools({ withEnvelope, writeEvent, ToolError }), "work-shape");

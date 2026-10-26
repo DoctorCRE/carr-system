@@ -1,14 +1,17 @@
 # Stable message identity research for WR-000502
 
-Status, 2026-10-26 10:08 CDT: the `00ca` local object key is safe to RECORD as
-the email identity for slice B2, but not yet safe to RELY on for undo,
-deduplication or proposal links. It stayed the same through edits, flags, an
-attachment, a reply, an Outlook restart and five days of sync. It differed
-between distinct messages with identical content, and no key was ever reused.
-Controlled moves, deletes and a store rebuild are still untested: the request to
-control Outlook was denied a third time, and New Outlook's AppleScript cannot
-reach account mail (see [the controlled-test attempt](#controlled-move-delete-and-rebuild-attempt-2026-10-26)).
-One natural case may be a key change on move or delete and remains unexplained.
+Status, 2026-10-26 10:08 CDT: the `00ca` local object key, scoped to one store
+item in one `HxStore.hxd`, is safe to RECORD as the email identity for slice B2,
+but not yet safe to RELY on for undo, deduplication or proposal links. It stayed
+the same through edits, flags, an attachment, a reply, an Outlook restart and
+five days of sync. It differed between distinct messages with identical sender,
+subject and preview, and between a reply and its parent. Eight moves made
+outside this study kept their keys, and no key was ever reused. Controlled
+moves, deletes and a store rebuild are still untested: the request to control
+Outlook was denied a third time, and New Outlook's AppleScript cannot reach
+account mail (see [the controlled-test attempt](#controlled-move-delete-and-rebuild-attempt-2026-10-26)
+and [what is still open](#still-open)). One natural case may be a key change on
+move or delete and remains unexplained.
 Intake records the key on every email record that has one. Audit
 [#2196](https://github.com/DoctorCRE/carr-system/pull/2196) slice B2 may record
 it but must not rely on it for undo, deduplication or proposal links until those
@@ -266,8 +269,8 @@ This adds nothing about controlled moves or deletes. The row-level Message-ID
 and folder fields come from merged `hxprobe db` rows, which can join store items
 and quoted headers, so 18 common keys showed a changed Message-ID set at row
 level. Fifteen were subset changes. The other three were disjoint, and all
-three sat in rows that merged several keys. No Message-ID moved to a new key. The five-day study's per-object method remains the
-stronger evidence.
+three sat in rows that merged several keys. No Message-ID moved to a new key.
+The five-day study's per-object method remains the stronger evidence.
 
 ### Verdict for slice B2
 
