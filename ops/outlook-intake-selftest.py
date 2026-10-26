@@ -101,6 +101,9 @@ class Fake:
         self.actions = {}
         self.fail_verbs = set()
         self.model_reply = {'next_step': None, 'due_on': None}
+        self.intent_calls = []
+        self.intent_reply = {'business': False, 'summary': None}
+        self.lead_reply = {'ok': True, 'proposed': True, 'status': 'pool'}
         self.contacts_rows = [CLIENT, LEAD]
         self.now = NOW
         self.on_decode = None
@@ -113,6 +116,8 @@ class Fake:
             return {'parties': self.parties.get(args['query'], []), 'deals': []}
         if verb == 'catch-me-up':
             return {'timeline': self.timeline.get(args['ref'], [])[:args['limit']]}
+        if verb == 'propose-email-lead':
+            return self.lead_reply
         if verb == 'get-next-action':
             return {'ok': True, 'owner': args['owner'], 'action': self.actions.get((args['ref'], args['owner']))}
         if verb == 'set-next-action':
@@ -135,6 +140,12 @@ class Fake:
             raise self.model_reply
         return self.model_reply
 
+    def lead_intent(self, mail, today):
+        self.intent_calls.append(mail)
+        if isinstance(self.intent_reply, Exception):
+            raise self.intent_reply
+        return self.intent_reply
+
     def decode(self, store_copy, files_copy, db_path):
         self.decodes += 1
         self.test.assertTrue(store_copy.exists(), 'decoder reads a copy')
@@ -151,7 +162,7 @@ class Fake:
 
     def ports(self):
         return intake.Ports(carr=self.carr, contacts=self.contacts, next_step=self.next_step,
-                            decode=self.decode, now=lambda: self.now)
+                            decode=self.decode, now=lambda: self.now, lead_intent=self.lead_intent)
 
     def writes(self, verb=None):
         return [(v, a) for v, a in self.calls if v in intake.WRITE_VERBS and (verb is None or v == verb)]
@@ -1205,6 +1216,118 @@ class IntakeTest(unittest.TestCase):
         keys = [a['idempotency_key'] for v, a in self.fake.calls if v == 'log-activity']
         self.assertEqual(len(keys), 2)
         self.assertEqual(keys[0], keys[1], 'the retry reuses the key')
+
+    # ---- sender classes: second addresses, automated senders, lead candidates ----
+
+    def test_every_address_in_a_record_email_field_is_a_contact(self):
+        rows = intake.record_contacts('Pat Example <PAT@a.test>; pat.home@b.test, note: office', 'C-901', 'Pat')
+        self.assertEqual(rows, [intake.Contact('pat@a.test', 'C-901', 'Pat'),
+                                intake.Contact('pat.home@b.test', 'C-901', 'Pat')])
+        self.assertEqual(intake.record_contacts('call the office', 'C-901', 'Pat'), [])
+
+    def test_a_second_address_on_the_same_record_logs_to_that_record(self):
+        self.fake.contacts_rows.append(intake.Contact('pat.home@example.test', 'C-901', 'Pat Example'))
+        result = self.run_intake([mail('pat.home@example.test', -timedelta(hours=1))])
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['ref'], 'C-901')
+        self.assertEqual(result.counts['unmatched'], 0)
+
+    def test_automated_senders_are_skipped_as_not_business(self):
+        mails = [mail('no-reply@vendor.test', -timedelta(hours=1), subject='Receipt'),
+                 mail('Notifications+abc@service.test', -timedelta(hours=1), subject='Alert'),
+                 mail('mailer-daemon@relay.test', -timedelta(hours=1), subject='Undeliverable')]
+        result = self.run_intake(mails)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(self.fake.calls, [])
+        self.assertEqual(self.fake.intent_calls, [])
+        self.assertEqual(result.counts['skipped_automated'], 3)
+        self.assertEqual(result.counts['unresolved_messages'], 0)
+        self.assertEqual(result.counts['unmatched'], 0)
+        self.run_intake(mails)
+        self.assertEqual(self.fake.calls, [])
+
+    def test_an_automated_looking_address_on_a_record_still_logs(self):
+        self.fake.contacts_rows.append(intake.Contact('alerts@example.test', 'V-903', 'Alert Vendor'))
+        result = self.run_intake([mail('alerts@example.test', -timedelta(hours=1))])
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['ref'], 'V-903')
+        self.assertEqual(result.counts['skipped_automated'], 0)
+
+    def test_retained_automated_mail_leaves_the_unresolved_queue(self):
+        m = mail('noreply@vendor.test', -timedelta(days=5))
+        ck = intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'])[0]
+        self.out().mkdir(parents=True)
+        (self.out() / intake.STATE).write_text(json.dumps({'mail_unresolved': {
+            ident(m): {'ck': ck, 'sent': m['sent_unix'], 'participants': {'h': 'missing'}}}}))
+        result = self.run_intake([m])
+        self.assertEqual(result.counts['unresolved_messages'], 0)
+        self.assertEqual(result.counts['skipped_automated'], 1)
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_an_unknown_sender_with_business_intent_is_queued_once_for_review(self):
+        self.fake.intent_reply = {'business': True, 'summary': 'Wants a clinic suite near the hospital.'}
+        first = mail('new.doctor@practice.test', -timedelta(hours=2), name='Dana Doctor')
+        result = self.run_intake([first])
+        self.assertEqual(result.state, 'succeeded')
+        [(verb, args)] = self.fake.writes()
+        self.assertEqual(verb, 'propose-email-lead')
+        self.assertEqual({k: v for k, v in args.items() if k != 'idempotency_key'},
+                         {'address': 'new.doctor@practice.test', 'display_name': 'Dana Doctor',
+                          'summary': 'Wants a clinic suite near the hospital.',
+                          'first_seen_at': intake._iso(first['sent_unix']), 'message_ref': ident(first)})
+        self.assertEqual(result.counts['lead_proposed'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 1, 'the mail waits for the promoted record')
+        self.assertNotIn('Wants a clinic', self.report_text())
+        second = mail('new.doctor@practice.test', -timedelta(hours=1), subject='Following up')
+        self.run_intake([first, second])
+        self.assertEqual(len(self.fake.writes('propose-email-lead')), 1)
+        self.assertEqual(len(self.fake.intent_calls), 1)
+        self.fake.contacts_rows.append(intake.Contact('new.doctor@practice.test', 'L-910', 'Dana Doctor'))
+        self.run_intake([first, second], touch=False)
+        self.assertEqual(sorted(a['ref'] for _, a in self.fake.writes('log-activity')), ['L-910', 'L-910'])
+
+    def test_an_unknown_sender_without_business_intent_is_not_queued_or_asked_again(self):
+        m = mail('friend@example.test', -timedelta(hours=1))
+        result = self.run_intake([m])
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(result.counts['lead_not_business'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 1)
+        self.run_intake([m])
+        self.assertEqual(len(self.fake.intent_calls), 1)
+
+    def test_a_sender_already_on_a_party_is_reported_not_proposed_again(self):
+        self.fake.intent_reply = {'business': True, 'summary': 'Asks about a renewal.'}
+        self.fake.lead_reply = {'ok': True, 'proposed': False, 'reason': 'known_party'}
+        m = mail('known@example.test', -timedelta(hours=1))
+        result = self.run_intake([m])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['lead_known_party'], 1)
+        self.run_intake([m, mail('known@example.test', -timedelta(minutes=30), subject='Again')])
+        self.assertEqual(len(self.fake.writes('propose-email-lead')), 1)
+
+    def test_outbound_mail_to_an_unknown_recipient_is_never_a_lead(self):
+        self.fake.intent_reply = {'business': True, 'summary': 'x'}
+        self.run_intake([mail(OWNER, -timedelta(hours=1), recipients='someone@example.test')])
+        self.assertEqual(self.fake.intent_calls, [])
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_an_intent_failure_fails_the_run_and_is_asked_again(self):
+        self.fake.intent_reply = RuntimeError('model down')
+        m = mail('new@example.test', -timedelta(hours=1))
+        self.assertEqual(self.run_intake([m]).reason, 'model_failed')
+        self.fake.intent_reply = {'business': True, 'summary': 'Needs space.'}
+        self.assertEqual(self.run_intake([m], touch=False).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('propose-email-lead')), 1)
+
+    def test_lead_intent_reply_parsing_accepts_only_the_schema(self):
+        self.assertEqual(intake.parse_intent({'is_error': False, 'structured_output': {'business': True, 'summary': ' Needs space. '}}),
+                         {'business': True, 'summary': 'Needs space.'})
+        self.assertEqual(intake.parse_intent({'is_error': False, 'structured_output': {'business': True, 'summary': None}}),
+                         {'business': False, 'summary': None})
+        for bad in ({'is_error': False, 'structured_output': {'business': 'yes', 'summary': None}},
+                    {'is_error': True, 'structured_output': {'business': True, 'summary': 'x'}}, {}):
+            with self.assertRaises(ValueError):
+                intake.parse_intent(bad)
 
     def test_a_held_lock_skips(self):
         self.out().mkdir(parents=True)
