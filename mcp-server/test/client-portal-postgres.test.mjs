@@ -56,6 +56,13 @@ test('a password opens only its client portal and the live deal roadmap', async 
       assert.deepEqual(await read(), expected);
     });
 
+    await t.test('five failed passwords lock only that slug even with its correct password', async () => {
+      for (let attempt = 0; attempt < 5; attempt++)
+        await assert.rejects(read('synthetic-a', 'wrong-password'), denied);
+      await assert.rejects(read(), denied);
+      assert.equal((await read('synthetic-b', 'synthetic-password-b')).portal.slug, 'synthetic-b');
+    });
+
     await t.test('portal ownership cannot be changed after creation', async () => {
       for (const assignment of [
         "client_id=(select client_id from ops.client_portal where slug='synthetic-b')",
