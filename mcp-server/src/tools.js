@@ -9786,6 +9786,24 @@ registerTools({
                  : "first of its class." };
     }),
   },
+  "read-decision": {
+    write: false,
+    description: "Read one recorded decision in full, including its title, human quote, complete agent rationale and provenance. Pass the decision_id from find-precedent or log-decision, as a full UUID or an unambiguous ID prefix. Ambiguous prefixes return candidates instead of choosing a decision. Reads the current record, including corrections made by update-decision. Read-only.",
+    inputSchema: { type: "object", properties: {
+      decision_id: { type: "string", description: "Full decision UUID or an unambiguous prefix, including the 8-character short form." } },
+      required: ["decision_id"], additionalProperties: false },
+    handler: async (c, _a, args) => {
+      const decisionId = await resolveDecisionId(c, args.decision_id);
+      const decision = (await c.query(
+        `select decision_id, event_id, entry_date, occurred_at, title, human_quote,
+                agent_rationale, provenance, author, session_key, source_file,
+                external_key, cause, quote_absent, cost_delta, quality_delta, priced
+           from v_decision_entry where decision_id = $1`, [decisionId])).rows[0];
+      if (!decision) throw new ToolError({ error: "decision_not_found", decision_id: args.decision_id,
+        hint: "pass the decision_id log-decision returned, not the event_id" });
+      return { ok: true, decision };
+    },
+  },
   "find-precedent": {
     write: false,
     description: "\"What precedent exists for a fork shaped like this?\" — searches recorded RULING HISTORY plus activated typed precedents. Results carry record_kind: settled_ruling is a recorded decision; typed_precedent is governed guidance and must not be presented as a settled decision. Search before re-arguing a settled point or declaring a fork open. Matches titles, partner wording, and reasoning with trigram similarity; two or three concrete nouns beat a sentence. NOT for doctrine (search-doctrine), records (find), or open work (loop-board). Read-only.",

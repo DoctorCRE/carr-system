@@ -1534,6 +1534,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-decision": {
+    "ingress_key": "mcp-tool:read-decision",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "afa34011dc484bc3374cfee5833902f94a5a9ea83f5c40ed896d5ade25e9166b",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-dispatch-history": {
     "ingress_key": "mcp-tool:read-dispatch-history",
     "source_locator": "mcp-server/src/session-identity.js",
