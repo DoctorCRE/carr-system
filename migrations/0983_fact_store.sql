@@ -236,7 +236,7 @@ begin
     return jsonb_build_object('ok',false,'error','observations_disagree');
   end if;
   if p_basis='human_review' then
-    if cardinality(inputs)<>1 or not exists(select 1 from public.actor a where a.id=p_actor_id and a.kind='human') then
+    if cardinality(inputs)<>1 or not exists(select 1 from public.actor a where a.id=p_actor_id and a.kind='human' and a.active) then
       return jsonb_build_object('ok',false,'error','human_review_requires_one_observation_and_a_human');
     end if;
   else

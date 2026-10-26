@@ -30613,7 +30613,7 @@ begin
     return jsonb_build_object('ok',false,'error','observations_disagree');
   end if;
   if p_basis='human_review' then
-    if cardinality(inputs)<>1 or not exists(select 1 from public.actor a where a.id=p_actor_id and a.kind='human') then
+    if cardinality(inputs)<>1 or not exists(select 1 from public.actor a where a.id=p_actor_id and a.kind='human' and a.active) then
       return jsonb_build_object('ok',false,'error','human_review_requires_one_observation_and_a_human');
     end if;
   else
@@ -122623,7 +122623,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0978_doctrine_title_topic_ranking.sql	852b8da1601a9277e7f9e2cd5fbf1385785af2356b4a08bc92438378c994c72b	1970-01-01 00:00:00+00
 0979_decline_unstarted_ready_work_request.sql	f343b16316d6a744dcf6c20073bedfb9e38695d5f06c56d292ba8797b9c261d6	1970-01-01 00:00:00+00
 0981_client_portal_writer_denials.sql	2380f08e4b75a3ed447b5b99854cfb8b9348308dab81a24c74986602feb56b86	1970-01-01 00:00:00+00
-0982_fact_store.sql	c8b0289b5994cce29144c300ada312bbffba4854a15b96253d64665d3c990235	1970-01-01 00:00:00+00
+0983_fact_store.sql	13f97f25f7cdee1ed5dbcdeb2b45764e4018765edbad37c4b5e6c021e6f8ad04	1970-01-01 00:00:00+00
 \.
 
 
@@ -123742,7 +123742,7 @@ insert into public.agent_profile ("charter","created_at","current_desk","current
 insert into public.agent_profile ("charter","created_at","current_desk","current_model","display_name","id","profile_key","sponsor_scope","status","updated_at","version") select "charter","created_at","current_desk","current_model","display_name","id","profile_key","sponsor_scope","status","updated_at","version" from jsonb_populate_record(null::public.agent_profile, '{"charter": ["marketing queue operations", "content repurposing and scheduling drafts", "campaign evidence capture"], "created_at": "2026-08-25T03:31:03.957747+00:00", "current_desk": "hermes-desktop", "current_model": "xai-oauth/grok-4.6", "display_name": "Marketing Ops", "id": "df274c25-f590-41c9-ae78-89290a96fd5c", "profile_key": "marketing-ops", "sponsor_scope": "shared", "status": "active", "updated_at": "2026-08-25T03:31:03.957747+00:00", "version": 2}'::jsonb);
 insert into public.agent_profile ("charter","created_at","current_desk","current_model","display_name","id","profile_key","sponsor_scope","status","updated_at","version") select "charter","created_at","current_desk","current_model","display_name","id","profile_key","sponsor_scope","status","updated_at","version" from jsonb_populate_record(null::public.agent_profile, '{"charter": ["independent verification with fresh context", "adversarial reading of finished work", "attestation of builds it did not make"], "created_at": "2026-08-23T03:20:17.201266+00:00", "current_desk": "hermes-desktop", "current_model": "nous/deepseek/deepseek-v4-pro", "display_name": "Reviewer", "id": "7325c706-580a-40e2-a62f-db68332da99d", "profile_key": "reviewer", "sponsor_scope": "shared", "status": "active", "updated_at": "2026-08-25T03:31:03.957747+00:00", "version": 2}'::jsonb);
 insert into public.agent_profile ("charter","created_at","current_desk","current_model","display_name","id","profile_key","sponsor_scope","status","updated_at","version") select "charter","created_at","current_desk","current_model","display_name","id","profile_key","sponsor_scope","status","updated_at","version" from jsonb_populate_record(null::public.agent_profile, '{"charter": ["routine system health observation", "scheduled-run and freshness checks", "incident draft preparation"], "created_at": "2026-08-25T03:31:03.957747+00:00", "current_desk": "hermes-desktop", "current_model": "nous/deepseek/deepseek-v4-pro", "display_name": "System Watch", "id": "4b3ccb10-ae39-4a9a-a3c7-48c69d593d28", "profile_key": "system-watch", "sponsor_scope": "shared", "status": "active", "updated_at": "2026-08-25T03:31:03.957747+00:00", "version": 2}'::jsonb);
--- CARR REVIEWED SEED ops.fact_key_contract (0982_fact_store.sql)
+-- CARR REVIEWED SEED ops.fact_key_contract (0983_fact_store.sql)
 insert into ops.fact_key_contract ("canonical_unit","expense_basis_required","fact_key","unit_multipliers") select "canonical_unit","expense_basis_required","fact_key","unit_multipliers" from jsonb_populate_record(null::ops.fact_key_contract, '{"canonical_unit": "USD/SF/year", "expense_basis_required": true, "fact_key": "base_rent_per_sf", "unit_multipliers": {"USD/SF/month": 12, "USD/SF/year": 1}}'::jsonb);
 insert into ops.fact_key_contract ("canonical_unit","expense_basis_required","fact_key","unit_multipliers") select "canonical_unit","expense_basis_required","fact_key","unit_multipliers" from jsonb_populate_record(null::ops.fact_key_contract, '{"canonical_unit": "months", "expense_basis_required": false, "fact_key": "free_rent_months", "unit_multipliers": {"months": 1}}'::jsonb);
 insert into ops.fact_key_contract ("canonical_unit","expense_basis_required","fact_key","unit_multipliers") select "canonical_unit","expense_basis_required","fact_key","unit_multipliers" from jsonb_populate_record(null::ops.fact_key_contract, '{"canonical_unit": "USD/SF", "expense_basis_required": false, "fact_key": "landlord_ti_per_sf", "unit_multipliers": {"USD/SF": 1}}'::jsonb);

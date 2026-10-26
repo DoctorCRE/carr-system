@@ -45,7 +45,7 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
     const predecessor = { ...SCAC_MUTATION_CURRENT_DB_GRANTS,
       secdef_execute: SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute.filter(g => !FACT_FUNCTIONS.test(g.signature)) };
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $f$select ${c.escapeLiteral(JSON.stringify(predecessor))}::jsonb$f$`);
-    await c.query(await readFile(new URL('../../migrations/0982_fact_store.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/0983_fact_store.sql', import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner'),($2,'codex','automation','Synthetic job')", [partner.id, job.id]);
 
     await t.test('the SQL normalization contract equals the comparison contract', async () => {
@@ -170,6 +170,11 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
       assert.equal(direct.error, 'human_review_requires_one_observation_and_a_human');
       assert.equal((await promote('conflict-deal', [lease, counter], { basis: 'human_review' }, partner)).error,
         'human_review_requires_one_observation_and_a_human');
+      await c.query('update actor set active=false where id=$1', [partner.id]);
+      try {
+        assert.equal((await promote('conflict-deal', [amendment], { basis: 'human_review' }, partner)).error,
+          'human_review_requires_one_observation_and_a_human');
+      } finally { await c.query('update actor set active=true where id=$1', [partner.id]); }
       const decided = await promote('conflict-deal', [amendment], { basis: 'human_review' }, partner);
       assert.equal(decided.canonical_fact.normalized_value, '26');
       assert.equal(decided.canonical_fact.promoted_by_actor_id, partner.id);
