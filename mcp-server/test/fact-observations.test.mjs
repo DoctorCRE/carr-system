@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
-import { publicError } from '../src/public-errors.js';
+import { publicError } from '../src/public-errors.ts';
 
 const db = { query() { throw new Error('comparison must not read or write the database'); } };
 const actor = { id: 'synthetic-reviewer', human: true };

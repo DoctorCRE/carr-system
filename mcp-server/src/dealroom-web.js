@@ -6,7 +6,7 @@
 // actor for the existing MCP and pipeline handlers. No identity or deal data
 // is stored in the cookie.
 
-import { publicError } from "./public-errors.js";
+import { publicError } from "./public-errors.ts";
 import {
   exchangeGoogleCode,
   googleAuthorizationUrl,

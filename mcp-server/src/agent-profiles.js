@@ -10,7 +10,7 @@
 // zero permissions. Desks stay transport, actors stay authority, profiles
 // are the human-facing layer over both.
 //
-import { integerFields } from "./safe-integer.js";
+import { integerFields } from "./safe-integer.ts";
 
 function profileRecord(row) {
   return integerFields(row, ["version"], "profile_version_invalid");

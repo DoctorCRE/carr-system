@@ -1,6 +1,6 @@
 import { personalScopeForActor, organizationTenantForActor } from "./identity.js";
 
-import { integerFields } from "./safe-integer.js";
+import { integerFields } from "./safe-integer.ts";
 
 function sponsorFor(actor, ToolError) {
   const scope = personalScopeForActor(actor);

@@ -1,6 +1,12 @@
 import { authorizationClassForActor, organizationTenantForActor } from './identity.js';
+import { ToolError } from './tool-error.ts';
+import type { Actor, Db, VerbInputs } from './verb-contract.ts';
 
-export const CONTRACTS = {
+/** How one economic fact is stored: accepted units with their multipliers to the canonical unit. */
+type FactContract = { units: Record<string, number>; unit: string; expenseBasis?: boolean };
+type Observation = VerbInputs['compare-fact-observations']['observations'][number];
+
+export const CONTRACTS: Record<string, FactContract> = {
   base_rent_per_sf: { units: { 'USD/SF/year': 1, 'USD/SF/month': 12 }, unit: 'USD/SF/year', expenseBasis: true },
   landlord_ti_per_sf: { units: { 'USD/SF': 1 }, unit: 'USD/SF' },
   term_months: { units: { months: 1, years: 12 }, unit: 'months' },
@@ -10,7 +16,7 @@ const EXPENSE_BASES = ['nnn', 'modified_gross', 'full_service_gross', 'gross'];
 const DECIMAL = /^(?:0|[1-9][0-9]{0,29})(?:\.[0-9]{1,18})?$/;
 const CONTENT_HASH = /^[a-fA-F0-9]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const text = maxLength => ({ type: 'string', minLength: 1, maxLength });
+const text = (maxLength: number) => ({ type: 'string', minLength: 1, maxLength });
 const uuid = { type: 'string', pattern: UUID.source, minLength: 36, maxLength: 36 };
 const sourceSchema = { type: 'object', additionalProperties: false, properties: {
   document_ref: text(200), page_start: { type: 'integer', minimum: 1, maximum: 100000 },
@@ -40,28 +46,29 @@ const observationSchema = { anyOf: Object.entries(CONTRACTS).map(([key, contract
   }, required: [...observationRequired, ...(contract.expenseBasis ? ['expense_basis'] : [])] };
 }) };
 
-function normalize(value, multiplier) {
+function normalize(value: string, multiplier: number) {
   const [whole, fractional = ''] = value.split('.');
   const scaled = (BigInt(whole + fractional) * BigInt(multiplier)).toString().padStart(fractional.length + 1, '0');
   if (!fractional.length) return scaled;
   return `${scaled.slice(0, -fractional.length)}.${scaled.slice(-fractional.length)}`.replace(/0+$/, '').replace(/\.$/, '');
 }
 
-function validate(args, ToolError, extra = []) {
+// Re-checks every field of untrusted input, so it reads args loosely.
+function validate(args: Record<string, any>, extra: string[] = []) {
   const invalid = () => { throw new ToolError({ error: 'validation_error' }); };
-  const object = (value, allowed, required = allowed) => {
+  const object = (value: any, allowed: string[], required = allowed) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)
       || Object.keys(value).some(k => !allowed.includes(k))
       || required.some(k => !Object.hasOwn(value, k))) invalid();
   };
-  const string = (value, max) => {
+  const string = (value: unknown, max: number) => {
     if (typeof value !== 'string' || !value.trim() || value.length > max) invalid();
   };
   object(args, ['entity_ref', 'observations', ...extra]);
   for (const key of extra) if (!UUID.test(args[key])) invalid();
   string(args.entity_ref, 200);
   if (!Array.isArray(args.observations) || !args.observations.length || args.observations.length > 100) invalid();
-  const ids = new Set();
+  const ids = new Set<unknown>();
   for (const o of args.observations) {
     object(o, Object.keys(observationProperties), observationRequired);
     string(o.id, 100);
@@ -95,7 +102,7 @@ function validate(args, ToolError, extra = []) {
   }
 }
 
-export function factObservationTools({ ToolError }) {
+export function factObservationTools() {
   return {
     'compare-fact-observations': {
       write: false,
@@ -103,19 +110,20 @@ export function factObservationTools({ ToolError }) {
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         entity_ref: { ...text(200), description: 'Caller-asserted entity for this comparable set. No stored identity or document binding is checked.' }, observations: { type: 'array', minItems: 1, maxItems: 100, items: observationSchema },
       }, required: ['entity_ref', 'observations'] },
-      handler: async (_client, _actor, args) => {
-        validate(args, ToolError);
+      handler: async (_client: Db, _actor: Actor, args: VerbInputs['compare-fact-observations']) => {
+        validate(args);
+        // expense_basis is read only for expense-basis contracts, where validate() required it.
         const observations = args.observations.map(input => ({ input,
           effective_confidence_tier: input.method === 'ocr' ? 'human_review' : input.confidence_tier,
           normalized: { value: normalize(input.value, CONTRACTS[input.fact_key].units[input.unit]),
             unit: CONTRACTS[input.fact_key].unit,
-            ...(CONTRACTS[input.fact_key].expenseBasis ? { expense_basis: input.expense_basis } : {}) },
+            ...(CONTRACTS[input.fact_key].expenseBasis ? { expense_basis: (input as { expense_basis?: string }).expense_basis } : {}) },
         }));
-        const groups = new Map();
+        const groups = new Map<string, { input: Observation; effective_confidence_tier: string; normalized: object }[]>();
         for (const observation of observations) {
           const key = observation.input.fact_key;
           if (!groups.has(key)) groups.set(key, []);
-          groups.get(key).push(observation);
+          groups.get(key)!.push(observation);
         }
         const fields = [...groups].map(([fact_key, group]) => ({ fact_key,
           status: group.length === 1 ? 'single_observation'
@@ -123,36 +131,36 @@ export function factObservationTools({ ToolError }) {
           observation_ids: group.map(o => o.input.id),
         }));
         const shared_source_groups = [...groups].flatMap(([fact_key, group]) => ['document_ref', 'content_hash', 'document_family_id'].flatMap(basis => {
-          const sources = new Map();
+          const sources = new Map<unknown, string[]>();
           for (const { input } of group) {
             const source = input.source;
             const refs = basis === 'document_family_id' ? [source.document_family_id, ...(source.derivation_chain || [])]
               : [basis === 'content_hash' ? source.content_hash?.toLowerCase() : source.document_ref];
             for (const ref of new Set(refs.filter(value => value !== undefined))) {
               if (!sources.has(ref)) sources.set(ref, []);
-              sources.get(ref).push(input.id);
+              sources.get(ref)!.push(input.id);
             }
           }
           return [...sources].filter(([, ids]) => ids.length > 1)
             .map(([source_ref, observation_ids]) => ({ fact_key, basis, source_ref, observation_ids }));
         }));
         const shared_extraction_groups = [...groups].flatMap(([fact_key, group]) => {
-          const domains = new Map();
+          const domains = new Map<string, { fact_key: string; pass: string; model: string; observation_ids: string[] }>();
           for (const { input } of group) {
             if (!input.extraction) continue;
             const { pass, model } = input.extraction;
             const key = JSON.stringify([pass, model]);
             if (!domains.has(key)) domains.set(key, { fact_key, pass, model, observation_ids: [] });
-            domains.get(key).observation_ids.push(input.id);
+            domains.get(key)!.observation_ids.push(input.id);
           }
           return [...domains.values()].filter(domain => domain.observation_ids.length > 1);
         });
         const review_items = fields.flatMap(field => {
-          const tiers = new Set(groups.get(field.fact_key).map(o => o.effective_confidence_tier));
+          const tiers = new Set(groups.get(field.fact_key)!.map(o => o.effective_confidence_tier));
           const reasons = [
             ...(field.status === 'conflict' ? ['conflict'] : []),
             ...['human_review', 'verify_band'].filter(tier => tiers.has(tier)),
-            ...(groups.get(field.fact_key).some(o => o.input.method === 'ocr') ? ['ocr'] : []),
+            ...(groups.get(field.fact_key)!.some(o => o.input.method === 'ocr') ? ['ocr'] : []),
           ];
           return reasons.length ? [{ entity_ref: args.entity_ref, fact_key: field.fact_key,
             priority: field.status === 'conflict' || tiers.has('human_review') ? 'high' : 'normal',
@@ -176,10 +184,10 @@ export function factObservationTools({ ToolError }) {
         entity_ref: { ...text(200), description: 'The entity these observations describe, such as a deal or lease reference.' },
         observations: { type: 'array', minItems: 1, maxItems: 100, items: observationSchema },
       }, required: ['idempotency_key', 'entity_ref', 'observations'] },
-      handler: async (c, actor, args) => {
+      handler: async (c: Db, actor: Actor, args: VerbInputs['record-fact-observations']) => {
         if (['verified_partner', 'probe_agent', 'review_agent'].includes(authorizationClassForActor(actor)))
           throw new ToolError({ error: 'not_in_profile' });
-        validate(args, ToolError, ['idempotency_key']);
+        validate(args, ['idempotency_key']);
         const out = (await c.query('select ops.record_fact_observations($1,$2,$3,$4,$5::jsonb) as r',
           [organizationTenantForActor(actor), actor.id, args.idempotency_key, args.entity_ref, JSON.stringify(args.observations)])).rows[0].r;
         if (!out.ok) throw new ToolError({ error: out.error });
@@ -196,7 +204,7 @@ export function factObservationTools({ ToolError }) {
         observation_ids: { type: 'array', minItems: 1, maxItems: 100, uniqueItems: true, items: uuid },
         base_version: { type: 'integer', minimum: 0, maximum: 0x7ffffffe },
       }, required: ['idempotency_key', 'entity_ref', 'fact_key', 'basis', 'observation_ids', 'base_version'] },
-      handler: async (c, actor, args) => {
+      handler: async (c: Db, actor: Actor, args: VerbInputs['promote-fact']) => {
         if (args.basis === 'human_review' && authorizationClassForActor(actor) !== 'verified_partner')
           throw new ToolError({ error: 'human_only_verb_requires_verified_partner' });
         const out = (await c.query('select ops.promote_fact($1,$2,$3,$4,$5,$6,$7::uuid[],$8) as r',
@@ -214,7 +222,7 @@ export function factObservationTools({ ToolError }) {
         entity_ref: { ...text(200), description: 'Limit to one entity.' },
         limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
       } },
-      handler: async (c, actor, args) => {
+      handler: async (c: Db, actor: Actor, args: VerbInputs['list-fact-conflicts']) => {
         const out = (await c.query('select ops.list_fact_conflicts($1,$2,$3) as r',
           [organizationTenantForActor(actor), args.entity_ref ?? null, args.limit ?? 50])).rows[0].r;
         return { ...out, schema_version: 'fact-conflicts.v1' };

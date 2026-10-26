@@ -53,7 +53,7 @@
 // PHI-incapable is an assessment a human performs about real systems; this
 // repository holds no such enumeration and inventing one would ship an invented
 // binding. So the roster arrives the way the supervisor registry arrives in
-// command-supervisor-admission.v5.js: caller-supplied, SEALED, and with each
+// command-supervisor-admission.v5.ts: caller-supplied, SEALED, and with each
 // entry's own digest RECOMPUTED here, so an entry re-pointed after signing
 // refuses. A caller can therefore only widen the roster by re-sealing it, which
 // is a visible act rather than a field on a request.
@@ -272,7 +272,7 @@ export const V5_BACKUP_QUARANTINE_REASON_IDS = Object.freeze([
 const SHA256_REF = /^sha256:[0-9a-f]{64}$/;
 
 // A stable identifier: no whitespace, no separators that would let one id read
-// as two. Same posture as command-supervisor-admission.v5.js's STABLE_ID.
+// as two. Same posture as command-supervisor-admission.v5.ts's STABLE_ID.
 const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:+-]{0,255}$/;
 
 const ROSTER_KEYS = Object.freeze(["entries", "enumeration_authority", "roster_digest"]);

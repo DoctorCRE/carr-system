@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { splitDealNextStep, validateDealItem, shortDealHeading } from '../src/deal-items.js';
+import { splitDealNextStep, validateDealItem, shortDealHeading } from '../src/deal-items.ts';
 import { TOOLS } from '../src/tools.js';
 
 test('legacy package splits into three short items while preserving every sourced fact', () => {

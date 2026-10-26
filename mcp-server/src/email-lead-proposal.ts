@@ -2,13 +2,15 @@
 // one row in the candidate reservoir (claim-card), where a partner promotes it
 // with promote-pool or declines it with decline-candidate. This verb never
 // creates a party or a lead and never reopens a row a partner already judged.
-import { createHash } from 'node:crypto';
+import { sha256 } from './sha256.ts';
+import { ToolError } from './tool-error.ts';
+import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
 
 const ADDRESS = /^[a-z0-9._%+'-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/;
 const SOURCE = 'outlook-intake';
 
-export function emailLeadProposalTools({ ToolError, withEnvelope, writeEvent }) {
-  const fail = error => { throw new ToolError({ error }); };
+export function emailLeadProposalTools({ withEnvelope, writeEvent }: { withEnvelope: WithEnvelope; writeEvent: WriteEvent }) {
+  const fail = (error: string): never => { throw new ToolError({ error }); };
   return {
     'propose-email-lead': {
       write: true,
@@ -21,7 +23,7 @@ export function emailLeadProposalTools({ ToolError, withEnvelope, writeEvent }) 
         first_seen_at: { type: 'string', format: 'date-time' },
         message_ref: { type: 'string', minLength: 1, maxLength: 100 },
       }, required: ['idempotency_key', 'address', 'summary', 'first_seen_at', 'message_ref'] },
-      handler: (c, actor, args) => withEnvelope(c, actor, 'propose-email-lead', args, async () => {
+      handler: (c: Db, actor: Actor, args: VerbInputs['propose-email-lead']) => withEnvelope(c, actor, 'propose-email-lead', args, async () => {
         const address = String(args.address || '').trim().toLowerCase();
         const summary = String(args.summary || '').trim();
         const seen = Date.parse(args.first_seen_at);
@@ -33,7 +35,7 @@ export function emailLeadProposalTools({ ToolError, withEnvelope, writeEvent }) 
              regexp_matches(lower(coalesce(p.email, '')), '([a-z0-9._%+''-]+@[a-z0-9-]+(?:\\.[a-z0-9-]+)+)', 'g') m
            where m[1] = $1 limit 1`, [address])).rows.length > 0;
         if (known) return { ok: true, contract: 'email-lead-proposal.v1', proposed: false, reason: 'known_party' };
-        const sourceKey = `email-sha256:${createHash('sha256').update(address).digest('hex')}`;
+        const sourceKey = `email-sha256:${sha256(address)}`;
         const name = String(args.display_name || '').trim() || address;
         const row = (await c.query(
           `insert into candidate_pool (source, source_key, source_row, name, email, score_basis, created_by, updated_by)
