@@ -18,7 +18,7 @@ description: >
 
 # handoff — session takeover packet builder (portable)
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3). *(This revision: Joe's direct order, loop #142 Job 1, executed 2026-08-06 — "fix the handoff skills"; the human's own order outranks the seat gate.)*
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3). *(This revision: Joe's direct order, loop #142 Job 1, executed 2026-08-06 — "fix the handoff skills"; the human's own order outranks the seat gate.)*
 
 ## RECORD-BACKED PROJECTS FIRST — the packet is the fallback, not the default
 

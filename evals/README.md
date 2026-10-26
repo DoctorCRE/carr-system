@@ -9,7 +9,8 @@ Steering evals (`/claude-api build-eval`, then `/claude-api hillclimb`):
 - Each surface keeps its current baseline: `<surface>/evidence/baseline.jsonl`
   (rule-delivery also keeps `runs/baseline/` and `runs/v3/`, with
   `runs/trajectory/scores.tsv` as the score history).
-- Run the surface's `run_eval.py` (`--help` lists its modes) to produce a candidate
+- Run the surface's runner (`evals/rule-delivery/run_eval.py`, `evals/retrieval-real-misses/run_eval.py` or
+  `evals/doctrine-semantic/run.py`; `--help` lists its modes) to produce a candidate
   and compare it with the baseline, for example
   `python3 evals/rule-delivery/run_eval.py --compare baseline v3`.
 - Candidates, new runs and reports are generated output; they are gitignored.

@@ -1,6 +1,6 @@
 # Facebook Ads Playbook 2026 — CARR-branded paid playbook
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Created July 18, 2026 from a current-sources research pass on the ten most influential Facebook-ads operators plus CARR's own funnel reality. This is the PAID companion to the organic `facebook-strategy-2026.md`. Different discipline: organic builds familiarity for free, paid buys reach and captures intent with money. SHARED CARR craft (the ad MECHANICS transfer; both Joe and Dell can run ads in their own markets, geography per-person), but the ad CREATIVE and copy still come through each agent's personal hook and voice layer, so the words diverge the same way the organic posts do. Read `DNA/writing-rules.md` and `DNA/brand-voice.md` for voice and bans; read this for paid strategy, structure, targeting, and budget. Refresh roughly every two quarters, since the ad platform moves fast.*
 
