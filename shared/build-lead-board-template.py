@@ -364,7 +364,7 @@ try:
 except (OSError, ValueError) as exc:
     raise SystemExit(f"lead-board: Hot source unavailable at {hot_path} ({exc}); "
                      "refusing to render Hot 0 without source data") from exc
-hot_n = len(HOT.get("ranked",[])) + len(HOT.get("proposed",[]))
+hot_n = len(HOT.get("ranked",[])) + (len(HOT.get("proposed",[])) if isinstance(HOT.get("proposed"), list) else 0)
 
 # ── Already-worked marking (2026-07-27) ────────────────────────────────────────
 # 34 router rows matched a registry contact by name and carried NO mark, so the

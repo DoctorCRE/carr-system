@@ -172,6 +172,75 @@ REGISTRY_NAMED = ["Lead ID", "Owner", "Stage", "Segment", "Contact Name", "Pract
 # two indices. Naming them here is what lets one transform serve both modes.
 REGISTRY_POS = {23: "Est-Lease-Event", 25: "Event-Confidence"}
 
+HOT_OUTPUT_MARKER = "HOT OUTPUT (ranked / proposed / holds / signals):"
+HOT_OUTPUT_TITLE = re.compile(
+    r"^NPI sweep (\d{4}-\d{2}-\d{2}):.*ranked Hot output", re.IGNORECASE)
+
+
+def hot_output_from_records():
+    from lib.record_call import call_verb
+
+    def unavailable(detail):
+        raise SystemExit(f"lead-board: Hot source unavailable ({detail}); "
+                         "refusing to render Hot 0 without source data")
+
+    found = call_verb("loop-board", {
+        "kind": "team_loop", "domain": "prospecting", "owner": "claude",
+        "status": "any", "search": "ranked Hot output", "limit": 300,
+    })
+    if not found.ok:
+        unavailable(found.describe())
+    loops = found.reply.get("loops") if isinstance(found.reply, dict) else None
+    if not isinstance(loops, list):
+        unavailable("loop-board returned no loop list")
+
+    matches = []
+    for loop in loops:
+        if not isinstance(loop, dict):
+            continue
+        title = loop.get("title") or loop.get("label") or ""
+        match = HOT_OUTPUT_TITLE.match(title) if isinstance(title, str) else None
+        if not match:
+            continue
+        run_date = loop.get("since_text") or match.group(1)
+        if isinstance(run_date, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", run_date):
+            matches.append((run_date, loop))
+    if not matches:
+        unavailable("no NPI sweep output record was found")
+
+    latest_date = max(run_date for run_date, _ in matches)
+    outputs = []
+    for loop in (loop for run_date, loop in matches if run_date == latest_date):
+        number = loop.get("number")
+        if not number:
+            unavailable("the latest NPI sweep record has no number")
+        detail = call_verb("read-loop", {"number": number, "kind": "team_loop"})
+        if not detail.ok:
+            unavailable(f"read-loop {number}: {detail.describe()}")
+        record = detail.reply.get("loop") if isinstance(detail.reply, dict) else None
+        body = record.get("body") if isinstance(record, dict) else None
+        if not isinstance(body, str) or HOT_OUTPUT_MARKER not in body:
+            unavailable(f"read-loop {number} has no Hot output marker")
+        encoded = body.split(HOT_OUTPUT_MARKER, 1)[1].lstrip()
+        try:
+            payload, end = json.JSONDecoder().raw_decode(encoded)
+        except ValueError as exc:
+            unavailable(f"read-loop {number} has invalid Hot JSON ({exc})")
+        if encoded[end:].strip():
+            unavailable(f"read-loop {number} has text after the Hot JSON")
+        if not isinstance(payload, dict):
+            unavailable(f"read-loop {number} Hot output is not an object")
+        for group in ("ranked", "holds", "signals"):
+            if not isinstance(payload.get(group), list):
+                unavailable(f"read-loop {number} Hot group {group} is not a list")
+        if not isinstance(payload.get("proposed"), (list, str)):
+            unavailable(f"read-loop {number} Hot group proposed is not a list or status")
+        created_at = record.get("created_at") or ""
+        outputs.append((str(created_at), str(number), payload))
+    if not outputs:
+        unavailable(f"no Hot output block was found in the {latest_date} sweep record")
+    return max(outputs, key=lambda output: (output[0], output[1]))[2]
+
 
 def registry_rows_from_file(path):
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
@@ -366,13 +435,16 @@ unowned = [r for r in registry_all if not r["owner"]]
 decisions_path = os.path.join(AUTO, "lead-board-decisions.json")
 DECISIONS = json.load(open(decisions_path)) if os.path.exists(decisions_path) else []
 hot_path = os.path.join(AUTO, "lead-board-hot.json")
-try:
-    with open(hot_path, encoding="utf-8") as hot_file:
-        HOT = json.load(hot_file)
-except (OSError, ValueError) as exc:
-    raise SystemExit(f"lead-board: Hot source unavailable at {hot_path} ({exc}); "
-                     "refusing to render Hot 0 without source data") from exc
-hot_n = len(HOT.get("ranked",[])) + len(HOT.get("proposed",[]))
+if MODE == MODE_RECORDS:
+    HOT = hot_output_from_records()
+else:
+    try:
+        with open(hot_path, encoding="utf-8") as hot_file:
+            HOT = json.load(hot_file)
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"lead-board: Hot source unavailable at {hot_path} ({exc}); "
+                         "refusing to render Hot 0 without source data") from exc
+hot_n = len(HOT["ranked"]) + (len(HOT["proposed"]) if isinstance(HOT["proposed"], list) else 0)
 
 # ── Already-worked marking (2026-07-27) ────────────────────────────────────────
 # 34 router rows matched a registry contact by name and carried NO mark, so the
