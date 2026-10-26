@@ -42,7 +42,7 @@ fn signature(class: u16) -> [u8; 10] {
 
 /// `[05 00, tag:u16, length:u32, 00 00, object...]`.
 /// Length includes the ten-byte envelope, not its enclosing transaction.
-fn envelopes(data: &[u8], tag: u16, class: u16) -> Vec<(usize, &[u8])> {
+pub(crate) fn envelopes(data: &[u8], tag: u16, class: u16) -> Vec<(usize, &[u8])> {
     let tag_bytes = tag.to_le_bytes();
     let needle = [5, 0, tag_bytes[0], tag_bytes[1]];
     memchr::memmem::find_iter(data, &needle)
@@ -75,12 +75,19 @@ fn reference(data: &[u8], class: u16, kinds: &[u32]) -> Option<(u64, u64)> {
     .then_some((id, owner))
 }
 
-fn message_key(data: &[u8], class: u16) -> Option<u64> {
+pub(crate) fn message_key(data: &[u8], class: u16) -> Option<u64> {
     if !data.starts_with(&signature(class)) {
         return None;
     }
     let id = u64_at(data, 10)?;
     (id != 0 && Some(id) == u64_at(data, 30) && Some(id) == u64_at(data, 38)).then_some(id)
+}
+
+/// The 51-byte tail is an identity candidate, not a proven logical message ID.
+pub(crate) fn metadata_tail(object: &[u8]) -> Option<&[u8; 51]> {
+    let start = object.len().checked_sub(59)?;
+    let tail = object.get(start..start + 51)?;
+    tail.starts_with(&[0, 9, 0, 46, 0]).then(|| tail.try_into().unwrap())
 }
 
 /// Folder payloads end in the display name, following a binary sort key.
@@ -149,13 +156,7 @@ impl Index {
             let Some(key) = message_key(object, 0x00bf) else {
                 continue;
             };
-            // This observed layout ends with a 51-byte immutable message ID
-            // (00 09 00 2e 00 ...), then the local folder key. Require that
-            // framing so a different metadata subtype cannot supply a link.
-            let Some(tail) = object.len().checked_sub(59) else {
-                continue;
-            };
-            if object.get(tail..tail + 5) != Some(&[0, 9, 0, 46, 0]) {
+            if metadata_tail(object).is_none() {
                 continue;
             }
             if let Some(folder) = u64_at(object, object.len() - 8) {

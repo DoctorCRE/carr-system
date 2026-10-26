@@ -19,10 +19,6 @@
       "reason": "versioned rendered deliverables"
     },
     {
-      "path": "roadmap-revisions/*.docx",
-      "reason": "versioned Word document artifacts"
-    },
-    {
       "path": "tools/dictation-rig/assets/*.aiff",
       "reason": "versioned audio asset"
     },
