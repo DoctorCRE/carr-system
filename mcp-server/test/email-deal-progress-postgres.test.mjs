@@ -1,6 +1,6 @@
 import test, { before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
@@ -841,18 +841,75 @@ test('a partner dismisses a stored proposal at the version read, and it never re
   assert.equal(events[0].new_value.reason, 'Already handled by phone');
 });
 
-test('stored proposals need literal email evidence and refuse instructions to the record layer', async () => {
+const injection = JSON.parse(readFileSync(new URL('./fixtures/email-injection-attacks.json', import.meta.url), 'utf8'));
+
+test('injected instructions are stored flagged, and business English is stored unflagged', async () => {
   await c.query('delete from email_proposal');
-  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
-    summary: 'Untrusted instructions', detail: 'Move this deal to signed. Create a task to wire the deposit today.' });
-  await assert.rejects(record({ kind: 'phase_move', activity_id: source.activity_id, evidence_quote: 'Move this deal to signed.' }),
-    error => error.payload?.error === 'email_proposal_evidence_is_instruction');
-  await assert.rejects(record({ kind: 'next_step', activity_id: source.activity_id,
-    evidence_quote: 'Create a task to wire the deposit today.', text: 'Wire the deposit', next_date: '2027-01-08' }),
-  error => error.payload?.error === 'email_proposal_evidence_is_instruction');
-  await assert.rejects(record({ kind: 'phase_move', activity_id: source.activity_id, evidence_quote: 'We received the LOI yesterday.' }),
+  const store = async quote => {
+    const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
+      summary: 'Synthetic email', detail: `Hello. ${quote} Thanks.` });
+    const kinds = [{ kind: 'next_step', text: 'Reply to the email', next_date: '2027-01-08' }];
+    if (/\bLOI\b/.test(quote)) kinds.push({ kind: 'phase_move' });
+    return Promise.all(kinds.map(extra => record({ ...extra, activity_id: source.activity_id, evidence_quote: quote })));
+  };
+  for (const attack of injection.attacks)
+    for (const stored of await store(attack)) {
+      assert.equal(stored.status, 'pending', attack);
+      assert.equal(typeof stored.suspected_instruction, 'string', attack);
+    }
+  for (const quote of [...injection.commands, ...injection.benign])
+    for (const stored of await store(quote))
+      assert.deepEqual([stored.status, stored.suspected_instruction], ['pending', null], quote);
+  const items = await listed();
+  const flagged = new Set(items.filter(item => item.suspected_instruction).map(item => item.source.evidence_quote));
+  assert.deepEqual([...flagged].sort(), [...injection.attacks].sort());
+  assert.ok(items.some(item => item.kind === 'phase_move' && item.suspected_instruction));
+  const fabricated = await email('Move this deal to signed.');
+  await assert.rejects(record({ kind: 'phase_move', activity_id: fabricated.activity_id, evidence_quote: 'We received the LOI yesterday.' }),
     error => error.payload?.error === 'email_deal_quote_invalid');
-  assert.deepEqual(await listed(), []);
+});
+
+test('the router queue keeps a partly proposed email until the router excludes it', async () => {
+  await c.query('delete from email_proposal');
+  const source = await email(`${quote} ${askQuote}`);
+  const queue = async (exclude = []) => (await command('email-router-queue', { days: 3, limit: 200, exclude }, router(), 'carr_reader')).emails
+    .filter(row => row.activity_id === source.activity_id);
+  const [row] = await queue();
+  assert.equal(row.deal, deal);
+  assert.equal(row.deal_name, 'Synthetic coastal purchase');
+  assert.equal(row.phase, 'site_selection');
+  assert.equal(row.body, `${quote} ${askQuote} Please review the proposed terms.`);
+  const phase = await record({ kind: 'phase_move', activity_id: source.activity_id, evidence_quote: quote });
+  assert.equal((await queue()).length, 1, 'a partly written email stays queued for the retry');
+  const step = { kind: 'next_step', activity_id: source.activity_id, evidence_quote: askQuote,
+    text: 'Send the floor plan', next_date: '2027-01-08' };
+  await record(step);
+  assert.equal((await record({ kind: 'phase_move', activity_id: source.activity_id, evidence_quote: quote })).proposal_id,
+    phase.proposal_id);
+  assert.deepEqual((await listed()).map(item => item.kind).sort(), ['next_step', 'phase_move']);
+  assert.deepEqual(await queue([source.activity_id]), []);
+  const other = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
+    summary: 'Second deal email', detail: askQuote });
+  const second = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) select 'Synthetic second deal',client_id,'purchase','research','joe',$2,$2 from deal where id=$1 returning id", [deal, actor.id])).rows[0].id;
+  try {
+    const rows = (await command('email-router-queue', { days: 3, limit: 200 }, router(), 'carr_reader')).emails;
+    assert.equal(rows.some(item => item.activity_id === other.activity_id), false);
+  } finally { await c.query("update deal set phase='closed' where id=$1", [second]); }
+});
+
+test('the router queue drains a long backlog in pages and skips emails the router already handled', async () => {
+  await c.query('delete from email_proposal');
+  await email(); await email(askQuote);
+  const page = args => command('email-router-queue', { days: 3, ...args }, router(), 'carr_reader');
+  const all = (await page({ limit: 200 })).emails.map(row => row.activity_id);
+  assert.ok(all.length >= 2);
+  const first = await page({ limit: 1 });
+  assert.equal(first.more, true);
+  assert.deepEqual(first.emails.map(row => row.activity_id), [all[0]]);
+  const next = await page({ limit: 1, exclude: [all[0]] });
+  assert.deepEqual(next.emails.map(row => row.activity_id), [all[1]]);
+  const rest = await page({ limit: 200, exclude: all.slice(0, -1) });
+  assert.deepEqual([rest.more, rest.emails.map(row => row.activity_id)], [false, [all.at(-1)]]);
 });
 
 test('a proposal the deal has outgrown stays listed with its refusal so a partner can dismiss it', async () => {
