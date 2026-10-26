@@ -1529,7 +1529,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-client-portal",
     "source_locator": "mcp-server/src/client-portal.js",
     "schema_digest": "25c4425e3887511ffa3b9a7d402b99e4167a424450ee8f986d53e1f1bd686c7a",
-    "write": false,
+    "write": true,
     "human_only": false,
     "authority_only": false,
     "delegates_to": []
@@ -2951,13 +2951,13 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "config": [
         "search_path=pg_catalog, pg_temp"
       ],
-      "grantee": "carr_reader",
+      "grantee": "carr_writer",
       "parallel": "u",
       "grantable": false,
       "privilege": "execute",
       "signature": "ops.read_client_portal(p_slug text, p_password text)",
-      "volatility": "s",
-      "ingress_key": "db-function-acl:ops.read_client_portal(p_slug text, p_password text):carr_reader:execute",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.read_client_portal(p_slug text, p_password text):carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
