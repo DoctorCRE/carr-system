@@ -6,7 +6,8 @@ const ZERO = '00000000-0000-0000-0000-000000000000';
 const statement = `with candidates as (
   select a.id as vendor_id,a.ref,a.party_id,a.company,
     p.id as contact_id,p.name,p.email,p.phone,p.cell,p.city,p.state,
-    v.category,vc.label as category_label,v.territory,v.offers as reason,
+    vc.slug as category,vc.label as category_label,v.territory,v.offers as reason,
+    coalesce(vd.workable,false) as workable,v.out_of_market,
     f.flag_id,f.value,f.source,f.observed_at,f.expires_on,
     coalesce(f.value->'found'='true'::jsonb and not f.proposes_correction
       and f.value->>'epistemic_status'='source_backed'
@@ -23,7 +24,8 @@ const statement = `with candidates as (
         or exists(select 1 from public.lead suppressed where suppressed.party_id=held.id and (coalesce(suppressed.suppressed,false) or suppressed.stage='do_not_contact')))) as restricted
   from public.v_vendor_assignment_context a
   join public.vendor v on v.id=a.id
-  left join public.vendor_category vc on vc.slug=v.category
+  left join public.vendor_category vc on vc.slug=coalesce(v.category_slug,v.category)
+  left join public.vendor_disposition vd on vd.slug=v.disposition
   left join lateral jsonb_array_elements(a.contacts) contact on true
   left join public.party p on p.id=(contact->>'id')::uuid
   left join lateral (
@@ -36,7 +38,9 @@ const statement = `with candidates as (
   select *,array_remove(array[
     case when nullif(btrim(name),'') is null then 'named_contact' end,
     case when nullif(btrim(company->>'name'),'') is null then 'company' end,
-    case when nullif(btrim(category),'') is null then 'category' end,
+    case when category is null then 'category' end,
+    case when not workable then 'workable_vendor' end,
+    case when out_of_market then 'in_market' end,
     case when nullif(btrim(reason),'') is null then 'meeting_reason' end,
     case when not office_verified then 'verified_office' end,
     case when restricted then 'contact_permission' end

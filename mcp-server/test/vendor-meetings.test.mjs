@@ -13,6 +13,8 @@ test('vendor meetings exposes a read-only versioned contract', () => {
   assert.equal(TOOLS['read-vendor-meetings'].write, false);
 });
 
+// No street word, so the fixture reads as synthetic to security/leak_guard.py.
+const OFFICE_STREET='Synthetic Commons, Unit 100';
 let fixture, admin, database, c, actor, sequence=0;
 before(async () => {
   const ciDsn = process.env.CARR_CI_DATABASE_URL;
@@ -58,12 +60,12 @@ async function candidate({name='Synthetic vendor contact', office=true}={}) {
  const company=(await c.query("insert into party(kind,name,created_by,updated_by) values('org',$1,$2,$2) returning id",['Synthetic lender '+(++sequence),actor.id])).rows[0].id;
  const contact=(await c.query("insert into party(kind,name,org_id,created_by,updated_by) values('person',$1,$2,$3,$3) returning id",[name,company,actor.id])).rows[0].id;
  await c.query("insert into vendor_category(slug,label,sort) values('fixture_lender','Synthetic lender',999) on conflict do nothing");
- const vendor=(await c.query("insert into vendor(party_id,category,offers,created_by,updated_by) values($1,'fixture_lender','Discuss financing for a synthetic dental office',$2,$2) returning id",[company,actor.id])).rows[0].id;
+ const vendor=(await c.query("insert into vendor(party_id,category,category_slug,offers,created_by,updated_by) values($1,'Synthetic legacy text','fixture_lender','Discuss financing for a synthetic dental office',$2,$2) returning id",[company,actor.id])).rows[0].id;
  if(office) await finding(contact);
  return {company,contact,vendor};
 }
 async function finding(contact, value={}, columns={}) {
- const data={found:true,epistemic_status:'source_backed',location_type:'office',street_address:'100 Synthetic Avenue',city:'Synthetic Bay',state:'AL',...value};
+ const data={found:true,epistemic_status:'source_backed',location_type:'office',street_address:OFFICE_STREET,city:'Synthetic Bay',state:'AL',...value};
  return (await c.query("insert into record_flag(subject_type,subject_id,kind,value,source,observed_at,expires_on,created_by) values('party',$1,'address',$2,'https://example.invalid/team',coalesce($3::timestamptz,now()),$4,$5) returning id",[contact,JSON.stringify(data),columns.observed_at ?? null, columns.expires_on ?? null,actor.id])).rows[0].id;
 }
 async function read(args={}, who=actor) {
@@ -81,7 +83,9 @@ test('named contact with sourced office is suggested even without email or phone
  assert.equal(item.company.id,f.company);
  assert.equal(item.contact.email,null);
  assert.equal(item.contact.phone,null);
- assert.equal(item.office.street_address,'100 Synthetic Avenue');
+ assert.equal(item.office.street_address,OFFICE_STREET);
+ assert.equal(item.category,'fixture_lender');
+ assert.equal(item.category_label,'Synthetic lender');
  assert.equal(item.reason,'Discuss financing for a synthetic dental office');
  assert.deepEqual(item.missing,[]);
 });
@@ -169,4 +173,39 @@ test('blank names and missing recorded meeting context remain Research',async()=
   assert.equal((await read()).items.some(i=>i.vendor_id===f.vendor),false);
   assert.ok((await read({view:'research'})).items.find(i=>i.vendor_id===f.vendor).missing.includes(missing));
  }
+});
+
+test('known email and phone come through on a Suggested row',async()=>{
+ const f=await candidate();
+ await c.query("update party set email='contact@example.invalid',phone='251-155-0100' where id=$1",[f.contact]);
+ const item=(await read()).items.find(i=>i.vendor_id===f.vendor);
+ assert.ok(item,'a contact with known email and phone is still suggested');
+ assert.equal(item.contact.email,'contact@example.invalid');
+ assert.equal(item.contact.phone,'251-155-0100');
+ assert.equal(item.contact.cell,null);
+});
+
+test('an uncategorised vendor stays in Research even with legacy free text',async()=>{
+ const f=await candidate();
+ await c.query("update vendor set category_slug=null,category='Target (not yet met)' where id=$1",[f.vendor]);
+ assert.equal((await read()).items.some(i=>i.vendor_id===f.vendor),false);
+ const row=(await read({view:'research'})).items.find(i=>i.vendor_id===f.vendor);
+ assert.deepEqual(row.missing,['category']);
+ assert.equal(row.category,null);
+ assert.equal(row.category_label,null);
+});
+
+test('not-workable and out-of-market vendors stay in Research, never Suggested',async()=>{
+ const parked=await candidate();
+ await c.query("update vendor set disposition='parked' where id=$1",[parked.vendor]);
+ const outside=await candidate();
+ await c.query('update vendor set out_of_market=true where id=$1',[outside.vendor]);
+ const suggested=await read();
+ for(const f of [parked,outside]) assert.equal(suggested.items.some(i=>i.vendor_id===f.vendor),false);
+ const research=(await read({view:'research'})).items;
+ assert.deepEqual(research.find(i=>i.vendor_id===parked.vendor).missing,['workable_vendor']);
+ assert.deepEqual(research.find(i=>i.vendor_id===outside.vendor).missing,['in_market']);
+ const avoided=await candidate();
+ await c.query("update vendor set disposition='avoid' where id=$1",[avoided.vendor]);
+ assert.ok((await read({view:'research'})).items.find(i=>i.vendor_id===avoided.vendor).missing.includes('workable_vendor'));
 });

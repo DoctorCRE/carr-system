@@ -25,11 +25,11 @@
     "party_id": "Exact live vendor party UUID",
     "company": "Exact live organization {id,name} or null",
     "contact": "Exact live person {id,name,email,phone,cell} or null. Missing email and phone do not prevent a suggestion.",
-    "category": "Recorded vendor category slug or null",
-    "category_label": "Recorded category label or null",
+    "category": "Slug of the vendor_category row matched by coalesce(category_slug, category), the directory reader's key, or null. Legacy free text that is not a category slug is null and leaves the category requirement unmet.",
+    "category_label": "That vendor_category label or null",
     "service_coverage": "Recorded vendor territory, distinct from office location",
     "reason": "Recorded vendor offers text. No inferred meeting benefit.",
-    "missing": "Unmet requirements from named_contact, company, category, meeting_reason, verified_office, contact_permission",
+    "missing": "Unmet requirements from named_contact, company, category, meeting_reason, verified_office, contact_permission, workable_vendor, in_market",
     "office": "Verified {street_address,city,state,finding_id,source,observed_at,expires_on} or null",
     "research": "{status,finding_id,observed_at,expires_on}. Status is not_researched, needs_review or office_verified. It describes the latest address finding, not an invented enrichment job."
   },
@@ -48,7 +48,7 @@
     "latest": "Select the contact's newest address finding by observed_at then finding UUID before checking validity. A negative, expired, future, disputed, malformed or proposed-correction finding cannot revive an older verified office.",
     "no_inheritance": "City, service territory, another person or company office never establishes this person's office. Missing office remains null."
   },
-  "readiness": "Suggested requires no missing requirements. Research is the inverse. Both remain searchable and paginated. Current contact holds, any live avoid vendor row and any suppressed or do_not_contact lead role on the vendor, contact or company prevent suggestions.",
+  "readiness": "Suggested requires no missing requirements. Research is the inverse. Both remain searchable and paginated. A vendor whose disposition is not workable in vendor_disposition (parked, avoid, or any later not-workable slug) misses workable_vendor, and an out_of_market vendor misses in_market, so both stay in Research. Current contact holds, any live avoid vendor row and any suppressed or do_not_contact lead role on the vendor, contact or company prevent suggestions.",
   "effects": "Read-only. Does not change identities, source findings, relationship facts or approved client needs. Does not compose or send messages.",
   "errors": ["AUTHORIZATION_REFUSED", "vendor_meetings_query_invalid", "vendor_meetings_unavailable"]
 }
