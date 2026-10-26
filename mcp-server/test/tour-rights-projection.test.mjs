@@ -1,3 +1,4 @@
+// Tests Tour rights writes and sanitized public projection reads.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { tourRightsProjectionTools } from "../src/tour-rights-projection.js";

@@ -1,3 +1,4 @@
+// Test lead history continuation cursors and malformed cursor rejection.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { assertRegisteredToolInput, TOOLS } from '../src/tools.js';

@@ -1,3 +1,4 @@
+// Tests read-only pending call follow-up snapshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { allowedIn, connectionRouteForTool } from '../src/mcp.js';

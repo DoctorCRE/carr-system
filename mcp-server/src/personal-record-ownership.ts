@@ -1,3 +1,4 @@
+// Check ownership of personal records against authenticated actors.
 import { partnerAuthoritySlugForActor } from "./partner-authority.js";
 import type { Actor, Db } from "./verb-contract.ts";
 

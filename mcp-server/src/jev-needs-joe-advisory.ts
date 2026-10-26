@@ -1,3 +1,4 @@
+// Request and validate Jev judgments on the Needs Joe queue.
 import { TypeSafeClient } from "@typesafe-ai/sdk";
 
 const MODEL = "jev-latest";

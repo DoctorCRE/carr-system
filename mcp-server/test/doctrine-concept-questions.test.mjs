@@ -1,3 +1,4 @@
+// Test doctrine concept matching for natural questions and visibility.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { doctrineRoutingFixture } from './helpers/doctrine-routing.mjs';

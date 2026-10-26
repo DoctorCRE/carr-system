@@ -1,3 +1,4 @@
+// Seal staging foundation assurance evidence.
 import { readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

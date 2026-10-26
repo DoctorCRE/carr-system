@@ -1,3 +1,4 @@
+// Test invoice undo authority dispatch and acting identity.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { executeRegisteredTool } from '../src/tools.js';

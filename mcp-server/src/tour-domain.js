@@ -1,3 +1,4 @@
+// Validate and expose tour domain operations.
 import { organizationTenantForActor } from "./identity.js";
 import { validRouteTimestamp, routeTimestampMicroseconds } from "./tour-route-timestamp.ts";
 

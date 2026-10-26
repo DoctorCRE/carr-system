@@ -1,3 +1,4 @@
+// Test control room contracts, schemas, security, and evidence rules.
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";

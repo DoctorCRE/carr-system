@@ -211,18 +211,6 @@ def run_isolated(gate, image, log, env):
         fixture.close()
 
 
-def partition_gates(gates, partition, *, rollback_only=ROLLBACK_ONLY_GATES):
-    if partition == 'all':
-        return gates
-    if partition == 'serial':
-        serial = [g for g in gates if g.name not in rollback_only]
-        head = [g for g in serial if needed_by_isolated(g)]
-        return head + [g for g in serial if g not in head]
-    if partition == 'isolated':
-        return [g for g in gates if g.name in rollback_only or needed_by_isolated(g)]
-    raise ValueError('unknown gate partition')
-
-
 def run_gates(dsn, gates, logdir, *, rollback_only=ROLLBACK_ONLY_GATES):
     parsed = urlsplit(dsn)
     if parsed.scheme not in ('postgres', 'postgresql') or parsed.hostname not in ('localhost', '127.0.0.1'):
@@ -382,12 +370,11 @@ def main():
     parser.add_argument('--sql-proof', action='append', default=[], metavar='FILE[:SHARDS]',
                         help='run a rollback-only SQL proof (split into SHARDS sessions) instead of Python gates')
     parser.add_argument('--psql', default='psql')
-    parser.add_argument('--partition', choices=('all', 'serial', 'isolated'), default='all')
     parser.add_argument('gates', nargs='*', type=Path)
     args = parser.parse_args()
     if args.sql_proof:
-        if args.gates or args.partition != 'all':
-            parser.error('--sql-proof and partitioned gate files are separate runs')
+        if args.gates:
+            parser.error('--sql-proof and gate files are separate runs')
         proofs = []
         for spec in args.sql_proof:
             path, _, shards = spec.partition(':')
@@ -395,7 +382,7 @@ def main():
         return run_sql_proofs(os.environ['DATABASE_URL'], proofs, args.logdir, args.psql)
     if not args.gates:
         parser.error('no gates given')
-    return run_gates(os.environ['DATABASE_URL'], partition_gates(args.gates, args.partition), args.logdir)
+    return run_gates(os.environ['DATABASE_URL'], args.gates, args.logdir)
 
 
 if __name__ == '__main__':

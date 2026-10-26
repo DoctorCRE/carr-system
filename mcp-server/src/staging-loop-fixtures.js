@@ -1,3 +1,4 @@
+// Prepare staging loop fixtures.
 import { Pool } from "@neondatabase/serverless";
 import { isStagingBrowserEnvironment } from "./staging-browser.ts";
 import { setWriterActorContext } from "./mcp.js";

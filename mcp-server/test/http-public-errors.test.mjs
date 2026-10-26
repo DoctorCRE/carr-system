@@ -1,3 +1,4 @@
+// Test HTTP routes redact public errors and correlate diagnostic logs.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

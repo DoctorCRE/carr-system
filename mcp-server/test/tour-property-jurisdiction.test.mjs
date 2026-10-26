@@ -1,3 +1,4 @@
+// Tests property registration and jurisdiction authority validation.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { tourPropertyJurisdictionTools } from "../src/tour-property-jurisdiction.js";

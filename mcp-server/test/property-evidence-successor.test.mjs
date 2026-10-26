@@ -1,3 +1,4 @@
+// Tests admission of Tour property evidence and feedback.
 import test from 'node:test';
 import {assertAdmits} from './helpers/registry-admission.mjs';
 

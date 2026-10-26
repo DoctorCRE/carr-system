@@ -1,3 +1,4 @@
+// Apply deal progress proposed from email.
 import { sha256 } from './sha256.ts';
 import { ToolError } from './tool-error.ts';
 import type { Actor, Db, DelegatedHandler, LockDealField, ResolveEmailProposal, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';

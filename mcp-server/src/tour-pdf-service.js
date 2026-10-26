@@ -1,3 +1,4 @@
+// Prepare, store, and verify rendered tour PDFs.
 import latoRegular from "../assets/lato-regular.ttf";
 import latoBold from "../assets/lato-bold.ttf";
 import { inspectTourPdfProof, DELIVERABLE_QC_RULESET_VERSION } from "./deliverable-qc.js";

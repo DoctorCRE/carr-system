@@ -1,3 +1,4 @@
+// Define command supervisor admission states.
 export const V5_ADMISSION_CHECK_STATES = Object.freeze([
   "satisfied", "violated", "unobservable", "not_reached",
 ]);

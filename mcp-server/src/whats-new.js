@@ -1,3 +1,4 @@
+// Expose recent business changes and actions.
 import { personalScopeForActor } from './identity.js';
 
 const SECTIONS = ['deal_changes', 'lead_changes', 'next_actions', 'critical_dates',

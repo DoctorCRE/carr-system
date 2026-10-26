@@ -1,3 +1,4 @@
+// Test Deal Room records, collaboration, conflicts, and retries.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
