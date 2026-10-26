@@ -1,3 +1,4 @@
+// Run MCP test suites in isolated batches.
 import { readdir, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";

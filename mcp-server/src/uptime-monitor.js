@@ -1,3 +1,4 @@
+// Check service health and track uptime incidents.
 export const API_ORIGIN = "https://api.doctorcre.com";
 export const APP_ORIGIN = "https://app.doctorcre.com";
 export const STATE_KEY = "uptime.v1";
