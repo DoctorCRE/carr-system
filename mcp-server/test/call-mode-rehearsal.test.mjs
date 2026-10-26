@@ -48,6 +48,7 @@ const CALL = [
   ['Dell', 'I will call the Harbor lender this week.'],
   ['Dell', 'Next step for Gulf Imaging: confirm the floor plan with the architect by November 10, 2026.'],
   ['Joe', 'Yes, agreed on the Gulf Imaging floor plan.'],
+  ['Joe', 'Next step for Magnolia Surgery: order the space plan from the designer by November 14, 2026.'],
 ];
 
 let fixture, admin, database, pool, c, server, baseUrl, companion, root, session, deals = {};
@@ -117,7 +118,7 @@ before(async () => {
   const client = (await c.query("insert into client(party_id,status,created_by,updated_by) values($1,'fixture_active',$2,$2) returning id", [party, joe.id])).rows[0].id;
   for (const [name, phase] of [['Synthetic Bayside Dental Relocation', 'research'],
     ['Synthetic Harbor Clinic Expansion', 'site_selection'], ['Synthetic Pinecrest Lab Lease', 'site_selection'],
-    ['Synthetic Gulf Imaging Center', 'site_selection']]) {
+    ['Synthetic Gulf Imaging Center', 'site_selection'], ['Synthetic Magnolia Surgery Center', 'site_selection']]) {
     deals[name] = (await c.query(`insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by)
       values($1,$2,'lease',$3,'joe',$4,$4) returning id`, [name, client, phase, joe.id])).rows[0].id;
     await c.query("insert into deal_participant(deal_id,actor_id,role,set_by) values($1,$2,'lead',$2)", [deals[name], joe.id]);
@@ -130,7 +131,8 @@ before(async () => {
   for (const [name, text, date] of [['Synthetic Bayside Dental Relocation', 'Old Bayside step', '2026-10-01'],
     ['Synthetic Harbor Clinic Expansion', 'Old Harbor step', '2026-10-30'],
     ['Synthetic Pinecrest Lab Lease', 'Old Pinecrest step', '2026-10-30'],
-    ['Synthetic Gulf Imaging Center', 'Old Gulf step', '2026-10-01']]) {
+    ['Synthetic Gulf Imaging Center', 'Old Gulf step', '2026-10-01'],
+    ['Synthetic Magnolia Surgery Center', 'Old Magnolia step', '2026-10-30']]) {
     const current = await deal(name);
     await verb(joe, 'set-next-step', { deal: current.id, text, next_date: date, base_version: current.version });
   }
@@ -253,13 +255,14 @@ test('a recorded weekly call updates every confidently discussed card and leaves
   const harbor = await deal('Synthetic Harbor Clinic Expansion');
   const pinecrest = await deal('Synthetic Pinecrest Lab Lease');
   const gulf = await deal('Synthetic Gulf Imaging Center');
+  const magnolia = await deal('Synthetic Magnolia Surgery Center');
   const { calls } = await verb(joe, 'read-call-outcomes');
   assert.equal(calls.length, 1);
   const outcome = calls[0];
   const applied = (dealId, kind) => outcome.applied.find(a => a.deal_id === dealId && a.kind === kind);
   // The deterministic stand-in states all three plainly. Live Sonnet makes its
   // own call: whatever it did not apply must be waiting as an approval card.
-  for (const [target, kind] of [[bayside, 'phase_move'], [bayside, 'next_step'], [harbor, 'next_step'], [gulf, 'next_step']]) {
+  for (const [target, kind] of [[bayside, 'phase_move'], [bayside, 'next_step'], [harbor, 'next_step'], [gulf, 'next_step'], [magnolia, 'next_step']]) {
     if (applied(target.id, kind)) continue;
     assert.ok(SONNET, `${kind} on ${target.id} should have applied: ${JSON.stringify(outcome)}`);
     assert.ok(outcome.open_cards.some(card => card.deal_id === target.id && card.kind === kind), JSON.stringify(outcome.open_cards));
@@ -315,13 +318,23 @@ test('a recorded weekly call updates every confidently discussed card and leaves
     assert.equal((await deal('Synthetic Gulf Imaging Center')).version, restored.version);
   }
   const baysideStep = applied(bayside.id, 'next_step');
-  if (baysideStep) {
+  if (baysideStep && applied(bayside.id, 'phase_move')) {
+    // The call's phase move cleared Joe's overdue Bayside step before the new
+    // step landed, so the board showed no step: undo must not bring it back.
+    await verb(joe, 'undo-call-change', { candidate_id: baysideStep.candidate_id,
+      base_version: (await deal('Synthetic Bayside Dental Relocation')).version });
+    const restored = await deal('Synthetic Bayside Dental Relocation');
+    assert.equal(restored.next_step, null, 'undo revived a step the board had already hidden');
+    assert.equal(restored.next_date, null);
+  }
+  const magnoliaStep = applied(magnolia.id, 'next_step');
+  if (magnoliaStep) {
     // Joe replaced the step by hand after the call: undo refuses and keeps his edit.
-    const current = await deal('Synthetic Bayside Dental Relocation');
-    await verb(joe, 'set-next-step', { deal: bayside.id, text: 'Later Bayside step', next_date: '2026-11-12', base_version: current.version });
-    await assert.rejects(verb(joe, 'undo-call-change', { candidate_id: baysideStep.candidate_id,
-      base_version: (await deal('Synthetic Bayside Dental Relocation')).version }), error => error.payload?.error === 'newer_change_exists');
-    assert.equal((await deal('Synthetic Bayside Dental Relocation')).next_step, 'Later Bayside step');
+    const current = await deal('Synthetic Magnolia Surgery Center');
+    await verb(joe, 'set-next-step', { deal: magnolia.id, text: 'Later Magnolia step', next_date: '2026-11-20', base_version: current.version });
+    await assert.rejects(verb(joe, 'undo-call-change', { candidate_id: magnoliaStep.candidate_id,
+      base_version: (await deal('Synthetic Magnolia Surgery Center')).version }), error => error.payload?.error === 'newer_change_exists');
+    assert.equal((await deal('Synthetic Magnolia Surgery Center')).next_step, 'Later Magnolia step');
   }
   const phase = applied(bayside.id, 'phase_move');
   if (phase) {

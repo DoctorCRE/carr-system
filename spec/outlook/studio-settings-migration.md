@@ -63,7 +63,7 @@ There are no identity, address, profile or credential fallbacks.
 | `timezone` | IANA timezone used for local windows, reports and the daily send limit. |
 | `repo` | Absolute path of the checkout the Outlook jobs run from, canonicalized when loaded. Only `bin/install-outlook-intake.sh` creates or moves it, so pulling the canonical checkout ships no Outlook code. |
 | `profile` | Absolute Outlook profile directory. Only its HxStore and EFMData files enter the private snapshot. |
-| `vendor` | Absolute pinned decoder checkout. The decoder lives at `hxprobe/target/release/hxprobe` inside it. |
+| `vendor` | Absolute decoder build directory. The installer builds `vendor/hxprobe` with Cargo's target directory at `build/` inside it and installs the verified decoder at `hxprobe/target/release/hxprobe`. |
 | `copy_helper`, `driver`, `folder_guide`, `send_state` | Absolute paths to the granted helper, local UI driver, private folder guide and send ledger directory. |
 | `mcp_credentials`, `database_credentials` | Absolute file pointers outside the repository. They hold no credential values in settings. |
 | `executable_path` | Executable search path rendered into the three Outlook plists. |
