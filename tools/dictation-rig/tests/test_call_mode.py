@@ -1090,7 +1090,7 @@ class AutomaticApplyTests(unittest.TestCase):
         step = self.mark(*result["deal_updates"])["deal_updates"][0]["next_step"]
         self.assertEqual((step["apply"], step["review_reason"]), ("review", post_call.UNSAID_REVIEW))
 
-    def test_a_jev_check_that_throws_does_not_apply(self) -> None:
+    def test_a_missing_jev_check_stays_for_review_and_reports_why(self) -> None:
         post_call.write_private(self.session / post_call.CONTEXT_FILE, {"call_context": {
             "session": self.session.name, "workspace_kind": "team", "generated_at": "2026-10-26T14:00:00Z", "deals": [
                 {"id": "deal-a", "name": "Bayside Dental Relocation", "owner": "joe", "operating_state": "active",
@@ -1099,11 +1099,19 @@ class AutomaticApplyTests(unittest.TestCase):
         raw = {"schema_version": 1, "report": {"summary": "", "decisions": [], "open_questions": []},
                "joe_tasks": [], "dell_tasks": [], "draft_proposals": [], "review_questions": [],
                "deal_updates": [self.update(next_step=self.step())]}
-        with patch("post_call_jev.check_distillation", side_effect=RuntimeError("Jev exploded")):
+        log_path = Path(self.tmp.name) / "call-mode.log"
+        with patch.dict(sys.modules, {"post_call_jev": None}), patch.object(post_call, "LOG_PATH", log_path, create=True):
             post_call.process_session(self.session, distiller=lambda _request: raw)
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
         step = report["deal_updates"][0]["next_step"]
-        self.assertEqual((step["apply"], step["review_reason"]), ("review", "The automatic deal check did not run."))
+        self.assertEqual(report["deal_check"], {"status": "unavailable", "exception_class": "ModuleNotFoundError"})
+        self.assertEqual((step["apply"], step["review_reason"]),
+                         ("review", "Deal check unavailable (ModuleNotFoundError)."))
+        self.assertEqual(post_call.automatic_candidates(self.session), [])
+        log_lines = log_path.read_text().splitlines()
+        self.assertEqual(len(log_lines), 1)
+        self.assertRegex(log_lines[0],
+                         rf"^\d{{4}}-\d{{2}}-\d{{2}}T\d{{2}}:\d{{2}}:\d{{2}}Z deal check unavailable session={self.session.name} exception=ModuleNotFoundError$")
 
     def test_summary_detail_check_does_not_hold_the_change(self) -> None:
         update = self.update(next_step=self.step(), checks={"deal": {"pass": True}, "details": {"pass": False}})
