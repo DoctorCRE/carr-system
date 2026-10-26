@@ -10960,6 +10960,7 @@ declare
   v_id uuid;
   v_actor public.actor%rowtype;
   v_row ops.work_request%rowtype;
+  v_receipts integer;
   v_now timestamp with time zone := now();
 begin
   if p_exit_reason is null or btrim(p_exit_reason) = '' then
@@ -11002,6 +11003,11 @@ begin
   values (v_id, p_idempotency_key, p_base_version, p_base_version + 1, 'declined',
           p_exit_reason, null, v_actor.id, v_now)
   on conflict (idempotency_key) do nothing;
+  get diagnostics v_receipts = row_count;
+  if v_receipts <> 1 then
+    raise exception 'withdrawal_receipt_conflict: idempotency key % already holds a withdrawal receipt; nothing was declined',
+      p_idempotency_key;
+  end if;
 
   update ops.work_request w
      set state = 'declined', exit_reason = p_exit_reason, closed_at = v_now,
@@ -122666,6 +122672,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0982_decline_unstarted_program_work_request.sql	b9d3cc1923fff53794725307d647fc59452669e5246c6b7121e79282a64b2741	1970-01-01 00:00:00+00
 0983_fact_store.sql	13f97f25f7cdee1ed5dbcdeb2b45764e4018765edbad37c4b5e6c021e6f8ad04	1970-01-01 00:00:00+00
 0985_call_mode_auto_apply.sql	df11b5b4b02f9062ff62c77c692e39263f5d6be59a1884143487cdde21f93f3f	1970-01-01 00:00:00+00
+0986_decline_requires_its_receipt.sql	293e6e21f95341bf47a2b8a10a9ab0f4f27024358843fa7182056d4fe96f7868	1970-01-01 00:00:00+00
 \.
 
 
