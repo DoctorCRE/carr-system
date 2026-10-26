@@ -72,19 +72,19 @@ diff --git a/hxprobe/Cargo.lock b/hxprobe/Cargo.lock
  name = "once_cell"
  version = "1.21.4"
  source = "registry+https://github.com/rust-lang/crates.io-index"
-@@ -162,6 +198,12 @@
- version = "2.0.1"
- source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -164,6 +200,12 @@
  checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
-+
-+[[package]]
+ 
+ [[package]]
 +name = "simd-adler32"
 +version = "0.3.10"
 +source = "registry+https://github.com/rust-lang/crates.io-index"
 +checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
- 
- [[package]]
++
++[[package]]
  name = "smallvec"
+ version = "1.15.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
 diff --git a/hxprobe/Cargo.toml b/hxprobe/Cargo.toml
 --- a/hxprobe/Cargo.toml
 +++ b/hxprobe/Cargo.toml
@@ -671,6 +671,205 @@ new file mode 100644
 +    }
 +
 +}
+diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
+--- a/hxprobe/src/folder.rs
++++ b/hxprobe/src/folder.rs
+@@ -6,15 +6,42 @@
+ 
+ use std::collections::{BTreeMap, BTreeSet};
+ 
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum Parent {
++    /// A null reference: the folder sits at the top of its account.
++    Top,
++    Folder(u64),
++    /// No recognized reference, or cached revisions disagree.
++    Unknown,
++}
++
+ #[derive(Debug)]
+ pub struct Folder {
+     pub id: u64,
+     pub account_id: u64,
+     /// Conflicting names in cached revisions are left unresolved.
+     pub name: Option<String>,
++    pub parent: Parent,
+     pub block: usize,
+ }
+ 
++/// Offset of the parent reference in a folder object (2026-10 Studio build).
++const PARENT_AT: usize = 792;
++
++/// A typed folder reference in the same account, or ten zero bytes for none.
++fn parent(object: &[u8], account_id: u64) -> Parent {
++    match object.get(PARENT_AT..PARENT_AT + 10) {
++        Some(sig) if sig == [0; 10] => Parent::Top,
++        Some(_) => match object.get(PARENT_AT..).and_then(|r| reference(r, 0x004d, &[2, 0x02ac])) {
++            Some((id, account)) if account == account_id && id != u64_at(object, 10).unwrap_or(0) => {
++                Parent::Folder(id)
++            }
++            _ => Parent::Unknown,
++        },
++        None => Parent::Unknown,
++    }
++}
++
+ #[derive(Default)]
+ pub struct Index {
+     pub folders: BTreeMap<u64, Folder>,
+@@ -40,9 +67,23 @@
+     s
+ }
+ 
++/// Envelope tags observed per object class. A tag changes between Outlook
++/// builds while the class and object layout stay put: the first tag of each
++/// pair is the pinned upstream build, the second the 2026-10 Studio build.
++const FOLDER: (&[u16], u16) = (&[0x04c2, 0x04d8], 0x004d);
++const VIEW: (&[u16], u16) = (&[0x0430], 0x004f);
++const MESSAGE: (&[u16], u16) = (&[0x0740, 0x074e], 0x00ca);
++const METADATA: (&[u16], u16) = (&[0x02c8, 0x02b8], 0x00bf);
++
+ /// `[05 00, tag:u16, length:u32, 00 00, object...]`.
+ /// Length includes the ten-byte envelope, not its enclosing transaction.
+-fn envelopes(data: &[u8], tag: u16, class: u16) -> Vec<(usize, &[u8])> {
++fn envelopes<'a>(data: &'a [u8], (tags, class): (&[u16], u16)) -> Vec<(usize, &'a [u8])> {
++    let mut found: Vec<_> = tags.iter().flat_map(|&tag| tagged(data, tag, class)).collect();
++    found.sort_unstable_by_key(|(start, _)| *start);
++    found
++}
++
++fn tagged(data: &[u8], tag: u16, class: u16) -> Vec<(usize, &[u8])> {
+     let tag_bytes = tag.to_le_bytes();
+     let needle = [5, 0, tag_bytes[0], tag_bytes[1]];
+     memchr::memmem::find_iter(data, &needle)
+@@ -116,22 +157,27 @@
+ impl Index {
+     /// First pass: gather the catalog and message/view membership references.
+     pub fn observe(&mut self, block: usize, data: &[u8]) {
+-        for (_, object) in envelopes(data, 0x04c2, 0x004d) {
++        for (_, object) in envelopes(data, FOLDER) {
+             let Some((id, account_id)) = reference(object, 0x004d, &[2, 0x02ac]) else {
+                 continue;
+             };
+             let Some(name) = trailing_name(object) else {
+                 continue;
+             };
++            let up = parent(object, account_id);
+             let folder = self.folders.entry(id).or_insert_with(|| Folder {
+                 id,
+                 account_id,
+                 name: Some(name.clone()),
++                parent: up,
+                 block,
+             });
+             if folder.name.as_ref() != Some(&name) || folder.account_id != account_id {
+                 folder.name = None;
+             }
++            if folder.parent != up {
++                folder.parent = Parent::Unknown;
++            }
+             // Two copies of the folder's view-collection reference. Require
+             // each reference's duplicated key, not an arbitrary nearby u64.
+             for at in [160, 360] {
+@@ -145,7 +191,7 @@
+                 }
+             }
+         }
+-        for (_, object) in envelopes(data, 0x02c8, 0x00bf) {
++        for (_, object) in envelopes(data, METADATA) {
+             let Some(key) = message_key(object, 0x00bf) else {
+                 continue;
+             };
+@@ -167,7 +213,7 @@
+     /// Resolve IPM.Note anchor positions to observed folders within this block.
+     pub fn links(&self, data: &[u8], needle: &[u8]) -> BTreeMap<usize, BTreeSet<u64>> {
+         let mut links = BTreeMap::new();
+-        for (start, object) in envelopes(data, 0x0430, 0x004f) {
++        for (start, object) in envelopes(data, VIEW) {
+             let Some((_, owner)) = reference(object, 0x004f, &[4]) else {
+                 continue;
+             };
+@@ -175,7 +221,7 @@
+                 self.link_single_anchor(&mut links, start, object, needle, folders);
+             }
+         }
+-        for (start, object) in envelopes(data, 0x0740, 0x00ca) {
++        for (start, object) in envelopes(data, MESSAGE) {
+             let Some(key) = message_key(object, 0x00ca) else {
+                 continue;
+             };
+@@ -190,15 +236,10 @@
+         let starts: Vec<_> = memchr::memmem::find_iter(data, &signature(0x00ca))
+             .filter(|&p| message_key(&data[p..], 0x00ca).is_some())
+             .collect();
+-        let boundaries: BTreeSet<_> = [
+-            (0x04c2, 0x004d),
+-            (0x0430, 0x004f),
+-            (0x0740, 0x00ca),
+-            (0x02c8, 0x00bf),
+-        ]
+-        .into_iter()
+-        .flat_map(|(tag, class)| envelopes(data, tag, class).into_iter().map(|(p, _)| p - 10))
+-        .collect();
++        let boundaries: BTreeSet<_> = [FOLDER, VIEW, MESSAGE, METADATA]
++            .into_iter()
++            .flat_map(|kind| envelopes(data, kind).into_iter().map(|(p, _)| p - 10))
++            .collect();
+         for (i, &start) in starts.iter().enumerate() {
+             let next_envelope = boundaries
+                 .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
+@@ -394,7 +435,51 @@
+         assert_eq!(index.links(&expanded, &note())[&610], BTreeSet::from([51]));
+     }
+ 
++    /// A 2026-10 build folder: envelope tag 0x04d8 and a parent slot at +792.
++    fn current_folder(id: u64, account: u64, name: &str, parent: Option<(u64, u64)>) -> Vec<u8> {
++        let mut b = object(0x4d, id, 2, account, 840);
++        if let Some((pid, paccount)) = parent {
++            b[792..838].copy_from_slice(&object(0x4d, pid, 2, paccount, 46));
++        }
++        b.extend([1, 1, 1, 1, 0]);
++        b.extend(name.encode_utf16().chain([0]).flat_map(u16::to_le_bytes));
++        envelope(0x4d8, &b)
++    }
++
+     #[test]
++    fn current_build_tags_and_parent_references() {
++        let mut index = Index::default();
++        index.observe(0, &current_folder(50, 7, "Active Deals", None));
++        index.observe(0, &current_folder(51, 7, "Deal A", Some((50, 7))));
++        index.observe(0, &current_folder(52, 7, "Elsewhere", Some((50, 8))));
++        index.observe(0, &current_folder(53, 7, "Self", Some((53, 7))));
++        assert_eq!(index.folders[&50].parent, Parent::Top);
++        assert_eq!(index.folders[&51].parent, Parent::Folder(50));
++        assert_eq!(index.folders[&52].parent, Parent::Unknown);
++        assert_eq!(index.folders[&53].parent, Parent::Unknown);
++        // An older-layout folder has no parent slot to read.
++        index.observe(0, &folder(60, 61, "Inbox"));
++        assert_eq!(index.folders[&60].parent, Parent::Unknown);
++
++        let mut metadata = object(0xbf, 70, 0, 70, 120);
++        metadata[61..66].copy_from_slice(&[0, 9, 0, 46, 0]);
++        put64(&mut metadata, 112, 51);
++        index.observe(0, &envelope(0x2b8, &metadata));
++        let mut msg = object(0xca, 70, 0, 70, 100);
++        msg.extend(note());
++        assert_eq!(index.links(&envelope(0x74e, &msg), &note())[&110], BTreeSet::from([51]));
++    }
++
++    #[test]
++    fn moved_folder_revisions_leave_the_parent_unknown() {
++        let mut index = Index::default();
++        index.observe(0, &current_folder(51, 7, "Deal A", Some((50, 7))));
++        index.observe(1, &current_folder(51, 7, "Deal A", None));
++        assert_eq!(index.folders[&51].parent, Parent::Unknown);
++        assert_eq!(index.folders[&51].name.as_deref(), Some("Deal A"));
++    }
++
++    #[test]
+     fn conflicting_folder_names_are_not_silently_overwritten() {
+         let mut index = Index::default();
+         index.observe(0, &folder(50, 60, "Old"));
 diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 --- a/hxprobe/src/main.rs
 +++ b/hxprobe/src/main.rs
@@ -717,7 +916,20 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
          }
      }
  
-@@ -249,7 +257,13 @@
+@@ -227,7 +235,11 @@
+              id               INTEGER PRIMARY KEY, -- local store key
+              account_id       INTEGER NOT NULL,    -- local account key
+              name             TEXT,                -- NULL if revisions disagree
+-             block            INTEGER NOT NULL
++             block            INTEGER NOT NULL,
++             -- 'top' (no parent), 'folder' (parent_id is set) or 'unknown'
++             -- (no recognized reference, or revisions disagree).
++             parent_status    TEXT NOT NULL,
++             parent_id        INTEGER              -- may name an unlisted folder
+          );
+          CREATE TABLE messages (
+              id           INTEGER PRIMARY KEY,
+@@ -249,7 +261,13 @@
               sent_utc     TEXT,
               -- 1 when the subject came from another record in the same
               -- conversation, because this record stores none of its own.
@@ -732,7 +944,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
           );
           CREATE TABLE message_folders (
               message_id INTEGER NOT NULL REFERENCES messages(id),
-@@ -259,6 +273,28 @@
+@@ -259,6 +277,28 @@
           CREATE INDEX message_folders_folder ON message_folders(folder_id);
           CREATE INDEX messages_sent ON messages(sent_unix);
           CREATE INDEX messages_sender ON messages(sender);
@@ -761,7 +973,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
           CREATE VIRTUAL TABLE messages_fts USING fts5(
               sender, sender_name, recipients, subject, body,
               content='messages', content_rowid='id', tokenize='porter unicode61'
-@@ -314,9 +349,17 @@
+@@ -314,9 +354,17 @@
                  .filter(|t| Some(**t) != r.sender.as_deref())
                  .map(|t| t.to_string())
                  .collect();
@@ -781,7 +993,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
                  }
              }
  
-@@ -389,9 +432,80 @@
+@@ -389,19 +437,97 @@
          }
      }
  
@@ -864,7 +1076,26 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      println!("  {} folders; {with_folder}/{stored} messages linked ({multi_folder} with multiple observed folders)", folders.folders.len());
      let tx = db.transaction().expect("tx");
      {
-@@ -414,13 +528,13 @@
+         let mut ins_folder = tx
+             .prepare(
+-                "INSERT INTO folders(id,account_id,name,block) VALUES (?1,?2,?3,?4)"
++                "INSERT INTO folders(id,account_id,name,block,parent_status,parent_id)
++                 VALUES (?1,?2,?3,?4,?5,?6)"
+             )
+             .expect("prepare folders");
+         for f in folders.folders.values() {
+-            ins_folder.execute(rusqlite::params![f.id as i64, f.account_id as i64, f.name, f.block as i64])
++            let (status, parent) = match f.parent {
++                folder::Parent::Top => ("top", None),
++                folder::Parent::Folder(id) => ("folder", Some(id as i64)),
++                folder::Parent::Unknown => ("unknown", None),
++            };
++            ins_folder
++                .execute(rusqlite::params![f.id as i64, f.account_id as i64, f.name, f.block as i64, status, parent])
+                 .expect("insert folder");
+         }
+         let mut ins_link = tx
+@@ -414,13 +540,13 @@
                  "INSERT INTO messages
                     (block,sender,sender_name,recipients,subject,message_id,body,
                      html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
@@ -881,7 +1112,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
              ins.execute(rusqlite::params![
                  r.offset as i64,
                  r.sender,
-@@ -435,6 +549,10 @@
+@@ -435,6 +561,10 @@
                  if r.html.is_some() { "full" } else { "preview" },
                  r.sent_unix,
                  r.subject_inherited as i64,
@@ -892,7 +1123,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
              ])
              .expect("insert");
              let message_id = tx.last_insert_rowid();
-@@ -444,6 +562,54 @@
+@@ -444,6 +574,56 @@
              }
          }
      }
@@ -934,6 +1165,8 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 +            ("event_identities", events.identities.len()),
 +            ("events_decoded", events.events.len()),
 +            ("calendar_lifecycle_unsupported", events.events.len()),
++            ("folders", folders.folders.len()),
++            ("messages_with_folder", with_folder),
 +        ] {
 +            ins_meta.execute(rusqlite::params![key, value as i64]).expect("insert meta");
 +        }
@@ -947,7 +1180,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      tx.commit().expect("commit");
  
      db.execute_batch(
-@@ -474,6 +638,10 @@
+@@ -474,6 +654,10 @@
  /// Combine a later revision of a message into the copy already held.
  fn merge(prev: &mut record::Record, r: record::Record) {
      prev.folder_ids.extend(r.folder_ids);
@@ -958,7 +1191,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      if prev.subject.is_none() {
          prev.subject = r.subject;
      }
-@@ -491,11 +659,14 @@
+@@ -491,11 +675,14 @@
          (Some(a), Some(b)) => b.len() > a.len(),
          _ => false,
      };
@@ -975,7 +1208,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      }
  }
  
-@@ -504,7 +675,9 @@
+@@ -504,7 +691,9 @@
  
  usage:
    hxprobe blocks <file>              verify every block, report coverage
@@ -986,7 +1219,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
    hxprobe map    <file> [n]          dump the field map for n records (0 = stats)
    hxprobe find   <file> <term> [n]   show records whose text contains <term>
  
-@@ -521,7 +694,11 @@
+@@ -521,7 +710,11 @@
  
      match args[1].as_str() {
          "blocks" => cmd_blocks(&args[2]),
