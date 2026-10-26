@@ -113,11 +113,11 @@ function validate(args, ToolError) {
   if (!Array.isArray(args.acceptance_criteria) || !args.acceptance_criteria.length || args.acceptance_criteria.length > 12)
     invalid("acceptance_criteria", "supply an array of 1 through 12 criteria, each with a unique uppercase id and non-empty text of at most 500 characters");
   const ids = new Set();
-  for (const [index, criterion] of args.acceptance_criteria.entries()) {
+  for (const criterion of args.acceptance_criteria) {
     if (!criterion || typeof criterion !== "object" || Object.keys(criterion).some(key => key !== "id" && key !== "text") ||
         !text(criterion.id) || !CRITERION_ID.test(criterion.id.trim()) || !text(criterion.text) || text(criterion.text).length > 500 ||
         ids.has(criterion.id.trim()))
-      throw new ToolError({ error: "invalid_acceptance_criteria", field: `acceptance_criteria[${index}]`,
+      throw new ToolError({ error: "invalid_acceptance_criteria", field: "acceptance_criteria",
         hint: "provide only id and text; id must be unique uppercase letters, digits, or hyphens, and text must be non-empty and at most 500 characters" });
     ids.add(criterion.id.trim());
   }
