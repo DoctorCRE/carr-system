@@ -185,7 +185,7 @@ test("identity merges, retrieval, board answers and partner-only deal transition
   assert.equal(TOOLS["confirm-merge"].humanOnly, true);
   const flagged = Object.keys(TOOLS).filter(name => TOOLS[name].humanCallerOnly === true);
   assert.deepEqual(flagged.sort(), ["answer-board-question", "approve-retrieval-proposals", "cancel-pending-deal", "commit-winning-property",
-    "confirm-merge", "record-deal-closing", "retire-retrieval-curation"]);
+    "confirm-email-deal-progress", "confirm-merge", "record-deal-closing", "retire-retrieval-curation"]);
 });
 
 test("confirm-merge refuses the unattended actor before database access", async () => {

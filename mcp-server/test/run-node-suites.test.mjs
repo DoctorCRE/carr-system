@@ -21,7 +21,7 @@ test("collection works with only ordinary suites", () => {
 });
 
 test("private PostgreSQL clusters run alone without dropping or duplicating suites", () => {
-  const postgres = ["a02-rule-enforcement-postgres.test.mjs", "confirm-merge-schema.test.mjs",
+  const postgres = ["email-deal-progress-postgres.test.mjs", "a02-rule-enforcement-postgres.test.mjs", "confirm-merge-schema.test.mjs",
     "journey-one-clock-input-store.v5.test.mjs", "journey-one-clock-store.v5.test.mjs",
     "lease-radar-postgres.test.mjs", "local-deals-store.test.mjs", "whats-new-store.test.mjs",
     "self-closing-records-sql.test.mjs"];
