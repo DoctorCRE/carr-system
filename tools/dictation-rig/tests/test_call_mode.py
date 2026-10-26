@@ -647,6 +647,28 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0]["phase_move"]["candidate_status"], "skipped")
         self.assertIsNotNone(post_call.retention_ready(self.session, "report-hash"))
 
+    def test_phase_proposals_reject_unsupported_shapes_and_quarantine_unknown_deals(self) -> None:
+        for phase in ({}, "legal", {"value": "closed"}, {"value": "invoiced"},
+                      {"value": "not-a-phase"}, {"value": True}, {"value": []},
+                      {"value": "legal", "base_event_id": None}):
+            with self.subTest(phase=phase):
+                (self.session / post_call.REPORT_FILE).unlink(missing_ok=True)
+                post_call.store_context(self.session, self.context)
+                output = self.output(deal_updates=[{
+                    "deal_id": "deal-a", "summary": "Update", "participant_ids": [],
+                    "evidence": "Move the deal to legal", "phase_move": phase,
+                }])
+                self.assertEqual(post_call.process_session(self.session, distiller=lambda _request: output)["state"], "blocked")
+                self.assertFalse((self.session / post_call.REPORT_FILE).exists())
+        output = self.output(deal_updates=[{
+            "deal_id": "unknown-deal", "summary": "Update", "participant_ids": [],
+            "evidence": "Move the deal to legal", "phase_move": {"value": "legal"},
+        }])
+        self.assertEqual(post_call.process_session(self.session, distiller=lambda _request: output)["state"], "ready_review")
+        report = post_call.report_for_deal_room(self.session)["report"]
+        self.assertEqual(report["deal_updates"], [])
+        self.assertTrue(any("unknown-deal" in row["question"] for row in report["review_questions"]))
+
     def test_maximum_length_next_step_keeps_activity_summary_unchanged(self) -> None:
         post_call.store_context(self.session, self.context)
         output = self.output(deal_updates=[{

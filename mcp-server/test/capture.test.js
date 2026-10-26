@@ -109,6 +109,12 @@ class CaptureFake {
     }
     if (sql.includes("capture:post-call-phase-base"))
       return { rows: this.phaseBase ? [{ event_id: this.phaseBase }] : [] };
+    if (sql.includes("dealroom:base-event")) return { rows: [{ id: params[0] }] };
+    if (sql.includes("dealroom:latest-field-event"))
+      return { rows: this.phaseBase !== params[2] ? [{ event_id: this.phaseBase,
+        actor_id: ids.dell, actor: "dell", value: "closing" }] : [] };
+    if (sql.includes("dealroom:create-conflict"))
+      return { rows: [{ id: "60000000-0000-0000-0000-000000000001", status: "open" }] };
     if (sql.includes("capture:post-call-context") || sql.includes("capture:post-call-legacy-context") ||
         sql.includes("capture:call-context") ||
         sql.includes("capture:tool-call-context")) {
@@ -479,6 +485,12 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
   const session = await r.handler.fetch(new Request("https://worker.test/capture/session",
     { headers: { authorization: `Bearer ${token}` } }), {});
   assert.equal((await session.json()).candidate_statuses[0].status, "pending");
+  assert.equal(db.events.length, 0);
+  await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
+    idempotency_key: "phase-stale-resolution", candidate_id: receipt.candidate_ids[0], accept: true,
+  }), error => error instanceof ToolError && error.payload.conflict?.value_a === "closing");
+  assert.equal((await TOOLS["capture-queue"].handler(db, joe, {})).candidates[0].id,
+    receipt.candidate_ids[0]);
   assert.equal(db.events.length, 0);
   const changed = await post(r.handler, "/capture/candidates", {
     ...batch, items: [{ ...item, payload: { ...item.payload, value: "closing" } }],

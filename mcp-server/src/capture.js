@@ -10,6 +10,7 @@ export const CAPTURE_SESSION_TTL_SECONDS = 24 * 60 * 60;
 const STATES = ["recording", "transcribing", "distilling", "done"];
 const KINDS = new Set(["phase_move", "next_step", "new_deal", "activity", "meeting_record"]);
 const POST_CALL_KINDS = new Set(["assigned_action", "email_draft"]);
+const POST_CALL_PHASES = new Set(["pending", "research", "site_selection", "negotiation", "legal", "due_diligence", "closing"]);
 
 async function sha256(value) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -206,11 +207,18 @@ function validateCandidates(body) {
 
 function validatePostCallLegacyItems(items) {
   for (const item of items) {
-    if (!["activity", "next_step"].includes(item.kind))
-      return { error: "post_call_legacy_kind_forbidden", allowed: ["activity", "next_step"] };
+    if (!["activity", "next_step", "phase_move"].includes(item.kind))
+      return { error: "post_call_legacy_kind_forbidden", allowed: ["activity", "next_step", "phase_move"] };
     if (Object.keys(item).some(key => !["kind", "payload", "evidence_quote", "confidence"].includes(key)) ||
         item.evidence_quote.length > 500)
       return { error: "invalid_post_call_candidate" };
+    if (item.kind === "phase_move") {
+      if (Object.keys(item.payload).some(key => !["deal", "field", "value"].includes(key)) ||
+          !isUuid(item.payload.deal) || item.payload.field !== "phase" ||
+          !POST_CALL_PHASES.has(item.payload.value))
+        return { error: "invalid_post_call_phase_move" };
+      continue;
+    }
     if (item.kind === "next_step") {
       if (Object.keys(item.payload).some(key => !["deal", "text", "next_date"].includes(key)) ||
           !isUuid(item.payload.deal) || typeof item.payload.text !== "string" ||
@@ -289,7 +297,7 @@ async function candidates(request, dependencies) {
           `select 1 from capture_post_call_report where session_id=$1
             /* capture:post-call-legacy-report-lock */`, [session.id]);
         if (filed.rows.length) refuse(409, { error: "post_call_report_filed" });
-        const refs = body.items.map(item => item.kind === "next_step" ? item.payload.deal : item.payload.ref);
+        const refs = body.items.map(item => item.kind === "activity" ? item.payload.ref : item.payload.deal);
         const exact = await client.query(
           `select deal_id from capture_call_context($1::uuid[])
             /* capture:post-call-legacy-context */`, [refs]);
@@ -303,6 +311,17 @@ async function candidates(request, dependencies) {
           /* capture:candidates-prior */`, [session.id, body.idempotency_key]);
       if (prior.rows.length && prior.rows[0].batch_hash !== batchHash)
         refuse(409, { error: "key_reuse" });
+      const items = structuredClone(body.items);
+      if (session.post_call && !prior.rows.length) {
+        for (const item of items.filter(item => item.kind === "phase_move")) {
+          const latest = await client.query(
+            `select id as event_id from event
+              where subject_type='deal' and subject_id=$1 and field='phase'
+              order by recorded_at desc, id desc limit 1
+              /* capture:post-call-phase-base */`, [item.payload.deal]);
+          item.payload.base_event_id = latest.rows[0]?.event_id || null;
+        }
+      }
       await client.query(
         `insert into capture_candidate
            (session_id, idempotency_key, batch_hash, item_index, kind, payload, evidence_quote, confidence)
@@ -311,7 +330,7 @@ async function candidates(request, dependencies) {
            from jsonb_array_elements($4::jsonb) with ordinality as item(value, ordinality)
          on conflict (session_id, idempotency_key, item_index) do nothing
          /* capture:candidates-insert */`,
-        [session.id, body.idempotency_key, batchHash, JSON.stringify(body.items)]);
+        [session.id, body.idempotency_key, batchHash, JSON.stringify(items)]);
       return client.query(
         `select id, item_index from capture_candidate
           where session_id=$1 and idempotency_key=$2 order by item_index
