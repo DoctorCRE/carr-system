@@ -1,3 +1,4 @@
+// Test governed correspondence consent, receipts, and read-only boundaries.
 import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 // V5-J103 governed correspondence store: the verb layer, against a fake record
 // layer. The database half is proved by governed-correspondence-store-postgres.sql

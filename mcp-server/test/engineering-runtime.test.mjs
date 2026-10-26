@@ -1,3 +1,4 @@
+// Test engineering runtime envelopes, admission, plans, receipts, and closure.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readSystemWorkCensus, SYSTEM_WORK_LEGS } from "../src/system-work-census.v5.js";

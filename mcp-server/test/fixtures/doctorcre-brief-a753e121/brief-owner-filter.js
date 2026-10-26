@@ -1,3 +1,4 @@
+// Filter brief rows by owner and mount the owner filter control.
 import { briefPreferences } from './brief-preferences.js';
 import { OWNER_FILTERS } from './owner-filters.js';
 

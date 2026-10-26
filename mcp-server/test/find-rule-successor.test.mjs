@@ -1,3 +1,4 @@
+// Test rule lookup admission alongside human identity merge.
 import test from 'node:test';
 import {assertAdmits} from './helpers/registry-admission.mjs';
 

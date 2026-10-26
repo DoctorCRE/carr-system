@@ -1,3 +1,4 @@
+// Build the morning brief view from payload, events, and preferences.
 import { filterBriefOwners } from './brief-owner-filter.js';
 import { normalizeChangeEvent, compareReceipts } from './change-receipts.mjs';
 import { toDay } from './calendar-model.js';
