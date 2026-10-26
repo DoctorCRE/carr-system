@@ -261,6 +261,8 @@ export function tourPropertyJurisdictionTools({ withEnvelope, writeEvent, ToolEr
     "append-tour-entrance-verification-receipt": {
       write: true,
       authorityOnly: true,
+      humanOnly: true,
+      humanCallerOnly: true,
       description: "Authority-only append of one immutable human entrance-verification receipt. The database requires a reviewed entrance, driveway, or parking-access candidate. This is not route, map, publication, or client-promotion authorization.",
       inputSchema: schema({ ...idempotencyProperty,
         property_id: { type: "string" }, coordinate_candidate_id: { type: "string" }, verified_at: { type: "string" },
