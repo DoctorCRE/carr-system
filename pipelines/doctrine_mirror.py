@@ -8,6 +8,7 @@ import errno
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -17,6 +18,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, TextIO
+from uuid import uuid4
 
 
 EXCLUDED_TABLES = frozenset({"sensitive_blob", "tool_call"})
@@ -150,10 +152,7 @@ def atomic_swap_tree(fresh_tree: str | os.PathLike[str], target: str | os.PathLi
     fresh = Path(fresh_tree)
     destination = Path(target)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    previous = destination.with_name(destination.name + ".prev")
-
-    if previous.exists():
-        _remove_tree(previous)
+    previous = destination.with_name(f"{destination.name}.prev-{uuid4().hex}")
     moved_old = False
     try:
         if destination.exists():
@@ -165,8 +164,16 @@ def atomic_swap_tree(fresh_tree: str | os.PathLike[str], target: str | os.PathLi
             previous.rename(destination)
         raise
     else:
-        if moved_old:
-            _remove_tree(previous)
+        retired_pattern = re.compile(re.escape(destination.name) + r"\.prev-[0-9a-f]{32}")
+        for retired in destination.parent.iterdir():
+            if retired.name != destination.name + ".prev" and not retired_pattern.fullmatch(retired.name):
+                continue
+            try:
+                _remove_tree(retired)
+            except OSError as error:
+                if error.errno != errno.EDEADLK:
+                    raise
+                print(f"mirror cleanup deferred at {retired}: {error}", file=sys.stderr)
 
 
 def build_and_swap(

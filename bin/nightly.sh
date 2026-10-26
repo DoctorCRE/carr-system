@@ -12,12 +12,12 @@ esac
 unset CARR_VAULT CARR_EXPORT_LIVE CARR_DRIVE_RECOVERY
 cd "$REPO" || exit 1
 mkdir -p "$REPO/out"
-LOG="$REPO/out/nightly.log"
 source "$REPO/bin/run-lock.sh"
 SERVICE=nightly-record-layer
 [ "${1:-}" = --exports ] && SERVICE=nightly-exports-daytime-retry
 carr_take_lock "$SERVICE" || exit 0
-trap 'carr_release_lock' EXIT
+RUN_LOG="$(python3 "$REPO/ops/nightly-log.py" begin "$REPO" "$SERVICE")" || exit $?
+trap 'run_rc=$?; python3 "$REPO/ops/nightly-log.py" finish "$RUN_LOG" "$run_rc"; carr_release_lock' EXIT
 trap 'exit 143' INT TERM HUP
 source "$REPO/bin/routine-credential-env.sh"
 carr_clear_routine_db_env
@@ -32,8 +32,9 @@ step() {
   local label="$1"; shift
   local key="nightly.$(print -r -- "${label%% \(*}" | tr 'A-Z ' 'a-z-' | tr -cd 'a-z0-9.-')"
   carr_step_timeout_prefix "$(carr_step_timeout_for "$label")"
-  carr_routine_exec /bin/zsh "$REPO/bin/run-scheduled.sh" "$SERVICE" "$key" \
-    "${CARR_STEP_TIMEOUT_ARGV[@]}" "$@" >> "$LOG" 2>&1
+  carr_routine_exec python3 "$REPO/ops/nightly-log.py" step "$RUN_LOG" "$label" \
+    /bin/zsh "$REPO/bin/run-scheduled.sh" "$SERVICE" "$key" \
+    "${CARR_STEP_TIMEOUT_ARGV[@]}" "$@"
   LAST_STEP_RC=$?
   case "$LAST_STEP_RC" in
     0|78) ;;
