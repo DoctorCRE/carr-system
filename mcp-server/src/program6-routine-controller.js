@@ -93,6 +93,7 @@ export function createProgram6RoutineController(overrides = {}) {
         if (route.tool === "current-work-requests") {
           try {
             const result = await dependencies.callToolFn(env, actor, route.tool, {}, "full");
+            if (url.searchParams.get("advisory") !== "jev") return json({ ok: true, data: result });
             return json({ ok: true, data: result, advisory: await needsJoeAdvisory(result, {
               apiKey: env.TYPESAFE_API_KEY, fetchImpl: dependencies.jevFetch,
             }) });
