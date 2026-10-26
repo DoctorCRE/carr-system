@@ -38,7 +38,7 @@ class ReviewGate(unittest.TestCase):
     def test_approval_requires_recognized_third_line_reviewer(self):
         pr = {"changed_files": 0, "additions": 151, "deletions": 0, "head": {"sha": "abc"}}
         for reviewer, expected in [("grok", True), ("Grok", True), ("Grok internal review", True),
-                                   ("the Dot", True), ("orchestrator re-pin", True),
+                                   ("the Dot", True), ("orchestrator re-pin", True), ("Claude", True), ("Claude (Opus subagent)", True), ("Claudette", False),
                                    ("builder", False), ("", False), ("groking", False), ("the Dot extra", False)]:
             with self.subTest(reviewer=reviewer):
                 body = f"VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: {reviewer}"
