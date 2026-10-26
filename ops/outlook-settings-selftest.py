@@ -170,7 +170,7 @@ class SettingsTest(unittest.TestCase):
         settings = load_settings(self.home)
         self.assertEqual((settings.owner, settings.account, settings.internal_domain),
                          ('joe', 'joe.bookout@carr.us', 'carr.us'))
-        self.assertEqual(settings.repo, repo)
+        self.assertEqual(settings.repo, self.home / 'carr-local/outlook-repo')
         self.assertEqual(settings.services, ('intake', 'refresh', 'triage'))
         self.assertIn('outlook settings valid:', done.stdout)
         self.assertFalse(settings.mcp_credentials.exists())

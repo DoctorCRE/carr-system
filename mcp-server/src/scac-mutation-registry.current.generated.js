@@ -740,7 +740,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "decline-work-request": {
     "ingress_key": "mcp-tool:decline-work-request",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "schema_digest": "29f455aa5bcc4811e1108550502be5589c6841d278a8921609dd19e04c068e62",
+    "schema_digest": "896e1e28e273119a2d95408f80f6f177ccfc70a1e379546edf8a1795fdd06ee9",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -1441,6 +1441,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "d91399460e294020a3d779fe4a2689968492e9766d385dd4a6e84574615420d3",
     "write": true,
     "human_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "propose-email-lead": {
+    "ingress_key": "mcp-tool:propose-email-lead",
+    "source_locator": "mcp-server/src/email-lead-proposal.js",
+    "schema_digest": "4ec94c09f595baa72fd5c6d82c7f1bab50f656d58d6e6fd6543c765509f33e25",
+    "write": true,
+    "human_only": false,
     "authority_only": false,
     "delegates_to": []
   },
