@@ -118,23 +118,74 @@ test("authorization refusal is returned before a registered mutation and tool er
   assert.equal(calls.length, 0);
 });
 
-test("current GET never requests Jev or schedules annotation even with vendor credentials", async () => {
-  const calls = [];
+test("current GET preserves the canonical queue when Jev credentials are unavailable", async () => {
   const canonical = { ok: true, items: [{ human_ref: REF, state: "ready" }] };
-  const controller = createProgram6RoutineController({
-    callToolFn: async (_env, _actor, name) => {
-      calls.push(name);
-      assert.equal(name, "current-work-requests");
+  const { controller } = subject({ callToolFn: async () => canonical });
+  const response = await controller.fetch(request("/api/system-work/current"), {}, {}, ACTOR, SESSION);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.data, canonical);
+  assert.equal(body.advisory.schema, "jev_c13_decision_queue_advisory/v1");
+  assert.equal(body.advisory.status, "unavailable");
+  assert.equal(body.advisory.reason, "missing_credentials");
+  assert.deepEqual(body.advisory.items, []);
+});
+
+test("current GET returns vendor advice beside unchanged authorized data", async () => {
+  const canonical = { ok: true, items: [{ human_ref: REF, title: "Synthetic ready decision", state: "ready",
+    source: { label: "Synthetic", freshness: "current" }, next_human_action: "Review the synthetic acceptance criteria" }],
+    next_human_action: { effect: "none" } };
+  const before = structuredClone(canonical);
+  const { controller, calls } = subject({
+    callToolFn: async (_env, actor, name, args, profile) => {
+      calls.push({ actor, name, args, profile });
       return canonical;
     },
+    jevFetch: async () => Response.json({ model: "jev-1.13.0", answers: {
+      [`item_0_${REF}_class`]: { type: "choice", choice: `0|${REF}|decision_ready`, confidence: 0.9,
+        probabilities: { [`0|${REF}|decision_ready`]: 0.9, [`0|${REF}|information_needed`]: 0.025,
+          [`0|${REF}|blocked`]: 0.025, [`0|${REF}|routine_review`]: 0.025, [`0|${REF}|unclear`]: 0.025 } },
+      [`item_0_${REF}_priority`]: { type: "noul", noul: 0.8 },
+      [`item_0_${REF}_relevance`]: { type: "noul", noul: 0.7 },
+      [`item_0_${REF}_ambiguity`]: { type: "noul", noul: 0.1 },
+    } }),
   });
   const waits = [];
-  for (let i = 0; i < 2; i++) {
-    const response = await controller.fetch(request("/api/system-work/current"),
-      { TYPESAFE_API_KEY: "fake" }, { waitUntil: promise => waits.push(promise) }, ACTOR, SESSION);
-    assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { ok: true, data: canonical });
-  }
-  assert.deepEqual(calls, ["current-work-requests", "current-work-requests"]);
+  const response = await controller.fetch(request("/api/system-work/current?tenant=other&state=ready"),
+    { TYPESAFE_API_KEY: "synthetic-key" }, { waitUntil: value => waits.push(value) }, ACTOR, SESSION);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.data, before);
+  assert.deepEqual(canonical, before);
+  assert.equal(body.advisory.status, "available");
+  assert.equal(body.advisory.items[0].attention_class, "decision_ready");
+  assert.deepEqual(calls, [{ actor: ACTOR, name: "current-work-requests", args: {}, profile: "full" }]);
   assert.deepEqual(waits, []);
+});
+
+test("vendor failure cannot fail the authorized queue read", async () => {
+  const canonical = { ok: true, items: [{ human_ref: REF, title: "Synthetic decision", state: "ready",
+    source: { label: "Synthetic", freshness: "current" }, next_human_action: "Review the synthetic record" }] };
+  let attempts = 0;
+  const { controller } = subject({ callToolFn: async () => canonical,
+    jevFetch: async () => { attempts++; throw new Error("private synthetic diagnostics"); } });
+  const response = await controller.fetch(request("/api/system-work/current"),
+    { TYPESAFE_API_KEY: "synthetic-key" }, {}, ACTOR, SESSION);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.data, canonical);
+  assert.equal(body.advisory.status, "unavailable");
+  assert.equal(JSON.stringify(body).includes("private synthetic diagnostics"), false);
+  assert.equal(attempts, 1);
+});
+
+test("canonical read failure remains a failure and sends no vendor request", async () => {
+  let attempts = 0;
+  const { controller } = subject({ callToolFn: async () => { throw new Error("canonical read failure"); },
+    jevFetch: async () => { attempts++; return Response.json({}); } });
+  const response = await controller.fetch(request("/api/system-work/current"),
+    { TYPESAFE_API_KEY: "synthetic-key" }, {}, ACTOR, SESSION);
+  assert.equal(response.status, 500);
+  assert.deepEqual(await response.json(), { error: "system_work_read_failed" });
+  assert.equal(attempts, 0);
 });
