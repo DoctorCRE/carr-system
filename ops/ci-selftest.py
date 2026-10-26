@@ -587,12 +587,6 @@ UNCOLLECTED_BY_DECISION = {
         "store, drives 20 concurrent sessions, and runs for 15 minutes by "
         "default. Network, database and wall-clock all disqualify it from a "
         "merge gate; it is run deliberately before a release.",
-    "tools/dictation-rig/tests/test_call_mode.py":
-        "Offline and correct, but not evaluated by this unit — it is a "
-        "unittest package under tools/dictation-rig/tests/ that this lane did "
-        "not run or vouch for. Named here so it is a known gap with an owner "
-        "rather than an invisible one; collecting it is a follow-up that must "
-        "run it first.",
     "tools/doc-convo/bin/test-brain-stream.sh":
         "Not evaluated by this unit. It lives in a bin/ directory beside the "
         "convo server rather than in a tests/ directory, and the three "
