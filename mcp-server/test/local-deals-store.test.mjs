@@ -1099,6 +1099,10 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         const reads = await readInvoiceDeals();
         const baseline = JSON.parse(readFileSync(snapshotPath, 'utf8'))[outcome || 'open'];
         for (const [name, result] of Object.entries(reads)) {
+          if (name === 'deal-board' && outcome) {
+            assert.deepEqual(result.deals, [], 'closed deals leave the open pipeline');
+            continue;
+          }
           if (name === 'deal-room-board' && outcome) {
             assert.deepEqual(result.deals, [], 'closed deals leave the working list');
             assert.deepEqual(result.closed_deals.map(row => Object.fromEntries(
@@ -1265,12 +1269,12 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.deepEqual(await TOOLS['deal-board'].handler(c), { deals: [] });
       await c.query('reset role');
       await fixture(false);
-      await c.query("update deal set outcome='won',phase='closed',operating_state='parked',parking_reason='other',parking_note='Synthetic pause',parked_at=now(),parked_by=$1 where id=$2", [actor.id, id(4)]);
+      await c.query("update deal set operating_state='parked',parking_reason='other',parking_note='Synthetic pause',parked_at=now(),parked_by=$1 where id=$2", [actor.id, id(4)]);
       await c.query('set local role carr_reader');
       const row = (await TOOLS['deal-board'].handler(c)).deals[0];
       assert.equal(row.id, id(4));
       assert.equal(row.client_name, 'Synthetic Practice');
-      assert.equal(row.phase_sort, 4);
+      assert.equal(row.phase_sort, 1);
       assert.equal(row.operating_state, 'parked');
       assert.equal(row.parking_note, 'Synthetic pause');
       assert.equal(row.invoiced_on, null);

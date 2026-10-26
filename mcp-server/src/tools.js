@@ -3735,7 +3735,7 @@ export const TOOLS = {
       b.phase, b.phase_sort, b.segment, b.outcome, b.lead_owner, b.last_touch, b.notes_path,
       d.operating_state, d.parking_note, to_jsonb(d.invoiced_on)#>>'{}' as invoiced_on,
       to_jsonb(d.closed_on)#>>'{}' as closed_on, d.lane
-      from v_deal_board b join v_deal_room_board d on d.id=b.id
+      from v_deal_board b join v_open_deal_room_board d on d.id=b.id
       order by b.phase_sort, b.name /* dealboard:operating-state */`)).rows }),
   },
 
@@ -3844,7 +3844,7 @@ export const TOOLS = {
             and ($3::uuid is null or account_client_id=$3::uuid)
           order by started_at desc limit 1`,
         [actor.slug, workspace, args.account_client_id || null]);
-      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows.map(d => ({ ...d, short_name: shortDealHeading(d) })), closed_deals: closedDeals.rows.filter(d => d.outcome === 'won' || !d.outcome && (d.closed_on || d.invoiced_on)), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
+      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows.map(d => ({ ...d, short_name: shortDealHeading(d) })), closed_deals: closedDeals.rows.filter(d => d.outcome !== 'lost'), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
         open_session: session.rows[0] || null };
     },
   },
