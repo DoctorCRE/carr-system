@@ -1,3 +1,4 @@
+// Test agent profile roster reads.
 import test from "node:test";
 import assert from "node:assert/strict";
 
