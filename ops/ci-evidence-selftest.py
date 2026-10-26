@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Tests CI evidence: hosted verdict, canary reuse and per-program records."""
 import copy
 import json
 import sys

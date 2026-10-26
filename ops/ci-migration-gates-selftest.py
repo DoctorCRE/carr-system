@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Tests the DB gate runner: isolation, overlap, shard coverage and records."""
 import importlib.util
 from pathlib import Path
 import socket
