@@ -33,7 +33,7 @@ function acceptanceProse(criteria) {
     item && typeof item === "object" && typeof item.text === "string" ? [item.text] : []);
 }
 
-function normalizeDigest(value) {
+export function normalizeRuleMapDigest(value) {
   const digest = String(value || "").trim().toLowerCase().replace(/^sha256:/, "");
   if (!/^[0-9a-f]{64}$/.test(digest)) return null;
   return `sha256:${digest}`;
@@ -78,7 +78,7 @@ export async function deriveRuleDeliverySource({
   packIndex,
   mapDigest,
 }) {
-  const installedDigest = normalizeDigest(mapDigest);
+  const installedDigest = normalizeRuleMapDigest(mapDigest);
   if (!installedDigest) throw new TypeError("one coherent installed rule map digest is required");
   const storedPlan = closedPlan(plan);
   if (!/^WR-[0-9]{1,12}$/.test(storedPlan.work_request_ref)
@@ -134,8 +134,4 @@ export async function deriveRuleDeliverySource({
     required_packs: matched.map(item => item.pack),
   };
   return { ...projection, contract_digest: await ruleDeliverySourceDigest(projection) };
-}
-
-export function normalizeRuleMapDigest(value) {
-  return normalizeDigest(value);
 }

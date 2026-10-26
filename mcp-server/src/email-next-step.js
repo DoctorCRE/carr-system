@@ -1,5 +1,6 @@
-import { createHash } from 'node:crypto';
+import { sha256 } from './sha256.ts';
 import { isCalendarDate } from './calendar-date.ts';
+import { ToolError } from './tool-error.ts';
 
 const properties = {
   deal: { type: 'string', format: 'uuid' },
@@ -13,7 +14,7 @@ const schema = extra => ({ type: 'object', additionalProperties: false,
   properties: { ...properties, ...extra },
   required: [...Object.keys(properties).filter(key => key !== 'owner'), ...Object.keys(extra)] });
 
-export function emailNextStepTools({ ToolError, withEnvelope, writeEvent, lockDealField, setNextStep, setNextAction }) {
+export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, setNextStep, setNextAction }) {
   const fail = error => { throw new ToolError({ error }); };
   async function proposal(c, args, lock = false) {
     if (!args.text.trim() || !isCalendarDate(args.next_date) || args.next_date.startsWith('0000'))
@@ -40,8 +41,8 @@ export function emailNextStepTools({ ToolError, withEnvelope, writeEvent, lockDe
       current_next_step: row.current_next_step, current_next_date: row.current_next_date,
       ...(owner === 'dell' ? { current_owner_actions: currentOwnerActions } : {}),
       source, requires_confirmation: true };
-    const digest = createHash('sha256').update(JSON.stringify({ ...result,
-      activity_version: row.activity_version, captured_body: row.detail })).digest('hex');
+    const digest = sha256(JSON.stringify({ ...result,
+      activity_version: row.activity_version, captured_body: row.detail }));
     return { ...result, proposal_digest: `sha256:${digest}` };
   }
   return {

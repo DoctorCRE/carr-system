@@ -1,4 +1,5 @@
 import { isCalendarDate } from './calendar-date.ts';
+import { ToolError } from './tool-error.ts';
 export const DEAL_ITEMS_SCHEMA = 'deal-items.v1';
 
 export function shortDealHeading(deal) {
@@ -87,8 +88,8 @@ export function splitDealNextStep(text, due_on = null, source_ref = 'next_step')
   return [...items.values()];
 }
 
-export function validateDealItem(item, ErrorType = TypeError) {
-  const invalid = field => { throw new ErrorType({ error: 'invalid_deal_item', field }); };
+export function validateDealItem(item) {
+  const invalid = field => { throw new ToolError({ error: 'invalid_deal_item', field }); };
   if (typeof item.title !== 'string' || item.title.trim().split(/\s+/u).length < 2 || item.title.trim().split(/\s+/u).length > 4 || item.title.length > 100) invalid('title');
   if (item.due_on != null && !isCalendarDate(item.due_on)) invalid('due_on');
   if (typeof item.source_ref !== 'string' || !item.source_ref.trim() || item.source_ref.length > 500) invalid('source_ref');
@@ -108,7 +109,7 @@ export async function readDealItems(c, dealId) {
       order by created_order, id /* deal-items:read */`, [dealId])).rows;
 }
 
-export function dealItemTools({ withEnvelope, writeEvent, resolveSubject, ToolError, canExercisePartnerAuthority, partnerAuthoritySlugForActor }) {
+export function dealItemTools({ withEnvelope, writeEvent, resolveSubject, canExercisePartnerAuthority, partnerAuthoritySlugForActor }) {
   const base = { idempotency_key: { type: 'string' }, deal: { type: 'string' } };
   const bullet = { type: 'object', additionalProperties: false,
     properties: { date: { type: ['string', 'null'], format: 'date' }, kind: { type: 'string', enum: ['promised', 'call', 'suggestion', 'status'] }, text: { type: 'string', minLength: 1, maxLength: 240 } }, required: ['kind', 'text'] };
@@ -127,7 +128,7 @@ export function dealItemTools({ withEnvelope, writeEvent, resolveSubject, ToolEr
     },
   });
   const record = async (c, actor, dealId, item, key, verb) => {
-    const value = validateDealItem(item, ToolError);
+    const value = validateDealItem(item);
     const owner = (await c.query('select id from actor where slug=$1 and active', [partnerAuthoritySlugForActor(actor)])).rows[0];
     if (!owner) throw new ToolError({ error: 'owner_not_provisioned' });
     const added = (await c.query(`insert into next_action(subject_type,subject_id,owner_id,due_on,description,created_by,updated_by,item_title,item_bullets,source_ref,created_at)

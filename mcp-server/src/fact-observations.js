@@ -1,4 +1,5 @@
 import { authorizationClassForActor, organizationTenantForActor } from './identity.js';
+import { ToolError } from './tool-error.ts';
 
 export const CONTRACTS = {
   base_rent_per_sf: { units: { 'USD/SF/year': 1, 'USD/SF/month': 12 }, unit: 'USD/SF/year', expenseBasis: true },
@@ -47,7 +48,7 @@ function normalize(value, multiplier) {
   return `${scaled.slice(0, -fractional.length)}.${scaled.slice(-fractional.length)}`.replace(/0+$/, '').replace(/\.$/, '');
 }
 
-function validate(args, ToolError, extra = []) {
+function validate(args, extra = []) {
   const invalid = () => { throw new ToolError({ error: 'validation_error' }); };
   const object = (value, allowed, required = allowed) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -95,7 +96,7 @@ function validate(args, ToolError, extra = []) {
   }
 }
 
-export function factObservationTools({ ToolError }) {
+export function factObservationTools() {
   return {
     'compare-fact-observations': {
       write: false,
@@ -104,7 +105,7 @@ export function factObservationTools({ ToolError }) {
         entity_ref: { ...text(200), description: 'Caller-asserted entity for this comparable set. No stored identity or document binding is checked.' }, observations: { type: 'array', minItems: 1, maxItems: 100, items: observationSchema },
       }, required: ['entity_ref', 'observations'] },
       handler: async (_client, _actor, args) => {
-        validate(args, ToolError);
+        validate(args);
         const observations = args.observations.map(input => ({ input,
           effective_confidence_tier: input.method === 'ocr' ? 'human_review' : input.confidence_tier,
           normalized: { value: normalize(input.value, CONTRACTS[input.fact_key].units[input.unit]),
@@ -179,7 +180,7 @@ export function factObservationTools({ ToolError }) {
       handler: async (c, actor, args) => {
         if (['verified_partner', 'probe_agent', 'review_agent'].includes(authorizationClassForActor(actor)))
           throw new ToolError({ error: 'not_in_profile' });
-        validate(args, ToolError, ['idempotency_key']);
+        validate(args, ['idempotency_key']);
         const out = (await c.query('select ops.record_fact_observations($1,$2,$3,$4,$5::jsonb) as r',
           [organizationTenantForActor(actor), actor.id, args.idempotency_key, args.entity_ref, JSON.stringify(args.observations)])).rows[0].r;
         if (!out.ok) throw new ToolError({ error: out.error });

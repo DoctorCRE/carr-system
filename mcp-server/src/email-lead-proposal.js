@@ -2,12 +2,13 @@
 // one row in the candidate reservoir (claim-card), where a partner promotes it
 // with promote-pool or declines it with decline-candidate. This verb never
 // creates a party or a lead and never reopens a row a partner already judged.
-import { createHash } from 'node:crypto';
+import { sha256 } from './sha256.ts';
+import { ToolError } from './tool-error.ts';
 
 const ADDRESS = /^[a-z0-9._%+'-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/;
 const SOURCE = 'outlook-intake';
 
-export function emailLeadProposalTools({ ToolError, withEnvelope, writeEvent }) {
+export function emailLeadProposalTools({ withEnvelope, writeEvent }) {
   const fail = error => { throw new ToolError({ error }); };
   return {
     'propose-email-lead': {
@@ -33,7 +34,7 @@ export function emailLeadProposalTools({ ToolError, withEnvelope, writeEvent }) 
              regexp_matches(lower(coalesce(p.email, '')), '([a-z0-9._%+''-]+@[a-z0-9-]+(?:\\.[a-z0-9-]+)+)', 'g') m
            where m[1] = $1 limit 1`, [address])).rows.length > 0;
         if (known) return { ok: true, contract: 'email-lead-proposal.v1', proposed: false, reason: 'known_party' };
-        const sourceKey = `email-sha256:${createHash('sha256').update(address).digest('hex')}`;
+        const sourceKey = `email-sha256:${sha256(address)}`;
         const name = String(args.display_name || '').trim() || address;
         const row = (await c.query(
           `insert into candidate_pool (source, source_key, source_row, name, email, score_basis, created_by, updated_by)

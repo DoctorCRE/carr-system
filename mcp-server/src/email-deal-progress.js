@@ -1,4 +1,5 @@
-import { createHash } from 'node:crypto';
+import { sha256 } from './sha256.ts';
+import { ToolError } from './tool-error.ts';
 
 const CONTRACT = 'email-deal-progress.v1';
 const loi = /\b(?:LOI|letter of intent)\b/i;
@@ -23,7 +24,7 @@ const properties = {
 const schema = extra => ({ type: 'object', additionalProperties: false,
   properties: { ...properties, ...extra }, required: [...Object.keys(properties), ...Object.keys(extra)] });
 
-export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lockDealField, updateDeal }) {
+export function emailDealProgressTools({ withEnvelope, writeEvent, lockDealField, updateDeal }) {
   const fail = error => { throw new ToolError({ error }); };
   async function proposal(c, args, lock = false) {
     const row = (await c.query(`select d.id as deal_id,d.name,d.client_id,d.phase,d.version,d.deal_type,
@@ -47,8 +48,8 @@ export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lo
     const result = { contract: CONTRACT, status: 'proposed', deal: row.deal_id, deal_name: row.name,
       client_id: row.client_id, base_version: row.version, from_phase: row.phase, to_phase: transition.toPhase,
       evidence_quote: args.evidence_quote, source, requires_confirmation: true };
-    const digest = createHash('sha256').update(JSON.stringify({ ...result,
-      activity_version: row.activity_version, captured_body: row.detail })).digest('hex');
+    const digest = sha256(JSON.stringify({ ...result,
+      activity_version: row.activity_version, captured_body: row.detail }));
     return { ...result, proposal_digest: `sha256:${digest}` };
   }
   return {

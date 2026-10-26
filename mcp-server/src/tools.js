@@ -9821,7 +9821,7 @@ registerTools({
       const item = validateDealItem({ ...proposed[0], bullets: [
         ...proposed.flatMap(i => i.bullets),
         ...shortFacts(candidate.evidence_quote).map(text => ({ date: null, kind: 'call', text })),
-      ] }, ToolError);
+      ] });
       const action = await c.query(
         `insert into capture_post_call_action (candidate_id,deal_id,owner_id,due_on,description,accepted_by,item_title,item_bullets,source_ref)
          values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) returning id
@@ -10273,7 +10273,7 @@ registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
 registerTools(researchSiteTools({ withEnvelope, writeEvent }), "research-sites");
 registerTools(partyIdentityTools({ withEnvelope, writeEvent, versionGuard, resolvePartyForWrite }), "party-identity");
 registerTools(scheduleBoardTools(), "schedule-board");
-registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject, ToolError,
+registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject,
   canExercisePartnerAuthority, partnerAuthoritySlugForActor }), "deal-items");
 
 // WR-AI-006: curation proposals are machine-callable; approval and retirement
@@ -10348,23 +10348,23 @@ registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 
 // Pure workbook-derived lease economics. No database, model, or write path.
 registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
-registerTools(factObservationTools({ ToolError }), "fact-observations");
+registerTools(factObservationTools(), "fact-observations");
 
 // The partner room (Idea 78): shared AI-to-AI transcript both Macs poll; raw
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
 registerTools(agentProfileTools(), "agent-profile");
-registerTools(clientPortalTools({ ToolError }), "client-portal");
+registerTools(clientPortalTools(), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
 // src/resource-observation.v5.js.
 registerTools(resourceObservationTools({ withEnvelope, ToolError }), "resource-observation");
-registerTools(emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lockDealField,
+registerTools(emailDealProgressTools({ withEnvelope, writeEvent, lockDealField,
   updateDeal: (c, actor, args) => TOOLS["update-deal"].handler(c, actor, args) }), "email-deal-progress");
-registerTools(emailNextStepTools({ ToolError, withEnvelope, writeEvent, lockDealField,
+registerTools(emailNextStepTools({ withEnvelope, writeEvent, lockDealField,
   setNextStep: (c, actor, args) => TOOLS["set-next-step"].handler(c, actor, args),
   setNextAction: (c, actor, args) => TOOLS["set-next-action"].handler(c, actor, args) }), "email-next-step");
-registerTools(emailLeadProposalTools({ ToolError, withEnvelope, writeEvent }), "email-lead-proposal");
+registerTools(emailLeadProposalTools({ withEnvelope, writeEvent }), "email-lead-proposal");
 const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealField,
   updateDeal:(c,actor,args)=>TOOLS["update-deal"].handler(c,actor,args),
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});

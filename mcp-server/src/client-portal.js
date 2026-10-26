@@ -1,5 +1,6 @@
+import { ToolError } from './tool-error.ts';
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
-export function clientPortalTools({ ToolError }) {
+export function clientPortalTools() {
   return {
     'read-client-portal': {
       write: true,
