@@ -20,6 +20,48 @@ the public example addresses only in the verbatim historical import. Final
 source examples use `@example.test`. No runtime extraction logic changes beyond
 the patch.
 
+## CARR changes and security review
+
+SECURITY REVIEW (2026-10-20): Rust, MIT. Dependencies are memmap2, memchr and
+rusqlite with bundled SQLite; CARR adds flate2 on its pure-Rust backend.
+No networking and no subprocesses anywhere in `src`. Apart from tests, the only
+file it writes is the SQLite database named on its command line. Its one
+`unsafe` block is the read-only mmap of the input file, which is why the intake
+job decodes a copy and never the live store Outlook rewrites. Blocks are
+CRC-checked before they are decompressed. Build with `cargo build --release
+--locked` so Cargo.lock pins every crate.
+
+WHAT CARR ADDS to `hxprobe db <file> [out.db] [files-dir]`:
+- Calendar events (`src/calendar.rs`) in `events` and `event_attendees`: GOID,
+  start and end, subject, location, organizer and attendees. Byte-distinct
+  candidates remain separate; only exact serialized copies collapse. GOID and
+  start are observed grouping fields. Every row exports unsupported lifecycle
+  status. Current occurrence state and attendance remain unverified. See
+  [calendar lifecycle limits](#calendar-lifecycle-limits).
+- Full bodies from EFMData sidecars (`src/body.rs`). These are gzip files at
+  `Files/S0/<N>/EFMData/<id>.dat`. `<N>` is 845 on Joe's machine, so every
+  `S0/*` folder is read rather than one hard-coded number. A sidecar is
+  accepted only when its text contains the record's own preview opening.
+- Copy collapse. Revisions of one message are joined by sender, normalized
+  subject and preview opening within a day. A preview-only copy then joins the
+  one full copy with the same sender and opening. The full body always wins,
+  and `copy_key` is stored as the identity the copies share.
+- Folders for the 2026-10 Outlook build (WR-000469). Its folder, compact-message
+  and metadata envelopes use new tags (`04d8`, `074e`, `02b8`); the old tags stay
+  accepted. `folders.parent_status` and `parent_id` come from the parent reference
+  at folder object +792, so paths such as Inbox/Active Deals/<deal> resolve. On the
+  2026-10-21 TEST-campaign copies: 0 folders before, 236 after (208 with a parent,
+  28 top-level), and 2,104 of 2,121 messages linked to a folder.
+- A `meta` table with block verification, message, collapse, sidecar and event
+  counts, which the intake job checks before it trusts a run (at least 95% of
+  blocks verified).
+
+Measured on a fresh copy, email from the last seven days:
+- Before: 253 unique emails, 79 with a full body (31%).
+- After: 164 emails, 80 with a full body (49%), 9 of them from EFMData.
+- The other emails are preview-only because Outlook never downloaded their
+  body. The evening triage job opens those, so Outlook downloads them.
+
 ## Supply chain
 
 Source archive:
@@ -28,8 +70,9 @@ Source archive:
 Archive SHA-256:
 `bbffd167a42081abc7de2f6ef6d44e14e7af2a7a004d3f060c62eb3c1a45e21c`
 
-Patch SHA-256:
-`a1ca5a3dd93a46216c9a88b42c917f83b87f23a4d1152bfc2bab36279416293a`
+This tree is the only decoder source. The import patch was retired after it
+drifted from the tree, so the upstream commit, archive hash and git history
+here carry the provenance.
 
 Cargo.lock retains all 31 registry package checksums. The crate is copied into
 the repository as editable source. Transitive dependencies stay on crates.io;
@@ -53,11 +96,18 @@ workflows register that class. A test failure stops the build and fails CI.
 The crate's 22 tests use synthetic data. Every example email address uses
 `@example.test`. No private Outlook store or profile is needed.
 
-For updates, retain a separate upstream import and CARR patch commit, review
+For updates, retain a separate upstream import and CARR change commit, review
 the lockfile changes and license, rerun the CI class and cargo-audit, and
 refresh BUILD-SHA256 for the recorded target and toolchain.
-The Outlook intake installer remains outside this slice; its source switch
-follows PR #2023.
+
+`bin/install-outlook-intake.sh` builds the installed decoder from this tree with
+the same `cargo build --release --locked`, using a target directory under the
+settings `vendor` path. It installs the binary only when its SHA-256 equals
+line 1 of BUILD-SHA256, so every change under this directory must refresh that
+line from a build on the Studio toolchain. `.carr-pin` records the git object
+IDs of this directory and the two atlas files; an unchanged pin skips the build.
+`ops/hxprobe-install-selftest.py` runs the installer and checks that its binary
+equals the in-tree build.
 
 ## Source study
 
@@ -89,7 +139,7 @@ The repository gates class discovers this test alongside the existing surface te
 
 ## Calendar lifecycle limits
 
-The maintained decoder and installer patch preserve byte-distinct calendar
+The maintained decoder preserves byte-distinct calendar
 candidates instead of merging the longest body and largest attendee list.
 Exact byte copies collapse only inside this decode. GOID and start remain
 observed schedule grouping fields, not an authoritative occurrence identity.
