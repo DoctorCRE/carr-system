@@ -63,8 +63,9 @@ test("a Joe-keyed unattended bearer resolves to the sponsored joe-local machine 
     { status: "personal", sponsor: "joe", source: "verified_grant_sponsor" });
 });
 
-test("the bare token (no Bearer prefix) is accepted the way every other door accepts it", () => {
-  assert.equal(unattendedActorForToken(SECRET, MAP)?.slug, "joe-local");
+test("the bare token (no Bearer scheme) is refused, as at every other door (WR-000527)", () => {
+  assert.equal(unattendedActorForToken(SECRET, MAP), null);
+  assert.equal(unattendedActorForToken(`bearer ${SECRET}`, MAP)?.slug, "joe-local");
 });
 
 test("each call returns a fresh actor object, never a shared one", () => {
