@@ -21,7 +21,7 @@ before(async () => {
     await c.query(definition);
   }
   await c.query('begin');
-  await c.query(readFileSync(new URL('../../migrations/0989_critical_date_resolution.sql', import.meta.url), 'utf8'));
+  await c.query(readFileSync(new URL('../../migrations/0990_critical_date_resolution.sql', import.meta.url), 'utf8'));
   await c.query('commit');
   await restoreEventIdentity(c, schema);
   await c.query(schema.match(/CREATE FUNCTION public\.trg_touch_row\(\) RETURNS trigger[\s\S]*?end \$\$;/)[0]);
