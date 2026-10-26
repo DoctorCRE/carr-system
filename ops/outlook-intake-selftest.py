@@ -446,6 +446,26 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual(intake.main(), 78)
             step.assert_not_called()
 
+    def test_a_router_that_cannot_import_or_raises_never_changes_the_intake_result(self):
+        import lib
+        from io import StringIO
+        settings = load_settings(self.home)
+        for outcome, code in ((intake.Outcome('succeeded', 'ok'), 0), (intake.Outcome('failed', 'writes_failed'), 1)):
+            saved = lib.email_router
+            del lib.email_router
+            try:
+                with patch.dict(sys.modules, {'lib.email_router': None}), \
+                        patch.object(intake, 'load_settings', return_value=settings), patch.object(type(settings), 'require_repo'), \
+                        patch.object(intake, 'run', return_value=outcome), patch('sys.stdout', new_callable=StringIO) as stdout:
+                    self.assertEqual(intake.main(), code)
+            finally:
+                lib.email_router = saved
+            self.assertIn('email-router-receipt {"state": "failed"', stdout.getvalue())
+            with patch.object(intake, 'load_settings', return_value=settings), patch.object(type(settings), 'require_repo'), \
+                    patch.object(intake, 'run', return_value=outcome), \
+                    patch.object(email_router, 'step', side_effect=RuntimeError('boom')), patch('sys.stdout'):
+                self.assertEqual(intake.main(), code)
+
     def test_contact_failures_have_safe_distinct_reasons(self):
         from types import SimpleNamespace
         for rows, code in (([], 'contacts_empty'), (ValueError('PRIVATE-SENTINEL'), 'contacts_read_failed')):

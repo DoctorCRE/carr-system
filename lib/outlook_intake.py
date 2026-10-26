@@ -1254,6 +1254,9 @@ def main() -> int:
     reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
     print('outlook-intake-receipt ' + json.dumps({'state': outcome.state, 'reason': reason, 'counts': outcome.counts}))
     if outcome.reason not in ('outside_window', 'previous_run_active'):
-        from lib import email_router
-        email_router.step(repo, settings)
+        try:
+            from lib import email_router
+            email_router.step(repo, settings)
+        except Exception:
+            print('email-router-receipt ' + json.dumps({'state': 'failed', 'counts': {'error': 1}}))
     return EXIT[outcome.state]
