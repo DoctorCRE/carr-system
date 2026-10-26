@@ -579,11 +579,17 @@ function hotCard(l,hi){
  </div></div>`;
 }
 function renderHot(){
- window.__H=[...HOT.ranked,...(HOT.proposed||[])];
- let h='<h2>Ranked leads</h2>'+HOT.ranked.map((l,i)=>hotCard(l,i)).join('');
- if(HOT.proposed&&HOT.proposed.length){ h+='<h2>Proposed, awaiting your yes / no (nothing self-enters)</h2>'+HOT.proposed.map((l,i)=>hotCard(l,HOT.ranked.length+i)).join(''); }
- if(HOT.holds&&HOT.holds.length){ h+='<h2>On hold, do not touch (their terms, not ours)</h2>'+HOT.holds.map(r=>`<div class="hold-row"><span class="hold-tag">${esc(r.tag)}</span><span>${r.text}</span></div>`).join(''); }
- if(HOT.signals&&HOT.signals.length){ h+='<h2>Client signals, not leads</h2>'+HOT.signals.map(r=>`<div class="signal-row"><span class="signal-tag">${esc(r.tag)}</span><span>${r.text}</span></div>`).join(''); }
+ const proposed=Array.isArray(HOT.proposed)?HOT.proposed:[];
+ const proposalNote=typeof HOT.proposed==='string'?HOT.proposed:'';
+ const holds=Array.isArray(HOT.holds)?HOT.holds:[];
+ const signals=Array.isArray(HOT.signals)?HOT.signals:[];
+ window.__H=[...HOT.ranked,...proposed];
+ let h='<h2>Ranked leads</h2>';
+ if(proposalNote) h+=`<p class="sub">${esc(proposalNote)}</p>`;
+ h+=HOT.ranked.map((l,i)=>hotCard(l,i)).join('');
+ if(proposed.length){ h+='<h2>Proposed, awaiting your yes / no (nothing self-enters)</h2>'+proposed.map((l,i)=>hotCard(l,HOT.ranked.length+i)).join(''); }
+ if(holds.length){ h+='<h2>On hold, do not touch (their terms, not ours)</h2>'+holds.map(r=>`<div class="hold-row"><span class="hold-tag">${esc(r.tag||r.name||'Hold')}</span><span>${esc(r.text||r.reason||'')}</span></div>`).join(''); }
+ if(signals.length){ h+='<h2>Client signals, not leads</h2>'+signals.map(r=>`<div class="signal-row"><span class="signal-tag">${esc(r.tag||r.name||'Signal')}</span><span>${esc(r.text||[r.ref,r.note].filter(Boolean).join(' · '))}</span></div>`).join(''); }
  $('#hotwrap').innerHTML=h;
 }
 

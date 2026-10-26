@@ -107,6 +107,66 @@ test('instruction and completion affect exactly one item and preserve its siblin
   assert.deepEqual(after.find(i => i.id === sibling.id), sibling);
 });
 
+test('Call Mode and the active agenda share open board eligibility', async () => {
+  await c.query('begin');
+  try {
+    const base = (await c.query('select client_id from deal where id=$1', [deal])).rows[0];
+    const excluded = [];
+    for (const fields of ["outcome='lost'", "outcome='won'", "phase='closed'", "closed_on='2026-10-20'", "invoiced_on='2026-10-20'"]) {
+      const id = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic terminal deal',$1,'purchase','pending','joe',$2,$2) returning id", [base.client_id, actor.id])).rows[0].id;
+      await c.query(`update deal set ${fields} where id=$1`, [id]);
+      excluded.push(id);
+    }
+    const parked = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,operating_state,parking_reason,parking_note,parked_at,parked_by,created_by,updated_by) values('Synthetic parked deal',$1,'purchase','pending','joe','parked','other','Synthetic pause',now(),$2,$2,$2) returning id", [base.client_id, actor.id])).rows[0].id;
+    const board = await TOOLS['deal-room-board'].handler(c, actor, {});
+    for (const id of excluded) {
+      assert.ok(!board.deals.some(d => d.id === id), 'terminal deals cannot enter the call agenda');
+      assert.ok([...board.closed_deals, ...board.lost_deals].some(d => d.id === id), 'known terminal deals remain in closed history');
+      assert.ok((await c.query('select id from v_deal_board where id=$1', [id])).rowCount, 'terminal history remains readable');
+    }
+    assert.ok((await c.query('select id from v_deal_room_board where id=$1', [excluded[0]])).rowCount, 'uninvoiced terminal history remains readable');
+    assert.ok(board.deals.some(d => d.id === parked), 'parked work remains available on its board');
+    const agenda = await executeRegisteredTool(c, actor, 'read-home-agenda', {});
+    assert.deepEqual(agenda.deals.map(d => d.id), [deal]);
+    await c.query('set local role carr_reader');
+    const context = await executeRegisteredTool(c, actor, 'get-call-context', { deal_ids: agenda.deals.map(d => d.id) });
+    assert.deepEqual(context.deals.map(d => d.id), [deal]);
+    for (const id of [...excluded, parked]) {
+      await assert.rejects(executeRegisteredTool(c, actor, 'get-call-context', { deal_ids: [deal, id] }), e => e.payload?.error === 'invalid_call_context_deals');
+    }
+  } finally { await c.query('rollback'); }
+});
+
+test('every phase, outcome and closure date combination appears exactly once on the board', async () => {
+  await c.query('begin');
+  try {
+    const { client_id } = (await c.query('select client_id from deal where id=$1', [deal])).rows[0];
+    const phases = (await c.query('select slug from deal_phase order by sort,slug')).rows.map(row => row.slug);
+    const fixtures = [];
+    for (const phase of phases) for (const outcome of [null, 'won', 'lost', 'paused']) {
+      for (const closed of [null, '2026-10-20']) for (const invoiced of [null, '2026-10-21']) {
+        const { id } = (await c.query(`insert into deal
+          (name,client_id,deal_type,phase,outcome,closed_on,invoiced_on,owner,created_by,updated_by)
+          values('Synthetic partition deal',$1,'purchase',$2,$3,$4,$5,'joe',$6,$6) returning id`,
+        [client_id, phase, outcome, closed, invoiced, actor.id])).rows[0];
+        fixtures.push({ id, phase, outcome, closed, invoiced });
+      }
+    }
+    const board = await executeRegisteredTool(c, actor, 'deal-room-board', {});
+    const pipeline = await executeRegisteredTool(c, actor, 'deal-board', {});
+    for (const fixture of fixtures) {
+      const label = JSON.stringify(fixture);
+      const lists = [board.deals, board.closed_deals, board.lost_deals];
+      assert.equal(lists.flat().filter(row => row.id === fixture.id).length, 1, label);
+      const working = !['closed', 'invoiced'].includes(fixture.phase)
+        && fixture.outcome === null && fixture.closed === null && fixture.invoiced === null;
+      assert.equal(board.deals.some(row => row.id === fixture.id), working, label);
+      assert.equal(pipeline.deals.some(row => row.id === fixture.id), working, label);
+      assert.equal(board.lost_deals.some(row => row.id === fixture.id), fixture.outcome === 'lost', label);
+    }
+  } finally { await c.query('rollback'); }
+});
+
 test('board and detail expose the same stored item contract', async () => {
   const board = await TOOLS['deal-room-board'].handler(c, actor, {});
   const card = board.deals.find(d => d.id === deal);
@@ -229,6 +289,11 @@ test('due checklist pings reach only the owner feed and replay without duplicate
     const captured = await executeRegisteredTool(c, actor, 'resolve-post-call-candidate', {
       candidate_id: candidate, accept: true, idempotency_key: randomUUID(),
     });
+    await c.query('reset role');
+    await c.query(`insert into ops.notification_preference(actor, timezone, quiet_hours_start, quiet_hours_end)
+      values($1,'America/Chicago',((now() at time zone 'America/Chicago') + interval '4 hours')::time,
+        ((now() at time zone 'America/Chicago') - interval '1 hour')::time)`, [actor.id]);
+    await c.query('set local role carr_writer');
     const key = randomUUID();
     const ping = key => executeRegisteredTool(c, actor, 'ping-deal-checklist', { deal, idempotency_key: key });
     const first = await ping(key);
@@ -241,6 +306,7 @@ test('due checklist pings reach only the owner feed and replay without duplicate
     assert.equal(retry.queued, 0);
     assert.equal(retry.deduplicated, 3);
     assert.equal(retry.notifications[0].notification_id, first.notifications[0].notification_id);
+    assert.equal((await c.query("select count(*)::int as count from event where subject_id=$1 and field='checklist_ping'", [deal])).rows[0].count, 3);
     const feed = await executeRegisteredTool(c, actor, 'notification-feed', {});
     assert.equal(feed.unread_count, 3);
     assert.deepEqual(feed.notifications.map(n => [n.id,n.subject_type,n.subject_ref,n.severity]).sort(),
@@ -274,6 +340,22 @@ test('due checklist pings reach only the owner feed and replay without duplicate
     const event = (await c.query('select e.subject_id,e.new_value from event e join ops.notification n on n.event_ref=e.id where n.id=$1', [first.notifications[0].notification_id])).rows[0];
     assert.equal(event.subject_id, deal);
     assert.deepEqual(event.new_value, { checklist_item_id: `critical-date:${date}`, due_on: '2000-01-01', recipient: 'joe' });
+    await c.query(`update ops.notification_preference set device_opt_in=true,
+      quiet_hours_start=((now() at time zone 'America/Chicago') - interval '1 hour')::time,
+      quiet_hours_end=((now() at time zone 'America/Chicago') + interval '1 hour')::time
+      where actor=$1`, [actor.id]);
+    await c.query("update critical_date set due_on='2000-01-02' where id=$1", [date]);
+    await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
+    await c.query('set local role carr_writer');
+    const held = await ping(randomUUID());
+    assert.equal(held.queued, 1);
+    assert.equal((await ping(randomUUID())).deduplicated, 1);
+    await c.query('reset role');
+    const delivery = (await c.query(`select channel,state,held_until > now() as future_hold,settled_at
+      from ops.notification_delivery where notification_id=$1 order by channel`, [held.notifications[0].notification_id])).rows;
+    assert.deepEqual(delivery, ['device','in_app'].map(channel =>
+      ({ channel, state: 'held_until_morning', future_hold: true, settled_at: null })));
+    assert.equal((await c.query("select count(*)::int as count from event where subject_id=$1 and field='checklist_ping'", [deal])).rows[0].count, 4);
     await c.query("insert into client_status(slug,label) values('prospect','Synthetic prospect') on conflict do nothing");
     await c.query("update client set status='prospect',prospect_engagement_status='inactive' where id=(select client_id from deal where id=$1)", [deal]);
     await c.query('set local role carr_writer');
