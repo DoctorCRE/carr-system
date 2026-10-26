@@ -15,6 +15,7 @@ bayside = deals["Synthetic Bayside Dental Relocation"]
 harbor = deals["Synthetic Harbor Clinic Expansion"]
 pinecrest = deals["Synthetic Pinecrest Lab Lease"]
 gulf = deals["Synthetic Gulf Imaging Center"]
+magnolia = deals["Synthetic Magnolia Surgery Center"]
 landlord = next(p for p in bayside["participants"] if p["name"] == "Synthetic Bayside Landlord")
 
 
@@ -43,6 +44,9 @@ print(json.dumps({
         update(gulf, "The floor plan goes to the architect.",
                "Next step for Gulf Imaging: confirm the floor plan with the architect by November 10, 2026",
                next_step={"text": "Confirm the floor plan with the architect", "next_date": "2026-11-10", "needs_review": None}),
+        update(magnolia, "The space plan is next.",
+               "Next step for Magnolia Surgery: order the space plan from the designer by November 14, 2026",
+               next_step={"text": "Order the space plan from the designer", "next_date": "2026-11-14", "needs_review": None}),
         update(pinecrest, "Joe and Dell disagreed about moving Pinecrest to legal.",
                "I think it goes to legal",
                phase_move={"value": "legal", "started_on": None, "needs_review": "Joe said legal and Dell said keep it in site selection."}),

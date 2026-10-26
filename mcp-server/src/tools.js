@@ -2440,6 +2440,9 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
 // later edit to the step, its date or one of its checklist items is newer work
 // and refuses the undo instead of being overwritten.
 async function undoAppliedNextStep(c, actor, dealId, candidate, key, args) {
+  // Same lock order as resolve-candidate's apply: the checklist first, so a
+  // partner completing one of the call's items waits for (or beats) the undo.
+  await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0)) /* call-outcome:undo-items-lock */", [dealId]);
   await lockDealField(c, dealId, "next_date");
   await lockDealField(c, dealId, "next_step");
   await versionGuard(c, "deal", dealId, args.base_version);
