@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 test('financial lifecycle callers share one strict calendar-date rule', async () => {
-  const { isCalendarDate } = await import('../src/calendar-date.js');
+  const { isCalendarDate } = await import('../src/calendar-date.ts');
   for (const date of ['2024-02-29', '2026-09-01', '0001-01-01', '9999-12-31'])
     assert.equal(isCalendarDate(date), true, date);
   for (const date of [null, undefined, 20260901, '', '2026-2-01', '2026-02-30',
@@ -12,7 +12,7 @@ test('financial lifecycle callers share one strict calendar-date rule', async ()
     assert.equal(isCalendarDate(date), false, String(date));
   for (const file of ['tools.js', 'invoice-tracker.js']) {
     const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
-    assert.match(source, /import \{ isCalendarDate \} from ["']\.\/calendar-date\.js["']/);
+    assert.match(source, /import \{ isCalendarDate \} from ["']\.\/calendar-date\.ts["']/);
     const caller = file === 'tools.js' ? source.slice(source.indexOf('"update-deal": {'), source.indexOf('"reassign-deal": {')) : source;
     assert.ok(!/Date\.parse\(.*T00:00:00Z/.test(caller), `${file} delegates the calendar rule`);
   }
