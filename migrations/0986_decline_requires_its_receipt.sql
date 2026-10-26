@@ -1,6 +1,6 @@
 -- rollback: forward-only; restores 0982's body if replayed, which only re-admits a receiptless decline on a reused key
 -- lock-review: replace one function without rewriting or locking business tables
--- 0983_decline_requires_its_receipt.sql
+-- 0986_decline_requires_its_receipt.sql
 -- Review follow-up on 0982. The withdrawal receipt insert used ON CONFLICT DO
 -- NOTHING and the update ran regardless. Sourced rows are protected by their
 -- immutability trigger, but WR-AI program rows have no receipt-checking trigger,
