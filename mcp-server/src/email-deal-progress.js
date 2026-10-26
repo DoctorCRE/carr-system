@@ -23,7 +23,7 @@ const properties = {
 const schema = extra => ({ type: 'object', additionalProperties: false,
   properties: { ...properties, ...extra }, required: [...Object.keys(properties), ...Object.keys(extra)] });
 
-export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lockDealField, updateDeal }) {
+export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lockDealField, updateDeal, resolveEmailProposal }) {
   const fail = error => { throw new ToolError({ error }); };
   async function proposal(c, args, lock = false) {
     const row = (await c.query(`select d.id as deal_id,d.name,d.client_id,d.phase,d.version,d.deal_type,
@@ -71,7 +71,8 @@ export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lo
               activity_id: current.source.activity_id, evidence_ref: current.source.evidence_ref,
               evidence_quote: current.evidence_quote, proposal_digest: current.proposal_digest },
               cause: 'human_stated', idempotency_key: args.idempotency_key });
-          return { ...current, status: 'confirmed', requires_confirmation: false };
+          return { ...current, status: 'confirmed', requires_confirmation: false,
+            email_proposal_id: await resolveEmailProposal(c, actor, 'phase_move', current.deal, current.source.activity_id) };
         });
       },
     },
