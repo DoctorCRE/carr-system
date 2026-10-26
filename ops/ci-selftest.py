@@ -1053,6 +1053,40 @@ def test_push_floor_distinguishes_imported_main_paths_from_branch_changes():
           rc != 0 and owned_name in out and "path-hygiene" in out, out[-900:])
 
 
+def test_push_floor_reports_missing_atlas_packages_without_blaming_registry():
+    with ci_fixture() as root:
+        tests = root / "mcp-server/test"
+        tests.mkdir()
+        paths = [tests / f"atlas-inventory-graph-{kind}.test.mjs"
+                 for kind in ("read", "web")]
+        source = "import 'atlas-fixture-dependency';\nthrow new Error('Atlas contract fixture failure');\n"
+        for path in paths:
+            path.write_text(source)
+        changed = ["mcp-server/src/scac-mutation-registry.current.generated.js"]
+        with _stub_git_answering_the_floor(changed) as stub_env:
+            rc, out = run(["--only", "pushfloor"],
+                          env={"CARR_CI_RANGE": FIXTURE_RANGE, **stub_env}, root=root)
+            check("missing Atlas packages fail with the actual dependency and npm ci",
+                  rc != 0 and "Cannot find package 'atlas-fixture-dependency'" in out
+                  and "npm ci" in out and "mcp-server" in out, out[-1200:])
+            check("missing Atlas packages do not prescribe registry repair",
+                  "active registry changed" not in out, out[-1200:])
+            package = root / "mcp-server/node_modules/atlas-fixture-dependency"
+            package.mkdir(parents=True)
+            (package / "package.json").write_text(
+                '{"type":"module","exports":"./index.js"}')
+            (package / "index.js").write_text("export const ready = true;\n")
+            rc, out = run(["--only", "pushfloor"],
+                          env={"CARR_CI_RANGE": FIXTURE_RANGE, **stub_env}, root=root)
+            check("installed packages preserve the Atlas contract failure and remedy",
+                  rc != 0 and "active registry changed" in out and "npm ci" not in out, out[-1200:])
+            for path in paths:
+                path.write_text("import 'atlas-fixture-dependency';\n")
+            rc, out = run(["--only", "pushfloor"],
+                          env={"CARR_CI_RANGE": FIXTURE_RANGE, **stub_env}, root=root)
+            check("passing Atlas tests still pass the push floor", rc == 0, out[-1200:])
+
+
 def _hosted_workflow(filename="ci.yml"):
     """Workflow as a dict, parsed by the js-yaml the server already carries."""
     import json
@@ -1534,6 +1568,7 @@ def main(argv=None):
                test_gates_selftests_have_a_process_group_watchdog,
                test_push_floor_defers_the_gates_class_instead_of_running_it,
                test_push_floor_distinguishes_imported_main_paths_from_branch_changes,
+               test_push_floor_reports_missing_atlas_packages_without_blaming_registry,
                test_hosted_zsh_setup_does_not_refresh_working_indexes,
                test_hosted_zsh_cache_requires_authenticated_bytes):
         try:
