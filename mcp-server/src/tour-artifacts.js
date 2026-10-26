@@ -189,6 +189,7 @@ export function tourArtifactTools({ withEnvelope, writeEvent, ToolError }) {
     "record-tour-pdf-human-review": {
       write: true,
       humanOnly: true,
+      humanCallerOnly: true,
       authorityOnly: true,
       description: "Authority-only human review receipt for a completed QC run. Acceptance is not client publication or share promotion.",
       inputSchema: schema({ ...idempotency, render_job_id: { type: "string" }, qc_run_digest: { type: "string" }, decision: { type: "string", enum: [...DECISIONS] }, reviewed_at: { type: "string" }, review_receipt_digest: { type: "string" }, reason: { type: "string" } }, [...REVIEW_FIELDS]),

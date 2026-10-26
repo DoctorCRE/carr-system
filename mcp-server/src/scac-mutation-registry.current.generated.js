@@ -12,6 +12,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "d4a0427de45712a0728a821cf80ab7d942acd2738c1ea9d5c7a2a109e12369d3",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -21,6 +22,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "bfddecd87f29f70193ab958b001c0ec53659a1b1fd35caa41f87b09259e27fd2",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -30,6 +32,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "9a071af1268ae1dc9beff7e7c4751e5e1fc92242b04601ad66801fe63c02e56c",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -39,6 +42,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "7ce3a73c1e7994ef5d1a7418eab11f035256204e97ab2464811ceafe62e420b0",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -48,6 +52,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "dcecaee083001a769a4909cc8266bcd185cc55533e81bd27b85288c9ebe7d076",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -57,6 +62,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "8a2f036ce4faad712a557b4f336f8e991737485f338d349847660b5af0c552cc",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -66,6 +72,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "3c2d95b332067ee9cf468ccbf7145bdc13b0a4a83edc850152cc75430a7a1a19",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -75,6 +82,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "53aa46a3fa9d347718121f46b717f6b0cadbb774d6cb9fde7aa64c23a17a2623",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -84,6 +92,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "d34441c73464ad250cea98420a983357f8a272126ee0151720ed5b3338e62e48",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -93,6 +102,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f725a94aa5d4f37c9241b3af22e025323bd1e39e97c02bcf2d0b295a7d116801",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -102,6 +112,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "3155ba2471c435654c52b8f3486f856b030934441306294a78eb020a714bb30b",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -111,6 +122,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "54c7ab9b14c77a8d6bcb4989dbf33e96358a632d7eba11d9c7a4bdf93843f7f1",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -120,6 +132,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "a8b72ebd25012fd4c9624a3ffe0c2f5823e16c973c0431537d758e89a1372897",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -129,6 +142,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "bdcdae304ab7cf85ddd097249d544a38d29973e4bd7b2dc9a0790cd50d7f6697",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -138,6 +152,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "1499fa2993e429d3ed06e90c7ffd9edf67d4c0f0482c6af739883a481ebd05eb",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -147,6 +162,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "75eaf9c84e72066636002f8a19cf30ffb5a6466c3a3b7fa057378d1def1b9696",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -156,6 +172,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "67b41a74f497beede97e2faa9d9ef36081ee7f7a9559f83cc8fa3d5b1f183fbe",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -165,6 +182,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "04c691c2cb639985e5d8ab3f360510859fd3664b69caad2671333ab5f2f95b61",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -174,6 +192,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "d82b23ab7624ac7dea98ec11cb70412417fa7926b528902fce8a99dbdfbb7b14",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -183,6 +202,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "6fb6971daecd01338afc8e71005b41d9e19096b23bc7c89b7467d8864d8f2a19",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -192,6 +212,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "53f4e8b7367cd9f892f94cbf76ec53dab19e4de30a2e41789d6fd81a58e17a60",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -201,6 +222,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "b39c0b2fa5bf6ea17ada8e22d5d49eca980ab780e9e69e599d9296cb130001e9",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -210,6 +232,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "a71528d3bc2b922a768d304ad281de584dcbfc4ad2f72c1327ea6340e70f4bf4",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -219,6 +242,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c8c8d422409106dd5c0e1c1bc18ae001b4051e3622ebffe6c710b92f67c344d4",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -227,7 +251,8 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/tour-property-jurisdiction.js",
     "schema_digest": "524db3f439673db083666ad94ba432d644d203c5e9cbcfc4eb7874dd1001fafc",
     "write": true,
-    "human_only": false,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -237,6 +262,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "cf51bf2c166dc8e467ea04346c901626652ed923f2201d0956a4627a4de405f6",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -246,6 +272,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "5301815a0b79d9b5d7b5ed5ccd4f652e1fe48cbcb46d5feb28b1a6c6f5632dbd",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -255,6 +282,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "88f19411e96df5841d29095b1a9010b0ff80e88426e89405fe43e0e7a997503f",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -264,6 +292,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "627677e3f5aedfb755b0fc5036de6bb062607b84f53af0bb2dde6024cc23571e",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -273,6 +302,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "9861afb08070d36d33bcfbacec493619a981531b33aa0444b674d2a4c943d949",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -282,6 +312,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "fb9629aa247d2f48633c3f123ae3535827a47a7527e0107186f8d0953e3cf669",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -291,6 +322,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "b9eaa9e0d52fe440bcf8d3197350d0d4b1bb158d90fb00f44c009183e0d816e8",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -300,6 +332,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "80f2ab3aae246479cd0d5e68e443d07d21c0b39715010e54e4a672acfe5e31ed",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -309,6 +342,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "e1079c75c09bb092fd355b767bafa3b38a4ef8997b73cd27cbc711ec99427129",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -318,6 +352,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "3636826f538688e10c81b7489e650371125a33ae7a1f42a643f753cf2eb889a5",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -327,6 +362,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "5bd96e7e972b700c9e8641b38b0887ee43d57e6754b3cff4b5803fdd9fdd8da0",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -336,6 +372,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "87ecbaa9c95b2c975e799942c5885f84c4c11856e3e87a022d6fad90742ec923",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -345,6 +382,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "b95a520ce369528def95fb0fbef60bb5c00f630cfaa50feae0a4a6d1ef8664e9",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -354,6 +392,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "bd3dfef9b4017175eb9ee2f8e10744db6d164325701e80539a798ae020edd375",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -363,6 +402,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "951a874c8854706a552b3080ed6c371efc6956c400e10757c317d618fe617791",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -372,6 +412,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "313f638109e6fe6f072ded06610647962890be10f7151431ab6e705f334ab23b",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -381,6 +422,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "357731a0c8ada42b5cb4198a6ca8484d53c8d303e0fe54afd23560b1a441a75b",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -390,6 +432,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f06eb6b85aca60ac42eede018a041127f76f7f1db83386e7933dc2293175737e",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": [
       "*registered_operation"
@@ -401,6 +444,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -410,6 +454,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "dd9d470f4fb7f884fc398b14fe5e3d2896733667657adfff3c99c479e9a565e7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -419,6 +464,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -428,6 +474,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c6390215581d934d925661d49a0155f8d5df7506b042ff50e7996d49f4c6d08d",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -437,6 +484,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f92c6f281e770e96ed5dead23553ddc90083e0ae62a972bd967f5b0e8f3203c8",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -446,6 +494,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "59d9e96867519a28bea89d6322acb3f4821cb6c19bdee4a6a0a4eaf014b4abe2",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -455,6 +504,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "1c570fb2a66307c91f25800a7df2fb980047f3acba70a5d41f335d5b8f68c732",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -464,6 +514,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "6a33e3711b471eab5594c1f353c75311ac7acd74e1457c893f0a93eb229dacb1",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -473,6 +524,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "e8fd95ee3e3428270a198dcc4b1dcdacbeaa9634c11c610c86e867aa83ffee2a",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -482,6 +534,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c44909adba57ff5631f6ef9118a593ff30a8a1f2e49f85cca4385e0ba41dcb72",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -491,6 +544,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "db664360f520c6b28dcf09fefd1d186bc517e55e9eef838d8a0660beee63d964",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -500,6 +554,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "83cb9929ea8eee3aafaca507ea5a022253b56334f1a584267f0eb44f08c2c733",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -509,6 +564,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -518,6 +574,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "361ab3e2f12dd524f23f96410eaa6507e72339f6494ca585082ef456bb9c598f",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -527,6 +584,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "cc47fb836e95150ee40ff57076eec5b4ee2efe4a68aaf25d148420ecef0e7fe2",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -536,6 +594,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "9078a10b96c7cfc735f339987f637d797d0e5363c8e31b94c64741737c9cd26c",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -545,6 +604,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "afab113d866bf2081d0599cdff0eba72209372e77ac0c1573cacf1c4aae91926",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -554,6 +614,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "b001ec53c7eccb5299011413a43e4bf0adb6dca50ffc5b289b02a4fe21c74ce0",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -563,6 +624,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "8fcdab540e2c25d37e00d0d25975dc1e4d5d3aca7112c326b59eb64bd051a722",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -572,6 +634,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "28abed1df7d49464dfb3df1fb1cb1a3a49c37500e81379e2202d345c6c5b4f3a",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -581,6 +644,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "caae7052c96e6b23f626a7656eb0a6187074f6bde2994ef39e06b9002a70cdfe",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -590,6 +654,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "e140267ad22953ee2b03cfda598318303f73de68205e864ce9c541a70b7ff15c",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -599,6 +664,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "769638bc199554ce71d14c20b9188b7e4566b9f40513fca37efc57bb26e8d673",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -608,6 +674,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -617,6 +684,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "fb816f0158e4d62cbe4bc17536833d3666cba05ea615eb758abcb3fe973cd42b",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -626,6 +694,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "5ba08d6ca6c36271a683b4f38b53f4ce7f2b53d854c6fed2eb280e040e2ceba6",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -635,6 +704,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "3c63ee059c7d4384c733bcbd0158649bc75d29e8c2185ff0eb84de86801de523",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -644,6 +714,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "0d3dbf94dc275a7f0dc0141048f14e4c8b92b88a24f15ae8a7c6067ddf68bbf8",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -653,6 +724,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "52ac294765642ef2706f6407ca2f171afcd3220a726d682ab57c5bbc2637a8ae",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -662,6 +734,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "a76320188824805cfe72fbc89885c17baa03dd932812fb1f2111b21e2f6d2ca1",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -671,6 +744,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -680,6 +754,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -689,6 +764,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -698,6 +774,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "3518baa69dedfc6dfa65ca36d8ff0b74f1cb3d6b4fec96a6018ec734da5234b9",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -707,6 +784,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "5da012e58b24a686e1012e7de5bc16f6b0d43a1eee011516b04bb7eabdafd112",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -716,6 +794,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "0e61c2863a988287cb0a6d3c639cbeec34bd424b625ebd98f62f3e1af246aa58",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -725,6 +804,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "7b2699702c3bc67c35115d50c0c7e5b10578725d2f682de2a4561b97421aac34",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -734,6 +814,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "896e1e28e273119a2d95408f80f6f177ccfc70a1e379546edf8a1795fdd06ee9",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -743,6 +824,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "a80352803536ee97105f4789bea2de8fd473a7696b9f6a4f7e882560805fb889",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -752,6 +834,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "374acfe499aada092f73ae6412b0efc1b05faf0dca6160f29e95c25daf2f6f62",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -761,6 +844,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c75ff26cacc2d8a7393b77d59008049dfc0803a2a29696943e88023b27c53bbc",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -770,6 +854,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "3349ced71bfc99614bd4556faba56a6e647a94e7d27140c21eda8427a50072a7",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -788,6 +873,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "b28351739140bb7b2f367ef0765a89a16e2146a6495e9c5136cd3ee9b2fa6c40",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -797,6 +883,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "4e3c661894bac221f812e9381c7c6d1ab898a2b3de74c850c2db187864593a7c",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -806,6 +893,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "46af38141c2bc3ec08b0ee019d1a9c43a8f97caa53ec955ee10419075768881c",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -815,6 +903,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "aecbf80439bb1a9913e8f75f2b739b5a49c1e6cd9cb57982f91235ec3a02094f",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -824,6 +913,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "db1341ac19d195908534d14aae0a8ecb64c817a2040bc746b7e66d3718f40721",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -833,6 +923,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "9f7ca1c347f0d401620474afbc2182fd5c3fe885857f372ceacafbd974681451",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -842,6 +933,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "4a6bdbdf4f3629cc8a5ce67ba9ed6094b5adcb5bb46a6c7c72abd945142308e6",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -851,6 +943,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -860,6 +953,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "1dc63095e8672403bbe40fa26719d175e695c0167f6daad6b9655f6506491f01",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -869,6 +963,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "49f3a4c7fe3b5c4edf58243812ad5a238694f420fa54fbbd57a0f73c6ce86274",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": [
       "catch-me-up",
@@ -881,6 +976,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c56d94b238592c8e3c48652c9844e169ecf9ef43c8604f3faa495ec292354dd2",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -890,6 +986,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "62d8d08c4fbc232594ac95bdd685d3c9c25435a6210ad1006ea9361cead2a8c2",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -899,6 +996,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "641802b95268b5c1c6758c6af72fed4e5e862116d72787adcd3fcf497ffdbeb8",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -908,6 +1006,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "8cf66475f70d7b873092b7ce14b9012f96a0943ecd5e52edd5571d3c6410bb19",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -917,6 +1016,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "9e4c68f0d9cca239aa667f90ef8aa14b4f4327b397e60fa943d74fc3f9200143",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -926,6 +1026,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "63787d4ab663cde75739db3ec6fc1a8c177d171dbfcaf84aa5be2a5603c6be7e",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -935,6 +1036,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -944,6 +1046,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "19a63e84823521b884a53329888aabba74f4a3373cffdd1791bce717af1a20d5",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -953,6 +1056,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "39f7707362a4c568e216bcb2b8807ce298ec31da7ab790defbe5c69ec2fe6670",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -962,6 +1066,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "39f7707362a4c568e216bcb2b8807ce298ec31da7ab790defbe5c69ec2fe6670",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -971,6 +1076,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "8b8cd2a0bd94b6951e688c02de3b3a62a77057c7b5ecb63c07ea94268945f313",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -980,6 +1086,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "eb212d3b90bab7fae46ce103f966ac8a290531a0fa731f4d765164e09cfd973a",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -989,6 +1096,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -998,6 +1106,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1007,6 +1116,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "39ae3da89eeae180a51dae17a503bc450b645b9fb90213d59a40412e0043cc67",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -1016,6 +1126,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1025,6 +1136,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1034,6 +1146,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "276e9def9cb1c6427894526e1406f8bc270bf3dee58ff79e5384d365abdc79cc",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1043,6 +1156,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "930e0db70fa12ccea4e11c11416dc9caacba02369998112943f93ea24919aa8a",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1052,6 +1166,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1061,6 +1176,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "76672e7fefca24c529b76db3f81d7e4847b44ed78acd41e9eabb8af3018670f8",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1070,6 +1186,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "2ed03a91db3e222b9482976a7968380b55b9842300f9340967e3995a71dc2329",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1079,6 +1196,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "0ffb8c8c7ab89cbb729eba73afa67c6b9ac0cba84bdbe5e17a15b99e5e827c5a",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1088,6 +1206,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "fee19b4dda019dc4b1ee509c75214c8bcee91f79a77b915ae4d46d21c73ac5b7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1097,6 +1216,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "8d0a5c66aafa64530231ec5bb1183b4f576dcb57006af7170ad99980c62e66c1",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1106,6 +1226,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "6c5c048e4c820047cf7a98970e4f98629908254b5e1400d9dd0f7308db51ffc5",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1115,6 +1236,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1124,6 +1246,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "fc8a1ff80543bb7a4fac294c21044da3990f1264c375e02aa9901df765f9449b",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1133,6 +1256,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "733c4a6cfe6a2bf504dacf52706812c7a02e0aeb760122f045c3577f6e804245",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1142,6 +1266,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "791ba91f68c5ed7585d0dc77e5301d323f41900ea2d0fa58be6982b808c85566",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1151,6 +1276,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1160,6 +1286,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1169,6 +1296,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "5493417ec69df86cbda832cfeb3f78e02c7778671aaf3aae358385b61c8ac1c4",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1178,6 +1306,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "7f435f34236214403d51b03f6169599d02a16307bc5ecc5dac0d62ccc566ca47",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1187,6 +1316,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c9cf3bf1ed2c491cce794e2aebcd0cd394e697ccdf6d72779e521f83d066ede2",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1196,6 +1326,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f4631b7df0c325de5d0fd0f2f75f2e21265dcedf91c718a789363e38ff920e33",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1205,6 +1336,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c860986438e8d6de11859107d57a4aecd06c137c995db4e12cdc35db60c4df7c",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1214,6 +1346,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "696eae3056045a15bce4fbcc938dffd7f5909487ca2c42d45e088bc7158cf0f7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1223,6 +1356,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f49c01bed19af0fe0288ff3ac50f2dc4ceb8e566d4e5343523fc6a221201da92",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1232,6 +1366,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "5db783f8427c4a314c9f860fec144fe079f3bff9a34a68eeed32092908e8498a",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1241,6 +1376,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "eeaa435ed3ddb9fd93706ea051316fac5e6f8c1b2de128a3470f3417340f24cf",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1250,6 +1386,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "fc629c9fc7f3ffa1be28f07e59a120c58132d48d93b0027a4ed9b4007c04b8ff",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1259,6 +1396,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1268,6 +1406,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f4312bc0ff52a95b7db89197ee11278fd8ac428f49f1c2f0ef97afd8a5486516",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1277,6 +1416,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "590f629b04bbf08ac03cb93e2a696c3b18f4f3ab41f7b246467a862bcf3d51d2",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1286,6 +1426,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f9bc31ea4b7272fe136ea9b4b50b9cefe1c1b8cd70def5e256205d197b500798",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1295,6 +1436,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": [
       "claim-card",
@@ -1309,6 +1451,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "311e730892d29b318e416f279a7996e0cb8cda88235581c412e27490dcd8738a",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": [
       "governance-queue",
@@ -1321,6 +1464,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "0bb5ef5a8124a9542ebaa3755506200d3d1abba9566f1c94fa0527291d2f3a26",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1330,6 +1474,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "51202123db5c43455e827cbd483863a853941a3f167b781561f8acc447b054fc",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1339,6 +1484,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "7becbb5e40fd46e54e14fc13ae5019171ae1b3999926c1cf53024c0d74d71077",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1348,6 +1494,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "e9162b7637c7e487ec8600df0e5cf6cea001cdc2d2b45ab72f537dcce0a3b1da",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1357,6 +1504,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c40d64bca766934387f77f764c079f5856c8f1418d4c6b8bca4328c05c32beec",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1366,6 +1514,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "b996de53e8285fe886bd3e47406dd97a98a40fa6085a02e4531dbacc4adb0da8",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1375,6 +1524,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "5c4ecf4520bf7284aded695d5faf84aba89ca30e387fb9b7a4cb89498bd6c13a",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1384,6 +1534,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1393,6 +1544,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "32955ab25ea9e9e83715fb8807d7a2a43f2216819966fcd0835bbf3eb9537ca9",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1402,6 +1554,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f78008f634adc4ae7b9484290accb372afd9a641edc56e0bc831ac7baae2a786",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1411,6 +1564,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "64552a9a85436ffd0b8b029f9f29c80cb626db73990b0834933e15b0fc271b0d",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1420,6 +1574,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "60edde32f604e7bab8ee4b471e23c330eeb6c86240333dd779fd83d6ce11626c",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": [
       "find-and-catch-up",
@@ -1432,6 +1587,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ca4dd8b72db67eee6dc276036b2e5b1a184c959d0f02fdf7e0acd7b3de54e9a0",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1441,6 +1597,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "d3542f540d81e59d650ff7f153c752c699bc2f6d178d4d6c87a25122cd121257",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1450,6 +1607,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "eba5b6e5177efcabd49e5c8b255a6ef0d187e6574638cb42c69e56b544682795",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1459,6 +1617,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "01563165207c5295db5f140cf83fcfc593ba0e9e8973a033244709709a4c2d25",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1468,6 +1627,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "722b7eb2945b75dabf92a52f9ba999c3d33c39dca8c1c5fe79635e3b819747e0",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1477,6 +1637,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "5976b93047ba504a919ec7770d0dac843953d7059ac284832ed3d56e20e9f9a9",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1486,6 +1647,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "a9e60593cae6bd8c4a201b71d419efca18c1c703c3ab15b68e70b27121084e9f",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1495,6 +1657,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "d91399460e294020a3d779fe4a2689968492e9766d385dd4a6e84574615420d3",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1504,6 +1667,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "4ec94c09f595baa72fd5c6d82c7f1bab50f656d58d6e6fd6543c765509f33e25",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1513,6 +1677,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "7d7464a48cae1a717ff0a7eb4d662727e112a70ef0545a2f3da824218234ebab",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1522,6 +1687,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "bf92a42013eb33f78d2ef296a4f47d79b27e5e68697fe162043000d7e7da5b40",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1531,6 +1697,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "0b383948846e27a6e8fcb31f6917ed4de693978c1e6206ee6076fadd8161664a",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1540,6 +1707,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "0cce99de34e57b5ca5a898696a622951b708d90dbc1dc854b588712937493bab",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1549,6 +1717,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "a481203d49233d5c52c879d00c0a5733fe5fc437dcfc613ae0e7515c72eac00f",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1558,6 +1727,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "5e10256c48824dd0d7e191f2ecae0885dd1fc24e39d8112ffbe9e25b2c9ad526",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1567,6 +1737,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "efbf95037c3a4b1ea73a10140b6cf48e6e3553888e2e3ab7a243d020661ee91d",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1576,6 +1747,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "0786bbdf9ad6e7491088190d98b3ae8eec5eefe8658069ce3830eef42f84fc1e",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1585,6 +1757,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "3755cab1aeb3c05567da19a1dce33140fdbc419f44bc07795fccde037e2e909a",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1594,6 +1767,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "a18d5c967bd49cafa432c9bb1d7c116f289725ee3a111b9750b90e8bd2a7bd53",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1603,6 +1777,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "91e298ac2dd0586ded466af4c10c4d810116cdc191a812e52f4a81dd6b65bfd4",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1612,6 +1787,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1621,6 +1797,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "25c4425e3887511ffa3b9a7d402b99e4167a424450ee8f986d53e1f1bd686c7a",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1630,6 +1807,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "a040086927206f6850bb42a36146f800614962d1ddd4295e1408cb6e0c6d3179",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1639,6 +1817,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "fddc80850e615ad4b807d4418efb9d238855d357df22f922327a06e8db08ec27",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1648,6 +1827,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c95ca24a7624ac4279c35aa1fa5a3ee0968da2adcbfc03ab6c4d3cd9ddf30190",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1657,6 +1837,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "afa34011dc484bc3374cfee5833902f94a5a9ea83f5c40ed896d5ade25e9166b",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1666,6 +1847,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ab8eb05d9de0072dae860e982c077acfa9e09effe59cb22d7590386b95d9a225",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1675,6 +1857,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "48a8b4cc6443fc0dd85860cadfb1a1faee8ac2c8a2bf4452634a270ab9789440",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1684,6 +1867,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "5c56d30ea2c569c992d4670718b8a80398d76621c2301857bb569ea4e13aabc9",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1693,6 +1877,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "3871e011f76bb1dfe3cc62fa4a33fec2734469e7943d7d3dd3b5998190696bdc",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1702,6 +1887,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "92ae529a7e47be0d8ac99fdef3b3b79c8588128418c5b5606f3f2ad1563f2757",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1711,6 +1897,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1720,6 +1907,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1729,6 +1917,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "9d499f26dbc68f347fc2eb1d1095f0d3fb277cabd410b3154f727a4b722fe4d3",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1738,6 +1927,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "e5aafd9450b309bb413a396b41b78f2dcadbe0dc95d918ea0edc176e02c29d65",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1747,6 +1937,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "d746974fa9afd5e951f76f9af38954b0ad7f436f2120dc974da65e5ee39f856f",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1756,6 +1947,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "585f7ca789d06f75b00844efc142578b00b790f398b6731615232d7f2c6f360a",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1765,6 +1957,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1774,6 +1967,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1783,6 +1977,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "09ba6375dcf875532b1fdb4424f53890ed66ef3ff23ae0e769a312c15b8a9f85",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1792,6 +1987,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "fddc80850e615ad4b807d4418efb9d238855d357df22f922327a06e8db08ec27",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1801,6 +1997,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1810,6 +2007,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "a11bca819cf80e6de4a5222f048364f26bbefd88d60e1a347ae153cd52c59471",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1819,6 +2017,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "d8142b9a3058bdb92612a579b5dc8f75286704ec1021c1f6cd87c345e7224447",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1828,6 +2027,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "7b6e0ecdeae25530f2e496e2cde7853db7cb2f8a123b4cd74993b154e8187453",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1837,6 +2037,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "e1c0eaf9331a82edba1a0352e96ef1a70b215bda9a6e435322faeb21da8adde1",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1846,6 +2047,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "3dd93d771ee37883a3a6981e7597f76231334a274bd11961bcc5ccdf28903039",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1855,6 +2057,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "520a23d16b3dc32163cb982d226607eca3ee4b12f745121571a74db2267e4b7e",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1864,6 +2067,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "0bb99e1b6d16d8150d47e8b04bcc4b8e1a76099a738f6934e530fa233467f43a",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1873,6 +2077,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "81a6340809292c11952c0637ffa7bd513606945d0857ff6737621c580610d8f5",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1882,6 +2087,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ffcae1761d74947ac5cda267b980e9d884bdc50ea89b0898daef6d1e1f018dee",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1891,6 +2097,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ec3cba9e020480a2bf23c540379db935ad22fc49bc5ee3c7e521c51524447517",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1900,6 +2107,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "0bb99e1b6d16d8150d47e8b04bcc4b8e1a76099a738f6934e530fa233467f43a",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1909,6 +2117,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1918,6 +2127,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "e15d4a8922a0f8c019e4cdfcc06bfb8ae4b506a00d0bbe319e5eb8fdbd5390cc",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1927,6 +2137,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "1fdd12ba613b33ad7907ec4b00801b41afe0b4ed02604f38c7c63a0fb2bf258e",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1936,6 +2147,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ff7d546a0402d2e65bf53a29167e87264c8e9c43e021706d06d0addef76d042f",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1945,6 +2157,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "84213490479ffbfb80f837c67f8af28b5066459043bff72c81ceb9caa0bd4ce5",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1954,6 +2167,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c21511276d8981c8fc5c401775d10b970de6c773a7f83a089cb1b5e433475406",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -1963,6 +2177,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "51745ae15bc5d1ff8741889b5518a243ec1fd5faf9638ce26d9219ae5337244f",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1972,6 +2187,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "05dc766b87e5f3eb59218df1cb428300aa1c62c77f0408f4ad2b483c380960c5",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1981,6 +2197,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c9aed64da03f8fee5521b76f84dd5f8c1183cf38db5f116aba2403a1f1126974",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1990,6 +2207,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "86e2fe7424da97bb4a8643c0927c085d4e630b7f73a61459ad6e1dff032815ac",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1999,6 +2217,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "9c85da39ce4b90b65300586c6cca78ea3698440a8a0cfe48e426ac365ad9774e",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2008,6 +2227,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2017,6 +2237,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2026,6 +2247,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "31ec07b95f6e58554e3cdfd13f3498671a2ede155a53c84a759954948589f8b6",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2035,6 +2257,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "3adafb91a5d32c51e7386ca06582b49fb074888c19eceb1e5a11415e98f75ae5",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2044,6 +2267,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "dad21ad5f7b68e8d0b85ffdc5592d66adb8e09a826787547996f41b5397a3565",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2053,6 +2277,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2062,6 +2287,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c26cf30b62954f502d18cdf3c7c17921b4f9b375a3bc558bf86343d2e5bf6f33",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2071,6 +2297,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c78df4fb3f0cdb1a423e53002c9c36649f96c93803a37c24a36e12597d216f47",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2080,6 +2307,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "d053ef06d1b93756dca0e7680244994bb447b94583e2e68f392919eb90ec3944",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2088,7 +2316,8 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
     "schema_digest": "87b85c5d5c18b13241292a391110d31b41ef2af6dfd938f7435261321741ea5b",
     "write": true,
-    "human_only": false,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2098,6 +2327,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "1eb88fa6d63c1509122d7b86c21b5f14107fe06336f4c4747f1b4751126365fc",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2107,6 +2337,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ffc4b25e1062de68b6fe937d51d4559f32bf2b5ca3a64a7a5f820b946de96a19",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2116,6 +2347,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "d40bf3b21722663f73172b2b6ea7b48c97fc1176373c6e1903a067324a4636a7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2125,6 +2357,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "8a219fa2443d70ed68f4752bbf5ea13364d41f5dc023bd9b2052c446567d8880",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2134,6 +2367,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "80d129fa5949522ecac83d2391dea13797320d611a0a68faaf61976c1be866dc",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2143,6 +2377,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "447d0f73701d5237bdf75656501e9d197be4838b2d151316cff307ca6a4324c8",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2152,6 +2387,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "47fd9fb6eedccfc8a80879701d7ef55a3042aa44053ba055ed7284ad6339dd45",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2161,6 +2397,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2170,6 +2407,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2179,6 +2417,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "2d7feae23b89b96b2f3bfb62306f720f63950d530e050fd8850cb3c25ee5fba8",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2188,6 +2427,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ea58e96ff5a67969c0b40d3b99b43ae1ae9c88641c1f38340ee4ef90dcb7f9c5",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2196,7 +2436,8 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
     "schema_digest": "447d0f73701d5237bdf75656501e9d197be4838b2d151316cff307ca6a4324c8",
     "write": true,
-    "human_only": false,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2206,6 +2447,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2215,6 +2457,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c1d802b085cec84897945813dce470a6ddfd7293fef788a2303ce2e0b305cab4",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2224,6 +2467,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "e7fbfbdb72bf5be472c4e52f3fdb8a89121ce572db7e1e9bb3b201507b01a451",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2233,6 +2477,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "9be88eb8643116749605430648df98a4c2b6c5ed5282109acb83992fdc036b75",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2242,6 +2487,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "61d734946373d8d7aa3f9a262c99515c1911d265f011205e3548f0a2e867f5c3",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2251,6 +2497,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ef6d316b0327c1388eb2ce690d68e0cb020815238947e0396595810c14aa5922",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2260,6 +2507,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "d17d83aaf76c3f0b3faccef281ab904e923af5894055d30b30aae9ab8342401d",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2269,6 +2517,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "3cbda8eb6354a9727f3e343b5e8568f22f6950162d49e32bce837f1e3f3a1e0a",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2278,6 +2527,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "0291c2b6b9008987119bddc4722fffdef51d15ec760e9756ff41ae2f4d108771",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2287,6 +2537,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f10b99f70895c181be001452d81b822afe11758230bbc22721e165108146fb23",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2296,6 +2547,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "a9be96b68548a1138a8c790541fd31efd394a23d69828d29bce6f55ee5a514cd",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2305,6 +2557,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "4f6df024bf1a9a071cd8a957fc597fa2201bcbe583800024a4095e925944e189",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2314,6 +2567,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "2f7f1b58e2de7c9842c0a65f5edcc29e2b2b966be878968b54e3bc45fb3fd748",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2323,6 +2577,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "08eda96f1cfcbe92ec6f0a66addc0a3d861f0d50e2a05727599fca70887a6587",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2332,6 +2587,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "7ce73bd66b06b6451131115bcd6ccafeaaab1bfe9bf2321f76e5cb83d86aa9a6",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2341,6 +2597,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "89c5446e7b07cac8842cd04d36fb530694fbf308577e8ea2e9a013e0694af9fe",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2350,6 +2607,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "a534cf101856ece084f5e8ae8057d50dc304073e576105903c45f385dc50fb4e",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2359,6 +2617,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "b28a3f61fed0fe4c06200832be31bc217a89b867f8d65e45cb770108e0033f41",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2368,6 +2627,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c28b3754255bfbd66c641547717e679b5507174515990184db15aaea67972a69",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2377,6 +2637,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "5b6e02034b697de9d2743c5c2158fe8ab685d22918161ffcddf8b8617fb2dc43",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2386,6 +2647,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "9e853497ba72c63ed0b9f9b013deb586c1f720c2787bff285297765f43741514",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": [
       "log-activity",
@@ -2400,6 +2662,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "40671356b4a627e0efe4b56dfe3ed6e18e8cfe823601c8a7e6ac20e798530771",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2418,6 +2681,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ef5027b786a7f59b13b9abaf0da32b1ad4796dafd60c7590d57f70eb51df096e",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2427,6 +2691,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "6a55c6878ae4b86a6f36e0c4b04bb13d96aa595a97e3c9baeb9142fc54667bb3",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2436,6 +2701,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "4dda0708f108ac69d06625535acb579bc2b0d1737fd814fb7df40c66c33e3034",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2445,6 +2711,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ef0499be31ea9da23a23c8c3138536ba8a131b79ce8619458b14fcd43eec6c34",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2454,6 +2721,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "9013091b73c6eaaccd10e5fb6eff9f9debd6b582e549fad7acf75ed48d70416e",
     "write": true,
     "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2463,6 +2731,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "2dec7b6002d8d31a0c90744ba9ea4f98e2eee8006b5022613e375e1fb3495e69",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2472,6 +2741,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "a1e87aba031deb0f0d129aba3fdaa4406179e1f32e9ba6946e86a2f2a5c6e9c9",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2481,6 +2751,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "190f9debf0677c0a8d1d9ce011c963b284ee22e4f35a25b999fced09262c2f6a",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2490,6 +2761,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "942ac3fdfa92a1ed455647d2e39d5ea63d17d9d0649802269add41694940b57a",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2499,6 +2771,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "b95a520ce369528def95fb0fbef60bb5c00f630cfaa50feae0a4a6d1ef8664e9",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2508,6 +2781,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "1e1fde12ed23f3fb575c200d8a9ea093dec2dcd3142470c6f72709d9a4f522d2",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2517,6 +2791,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "239b37c230bb32de3104dfe2772d6e0832eb21fe30b2d082e1bec9043933d16d",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2526,6 +2801,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "10f4d054b48c31a6a7152c6aedd0b79aa98b665c8dc12e56edfd4683571dde6e",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2535,6 +2811,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ea375f0be29645f3b58be00427369dd9281c475beab8d09f9bfcf442f43f51c4",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2544,6 +2821,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c3c0a603485563ac784409e8e4beeee5dc5ca984ab4410512b4ed7bba6c530f9",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2553,6 +2831,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ce4da3e1effcf733376b25bce4c52ab9d9fbc7eeb301edb6d0c7fcc39576c3b7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2562,6 +2841,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2571,6 +2851,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "15edee05ff5adc39e6bc6eaa807030a6f8885d099d7296cb09bff5792fe0abaa",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2580,6 +2861,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "cd0f7833d41cefc8c46369744c9eddd6e07e53ca9070130dbb6c9a5723c8940f",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2589,6 +2871,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "a7eeef5debe516a7ece6d07869b189cca7e2c0cc2feb4812941af8bdc3de253c",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2598,6 +2881,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "fc8b48248395bf18c50f189d25d4c744d7ae641d59399e1761cbfa4ea7c46cf6",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2607,6 +2891,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "fe2da3aa52b6ae0980c2f7da2a8efae02cd0bb92ed0ffaa9e3adacefbdad7208",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2616,6 +2901,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "dca2f806ef3eaf981c0a7bce6861df8dcb121bb161d2df8995919419c9bc6ff2",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2625,6 +2911,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "f9e8c7d9c0c0b1debc14f97989a118bb416dff94a907db3fc6dfabbc96388d28",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2634,6 +2921,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "1f6d231c7854c81b9e53c6d78ae482be5a9b15ea990dd557ca328a5b62ff5873",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2643,6 +2931,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "9c7139155f314a1dca649f7a6785ec280cf6fccb84114c96d165947608ecbce0",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2652,6 +2941,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "b7da2861fae485e929321835e645da97fc426991aeba3e90d7a2347f5d7cd8f5",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2661,6 +2951,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "67f94733c2353536c9a030607b23106c4dd2c73cbbc9cd5523ae7c4a040dff91",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2670,6 +2961,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "332c856695b9d91906277c8e1e029be847d51b16c4f4de5dde254e3a74834812",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2679,6 +2971,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "dcc617e4d0702df7293ec660dd2bdbe9e439db385a9cd8b0a45e742a6381593c",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2688,6 +2981,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "963a81eda4e537fd27b9a7ddd27afccd6ea1da64cc37afeffc435796afe0f0dd",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2697,6 +2991,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "7ff1747f981066e2f75281fbb0e051264859d0705179662ba43d808315b58594",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2706,6 +3001,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2715,6 +3011,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ff770d41299ef7cb660d6072bdb5757c07dd3bfb11d46b9bcf2f84b4fe9b51b1",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": [
       "log-activity"
@@ -2726,6 +3023,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "dd5bbb6af7846216c05b6df0b6b559309b0f67178d29fc5bf33b95c93df9354e",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2735,6 +3033,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "fd37e7f1c1ba253d5e947c4743894c232e670d070036d4202b9099e5b3fed5dc",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2744,6 +3043,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "06ec8550ba4d8b9a379c0c220d110f64f30a9edf11057bc575581db220990266",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2753,6 +3053,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "dccd878006d7481717f8769d681cf6cfa7fe826328188010f24cedf07a56701e",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2762,6 +3063,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "7d43c7dcb29bb048ad4330b22b57100dc04384260973106884bbe343745b0e9c",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -2771,6 +3073,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "7be9820032d47bb94888aad94a52f89a50aa5fa7e0638d1d689fefdca03f8ccf",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2780,6 +3083,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "c23d0abc10107890b9ea09f17b6d81b1572d32dc42844de24362eb63d9a3743c",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2789,6 +3093,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "96edb83b9e05b76a9a11a0f10c0a7499ddf0c557463718f20ae578cdf71d5555",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2798,6 +3103,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "e04f9c33266839fdb956e0830937b7f6da693b6e7afb124c7152e92b7e6b0532",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2807,6 +3113,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "6db4435be42a2fee8a942b7d19aaafd9c80c847022cd037cb0a49b6ac35f96a9",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2816,6 +3123,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "fed6108dc0ceae873f770789b0372493709217599ad15839962d65d8daf02b16",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2825,6 +3133,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "5bd96e7e972b700c9e8641b38b0887ee43d57e6754b3cff4b5803fdd9fdd8da0",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2834,6 +3143,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "126ebd4723150468d305a554501dcf6d3f15023849350468d33e1bb0d9154fb6",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2843,6 +3153,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "383b450b2c3973362770f636da1273eca9fdde243f67db4a6dcae5e4be3fece7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2852,6 +3163,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "1ea5a47bbbc46740ea8e4d07ceaf0fd76bd3b9780d6ebce5b462ac25ca1df8f6",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2861,6 +3173,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "5397b7fe4c9b4aebabcdceab900b904d671d258b7e2d6faffdbc9ae534e122e9",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2870,6 +3183,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "91c755127ecc60ec58dc2cf5184323015eb53dd5c0be25d2e9cafd1f25c3c423",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2879,6 +3193,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "e1df98e06c10b4b237933e86855f595cac3f749a3ecd42dae982706209e1a97e",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2888,6 +3203,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "6304e4471a513098fcf0b8ca5ee0bcfb1dcda46c3dd96ba0a86ede2bc8103a61",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2897,6 +3213,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "8925c9812d69f84d6f7c54a32195bfaca6169c64bc29cb9e2fa53a3e2cfee723",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2906,6 +3223,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "a46d9164f4f25becd07e3db36d52617a35ada87d78338b7ffd1eab2ce674f0e5",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2915,6 +3233,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "3afd0eb0414c00a12f982d740b8dc0f1ff5ce42bd9d86ff69820b994da93136f",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2924,6 +3243,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2933,6 +3253,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "78f7580be5be6794885a75c9253c70d7d245688c11edf028a5335e29dc4f7791",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2942,6 +3263,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "cefe11d8b81e40e9d870e91f56fd054356671a193c80fa8cc5a01ea4f93b4ae7",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2951,6 +3273,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "38016ebc2cb6aea790d0ba9633f270f4ea0778518d84b96480ae3d08b6037da2",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2960,6 +3283,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "4998bec3cb4dd152089e253d970dfa603eae3682b212573e45e5c7c79442ac44",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   }

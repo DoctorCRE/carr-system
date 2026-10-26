@@ -1,6 +1,7 @@
 import { randomString } from "./google-oidc.js";
 import { publicError } from "./public-errors.ts";
 import { isCalendarDate } from "./calendar-date.ts";
+import { bearerCredential } from "./bearer.ts";
 
 const JSON_HEADERS = { "content-type": "application/json" };
 const json = (body, status = 200) =>
@@ -27,12 +28,9 @@ function canonical(value) {
   return value;
 }
 
-function bearer(request) {
-  return (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-}
-
 function captureDevice(request, env) {
-  const token = bearer(request);
+  const token = bearerCredential(request.headers.get("authorization"));
+  if (!token) return null;
   let tokens;
   try { tokens = JSON.parse(env.CAPTURE_TOKENS || "{}"); }
   catch { tokens = {}; }
@@ -408,7 +406,7 @@ async function callContext(request, dependencies) {
     return json({ error: "invalid_call_context_deals" }, 400);
   try {
     const result = await dependencies.withWriter(async client => {
-      await authenticatedSession(client, bearer(request));
+      await authenticatedSession(client, bearerCredential(request.headers.get("authorization")));
       return client.query(
         `select deal_id,deal_name,owner,operating_state,participant_party_id,participant_party_ref,
                 participant_name,participant_email,participant_role
@@ -476,7 +474,7 @@ async function postCallReport(request, dependencies) {
 async function session(request, dependencies) {
   try {
     const result = await dependencies.withWriter(async client => {
-      const authenticated = await authenticatedSession(client, bearer(request));
+      const authenticated = await authenticatedSession(client, bearerCredential(request.headers.get("authorization")));
       return client.query(
         `select s.state,s.post_call,
                 count(c.id) filter (where c.status='pending')::int as pending,
