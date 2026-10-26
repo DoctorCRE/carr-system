@@ -25,6 +25,7 @@ cd "$REPO"
 PY="$REPO/.venv/bin/python"
 RUNTIME="$("$PY" -m lib.outlook_settings field repo)"
 if [ "$REPO" != "$RUNTIME" ]; then
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
   SHA="$(git rev-parse HEAD)"
   if [ -e "$RUNTIME" ]; then
     if [ "$(git -C "$RUNTIME" rev-parse --show-toplevel 2>/dev/null)" != "$RUNTIME" ] \

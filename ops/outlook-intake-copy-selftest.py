@@ -14,6 +14,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from git_env import fixture_env
 from outlook_test_support import write_settings
 from lib.outlook_settings import load_settings, SettingsError
 
@@ -144,7 +145,7 @@ class InstallerTest(unittest.TestCase):
     def install(self, name='intake', check=True):
         command = ['/bin/zsh', '-f', '-c', 'export HOME="$1"; exec /bin/zsh -f "$2"',
                    'installer-test', str(self.home), str(self.repo / f'bin/install-outlook-{name}.sh')]
-        return subprocess.run(command, capture_output=True, text=True, check=check)
+        return subprocess.run(command, capture_output=True, text=True, check=check, env=fixture_env())
 
     def test_installer_uses_settings_without_a_machine_role_and_preserves_the_granted_binary(self):
         result = self.install()
@@ -173,7 +174,7 @@ class InstallerTest(unittest.TestCase):
 
     def git(self, checkout, *args):
         return subprocess.run(['git', '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.test',
-                               *args], cwd=checkout, check=True, capture_output=True, text=True).stdout.strip()
+                               *args], cwd=checkout, env=fixture_env(), check=True, capture_output=True, text=True).stdout.strip()
 
     def test_jobs_run_from_a_checkout_only_the_installer_moves_without_rebuilding_the_helper(self):
         (self.repo / '.gitignore').write_text('.venv/\nout\n')
