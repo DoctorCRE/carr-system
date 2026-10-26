@@ -2956,7 +2956,7 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "grantable": false,
       "privilege": "execute",
       "signature": "ops.read_client_portal(p_slug text, p_password text)",
-      "volatility": "s",
+      "volatility": "v",
       "ingress_key": "db-function-acl:ops.read_client_portal(p_slug text, p_password text):carr_reader:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",

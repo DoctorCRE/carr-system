@@ -2,7 +2,7 @@ const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 export function clientPortalTools({ ToolError }) {
   return {
     'read-client-portal': {
-      description: 'Read one password-protected client-portal.v1 roadmap and explicitly shared text material. Requires authenticated CARR access. This is not a public login endpoint; a future public consumer must throttle password attempts. Never accepts client or deal selectors.',
+      description: 'Read one password-protected client-portal.v1 roadmap and explicitly shared text material. Requires authenticated CARR access. This is not a public login endpoint. The server locks a slug after five failed passwords within 15 minutes. Never accepts client or deal selectors.',
       inputSchema: {
         type: 'object', additionalProperties: false,
         properties: { slug: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,62}$' }, password: { type: 'string', minLength: 1, maxLength: 1024 } },
