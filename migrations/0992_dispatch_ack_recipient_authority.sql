@@ -31,7 +31,7 @@
 
 create or replace function ops.acknowledge_dispatch(
   p_dispatch_ref uuid, p_stage text, p_evidence text)
-returns jsonb language plpgsql volatile security definer set search_path=pg_catalog,ops,public
+returns jsonb language plpgsql volatile security definer set search_path=pg_catalog,ops,public,pg_temp
 as $$
 declare v_actor uuid; v_slug text; v_id bigint; v_stage text;
         v_link public.room_dispatch_link%rowtype;

@@ -632,7 +632,7 @@ end $_$;
 
 CREATE FUNCTION ops.acknowledge_dispatch(p_dispatch_ref uuid, p_stage text, p_evidence text) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'public'
+    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
     AS $$
 declare v_actor uuid; v_slug text; v_id bigint; v_stage text;
         v_link public.room_dispatch_link%rowtype;
@@ -114434,7 +114434,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0987_email_proposal.sql	c0ab5328442e86d95e28c629575002b6b73ef28dd0d183f7ddee253bcaea77fd	1970-01-01 00:00:00+00
 0988_drop_siep_program_leftovers.sql	9c20dcac261bbf29cdd68184c9688e3333cfe95e9134f0e1fa461d402bf8695c	1970-01-01 00:00:00+00
 0989_call_context_open_deals.sql	4c486dfbbd5f52fdf04d4335c048cded481b9676284a0a323ea85395a3f27752	1970-01-01 00:00:00+00
-0992_dispatch_ack_recipient_authority.sql	76885c222d09ab4cfd715b6fd3aca1a68626c8c776c483917b1a88a2d7fb3c16	1970-01-01 00:00:00+00
+0992_dispatch_ack_recipient_authority.sql	95fe5c0e20addde14c24639b75bf1e2968272db7aed1c8049e0cde3fc978af09	1970-01-01 00:00:00+00
 \.
 
 
