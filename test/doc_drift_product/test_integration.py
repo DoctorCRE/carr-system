@@ -114,6 +114,17 @@ class ProductIntegrationTest(unittest.TestCase):
                          'Repair the instruction, then rerun `ops/ci.sh --doc-drift`.\n\n'
                          '- `README.md:3` missing path `bin/gone.sh`; candidate `bin/here.sh`\n')
 
+    def test_failing_summary_run_prints_the_new_claims_to_stderr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, known, out = (Path(directory) / name for name in ('report.json', 'baseline.json', 'out'))
+            report.write_text(json.dumps(self.report([self.gone])))
+            known.write_text(json.dumps(dict(findings=[])))
+            result = subprocess.run([sys.executable, str(ROOT / 'ops/doc-drift-product.py'), '--report', str(report),
+                                     '--baseline', str(known), '--summary', str(out)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('- `README.md:3` missing path `bin/gone.sh`', result.stderr)
+        self.assertIn('1 new stale claims beyond the baseline', result.stderr)
+
     def test_known_drift_passes_and_reports_the_baseline_count(self):
         known = dict(findings=[dict(file='README.md', kind='path', target='bin/gone.sh'),
                                dict(file='README.md', kind='verb', target='gone')])

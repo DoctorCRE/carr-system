@@ -5,11 +5,12 @@ import io
 import json
 import re
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
 from collections import Counter
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -81,6 +82,38 @@ def weekly_files(html, as_of):
     if not selected or (as_of - selected[-1][0]).days > 8:
         raise ValueError("NPPES weekly publication is missing or stale")
     return [url for _, url in selected]
+
+
+# CMS keeps listing weekly files on the index after it deletes them. A listed
+# file that ended more than this many days ago and now answers 404 has expired.
+EXPIRY_GRACE_DAYS = 7
+
+
+def _today():
+    return datetime.now(timezone.utc).date()
+
+
+def weekly_end(url):
+    match = re.search(r"_(\d{6})_Weekly_V2\.zip$", url, re.I)
+    return datetime.strptime(match[1], "%m%d%y").date() if match else None
+
+
+def fetch_weekly_files(urls, fetch=None):
+    """Return (payload, url) pairs; an expired file is counted and skipped, anything else raises."""
+    fetch = fetch or _fetch
+    payloads, skipped = [], Counter()
+    for url in urls:
+        try:
+            payloads.append((fetch(url), url))
+        except urllib.error.HTTPError as exc:
+            end = weekly_end(url)
+            if exc.code == 404 and end is not None and (_today() - end).days > EXPIRY_GRACE_DAYS:
+                skipped["expired_weekly_file"] += 1
+                continue
+            raise
+    if skipped:
+        print("NPPES skipped weekly files: " + json.dumps(skipped, sort_keys=True), file=sys.stderr)
+    return payloads
 
 
 def parse_nppes(rows, *, as_of, source, practice_locations=None):
@@ -211,8 +244,8 @@ def prepare(ctx):
     else:
         urls = weekly_files(_fetch(INDEX_URL).decode("utf-8"), ctx.now.date())
         rows = []
-        for url in urls:
-            rows.extend(parse_weekly_zip(_fetch(url), as_of=ctx.now.date(), source=url))
+        for payload, url in fetch_weekly_files(urls):
+            rows.extend(parse_weekly_zip(payload, as_of=ctx.now.date(), source=url))
     consumed_path = ROOT / "out/routines/lead-signals-weekly/consumed-candidates.json"
     consumed = set(fixture.get("consumed_keys", [])) if fixture is not None else set(json.loads(consumed_path.read_text()) if consumed_path.exists() else [])
     proposed = [row for row in candidates(rows) if row["source_key"] not in consumed]
@@ -227,8 +260,10 @@ def prepare(ctx):
                 if not match.get("merged"):
                     matches[match["ref"]] = {key: match.get(key) for key in ("ref", "kind", "name", "city")}
             for org in found.get("organizations", []):
+                # The record layer lists null refs for organizations it knows only by name;
+                # keep them as matches (never a "new" lead) under a name key that sorts with refs.
                 for ref in org.get("refs", []) + org.get("role_refs", []):
-                    matches.setdefault(ref, {"ref": ref, "name": org["name"]})
+                    matches.setdefault(ref or "org:" + _text(org.get("name")), {"ref": ref, "name": org["name"]})
         row["existing_candidates"] = [matches[ref] for ref in sorted(matches)]
         row["identity_status"] = "PENDING confirmation"
         if matches:
