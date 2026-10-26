@@ -9120,7 +9120,7 @@ registerTools({
 
   "ping-deal-checklist": {
     write: true,
-    description: "Queue action-required notifications for one active deal's due and overdue standard checklist deadlines and open sourced stored checklist items. The recorded deal owner must be Joe or Dell. Uses current doctrine, sourced deadlines, quiet hours and recipient/item/date deduplication. Returns queued notification receipts, never a delivery claim. Does not schedule, send a device message or change deal facts.",
+    description: "Queue action-required notifications for one active deal's due and overdue standard checklist deadlines and open sourced stored checklist items. The recorded deal owner must be Joe or Dell. Uses current doctrine, sourced deadlines, morning holds and recipient/item/date deduplication. Returns queued notification receipts, never a delivery claim. Does not schedule, send a device message or change deal facts.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       deal: { type: "string" }, idempotency_key: { type: "string" },
     }, required: ["deal", "idempotency_key"] },
@@ -9145,20 +9145,26 @@ registerTools({
         .filter(item => item.status === "open" && item.source_ref?.trim()
           && isCalendarDate(item.due_on) && item.due_on <= checklist.observed_on)
         .map(item => ({ id: `deal-item:${item.id}`, due_on: item.due_on }));
+      await c.query("select pg_advisory_xact_lock(hashtextextended('deal-checklist:' || $1, 0))", [deal.id]);
       for (const item of [...checklist.due_items, ...storedDue]) {
-        await writeEvent(c, actor, "ping-deal-checklist", "deal", deal.id, {
-          field: "checklist_ping", new: { checklist_item_id: item.id, due_on: item.due_on, recipient: deal.owner },
-          cause: "automation_job", idempotency_key: args.idempotency_key,
-        });
-        const eventId = (await c.query(
-          `select id from event where subject_type='deal' and subject_id=$1 and verb='ping-deal-checklist'
-             and field='checklist_ping' and idempotency_key=$2 and new_value->>'checklist_item_id'=$3
-           order by recorded_at desc,id desc limit 1`, [deal.id, args.idempotency_key, item.id])).rows[0]?.id;
+        const eventQuery = `select id from event where subject_type='deal' and subject_id=$1 and verb='ping-deal-checklist'
+             and field='checklist_ping' and new_value->>'checklist_item_id'=$2
+             and new_value->>'due_on'=$3 and new_value->>'recipient'=$4
+           order by recorded_at desc,id desc limit 1`;
+        const eventArgs = [deal.id, item.id, item.due_on, deal.owner];
+        let eventId = (await c.query(eventQuery, eventArgs)).rows[0]?.id;
+        if (!eventId) {
+          await writeEvent(c, actor, "ping-deal-checklist", "deal", deal.id, {
+            field: "checklist_ping", new: { checklist_item_id: item.id, due_on: item.due_on, recipient: deal.owner },
+            cause: "automation_job", idempotency_key: args.idempotency_key,
+          });
+          eventId = (await c.query(eventQuery, eventArgs)).rows[0]?.id;
+        }
         const minted = (await c.query(
           "select ops.mint_notification($1,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11) as result",
           ["event", eventId, "deal", deal.id, "A deal checklist item is due. Open the deal checklist for details.",
             "action_required", "/notifications", `deal-checklist:${deal.id}:${item.id}:${item.due_on}`,
-            deal.owner, false, false])).rows[0]?.result;
+            deal.owner, false, true])).rows[0]?.result;
         if (!minted?.ok || !minted.notification_id)
           throw new ToolError({ error: "deal_checklist_notification_unavailable" });
         result[minted.deduplicated ? "deduplicated" : "queued"]++;

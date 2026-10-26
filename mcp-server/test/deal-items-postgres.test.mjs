@@ -289,6 +289,11 @@ test('due checklist pings reach only the owner feed and replay without duplicate
     const captured = await executeRegisteredTool(c, actor, 'resolve-post-call-candidate', {
       candidate_id: candidate, accept: true, idempotency_key: randomUUID(),
     });
+    await c.query('reset role');
+    await c.query(`insert into ops.notification_preference(actor, timezone, quiet_hours_start, quiet_hours_end)
+      values($1,'America/Chicago',((now() at time zone 'America/Chicago') + interval '4 hours')::time,
+        ((now() at time zone 'America/Chicago') - interval '1 hour')::time)`, [actor.id]);
+    await c.query('set local role carr_writer');
     const key = randomUUID();
     const ping = key => executeRegisteredTool(c, actor, 'ping-deal-checklist', { deal, idempotency_key: key });
     const first = await ping(key);
@@ -301,6 +306,7 @@ test('due checklist pings reach only the owner feed and replay without duplicate
     assert.equal(retry.queued, 0);
     assert.equal(retry.deduplicated, 3);
     assert.equal(retry.notifications[0].notification_id, first.notifications[0].notification_id);
+    assert.equal((await c.query("select count(*)::int as count from event where subject_id=$1 and field='checklist_ping'", [deal])).rows[0].count, 3);
     const feed = await executeRegisteredTool(c, actor, 'notification-feed', {});
     assert.equal(feed.unread_count, 3);
     assert.deepEqual(feed.notifications.map(n => [n.id,n.subject_type,n.subject_ref,n.severity]).sort(),
@@ -334,6 +340,22 @@ test('due checklist pings reach only the owner feed and replay without duplicate
     const event = (await c.query('select e.subject_id,e.new_value from event e join ops.notification n on n.event_ref=e.id where n.id=$1', [first.notifications[0].notification_id])).rows[0];
     assert.equal(event.subject_id, deal);
     assert.deepEqual(event.new_value, { checklist_item_id: `critical-date:${date}`, due_on: '2000-01-01', recipient: 'joe' });
+    await c.query(`update ops.notification_preference set device_opt_in=true,
+      quiet_hours_start=((now() at time zone 'America/Chicago') - interval '1 hour')::time,
+      quiet_hours_end=((now() at time zone 'America/Chicago') + interval '1 hour')::time
+      where actor=$1`, [actor.id]);
+    await c.query("update critical_date set due_on='2000-01-02' where id=$1", [date]);
+    await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
+    await c.query('set local role carr_writer');
+    const held = await ping(randomUUID());
+    assert.equal(held.queued, 1);
+    assert.equal((await ping(randomUUID())).deduplicated, 1);
+    await c.query('reset role');
+    const delivery = (await c.query(`select channel,state,held_until > now() as future_hold,settled_at
+      from ops.notification_delivery where notification_id=$1 order by channel`, [held.notifications[0].notification_id])).rows;
+    assert.deepEqual(delivery, ['device','in_app'].map(channel =>
+      ({ channel, state: 'held_until_morning', future_hold: true, settled_at: null })));
+    assert.equal((await c.query("select count(*)::int as count from event where subject_id=$1 and field='checklist_ping'", [deal])).rows[0].count, 4);
     await c.query("insert into client_status(slug,label) values('prospect','Synthetic prospect') on conflict do nothing");
     await c.query("update client set status='prospect',prospect_engagement_status='inactive' where id=(select client_id from deal where id=$1)", [deal]);
     await c.query('set local role carr_writer');
