@@ -15,7 +15,12 @@ export const CONNECTION_PROVIDERS = Object.freeze([
   { id:'model_route', name:'Model tools', manage_url:'/control-room?tab=agents' },
 ]);
 
-export function connectionsProjection(dashboard) {
+type ResourceDashboard = {
+  generated_at: unknown;
+  providers: { provider: string; state: unknown; observed_at?: unknown }[];
+};
+
+export function connectionsProjection(dashboard: ResourceDashboard) {
   return { ok:true, schema:'doctorcre-connections.v1', generated_at:dashboard.generated_at,
     providers:CONNECTION_PROVIDERS.map(provider => {
       const resource = dashboard.providers.find(row => row.provider === provider.id);

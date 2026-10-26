@@ -288,11 +288,22 @@ class FakeClient {
       return { rows: [] };
     }
     if (sql.includes("dealroom:drop-prior-action")) {
+      const rows = [];
       for (const action of this.nextActions) {
-        if (action.subject_id === params[1] && action.owner_id === params[0] && action.status === "open")
+        if (action.subject_id === params[1] && action.owner_id === params[0] && action.status === "open") {
           action.status = "dropped";
+          rows.push({ id: action.id });
+        }
       }
-      return { rows: [] };
+      return { rows };
+    }
+    if (sql.includes("dealroom:board-step")) {
+      // The board shows the newest open ball, else the newest next-step note.
+      const action = this.nextActions.filter(a => a.status === "open" && a.subject_id === params[0])
+        .sort((a, b) => b.updated_at.localeCompare(a.updated_at) || b.id.localeCompare(a.id))[0];
+      const note = this.notes.filter(n => n.deal_id === params[0] && n.kind === "next_step")
+        .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))[0];
+      return { rows: [{ next_step: action?.description ?? note?.text ?? null }] };
     }
     if (sql.includes("dealroom:add-next-action")) {
       const action = { id: this.uuid(), subject_id: params[0], owner_id: params[1],

@@ -426,12 +426,14 @@ function moduleImports(directory) {
   const script = `
     const { readdirSync, readFileSync } = require("node:fs");
     const { join } = require("node:path");
+    const { stripTypeScriptTypes } = require("node:module");
     const vm = require("node:vm");
     const dir = process.argv[1];
     const out = {};
     for (const name of readdirSync(dir).sort()) {
-      if (!name.endsWith(".js")) continue;
-      const source = readFileSync(join(dir, name), "utf8");
+      if (!/\.[jt]s$/.test(name)) continue;
+      const text = readFileSync(join(dir, name), "utf8");
+      const source = name.endsWith(".ts") ? stripTypeScriptTypes(text) : text;
       out[name] = new vm.SourceTextModule(source, { identifier: name }).dependencySpecifiers;
     }
     process.stdout.write(JSON.stringify(out));

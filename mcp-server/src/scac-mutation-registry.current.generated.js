@@ -1363,7 +1363,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "patch-deal-field": {
     "ingress_key": "mcp-tool:patch-deal-field",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "34af533f177b63867fd7fb6123037181ce89236e855efd841f829c2f8f3a7a58",
+    "schema_digest": "f78008f634adc4ae7b9484290accb372afd9a641edc56e0bc831ac7baae2a786",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -1565,6 +1565,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-board-answers",
     "source_locator": "mcp-server/src/board-answers.js",
     "schema_digest": "91e298ac2dd0586ded466af4c10c4d810116cdc191a812e52f4a81dd6b65bfd4",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-call-outcomes": {
+    "ingress_key": "mcp-tool:read-call-outcomes",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
     "authority_only": false,
@@ -2320,7 +2329,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "resolve-candidate": {
     "ingress_key": "mcp-tool:resolve-candidate",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "6a55c6878ae4b86a6f36e0c4b04bb13d96aa595a97e3c9baeb9142fc54667bb3",
+    "schema_digest": "9e853497ba72c63ed0b9f9b013deb586c1f720c2787bff285297765f43741514",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -2401,6 +2410,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": true,
     "authority_only": true,
+    "delegates_to": []
+  },
+  "review-call-outcome": {
+    "ingress_key": "mcp-tool:review-call-outcome",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "190f9debf0677c0a8d1d9ce011c963b284ee22e4f35a25b999fced09262c2f6a",
+    "write": true,
+    "human_only": false,
+    "authority_only": false,
     "delegates_to": []
   },
   "review-deal": {
@@ -2715,6 +2733,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:triage-item",
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "e04f9c33266839fdb956e0830937b7f6da693b6e7afb124c7152e92b7e6b0532",
+    "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "undo-call-change": {
+    "ingress_key": "mcp-tool:undo-call-change",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "6db4435be42a2fee8a942b7d19aaafd9c80c847022cd037cb0a49b6ac35f96a9",
     "write": true,
     "human_only": false,
     "authority_only": false,
