@@ -1,5 +1,5 @@
 import { organizationTenantForActor } from "./identity.js";
-import { validRouteTimestamp, routeTimestampMicroseconds } from "./tour-route-timestamp.js";
+import { validRouteTimestamp, routeTimestampMicroseconds } from "./tour-route-timestamp.ts";
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,DIGEST=/^sha256:[0-9a-f]{64}$/;
 const AUTH=new Set(["tenant","tenant_id","organization_tenant_id","actor","actor_id","reviewer","identity","authorization","authorization_class","sponsor","human_slug"]);

@@ -6,7 +6,7 @@
 // actor for the existing MCP and pipeline handlers. No identity or deal data
 // is stored in the cookie.
 
-import { publicError } from "./public-errors.js";
+import { publicError } from "./public-errors.ts";
 import {
   exchangeGoogleCode,
   googleAuthorizationUrl,
@@ -30,7 +30,7 @@ import { isTourInternalRequest } from "./tour-internal-web.js";
 import { executeRegisteredTool } from "./tools.js";
 import { readDealWithJev } from "./jev-deal-reading.js";
 import { callTool } from "./mcp.js";
-import { isStagingBrowserEnvironment } from "./staging-browser.js";
+import { isStagingBrowserEnvironment } from "./staging-browser.ts";
 import { prepareStagingLoopFixtures } from "./staging-loop-fixtures.js";
 
 export const DEALROOM_ASSET_DIRECTORY = "../out/doctorcre-artifacts/current"; // mirrors wrangler.toml [assets]

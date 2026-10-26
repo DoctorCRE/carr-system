@@ -1,4 +1,4 @@
-import { isCalendarDate } from './calendar-date.js';
+import { isCalendarDate } from './calendar-date.ts';
 
 // One read owns the closed-deal/commission join for Invoices and Home.
 // Recording a receipt changes the existing commission only; it moves no money.

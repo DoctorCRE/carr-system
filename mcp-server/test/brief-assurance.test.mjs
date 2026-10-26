@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import pg from 'pg';
 import { readMigration } from './migration-source.testhelper.mjs';
-import { readBriefAssurance } from '../src/brief-assurance.js';
+import { readBriefAssurance } from '../src/brief-assurance.ts';
 import { executeRegisteredTool, ToolError, TOOLS } from '../src/tools.js';
 import { connectionRouteForTool } from '../src/mcp.js';
 import { acquireDisposablePostgres, acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';

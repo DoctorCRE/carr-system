@@ -33,7 +33,7 @@ import {
   V5_ADMISSION_CHECK_STATES,
   V5_CAPABILITY_STATES,
   V5_NONCE_STATES,
-} from "../src/command-supervisor-admission.v5.js";
+} from "../src/command-supervisor-admission.v5.ts";
 import {
   V5_EFFECT_ENVELOPE_SCHEMA_VERSION,
   V5_EFFECT_ENVELOPE_POLICY_VERSION,
@@ -1359,7 +1359,7 @@ test("the module produces no effect, reads no clock, filesystem, network or envi
   }
   const imports = [...source.matchAll(/^import\s[^;]*?from\s+"([^"]+)";/gm)].map(match => match[1]).sort();
   assert.deepEqual(imports, [
-    "./artifact-trust.js", "./command-supervisor-admission.v5.js",
+    "./artifact-trust.js", "./command-supervisor-admission.v5.ts",
     "./global-boundaries.v5.js", "./identity.js",
   ], "the evaluators reuse the existing kernels and keep no second action or actor registry");
 

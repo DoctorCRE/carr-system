@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ToolError } from './tool-error.js';
+import { ToolError } from './tool-error.ts';
 import { organizationTenantForActor } from './identity.js';
 import { partnerAuthoritySlugForActor } from './partner-authority.js';
 

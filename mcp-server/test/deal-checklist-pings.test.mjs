@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { TOOLS } from '../src/tools.js';
 import { PROFILES } from '../src/mcp.js';
-import { CHECKLIST_SOURCES } from '../src/deal-checklist.js';
+import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
 
 const dealId = '10000000-0000-4000-8000-000000000001';
 const actor = { id: '20000000-0000-4000-8000-000000000001', slug: 'joe', human: true };

@@ -731,6 +731,7 @@
       "*tools/*.py",
       "*bin/*",
       "*mcp-server/src/*.js",
+      "*mcp-server/src/*.ts",
       "*migrations/*.sql"
      ]
     }

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createTourInternalWebHandler, isTourInternalRequest } from "../src/tour-internal-web.js";
 import { tourDomainTools } from "../src/tour-domain.js";
-import { ToolError } from "../src/tool-error.js";
+import { ToolError } from "../src/tool-error.ts";
 
 // Slice 2 (create a Tour and assemble its stops). Synthetic identifiers only.
 const ORIGIN = "https://app.doctorcre.com";

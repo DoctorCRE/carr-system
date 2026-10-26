@@ -1,21 +1,54 @@
 #!/bin/zsh
-# install-outlook-intake.sh — build the fixed-scope copier and pinned hxprobe, then render the job.
+# install-outlook-intake.sh — build the fixed-scope copier and the vendored hxprobe, then render the job.
 #
 # A narrow installer like install-outlook-triage.sh: ops/config-as-code.py install
-# would also rewrite every unrelated hook and LaunchAgent. The decoder is
-# ukd1/hxstore-reverse-engineering at a pinned commit plus
-# vendor-patches/hxprobe-calendar-and-bodies.patch, built offline from its
-# locked dependencies (see vendor-patches/README.md). It never loads the job:
-# it renders the plist, creates the launchd log at 0600, and prints the two
-# commands the operator runs to load it.
+# would also rewrite every unrelated hook and LaunchAgent. The decoder is built
+# from vendor/hxprobe in this checkout, the tree the hxprobe CI class tests, with
+# the same `cargo build --release --locked`. Cargo's target directory sits under
+# the settings `vendor` path, and the binary is installed only when its SHA-256
+# equals vendor/hxprobe/BUILD-SHA256; otherwise the previous decoder stays. It
+# never loads the job: it renders the plist, creates the launchd log at 0600,
+# and prints the two commands the operator runs to load it.
+#
+# The Outlook jobs run from the settings `repo`, a checkout that only this
+# installer moves. Run from any other checkout, it first fetches its own HEAD
+# commit into that path (detached), links .venv, out and mcp-server/node_modules
+# back to the installing checkout the first time only, then re-runs itself from
+# there. Pulling the canonical checkout therefore never ships Outlook code, and
+# the granted helper's compiled paths stay the same on every later run.
 #
 # Usage: ./bin/install-outlook-intake.sh
 
 set -eu
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$REPO"
 PY="$REPO/.venv/bin/python"
+RUNTIME="$("$PY" -m lib.outlook_settings field repo)"
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+if [ "$REPO" != "$RUNTIME" ]; then
+  SHA="$(git rev-parse HEAD)"
+  if [ -e "$RUNTIME" ]; then
+    if [ "$(git -C "$RUNTIME" rev-parse --show-toplevel 2>/dev/null)" != "$RUNTIME" ] \
+       || [ -n "$(git -C "$RUNTIME" status --porcelain --untracked-files=no)" ]; then
+      print -u2 -- "install-outlook-intake: $RUNTIME must be a clean checkout that only this installer moves"
+      exit 1
+    fi
+  else
+    mkdir -p "$(dirname "$RUNTIME")"
+    git init --quiet "$RUNTIME"
+  fi
+  git -C "$RUNTIME" fetch --quiet --depth=1 "$REPO" "$SHA"
+  git -C "$RUNTIME" checkout --quiet --detach "$SHA"
+  mkdir -p "$REPO/out"
+  for shared in .venv out mcp-server/node_modules; do
+    if [ ! -e "$RUNTIME/$shared" ] && [ ! -L "$RUNTIME/$shared" ] && [ -e "$REPO/$shared" ]; then
+      ln -s "$(cd "$REPO/$shared" && pwd -P)" "$RUNTIME/$shared"
+    fi
+  done
+  print -- "install-outlook-intake: Outlook jobs run from $RUNTIME at $SHA"
+  exec /bin/zsh "$RUNTIME/bin/install-outlook-intake.sh"
+fi
 "$PY" -m lib.outlook_settings service intake
 "$PY" -m lib.outlook_settings service refresh
 LABEL="com.carr.outlook-intake"
@@ -23,13 +56,13 @@ SOURCE="$REPO/ops/launchd/$LABEL.plist"
 DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
 RENDERED="$REPO/out/$LABEL.plist"
 LOG="$REPO/out/outlook-intake-launchd.log"
-COMMIT="191b54e42757687806202f8f696e9066f0514e11"
 VENDOR="$("$PY" -m lib.outlook_settings field vendor)"
 HELPER="$("$PY" -m lib.outlook_settings field copy_helper)"
-VENDOR_PARENT="$(dirname "$VENDOR")"
-PATCH="$REPO/vendor-patches/hxprobe-calendar-and-bodies.patch"
+CRATE="$REPO/vendor/hxprobe"
+# build.rs also reads the store atlas and its generator from the repository root.
+SOURCES=(vendor/hxprobe spec/outlook/hxstore-atlas.json ops/hxstore-atlas.py)
+DECODER="$VENDOR/hxprobe/target/release/hxprobe"
 PIN="$VENDOR/.carr-pin"
-WANT_PIN="$COMMIT $(/usr/bin/shasum -a 256 "$PATCH" | cut -d' ' -f1)"
 TMP="$(mktemp -t carr-outlook-intake-plist)"
 trap 'rm -f "$TMP"' EXIT
 
@@ -38,17 +71,31 @@ if [ ! -f "$SOURCE" ]; then
   exit 1
 fi
 
-if [ ! -x "$VENDOR/hxprobe/target/release/hxprobe" ] || [ "$(cat "$PIN" 2>/dev/null)" != "$WANT_PIN" ]; then
-  if [ -e "$VENDOR" ]; then
-    print -u2 -- "install-outlook-intake: $VENDOR exists but is not the pinned, patched build; move it aside first"
+if [ -n "$(git -C "$REPO" status --porcelain -- "${SOURCES[@]}")" ]; then
+  print -u2 -- "install-outlook-intake: $REPO has uncommitted decoder sources; the decoder builds only from committed source"
+  exit 1
+fi
+WANT_PIN="source $(git -C "$REPO" rev-parse "${SOURCES[@]/#/HEAD:}" | /usr/bin/paste -sd' ' -)"
+HAVE_PIN="$(cat "$PIN" 2>/dev/null || true)"
+if [ ! -x "$DECODER" ] || [ "$HAVE_PIN" != "$WANT_PIN" ]; then
+  # Only the old upstream-plus-patch checkout is refused; a folder left by a
+  # failed build of this installer has no pin and no crate, and is retried.
+  if [ -e "$VENDOR/hxprobe/Cargo.toml" ] || { [ -n "$HAVE_PIN" ] && [ "${HAVE_PIN#source }" = "$HAVE_PIN" ]; }; then
+    print -u2 -- "install-outlook-intake: $VENDOR holds the old upstream decoder checkout; move it aside first"
     exit 1
   fi
-  mkdir -p "$VENDOR_PARENT"
-  /usr/bin/curl -fsSL "https://codeload.github.com/ukd1/hxstore-reverse-engineering/tar.gz/$COMMIT" \
-    | /usr/bin/tar -xz -C "$VENDOR_PARENT"
-  mv "$VENDOR_PARENT/hxstore-reverse-engineering-$COMMIT" "$VENDOR"
-  (cd "$VENDOR" && /usr/bin/patch -p1 --quiet < "$PATCH")
-  (cd "$VENDOR/hxprobe" && cargo test --release --locked --quiet && cargo build --release --locked --quiet)
+  mkdir -p "$VENDOR/hxprobe/target/release"
+  (cd "$CRATE" && cargo test --release --locked --quiet --target-dir "$VENDOR/build" \
+     && cargo build --release --locked --quiet --target-dir "$VENDOR/build")
+  BUILT="$(/usr/bin/shasum -a 256 "$VENDOR/build/release/hxprobe" | cut -d' ' -f1)"
+  RECEIPT="$(head -n 1 "$CRATE/BUILD-SHA256" | cut -d' ' -f1)"
+  if [ "$BUILT" != "$RECEIPT" ]; then
+    print -u2 -- "install-outlook-intake: built decoder $BUILT differs from vendor/hxprobe/BUILD-SHA256 $RECEIPT"
+    print -u2 -- "  local toolchain: $(rustc -V); the installed decoder is unchanged. Refresh BUILD-SHA256 in a PR."
+    exit 1
+  fi
+  cp "$VENDOR/build/release/hxprobe" "$DECODER.new"
+  mv -f "$DECODER.new" "$DECODER"
   print -- "$WANT_PIN" > "$PIN"
 fi
 
@@ -70,7 +117,7 @@ settings.require_repo(repo)
 
 source = repo / 'tools/outlook-intake-copy.c'
 helper = settings.copy_helper
-work_root = settings.repo / 'out/outlook-intake'
+work_root = (settings.repo / 'out/outlook-intake').resolve()
 flags = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
          f'-DOUTLOOK_PROFILE={json.dumps(str(settings.profile))}',
          f'-DOUTLOOK_WORK_ROOT={json.dumps(str(work_root))}',
@@ -97,7 +144,7 @@ chmod 644 "$RENDERED"
 touch "$LOG"
 chmod 600 "$LOG"
 
-print -- "install-outlook-intake: hxprobe pinned and built; plist rendered to $RENDERED"
+print -- "install-outlook-intake: hxprobe built from vendor/hxprobe; plist rendered to $RENDERED"
 print -- "install-outlook-intake: one-time step: grant Full Disk Access to $HELPER"
 print -- "  System Settings > Privacy & Security > Full Disk Access > add the helper above."
 print -- "install-outlook-intake: it is NOT loaded. To load it, run:"

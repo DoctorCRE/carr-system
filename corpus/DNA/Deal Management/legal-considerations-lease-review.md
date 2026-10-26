@@ -1,6 +1,6 @@
 # Legal Considerations in Healthcare Leases — Agent Reference
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Created 2026-07-07 by Claude Code (watch-video skill), from CARR's "Brokerage Mastery Podcast" episode on Legal Considerations (`training.carr.us/sessions/legal-considerations`, audio-only, 36 min). Host: a senior CARR agent. Guest: **the firm's lead attorney**, founding attorney of **Dental & Medical Counsel** (dentalandmedicalcounsel.com; also runs "HR for Health") — 20+ years, thousands of dental/healthcare practices. Agent-facing knowledge for spotting lease risks and moving legal forward. Paraphrase-only per the Jul 8 policy: no transcript stored, timestamps not retained; the source session is identified in the capture ledger.*
 

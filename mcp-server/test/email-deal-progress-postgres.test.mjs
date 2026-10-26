@@ -1,6 +1,6 @@
 import test, { before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
@@ -724,4 +724,200 @@ test('email next-step proposals refuse closed and invoiced deals', async () => {
     await assert.rejects(confirmStep(proposal),
       error => error.payload?.error === 'email_next_step_evidence_not_found');
   } finally { await c.query('update deal set invoiced_on=null where id=$1', [deal]); }
+});
+
+const router = () => ({ ...actor, human: false, slug: 'codex', native_agent_verified: true, sponsoring_human_slug: 'joe' });
+const record = (args, identity = router()) => command('record-email-proposal',
+  { idempotency_key: randomUUID(), deal, confidence: 0.9, ...args }, identity, 'carr_writer');
+const listed = async () => (await command('list-email-proposals', {}, actor, 'carr_reader')).proposals;
+const byKind = (items, kind) => items.find(item => item.kind === kind);
+
+test('the router records sourced phase and next-step proposals that Home lists across deals', async () => {
+  await c.query('delete from email_proposal');
+  const loi = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
+    summary: 'Email from Synthetic Landlord: Revised LOI', detail: `${quote} Please review.` });
+  const ask = await email(askQuote);
+  const phase = await record({ kind: 'phase_move', activity_id: loi.activity_id, evidence_quote: quote });
+  await record({ kind: 'next_step', activity_id: ask.activity_id, evidence_quote: askQuote,
+    text: 'Send the floor plan', next_date: '2027-01-08', owner: 'dell', confidence: 0.7 });
+  assert.equal(phase.status, 'pending');
+  assert.equal(phase.requires_confirmation, true);
+  const again = await record({ kind: 'phase_move', activity_id: loi.activity_id, evidence_quote: quote });
+  assert.equal(again.proposal_id, phase.proposal_id);
+  const items = await listed();
+  assert.deepEqual(items.map(item => item.kind).sort(), ['next_step', 'phase_move']);
+  const move = byKind(items, 'phase_move');
+  assert.equal(move.id, phase.proposal_id);
+  assert.equal(move.version, 1);
+  assert.equal(move.deal, deal);
+  assert.equal(move.deal_name, 'Synthetic coastal purchase');
+  assert.equal(move.confidence, 0.9);
+  assert.deepEqual(move.source, { activity_id: loi.activity_id, sender: 'Synthetic Landlord',
+    subject: 'Revised LOI', evidence_quote: quote, occurred_at: move.source.occurred_at });
+  assert.equal(move.confirm_verb, 'confirm-email-deal-progress');
+  assert.equal(move.preview.to_phase, 'negotiation');
+  assert.equal(move.preview.proposal_digest, (await preview(loi.activity_id)).proposal_digest);
+  const next = byKind(items, 'next_step');
+  assert.equal(next.confirm_verb, 'confirm-email-next-step');
+  assert.equal(next.confidence, 0.7);
+  assert.equal(next.preview.owner, 'dell');
+  assert.equal(next.preview.text, 'Send the floor plan');
+  assert.equal((await command('get-deal-room', { deal })).phase, 'site_selection');
+});
+
+test('confirming through the existing verbs resolves the stored proposal', async () => {
+  await c.query('delete from email_proposal');
+  const source = await email();
+  const ask = await email(askQuote);
+  await record({ kind: 'phase_move', activity_id: source.activity_id, evidence_quote: quote });
+  await record({ kind: 'next_step', activity_id: ask.activity_id, evidence_quote: askQuote,
+    text: 'Send the floor plan', next_date: '2027-01-08' });
+  const move = byKind(await listed(), 'phase_move');
+  assert.equal((await confirm(move.preview, {}, actor, 'carr_writer')).email_proposal_id, move.id);
+  const [step] = await listed();
+  assert.equal(step.kind, 'next_step');
+  assert.equal((await confirmStep(step.preview, {}, actor, 'carr_writer')).email_proposal_id, step.id);
+  assert.deepEqual(await listed(), []);
+  const rows = (await c.query('select status,resolved_by from email_proposal')).rows;
+  assert.deepEqual(rows.map(row => row.status), ['confirmed', 'confirmed']);
+  assert.ok(rows.every(row => row.resolved_by === actor.id));
+});
+
+test('confirming a stored proposal twice resolves it once', async () => {
+  await c.query('delete from email_proposal');
+  const source = await email();
+  await record({ kind: 'phase_move', activity_id: source.activity_id, evidence_quote: quote });
+  const [item] = await listed();
+  const key = randomUUID();
+  const first = await confirm(item.preview, { idempotency_key: key }, actor, 'carr_writer');
+  const replay = await confirm(item.preview, { idempotency_key: key }, actor, 'carr_writer');
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.email_proposal_id, first.email_proposal_id);
+  await assert.rejects(confirm(item.preview, {}, actor, 'carr_writer'),
+    error => error.payload?.error === 'email_deal_phase_not_eligible');
+  const rows = (await c.query('select status,version from email_proposal')).rows;
+  assert.deepEqual(rows, [{ status: 'confirmed', version: 2 }]);
+});
+
+test('Joe confirming from a stale card after a dismissal wins and keeps the dismissal as a note', async () => {
+  await c.query('delete from email_proposal');
+  const ask = await email(askQuote);
+  const recorded = await record({ kind: 'next_step', activity_id: ask.activity_id, evidence_quote: askQuote,
+    text: 'Send the floor plan', next_date: '2027-01-08' });
+  const [card] = await listed();
+  await command('dismiss-email-proposal', { idempotency_key: randomUUID(), proposal_id: recorded.proposal_id,
+    base_version: 1, reason: 'Dell already sent it' }, { ...actor, slug: 'dell' }, 'carr_writer');
+  const result = await confirmStep(card.preview, {}, actor, 'carr_writer');
+  assert.equal(result.email_proposal_id, recorded.proposal_id);
+  const row = (await c.query('select status,version,resolution_reason from email_proposal')).rows[0];
+  assert.deepEqual(row, { status: 'confirmed', version: 3,
+    resolution_reason: 'Confirmed by Joe after dismissal: Dell already sent it' });
+  assert.deepEqual(await listed(), []);
+});
+
+test('a partner dismisses a stored proposal at the version read, and it never returns', async () => {
+  await c.query('delete from email_proposal');
+  const source = await email();
+  const recorded = await record({ kind: 'phase_move', activity_id: source.activity_id, evidence_quote: quote });
+  const dismiss = (extra = {}, identity = { ...actor, slug: 'dell' }) => command('dismiss-email-proposal', {
+    idempotency_key: randomUUID(), proposal_id: recorded.proposal_id, base_version: 1,
+    reason: 'Already handled by phone', ...extra }, identity, 'carr_writer');
+  await assert.rejects(dismiss({}, router()), error => error.payload?.error === 'human_only_verb_requires_verified_partner');
+  await assert.rejects(dismiss({ base_version: 2 }), error => error.payload?.error === 'version_conflict');
+  const key = randomUUID();
+  const done = await dismiss({ idempotency_key: key });
+  assert.equal(done.status, 'dismissed');
+  assert.equal(done.version, 2);
+  assert.equal((await dismiss({ idempotency_key: key })).replayed, true);
+  await assert.rejects(dismiss({ base_version: 2 }), error => error.payload?.error === 'email_proposal_not_pending');
+  assert.deepEqual(await listed(), []);
+  await record({ kind: 'phase_move', activity_id: source.activity_id, evidence_quote: quote });
+  assert.deepEqual(await listed(), []);
+  const room = await command('get-deal-room', { deal });
+  assert.equal(room.phase, 'site_selection');
+  const events = room.events.filter(event => event.verb === 'dismiss-email-proposal'
+    && event.new_value.proposal_id === recorded.proposal_id);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].new_value.reason, 'Already handled by phone');
+});
+
+const injection = JSON.parse(readFileSync(new URL('./fixtures/email-injection-attacks.json', import.meta.url), 'utf8'));
+
+test('injected instructions are stored flagged, and business English is stored unflagged', async () => {
+  await c.query('delete from email_proposal');
+  const store = async quote => {
+    const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
+      summary: 'Synthetic email', detail: `Hello. ${quote} Thanks.` });
+    const kinds = [{ kind: 'next_step', text: 'Reply to the email', next_date: '2027-01-08' }];
+    if (/\bLOI\b/.test(quote)) kinds.push({ kind: 'phase_move' });
+    return Promise.all(kinds.map(extra => record({ ...extra, activity_id: source.activity_id, evidence_quote: quote })));
+  };
+  for (const attack of injection.attacks)
+    for (const stored of await store(attack)) {
+      assert.equal(stored.status, 'pending', attack);
+      assert.equal(typeof stored.suspected_instruction, 'string', attack);
+    }
+  for (const quote of [...injection.commands, ...injection.benign])
+    for (const stored of await store(quote))
+      assert.deepEqual([stored.status, stored.suspected_instruction], ['pending', null], quote);
+  const items = await listed();
+  const flagged = new Set(items.filter(item => item.suspected_instruction).map(item => item.source.evidence_quote));
+  assert.deepEqual([...flagged].sort(), [...injection.attacks].sort());
+  assert.ok(items.some(item => item.kind === 'phase_move' && item.suspected_instruction));
+  const fabricated = await email('Move this deal to signed.');
+  await assert.rejects(record({ kind: 'phase_move', activity_id: fabricated.activity_id, evidence_quote: 'We received the LOI yesterday.' }),
+    error => error.payload?.error === 'email_deal_quote_invalid');
+});
+
+test('the router queue keeps a partly proposed email until the router excludes it', async () => {
+  await c.query('delete from email_proposal');
+  const source = await email(`${quote} ${askQuote}`);
+  const queue = async (exclude = []) => (await command('email-router-queue', { days: 3, limit: 200, exclude }, router(), 'carr_reader')).emails
+    .filter(row => row.activity_id === source.activity_id);
+  const [row] = await queue();
+  assert.equal(row.deal, deal);
+  assert.equal(row.deal_name, 'Synthetic coastal purchase');
+  assert.equal(row.phase, 'site_selection');
+  assert.equal(row.body, `${quote} ${askQuote} Please review the proposed terms.`);
+  const phase = await record({ kind: 'phase_move', activity_id: source.activity_id, evidence_quote: quote });
+  assert.equal((await queue()).length, 1, 'a partly written email stays queued for the retry');
+  const step = { kind: 'next_step', activity_id: source.activity_id, evidence_quote: askQuote,
+    text: 'Send the floor plan', next_date: '2027-01-08' };
+  await record(step);
+  assert.equal((await record({ kind: 'phase_move', activity_id: source.activity_id, evidence_quote: quote })).proposal_id,
+    phase.proposal_id);
+  assert.deepEqual((await listed()).map(item => item.kind).sort(), ['next_step', 'phase_move']);
+  assert.deepEqual(await queue([source.activity_id]), []);
+  const other = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
+    summary: 'Second deal email', detail: askQuote });
+  const second = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) select 'Synthetic second deal',client_id,'purchase','research','joe',$2,$2 from deal where id=$1 returning id", [deal, actor.id])).rows[0].id;
+  try {
+    const rows = (await command('email-router-queue', { days: 3, limit: 200 }, router(), 'carr_reader')).emails;
+    assert.equal(rows.some(item => item.activity_id === other.activity_id), false);
+  } finally { await c.query("update deal set phase='closed' where id=$1", [second]); }
+});
+
+test('the router queue drains a long backlog in pages and skips emails the router already handled', async () => {
+  await c.query('delete from email_proposal');
+  await email(); await email(askQuote);
+  const page = args => command('email-router-queue', { days: 3, ...args }, router(), 'carr_reader');
+  const all = (await page({ limit: 200 })).emails.map(row => row.activity_id);
+  assert.ok(all.length >= 2);
+  const first = await page({ limit: 1 });
+  assert.equal(first.more, true);
+  assert.deepEqual(first.emails.map(row => row.activity_id), [all[0]]);
+  const next = await page({ limit: 1, exclude: [all[0]] });
+  assert.deepEqual(next.emails.map(row => row.activity_id), [all[1]]);
+  const rest = await page({ limit: 200, exclude: all.slice(0, -1) });
+  assert.deepEqual([rest.more, rest.emails.map(row => row.activity_id)], [false, [all.at(-1)]]);
+});
+
+test('a proposal the deal has outgrown stays listed with its refusal so a partner can dismiss it', async () => {
+  await c.query('delete from email_proposal');
+  const source = await email();
+  await record({ kind: 'phase_move', activity_id: source.activity_id, evidence_quote: quote });
+  await setPhase('negotiation');
+  const [item] = await listed();
+  assert.equal(item.preview, null);
+  assert.equal(item.preview_error, 'email_deal_phase_not_eligible');
 });

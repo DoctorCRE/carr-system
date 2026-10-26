@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Build and run the dedicated copier against synthetic files only."""
 import json
-import hashlib
 import os
 import plistlib
 from pathlib import Path
@@ -14,6 +13,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from git_env import fixture_env
 from outlook_test_support import write_settings
 from lib.outlook_settings import load_settings, SettingsError
 
@@ -119,16 +119,21 @@ class InstallerTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
         self.repo, self.home = self.root / 'repo & quoted', self.root / 'home'
-        for relative in ('bin', 'tools', 'ops/launchd', 'lib', '.venv/bin', 'vendor-patches'):
+        for relative in ('bin', 'tools', 'ops/launchd', 'lib', '.venv/bin', 'vendor/hxprobe', 'spec/outlook'):
             (self.repo / relative).mkdir(parents=True)
         for relative in ('bin/install-outlook-intake.sh', 'bin/install-outlook-triage.sh',
                          'tools/outlook-intake-copy.c', 'lib/outlook_settings.py',
                          'ops/launchd/com.carr.outlook-intake.plist',
                          'ops/launchd/com.carr.outlook-refresh.plist',
-                         'ops/launchd/com.carr.outlook-triage.plist',
-                         'vendor-patches/hxprobe-calendar-and-bodies.patch'):
+                         'ops/launchd/com.carr.outlook-triage.plist'):
             shutil.copyfile(ROOT / relative, self.repo / relative)
+        for relative in ('vendor/hxprobe/Cargo.toml', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py'):
+            (self.repo / relative).write_text('synthetic decoder source\n')
         (self.repo / '.venv/bin/python').symlink_to(sys.executable)
+        (self.repo / '.gitignore').write_text('.venv/\nout\n')
+        self.git(self.repo, 'init', '--quiet')
+        self.git(self.repo, 'add', '-A')
+        self.git(self.repo, 'commit', '--quiet', '-m', 'fixture')
         self.profile = self.home / 'Custom Profile'
         self.helper = self.home / 'custom binaries/granted-outlook-copy'
         self.vendor = self.home / 'custom vendor/hxstore'
@@ -138,13 +143,14 @@ class InstallerTest(unittest.TestCase):
         decoder = self.vendor / 'hxprobe/target/release/hxprobe'
         decoder.write_text('#!/bin/sh\nexit 99\n')
         decoder.chmod(0o700)
-        digest = hashlib.sha256((self.repo / 'vendor-patches/hxprobe-calendar-and-bodies.patch').read_bytes()).hexdigest()
-        (self.vendor / '.carr-pin').write_text(f'191b54e42757687806202f8f696e9066f0514e11 {digest}\n')
+        sources = self.git(self.repo, 'rev-parse', 'HEAD:vendor/hxprobe', 'HEAD:spec/outlook/hxstore-atlas.json',
+                           'HEAD:ops/hxstore-atlas.py').split()
+        (self.vendor / '.carr-pin').write_text('source ' + ' '.join(sources) + '\n')
 
     def install(self, name='intake', check=True):
         command = ['/bin/zsh', '-f', '-c', 'export HOME="$1"; exec /bin/zsh -f "$2"',
                    'installer-test', str(self.home), str(self.repo / f'bin/install-outlook-{name}.sh')]
-        return subprocess.run(command, capture_output=True, text=True, check=check)
+        return subprocess.run(command, capture_output=True, text=True, check=check, env=fixture_env())
 
     def test_installer_uses_settings_without_a_machine_role_and_preserves_the_granted_binary(self):
         result = self.install()
@@ -170,6 +176,71 @@ class InstallerTest(unittest.TestCase):
         before = self.helper.stat().st_mtime_ns
         self.install()
         self.assertEqual(self.helper.stat().st_mtime_ns, before, 'an unchanged helper retains its privacy identity')
+
+    def git(self, checkout, *args):
+        return subprocess.run(['git', '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.test',
+                               *args], cwd=checkout, env=fixture_env(), check=True, capture_output=True, text=True).stdout.strip()
+
+    def test_an_upstream_decoder_checkout_is_refused_until_moved_aside(self):
+        decoder = self.vendor / 'hxprobe/target/release/hxprobe'
+        (self.vendor / '.carr-pin').write_text('191b54e42757687806202f8f696e9066f0514e11 a1ca5a3d\n')
+        result = self.install(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('move it aside first', result.stderr)
+        self.assertEqual(decoder.read_text(), '#!/bin/sh\nexit 99\n')
+        self.assertFalse(self.helper.exists())
+        (self.vendor / '.carr-pin').unlink()
+        (self.vendor / 'hxprobe/Cargo.toml').write_text('[package]\n')
+        result = self.install(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('move it aside first', result.stderr)
+
+    def test_uncommitted_decoder_source_is_refused_before_any_build(self):
+        (self.repo / 'spec/outlook/hxstore-atlas.json').write_text('edited\n')
+        result = self.install(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('uncommitted decoder sources', result.stderr)
+        self.assertFalse((self.vendor / 'build').exists())
+
+    def test_jobs_run_from_a_checkout_only_the_installer_moves_without_rebuilding_the_helper(self):
+        runtime = self.home / 'carr-local/outlook-repo'
+        write_settings(self.home, runtime, profile=str(self.profile), vendor=str(self.vendor),
+                       copy_helper=str(self.helper))
+        result = self.install()
+        first = self.git(self.repo, 'rev-parse', 'HEAD')
+        self.assertIn(f'Outlook jobs run from {runtime} at {first}', result.stdout)
+        self.assertEqual(self.git(runtime, 'rev-parse', 'HEAD'), first)
+        self.assertEqual(self.git(runtime, 'status', '--porcelain', '--untracked-files=no'), '')
+        self.assertEqual((runtime / 'out').resolve(), self.repo / 'out')
+        self.assertEqual((runtime / '.venv').resolve(), self.repo / '.venv')
+        intake = plistlib.loads((self.repo / 'out/com.carr.outlook-intake.plist').read_bytes())
+        self.assertEqual(intake['WorkingDirectory'], str(runtime))
+        scope = subprocess.run([str(self.helper), '--scope'], capture_output=True, text=True, check=True)
+        self.assertEqual(scope.stdout.splitlines(), [str(self.profile), str(self.repo / 'out/outlook-intake'), str(runtime)])
+        load_settings(self.home).verify_helper()
+        self.profile.mkdir(parents=True)
+        (self.profile / 'HxStore.hxd').write_bytes(b'runtime-fixture')
+        out = runtime / 'out/outlook-intake'
+        out.mkdir(mode=0o700)
+        work = Path(tempfile.mkdtemp(prefix='work-', dir=out))
+        subprocess.run([str(self.helper)], cwd=work, capture_output=True, check=True)
+        self.assertEqual((work / 'store.hxd').read_bytes(), b'runtime-fixture')
+
+        (self.repo / 'lib/later_change.py').write_text('LATER = True\n')
+        self.git(self.repo, 'add', '-A')
+        self.git(self.repo, 'commit', '--quiet', '-m', 'later')
+        second = self.git(self.repo, 'rev-parse', 'HEAD')
+        self.assertEqual(self.git(runtime, 'rev-parse', 'HEAD'), first, 'moving the canonical checkout ships nothing')
+        before = self.helper.stat().st_mtime_ns
+        self.install()
+        self.assertEqual(self.git(runtime, 'rev-parse', 'HEAD'), second)
+        self.assertTrue((runtime / 'lib/later_change.py').is_file())
+        self.assertEqual(self.helper.stat().st_mtime_ns, before, 'a re-run keeps the granted helper and its compiled paths')
+
+        (runtime / 'lib/later_change.py').write_text('LATER = False\n')
+        refused = self.install(check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('must be a clean checkout', refused.stderr)
 
     def test_invalid_settings_refuse_both_installers_before_build_or_launchagent_writes(self):
         self.config.unlink()
