@@ -488,7 +488,7 @@ def parse_reply(reply: dict) -> dict:
     return {'next_step': (step or '').strip() or None, 'due_on': due}
 
 
-def ask_model(mail: dict, today: date, model: str = 'haiku') -> dict:
+def ask_model(mail: dict, today: date, model: str) -> dict:
     direction = 'sent by the broker' if mail['outbound'] else 'received by the broker'
     prompt = (f'Today is {today.isoformat()}. This email was {direction}.\n'
               f'Subject: {mail["subject"] or ""}\n\n{mail["text"][:MODEL_BODY_CHARS]}')
@@ -496,7 +496,7 @@ def ask_model(mail: dict, today: date, model: str = 'haiku') -> dict:
     return parse_reply({'is_error': False, 'structured_output': out})
 
 
-def ask_lead_intent(mail: dict, today: date, model: str = 'haiku') -> dict:
+def ask_lead_intent(mail: dict, today: date, model: str) -> dict:
     prompt = (f'Today is {today.isoformat()}.\nSubject: {mail["subject"] or ""}\n\n'
               f'{mail["text"][:MODEL_BODY_CHARS]}')
     out = model_call.ask(prompt, model=model, schema=INTENT_SCHEMA, system_prompt=INTENT_PROMPT)
@@ -1235,4 +1235,7 @@ def main() -> int:
     print(status_line(outcome))
     reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
     print('outlook-intake-receipt ' + json.dumps({'state': outcome.state, 'reason': reason, 'counts': outcome.counts}))
+    if outcome.reason not in ('outside_window', 'previous_run_active'):
+        from lib import email_router
+        email_router.step(repo, settings)
     return EXIT[outcome.state]
