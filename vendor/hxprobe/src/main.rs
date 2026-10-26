@@ -289,7 +289,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              organizer_name  TEXT,
              organizer_email TEXT,
              body            TEXT,
-             UNIQUE (goid, start_unix)
+             lifecycle_status TEXT NOT NULL,
+             lifecycle_reason TEXT NOT NULL
          );
          CREATE TABLE event_attendees (
              event_id INTEGER NOT NULL REFERENCES events(id),
@@ -570,8 +571,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         let mut ins_event = tx
             .prepare(
                 "INSERT INTO events(goid,start_unix,end_unix,start_utc,end_utc,subject,location,
-                                    organizer_name,organizer_email,body)
-                 VALUES (?1,?2,?3,datetime(?2,'unixepoch'),datetime(?3,'unixepoch'),?4,?5,?6,?7,?8)",
+                                    organizer_name,organizer_email,body,lifecycle_status,lifecycle_reason)
+                 VALUES (?1,?2,?3,datetime(?2,'unixepoch'),datetime(?3,'unixepoch'),?4,?5,?6,?7,?8,
+                         'unsupported','hxstore_lifecycle_unverified')",
             )
             .expect("prepare events");
         let mut ins_attendee = tx
@@ -602,12 +604,13 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("event_objects", events.objects),
             ("event_identities", events.identities.len()),
             ("events_decoded", events.events.len()),
+            ("calendar_lifecycle_unsupported", events.events.len()),
         ] {
             ins_meta.execute(rusqlite::params![key, value as i64]).expect("insert meta");
         }
     }
     println!(
-        "  {} calendar objects; {}/{} events decoded",
+        "  {} calendar objects; {} unsupported candidates across {} GOID/start groups",
         events.objects,
         events.events.len(),
         events.identities.len()
