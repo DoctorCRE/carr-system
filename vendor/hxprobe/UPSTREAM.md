@@ -36,7 +36,10 @@ WHAT CARR ADDS to `hxprobe db <file> [out.db] [files-dir]`:
   start and end, subject, location, organizer and attendees. Byte-distinct
   candidates remain separate; only exact serialized copies collapse. GOID and
   start are observed grouping fields. Every row exports unsupported lifecycle
-  status. Current occurrence state and attendance remain unverified. See
+  status. Current occurrence state and attendance remain unverified. An item
+  with no attendee block (an own appointment, some recurring series) decodes
+  with no attendees; on the 2026-10-21 study copies that took decoded GOID/start
+  groups from 169 to all 191, including the TEST account's new appointment. See
   [calendar lifecycle limits](#calendar-lifecycle-limits).
 - Full bodies from EFMData sidecars (`src/body.rs`). These are gzip files at
   `Files/S0/<N>/EFMData/<id>.dat`. `<N>` is 845 on Joe's machine, so every
@@ -102,7 +105,7 @@ This result covers the checked lockfile against that advisory revision.
 The `hxprobe` class in `ops/ci.sh` runs `cargo test --locked` followed by
 `cargo build --release --locked` from this directory. The PR and main-canary
 workflows register that class. A test failure stops the build and fails CI.
-The crate's 22 tests use synthetic data. Every example email address uses
+The crate's 32 tests use synthetic data. Every example email address uses
 `@example.test`. No private Outlook store or profile is needed.
 
 For updates, retain a separate upstream import and CARR change commit, review
@@ -164,8 +167,23 @@ Synthetic tests prove candidate separation and fail-closed labeling only.
 Native decoder validation and controlled test-account format research are still
 required before current calendar lifecycle or completeness can be claimed.
 
+An object whose NUL-terminated fields run to its end, with no attendee count,
+decodes with no attendees. The 2026-10-21 TEST-account study pair showed such an
+appointment added one GOID/start identity and, before this, no decoded candidate.
+
 Intake stores opaque candidate hashes and provisional schedule timestamps in its
-private state. It does not create reminders or contact activities from these
+private state. Separately it publishes the next fourteen days of meetings that
+name the configured account in every stored copy as a display snapshot (board
+`calendar-agenda`) for the morning brief, with no notes or bodies.
+
+Observed on the 2026-10-21 study copies (Joe's shared profile, not yet the TEST
+account): each recurring occurrence is a separate object whose Global Object ID
+carries its local instance date in bytes 16-19 (111 of 111 rows matched their
+start date); the series master keeps zero there. Only one ID appeared at two
+starts, which reads as a moved meeting. Not decoded yet, so the snapshot always
+warns about them: attendee responses (declines), deleted-items or folder
+membership, the owning account, revision order, and whether every occurrence of
+a series is materialized. It does not create reminders or contact activities from these
 rows. Existing unacknowledged calendar activities and next actions without
 established mail provenance remain quarantined with their frozen payloads.
 Mail continues independently. Status reasons remain `processed`, `nothing_new`,
