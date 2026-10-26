@@ -530,6 +530,57 @@ mod tests {
         assert_eq!(index.folders[&51].name.as_deref(), Some("Deal A"));
     }
 
+    /// An expanded message header with a typed folder reference at +408
+    /// naming a folder the index has never catalogued.
+    fn header(id: u64, size: usize) -> Vec<u8> {
+        let mut b = object(0xca, id, 0, id, size);
+        b[408..454].copy_from_slice(&object(0x4d, 50, 2, 7, 46));
+        b
+    }
+
+    #[test]
+    fn keys_need_a_header_reference_but_no_folder_catalog() {
+        let index = Index::default();
+        let mut expanded = header(70, 500);
+        expanded.extend(note());
+        let mut early = object(0xca, 71, 0, 71, 100);
+        early.extend(note());
+        let mut compact = object(0xca, 72, 0, 72, 100);
+        compact.extend(note());
+        let mut data = expanded.clone();
+        data.extend(&early);
+        data.extend(envelope(0x740, &compact));
+        let keys = index.keys(&data, &note());
+        assert_eq!(keys.get(&500), Some(&70));
+        assert_eq!(keys.len(), 2, "an anchor inside the fixed header is not keyed");
+        assert_eq!(keys.values().copied().collect::<BTreeSet<_>>(), BTreeSet::from([70, 72]));
+        assert!(index.links(&data, &note()).is_empty(), "keys do not invent folder links");
+        let mut bare = object(0xca, 74, 0, 74, 500);
+        bare.extend(note());
+        assert!(index.keys(&bare, &note()).is_empty(), "no typed folder reference, no key");
+    }
+
+    #[test]
+    fn keys_never_cross_an_envelope_or_the_header_bound() {
+        let index = Index::default();
+        // A view envelope between the header and the next anchor ends the header.
+        let mut data = header(70, 470);
+        let mut view = object(0x4f, 71, 4, 60, 100);
+        view.extend(note());
+        data.extend(envelope(0x430, &view));
+        assert!(index.keys(&data, &note()).is_empty());
+        // An anchor 4096 or more bytes past the header belongs to something else.
+        let mut far = header(72, 4096);
+        far.extend(note());
+        assert!(index.keys(&far, &note()).is_empty());
+        // Only the first anchor inside one header takes its key.
+        let mut twice = header(73, 500);
+        twice.extend(note());
+        twice.extend(vec![0; 40]);
+        twice.extend(note());
+        assert_eq!(index.keys(&twice, &note()), BTreeMap::from([(500, 73)]));
+    }
+
     #[test]
     fn conflicting_folder_names_are_not_silently_overwritten() {
         let mut index = Index::default();
