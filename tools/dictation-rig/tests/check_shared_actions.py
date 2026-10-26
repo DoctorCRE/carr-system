@@ -31,6 +31,9 @@ class SharedActions(unittest.TestCase):
         owner, task = tasks[0]
         self.assertEqual(owner, "dell")
         self.assertIn("joe", task["title"].casefold())
+        self.assertIn("sheet", task["title"].casefold())
+        self.assertIn("numbers", task["title"].casefold())
+        self.assertEqual(task["deal_id"], "synthetic-sheet")
 
     def test_volunteer_overrides_deal_owner(self):
         tasks = self.extract([
@@ -42,6 +45,9 @@ class SharedActions(unittest.TestCase):
         owner, task = tasks[0]
         self.assertEqual(owner, "joe")
         self.assertIn("dell", task["title"].casefold())
+        self.assertIn("sheet", task["title"].casefold())
+        self.assertIn("numbers", task["title"].casefold())
+        self.assertEqual(task["deal_id"], "synthetic-sheet")
 
     def test_distinct_individual_actions_remain_separate(self):
         tasks = self.extract([
