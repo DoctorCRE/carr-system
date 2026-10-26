@@ -1,4 +1,5 @@
 #!/bin/bash
+# Run the repository's canonical CI classes and report their verified results.
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /bin/bash "$0" "$@"
 fi
@@ -228,6 +229,11 @@ tree_fingerprint() {
 check_gates() {
   local failures="" count=0 skiplist="" gates_timed_out=0 gate_index=0
   export CARR_HOOK_FIXTURE=1
+
+  if ! run_quiet "$LOGDIR/codemap.log" "$PY" tools/codemap.py --check; then
+    failures="$failures codemap"
+    fail_tail "$LOGDIR/codemap.log"
+  fi
 
   # rustup installs the pinned toolchain before concurrent HxStore builds.
   if [ -f vendor/hxprobe/Cargo.toml ]; then
