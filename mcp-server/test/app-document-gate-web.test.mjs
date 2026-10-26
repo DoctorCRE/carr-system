@@ -1,3 +1,4 @@
+// Test the app document gate web routes.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createDealroomHandler, isDealroomRequest } from "../src/dealroom-web.js";

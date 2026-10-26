@@ -1,3 +1,4 @@
+// Tests client share field allowlists and safeguards against internal data leakage.
 import { readMigration } from "./migration-source.testhelper.mjs";
 // V5-J303 client-shared Tours: the client field allowlist is explicit and
 // default-deny. Joe's ruling (decision 4ab3933e, 2026-09-24): a client sees

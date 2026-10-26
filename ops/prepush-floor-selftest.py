@@ -6,7 +6,7 @@ WHY THIS FILE EXISTS AT ALL. On 2026-08-23 the gates council moved the full
 ten-class ops/ci.sh off the push path and left a fast local floor behind. Doing
 that required three changes to the hook whose failure modes are silent:
 
-  1. It now selects classes (`--only pushfloor,secret`). Select the wrong ones
+  1. It now selects classes (`--only pushfloor`). Select the wrong ones
      and the push path checks less than anybody thinks, with no symptom.
   2. It derives CARR_CI_RANGE from the refs captured on stdin.
   3. It now TEEs the run so the failure text can be attributed. A shell pipeline
@@ -75,6 +75,15 @@ exit "${STUB_CI_RC:-0}"
 """
 
 
+SCANNER = """import os, sys
+if "--pre-push" in sys.argv:
+    sys.stdin.read()
+with open(os.environ.get("CI_CALL_LOG", os.devnull), "a") as log:
+    log.write("{tag}:" + " ".join(a for a in sys.argv[1:] if not a.startswith("/")) + "\\n")
+sys.exit(int(os.environ.get("{rc}", "0")))
+"""
+
+
 def build(tmp):
     env = fixture_env()
     bare = tmp / "origin.git"
@@ -96,10 +105,12 @@ def build(tmp):
     ops.mkdir()
     (ops / "ci.sh").write_text(STUB)
     os.chmod(ops / "ci.sh", 0o755)
-    # The hook's leak guard is stubbed like ci.sh: it needs a corpus and a
-    # gitleaks download, neither of which this floor proof is about.
+    # The hook's content scanners are stubbed like ci.sh: the real ones need a
+    # corpus and a gitleaks download. Each records one line per invocation, so
+    # the count of scans per push is asserted, not assumed (WR-000537).
     (repo / "security").mkdir()
-    (repo / "security" / "leak_guard.py").write_text("import sys\nsys.stdin.read()\n")
+    (repo / "security" / "leak_guard.py").write_text(SCANNER.format(tag="leak-guard", rc="STUB_LEAK_RC"))
+    (ops / "ci-secret-scan.py").write_text(SCANNER.format(tag="shaped", rc="STUB_SHAPED_RC"))
     (repo / "seed.txt").write_text("seed\n")
     git(repo, "add", "-A", check_rc=True)
     git(repo, "commit", "-qm", "seed", check_rc=True)
@@ -133,7 +144,7 @@ def main():
         check("a green floor allows the push", r.returncode == 0, r.stderr)
         calls = log.read_text() if log.exists() else ""
         check("the hook selected the fast subset, not the whole suite",
-              "args:--only pushfloor secret" in calls, calls)
+              "args:--only pushfloor\n" in calls, calls)
         # THE SEPARATOR IS LOAD-BEARING, so it is pinned rather than left to the
         # substring above to imply. ci.sh has only understood a COMMA list since
         # the push-floor change that taught --only to split them; before that
@@ -146,8 +157,12 @@ def main():
         # naming a class that does not exist. Spaces parse correctly on BOTH
         # versions. A future edit that "tidies" these back to commas re-breaks
         # every older worktree on the machine, silently, so it fails here first.
-        check("the class list is space-separated, parseable by every ci.sh version",
-              "--only pushfloor,secret" not in calls, calls)
+        check("the floor does not re-run the content scanners as the secret class",
+              "secret" not in calls, calls)
+        check("each content scanner ran exactly once for the push",
+              calls.count("leak-guard:") == 1 and calls.count("shaped:") == 1, calls)
+        check("the leak guard judged the refs against the receiver",
+              "leak-guard:--root --pre-push --remote" in calls, calls)
         check("the hook did NOT run the full ten-class suite",
               "args:\n" not in calls, calls)
 
@@ -175,7 +190,11 @@ def main():
               head[:12] in calls, calls)
 
         check("the floor selects content checks without branch ancestry",
-              "args:--only pushfloor secret\n" in calls, calls)
+              "args:--only pushfloor\n" in calls, calls)
+        check("the shaped scan reads the same pushed range the floor gets",
+              f"shaped:--range {head}" not in calls
+              and any(line.startswith("shaped:--range ") and line.endswith(head)
+                      for line in calls.splitlines()), calls)
         check("the floor does NOT run the full suite",
               "args:--only\n" not in calls and "gates" not in calls, calls)
 
@@ -227,7 +246,7 @@ def main():
         env.update(STUB_CI_RC="1", CI_CALL_LOG=str(log), CARR_ALLOW_MAIN_PUSH="1")
         r = git(repo, "push", "origin", "HEAD:refs/heads/main", env=env)
         check("the retired owner override cannot bypass a red content floor",
-              r.returncode != 0 and "pushfloor secret" in log.read_text(), r.stderr)
+              r.returncode != 0 and "args:--only pushfloor" in log.read_text(), r.stderr)
 
         # 5b. THE NEW-BRANCH BASE IS THE MERGE BASE, NOT origin/main.
         #     `git diff origin/main..HEAD` is a TWO-DOT diff: it compares two
@@ -282,7 +301,7 @@ def main():
         check("CARR_SKIP_CI=1 with NO reason is refused, not honoured",
               r.returncode != 0, r.stderr)
         check("and the suite WAS invoked (the skip did not take)",
-              log.read_text().strip() != "", log.read_text())
+              "args:" in log.read_text(), log.read_text())
         check("the refusal names the missing CARR_SKIP_CI_REASON",
               "CARR_SKIP_CI_REASON" in r.stderr, r.stderr)
 
@@ -300,7 +319,27 @@ def main():
         check("CARR_SKIP_CI=1 WITH a reason still skips a red floor",
               r.returncode == 0, r.stderr)
         check("and the suite was genuinely not invoked",
-              log.read_text().strip() == "", log.read_text())
+              "args:" not in log.read_text(), log.read_text())
+        check("but a reasoned skip still runs both content scanners once",
+              log.read_text().count("leak-guard:") == 1
+              and log.read_text().count("shaped:") == 1, log.read_text())
+
+        # 6c. NO FLAG SKIPS A CONTENT SCAN. A red shaped scan refuses the push
+        # even under an honoured CARR_SKIP_CI, and refuses before the floor.
+        (repo / "f.txt").write_text("f\n")
+        git(repo, "add", "f.txt", check_rc=True)
+        git(repo, "commit", "-qm", "sixth", check_rc=True)
+        for scanner, variable in (("shaped", "STUB_SHAPED_RC"), ("leak guard", "STUB_LEAK_RC")):
+            log.write_text("")
+            r = push(repo, "feature-f", rc="0", log=log,
+                     extra={variable: "1", "CARR_SKIP_CI": "1",
+                            "CARR_SKIP_CI_REASON": "selftest proving scans are unskippable"})
+            check(f"a red {scanner} scan refuses the push even with a reasoned skip",
+                  r.returncode != 0, r.stderr)
+            check(f"and a red {scanner} scan stops before the floor runs",
+                  "args:" not in log.read_text(), log.read_text())
+        pushed = git(repo, "ls-remote", "origin", "refs/heads/feature-f").stdout
+        check("and nothing reached the remote", pushed.strip() == "", pushed)
         check("a receipt was appended to out/ci-skip-receipts.jsonl",
               receipts.exists() and "selftest exercising the honoured skip" in receipts.read_text(),
               receipts.read_text() if receipts.exists() else "(no file)")

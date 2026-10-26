@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test launchd hold and disabled-job handling.
 import ast
 import contextlib
 import importlib.util

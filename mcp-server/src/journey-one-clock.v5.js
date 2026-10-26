@@ -1,3 +1,4 @@
+// Calculate Journey One deadlines on the Chicago calendar.
 export const JOURNEY_ONE_DEADLINE_CONTRACT = Object.freeze({
   timezone: "America/Chicago", calendar_days: 30,
   clock_origin_gate_id: "foundation-assurance-minimum-accepted",

@@ -1,3 +1,4 @@
+// Normalize safe integer fields and envelopes.
 import { ToolError } from "./tool-error.ts";
 import type { Actor, Db } from "./verb-contract.ts";
 

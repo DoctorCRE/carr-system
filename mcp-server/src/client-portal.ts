@@ -1,3 +1,4 @@
+// Expose client portal tools.
 import { ToolError } from './tool-error.ts';
 import type { Db, VerbInputs } from './verb-contract.ts';
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;

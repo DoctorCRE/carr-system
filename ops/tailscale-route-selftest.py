@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test the Tailscale route guard.
 import json
 import os
 import plistlib

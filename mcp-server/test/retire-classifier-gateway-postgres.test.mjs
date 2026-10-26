@@ -1,3 +1,4 @@
+// Test PostgreSQL retirement of the classifier gateway.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test routing of type checks for changed files.
 from pathlib import Path
 import subprocess
 import tempfile

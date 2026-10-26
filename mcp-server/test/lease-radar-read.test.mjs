@@ -1,3 +1,4 @@
+// Test authenticated lease radar reads, coverage and missing data handling.
 import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 import test from 'node:test';
 

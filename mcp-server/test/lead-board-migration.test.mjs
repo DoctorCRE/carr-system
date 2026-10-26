@@ -1,3 +1,4 @@
+// Test Lead Board migration reader views, grants and funnel ordering.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";

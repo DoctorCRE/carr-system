@@ -1,3 +1,4 @@
+// Test action risk guardrails and their enforcement.
 
 import test from "node:test";
 import assert from "node:assert/strict";

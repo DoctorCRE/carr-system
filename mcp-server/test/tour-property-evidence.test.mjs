@@ -1,3 +1,4 @@
+// Tests property jurisdiction evidence, conflicts, and time-bound reads.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { projectPropertyEvidence, readPropertyEvidence } from "../src/tour-property-evidence.ts";
