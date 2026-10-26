@@ -330,7 +330,10 @@ def session_path(session: str, recordings: Path | None = None) -> Path:
     if not session or session in {".", ".."} or "/" in session or "\\" in session:
         raise ValueError("invalid recording session")
     root = (recordings or RECORDINGS).resolve()
-    path = (root / session).resolve()
+    resolved = os.path.realpath(root / session)
+    if not resolved.startswith(str(root).rstrip(os.sep) + os.sep):
+        raise ValueError("recording session not found")
+    path = Path(resolved)
     if path.parent != root or not path.is_dir():
         raise ValueError("recording session not found")
     return path
