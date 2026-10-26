@@ -92,6 +92,7 @@ case "${1:-}" in
   salesforce-diff) sf_diff "$@" ;;
   salesforce-sync) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -m lib.salesforce_deal_sync "$@" ;;
   section-index) shift; section_index "$@" ;;
+  regen)        shift; "$PY" "$REPO/tools/regen.py" "$@" ;;
   registry-audit) registry_audit "$@" ;;
   review-queue) review_queue "$@" ;;
   brief-pack)   brief_pack "$@" ;;
@@ -128,7 +129,8 @@ case "${1:-}" in
   outlook-event) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["event", *sys.argv[1:]]))' "$@" ;;
   *)
     printf '%s' \
-      "usage: run.sh map [--missing]|" \
+      "usage: run.sh regen registry|" \
+      "map [--missing]|" \
       "deal-room|" \
       "lead-board|" \
       "lead-promote [--count N] [--county X] [--segment X]|" \
