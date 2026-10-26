@@ -1,3 +1,4 @@
+// Read and manage feature switches.
 import { randomUUID } from 'node:crypto';
 import { ToolError } from './tool-error.ts';
 import { organizationTenantForActor } from './identity.js';

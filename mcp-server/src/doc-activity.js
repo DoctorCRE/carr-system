@@ -1,3 +1,4 @@
+// Project and expose document activity entries.
 import { organizationTenantForActor, personalScopeForActor } from './identity.js';
 import { validDealRoomValue, dealRoomEvidenceValue } from './dealroom.js';
 

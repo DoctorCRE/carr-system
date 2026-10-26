@@ -1,3 +1,4 @@
+// Identify permitted staging browser environments.
 export const CARR_STAGING_HOST = "carr-mcp-staging.joe-bookout-carr-us.workers.dev";
 export const APP_STAGING_HOST = "doctorcre-app-staging.joe-bookout-carr-us.workers.dev";
 

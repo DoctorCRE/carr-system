@@ -1,3 +1,4 @@
+// Generate Cloudflare Worker type declarations.
 import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 
