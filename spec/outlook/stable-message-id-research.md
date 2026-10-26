@@ -1,14 +1,15 @@
 # Stable message identity research for WR-000502
 
-Status, 2026-10-26: the `00ca` local object key is the stable email ID for
-Outlook intake, scoped to one store item in one `HxStore.hxd`. On TEST-account
-copies it stayed the same across every observed edit of two revised messages.
-It differed between two distinct messages with identical sender, subject and
-preview, and between a reply and its parent. Moves, an Outlook restart and a
-store rebuild remain untested; see [what is still open](#still-open).
-Intake now carries the key on every email record that has one. Audit
-[#2196](https://github.com/DoctorCRE/carr-system/pull/2196) slice B2 can bind
-undo, deduplication and proposal links to it. Send keeps its existing behavior.
+Status, 2026-10-26: the `00ca` local object key is a CANDIDATE stable email ID,
+scoped to one store item in one `HxStore.hxd`. On TEST-account copies it stayed
+the same across every observed edit of two revised messages. It differed between
+two distinct messages with identical sender, subject and preview, and between a
+reply and its parent. Moves, an Outlook restart or resync, deletion followed by
+key reuse, and a store rebuild are untested; see [what is still open](#still-open).
+Intake now records the key on every email record that has one. Audit
+[#2196](https://github.com/DoctorCRE/carr-system/pull/2196) slice B2 may record
+it but must not rely on it for undo, deduplication or proposal links until those
+cases pass. Send keeps its existing behavior.
 
 ## Candidate comparison
 
@@ -134,6 +135,29 @@ values only. No content was printed or kept.
 | Message-IDs whose key set changed between the snapshots | 2 of 656 | |
 | Content-identical groups spanning more than one key | 16 | 16 |
 
+### The two Message-IDs whose key set changed
+
+Neither case is an existing item changing its key.
+
+- One Message-ID was held by three keys in `001-control` and two in
+  `012-control`. The missing key had no anchors left in `012-control`, so that
+  item left the cached store. Its key did not reappear on any other item.
+- One Message-ID gained a key. The new key did not exist in `001-control`, and
+  its rows carry only that one Message-ID. A new store item arrived with an
+  existing Message-ID, such as a second copy of the same email. The original
+  key kept its rows.
+
+Neither item belongs to the TEST account, so their content was not examined.
+
+### Key space
+
+The keys form one numeric space across both accounts in the shared store. TEST
+keys sit between work-account keys, with work-account neighbours on both sides.
+Every key new in `012-control` was larger than every key in `001-control`. Two
+keys left the store in that hour and neither was reused. This fits a store-wide
+increasing counter, but one hour of copies cannot show that a deleted item's key
+is never reused.
+
 Sender and subject extraction disagree inside 411 keys. The TEST items show
 the cause: quoted headers in replies feed the heuristic field map. Those fields
 are not identity evidence either way. Ten of the 16 content-identical groups
@@ -151,7 +175,8 @@ rows carried at least one key and 284 carried two or more. The TEST welcome row
 carried both W1 and W2, which exposes the merge for B2 to split.
 
 The intake records the keys per intake ID in its private state as `mail_keys`.
-They expire with the mail they describe. A decoder without the column still
+They expire with the mail they describe. Mail the intake finished before this
+change ships is skipped on later runs, so it gets no keys. A decoder without the column still
 runs, and its mail simply records no keys. Merging and idempotency keys are
 unchanged; B2 decides how to split rows.
 
@@ -170,6 +195,7 @@ Access to `~/carr-local/bin/outlook-research-copy`.
 
 - Moving a message between folders.
 - Quitting and restarting Outlook, and a full resync.
+- Deleting a message, then checking that no later item takes its key.
 - A store rebuild or account removal, which may renumber every key.
 - Two drafts with identical text and different recipients, as the original plan
   specified. W1 and W2 cover identical content with the same recipient.

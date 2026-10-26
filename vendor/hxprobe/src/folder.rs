@@ -447,6 +447,27 @@ mod tests {
     }
 
     #[test]
+    fn keys_never_cross_an_envelope_or_the_header_bound() {
+        let index = Index::default();
+        // A view envelope between the header and the next anchor ends the header.
+        let mut data = object(0xca, 70, 0, 70, 470);
+        let mut view = object(0x4f, 71, 4, 60, 100);
+        view.extend(note());
+        data.extend(envelope(0x430, &view));
+        assert!(index.keys(&data, &note()).is_empty());
+        // An anchor 4096 or more bytes past the header belongs to something else.
+        let mut far = object(0xca, 72, 0, 72, 4096);
+        far.extend(note());
+        assert!(index.keys(&far, &note()).is_empty());
+        // Only the first anchor inside one header takes its key.
+        let mut twice = object(0xca, 73, 0, 73, 500);
+        twice.extend(note());
+        twice.extend(vec![0; 40]);
+        twice.extend(note());
+        assert_eq!(index.keys(&twice, &note()), BTreeMap::from([(500, 73)]));
+    }
+
+    #[test]
     fn conflicting_folder_names_are_not_silently_overwritten() {
         let mut index = Index::default();
         index.observe(0, &folder(50, 60, "Old"));

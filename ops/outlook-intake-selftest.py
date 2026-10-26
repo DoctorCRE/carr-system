@@ -706,10 +706,10 @@ class IntakeTest(unittest.TestCase):
         return json.loads((self.out() / intake.STATE).read_text()).get('mail_keys', {})
 
     def test_each_email_record_carries_its_store_local_key(self):
-        a = mail('pat@example.test', -timedelta(hours=2), local_keys='524142')
-        b = mail('lee@example.test', -timedelta(hours=1), subject='Tour', local_keys='528221')
+        a = mail('pat@example.test', -timedelta(hours=2), local_keys='9001')
+        b = mail('lee@example.test', -timedelta(hours=1), subject='Tour', local_keys='9002')
         self.run_intake([a, b])
-        self.assertEqual(self.mail_keys(), {ident(a): ['524142'], ident(b): ['528221']})
+        self.assertEqual(self.mail_keys(), {ident(a): ['9001'], ident(b): ['9002']})
 
     def test_unresolved_and_skipped_emails_carry_their_local_key_too(self):
         unknown = mail('new@example.test', -timedelta(hours=1), local_keys='77')
@@ -721,17 +721,17 @@ class IntakeTest(unittest.TestCase):
         # Two distinct store items with the same sender, subject and opening
         # (the WR-000502 twins) still collapse here; the record names both
         # keys so slice B2 can split them.
-        first = mail('pat@example.test', -timedelta(hours=2), copy_key='template', local_keys='522596')
+        first = mail('pat@example.test', -timedelta(hours=2), copy_key='template', local_keys='9102')
         second = mail('pat@example.test', -timedelta(hours=2) + timedelta(minutes=5), copy_key='template',
-                      local_keys='521716')
+                      local_keys='9101')
         self.run_intake([first, second])
         self.assertEqual(len(self.fake.writes('log-activity')), 1)
-        self.assertEqual(self.mail_keys(), {ident(first): ['521716', '522596']})
+        self.assertEqual(self.mail_keys(), {ident(first): ['9101', '9102']})
 
     def test_a_decoder_row_that_merged_two_store_items_keeps_both_keys(self):
-        m = mail('pat@example.test', -timedelta(hours=1), local_keys='521716,522596')
+        m = mail('pat@example.test', -timedelta(hours=1), local_keys='9101,9102')
         self.run_intake([m])
-        self.assertEqual(self.mail_keys(), {ident(m): ['521716', '522596']})
+        self.assertEqual(self.mail_keys(), {ident(m): ['9101', '9102']})
 
     def test_a_decoder_without_local_keys_logs_mail_and_records_no_keys(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
