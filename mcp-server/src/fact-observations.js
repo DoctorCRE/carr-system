@@ -74,7 +74,7 @@ export function factObservationTools({ ToolError }) {
   return {
     'compare-fact-observations': {
       write: false,
-      description: 'Compare supplied economic fact observations using exact decimal normalization and project review items by field. Effective confidence tiers are conservative routing labels, not verified confidence. OCR always requires human review because dual-engine agreement is not proven. Preserves supplied citations but does not verify sources, read stored records, establish independent evidence, promote facts, or write records.',
+      description: 'Compare supplied economic fact observations using exact decimal normalization and project review items by field with their competing observations, supplied citations, normalized values, and routing tiers. Effective confidence tiers are conservative routing labels, not verified confidence. OCR always requires human review because dual-engine agreement is not proven. Preserves supplied citations but does not verify sources, read stored records, establish independent evidence, promote facts, or write records.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         entity_ref: { ...text(200), description: 'Caller-asserted entity for this comparable set. No stored identity or document binding is checked.' }, observations: { type: 'array', minItems: 1, maxItems: 100, items: observationSchema },
       }, required: ['entity_ref', 'observations'] },
@@ -106,7 +106,7 @@ export function factObservationTools({ ToolError }) {
           ];
           return reasons.length ? [{ entity_ref: args.entity_ref, fact_key: field.fact_key,
             priority: field.status === 'conflict' || tiers.has('human_review') ? 'high' : 'normal',
-            observation_ids: field.observation_ids, reasons,
+            observation_ids: field.observation_ids, observations: groups.get(field.fact_key), reasons,
           }] : [];
         }).sort((a, b) => Number(b.priority === 'high') - Number(a.priority === 'high'));
         return { ok: true, schema_version: 'fact-observation-comparison.v1', entity_ref: args.entity_ref,
