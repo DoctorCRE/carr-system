@@ -632,10 +632,12 @@ end $_$;
 
 CREATE FUNCTION ops.acknowledge_dispatch(p_dispatch_ref uuid, p_stage text, p_evidence text) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
+    SET search_path TO 'pg_catalog', 'ops', 'public'
     AS $$
 declare v_actor uuid; v_slug text; v_id bigint; v_stage text;
+        v_link public.room_dispatch_link%rowtype;
         v_prior public.room_dispatch_ack%rowtype;
+        v_session_party boolean;
 begin
   v_actor := ops.portfolio_writer_actor_id();
   select a.slug into v_slug from public.actor a where a.id = v_actor;
@@ -646,14 +648,28 @@ begin
     return jsonb_build_object('ok', false, 'reason_id', 'dispatch_ref_required');
   end if;
   v_stage := nullif(btrim(coalesce(p_stage, '')), '');
-  -- The relation's own check would refuse this anyway; refusing here gives the
-  -- caller a reason_id instead of a constraint error.
   if v_stage is null or v_stage not in ('received', 'acknowledged') then
     return jsonb_build_object('ok', false, 'reason_id', 'dispatch_stage_invalid');
   end if;
-  if not exists (select 1 from public.room_dispatch_link l
-                  where l.dispatch_ref = p_dispatch_ref) then
+  select * into v_link from public.room_dispatch_link l
+   where l.dispatch_ref = p_dispatch_ref;
+  if v_link.id is null then
     return jsonb_build_object('ok', false, 'reason_id', 'dispatch_link_not_found');
+  end if;
+
+  -- WHO MAY WRITE THIS STAGE, before anything is inserted or read back.
+  v_session_party :=
+       exists (select 1 from public.claude_continuity_leaf l
+                where l.session_id = v_link.session_id
+                  and (l.owner_actor_id = v_actor or l.surface_principal_actor_id = v_actor))
+    or exists (select 1 from public.codex_continuity_checkpoint c
+                where c.native_task_id = v_link.session_id and c.owner_actor_id = v_actor)
+    or exists (select 1 from ops.capability_agent_session s
+                where s.id::text = v_link.session_id
+                  and (s.executor_actor_id = v_actor or s.created_by_actor_id = v_actor));
+  if not (v_session_party
+          or (v_stage = 'received' and v_slug = v_link.written_by)) then
+    return jsonb_build_object('ok', false, 'reason_id', 'dispatch_ack_not_authorized');
   end if;
 
   insert into public.room_dispatch_ack(dispatch_ref, stage, by_actor, evidence)
@@ -681,7 +697,7 @@ end $$;
 -- Name: FUNCTION acknowledge_dispatch(p_dispatch_ref uuid, p_stage text, p_evidence text); Type: COMMENT; Schema: ops; Owner: -
 --
 
-COMMENT ON FUNCTION ops.acknowledge_dispatch(p_dispatch_ref uuid, p_stage text, p_evidence text) IS 'WR-000119: appends one public.room_dispatch_ack row for a dispatch and a stage. by_actor is the DERIVED caller and there is no actor argument anywhere, so an acknowledgement is first-hand by construction; the unique (dispatch_ref, stage) constraint makes a restated acknowledgement one row rather than two.';
+COMMENT ON FUNCTION ops.acknowledge_dispatch(p_dispatch_ref uuid, p_stage text, p_evidence text) IS 'WR-000119/WR-000528: appends one public.room_dispatch_ack row for a dispatch and a stage. by_actor is the DERIVED caller. Only the link''s minting desk (received) or an identity a session book records as owning the target session (received or acknowledged) may write; anyone else is refused with dispatch_ack_not_authorized before the insert and before deduplication. The unique (dispatch_ref, stage) constraint makes an authorized restatement one row.';
 
 
 --
@@ -114418,6 +114434,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0987_email_proposal.sql	c0ab5328442e86d95e28c629575002b6b73ef28dd0d183f7ddee253bcaea77fd	1970-01-01 00:00:00+00
 0988_drop_siep_program_leftovers.sql	9c20dcac261bbf29cdd68184c9688e3333cfe95e9134f0e1fa461d402bf8695c	1970-01-01 00:00:00+00
 0989_call_context_open_deals.sql	4c486dfbbd5f52fdf04d4335c048cded481b9676284a0a323ea85395a3f27752	1970-01-01 00:00:00+00
+0992_dispatch_ack_recipient_authority.sql	76885c222d09ab4cfd715b6fd3aca1a68626c8c776c483917b1a88a2d7fb3c16	1970-01-01 00:00:00+00
 \.
 
 
