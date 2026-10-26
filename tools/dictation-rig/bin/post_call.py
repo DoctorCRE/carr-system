@@ -19,9 +19,10 @@ import sys
 import tempfile
 import urllib.parse
 import fcntl
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -272,6 +273,93 @@ def _calendar_date_or_none(value: Any, field: str) -> None:
         raise ContractError(f"{field} must be a YYYY-MM-DD calendar date or null")
 
 
+CALL_TIME_ZONE = "America/Chicago"
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+RELATIVE_DAY = re.compile(
+    r"\b(day after tomorrow|tomorrow|today|next week|"
+    r"(?:(?:next|this)\s+)?(?:" + "|".join(WEEKDAYS) + r"))\b", re.IGNORECASE,
+)
+CALENDAR_DAY = re.compile(
+    r"\b(?:\d{4}-\d{2}-\d{2}|(?:January|February|March|April|May|June|July|August|"
+    r"September|October|November|December)\s+\d{1,2})\b", re.IGNORECASE,
+)
+
+
+def recorded_call_date(session_dir: Path) -> str | None:
+    stored = read_json(session_dir / CONTEXT_FILE) or {}
+    metadata = read_json(session_dir / "meta.json") or {}
+    for stamp in (stored.get("started_at"), metadata.get("started")):
+        if not isinstance(stamp, str):
+            continue
+        try:
+            instant = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if instant.tzinfo is not None:
+            return instant.astimezone(ZoneInfo(CALL_TIME_ZONE)).date().isoformat()
+    return None
+
+
+def _relative_phrases(evidence: str) -> list[str]:
+    if CALENDAR_DAY.search(evidence):
+        return []
+    weekdays = "(?:" + "|".join(WEEKDAYS) + ")"
+    if re.search(r"\b(?:last|previous|following)\s+" + weekdays +
+                 r"\b|\b(?:days?|weeks?|months?)\s+(?:from|after|before)\b|\b" + weekdays +
+                 r"\s+after next\b|\bthis time next week\b", evidence, re.IGNORECASE):
+        return []
+    phrases = [match.group().lower() for match in RELATIVE_DAY.finditer(evidence)
+               if not re.match(r"['’]s\b", evidence[match.end():])
+               or re.match(r"['’]s\s+lunch call\b", evidence[match.end():], re.IGNORECASE)
+               and re.search(r"\bbefore\s+$", evidence[:match.start()], re.IGNORECASE)]
+    if "next week" in phrases and any(phrase.split()[-1] in WEEKDAYS for phrase in phrases):
+        phrases = ["next " + phrase.split()[-1] if phrase.split()[-1] in WEEKDAYS else phrase
+                   for phrase in phrases if phrase != "next week"]
+    return phrases
+
+
+def _relative_due_date(evidence: str, transcript: dict[str, Any] | None, call_date: str | None) -> str | None:
+    if transcript is None:
+        return None
+    spoken = " ".join(str(segment.get("text", "")) for segment in transcript.get("segments", [])
+                      if isinstance(segment, dict))
+    if not _words(evidence) or f" {_words(evidence)} " not in f" {_words(spoken)} ":
+        return None
+    if CALENDAR_DAY.search(evidence):
+        return None
+    phrases = _relative_phrases(evidence)
+    if not phrases and re.search(r"\bbefore (?:the )?lunch call\b", evidence, re.IGNORECASE):
+        lunch_anchors = [sentence for sentence in re.split(r"[.!?]", spoken)
+                         if re.search(r"\blunch call\b", sentence, re.IGNORECASE)
+                         and _words(sentence) != _words(evidence)
+                         and (RELATIVE_DAY.search(sentence) or CALENDAR_DAY.search(sentence))]
+        if lunch_anchors:
+            anchored = [_relative_phrases(sentence) for sentence in lunch_anchors]
+            if not all(anchored):
+                return None
+            phrases = [phrase for group in anchored for phrase in group]
+        else:
+            phrases = ["today"]
+    if not phrases:
+        return None
+    if call_date is None:
+        raise ContractError("A relative deadline requires the recorded call start date in America/Chicago")
+    anchor = date.fromisoformat(call_date)
+    resolved: set[date] = set()
+    for phrase in phrases:
+        if phrase in {"today", "tomorrow", "day after tomorrow"}:
+            offset = {"today": 0, "tomorrow": 1, "day after tomorrow": 2}[phrase]
+        elif phrase == "next week":
+            offset = 7 - anchor.weekday()
+        else:
+            weekday = WEEKDAYS.index(phrase.split()[-1])
+            offset = 7 - anchor.weekday() + weekday if phrase.startswith("next ") else (weekday - anchor.weekday()) % 7
+        resolved.add(anchor + timedelta(days=offset))
+    if len(resolved) != 1:
+        raise ContractError("The evidence gives conflicting relative deadlines; clarify the deadline")
+    return resolved.pop().isoformat()
+
+
 UNSAID_REVIEW = "The model did not say whether this was settled."
 
 
@@ -284,7 +372,8 @@ def _review_note(change: dict[str, Any], field: str) -> None:
         change["needs_review"] = None
 
 
-def _validate_distillation(value: Any) -> dict[str, Any]:
+def _validate_distillation(value: Any, *, call_date: str | None = None,
+                           transcript: dict[str, Any] | None = None) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ContractError("distiller output must be an object")
     _strict_keys(value, {"schema_version", "report", "joe_tasks", "dell_tasks", "deal_updates", "draft_proposals", "review_questions"})
@@ -341,12 +430,29 @@ def _validate_distillation(value: Any) -> dict[str, Any]:
                 raise ContractError(f"{list_name}.deal_id must be an exact non-empty string")
             if not isinstance(item["participant_ids"], list) or not all(isinstance(x, str) for x in item["participant_ids"]):
                 raise ContractError(f"{list_name}.participant_ids must be string IDs")
+            resolved = None
+            if is_action or step is not None:
+                resolved = _relative_due_date(item["evidence"], transcript, call_date)
+                if resolved is not None:
+                    if is_action:
+                        item["due_on"] = resolved
+                    else:
+                        step["next_date"] = resolved
             if _word_count(item["evidence"]) > 15:
-                # Evidence is an untrusted review hint, never authority. Keep
-                # the model's exact leading words while enforcing the remote
-                # 15-word ceiling deterministically instead of losing the
-                # entire weekly report over one verbose quote.
-                item["evidence"] = " ".join(item["evidence"].split()[:15])
+                # Retain the quoted timing inside the remote 15-word ceiling.
+                # Other evidence keeps its original leading words.
+                words = item["evidence"].split()
+                start = 0
+                if resolved is not None:
+                    timing = list(RELATIVE_DAY.finditer(item["evidence"]))
+                    last = timing[-1] if timing else re.search(r"\bbefore (?:the )?lunch call\b", item["evidence"], re.IGNORECASE)
+                    if last is not None:
+                        end = last.end()
+                        day_part = re.match(r"\s+(?:morning|afternoon|evening|night)\b", item["evidence"][end:], re.IGNORECASE)
+                        if day_part:
+                            end += day_part.end()
+                        start = max(0, len(item["evidence"][:end].split()) - 15)
+                item["evidence"] = " ".join(words[start:start + 15])
     return value
 
 
@@ -354,8 +460,9 @@ def _review_id(session: str, kind: str, number: int) -> str:
     return hashlib.sha256(f"{session}:{kind}:{number}".encode()).hexdigest()[:16]
 
 
-def normalize_distillation(value: Any, context: dict[str, Any], session: str) -> dict[str, Any]:
-    raw = _validate_distillation(value)
+def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
+                           call_date: str | None = None, transcript: dict[str, Any] | None = None) -> dict[str, Any]:
+    raw = _validate_distillation(value, call_date=call_date, transcript=transcript)
     deal_ids = {deal["id"] for deal in context["deals"]}
     parties_by_deal = {deal["id"]: {party["party_id"]: party for party in deal["participants"]} for deal in context["deals"]}
     review = [{"id": _review_id(session, "model", n), "question": q, "resolved": False} for n, q in enumerate(raw["review_questions"], 1)]
@@ -438,8 +545,15 @@ def _distiller_instruction() -> str:
         "Use only exact deal_id and party_id values present in CONTEXT; never copy display names into ID fields. "
         "When Joe says he/I/we will do something, create a joe_tasks item. "
         "When Dell says he/I/we will do something, create a dell_tasks item. "
-        "For each task, use due_on as YYYY-MM-DD only when the transcript states an unambiguous calendar date, including the year. "
-        "Use null when no date is stated. For relative dates or dates with an unclear year, use null and add a question to review_questions; never guess a date. "
+        "For each task, resolve spoken deadlines into due_on as YYYY-MM-DD against CALL_DATE in TIME_ZONE, "
+        "the recording's America/Chicago calendar date, never the processing date. "
+        "Bare weekdays (including Friday morning) mean the next occurrence including the call day. "
+        "Next weekday means that weekday in the following calendar week. Next week means the following Monday. "
+        "Today, tomorrow and day after tomorrow are offsets of zero, one and two calendar days. "
+        "Before the lunch call means CALL_DATE unless the transcript dates that lunch call differently. "
+        "Preserve an explicitly stated calendar date and year. Include the spoken timing in the evidence quote. "
+        "Use null only when no time was stated. If a stated deadline cannot be resolved or CALL_DATE is missing, "
+        "add a review question rather than invent a date. "
         "A deal status statement creates a deal_updates item with next_step and phase_move null. "
         "Only an explicitly agreed phase change sets phase_move to an object with value and started_on. "
         "started_on is the YYYY-MM-DD the partners say the new phase began, only when they state that calendar date "
@@ -488,7 +602,8 @@ def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
         "--system-prompt", _distiller_instruction(),
     ]
     child_env = {k: v for k, v in os.environ.items() if k not in API_ENV and k != "CLAUDECODE"}
-    prompt = json.dumps({"CONTEXT": request["context"], "TRANSCRIPT": request["transcript"]}, ensure_ascii=False)
+    prompt = json.dumps({"CONTEXT": request["context"], "TRANSCRIPT": request["transcript"],
+                         "CALL_DATE": request.get("call_date"), "TIME_ZONE": CALL_TIME_ZONE}, ensure_ascii=False)
     try:
         with tempfile.TemporaryDirectory() as empty:
             done = subprocess.run(argv, input=prompt, text=True, capture_output=True,
@@ -552,9 +667,12 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
     transcript = read_json(session_dir / "transcript.json")
     if transcript is None:
         raise ContractError("transcript.json is required before post-call processing")
-    request = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "context": context, "transcript": transcript}
+    call_date = recorded_call_date(session_dir)
+    request = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "context": context,
+               "transcript": transcript, "call_date": call_date}
     try:
-        result = normalize_distillation(distiller(request), context, session_dir.name)
+        result = normalize_distillation(distiller(request), context, session_dir.name,
+                                       call_date=call_date, transcript=transcript)
     except (RuntimeError, ContractError) as exc:
         status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "blocked", "updated_at": now(), "reason": str(exc)}
         write_private(session_dir / STATUS_FILE, status)
