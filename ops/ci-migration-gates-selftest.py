@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Prove the DB gate runner: failures stay visible and isolated gates get private clusters."""
 import importlib.util
 from pathlib import Path
 import socket
