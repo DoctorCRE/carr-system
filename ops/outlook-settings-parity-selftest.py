@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from types import ModuleType
 import unittest
 import uuid
 from unittest.mock import patch
@@ -18,6 +19,18 @@ sys.path.insert(0, str(ROOT))
 from lib import outlook_intake as current
 from lib.outlook_settings import SettingsError, load_settings
 from outlook_test_support import write_settings
+
+
+BASELINE = '712ee39b8d6b61f986d210107a83ad07846a32ba'
+
+
+def baseline_module():
+    source = subprocess.run(['git', 'show', f'{BASELINE}:lib/outlook_intake.py'], cwd=ROOT,
+                            check=True, capture_output=True, text=True).stdout
+    module = ModuleType('outlook_before_settings')
+    sys.modules[module.__name__] = module
+    exec(compile(source, f'{BASELINE}:lib/outlook_intake.py', 'exec'), module.__dict__)
+    return module
 
 
 def fixture_module():
@@ -60,7 +73,7 @@ class ParityTest(unittest.TestCase):
                         str(ROOT / 'tools/outlook-intake-copy.c'), '-o', str(helper)],
                        capture_output=True, check=True)
 
-    def exercise(self):
+    def exercise(self, module=current):
         out = self.repo / current.OUT
         shutil.rmtree(out, ignore_errors=True)
         self.fixture.unlink(missing_ok=True)
@@ -73,20 +86,29 @@ class ParityTest(unittest.TestCase):
         events = [f.event('past-visit', -timedelta(hours=5), organizer=('Broker', sender),
                           attendees=[('Pat Example', 'pat@example.test')]),
                   f.event('upcoming-visit', timedelta(days=2), organizer=('Broker', sender),
-                          attendees=[('Lee Sample', 'lee@example.test')])]
+                          attendees=[('Unmapped Visitor', 'visitor@example.test')])]
         f.write_db(self.fixture, mails, events)
         fake = f.Fake(self)
         fake.fixture = self.fixture
         fake.model_reply = {'next_step': 'Confirm the visit.', 'due_on': '2026-10-23'}
-        with patch('uuid.uuid4', return_value=uuid.UUID(int=1)):
-            result = current.run(self.repo, self.home, fake.ports())
+        with patch.object(f, 'intake', module), patch('uuid.uuid4', return_value=uuid.UUID(int=1)):
+            result = module.run(self.repo, self.home, fake.ports())
         artifacts = {path.name: path.read_bytes() for path in sorted(out.glob('*')) if path.is_file()}
-        return result, fake.calls, artifacts, current.status_line(result).encode()
+        return result, fake.calls, artifacts, module.status_line(result).encode()
+
+    def test_mail_record_calls_are_byte_identical_to_baseline_without_calendar_writes(self):
+        before = self.exercise(baseline_module())
+        after = self.exercise()
+        calendar_activity = current.key('log-activity', 'C-901',
+                                        f'past-visit|{self.fixtures.ts(-timedelta(hours=5))}')
+        before_calls = [(verb, args) for verb, args in before[1]
+                        if args.get('idempotency_key') != calendar_activity]
+        self.assertEqual(json.dumps(before_calls).encode(), json.dumps(after[1]).encode())
 
     def test_studio_settings_preserve_mail_artifacts_and_quarantine_calendar(self):
         result, calls, artifacts, status = self.exercise()
         self.assertEqual(result.state, 'succeeded')
-        self.assertEqual(result.reason, 'calendar_lifecycle_unsupported')
+        self.assertEqual(result.reason, 'processed')
         activities = [args['kind'] for verb, args in calls if verb == 'log-activity']
         self.assertEqual(activities, ['email_in', 'email_out', 'email_in'])
         actions = [args for verb, args in calls if verb == 'set-next-action']

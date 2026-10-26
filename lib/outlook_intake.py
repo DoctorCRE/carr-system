@@ -607,7 +607,7 @@ class Run:
 
     # calendar
 
-    def events(self, events: list[dict], matcher: Matcher) -> None:
+    def events(self, events: list[dict], matcher: Matcher, since: int) -> None:
         """Keep opaque schedule evidence, never infer attendance or current lifecycle."""
         evidence = {}
         unresolved = {}
@@ -621,13 +621,14 @@ class Run:
             if org and not _internal(org, self.settings.internal_domain) and org not in [p for p, _ in people]:
                 people.append((org, e['organizer_name']))
             missing = {_hash(email): matcher.reason(email) for email, _ in people if matcher.reason(email)}
-            if missing or not people:
+            if missing:
                 unresolved[candidate] = {'participants': missing}
-            for email, name in people:
-                reason = matcher.reason(email)
-                if reason is not None:
-                    self.unmatched.add((name or '(no name)', _domain(email), reason))
-        self.state.update(calendar_evidence=evidence, calendar_unresolved=unresolved, calendar_policy=1)
+            if e['end_unix'] >= since and e['start_unix'] <= (self.now + UPCOMING).timestamp():
+                for email, name in people:
+                    reason = matcher.reason(email)
+                    if reason is not None:
+                        self.unmatched.add((name or '(no name)', _domain(email), reason))
+        self.state.update(calendar_evidence=evidence, calendar_unresolved=unresolved, calendar_policy=2)
         self.state.pop('calendar_due_at', None)
         self.state.pop('upcoming', None)
         self.counts.update(calendar_counts(self.state))
@@ -768,14 +769,13 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     pending_writes = any(not r['acknowledged'] and r.get('disposition') != 'calendar_unsupported'
                          for r in state.get('requests', {}).values())
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
-    if state.get('store') == signature and not hydration_due and not contacts_changed and not state.get('steps') and not pending_writes and state.get('calendar_policy') == 1:
+    if state.get('store') == signature and not hydration_due and not contacts_changed and not state.get('steps') and not pending_writes and state.get('calendar_policy') == 2:
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _refresh_list(out, state['pending_full'])
             _save(out, state)
         counts = {**mapping_counts(state), **calendar_counts(state)}
-        return Outcome('succeeded', 'calendar_lifecycle_unsupported' if any(calendar_counts(state).values())
-                       else 'store_unchanged', counts)
+        return Outcome('succeeded', 'store_unchanged', counts)
     try:
         meta, mails, events = _decode(home, out, ports.decode)
     except FullDiskAccessRequired as error:
@@ -808,7 +808,8 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         work.emails(mails, matcher, since)
         work.full_text(mails)
         work.next_steps(mails)
-        work.events(events, matcher)
+        mail_processed = bool(work.written or any(work.counts.values()))
+        work.events(events, matcher, since)
     except CarrError as error:
         _save(out, state)
         return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code, work.counts)
@@ -817,7 +818,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         work.counts['error_' + code] = sum(not r['acknowledged'] and r.get('error_code') == code
                                           for r in state.get('requests', {}).values())
     refresh = _refresh_list(out, state.get('pending_full', {}))
-    if any(work.counts.values()) or work.written:
+    if mail_processed or work.unmatched or refresh or work.counts['calendar_requests_quarantined']:
         work.report(out, refresh)
     counts = {**work.counts, 'needs_refresh_listed': refresh}
     failed = next((reason for count, reason in (('writes_failed', 'writes_failed'),
@@ -831,8 +832,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint())
     _prune(state, now)
     _save(out, state)
-    return Outcome('succeeded', 'calendar_lifecycle_unsupported' if any(calendar_counts(state).values()) else
-                   'processed' if work.written or any(work.counts.values()) else 'nothing_new', counts)
+    return Outcome('succeeded', 'processed' if mail_processed else 'nothing_new', counts)
 
 
 # ---- production ports --------------------------------------------------------

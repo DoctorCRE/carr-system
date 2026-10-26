@@ -75,14 +75,16 @@ reasons = frozenset("outside_window previous_run_active cleanup_failed store_mis
                     "writes_failed model_failed steps_pending processed nothing_new writes_deferred "
                     "request_blocked full_disk_access_required contacts_empty contacts_read_failed timeout auth_refused "
                     "key_reuse transport_oversized no_acknowledgement reply_unreadable transport_error "
-                    "invalid_request subject_unresolved database_refused setup_failed".split())
+                    "invalid_request subject_unresolved database_refused setup_failed calendar_lifecycle_unsupported".split())
 counts = frozenset("emails events_past events_upcoming logged preview_only full_text_notes balls_set "
                    "balls_kept unmatched model_failed steps_pending writes_failed needs_refresh_listed "
+                   "calendar_lifecycle_unsupported calendar_requests_quarantined hydration_pending hydration_expired "
                    "unresolved_messages unresolved_addresses unresolved_calendar mapping_missing "
                    "mapping_ambiguous mapping_unsupported writes_deferred requests_blocked error_timeout error_auth_refused "
                    "error_key_reuse error_transport_oversized error_no_acknowledgement error_reply_unreadable "
                    "error_transport_error error_invalid_request error_subject_unresolved error_database_refused "
-                   "error_setup_failed error_contacts_empty error_contacts_read_failed".split())
+                   "error_setup_failed error_contacts_empty error_contacts_read_failed "
+                   "error_next_action_conflict error_legacy_action_guard_required".split())
 receipt = None
 with open(sys.argv[1]) as output:
     for line in output:

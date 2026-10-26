@@ -109,5 +109,6 @@ Intake stores opaque candidate hashes and provisional schedule timestamps in its
 private state. It does not create reminders or contact activities from these
 rows. Existing unacknowledged calendar activities and next actions without
 established mail provenance remain quarantined with their frozen payloads.
-Mail continues independently. The status reason remains
-`calendar_lifecycle_unsupported` even when the store is unchanged.
+Mail continues independently. Status reasons remain `processed`, `nothing_new`,
+or `store_unchanged`. Calendar status appears only in the
+`calendar_lifecycle_unsupported` and `calendar_requests_quarantined` counts.

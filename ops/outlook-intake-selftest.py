@@ -248,7 +248,7 @@ class IntakeTest(unittest.TestCase):
                       event('elapsed', -timedelta(hours=3), attendees=[('Lee', 'lee@example.test')])]
         result = self.run_intake(events=candidates)
         self.assertEqual(self.fake.writes(), [])
-        self.assertEqual(result.reason, 'calendar_lifecycle_unsupported')
+        self.assertEqual(result.reason, 'nothing_new')
         self.assertEqual(result.counts['calendar_lifecycle_unsupported'], 3)
         evidence = json.loads((self.out() / intake.STATE).read_text())['calendar_evidence']
         self.assertTrue(all(e['evidence'] == 'provisional_schedule' for e in evidence.values()))
@@ -260,17 +260,20 @@ class IntakeTest(unittest.TestCase):
         result = self.run_intake([m], [e])
         self.assertEqual([(v, a.get('kind')) for v, a in self.fake.writes()], [('log-activity', 'email_in')])
         self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.reason, 'processed')
+        changed = self.run_intake([m], [e])
+        self.assertEqual(changed.reason, 'nothing_new')
         quiet = self.run_intake([m], [e], touch=False)
-        self.assertEqual(quiet.reason, 'calendar_lifecycle_unsupported')
+        self.assertEqual(quiet.reason, 'store_unchanged')
         self.assertEqual(quiet.counts['calendar_lifecycle_unsupported'], 1)
-        self.assertEqual(self.fake.decodes, 1)
+        self.assertEqual(self.fake.decodes, 2)
 
     def test_calendar_schedule_never_becomes_attendance_as_time_passes(self):
         events = [event('elapsed', timedelta(hours=1), attendees=[('Pat', 'pat@example.test')])]
         self.run_intake(events=events)
         self.fake.now += timedelta(hours=3)
         result = self.run_intake(events=events, touch=False)
-        self.assertEqual(result.reason, 'calendar_lifecycle_unsupported')
+        self.assertEqual(result.reason, 'store_unchanged')
         self.assertEqual(self.fake.writes(), [])
         self.assertEqual(self.fake.decodes, 1)
 
@@ -295,6 +298,50 @@ class IntakeTest(unittest.TestCase):
         state = json.loads((self.out() / intake.STATE).read_text())
         self.assertTrue(all(r['disposition'] == 'calendar_unsupported' and not r['acknowledged']
                             for r in state['requests'].values()))
+
+    def test_internal_calendar_candidates_are_not_unresolved_meetings(self):
+        result = self.run_intake(events=[event('internal', timedelta(days=1),
+                                              attendees=[('Partner', PARTNER)])])
+        self.assertEqual(result.counts['calendar_lifecycle_unsupported'], 1)
+        self.assertEqual(result.counts['unresolved_calendar'], 0)
+        self.assertEqual(result.counts['unresolved_addresses'], 0)
+
+    def test_prior_calendar_policy_rechecks_internal_unresolved_state(self):
+        candidates = [event('internal', timedelta(days=1), attendees=[('Partner', PARTNER)])]
+        self.run_intake(events=candidates)
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        state['calendar_policy'] = 1
+        state['calendar_unresolved'] = {candidate: {'participants': {}}
+                                        for candidate in state['calendar_evidence']}
+        path.write_text(json.dumps(state))
+        result = self.run_intake(events=candidates, touch=False)
+        self.assertEqual(result.counts['unresolved_calendar'], 0)
+        self.assertEqual(result.counts['calendar_lifecycle_unsupported'], 1)
+        self.assertEqual(self.fake.decodes, 2)
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_unmatched_calendar_report_only_includes_recent_events(self):
+        events = [event('old', -timedelta(days=30), attendees=[('Old Visitor', 'old@example.test')]),
+                  event('future', timedelta(days=30), attendees=[('Future Visitor', 'future@example.test')]),
+                  event('recent', -timedelta(hours=3), attendees=[('Recent Visitor', 'recent@example.test')]),
+                  event('soon', timedelta(days=2), attendees=[('Soon Visitor', 'soon@example.test')])]
+        result = self.run_intake(events=events)
+        self.assertEqual(result.counts['calendar_lifecycle_unsupported'], 4)
+        self.assertEqual(result.counts['unresolved_calendar'], 4)
+        self.assertIn('Recent Visitor', self.report_text())
+        self.assertIn('Soon Visitor', self.report_text())
+        self.assertNotIn('Old Visitor', self.report_text())
+        self.assertNotIn('Future Visitor', self.report_text())
+
+    def test_quiet_calendar_runs_do_not_write_reports(self):
+        candidates = [event('internal', timedelta(days=1), attendees=[('Partner', PARTNER)]),
+                      event('matched', timedelta(days=2), attendees=[('Pat', 'pat@example.test')])]
+        self.run_intake(events=candidates)
+        self.assertEqual(list(self.out().glob('report-*.md')), [])
+        self.fake.now += timedelta(minutes=30)
+        self.run_intake(events=candidates)
+        self.assertEqual(list(self.out().glob('report-*.md')), [])
 
     def test_calendar_mapping_ambiguity_resolves_without_asserting_attendance(self):
         e = event('partial', -timedelta(hours=3), attendees=[('Pat', 'pat@example.test'), ('New', 'new@example.test')])
@@ -681,7 +728,7 @@ class IntakeTest(unittest.TestCase):
     def test_hydration_rechecks_sidecars_despite_unsupported_calendar(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='Hello', kind='preview', copy_key='hydrate')
         events = [event('unsupported', timedelta(days=1), attendees=[('Pat', 'pat@example.test')])]
-        self.assertEqual(self.run_intake([preview], events).reason, 'calendar_lifecycle_unsupported')
+        self.assertEqual(self.run_intake([preview], events).reason, 'processed')
         self.assertEqual(self.fake.model_calls, [], 'a preview cannot settle an obligation')
         self.fake.now += timedelta(minutes=30)
         full = {**preview, 'body': 'Hello. Send the floor plan by Thursday.', 'body_kind': 'full'}
