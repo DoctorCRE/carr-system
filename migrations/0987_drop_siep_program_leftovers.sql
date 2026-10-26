@@ -1,7 +1,7 @@
 -- rollback: forward-only; re-create the objects by replaying their source migrations (0324, 0335, 0453, 0456, 0458, 0460, 0465, 0467) on a branch; the dropped SIEP ledger and SCAC trust/token rows are retired-programme history with no runtime reader
 -- expand-contract: contract — the code callers were removed in the WR-SIEP-26 code PR; nothing in mcp-server/src, ops runtime, tools, hooks or bin reads these objects
 -- lock-review: drops two shadow-mode trigger pairs per guarded table (brief ACCESS EXCLUSIVE per table, one at a time) and 27 small retired tables
--- 0983_drop_siep_program_leftovers.sql
+-- 0987_drop_siep_program_leftovers.sql
 -- WR-SIEP-26, approved by Joe on 2026-10-26 with the catalog audit. Drops the
 -- retired SIEP programme objects that have no runtime caller:
 --   SIEP-0324 package ledger/DAG, its work_request and event guards and view

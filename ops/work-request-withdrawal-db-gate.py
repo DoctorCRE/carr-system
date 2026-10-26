@@ -638,11 +638,6 @@ def main() -> int:
                 if version is None:
                     raise RuntimeError(f"program fixture {program_ref} is missing")
                 version = version[0]
-                if program_ref.startswith("WR-SIEP-"):
-                    # Only the SIEP catalog has a transition guard; AI rows never did.
-                    refuses(cur, "update ops.work_request set state='declined',exit_reason='forged',"
-                                 "closed_at=now(),version=version+1 where ref=%s", (program_ref,),
-                            f"unreceipted {program_ref} decline")
                 cur.execute("savepoint program_started")
                 cur.execute("alter table ops.work_request disable trigger user")
                 cur.execute("update ops.work_request set claimed_at=now() where ref=%s", (program_ref,))
