@@ -2,14 +2,18 @@ import { createHash } from 'node:crypto';
 
 const CONTRACT = 'email-deal-progress.v1';
 const loi = /\b(?:LOI|letter of intent)\b/i;
+const leaseTypes = ['startup', 'relocation', 'expansion', 'additional_office', 'lease', 'renewal'];
 const transitions = new Map([
-  ['research', { toPhase: 'site_selection', instrument: /\btours?\b/i,
-    additionalEvidence: [/\b(?:scheduled|confirmed|set)\b/i] }],
-  ['site_selection', { toPhase: 'negotiation', instrument: loi, additionalEvidence: [] }],
-  ['negotiation', { toPhase: 'legal', instrument: loi, additionalEvidence: [/\b(?:signed|executed)\b/i] }],
-  ['legal', { toPhase: 'closing', instrument: /\blease\b/i, excludedInstrument: loi,
-    dealTypes: ['startup', 'relocation', 'expansion', 'additional_office', 'lease', 'renewal'],
-    additionalEvidence: [/\b(?:signed|executed)\b/i] }],
+  ['research', { toPhase: 'site_selection', rules: [{ instrument: /\btours?\b/i,
+    additionalEvidence: [/\b(?:scheduled|confirmed|set)\b/i] }] }],
+  ['site_selection', { toPhase: 'negotiation', rules: [{ instrument: loi, additionalEvidence: [] }] }],
+  ['negotiation', { toPhase: 'legal', rules: [
+    { instrument: loi, additionalEvidence: [/\b(?:signed|executed)\b/i] },
+    { instrument: /\blease\b/i, excludedInstrument: loi, dealTypes: leaseTypes,
+      additionalEvidence: [/\b(?:sent|issued|circulated|out for (?:legal )?review)\b/i] },
+  ] }],
+  ['legal', { toPhase: 'closing', rules: [{ instrument: /\blease\b/i, excludedInstrument: loi,
+    dealTypes: leaseTypes, additionalEvidence: [/\b(?:signed|executed)\b/i] }] }],
 ]);
 const properties = {
   deal: { type: 'string', format: 'uuid' },
@@ -31,11 +35,13 @@ export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lo
       ${lock ? 'for update of d for share of a,cl,p' : ''}`, [args.deal,args.activity_id])).rows[0];
     if (!row) fail('email_deal_evidence_not_found');
     const transition = transitions.get(row.phase);
-    if (!transition || (transition.dealTypes && !transition.dealTypes.includes(row.deal_type)) ||
-        !transition.additionalEvidence.every(pattern => pattern.test(args.evidence_quote)))
-      fail('email_deal_phase_not_eligible');
-    if (!row.detail?.includes(args.evidence_quote) ||
-        !transition.instrument.test(args.evidence_quote) || transition.excludedInstrument?.test(args.evidence_quote)) fail('email_deal_quote_invalid');
+    const eligible = transition?.rules.filter(rule =>
+      (!rule.dealTypes || rule.dealTypes.includes(row.deal_type)) &&
+      rule.additionalEvidence.every(pattern => pattern.test(args.evidence_quote)));
+    if (!eligible?.length) fail('email_deal_phase_not_eligible');
+    if (!row.detail?.includes(args.evidence_quote) || !eligible.some(rule =>
+        rule.instrument.test(args.evidence_quote) && !rule.excludedInstrument?.test(args.evidence_quote)))
+      fail('email_deal_quote_invalid');
     const source = { activity_id: row.activity_id, summary: row.summary,
       occurred_at: new Date(row.occurred_at).toISOString(), evidence_ref: `activity:${row.activity_id}` };
     const result = { contract: CONTRACT, status: 'proposed', deal: row.deal_id, deal_name: row.name,
@@ -48,7 +54,7 @@ export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lo
   return {
     'confirm-email-deal-progress': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: 'Joe confirms the displayed tour-set, LOI-receipt, signed-LOI or executed-lease proposal. Requires the preview digest and unchanged source text, linkage and deal version. Moves research to site selection for a scheduled or confirmed tour, or site selection to negotiation for LOI receipt, or negotiation to legal for a signed or executed LOI, or legal to closing for a signed or executed lease on a lease or renewal deal, through update-deal and retains the email quote in deal history. No sends or automatic phase moves.',
+      description: 'Joe confirms the displayed tour-set, LOI-receipt, signed-LOI, lease-out or executed-lease proposal. Requires the preview digest and unchanged source text, linkage and deal version. Moves research to site selection for a scheduled or confirmed tour, or site selection to negotiation for LOI receipt, or negotiation to legal for a signed or executed LOI or a lease sent for review on a lease or renewal deal, or legal to closing for a signed or executed lease on a lease or renewal deal, through update-deal and retains the email quote in deal history. No sends or automatic phase moves.',
       inputSchema: schema({ proposal_digest: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' },
         idempotency_key: { type: 'string', minLength: 1, maxLength: 200 } }),
       handler: async (c, actor, args) => {
@@ -71,7 +77,7 @@ export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lo
     },
     'preview-email-deal-progress': {
       write: false,
-      description: 'Propose research to site selection for a scheduled or confirmed tour, or site selection to negotiation for LOI receipt, or negotiation to legal for a signed or executed LOI, or legal to closing for a signed or executed lease on a lease or renewal deal, from a selected captured inbound email and a literal evidence quote. Select the exact deal first. Captured text may be a preview. This does not classify, execute email instructions, or change a record. Lease-execution quotes must exclude LOI wording. Joe must review whether the quote proves a tour is set, LOI receipt, LOI signing or lease execution. Scheduling, signing or execution wording is a review cue, not proof of the milestone.',
+      description: 'Propose research to site selection for a scheduled or confirmed tour, or site selection to negotiation for LOI receipt, or negotiation to legal for a signed or executed LOI or a lease sent for review on a lease or renewal deal, or legal to closing for a signed or executed lease on a lease or renewal deal, from a selected captured inbound email and a literal evidence quote. Select the exact deal first. Captured text may be a preview. This does not classify, execute email instructions, or change a record. Lease-out and lease-execution quotes must exclude LOI wording. Joe must review whether the quote proves a tour is set, LOI receipt, LOI signing, lease review or lease execution. Scheduling, delivery, signing or execution wording is a review cue, not proof of the milestone.',
       inputSchema: schema({}),
       handler: (c, _actor, args) => proposal(c, args),
     },
