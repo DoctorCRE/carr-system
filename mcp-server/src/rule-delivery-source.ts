@@ -1,3 +1,4 @@
+// Derive and hash rule delivery source projections.
 const SOURCE_SCHEMA = "rule-delivery-source.v1";
 const MATCHER = "literal-boundary-v1";
 

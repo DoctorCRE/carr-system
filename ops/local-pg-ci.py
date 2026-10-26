@@ -270,7 +270,7 @@ def run_local_ci(
     integration_base: str | None = None,
     migration_part: str = "all",
 ) -> int:
-    if migration_part not in {"all", "core", "proofs", "gates", "gates-serial", "gates-isolated", "acceptance"}:
+    if migration_part not in {"all", "core", "proofs", "gates", "acceptance"}:
         raise LocalPGRefusal("unknown local DB lane migration part")
     if migration_part != "all" and (ci_class != "migration" or integration_base is not None):
         raise LocalPGRefusal("partitioned migration proof requires the ordinary migration lane")
@@ -546,7 +546,7 @@ def main() -> int:
         default="migration",
         help="migration is the fast DB lane; strict runs every canonical class locally",
     )
-    parser.add_argument("--migration-part", choices=("all", "core", "proofs", "gates", "gates-serial", "gates-isolated", "acceptance"), default="all",
+    parser.add_argument("--migration-part", choices=("all", "core", "proofs", "gates", "acceptance"), default="all",
                         help="partitioned runs require all sibling verdicts in the hosted aggregate")
     parser.add_argument("--port", type=int, default=55432)
     parser.add_argument("--integration-base", help="exact current-main SHA for restore/forward/consumer union proof")

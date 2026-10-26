@@ -1,3 +1,4 @@
+// Tests the inventory of approved browser launchers.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, rm, readFile, writeFile } from "node:fs/promises";

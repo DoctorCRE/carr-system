@@ -1,3 +1,4 @@
+// Tests program controller census evidence and width decisions.
 import { readMigration } from "./migration-source.testhelper.mjs";
 // WR-000110 — the program-controller census reader, one test per acceptance
 // criterion it owns, plus the supporting proofs the frozen spec names.

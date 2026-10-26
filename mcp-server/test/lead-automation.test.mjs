@@ -1,3 +1,4 @@
+// Test lead automation evidence, lifecycle decisions and proposals.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import { createHash } from "node:crypto";
 import test from "node:test";

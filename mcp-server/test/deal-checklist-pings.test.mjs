@@ -1,3 +1,4 @@
+// Test sourced deal checklist reminders, eligibility, and retry behavior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

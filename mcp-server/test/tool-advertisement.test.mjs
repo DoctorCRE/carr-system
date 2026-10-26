@@ -1,3 +1,4 @@
+// Tests MCP tool discovery, advertisement, and authorization boundaries.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

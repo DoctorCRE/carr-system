@@ -1,3 +1,4 @@
+// Test rule enforcement against PostgreSQL.
 
 import test from "node:test";
 import assert from "node:assert/strict";

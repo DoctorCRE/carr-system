@@ -1,3 +1,4 @@
+// Test lease radar projections and reader grants against PostgreSQL.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';

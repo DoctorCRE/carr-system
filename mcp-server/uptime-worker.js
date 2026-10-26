@@ -1,3 +1,4 @@
+// Serve uptime checks and persist the uptime ledger.
 import { ACTION, runMinute, STATE_KEY } from "./src/uptime-monitor.js";
 
 function summary(state) {

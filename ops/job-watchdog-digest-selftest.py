@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test job watchdog digest hooks.
 import json
 import os
 import plistlib

@@ -1,3 +1,4 @@
+// Test job passport panel behavior and its supporting contracts.
 import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";

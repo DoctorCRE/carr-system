@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Build and verify CI evidence, including per-program execution records."""
 # doctrine: engineering-workflow-sop
 from __future__ import annotations
 

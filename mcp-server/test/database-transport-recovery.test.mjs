@@ -1,3 +1,4 @@
+// Test database transport retries, reconnects, and transaction replay boundaries.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { neonConfig, Pool } from '@neondatabase/serverless';

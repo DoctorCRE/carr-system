@@ -1,3 +1,4 @@
+// Tests the reviewed national account classification correction.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

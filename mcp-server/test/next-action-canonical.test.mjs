@@ -1,3 +1,4 @@
+// Tests canonical next action reads and concurrency safeguards.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

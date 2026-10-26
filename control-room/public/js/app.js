@@ -1,3 +1,4 @@
+// Render the control room prototype surfaces and scenario navigation.
 import {loadFixture, prepareFixtureForPresentation, SCENARIOS, SURFACES} from "./client.js";
 
 const app = document.querySelector("#app");

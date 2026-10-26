@@ -1,3 +1,4 @@
+// Tests reports web routing, origins, and mutation restrictions.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createReportsWebHandler, isReportsHostRequest, isReportsRequest, REPORTS_ORIGIN } from "../src/reports-web.js";

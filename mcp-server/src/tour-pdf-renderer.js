@@ -1,3 +1,4 @@
+// Render tour packets as PDF documents.
 import fontkit from "@pdf-lib/fontkit";
 import { decodePDFRawStream, PDFDocument, PDFName, PDFString, rgb } from "pdf-lib";
 import { formatApprovedMetric, renderTourPacket } from "./tour-packet-render.js";
