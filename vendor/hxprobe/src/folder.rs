@@ -231,31 +231,9 @@ impl Index {
             }
         }
         // Expanded message objects embedded in transaction wrappers include
-        // a full typed folder reference at +408. Unlike compact objects, they
-        // do not have an individual length envelope. Bound the header by the
-        // next message object, and only take its first ItemClass anchor.
-        let starts: Vec<_> = memchr::memmem::find_iter(data, &signature(0x00ca))
-            .filter(|&p| message_key(&data[p..], 0x00ca).is_some())
-            .collect();
-        let boundaries: BTreeSet<_> = [FOLDER, VIEW, MESSAGE, METADATA]
-            .into_iter()
-            .flat_map(|kind| envelopes(data, kind).into_iter().map(|(p, _)| p - 10))
-            .collect();
-        for (i, &start) in starts.iter().enumerate() {
-            let next_envelope = boundaries
-                .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
-                .next()
-                .copied()
-                .unwrap_or(data.len());
-            let end = starts
-                .get(i + 1)
-                .copied()
-                .unwrap_or(data.len())
-                .min(next_envelope)
-                .min(start.saturating_add(4096));
-            let Some(object) = data.get(start..end) else {
-                continue;
-            };
+        // a full typed folder reference at +408. Only take their first
+        // ItemClass anchor.
+        for (start, object) in expanded(data) {
             let Some(field) = object.get(408..) else {
                 continue;
             };
@@ -283,6 +261,31 @@ impl Index {
         links
     }
 
+    /// Resolve IPM.Note anchor positions to the local message key of the
+    /// message object holding them, so other objects can name the message.
+    pub fn keys(&self, data: &[u8], needle: &[u8]) -> BTreeMap<usize, u64> {
+        let mut keys = BTreeMap::new();
+        for (start, object) in envelopes(data, MESSAGE) {
+            let Some(key) = message_key(object, MESSAGE.1) else { continue };
+            let mut anchors = memchr::memmem::find_iter(object, needle);
+            if let (Some(anchor), None) = (anchors.next(), anchors.next()) {
+                keys.insert(start + anchor, key);
+            }
+        }
+        for (start, object) in expanded(data) {
+            // Only a real message header carries its typed folder reference;
+            // a bare message reference inside another object does not.
+            if object.get(408..).and_then(|f| reference(f, 0x004d, &[2, 0x02ac])).is_none() {
+                continue;
+            }
+            let Some(key) = message_key(object, MESSAGE.1) else { continue };
+            if let Some(rel) = memchr::memmem::find(object, needle).filter(|&rel| rel >= 454) {
+                keys.entry(start + rel).or_insert(key);
+            }
+        }
+        keys
+    }
+
     fn link_single_anchor(
         &self,
         links: &mut BTreeMap<usize, BTreeSet<u64>>,
@@ -305,6 +308,36 @@ impl Index {
             links.entry(start + anchor).or_default().extend(known);
         }
     }
+}
+
+/// Expanded message objects have no length envelope of their own. Bound each
+/// header by the next message object, the next known envelope, or 4 KiB.
+fn expanded(data: &[u8]) -> Vec<(usize, &[u8])> {
+    let starts: Vec<_> = memchr::memmem::find_iter(data, &signature(0x00ca))
+        .filter(|&p| message_key(&data[p..], 0x00ca).is_some())
+        .collect();
+    let boundaries: BTreeSet<_> = [FOLDER, VIEW, MESSAGE, METADATA]
+        .into_iter()
+        .flat_map(|kind| envelopes(data, kind).into_iter().map(|(p, _)| p - 10))
+        .collect();
+    starts
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &start)| {
+            let next_envelope = boundaries
+                .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
+                .next()
+                .copied()
+                .unwrap_or(data.len());
+            let end = starts
+                .get(i + 1)
+                .copied()
+                .unwrap_or(data.len())
+                .min(next_envelope)
+                .min(start.saturating_add(4096));
+            Some((start, data.get(start..end)?))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -469,6 +502,23 @@ mod tests {
         let mut msg = object(0xca, 70, 0, 70, 100);
         msg.extend(note());
         assert_eq!(index.links(&envelope(0x74e, &msg), &note())[&110], BTreeSet::from([51]));
+    }
+
+    #[test]
+    fn anchors_resolve_to_their_message_key() {
+        let index = Index::default();
+        let mut compact = object(0xca, 70, 0, 70, 100);
+        compact.extend(note());
+        assert_eq!(index.keys(&envelope(0x74e, &compact), &note()), BTreeMap::from([(110, 70)]));
+        let mut twice = compact.clone();
+        twice.extend(note());
+        assert!(index.keys(&envelope(0x74e, &twice), &note()).is_empty());
+        let mut expanded = object(0xca, 71, 0, 71, 500);
+        expanded.extend(note());
+        // A bare message reference with no folder reference at +408 is not a header.
+        assert!(index.keys(&expanded, &note()).is_empty());
+        expanded[408..454].copy_from_slice(&object(0x4d, 50, 2, 7, 46));
+        assert_eq!(index.keys(&expanded, &note()), BTreeMap::from([(500, 71)]));
     }
 
     #[test]
