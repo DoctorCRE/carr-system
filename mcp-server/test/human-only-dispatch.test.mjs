@@ -86,6 +86,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "commit-winning-property",
 
     "complete-deal-item",
+    "confirm-email-deal-progress",
     "confirm-merge",
     "decide-doc-suggestion",
     "instruct-deal-item",
