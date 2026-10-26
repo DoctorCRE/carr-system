@@ -53,10 +53,74 @@ class PecosPoolCliTests(unittest.TestCase):
         first = self.run_cli()
         self.assertEqual(first.returncode, 0, first.stderr)
         before = self.output("pecos.json").read_bytes()
+        (self.script.parent / "_data/pecos-source-2026Q3.json").unlink()
         self.write_source(headers=["NPI", "ENRLMT_ID", "STATE", "FIRST_NAME", "LAST_NAME", "PROVIDER_TYPE_DESC"])
         result = self.run_cli()
         self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PECOS source schema drift", result.stderr)
         self.assertEqual(self.output("pecos.json").read_bytes(), before)
+
+    def interrupt_import(self):
+        rows = [
+            [str(1234567890 + index), "N", "1", f"I2025010{index + 1}000100", "01",
+             "PRACTITIONER - Dentist", state, name, "", "Example", ""]
+            for index, (state, name) in enumerate((("FL", "Ava"), ("GA", "Bo"), ("AL", "Cal")))
+        ]
+        self.write_source(rows=rows)
+        result = subprocess.run([sys.executable, "-c", """
+import runpy, sys
+scope = runpy.run_path(sys.argv[1])
+scope = scope["main"].__globals__
+scope["CHECKPOINT_INTERVAL"] = 1
+save = scope["save_checkpoint"]
+def interrupt(*args):
+    save(*args)
+    if args[2] == 2:
+        raise SystemExit(75)
+scope["save_checkpoint"] = interrupt
+sys.argv = sys.argv[1:]
+scope["main"]()
+""", str(self.script), str(self.source)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 75, result.stderr)
+        checkpoint = self.script.parent / "_data/pecos-checkpoint-2026Q3.json"
+        self.assertEqual(json.loads(checkpoint.read_text())["processed_rows"], 2)
+        self.assertFalse(self.output("pecos.json").exists())
+        return checkpoint
+
+    def test_resume_skips_saved_rows_and_completes_both_outputs_once(self):
+        checkpoint = self.interrupt_import()
+        result = subprocess.run([sys.executable, "-c", """
+import runpy, sys
+scope = runpy.run_path(sys.argv[1])["main"].__globals__
+decode = scope["enrl_date"]
+def reject_saved_row(value):
+    if value == "I20250101000100":
+        raise AssertionError("saved row was processed again")
+    return decode(value)
+scope["enrl_date"] = reject_saved_row
+sys.argv = sys.argv[1:]
+scope["main"]()
+""", str(self.script), str(self.source)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("3 rows scanned, 2 FL/AL", result.stdout)
+        candidates = json.loads(self.output("pecos.json").read_text())
+        self.assertEqual([row["name"] for row in candidates], ["Cal Example", "Ava Example"])
+        data = self.script.parent / "_data"
+        self.assertEqual(json.loads((data / "pecos-baseline-2026Q3.json").read_text()),
+                         ["1234567890|I20250101000100", "1234567892|I20250103000100"])
+        self.assertEqual(json.loads((data / "pecos-source-2026Q3.json").read_text())["rows_scanned"], 3)
+        self.assertFalse(checkpoint.exists())
+
+    def test_resume_refuses_changed_source_and_preserves_checkpoint(self):
+        checkpoint = self.interrupt_import()
+        before = checkpoint.read_bytes()
+        self.write_source()
+        result = self.run_cli()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PECOS checkpoint belongs to different source content", result.stderr)
+        self.assertEqual(checkpoint.read_bytes(), before)
+        self.assertFalse(self.output("pecos.json").exists())
+        self.assertFalse((self.script.parent / "_data/pecos-source-2026Q3.json").exists())
 
     def test_extract_dates_preserve_the_existing_data_quarter_labels(self):
         for extract, quarter in (("2026.04.01", "2026Q1"), ("2026.01.01", "2025Q4")):
