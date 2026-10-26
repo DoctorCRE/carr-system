@@ -89,7 +89,8 @@ function identityHandler(email, clock) {
 test("Deal Room host is explicit per environment and request matching fails closed", async () => {
   const wrangler = await readFile(WRANGLER_PATH, "utf8");
   assert.match(wrangler, /\[vars\]\nCARR_ENV = "production"\nAPP_HOST = "app\.doctorcre\.com"\nLEGACY_DEALROOM_HOST = "dealroom\.doctorcre\.com"/);
-  assert.doesNotMatch(wrangler, /^\[env\.staging/m);
+  assert.match(wrangler,
+    /\[env\.staging\.vars\]\nCARR_ENV = "staging"\nAPP_HOST = "carr-mcp-staging\.joe-bookout-carr-us\.workers\.dev"[\s\S]*DOCTORCRE_APP_HOST = "doctorcre-app-staging\.joe-bookout-carr-us\.workers\.dev"/);
 
   assert.equal(isDealroomRequest(new Request(`https://${PRODUCTION_HOST}/`), { DEALROOM_HOST: PRODUCTION_HOST }), true);
   assert.equal(isDealroomRequest(new Request(`https://${APP_HOST}/`), { APP_HOST, LEGACY_DEALROOM_HOST: PRODUCTION_HOST }), true);

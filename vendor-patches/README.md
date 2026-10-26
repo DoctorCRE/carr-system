@@ -42,6 +42,15 @@ WHAT THE PATCH ADDS to `hxprobe db <file> [out.db] [files-dir]`:
   at folder object +792, so paths such as Inbox/Active Deals/<deal> resolve. On the
   2026-10-21 TEST-campaign copies: 0 folders before, 236 after (208 with a parent,
   28 top-level), and 2,104 of 2,121 messages linked to a folder.
+- Attachment metadata (WR-000469 AC-ATTACH, `src/attachment.rs`). Class `016a`
+  objects (tag `0318`) give `attachments`: message key (typed reference at +360),
+  name (the cache file name without Outlook's `[<digits>]` suffix), declared MIME
+  type, size (+558) and the profile-relative cache path
+  `~/Files/S0/<n>/Attachments/<k>/<file>`. `message_keys` maps message rows to the
+  local keys of their message objects. No bytes are read; `lib/outlook_attachments.py`
+  reads, type-checks by magic bytes, caps and hashes cached files from a private
+  copy. On the 2026-10-21 copies: 15,130 objects, 7,017 attachments, 566 linked to
+  exactly one message row.
 - A `meta` table with block verification, message, collapse, sidecar and event
   counts, which the intake job checks before it trusts a run (at least 95% of
   blocks verified).

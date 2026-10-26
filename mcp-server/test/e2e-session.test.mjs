@@ -165,9 +165,9 @@ test("E2E-marked sessions cannot authenticate in production or outlive normal ex
 
 test("staging's MCP origin policy admits its normal browser cookie without widening production", async () => {
   const config = await readFile(new URL("../wrangler.toml", import.meta.url), "utf8");
-  assert.equal(config.includes("CARR_MCP_ALLOWED_ORIGINS"), false);
-  assert.equal(config.includes("[env.staging]"), false);
-  const allowed = JSON.stringify([`https://${CARR_HOST}`, `https://${APP_HOST}`]);
+  const [production, staging] = config.split("\n[env.staging.vars]\n");
+  assert.equal(production.includes("CARR_MCP_ALLOWED_ORIGINS"), false);
+  const allowed = staging.match(/^CARR_MCP_ALLOWED_ORIGINS = '(.*)'$/m)?.[1];
   assert.deepEqual(JSON.parse(allowed), [`https://${CARR_HOST}`, `https://${APP_HOST}`]);
   for (const host of [CARR_HOST, APP_HOST]) {
     const request = new Request(`https://${host}/mcp`, { headers: { origin: `https://${host}` } });
