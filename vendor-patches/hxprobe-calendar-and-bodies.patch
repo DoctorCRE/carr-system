@@ -1041,7 +1041,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
  #[derive(Default)]
  pub struct Index {
      pub folders: BTreeMap<u64, Folder>,
-@@ -40,9 +67,23 @@
+@@ -40,9 +67,23 @@ fn signature(class: u16) -> [u8; 10] {
      s
  }
  
@@ -1066,7 +1066,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
      let tag_bytes = tag.to_le_bytes();
      let needle = [5, 0, tag_bytes[0], tag_bytes[1]];
      memchr::memmem::find_iter(data, &needle)
-@@ -75,7 +116,7 @@
+@@ -75,7 +116,7 @@ fn reference(data: &[u8], class: u16, kinds: &[u32]) -> Option<(u64, u64)> {
      .then_some((id, owner))
  }
  
@@ -1075,7 +1075,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
      if !data.starts_with(&signature(class)) {
          return None;
      }
-@@ -116,22 +157,27 @@
+@@ -116,22 +157,27 @@ fn trailing_name(data: &[u8]) -> Option<String> {
  impl Index {
      /// First pass: gather the catalog and message/view membership references.
      pub fn observe(&mut self, block: usize, data: &[u8]) {
@@ -1104,7 +1104,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
              // Two copies of the folder's view-collection reference. Require
              // each reference's duplicated key, not an arbitrary nearby u64.
              for at in [160, 360] {
-@@ -145,7 +191,7 @@
+@@ -145,7 +191,7 @@ impl Index {
                  }
              }
          }
@@ -1113,7 +1113,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
              let Some(key) = message_key(object, 0x00bf) else {
                  continue;
              };
-@@ -167,7 +213,7 @@
+@@ -167,7 +213,7 @@ impl Index {
      /// Resolve IPM.Note anchor positions to observed folders within this block.
      pub fn links(&self, data: &[u8], needle: &[u8]) -> BTreeMap<usize, BTreeSet<u64>> {
          let mut links = BTreeMap::new();
@@ -1122,7 +1122,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
              let Some((_, owner)) = reference(object, 0x004f, &[4]) else {
                  continue;
              };
-@@ -175,7 +221,7 @@
+@@ -175,7 +221,7 @@ impl Index {
                  self.link_single_anchor(&mut links, start, object, needle, folders);
              }
          }
@@ -1131,7 +1131,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
              let Some(key) = message_key(object, 0x00ca) else {
                  continue;
              };
-@@ -184,36 +230,9 @@
+@@ -184,36 +230,9 @@ impl Index {
              }
          }
          // Expanded message objects embedded in transaction wrappers include
@@ -1171,7 +1171,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
              let Some(field) = object.get(408..) else {
                  continue;
              };
-@@ -241,6 +260,31 @@
+@@ -241,6 +260,31 @@ impl Index {
          links
      }
  
@@ -1203,7 +1203,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
      fn link_single_anchor(
          &self,
          links: &mut BTreeMap<usize, BTreeSet<u64>>,
-@@ -265,6 +309,36 @@
+@@ -265,6 +309,36 @@ impl Index {
      }
  }
  
@@ -1240,7 +1240,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
  #[cfg(test)]
  mod tests {
      use super::*;
-@@ -394,7 +468,68 @@
+@@ -394,6 +468,118 @@ mod tests {
          assert_eq!(index.links(&expanded, &note())[&610], BTreeSet::from([51]));
      }
  
@@ -1255,7 +1255,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
 +        envelope(0x4d8, &b)
 +    }
 +
-     #[test]
++    #[test]
 +    fn current_build_tags_and_parent_references() {
 +        let mut index = Index::default();
 +        index.observe(0, &current_folder(50, 7, "Active Deals", None));
@@ -1305,10 +1305,60 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
 +        assert_eq!(index.folders[&51].name.as_deref(), Some("Deal A"));
 +    }
 +
++    /// An expanded message header with a typed folder reference at +408
++    /// naming a folder the index has never catalogued.
++    fn header(id: u64, size: usize) -> Vec<u8> {
++        let mut b = object(0xca, id, 0, id, size);
++        b[408..454].copy_from_slice(&object(0x4d, 50, 2, 7, 46));
++        b
++    }
++
 +    #[test]
++    fn keys_need_a_header_reference_but_no_folder_catalog() {
++        let index = Index::default();
++        let mut expanded = header(70, 500);
++        expanded.extend(note());
++        let mut early = object(0xca, 71, 0, 71, 100);
++        early.extend(note());
++        let mut compact = object(0xca, 72, 0, 72, 100);
++        compact.extend(note());
++        let mut data = expanded.clone();
++        data.extend(&early);
++        data.extend(envelope(0x740, &compact));
++        let keys = index.keys(&data, &note());
++        assert_eq!(keys.get(&500), Some(&70));
++        assert_eq!(keys.len(), 2, "an anchor inside the fixed header is not keyed");
++        assert_eq!(keys.values().copied().collect::<BTreeSet<_>>(), BTreeSet::from([70, 72]));
++        assert!(index.links(&data, &note()).is_empty(), "keys do not invent folder links");
++        let mut bare = object(0xca, 74, 0, 74, 500);
++        bare.extend(note());
++        assert!(index.keys(&bare, &note()).is_empty(), "no typed folder reference, no key");
++    }
++
++    #[test]
++    fn keys_never_cross_an_envelope_or_the_header_bound() {
++        let index = Index::default();
++        // A view envelope between the header and the next anchor ends the header.
++        let mut data = header(70, 470);
++        let mut view = object(0x4f, 71, 4, 60, 100);
++        view.extend(note());
++        data.extend(envelope(0x430, &view));
++        assert!(index.keys(&data, &note()).is_empty());
++        // An anchor 4096 or more bytes past the header belongs to something else.
++        let mut far = header(72, 4096);
++        far.extend(note());
++        assert!(index.keys(&far, &note()).is_empty());
++        // Only the first anchor inside one header takes its key.
++        let mut twice = header(73, 500);
++        twice.extend(note());
++        twice.extend(vec![0; 40]);
++        twice.extend(note());
++        assert_eq!(index.keys(&twice, &note()), BTreeMap::from([(500, 73)]));
++    }
++
+     #[test]
      fn conflicting_folder_names_are_not_silently_overwritten() {
          let mut index = Index::default();
-         index.observe(0, &folder(50, 60, "Old"));
 diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 --- a/hxprobe/src/main.rs
 +++ b/hxprobe/src/main.rs
@@ -1324,7 +1374,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
  //!   hxprobe map    <file> [n]        dump the named field map for n records
  //!   hxprobe find   <file> <term>     show records whose text contains <term>
  //! ```
-@@ -24,7 +27,10 @@
+@@ -24,7 +27,10 @@ use std::fs::File;
  
  use memmap2::Mmap;
  
@@ -1335,7 +1385,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
  mod folder;
  mod header;
  mod lz;
-@@ -202,7 +208,7 @@
+@@ -202,7 +208,7 @@ fn cmd_find(path: &str, term: &str, limit: usize) {
  }
  
  /// Parse the whole store into a SQLite database with a full-text index.
@@ -1344,7 +1394,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      let mm = map(path);
      let needle = record::anchor_needle();
      let offs = block::find_all(&mm);
-@@ -210,9 +216,14 @@
+@@ -210,9 +216,14 @@ fn cmd_db(path: &str, db_path: &str) {
  
      // Folder catalogs and membership metadata can occur after the messages.
      let mut folders = folder::Index::default();
@@ -1359,7 +1409,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
          }
      }
  
-@@ -227,7 +238,11 @@
+@@ -227,7 +238,11 @@ fn cmd_db(path: &str, db_path: &str) {
               id               INTEGER PRIMARY KEY, -- local store key
               account_id       INTEGER NOT NULL,    -- local account key
               name             TEXT,                -- NULL if revisions disagree
@@ -1372,7 +1422,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
           );
           CREATE TABLE messages (
               id           INTEGER PRIMARY KEY,
-@@ -249,7 +264,13 @@
+@@ -249,7 +264,17 @@ fn cmd_db(path: &str, db_path: &str) {
               sent_utc     TEXT,
               -- 1 when the subject came from another record in the same
               -- conversation, because this record stores none of its own.
@@ -1383,11 +1433,15 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 +             copies       INTEGER,   -- revisions collapsed into this row
 +             -- sender, normalized subject and preview opening: the identity
 +             -- this row's copies share; NULL when too short to identify.
-+             copy_key     TEXT
++             copy_key     TEXT,
++             -- store-local keys of the message objects merged into this row,
++             -- decimal, comma-separated and ascending; NULL when none linked.
++             -- More than one means this row joined distinct store items.
++             local_keys   TEXT
           );
           CREATE TABLE message_folders (
               message_id INTEGER NOT NULL REFERENCES messages(id),
-@@ -257,8 +278,49 @@
+@@ -257,8 +282,49 @@ fn cmd_db(path: &str, db_path: &str) {
               PRIMARY KEY (message_id, folder_id)
           );
           CREATE INDEX message_folders_folder ON message_folders(folder_id);
@@ -1437,7 +1491,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
           CREATE VIRTUAL TABLE messages_fts USING fts5(
               sender, sender_name, recipients, subject, body,
               content='messages', content_rowid='id', tokenize='porter unicode61'
-@@ -278,10 +340,12 @@
+@@ -278,10 +344,12 @@ fn cmd_db(path: &str, db_path: &str) {
          let Some(b) = block::parse(&mm, o) else { continue };
          blocks_ok += 1;
          let folder_links = folders.links(&b.data, &needle);
@@ -1450,7 +1504,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
              let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);
  
              // The named map is authoritative for every field it covers: it
-@@ -314,9 +378,17 @@
+@@ -314,9 +382,17 @@ fn cmd_db(path: &str, db_path: &str) {
                  .filter(|t| Some(**t) != r.sender.as_deref())
                  .map(|t| t.to_string())
                  .collect();
@@ -1470,13 +1524,10 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
                  }
              }
  
-@@ -386,22 +458,100 @@
-     for r in best.values_mut() {
-         if r.sender_name.is_some() && r.sender_name == r.subject {
-             r.sender_name = None;
-+        }
-+    }
-+
+@@ -389,19 +465,97 @@ fn cmd_db(path: &str, db_path: &str) {
+         }
+     }
+ 
 +    // Collapse the copies `sender + send time` could not join. See body.rs.
 +    let mut by_time: Vec<record::Record> = best.into_values().collect();
 +    by_time.sort_by_key(|r| r.sent_unix);
@@ -1537,8 +1588,8 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 +            best[j].sent_unix = sent;
 +            absorbed[i] = true;
 +            collapsed += 1;
-         }
-     }
++        }
++    }
 +    let mut keep = absorbed.iter().map(|a| !a);
 +    best.retain(|_| keep.next().unwrap_or(true));
 +    println!(
@@ -1547,7 +1598,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 +        sidecars.rejected,
 +        sidecars.len()
 +    );
- 
++
      let stored = best.len();
 -    let with_folder = best.values().filter(|r| !r.folder_ids.is_empty()).count();
 -    let multi_folder = best.values().filter(|r| r.folder_ids.len() > 1).count();
@@ -1575,7 +1626,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
                  .expect("insert folder");
          }
          let mut ins_link = tx
-@@ -409,18 +559,33 @@
+@@ -409,18 +563,33 @@ fn cmd_db(path: &str, db_path: &str) {
                  "INSERT INTO message_folders(message_id,folder_id) VALUES (?1,?2)"
              )
              .expect("prepare folder links");
@@ -1600,10 +1651,10 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
                     (block,sender,sender_name,recipients,subject,message_id,body,
                      html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
 -                    subject_inherited)
-+                    subject_inherited,preview,body_source,copies,copy_key)
++                    subject_inherited,preview,body_source,copies,copy_key,local_keys)
                   VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,
 -                         datetime(?12,'unixepoch'),?13)",
-+                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17)",
++                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17,?18)",
              )
              .expect("prepare");
  
@@ -1612,7 +1663,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
              ins.execute(rusqlite::params![
                  r.offset as i64,
                  r.sender,
-@@ -435,6 +600,10 @@
+@@ -435,6 +604,11 @@ fn cmd_db(path: &str, db_path: &str) {
                  if r.html.is_some() { "full" } else { "preview" },
                  r.sent_unix,
                  r.subject_inherited as i64,
@@ -1620,10 +1671,11 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 +                r.body_source,
 +                r.copies as i64,
 +                body::copy_key(r),
++                local_keys(r),
              ])
              .expect("insert");
              let message_id = tx.last_insert_rowid();
-@@ -442,8 +611,65 @@
+@@ -442,8 +616,66 @@ fn cmd_db(path: &str, db_path: &str) {
                  ins_link.execute(rusqlite::params![message_id, *folder_id as i64])
                      .expect("insert folder link");
              }
@@ -1664,6 +1716,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 +            ("messages", stored),
 +            ("messages_full", best.iter().filter(|r| r.html.is_some()).count()),
 +            ("copies_collapsed", collapsed),
++            ("local_key_conflicts", best.iter().filter(|r| r.local_keys.len() > 1).count()),
 +            ("sidecar_files", sidecars.len()),
 +            ("sidecar_linked", sidecars.linked),
 +            ("sidecar_rejected", sidecars.rejected),
@@ -1689,7 +1742,16 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      tx.commit().expect("commit");
  
      db.execute_batch(
-@@ -474,6 +700,11 @@
+@@ -471,9 +703,20 @@ fn cmd_db(path: &str, db_path: &str) {
+     }
+ }
+ 
++/// The local keys of every revision merged into this row.
++fn local_keys(r: &record::Record) -> Option<String> {
++    (!r.local_keys.is_empty())
++        .then(|| r.local_keys.iter().map(u64::to_string).collect::<Vec<_>>().join(","))
++}
++
  /// Combine a later revision of a message into the copy already held.
  fn merge(prev: &mut record::Record, r: record::Record) {
      prev.folder_ids.extend(r.folder_ids);
@@ -1701,7 +1763,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      if prev.subject.is_none() {
          prev.subject = r.subject;
      }
-@@ -491,11 +722,14 @@
+@@ -491,10 +734,13 @@ fn merge(prev: &mut record::Record, r: record::Record) {
          (Some(a), Some(b)) => b.len() > a.len(),
          _ => false,
      };
@@ -1712,13 +1774,12 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 -    }
 -    if r.body.len() > prev.body.len() {
 +        prev.body_source = r.body_source;
-         prev.body = r.body;
-+    } else if prev.html.is_none() && r.body.len() > prev.body.len() {
 +        prev.body = r.body;
++    } else if prev.html.is_none() && r.body.len() > prev.body.len() {
+         prev.body = r.body;
      }
  }
- 
-@@ -504,7 +738,9 @@
+@@ -504,7 +750,9 @@ hxprobe — parse HxStore.hxd, the New Outlook for Mac message store
  
  usage:
    hxprobe blocks <file>              verify every block, report coverage
@@ -1729,7 +1790,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
    hxprobe map    <file> [n]          dump the field map for n records (0 = stats)
    hxprobe find   <file> <term> [n]   show records whose text contains <term>
  
-@@ -521,7 +757,11 @@
+@@ -521,7 +769,11 @@ fn main() {
  
      match args[1].as_str() {
          "blocks" => cmd_blocks(&args[2]),
@@ -1745,7 +1806,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 diff --git a/hxprobe/src/record.rs b/hxprobe/src/record.rs
 --- a/hxprobe/src/record.rs
 +++ b/hxprobe/src/record.rs
-@@ -29,6 +29,8 @@
+@@ -29,6 +29,8 @@ pub struct Record {
      pub recipients: Vec<String>,
      /// Folder keys observed across cached revisions; this is not a live view.
      pub folder_ids: std::collections::BTreeSet<u64>,
@@ -1754,7 +1815,7 @@ diff --git a/hxprobe/src/record.rs b/hxprobe/src/record.rs
      pub subject: Option<String>,
      pub message_id: Option<String>,
      /// Plain text, tags stripped and entities decoded.
-@@ -40,6 +42,13 @@
+@@ -40,6 +42,13 @@ pub struct Record {
      /// True when the subject came from a sibling record in the same
      /// conversation rather than from this record's own bytes.
      pub subject_inherited: bool,
@@ -1768,7 +1829,7 @@ diff --git a/hxprobe/src/record.rs b/hxprobe/src/record.rs
  }
  
  /// Selecting the send time from the ticks in a record.
-@@ -513,7 +522,7 @@
+@@ -513,7 +522,7 @@ fn undouble(t: &str) -> String {
  /// used to be duplicated; this one is kept because the body is not a UTF-16LE
  /// run and so is not part of the named map.
  pub fn parse(offset: usize, blob: &[u8], anchor: usize) -> Record {
