@@ -1,8 +1,6 @@
 -- rollback: restore the board and context definitions from 0936 and 0094 in a forward migration.
 -- expand-contract: expand; preserve both read interfaces and their grants.
 -- lock-review: replace read definitions only; no business rows are changed.
-begin;
-
 CREATE OR REPLACE VIEW public.v_deal_room_board AS
  SELECT d.id,
     d.name,
@@ -85,5 +83,3 @@ as $$
    where d.id = any(requested_deal_ids)
      and d.operating_state = 'active'
 $$;
-
-commit;
