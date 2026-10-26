@@ -1227,6 +1227,20 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(rows, [intake.Contact('pat@a.test', 'C-901', 'Pat'),
                                 intake.Contact('pat.home@b.test', 'C-901', 'Pat')])
         self.assertEqual(intake.record_contacts('call the office', 'C-901', 'Pat'), [])
+        self.assertEqual(intake.record_contacts('Info@practice.test', 'C-901', 'Pat'),
+                         [intake.Contact('info@practice.test', 'C-901', 'Pat')], 'a lone address stays exact')
+
+    def test_a_shared_role_address_in_a_multi_address_field_is_flagged_not_matched(self):
+        rows = intake.record_contacts('pat@practice.test; frontdesk@practice.test', 'C-901', 'Pat')
+        self.assertEqual(rows, [intake.Contact('pat@practice.test', 'C-901', 'Pat'),
+                                intake.Contact('frontdesk@practice.test', 'C-901', 'Pat', exact=False)])
+        self.fake.contacts_rows += rows
+        result = self.run_intake([mail('frontdesk@practice.test', -timedelta(hours=1))])
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(self.fake.intent_calls, [], 'a flagged role address is never a lead')
+        self.assertEqual(result.counts['mapping_shared_role'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 1)
+        self.assertIn('shared_role', self.report_text())
 
     def test_a_second_address_on_the_same_record_logs_to_that_record(self):
         self.fake.contacts_rows.append(intake.Contact('pat.home@example.test', 'C-901', 'Pat Example'))
@@ -1235,9 +1249,9 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(args['ref'], 'C-901')
         self.assertEqual(result.counts['unmatched'], 0)
 
-    def test_automated_senders_are_skipped_as_not_business(self):
+    def test_machine_senders_are_skipped_as_not_business(self):
         mails = [mail('no-reply@vendor.test', -timedelta(hours=1), subject='Receipt'),
-                 mail('Notifications+abc@service.test', -timedelta(hours=1), subject='Alert'),
+                 mail('Bounce+abc@service.test', -timedelta(hours=1), subject='Bounce'),
                  mail('mailer-daemon@relay.test', -timedelta(hours=1), subject='Undeliverable')]
         result = self.run_intake(mails)
         self.assertEqual(result.state, 'succeeded')
@@ -1245,27 +1259,37 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.fake.intent_calls, [])
         self.assertEqual(result.counts['skipped_automated'], 3)
         self.assertEqual(result.counts['unresolved_messages'], 0)
+        self.assertEqual(result.counts['unresolved_addresses'], 0)
         self.assertEqual(result.counts['unmatched'], 0)
-        self.run_intake(mails)
+        self.assertNotIn('vendor.test', self.report_text())
+        result = self.run_intake(mails)
         self.assertEqual(self.fake.calls, [])
+        self.assertEqual(result.counts['skipped_automated'], 3, 'a count of retained mail, not per run')
 
-    def test_an_automated_looking_address_on_a_record_still_logs(self):
-        self.fake.contacts_rows.append(intake.Contact('alerts@example.test', 'V-903', 'Alert Vendor'))
-        result = self.run_intake([mail('alerts@example.test', -timedelta(hours=1))])
+    def test_role_and_human_senders_are_never_skipped_as_machines(self):
+        for address in ('marketing.director@practice.test', 'news.desk@paper.test', 'updates@practice.test',
+                        'alerts.team@practice.test', 'notifications@practice.test', 'info@practice.test'):
+            self.assertFalse(intake.automated(address), address)
+        for address in ('noreply@x.test', 'no_reply@x.test', 'do-not-reply@x.test', 'donotreply@x.test',
+                        'mailer-daemon@x.test', 'postmaster@x.test', 'bounces+123@x.test'):
+            self.assertTrue(intake.automated(address), address)
+
+    def test_skipped_machine_mail_logs_once_a_record_carries_the_address(self):
+        m = mail('noreply@vendor.test', -timedelta(hours=1))
+        self.assertEqual(self.run_intake([m]).counts['skipped_automated'], 1)
+        self.fake.contacts_rows.append(intake.Contact('noreply@vendor.test', 'V-903', 'Portal Vendor'))
+        result = self.run_intake([m], touch=False)
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual(args['ref'], 'V-903')
         self.assertEqual(result.counts['skipped_automated'], 0)
 
-    def test_retained_automated_mail_leaves_the_unresolved_queue(self):
-        m = mail('noreply@vendor.test', -timedelta(days=5))
-        ck = intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'])[0]
-        self.out().mkdir(parents=True)
-        (self.out() / intake.STATE).write_text(json.dumps({'mail_unresolved': {
-            ident(m): {'ck': ck, 'sent': m['sent_unix'], 'participants': {'h': 'missing'}}}}))
-        result = self.run_intake([m])
-        self.assertEqual(result.counts['unresolved_messages'], 0)
-        self.assertEqual(result.counts['skipped_automated'], 1)
-        self.assertEqual(self.fake.writes(), [])
+    def test_a_machine_address_with_a_mapping_problem_is_reported_not_hidden(self):
+        self.fake.contacts_rows += [intake.Contact('noreply@vendor.test', 'V-903', 'A'),
+                                    intake.Contact('noreply@vendor.test', 'V-904', 'B')]
+        result = self.run_intake([mail('noreply@vendor.test', -timedelta(hours=1))])
+        self.assertEqual(result.counts['skipped_automated'], 0)
+        self.assertEqual(result.counts['mapping_ambiguous'], 1)
+        self.assertIn('ambiguous', self.report_text())
 
     def test_an_unknown_sender_with_business_intent_is_queued_once_for_review(self):
         self.fake.intent_reply = {'business': True, 'summary': 'Wants a clinic suite near the hospital.'}
@@ -1321,6 +1345,32 @@ class IntakeTest(unittest.TestCase):
         self.fake.intent_reply = {'business': True, 'summary': 'Needs space.'}
         self.assertEqual(self.run_intake([m], touch=False).state, 'succeeded')
         self.assertEqual(len(self.fake.writes('propose-email-lead')), 1)
+
+    def test_a_sender_the_queue_cannot_take_is_never_proposed_and_does_not_fail_the_run(self):
+        self.fake.intent_reply = {'business': True, 'summary': 'Needs space.'}
+        for sender in ('/o=exchangelabs/ou=exchange administrative group/cn=recipients/cn=abc',
+                       'dr.müller@praxis.test'):
+            self.assertFalse(intake.proposable(sender), sender)
+        result = self.run_intake([mail('/o=exchangelabs/ou=group/cn=recipients/cn=abc', -timedelta(hours=1)),
+                                  mail('dr.müller@praxis.test', -timedelta(hours=1), subject='Space')])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(self.fake.writes('propose-email-lead'), [])
+        self.assertEqual(self.fake.intent_calls, [])
+
+    def test_a_permanent_refusal_is_terminal_not_a_failed_run(self):
+        self.fake.intent_reply = {'business': True, 'summary': 'Needs space.'}
+        self.fake.fail_verbs.add('propose-email-lead')
+        refused = intake.CarrError(code='invalid_request')
+        with patch.object(self.fake, 'carr', side_effect=lambda verb, args: (_ for _ in ()).throw(refused)
+                          if verb == 'propose-email-lead' else {'ok': True}):
+            m = mail('new@example.test', -timedelta(hours=1))
+            result = self.run_intake([m])
+            self.assertEqual(result.state, 'succeeded')
+            self.assertEqual(result.counts['lead_refused'], 1)
+            result = self.run_intake([m])
+            self.assertEqual(result.state, 'succeeded')
+            self.assertEqual(result.counts['lead_refused'], 0)
+        self.assertEqual(intake._reply_error({'error': 'email_lead_input_invalid'}), 'invalid_request')
 
     def test_lead_intent_reply_parsing_accepts_only_the_schema(self):
         self.assertEqual(intake.parse_intent({'is_error': False, 'structured_output': {'business': True, 'summary': ' Needs space. '}}),

@@ -19,11 +19,14 @@ names alone never establish identity. Unmatched participants in mail and calenda
 stay unresolved and are retried when mappings change, even outside the rolling
 lookback. Records are never created, merged or renamed.
 
-A sender with no record whose address is automated (no-reply, notifications,
-mailer-daemon and the like) is skipped as not business. Any other unknown inbound
-sender gets one isolated haiku call; business intent queues the address once on
-the claim card through propose-email-lead, where a partner promotes or declines it.
-The email stays unresolved and logs on the new record once the contact exists.
+A role address (front desk, info, office...) that shares a record's email field
+with other addresses is flagged shared_role, never matched: it may serve many people.
+Mail whose only unknown participants are machine senders (no-reply, mailer-daemon,
+postmaster, bounces) is not business: it is retained, uncounted as unresolved, and
+logs if a record later carries the address. Any other unknown inbound sender gets
+one isolated haiku call; business intent queues the address once on the claim card
+through propose-email-lead, where a partner promotes or declines it. The email stays
+unresolved and logs on the new record once the contact exists.
 Every write carries uuid5(NAMESPACE_URL, "<verb>|<ref>|<source id>"), so an
 action stays pending in the state file until the verb acknowledges it and the
 retry replays the same key. A run with any write, model or cleanup failure
@@ -108,7 +111,8 @@ def _reply_error(reply: dict) -> str:
         return error
     if error in ('unauthorized', 'forbidden'):
         return 'auth_refused'
-    if error in ('missing_required', 'invalid_field_value', 'missing_idempotency_key', 'unknown_kind'):
+    if error in ('missing_required', 'invalid_field_value', 'missing_idempotency_key', 'unknown_kind',
+                 'email_lead_input_invalid'):
         return 'invalid_request'
     if error in ('subject_not_found', 'needs_disambiguation', 'ref_not_found', 'not_found'):
         return 'subject_unresolved'
@@ -142,6 +146,7 @@ class Contact:
     email: str
     ref: str
     name: str
+    exact: bool = True
 
 
 @dataclass
@@ -210,19 +215,33 @@ def _addresses(text: str | None) -> list[str]:
     return [a.lower() for a in re.findall(r'[\w.+\'-]+@[\w-]+(?:\.[\w-]+)+', text or '')]
 
 
-AUTOMATED_LOCAL = re.compile(
-    r'^(?:no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounces?|notifications?|notify|'
-    r'alerts?|newsletters?|news|digest|marketing|updates|auto-?(?:reply|confirm))(?:[-_.+].*)?$')
+AUTOMATED_LOCAL = re.compile(r'^(?:no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounces?)(?:[-.+].*)?$')
+ROLE_LOCAL = re.compile(r'^(?:front-?desk|info|office|admin|contact|reception|billing|hello|team|support|'
+                        r'scheduling|appointments?|sales|inquiries|enquiries|referrals?|records|staff|help|general)'
+                        r'(?:[-.+].*)?$')
+# The same rule propose-email-lead applies; anything else (X.500 paths, non-ASCII) cannot be queued.
+PROPOSABLE = re.compile(r"^[a-z0-9._%+'-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$")
+
+
+def _local(address: str) -> str:
+    return address.lower().rsplit('@', 1)[0].replace('_', '-')
 
 
 def automated(address: str) -> bool:
     """A machine sender by its local part. Only consulted for an address no record carries."""
-    return bool(AUTOMATED_LOCAL.match(address.lower().rsplit('@', 1)[0].replace('_', '-')))
+    return bool(AUTOMATED_LOCAL.match(_local(address)))
+
+
+def proposable(address: str) -> bool:
+    return bool(PROPOSABLE.match(address.strip().lower()))
 
 
 def record_contacts(email: str | None, ref: str, name: str) -> list[Contact]:
-    """One contact per address written in a record's email field, in order, without repeats."""
-    return [Contact(a, ref, name) for a in dict.fromkeys(_addresses(email))]
+    """One contact per address written in a record's email field, in order, without repeats.
+
+    Beside other addresses, a role address may be a shared practice inbox: it is flagged, not exact."""
+    found = list(dict.fromkeys(_addresses(email)))
+    return [Contact(a, ref, name, exact=len(found) == 1 or not ROLE_LOCAL.match(_local(a))) for a in found]
 
 
 def _clean_name(name: str | None, subject: str | None) -> str | None:
@@ -321,24 +340,35 @@ class Matcher:
     def __init__(self, contacts: list, domain: str):
         self.by_email: dict[str, set] = {}
         self.unsupported: set[str] = set()
+        self.shared: set[str] = set()
         for c in contacts:
             if '@' in c.email and not _internal(c.email, domain):
-                if RECORD_REF.match(c.ref):
+                if not c.exact:
+                    self.shared.add(c.email.lower())
+                elif RECORD_REF.match(c.ref):
                     self.by_email.setdefault(c.email.lower(), set()).add(c.ref)
                 else:
                     self.unsupported.add(c.email.lower())
 
     def fingerprint(self) -> str:
         return _hash(json.dumps({'supported': {a: sorted(refs) for a, refs in self.by_email.items()},
-                                 'unsupported': sorted(self.unsupported)}, sort_keys=True))
+                                 'unsupported': sorted(self.unsupported), 'shared': sorted(self.shared)},
+                                sort_keys=True))
 
     def reason(self, address: str) -> str | None:
         refs = self.by_email.get(address.lower(), set())
         if len(refs) > 1:
             return 'ambiguous'
         if not refs:
-            return 'unsupported' if address.lower() in self.unsupported else 'missing'
+            if address.lower() in self.unsupported:
+                return 'unsupported'
+            return 'shared_role' if address.lower() in self.shared else 'missing'
         return None
+
+    def classify(self, address: str) -> str | None:
+        """reason(), except an unknown machine sender is 'automated': not business, not unresolved."""
+        reason = self.reason(address)
+        return 'automated' if reason == 'missing' and automated(address) else reason
 
     def ref(self, address: str) -> str | None:
         refs = self.by_email.get(address.lower(), set())
@@ -439,7 +469,7 @@ class Run:
                                       'model_failed', 'steps_pending', 'hydration_expired', 'writes_failed',
                                       'writes_deferred', 'requests_blocked', 'skipped_automated',
                                       'lead_proposed', 'lead_already_queued', 'lead_known_party',
-                                      'lead_not_business')}
+                                      'lead_not_business', 'lead_refused')}
         self.written: list[tuple[str, str, str, str]] = []
         self.unmatched: set[tuple[str, str, str]] = set()
         self.balls: dict[str, tuple[str, int, int]] = {}
@@ -469,6 +499,13 @@ class Run:
                 if not isinstance(reply, dict) or reply.get('ok') is not True:
                     raise CarrError(code=_reply_error(reply) if isinstance(reply, dict) else 'reply_unreadable')
             except CarrError as error:
+                if verb == 'propose-email-lead' and error.code in BLOCKED_ERRORS:
+                    # A queue refusal is a fact about this sender, not a failed run: never replay it.
+                    request.update(acknowledged=True, disposition='refused', outcome='refused',
+                                   retry_at=None, error_code=error.code)
+                    _save(self.out, self.state)
+                    self.written.append((who, 'claim card', verb, 'refused'))
+                    return True
                 if verb == 'set-next-action' and error.code == 'next_action_conflict':
                     request.update(acknowledged=True, disposition='superseded', retry_at=None,
                                    error_code=None)
@@ -550,12 +587,7 @@ class Run:
             outbound = _internal(m['sender'], self.settings.internal_domain)
             parties = ([(a, None) for a in _addresses(m['recipients']) if not _internal(a, self.settings.internal_domain)] if outbound
                        else [(m['sender'].lower(), _clean_name(m['sender_name'], m['subject']))])
-            machine = [a for a, _ in parties if automated(a) and matcher.ref(a) is None]
-            parties = [(a, name) for a, name in parties if a not in machine]
             if not parties:
-                if machine and not outbound:
-                    self.counts['skipped_automated'] += 1
-                unresolved.pop(m['ident'], None)
                 done.setdefault(m['ck'], []).append(m['sent_unix'])
                 continue
             self.counts['emails'] += 1
@@ -563,17 +595,18 @@ class Run:
             for address, name in parties:
                 ref = matcher.ref(address)
                 if ref is None:
-                    reason = matcher.reason(address)
+                    reason = matcher.classify(address)
                     assert reason is not None
-                    self.unmatched.add((name or '(no name)', _domain(address), reason))
+                    if reason != 'automated':
+                        self.unmatched.add((name or '(no name)', _domain(address), reason))
                 elif ref not in refs:
                     refs.append(ref)
             progress = unresolved.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix']})
-            progress['participants'] = {_hash(address): matcher.reason(address) for address, _ in parties
-                                        if matcher.reason(address)}
+            progress['participants'] = {_hash(address): matcher.classify(address) for address, _ in parties
+                                        if matcher.classify(address)}
             completed = progress.setdefault('completed_refs', [])
             missing = bool(progress['participants'])
-            if not outbound and matcher.reason(m['sender']) == 'missing':
+            if not outbound and matcher.classify(m['sender']) == 'missing' and proposable(m['sender']):
                 self.lead_candidates.append((m, progress))
             refs = [ref for ref in refs if ref not in completed]
             if not refs:
@@ -635,12 +668,13 @@ class Run:
                     self.counts['lead_not_business'] += 1
                     continue
             args = {'idempotency_key': key('propose-email-lead', source, 'sender'), 'address': address,
-                    'display_name': _clean_name(m['sender_name'], m['subject']),
+                    'display_name': (_clean_name(m['sender_name'], m['subject']) or '')[:200] or None,
                     'summary': progress.get('summary') or '', 'first_seen_at': _iso(m['sent_unix']),
                     'message_ref': m['ident']}
             if self.write('propose-email-lead', args, _clean_name(m['sender_name'], m['subject']) or _domain(address)):
                 outcome = self.state['requests'][args['idempotency_key']].get('outcome')
-                name = {'proposed': 'lead_proposed', 'known_party': 'lead_known_party'}.get(outcome, 'lead_already_queued')
+                name = {'proposed': 'lead_proposed', 'known_party': 'lead_known_party',
+                        'refused': 'lead_refused'}.get(outcome, 'lead_already_queued')
                 self.counts[name] += 1
 
     def next_steps(self, mails: list[dict]) -> None:
@@ -724,7 +758,7 @@ class Run:
             org = (e['organizer_email'] or '').lower()
             if org and not _internal(org, self.settings.internal_domain) and org not in [p for p, _ in people]:
                 people.append((org, e['organizer_name']))
-            people = [(email, name) for email, name in people if matcher.ref(email) or not automated(email)]
+            people = [(email, name) for email, name in people if matcher.classify(email) != 'automated']
             missing = {_hash(email): matcher.reason(email) for email, _ in people if matcher.reason(email)}
             if missing:
                 unresolved[candidate] = {'participants': missing}
@@ -775,18 +809,22 @@ def _refresh_list(out: Path, pending: dict) -> int:
 
 
 def mapping_counts(state: dict) -> dict:
+    """Retained machine-only mail is counted as skipped, never as unresolved."""
     mail = state.get('mail_unresolved', {})
     calendar = state.get('calendar_unresolved', {})
     participants = {}
     for item in [*mail.values(), *calendar.values()]:
         participants.update(item.get('participants', {}))
+    participants = {h: r for h, r in participants.items() if r != 'automated'}
+    machine_only = sum(bool(item.get('participants')) and set(item['participants'].values()) == {'automated'}
+                       for item in mail.values())
     return {'hydration_pending': len(state.get('pending_full', {})),
             'hydration_expired': sum(bool(p.get('expired')) for p in state.get('pending_full', {}).values()),
-            'unresolved_messages': len(mail),
+            'unresolved_messages': len(mail) - machine_only, 'skipped_automated': machine_only,
             'unresolved_calendar': len(calendar), 'unresolved_addresses': len(participants),
             'unmatched': len(participants),
             **{'mapping_' + reason: list(participants.values()).count(reason)
-               for reason in ('missing', 'ambiguous', 'unsupported')}}
+               for reason in ('missing', 'ambiguous', 'unsupported', 'shared_role')}}
 
 
 def _prune(state: dict, now: datetime) -> None:
