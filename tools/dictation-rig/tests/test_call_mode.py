@@ -762,6 +762,52 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual([(item["assignee"], item["due_on"]) for item in actions],
                          [("joe", "2028-02-29"), ("dell", None)])
 
+    def test_relative_dates_use_recorded_chicago_day_in_report_and_candidates(self) -> None:
+        cases = (
+            ("2026-10-27T00:30:00Z", "Friday morning", "2026-10-30"),
+            ("2026-10-27T00:30:00Z", "next week", "2026-11-02"),
+            ("2026-10-27T00:30:00Z", "before the lunch call", "2026-10-26"),
+        )
+        for started_at, phrase, expected in cases:
+            with self.subTest(phrase=phrase):
+                (self.session / post_call.REPORT_FILE).unlink(missing_ok=True)
+                post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": started_at})
+                post_call.store_context(self.session, self.context)
+                quote = f"For A, call Vendor A {phrase}."
+                (self.session / "transcript.json").write_text(json.dumps({"segments": [
+                    {"speaker": "Joe", "text": quote},
+                    {"speaker": "Dell", "text": "I will review the proposal."},
+                ]}))
+                output = self.output(joe_tasks=[{
+                    "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
+                    "evidence": quote, "due_on": None,
+                }], dell_tasks=[{
+                    "title": "Review proposal", "deal_id": "deal-b", "participant_ids": [],
+                    "evidence": "I will review the proposal.", "due_on": None,
+                }], deal_updates=[{
+                    "deal_id": "deal-a", "summary": "Agreed next step", "participant_ids": [],
+                    "evidence": quote, "next_step": {
+                        "text": "Call Vendor A", "next_date": None, "needs_review": None,
+                    },
+                }], draft_proposals=[])
+                requests = []
+
+                def distill(request):
+                    requests.append(request)
+                    return output
+
+                status = post_call.process_session(self.session, distiller=distill)
+                self.assertEqual(status["state"], "ready_review")
+                report = post_call.report_for_deal_room(self.session)["report"]
+                self.assertEqual(report["joe_tasks"][0]["due_on"], expected)
+                self.assertEqual(report["deal_updates"][0]["next_step"]["next_date"], expected)
+                self.assertEqual(report["joe_tasks"][0]["evidence"], quote)
+                self.assertIsNone(report["dell_tasks"][0]["due_on"])
+                self.assertEqual(requests[0]["call_date"], "2026-10-26")
+                candidates = post_call.sanitized_candidates(self.session)
+                self.assertEqual(candidates["post_call_items"][0]["due_on"], expected)
+                self.assertEqual(candidates["legacy_items"][1]["payload"]["next_date"], expected)
+
     def test_invalid_action_dates_block_without_creating_candidates(self) -> None:
         invalid_dates: tuple[object, ...] = (
             "2027-02-29", "2026-04-31", "20261025", "2026-1-01",
