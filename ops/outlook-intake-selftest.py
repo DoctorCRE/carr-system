@@ -20,6 +20,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from lib import model_call
 from lib import outlook_intake as intake
 from lib.outlook_settings import load_settings
 from outlook_test_support import write_settings
@@ -1311,13 +1312,34 @@ class ScheduleTest(unittest.TestCase):
 
 class ModelCallTest(unittest.TestCase):
     def test_the_model_runs_isolated_with_no_tools_settings_or_mcp(self):
-        command = intake.model_command()
+        command = model_call.command('haiku', intake.REPLY_SCHEMA, intake.SYSTEM_PROMPT)
         for flag in ('--tools', '--setting-sources', '--strict-mcp-config', '--disable-slash-commands',
                      '--no-session-persistence', '--json-schema'):
             self.assertIn(flag, command)
         self.assertEqual(command[command.index('--tools') + 1], '')
         self.assertEqual(command[command.index('--setting-sources') + 1], '')
         self.assertEqual(command[command.index('--model') + 1], 'haiku')
+
+    def test_the_model_name_comes_from_settings_and_defaults_to_haiku(self):
+        with tempfile.TemporaryDirectory() as home:
+            write_settings(Path(home), ROOT)
+            self.assertEqual(load_settings(Path(home)).model, 'haiku')
+            write_settings(Path(home), ROOT, model='sonnet')
+            self.assertEqual(load_settings(Path(home)).model, 'sonnet')
+            write_settings(Path(home), ROOT, model='haiku; rm -rf')
+            with self.assertRaises(ValueError):
+                load_settings(Path(home))
+        seen = {}
+
+        def fake(cmd, **kwargs):
+            seen['model'] = cmd[cmd.index('--model') + 1]
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(
+                {'is_error': False, 'structured_output': {'next_step': None, 'due_on': None}}), '')
+        mail = {'outbound': False, 'subject': 'Synthetic', 'text': 'Synthetic body'}
+        with patch('subprocess.run', side_effect=fake):
+            self.assertEqual(intake.ask_model(mail, datetime(2026, 10, 26).date(), 'sonnet'),
+                             {'next_step': None, 'due_on': None})
+        self.assertEqual(seen['model'], 'sonnet')
 
     def test_reply_parsing_accepts_only_the_schema(self):
         good = {'next_step': 'Reply', 'due_on': '2026-10-22'}

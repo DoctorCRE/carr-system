@@ -803,7 +803,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "email-router-queue": {
     "ingress_key": "mcp-tool:email-router-queue",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "2cc942a237cb4e3c89a86c502c677a953e2279cbbd6122b6ae3641036cdffab2",
+    "schema_digest": "46af38141c2bc3ec08b0ee019d1a9c43a8f97caa53ec955ee10419075768881c",
     "write": false,
     "human_only": false,
     "authority_only": false,

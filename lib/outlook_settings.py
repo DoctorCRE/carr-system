@@ -38,6 +38,7 @@ class OutlookSettings:
     services: tuple[str, ...]
     full_screen_height: int
     source: Path
+    model: str = 'haiku'
 
     @property
     def decoder(self) -> Path:
@@ -118,7 +119,10 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
     if not isinstance(values, dict):
         fail('json', 'must be an object')
     expected = {field.name for field in fields(OutlookSettings)} - {'source'}
-    for name in sorted(expected):
+    if 'model' in values and (not isinstance(values['model'], str)
+                              or not re.fullmatch(r'[a-z0-9][a-z0-9.-]{0,63}', values['model'])):
+        fail('model', 'must be a model name such as haiku')
+    for name in sorted(expected - {'model'}):
         if name not in values:
             fail(name, 'required')
         value = values[name]
