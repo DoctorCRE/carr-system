@@ -215,8 +215,9 @@ class LeadTests(unittest.TestCase):
         ctx = runtime.Context("lead-signals-weekly", dry_run=True,
                               now=datetime.fromisoformat("2026-10-26T07:00:00-05:00"))
         ctx.read = lambda verb, args: {}
-        with patch.object(leads, "_fetch", side_effect=fetch), \
-                patch.object(leads, "ROOT", Path(tempfile.mkdtemp())), \
+        with tempfile.TemporaryDirectory() as root, \
+                patch.object(leads, "_fetch", side_effect=fetch), \
+                patch.object(leads, "ROOT", Path(root)), \
                 patch("sys.stderr", new_callable=io.StringIO) as errors:
             plan = leads.prepare(ctx)
         self.assertEqual([row["npi"] for row in plan["candidates"]], ["1234567893"])
