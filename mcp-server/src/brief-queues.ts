@@ -4,7 +4,14 @@ import { ToolError } from "./tool-error.ts";
 /** A keyset sort key: four strings compared left to right. */
 type QueueKey = string[];
 type Instant = string | number | Date | null | undefined;
-type QueueCursor = { v: number; scope: string; key: QueueKey };
+type QueueCursor = { v: 1; scope: string; key: QueueKey };
+
+function isQueueCursor(value: unknown, scope: string): value is QueueCursor {
+  if (!value || typeof value !== 'object') return false;
+  const { v, scope: cursorScope, key } = value as Record<string, unknown>;
+  return v === 1 && cursorScope === scope && Array.isArray(key) && key.length === 4
+    && key.every(part => typeof part === 'string' && part.length <= 256);
+}
 
 const compare = (a: QueueKey, b: QueueKey) => {
   for (let i = 0; i < a.length; i++) {
@@ -23,9 +30,9 @@ export async function briefQueuePage<T>(items: T[], { limit = 50, cursor, scope,
   if (cursor !== undefined) {
     try {
       if (typeof cursor !== 'string' || !cursor.length || cursor.length > 8000) throw Error();
-      after = JSON.parse(decodeURIComponent(atob(cursor))) as QueueCursor;
-      if (after.v !== 1 || after.scope !== scope || !Array.isArray(after.key)
-          || after.key.length !== 4 || !after.key.every(value => typeof value === 'string' && value.length <= 256)) throw Error();
+      const parsed: unknown = JSON.parse(decodeURIComponent(atob(cursor)));
+      if (!isQueueCursor(parsed, scope)) throw Error();
+      after = parsed;
     } catch { throw new ToolError({ error: 'brief_queue_cursor_invalid' }); }
   }
   const sorted = (await Promise.all(items.map(async item => ({ item, key: await key(item) }))))

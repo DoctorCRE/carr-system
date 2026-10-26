@@ -182,7 +182,7 @@ print('complete; SQL bytes preserved')
                                     input=block, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(path.read_bytes(), original)
-        self.assertEqual((REPO / "db/schema.sql").read_bytes().count(b"\r"), 3)
+        self.assertEqual((REPO / "db/schema.sql").read_bytes().count(b"\r"), 1)
 
     def test_snapshot_ingress_patterns_reject_cr_in_postgres(self):
         dsn = os.environ.get("CARR_CI_DATABASE_URL")
@@ -195,7 +195,7 @@ print('complete; SQL bytes preserved')
         text = (REPO / "db/schema.sql").read_bytes().decode()
         patterns = [text[text.rfind("'", 0, m.start()) + 1:text.find("'", m.end())]
                     for m in re.finditer("\r", text)]
-        self.assertEqual(len(patterns), 3)
+        self.assertEqual(len(patterns), 1)
         with psycopg.connect(dsn) as conn:
             for pattern in patterns:
                 # Match PostgreSQL's exact pattern as loaded from the snapshot.

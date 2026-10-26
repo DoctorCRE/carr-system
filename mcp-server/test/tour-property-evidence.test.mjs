@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectPropertyEvidence, readPropertyEvidence } from "../src/tour-property-evidence.js";
+import { projectPropertyEvidence, readPropertyEvidence } from "../src/tour-property-evidence.ts";
 
 const propertyId = "10000000-0000-4000-8000-000000000001";
 const at = "2026-09-29T12:00:00.000Z";

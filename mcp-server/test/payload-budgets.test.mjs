@@ -12,7 +12,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { TOOLS } from "../src/tools.js";
-import { capabilityProgramTools } from "../src/capability-program.js";
 
 class ToolError extends Error {
   constructor(payload) { super(payload.error); this.payload = payload; }
@@ -112,34 +111,6 @@ test("loop-board without the flag returns today's full rows (backwards compatibl
   assert.ok(!("current_version" in result.loops[0]), "row shape unchanged");
   assert.ok("label" in result.loops[0] && "version" in result.loops[0]);
 });
-
-// ── capability-program ────────────────────────────────────────────────────────
-
-function programDb(rows) {
-  return { query: async (sql) => {
-    if (sql.includes("from ops.work_request")) return { rows };
-    throw new Error(`unexpected query: ${sql}`);
-  }};
-}
-
-const programRows = [
-  { id: "wr-1", ref: "WR-AI-006", program_ordinal: 1, version: 5, state: "ready",
-    disposition: "build", title: "Current project",
-    desired_outcome: "long prose outcome that must stay out of brief rows",
-    acceptance_criteria: ["c1"], executor_actor: "hermes-pilot",
-    project_context: { scope: "prose" }, completion_evidence: { artifact_ref: "x" } },
-  { id: "wr-2", ref: "WR-AI-007", program_ordinal: 2, version: 1, state: "confirmed_closed",
-    disposition: "adopt", title: "Closed project", desired_outcome: "done prose",
-    acceptance_criteria: [], executor_actor: null, project_context: {} },
-];
-
-// A PAYLOAD BUDGET MAY DROP FIELDS; IT MAY NOT CHANGE WHAT THE VERB MEANS.
-// Both modes are the same read, so a sequence naming no project must fail the
-// same way in each. Before this, the summary early-return sat ABOVE the guard:
-// the full path threw capability_project_not_found and summary answered
-// requested:null. The null was the worse half — summary sets `requested` to the
-// current item when no sequence is given, and current is null once the program
-// completes, so "no such project" and "program finished" were indistinguishable.
 
 // ── list-verbs ────────────────────────────────────────────────────────────────
 

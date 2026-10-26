@@ -148,7 +148,7 @@ test('cold and empty corpora report coverage without changing lexical ranks',asy
 
 test('embedding storage errors roll back only optional vectors and allow a later retry',async()=>{
   const { doctrineEmbeddingDatabase }=await import('./helpers/doctrine-embedding-postgres.mjs');
-  const { embedDoctrineRevisions }=await import('../src/doctrine-embeddings.js');
+  const { embedDoctrineRevisions }=await import('../src/doctrine-embeddings.ts');
   const fixture=await doctrineEmbeddingDatabase();
   try {
     const c={query:fixture.client.query.bind(fixture.client),ai:{run:async()=>({data:[unit()]})}};
@@ -254,7 +254,7 @@ test('a vector-query failure returns the lexical answer',async()=>{
 });
 
 test('large atomic writes batch complete overlapping UTF-8 chunks',async()=>{
-  const { embedDoctrineRevisions }=await import('../src/doctrine-embeddings.js');
+  const { embedDoctrineRevisions }=await import('../src/doctrine-embeddings.ts');
   const sizes=[],inputs=[];
   const text='🦉'.repeat(200);
   const out=await embedDoctrineRevisions({
@@ -277,7 +277,7 @@ test('blank queries keep lexical abstention without calling the model',async()=>
 
 test('runtime roles can backfill and search under the hardened default function ACL', async () => {
   const { doctrineEmbeddingDatabase } = await import('./helpers/doctrine-embedding-postgres.mjs');
-  const { backfillDoctrineEmbeddings } = await import('../src/doctrine-embeddings.js');
+  const { backfillDoctrineEmbeddings } = await import('../src/doctrine-embeddings.ts');
   const fixture = await doctrineEmbeddingDatabase();
   try {
     const c = { query: fixture.client.query.bind(fixture.client),
@@ -326,7 +326,7 @@ test('a vector SQL failure preserves lexical fallback and problem capture inside
 
 test('answer text after byte 480 is searchable and sections rank once by their best chunk', async () => {
   const { doctrineEmbeddingDatabase } = await import('./helpers/doctrine-embedding-postgres.mjs');
-  const { backfillDoctrineEmbeddings } = await import('../src/doctrine-embeddings.js');
+  const { backfillDoctrineEmbeddings } = await import('../src/doctrine-embeddings.ts');
   const fixture = await doctrineEmbeddingDatabase();
   try {
     const inputs = [];

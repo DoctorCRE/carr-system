@@ -1,4 +1,9 @@
 import { ToolError } from './tool-error.ts';
+import type { Actor, Db, WriteEvent } from './verb-contract.ts';
+
+type DealAssignment = { deal_id: string; role: string; company_party_id: string; contact_party_id: string;
+  active?: boolean; note?: string };
+type VendorAssignmentState = { version: number; assignments: Set<string> };
 
 const DEAL_VENDOR_ROLES = ['lender','contractor','architect','attorney','title','inspector','landlord_rep'];
 
@@ -10,9 +15,10 @@ export const DEAL_ASSIGNMENTS_SCHEMA = { type: 'array', minItems: 1, maxItems: 3
     active: { type: 'boolean' }, note: { type: 'string', maxLength: 2000 },
   }, required: ['deal_id','role','company_party_id','contact_party_id'] } };
 
-export async function lockDealAssignments(c, assignments) {
+export async function lockDealAssignments(c: Db,
+  assignments: { vendor_id?: unknown; company_party_id?: unknown; contact_party_id?: unknown }[]) {
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const vendors = [], parties = [];
+  const vendors: unknown[] = [], parties: unknown[] = [];
   for (const entry of assignments) {
     if (![entry?.vendor_id,entry?.company_party_id,entry?.contact_party_id].every(id => typeof id === 'string' && uuid.test(id)))
       throw new ToolError({error:'deal_assignment_invalid'});
@@ -26,14 +32,16 @@ export async function lockDealAssignments(c, assignments) {
   await c.query('select id from public.vendor where id=any($1::uuid[]) order by id for update',[vendors]);
 }
 
-export async function writeDealAssignments(c, actor, vendorId, entries, recordEvent, key, verb, baseVersion, {states = new Map(), human_quote} = {}) {
-  const refuse = () => { throw new ToolError({error:'deal_assignment_invalid'}); };
+export async function writeDealAssignments(c: Db, actor: Actor, vendorId: string, entries: DealAssignment[],
+  recordEvent: WriteEvent, key: string, verb: string, baseVersion: unknown,
+  {states = new Map(), human_quote}: { states?: Map<string, VendorAssignmentState>; human_quote?: string } = {}) {
+  const refuse = (): never => { throw new ToolError({error:'deal_assignment_invalid'}); };
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!Array.isArray(entries) || !entries.length || entries.length > 30) refuse();
-  const seen = new Set();
+  const seen = new Set<string>();
   for (const entry of entries) {
     if (!entry || Object.keys(entry).some(k => !Object.hasOwn(DEAL_ASSIGNMENTS_SCHEMA.items.properties,k)) ||
-        !['deal_id','company_party_id','contact_party_id'].every(k => typeof entry[k] === 'string' && uuid.test(entry[k])) ||
+        !(['deal_id','company_party_id','contact_party_id'] as const).every(k => typeof entry[k] === 'string' && uuid.test(entry[k])) ||
         !DEAL_VENDOR_ROLES.includes(entry.role) ||
         entry.active !== undefined && typeof entry.active !== 'boolean' ||
         entry.note !== undefined && (typeof entry.note !== 'string' || entry.note.length > 2000)) refuse();
@@ -57,7 +65,7 @@ export async function writeDealAssignments(c, actor, vendorId, entries, recordEv
     if (state.assignments.has(identity)) refuse();
     state.assignments.add(identity);
   }
-  const changes = [];
+  const changes: { deal_id: string; role: string; active: boolean }[] = [];
   for (const entry of entries) {
     const before = (await c.query(`select role,company_party_id,contact_party_id,active,note from public.deal_vendor_assignment
       where deal_id=$1 and party_id=$2 and role=$3 for update`, [entry.deal_id,vendor.party_id,entry.role])).rows[0] || null;
@@ -80,7 +88,7 @@ export async function writeDealAssignments(c, actor, vendorId, entries, recordEv
   return changes;
 }
 
-export const dealVendorCards = alias => `coalesce((select jsonb_agg(jsonb_build_object(
+export const dealVendorCards = (alias: string) => `coalesce((select jsonb_agg(jsonb_build_object(
   'party_id',v.party_id,'role',v.role,'company',v.company,'contact',v.contact,'note',v.note,'updated_at',v.updated_at)
   order by v.role,v.company->>'name',v.contact->>'name',v.party_id)
   from public.v_deal_room_vendor v where v.deal_id=${alias}.id),'[]'::jsonb)`;

@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { pipelineChanges } from "../src/dealroom.js";
 import { TOOLS } from "../src/tools.js";
 import { docActivityEntry } from "../src/doc-activity.js";
-import { CHECKLIST_SOURCES } from '../src/deal-checklist.js';
+import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
 
 const ids = {
   deal: "10000000-0000-0000-0000-000000000001",
@@ -547,7 +547,7 @@ test("the two base statements hold together as written, since no test can run th
 
   const board = tools.slice(tools.indexOf('"deal-room-board": {'),
     tools.indexOf("dealroom:board-field-base") + 200);
-  assert.match(board, /from v_deal_room_board b\b/, "the outer relation is aliased, so b.id resolves");
+  assert.match(board, /from v_open_deal_room_board b\b/, "the outer relation is aliased, so b.id resolves");
   assert.match(board, /from v_deal_room_event e\b/,
     "the reader must use the granted deal-scoped event view");
   assert.doesNotMatch(board, /from (?:public\.)?event e\b/,
