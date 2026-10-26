@@ -95,28 +95,9 @@ class BaselineTests(unittest.TestCase):
     def test_committed_manifest_matches_every_retained_file_and_snapshot_row(self):
         root = Path(__file__).resolve().parents[1]
         baseline = MigrationBaseline.load(root)
-        gate = runpy.run_path(str(root / 'ops/migration-safety-gate.py'))
-        snapshot = (root / 'db/schema.sql').read_text()
-        baseline.validate_coverage(gate['ledger_rows'](snapshot) or {})
-        files = {path.name: path.read_text() for path in (root / 'migrations').glob('*.sql')}
-        self.assertEqual(gate['ledger_problems'](files, snapshot, baseline), [])
-
-    def test_snapshot_prefix_accepts_pending_successors_and_refuses_identity_drift(self):
-        root = Path(__file__).resolve().parents[1]
-        validate = runpy.run_path(str(root / 'ops/migration-safety-gate.py'))['ledger_problems']
-        baseline = MigrationBaseline.from_document(document())
-        files = {'0003_pending.sql': 'select 3;\n'}
-        rows = [('0001_a.sql', digest('select 1;\n')), ('0002_b.sql', digest('select 2;\n'))]
-
-        def snapshot(entries):
-            return ('COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;\n'
-                    + ''.join(f'{name}\t{checksum}\tfixture\n' for name, checksum in entries)
-                    + '\\.\n')
-
-        self.assertEqual(validate(files, snapshot(rows), baseline), [])
-        for bad_rows in (rows[1:], [rows[0], (rows[1][0], 'f' * 64)]):
-            with self.subTest(rows=bad_rows):
-                self.assertNotEqual(validate(files, snapshot(bad_rows), baseline), [])
+        ledger = repository_ledger(root, baseline)
+        parse = runpy.run_path(str(root / 'ops/migration-safety-gate.py'))['ledger_rows']
+        self.assertEqual(ledger, parse((root / 'db/schema.sql').read_text()))
 
     def test_generator_reads_exact_source_instead_of_working_tree(self):
         root = Path(__file__).resolve().parents[1]

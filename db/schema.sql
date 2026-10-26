@@ -69202,11 +69202,10 @@ CREATE FUNCTION public.capture_call_context(requested_deal_ids uuid[]) RETURNS T
     SET search_path TO 'pg_catalog', 'public', 'pg_temp'
     AS $$
   select d.id, d.name, d.owner, d.operating_state, dp.party_id, p.ref, p.name, p.email, dp.role
-    from public.deal d
+    from public.v_deal_room_board d
     left join public.deal_participant dp on dp.deal_id=d.id and dp.to_at is null
     left join public.party p on p.id=dp.party_id
    where d.id = any(requested_deal_ids)
-     and d.outcome is null
      and d.operating_state = 'active'
 $$;
 
@@ -88645,7 +88644,7 @@ CREATE VIEW public.v_deal_room_board AS
      LEFT JOIN public.deal_market_assignment dma ON ((dma.deal_id = d.id)))
      LEFT JOIN public.v_last_touch lt ON (((lt.subject_type = 'deal'::text) AND (lt.subject_id = d.id))))
      LEFT JOIN public.actor pa ON ((pa.id = d.parked_by)))
-  WHERE ((d.invoiced_on IS NULL) AND ((c.status <> 'prospect'::text) OR (c.prospect_engagement_status = 'active'::text)));
+  WHERE ((d.invoiced_on IS NULL) AND (d.outcome IS NULL) AND (d.closed_on IS NULL) AND (d.phase <> ALL (ARRAY['closed'::text, 'invoiced'::text])) AND ((c.status <> 'prospect'::text) OR (c.prospect_engagement_status = 'active'::text)));
 
 
 --
@@ -122779,6 +122778,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0985_call_mode_auto_apply.sql	df11b5b4b02f9062ff62c77c692e39263f5d6be59a1884143487cdde21f93f3f	1970-01-01 00:00:00+00
 0986_decline_requires_its_receipt.sql	293e6e21f95341bf47a2b8a10a9ab0f4f27024358843fa7182056d4fe96f7868	1970-01-01 00:00:00+00
 0987_email_proposal.sql	c0ab5328442e86d95e28c629575002b6b73ef28dd0d183f7ddee253bcaea77fd	1970-01-01 00:00:00+00
+0989_call_context_open_deals.sql	609cd6f8caf92cf9d3584b808272b6337a9d2340e8ee83086578e3610ec6062b	1970-01-01 00:00:00+00
 \.
 
 
