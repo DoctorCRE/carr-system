@@ -1091,6 +1091,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-fact-conflicts": {
+    "ingress_key": "mcp-tool:list-fact-conflicts",
+    "source_locator": "mcp-server/src/fact-observations.js",
+    "schema_digest": "fc8a1ff80543bb7a4fac294c21044da3990f1264c375e02aa9901df765f9449b",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-feature-switches": {
     "ingress_key": "mcp-tool:list-feature-switches",
     "source_locator": "mcp-server/src/feature-switches.js",
@@ -1422,6 +1431,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/email-next-step.js",
     "schema_digest": "722b7eb2945b75dabf92a52f9ba999c3d33c39dca8c1c5fe79635e3b819747e0",
     "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "promote-fact": {
+    "ingress_key": "mcp-tool:promote-fact",
+    "source_locator": "mcp-server/src/fact-observations.js",
+    "schema_digest": "5976b93047ba504a919ec7770d0dac843953d7059ac284832ed3d56e20e9f9a9",
+    "write": true,
     "human_only": false,
     "authority_only": false,
     "delegates_to": []
@@ -2009,6 +2027,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": false,
     "authority_only": true,
+    "delegates_to": []
+  },
+  "record-fact-observations": {
+    "ingress_key": "mcp-tool:record-fact-observations",
+    "source_locator": "mcp-server/src/fact-observations.js",
+    "schema_digest": "ffc4b25e1062de68b6fe937d51d4559f32bf2b5ca3a64a7a5f820b946de96a19",
+    "write": true,
+    "human_only": false,
+    "authority_only": false,
     "delegates_to": []
   },
   "record-finding": {
@@ -2985,6 +3012,51 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.read_client_portal(p_slug text, p_password text)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.read_client_portal(p_slug text, p_password text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.record_fact_observations(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_observations jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.record_fact_observations(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_observations jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.promote_fact(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_fact_key text, p_basis text, p_observation_ids uuid[], p_base_version integer)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.promote_fact(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_fact_key text, p_basis text, p_observation_ids uuid[], p_base_version integer):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.list_fact_conflicts(p_tenant text, p_entity_ref text, p_limit integer)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.list_fact_conflicts(p_tenant text, p_entity_ref text, p_limit integer):carr_reader:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
