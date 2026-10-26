@@ -2439,6 +2439,9 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
 // later edit to the step, its date or one of its checklist items is newer work
 // and refuses the undo instead of being overwritten.
 async function undoAppliedNextStep(c, actor, dealId, candidate, key, args) {
+  // Same lock order as resolve-candidate's apply: the checklist first, so a
+  // partner completing one of the call's items waits for (or beats) the undo.
+  await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0)) /* call-outcome:undo-items-lock */", [dealId]);
   await lockDealField(c, dealId, "next_date");
   await lockDealField(c, dealId, "next_step");
   await versionGuard(c, "deal", dealId, args.base_version);
@@ -6930,7 +6933,12 @@ export const TOOLS = {
       const aboutRefs = args.about
         ? (Array.isArray(args.about) ? args.about : [args.about]).map(r => String(r || "").trim()).filter(Boolean)
         : [];
-      for (const ref of aboutRefs) await resolveSubject(c, ref);
+      for (const ref of aboutRefs) {
+        if (/^WR-/i.test(ref))
+          throw new ToolError({ error: "unsupported_decision_about", field: "about", ref,
+            hint: "Work Request refs are not supported in about. Use a lead, client, vendor, party or deal ref. For a system-wide ruling, omit about and name the Work Request in the rationale." });
+        await resolveSubject(c, ref);
+      }
 
       // [idea 68, 0085] BOTH HALVES OF A PRICE OR NEITHER. A cost with no
       // quality number is a complaint and a quality number with no cost is a

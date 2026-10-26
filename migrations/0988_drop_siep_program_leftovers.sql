@@ -1,7 +1,7 @@
 -- rollback: forward-only; re-create the objects by replaying their source migrations (0324, 0335, 0453, 0456, 0458, 0460, 0465, 0467) on a branch; the dropped SIEP ledger and SCAC trust/token rows are retired-programme history with no runtime reader
 -- expand-contract: contract — the code callers were removed in the WR-SIEP-26 code PR; nothing in mcp-server/src, ops runtime, tools, hooks or bin reads these objects
 -- lock-review: drops two shadow-mode trigger pairs per guarded table (brief ACCESS EXCLUSIVE per table, one at a time) and 27 small retired tables
--- 0987_drop_siep_program_leftovers.sql
+-- 0988_drop_siep_program_leftovers.sql
 -- WR-SIEP-26, approved by Joe on 2026-10-26 with the catalog audit. Drops the
 -- retired SIEP programme objects that have no runtime caller:
 --   SIEP-0324 package ledger/DAG, its work_request and event guards and view
@@ -686,12 +686,12 @@ declare
 ]$retired$::jsonb;
 begin
   if ops.scac_mutation_catalog_v118_current() is not true then
-    raise exception '0987 FAILED: the SCAC catalog was not current before the drop';
+    raise exception '0988 FAILED: the SCAC catalog was not current before the drop';
   end if;
   if exists (select 1 from jsonb_array_elements(coalesce(original->'retired_secdef_execute','[]'::jsonb)) old,
                            jsonb_array_elements(retired) new
               where old->>'ingress_key' = new->>'ingress_key') then
-    raise exception '0987 FAILED: a SIEP grant is already retired';
+    raise exception '0988 FAILED: a SIEP grant is already retired';
   end if;
   execute format(
     'CREATE OR REPLACE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb '
@@ -715,7 +715,7 @@ begin
     execute format('drop trigger %I on %s', r.tgname, r.rel);
     v_dropped := v_dropped + 1;
   end loop;
-  raise notice '0987 dropped % SIEP-18 reference-monitor triggers', v_dropped;
+  raise notice '0988 dropped % SIEP-18 reference-monitor triggers', v_dropped;
 end $drop_monitor$;
 
 drop trigger siep_program_identity_guard_before_update on ops.work_request;
@@ -761,17 +761,17 @@ begin
     execute format('drop function %s', r.fn);
     v_dropped := v_dropped + 1;
   end loop;
-  raise notice '0987 dropped % SIEP functions', v_dropped;
+  raise notice '0988 dropped % SIEP functions', v_dropped;
 end $drop_functions$;
 
 do $verify$
 begin
   if exists (select 1 from pg_class c where c.relnamespace = 'ops'::regnamespace and c.relname like 'siep\_%') then
-    raise exception '0987 FAILED: a SIEP relation survived';
+    raise exception '0988 FAILED: a SIEP relation survived';
   end if;
   if exists (select 1 from pg_trigger t join pg_proc p on p.oid = t.tgfoid
               where not t.tgisinternal and (p.proname like 'siep\_%' or p.proname = 'scac_reference_monitor_guard')) then
-    raise exception '0987 FAILED: a SIEP trigger survived';
+    raise exception '0988 FAILED: a SIEP trigger survived';
   end if;
   if to_regclass('ops.scac_exact_effect_contract') is null
      or to_regclass('ops.scac_trusted_principal_binding') is null
@@ -779,12 +779,12 @@ begin
      or to_regprocedure('ops.scac_bind_trusted_principal(jsonb,uuid)') is null
      or to_regprocedure('ops.scac_exact_effect_union(text,text)') is null
      or to_regprocedure('ops.scac_reference_monitor_sha256(jsonb)') is null then
-    raise exception '0987 FAILED: a kept SIEP-18 exact-effect object is missing';
+    raise exception '0988 FAILED: a kept SIEP-18 exact-effect object is missing';
   end if;
   if to_regclass('ops.scac_policy_epoch') is null or to_regclass('ops.scac_mutation_registry_entry') is null then
-    raise exception '0987 FAILED: the kept policy epoch or mutation registry is missing';
+    raise exception '0988 FAILED: the kept policy epoch or mutation registry is missing';
   end if;
   if ops.scac_mutation_catalog_v118_current() is not true then
-    raise exception '0987 FAILED: the drop changed an unaccounted SCAC capability';
+    raise exception '0988 FAILED: the drop changed an unaccounted SCAC capability';
   end if;
 end $verify$;

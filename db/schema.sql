@@ -114282,7 +114282,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0983_fact_store.sql	13f97f25f7cdee1ed5dbcdeb2b45764e4018765edbad37c4b5e6c021e6f8ad04	1970-01-01 00:00:00+00
 0985_call_mode_auto_apply.sql	df11b5b4b02f9062ff62c77c692e39263f5d6be59a1884143487cdde21f93f3f	1970-01-01 00:00:00+00
 0986_decline_requires_its_receipt.sql	293e6e21f95341bf47a2b8a10a9ab0f4f27024358843fa7182056d4fe96f7868	1970-01-01 00:00:00+00
-0987_drop_siep_program_leftovers.sql	c90dfb142135cb2f866429cbee099c77af85484e3e4c52492521a60742dff9b3	1970-01-01 00:00:00+00
+0988_drop_siep_program_leftovers.sql	9c20dcac261bbf29cdd68184c9688e3333cfe95e9134f0e1fa461d402bf8695c	1970-01-01 00:00:00+00
 \.
 
 
