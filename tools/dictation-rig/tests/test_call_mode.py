@@ -173,6 +173,23 @@ class CallModeTests(unittest.TestCase):
         (session / "ingested.json").write_text("{}")
         self.assertEqual(self.state()["state"], "filed")
 
+    def test_exhausted_extraction_is_visible_even_after_filing_and_age_cutoff(self) -> None:
+        session = self.session("needs-attention")
+        call_mode.write_call_context(session, "weekly_deal_call", "Joe")
+        (session / "transcript.json").write_text("{}")
+        (session / "ingested.json").write_text("{}")
+        post_call.write_private(session / post_call.STATUS_FILE, {
+            "state": "needs_attention", "extraction_attempts": 3,
+            "reason": "private transcript detail",
+        })
+        stale = time.time() - call_mode.TERMINAL_AGE_SECONDS - 60
+        os.utime(session, (stale, stale))
+        result = self.state()
+        self.assertEqual(result["state"], "needs_attention")
+        self.assertEqual(result["extraction_attempts"], 3)
+        self.assertNotIn("reason", result)
+        self.assertIn("Needs attention", call_mode.PAGE)
+
     def test_stale_partial_session_is_not_reported_as_recording(self) -> None:
         session = self.session("stale-partial")
         track = session / "mic.caf"
@@ -633,6 +650,32 @@ class PostCallTests(unittest.TestCase):
                 self.assertTrue(status["reason"])
                 self.assertIsNone(post_call.context_from_session(self.session))
                 self.assertFalse((self.session / post_call.REPORT_FILE).exists())
+
+    def test_extraction_retries_back_off_and_stop_after_three_attempts(self) -> None:
+        post_call.store_context(self.session, self.context)
+        calls = []
+
+        def blocked(request):
+            calls.append(request)
+            raise RuntimeError("synthetic deterministic refusal")
+
+        for timestamp, expected_calls, expected_state in [
+            ("2026-10-26T12:00:00Z", 1, "blocked"),
+            ("2026-10-26T12:04:59Z", 1, "blocked"),
+            ("2026-10-26T12:05:00Z", 2, "blocked"),
+            ("2026-10-26T12:19:59Z", 2, "blocked"),
+            ("2026-10-26T12:20:00Z", 3, "needs_attention"),
+            ("2026-10-27T12:20:00Z", 3, "needs_attention"),
+        ]:
+            with self.subTest(timestamp=timestamp), patch.object(post_call, "now", return_value=timestamp):
+                status = post_call.process_session(self.session, blocked)
+                self.assertEqual(len(calls), expected_calls)
+                self.assertEqual(status["state"], expected_state)
+                self.assertEqual(status["extraction_attempts"], expected_calls)
+                self.assertEqual(post_call.report_for_deal_room(self.session)["status"], status)
+        self.assertIsNone(status["next_attempt_at"])
+        self.assertFalse((self.session / post_call.REPORT_FILE).exists())
+        self.assertIsNotNone(post_call.context_from_session(self.session))
 
     def test_context_allows_same_party_on_different_deals_but_exact_output_attaches_to_its_deal(self) -> None:
         post_call.validate_context(self.context, self.session.name)
