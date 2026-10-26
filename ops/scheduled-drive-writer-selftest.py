@@ -93,6 +93,17 @@ def main() -> int:
             check(f"{name} reports target repo-local out/Learning",
                   any(str(root / name / "out" / "Learning") in str(row["args"]) for row in rows))
 
+        prompt = (ROOT / "ops/scheduled-tasks/social-metrics-pull-weekly.SKILL.md").read_text()
+        slugs = re.findall(r'r = Report\("(weekly-learning|correction-miner)"',
+                           (ROOT / "pipelines/learning_jobs.py").read_text())
+        pull = (ROOT / "pipelines/pull_placement_metrics.py").read_text()
+        check("social metrics verifies the weekly producer's repo-local reports",
+              re.findall(r"^- ~/carr-system/out/Learning/([^\s`]+)", prompt, re.M)
+              == ["placement-pull-latest.md"] + [f"{slug}-latest.md" for slug in slugs]
+              and 'Path(a.report_dir) / "placement-pull-latest.md"' in pull)
+        check("social metrics has no retired report destination",
+              "Automation/Learning/" not in prompt)
+
         dashboard_python = ROOT / ".venv" / "bin" / "python"
         if not dashboard_python.exists():
             dashboard_python = Path(sys.executable)
