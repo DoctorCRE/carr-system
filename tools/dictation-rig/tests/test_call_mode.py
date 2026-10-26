@@ -588,7 +588,7 @@ class PostCallTests(unittest.TestCase):
 
     def test_explicit_next_step_reaches_review_and_existing_candidate_lane(self) -> None:
         post_call.store_context(self.session, self.context)
-        output = self.output(deal_updates=[{
+        output = self.output(joe_tasks=[], dell_tasks=[], draft_proposals=[], deal_updates=[{
             "deal_id": "deal-a", "summary": "Landlord follow-up agreed.",
             "participant_ids": ["p-1"], "evidence": "Call Vendor A on February 29, 2028.",
             "next_step": {"text": "Call Vendor A", "next_date": "2028-02-29"},
@@ -600,14 +600,42 @@ class PostCallTests(unittest.TestCase):
         self.assertIn("2028-02-29", update["summary"])
         shaped = post_call.sanitized_candidates(self.session)
         self.assertEqual(shaped["legacy_items"], [{
+            "kind": "activity", "payload": {"ref": "deal-a", "kind": "note", "summary": "Landlord follow-up agreed."},
+            "evidence_quote": "Call Vendor A on February 29, 2028.", "confidence": 0.5,
+        }, {
             "kind": "next_step", "payload": {
                 "deal": "deal-a", "text": "Call Vendor A", "next_date": "2028-02-29",
             }, "evidence_quote": "Call Vendor A on February 29, 2028.", "confidence": 0.5,
         }])
         binding = [item for item in shaped["bindings"] if item["remote"] == "legacy"]
-        post_call.apply_candidate_ids(self.session, binding, ["next-step-candidate"])
+        post_call.apply_candidate_ids(self.session, binding[:1], ["note-candidate"])
+        remaining = post_call.sanitized_candidates(self.session)
+        self.assertEqual([item["kind"] for item in remaining["legacy_items"]], ["next_step"])
+        post_call.apply_candidate_ids(self.session, [item for item in remaining["bindings"] if item["remote"] == "legacy"], ["next-step-candidate"])
         self.assertEqual(post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0]["candidate_status"], "pending")
         self.assertEqual(post_call.sanitized_candidates(self.session)["legacy_items"], [])
+        post_call.apply_candidate_statuses(self.session, {"note-candidate": "confirmed"})
+        self.assertIsNone(post_call.retention_ready(self.session, "report-hash"))
+        post_call.apply_candidate_statuses(self.session, {"next-step-candidate": "skipped"})
+        update = post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0]
+        self.assertEqual(update["candidate_status"], "confirmed")
+        self.assertEqual(update["next_step"]["candidate_status"], "skipped")
+        self.assertIsNotNone(post_call.retention_ready(self.session, "report-hash"))
+
+    def test_maximum_length_next_step_keeps_activity_summary_unchanged(self) -> None:
+        post_call.store_context(self.session, self.context)
+        output = self.output(deal_updates=[{
+            "deal_id": "deal-a", "summary": "Landlord follow-up agreed.",
+            "participant_ids": [], "evidence": "Follow-up agreed",
+            "next_step": {"text": "x" * 500, "next_date": None},
+        }])
+        self.assertEqual(post_call.process_session(self.session, distiller=lambda _request: output)["state"], "ready_review")
+        candidates = post_call.sanitized_candidates(self.session)["legacy_items"]
+        self.assertEqual(candidates[0]["payload"]["summary"], "Landlord follow-up agreed.")
+        self.assertEqual(candidates[1]["payload"]["text"], "x" * 500)
+        visible = post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0]
+        self.assertIn("clears the current date", visible["summary"])
+        self.assertEqual(post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0], visible)
 
     def test_invalid_next_steps_block_without_creating_a_review_pack(self) -> None:
         invalid_steps: tuple[object, ...] = (
@@ -646,7 +674,8 @@ class PostCallTests(unittest.TestCase):
         self.assertTrue(any("unknown-deal" in question["question"] for question in report["review_questions"]))
         candidates = post_call.sanitized_candidates(self.session)["legacy_items"]
         self.assertEqual(candidates[0]["payload"], {"ref": "deal-b", "kind": "note", "summary": "Lease reviewed"})
-        self.assertEqual(candidates[1]["payload"], {"deal": "deal-a", "text": "Call landlord", "next_date": None})
+        self.assertEqual(candidates[1]["payload"]["summary"], "Follow-up agreed")
+        self.assertEqual(candidates[2]["payload"], {"deal": "deal-a", "text": "Call landlord", "next_date": None})
 
     def test_explicit_action_dates_reach_review_and_candidate_submission(self) -> None:
         (self.session / "transcript.json").write_text(json.dumps({"segments": [
