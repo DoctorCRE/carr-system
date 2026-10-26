@@ -2331,10 +2331,12 @@ async function appendDealNextStep(c, actor, dealId, text, nextDate, key) {
   // The Deal Room's next step and the operating system's next action are
   // one fact, not parallel lists. Each partner still keeps one ball of
   // their own on the deal; replacing yours drops (does not complete) it.
+  // A partner's own automation (joe-local) replaces that partner's step: the
+  // board reads the newest open step, so leaving Joe's open would hide it.
   await c.query(
     `update next_action set status='dropped', updated_by=$1
-      where subject_type='deal' and subject_id=$2 and owner_id=$1 and status='open' and item_title is null
-      /* dealroom:drop-prior-action */`, [actor.id, dealId]);
+      where subject_type='deal' and subject_id=$2 and owner_id=any($3::uuid[]) and status='open' and item_title is null
+      /* dealroom:drop-prior-action */`, [actor.id, dealId, await partnerOwnerIds(c, actor)]);
   const action = await c.query(
     `insert into next_action (subject_type, subject_id, owner_id, due_on,
                               description, created_by, updated_by, updated_at)
@@ -2366,14 +2368,20 @@ function dealNextStepStatus(step, date) {
     ...(required ? { prompt: "Doc needs the new next step and date for this deal. Use set-next-step to record both." } : {}) };
 }
 
-async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-deal-note") {
+async function partnerOwnerIds(c, actor) {
   const partner = partnerAuthoritySlugForActor(actor);
-  if (!partner) return {};
   const ownerIds = [actor.id];
-  if (partner !== actor.slug) {
+  if (partner && partner !== actor.slug) {
     const sponsor = (await c.query("select id from actor where slug=$1", [partner])).rows[0];
     if (sponsor) ownerIds.push(sponsor.id);
   }
+  return ownerIds;
+}
+
+async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-deal-note") {
+  const partner = partnerAuthoritySlugForActor(actor);
+  if (!partner) return {};
+  const ownerIds = await partnerOwnerIds(c, actor);
   await lockDealField(c, dealId, "next_date");
   await lockDealField(c, dealId, "next_step");
   const current = (await c.query(
@@ -2512,6 +2520,9 @@ async function applyDealRoomField(c, actor, dealId, field, value, idempotencyKey
     new: { [field]: value },
     human_quote: provenance.human_quote || null,
     agent_rationale: provenance.change_reason || null,
+    // A stated phase start lands at noon in the business timezone, so
+    // v_deal_room_phase_start reads back the same calendar day.
+    occurred_at: provenance.occurred_on ? `${provenance.occurred_on} 12:00 America/Chicago` : null,
     idempotency_key: idempotencyKey,
   });
   // The committed identity of the event this write just made, READ BACK from the
@@ -9191,9 +9202,13 @@ registerTools({
       base_event_id: { anyOf: [{ type: "string" }, { type: "null" }] },
       change_reason: { type: "string", description: "why this cell changed; lands on the event as agent_rationale" },
       human_quote: { type: "string", description: "the partner's verbatim words, when they directed the change" },
+      occurred_on: { type: "string", description: "phase only: YYYY-MM-DD the partners stated the phase began; not in the future" },
     }, required: ["idempotency_key", "deal", "field", "value", "base_event_id"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "patch-deal-field", args, async () => {
       assertDealRoomField(args.field, args.value, ToolError);
+      if (args.occurred_on != null && (args.field !== "phase" || !isCalendarDate(args.occurred_on) ||
+          args.occurred_on > new Date().toISOString().slice(0, 10)))
+        throw new ToolError({ error: "invalid_occurred_on", hint: "a past or present YYYY-MM-DD, for a phase move only" });
       const s = await resolveSubject(c, args.deal);
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
       await lockDealField(c, s.id, args.field);
@@ -9214,7 +9229,7 @@ registerTools({
       }
       const applied = await applyDealRoomField(c, actor, s.id, args.field, args.value,
         args.idempotency_key, "patch-deal-field",
-        { change_reason: args.change_reason, human_quote: args.human_quote });
+        { change_reason: args.change_reason, human_quote: args.human_quote, occurred_on: args.occurred_on });
       return { ok: true, deal_id: s.id, field: args.field, ...applied };
     }),
   },
@@ -9591,21 +9606,27 @@ registerTools({
 
   "resolve-candidate": {
     write: true,
-    description: "Human gate for one capture proposal. Rejecting only skips it. Accepting invokes its mapped live verb as the confirming partner, then confirms the candidate only after that write returns a real record reference.",
+    description: "Human gate for one capture proposal. Rejecting only skips it. Accepting invokes its mapped live verb as the confirming partner, then confirms the candidate only after that write returns a real record reference. automatic=true is the weekly pipeline call applying a next step or phase it heard stated plainly: partner authority only, post-call sessions only, and the change is listed on read-call-outcomes with its evidence and an undo.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, candidate_id: { type: "string" },
-      accept: { type: "boolean" }, note: { type: "string" },
+      accept: { type: "boolean" }, note: { type: "string" }, automatic: { type: "boolean" },
     }, required: ["idempotency_key", "candidate_id", "accept"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "resolve-candidate", args, async () => {
       const { candidate, resolution } = await prepareCaptureCandidate(c, actor, args, {
         table: "capture_candidate",
-        read: `select id, kind, payload, status, resulting_ref
-           from capture_candidate where id=$1 for update /* capture:resolve-read */`,
+        read: `select c.id, c.kind, c.payload, c.status, c.resulting_ref, c.evidence_quote, s.post_call
+           from capture_candidate c join capture_session s on s.id=c.session_id
+          where c.id=$1 for update of c /* capture:resolve-read */`,
         skip: `update capture_candidate
               set status='skipped', resolved_by=$2, resolution_note=$3, resolved_at=now()
             where id=$1 /* capture:resolve-skip */`,
       });
       if (resolution) return resolution;
+      const automatic = args.automatic === true && args.accept === true;
+      if (automatic && (!canExercisePartnerAuthority(actor) || !candidate.post_call ||
+          !["next_step", "phase_move"].includes(candidate.kind)))
+        throw new ToolError({ error: "automatic_apply_not_allowed", kind: candidate.kind,
+          hint: "only a partner's own Call Mode may apply a post-call next step or phase automatically" });
 
       const verbByKind = {
         phase_move: "patch-deal-field",
@@ -9618,6 +9639,14 @@ registerTools({
       if (!verb) throw new ToolError({ error: "unknown_candidate_kind", kind: candidate.kind });
       const innerArgs = { ...candidate.payload, idempotency_key: `capture:${candidate.id}` };
       if (candidate.kind === "meeting_record") innerArgs.kind = "meeting";
+      if (candidate.kind === "phase_move") {
+        // The partners' own words on the call are the evidence for the move,
+        // and a start date they stated becomes the phase's start date.
+        delete innerArgs.started_on;
+        if (candidate.payload.started_on) innerArgs.occurred_on = candidate.payload.started_on;
+        innerArgs.human_quote = candidate.evidence_quote;
+        innerArgs.change_reason = "Stated on the weekly pipeline call";
+      }
       if (candidate.kind === 'next_step') {
         const subject = await resolveSubject(c, candidate.payload.deal);
         await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [subject.id]);
@@ -9652,11 +9681,11 @@ registerTools({
       await c.query(
         `update capture_candidate
             set status='confirmed', resolved_by=$2, resolution_note=$3,
-                resulting_ref=$4, resolved_at=now()
+                resulting_ref=$4, resolved_at=now(), applied_automatically=$5
           where id=$1 /* capture:resolve-confirm */`,
-        [candidate.id, actor.id, args.note || null, String(ref)]);
+        [candidate.id, actor.id, args.note || null, String(ref), automatic]);
       return { ok: true, candidate_id: candidate.id, status: "confirmed", ref: String(ref),
-        verb, result };
+        verb, automatic, result };
     }),
   },
 
@@ -9728,6 +9757,150 @@ registerTools({
       });
       return { ok: true, candidate_id: candidate.id, status: "confirmed",
         ref: String(action.rows[0].id), assignee: candidate.assignee_slug };
+    }),
+  },
+
+  // WR-000433 AC4 and Joe's 2026-10-26 ruling: confident changes from the
+  // weekly pipeline call apply themselves, and the call's outcome (each applied
+  // change with its evidence, plus every card still open) stays on record and
+  // on Home until a partner has looked it over, in case one was wrong.
+  "read-call-outcomes": {
+    writerConnection: true,
+    description: "Pipeline-call outcomes not yet reviewed: for each call, every change applied automatically (deal, change, transcript evidence quote, applied_at, undone_at, and the deal's current version for undo-call-change) and every card still waiting on Joe or Dell. Nothing here sends anything.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    handler: async (c) => {
+      const sessions = (await c.query(`
+        select s.id as session_id, a.slug as recorder, to_jsonb(s.started_at)#>>'{}' as started_at,
+               (s.started_at at time zone 'America/Chicago')::date::text as call_date
+          from capture_session s join actor a on a.id=s.actor_id
+         where s.post_call and s.outcome_reviewed_at is null
+           and (exists (select 1 from capture_candidate c where c.session_id=s.id and c.applied_automatically)
+             or (s.expires_at > now() and (
+                 exists (select 1 from capture_candidate c where c.session_id=s.id and c.status='pending')
+              or exists (select 1 from capture_post_call_candidate c where c.session_id=s.id and c.status='pending'))))
+         order by s.started_at desc, s.id limit 50 /* call-outcome:sessions */`)).rows;
+      if (!sessions.length) return { schema_version: "call-outcomes.v1", calls: [], send: false };
+      const ids = sessions.map(row => row.session_id);
+      const legacy = (await c.query(`
+        select c.session_id, c.id as candidate_id, c.kind, c.status, c.applied_automatically, c.payload,
+               c.evidence_quote, d.id as deal_id, d.name as deal_name, d.version as deal_version,
+               to_jsonb(c.resolved_at)#>>'{}' as applied_at, to_jsonb(c.undone_at)#>>'{}' as undone_at
+          from capture_candidate c
+          left join deal d on d.id::text = coalesce(c.payload->>'deal', c.payload->>'ref')
+         where c.session_id = any($1::uuid[]) and (c.applied_automatically or c.status='pending')
+         order by c.created_at, c.item_index, c.id /* call-outcome:changes */`, [ids])).rows;
+      const postCall = (await c.query(`
+        select c.session_id, c.id as candidate_id, c.kind, c.deal_id, d.name as deal_name, c.evidence_quote,
+               case c.kind when 'assigned_action' then jsonb_build_object('assignee', c.assignee_slug,
+                 'action', c.action_description, 'due_on', to_jsonb(c.due_on)#>>'{}')
+               else jsonb_build_object('recipient_ref', c.recipient_ref, 'subject', c.email_subject) end as payload
+          from capture_post_call_candidate c join deal d on d.id=c.deal_id
+         where c.session_id = any($1::uuid[]) and c.status='pending'
+         order by c.created_at, c.item_index, c.id /* call-outcome:cards */`, [ids])).rows;
+      const calls = sessions.map(session => ({ ...session,
+        applied: legacy.filter(row => row.session_id === session.session_id && row.applied_automatically)
+          .map(({ session_id, status, applied_automatically, ...row }) => row),
+        open_cards: [
+          ...legacy.filter(row => row.session_id === session.session_id && row.status === 'pending')
+            .map(row => ({ candidate_id: row.candidate_id, resolver: "resolve-candidate", kind: row.kind,
+              deal_id: row.deal_id, deal_name: row.deal_name, payload: row.payload, evidence_quote: row.evidence_quote })),
+          ...postCall.filter(row => row.session_id === session.session_id)
+            .map(({ session_id, ...row }) => ({ ...row, resolver: "resolve-post-call-candidate" })),
+        ] }));
+      return { schema_version: "call-outcomes.v1", calls, send: false };
+    },
+  },
+
+  "review-call-outcome": {
+    write: true,
+    description: "Mark one pipeline call's outcome reviewed by a partner, so it leaves Home. Applied changes stay applied and still undoable from the deal; open cards stay open.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      idempotency_key: { type: "string" }, session_id: { type: "string" },
+    }, required: ["idempotency_key", "session_id"] },
+    handler: async (c, actor, args) => withEnvelope(c, actor, "review-call-outcome", args, async () => {
+      if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "partner_required" });
+      const row = (await c.query(
+        `update capture_session set outcome_reviewed_at=now(), outcome_reviewed_by=$2
+          where id=$1 and post_call and outcome_reviewed_at is null returning id
+          /* call-outcome:review */`, [args.session_id, actor.id])).rows[0];
+      if (!row) {
+        const known = (await c.query("select outcome_reviewed_at from capture_session where id=$1 and post_call", [args.session_id])).rows[0];
+        if (!known) throw new ToolError({ error: "not_found", table: "capture_session", id: args.session_id });
+        return { ok: true, session_id: args.session_id, already: "reviewed" };
+      }
+      await writeEvent(c, actor, "review-call-outcome", "actor", actor.id, {
+        new: { session_id: args.session_id, reviewed: true }, idempotency_key: args.idempotency_key });
+      return { ok: true, session_id: args.session_id, reviewed: true };
+    }),
+  },
+
+  "undo-call-change": {
+    write: true,
+    description: "Undo one change a pipeline call applied automatically: a phase move goes back to the prior phase, a next step back to the prior step and date (its checklist items are dropped). Needs the deal's base_version from a fresh read-call-outcomes or deal read, and refuses when the card changed again after the call.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      idempotency_key: { type: "string" }, candidate_id: { type: "string" }, base_version: { type: "integer" },
+    }, required: ["idempotency_key", "candidate_id", "base_version"] },
+    handler: async (c, actor, args) => withEnvelope(c, actor, "undo-call-change", args, async () => {
+      if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "partner_required" });
+      const candidate = (await c.query(
+        `select id, kind, payload, applied_automatically, undone_at from capture_candidate
+          where id=$1 for update /* call-outcome:undo-read */`, [args.candidate_id])).rows[0];
+      if (!candidate) throw new ToolError({ error: "not_found", table: "capture_candidate", id: args.candidate_id });
+      if (!candidate.applied_automatically) throw new ToolError({ error: "not_applied_automatically" });
+      if (candidate.undone_at) return { ok: true, candidate_id: candidate.id, already: "undone" };
+      const dealId = candidate.payload.deal;
+      const key = `capture:${candidate.id}`;
+      let reverted;
+      if (candidate.kind === "phase_move") {
+        await lockDealField(c, dealId, "phase");
+        await versionGuard(c, "deal", dealId, args.base_version);
+        const applied = (await c.query(
+          `select id from event where subject_type='deal' and subject_id=$1 and field='phase' and idempotency_key=$2
+            order by recorded_at desc, id desc limit 1 /* call-outcome:undo-phase */`, [dealId, key])).rows[0];
+        if (!applied) throw new ToolError({ error: "applied_change_not_found" });
+        reverted = await executeRegisteredTool(c, actor, "revert-deal-field",
+          { event_id: applied.id, idempotency_key: `${args.idempotency_key}:phase` });
+      } else if (candidate.kind === "next_step") {
+        await lockDealField(c, dealId, "next_date");
+        await lockDealField(c, dealId, "next_step");
+        await versionGuard(c, "deal", dealId, args.base_version);
+        // The first next_step and next_date events under the apply's key hold
+        // the card as it stood before the call changed it.
+        const before = (await c.query(
+          `select distinct on (field) field, old_value -> field as value, recorded_at from event
+            where subject_type='deal' and subject_id=$1 and idempotency_key=$2 and field in ('next_step','next_date')
+            order by field, recorded_at, id /* call-outcome:undo-step-before */`, [dealId, key])).rows;
+        if (before.length !== 2) throw new ToolError({ error: "applied_change_not_found" });
+        const newer = (await c.query(
+          `select 1 from event where subject_type='deal' and subject_id=$1 and field in ('next_step','next_date')
+              and recorded_at > (select max(recorded_at) from event where subject_type='deal' and subject_id=$1 and idempotency_key=$2)
+            limit 1 /* call-outcome:undo-step-newer */`, [dealId, key])).rows;
+        if (newer.length) throw new ToolError({ error: "newer_change_exists",
+          hint: "The next step changed again after the call. Open the deal and edit it directly." });
+        const prior = Object.fromEntries(before.map(row => [row.field, row.value ?? null]));
+        const dropped = (await c.query(
+          `update next_action set status='dropped', updated_by=$3
+            where subject_type='deal' and subject_id=$1 and source_ref=$2 and item_title is not null and status <> 'dropped'
+            returning id /* call-outcome:undo-step-items */`, [dealId, `capture_candidate:${candidate.id}`, actor.id])).rows;
+        if (prior.next_step) {
+          reverted = await appendDealNextStep(c, actor, dealId, prior.next_step, prior.next_date, args.idempotency_key);
+        } else {
+          await c.query("update deal set next_date=$2, updated_by=$3 where id=$1", [dealId, prior.next_date, actor.id]);
+          for (const field of ["next_step", "next_date"])
+            await writeEvent(c, actor, "undo-call-change", "deal", dealId, {
+              field, old: { [field]: field === "next_step" ? candidate.payload.text : candidate.payload.next_date },
+              new: { [field]: prior[field], superseded_action_ids: [] },
+              recorded_at_after_lock: true, idempotency_key: args.idempotency_key });
+          reverted = { next_step: null, next_date: prior.next_date };
+        }
+        reverted.dropped_item_ids = dropped.map(row => row.id);
+      } else throw new ToolError({ error: "not_applied_automatically" });
+      await c.query("update capture_candidate set undone_at=now(), undone_by=$2 where id=$1 /* call-outcome:undo */",
+        [candidate.id, actor.id]);
+      await writeEvent(c, actor, "undo-call-change", "deal", dealId, {
+        field: "call_change_undo", new: { candidate_id: candidate.id, kind: candidate.kind },
+        idempotency_key: args.idempotency_key });
+      return { ok: true, candidate_id: candidate.id, deal_id: dealId, kind: candidate.kind, undone: true, reverted };
     }),
   },
 }, "deal-room-inline");

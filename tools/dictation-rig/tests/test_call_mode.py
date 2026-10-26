@@ -56,6 +56,14 @@ _CLIENT_PATCHES = (
 )
 
 
+_LOG_DIR = tempfile.TemporaryDirectory()
+_CLIENT_PATCHES += (
+    # Keep test lines out of the live companion and bridge logs on the Studio.
+    patch.object(call_mode, "LOG_PATH", Path(_LOG_DIR.name) / "call-mode.log"),
+    patch.object(capture_bridge, "LOG_PATH", Path(_LOG_DIR.name) / "capture-bridge.log"),
+)
+
+
 def setUpModule() -> None:
     # Stop before provider selection, credential reads, or network transport.
     # Injected ask functions and loopback distiller fakes still run normally.
@@ -903,7 +911,9 @@ class PostCallTests(unittest.TestCase):
         update = schema["properties"]["deal_updates"]["items"]
         self.assertIn("next_step", update["required"])
         step = update["properties"]["next_step"]["anyOf"][1]
-        self.assertEqual(step["required"], ["text", "next_date"])
+        self.assertEqual(step["required"], ["text", "next_date", "needs_review"])
+        phase = update["properties"]["phase_move"]["anyOf"][1]
+        self.assertEqual(phase["required"], ["value", "started_on", "needs_review"])
         self.assertFalse(step["additionalProperties"])
         self.assertEqual(step["properties"]["next_date"]["type"], ["string", "null"])
         source = json.loads(runner.call_args.kwargs["input"])
@@ -994,6 +1004,142 @@ class PostCallTests(unittest.TestCase):
         again = post_call.create_outlook_draft(self.session, draft["draft_id"], draft["content_hash"], runner=runner)
         self.assertTrue(again["idempotent"])
         self.assertEqual(runner.call_count, 1)
+
+
+class AutomaticApplyTests(unittest.TestCase):
+    """Joe, 2026-10-26: plainly stated changes apply; anything unsettled is a card."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.session = Path(self.tmp.name) / "2026.10.26-0900"
+        self.session.mkdir()
+        self.transcript = {"segments": [
+            {"speaker": "Joe", "text": "Next step for Bayside: send the lease draft by November 6, 2026."},
+            {"speaker": "Dell", "text": "Agreed. Bayside moves to negotiation."},
+        ]}
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def update(self, **change: object) -> dict[str, object]:
+        base: dict[str, object] = {"deal_id": "deal-a", "summary": "Bayside", "participant_ids": [],
+                                   "evidence": "send the lease draft by November 6, 2026",
+                                   "next_step": None, "phase_move": None}
+        base.update(change)
+        return base
+
+    def step(self, **extra: object) -> dict[str, object]:
+        return {"text": "Send the lease draft", "next_date": "2026-11-06", "needs_review": None, **extra}
+
+    def mark(self, *updates: dict[str, object]) -> dict[str, object]:
+        return post_call.mark_automatic({"deal_updates": list(updates), "review_questions": []}, self.transcript)
+
+    def test_plainly_stated_change_is_automatic(self) -> None:
+        marked = self.mark(self.update(next_step=self.step(), phase_move={
+            "value": "negotiation", "started_on": None, "needs_review": None}))
+        update = marked["deal_updates"][0]
+        self.assertEqual(update["next_step"]["apply"], "automatic")
+        self.assertEqual(update["phase_move"]["apply"], "automatic")
+
+    def test_unsettled_changes_stay_cards_with_a_reason(self) -> None:
+        cases = {
+            "model asked": self.update(next_step=self.step(needs_review="Dell did not agree.")),
+            "no date": self.update(next_step=self.step(next_date=None)),
+            "invented evidence": self.update(next_step=self.step(), evidence="we will sign the lease today"),
+            "wrong deal": self.update(next_step=self.step(), checks={"deal": {"pass": False}}),
+        }
+        for name, update in cases.items():
+            with self.subTest(name):
+                step = self.mark(update)["deal_updates"][0]["next_step"]
+                self.assertEqual(step["apply"], "review")
+                self.assertTrue(step["review_reason"])
+        twice = self.mark(self.update(next_step=self.step()), self.update(next_step=self.step(text="Other")))
+        self.assertEqual({u["next_step"]["apply"] for u in twice["deal_updates"]}, {"review"})
+
+    def test_summary_detail_check_does_not_hold_the_change(self) -> None:
+        update = self.update(next_step=self.step(), checks={"deal": {"pass": True}, "details": {"pass": False}})
+        self.assertEqual(self.mark(update)["deal_updates"][0]["next_step"]["apply"], "automatic")
+
+    def test_stated_start_date_travels_with_the_phase_and_future_dates_do_not(self) -> None:
+        raw = {"schema_version": 1, "report": {"summary": "", "decisions": [], "open_questions": []},
+               "joe_tasks": [], "dell_tasks": [], "draft_proposals": [], "review_questions": [],
+               "deal_updates": [self.update(phase_move={"value": "negotiation", "started_on": "2026-10-20", "needs_review": None}),
+                                self.update(deal_id="deal-b", phase_move={"value": "legal", "started_on": "2999-01-01"})]}
+        context = {"deals": [{"id": "deal-a", "participants": []}, {"id": "deal-b", "participants": []}]}
+        result = post_call.normalize_distillation(raw, context, self.session.name)
+        self.assertEqual(result["deal_updates"][0]["phase_move"]["started_on"], "2026-10-20")
+        self.assertIsNone(result["deal_updates"][1]["phase_move"]["started_on"])
+        self.assertIsNone(result["deal_updates"][1]["phase_move"]["needs_review"])
+        post_call.write_private(self.session / post_call.REPORT_FILE, result)
+        payloads = [item["payload"] for item in post_call.sanitized_candidates(self.session)["legacy_items"]
+                    if item["kind"] == "phase_move"]
+        self.assertEqual(payloads[0]["started_on"], "2026-10-20")
+        self.assertNotIn("started_on", payloads[1])
+
+    def write_report(self) -> None:
+        report = {"generated_at": "2026-10-26T14:00:00Z", "review_questions": [], "deal_updates": [
+            self.update(next_step=self.step(apply="automatic", candidate_id="c-step", candidate_status="pending"),
+                        phase_move={"value": "negotiation", "apply": "automatic", "candidate_id": "c-phase",
+                                    "candidate_status": "pending"}),
+            self.update(deal_id="deal-b", next_step=self.step(apply="review", review_reason="Dell did not agree.",
+                                                               candidate_id="c-held", candidate_status="pending")),
+        ]}
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+
+    def test_bridge_applies_through_the_partners_verb_door_and_records_refusals(self) -> None:
+        self.write_report()
+        calls: list[list[str]] = []
+
+        def verb(argv, **_kwargs):
+            calls.append(argv)
+            args = json.loads(argv[-1])
+            if args["candidate_id"] == "c-phase":
+                return SimpleNamespace(returncode=1, stdout='{"ok": false, "error": "inner_write_failed"}\n', stderr="")
+            return SimpleNamespace(returncode=0, stdout='identity line\n{"ok": true, "status": "confirmed"}\n', stderr="")
+
+        with patch.dict(os.environ, {"CARR_POST_CALL_VERB_COMMAND": "verb-door --flag"}), \
+                patch.object(capture_bridge.subprocess, "run", side_effect=verb):
+            self.assertTrue(capture_bridge.apply_automatic(self.session))
+        self.assertEqual([argv[:3] for argv in calls], [["verb-door", "--flag", "resolve-candidate"]] * 2)
+        sent = [json.loads(argv[-1]) for argv in calls]
+        self.assertEqual({args["candidate_id"] for args in sent}, {"c-step", "c-phase"})
+        self.assertTrue(all(args["automatic"] and args["accept"] for args in sent))
+        self.assertIn("2026-10-26 pipeline call", sent[0]["note"])
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        bayside, held = report["deal_updates"]
+        self.assertTrue(bayside["next_step"]["applied_automatically"])
+        self.assertEqual(bayside["next_step"]["candidate_status"], "confirmed")
+        self.assertEqual(bayside["phase_move"]["apply"], "review")
+        self.assertIn("inner_write_failed", bayside["phase_move"]["review_reason"])
+        self.assertEqual(held["next_step"]["candidate_status"], "pending")
+        self.assertEqual({k: report["automatic"][k] for k in ("applied", "kept_for_review")},
+                         {"applied": 1, "kept_for_review": 2})
+        # A retry offers nothing new and never re-sends an applied change.
+        with patch.object(capture_bridge.subprocess, "run") as again:
+            self.assertTrue(capture_bridge.apply_automatic(self.session))
+        again.assert_not_called()
+        visible = post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0]["summary"]
+        self.assertIn("Next step set to: Send the lease draft", visible)
+
+    def test_idempotency_key_is_stable_per_session_and_candidate(self) -> None:
+        keys = []
+        for _ in range(2):
+            self.write_report()
+            with patch.object(capture_bridge.subprocess, "run", return_value=SimpleNamespace(
+                    returncode=0, stdout='{"ok": true, "status": "confirmed"}', stderr="")) as run:
+                capture_bridge.apply_automatic(self.session)
+            keys.append([json.loads(call.args[0][-1])["idempotency_key"] for call in run.call_args_list])
+        self.assertEqual(keys[0], keys[1])
+
+    def test_ready_report_is_filed_and_applied_without_waiting_for_the_sweep(self) -> None:
+        worker = SimpleNamespace(returncode=0, stdout='{"state": "ready_review"}', stderr="")
+        with patch.object(post_call.subprocess, "run", return_value=worker) as run:
+            self.assertEqual(post_call.run_session(self.session), {"state": "ready_review"})
+        self.assertEqual(run.call_args_list[1].args[0][-2:], ["poll", str(self.session)])
+        waiting = SimpleNamespace(returncode=0, stdout='{"state": "awaiting_context"}', stderr="")
+        with patch.object(post_call.subprocess, "run", return_value=waiting) as run:
+            post_call.run_session(self.session)
+        self.assertEqual(run.call_count, 1)
 
 
 class CaptureBridgePostCallTests(unittest.TestCase):
