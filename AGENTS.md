@@ -196,6 +196,9 @@ by definition: `CARR_ALLOW_MAIN_COMMIT=1 git commit ...`, for one command only.
 
 ## Checks
 
+Keep new shell logic to about 100 lines per script. Put orchestration in tested
+Python modules and keep `.sh` entry points as short launchers.
+
 `ops/ci.sh` is the ONE check script. The GitHub workflow and the pre-push hook
 both call it; neither contains check logic, so a check added there appears in
 both. Run one class while iterating:
