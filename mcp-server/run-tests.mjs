@@ -7,7 +7,7 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const LAUNCH_REGRESSIONS = "chrome-launch.test.mjs";
 const PRIVATE_POSTGRES_SUITES = new Set([
   "client-portal-postgres.test.mjs", "fact-store-postgres.test.mjs",
-  "deal-items-postgres.test.mjs", "email-deal-progress-postgres.test.mjs", "email-lead-proposal-postgres.test.mjs",
+  "deal-items-postgres.test.mjs", "vendor-meetings.test.mjs", "email-deal-progress-postgres.test.mjs", "email-lead-proposal-postgres.test.mjs",
   "next-action-canonical.test.mjs",
   "feature-switches-postgres.test.mjs",
   "a02-rule-enforcement-postgres.test.mjs", "confirm-merge-schema.test.mjs",
