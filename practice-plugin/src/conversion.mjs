@@ -1,3 +1,4 @@
+// Validate and screen practice space conversion requirements.
 import { z } from 'zod';
 import { envelope, rangeSchema } from './evidence.mjs';
 import { D, dollars, id, usd } from './runway.mjs';

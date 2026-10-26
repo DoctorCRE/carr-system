@@ -1,3 +1,4 @@
+// Define evidence schemas and envelopes for planning results.
 import { z } from 'zod';
 
 export const NOTICE = 'Preliminary screening only. A qualified designer and the permitting authority must confirm the program and applicable requirements. Not legal, financial, or design advice.';
