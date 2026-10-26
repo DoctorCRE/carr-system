@@ -1,3 +1,4 @@
+// Tests retired metering and program controller web routes.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createDealroomHandler, isDealroomRequest } from "../src/dealroom-web.js";

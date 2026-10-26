@@ -1,3 +1,4 @@
+// Test doctrine title-topic ranking, visibility, and deterministic ordering.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TOOLS } from '../src/tools.js';

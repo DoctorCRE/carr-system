@@ -1,3 +1,4 @@
+// Tests program 6 routine controller routes and authority boundaries.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createProgram6RoutineController, SAFE_READY_PLAN } from "../src/program6-routine-controller.js";

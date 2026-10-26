@@ -1,3 +1,4 @@
+// Validate foundation assurance evidence and seals.
 import { digest } from "./artifact-trust.js";
 import {
   BENCHMARK_COST_VARIANCE_THRESHOLDS,

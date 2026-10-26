@@ -1,3 +1,4 @@
+// Test safe doctrine version handling across reads and writes.
 import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";

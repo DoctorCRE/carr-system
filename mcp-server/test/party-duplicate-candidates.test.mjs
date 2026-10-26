@@ -1,3 +1,4 @@
+// Tests duplicate party candidate matching and explanations.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';

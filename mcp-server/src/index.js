@@ -1,3 +1,4 @@
+// Serve the CARR MCP Worker and its authentication routes.
 import INGEST_TRANSPORT from "./ingest-transport.v1.json" with { type: "json" };
 
 // CARR MCP server — Worker entrypoint.

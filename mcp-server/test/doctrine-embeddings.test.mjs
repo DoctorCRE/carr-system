@@ -1,3 +1,4 @@
+// Test doctrine semantic retrieval, embedding backfill, and failure handling.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { searchDoctrineSituations } from '../src/situation-retrieval.js';

@@ -1,3 +1,4 @@
+// Test the authenticated, versioned home agenda snapshot and overflow handling.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { allowedIn, connectionRouteForTool } from '../src/mcp.js';

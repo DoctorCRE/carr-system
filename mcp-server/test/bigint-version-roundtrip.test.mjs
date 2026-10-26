@@ -1,3 +1,4 @@
+// Test version round trips and unsafe increment refusal.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";
