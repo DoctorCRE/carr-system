@@ -18,7 +18,7 @@ const ARGS = (() => { try { return typeof args === 'string' ? JSON.parse(args) :
 //    judge whether the lead is worth Joe's time. Weak-but-plausible => low score, still on the list.
 //  - Fan-out hygiene: verifiers are fresh-context, judging the cited source; run starts SCOPED
 //    (default 6 finder agents), widen only after a clean run.
-//  - A lone surname never merges records: dedupe key = normalized name + one corroborating field.
+//  - A lone name never merges records: see the Dedupe edge below.
 //  - The workflow writes nothing. The invoking session (top seat) routes results to the
 //    CARR Leads Inbox / registry intake per DNA/Leads/lead-system.md, stamps, and logs the run.
 // args: { today: 'YYYY-MM-DD', lanes?: string[], regions?: string[], cap?: number }
@@ -69,19 +69,24 @@ const swept = await parallel(jobs.map((j, idx) => () => agent(
   `You are ONE lane of a healthcare-practice lead sweep for a commercial real estate advisor (tenant/buyer representation only) covering: ${j.region}. Your lane, and ONLY your lane: ${j.lane}. Search the live web. Target PRIVATE practices (dental, medical, vet, chiro, vision, therapy, fitness/wellness) — never hospitals or corporate/institutional systems. Return every candidate you find with a real source URL; do NOT filter for quality — grade confidence instead (HIGH/MEDIUM/LOW) and include weak-but-plausible finds at LOW. Empty lanes return an empty list honestly.`,
   { label: `sweep:${idx + 1}`, phase: 'Sweep', model: 'sonnet', schema: FINDINGS })))
 
-// Dedupe is an edge, not an agent: normalized name + one corroborating field.
-const seen = new Map()
+// Dedupe is an edge, not an agent (WR-AI-008): same normalized name, at least one shared
+// corroborating field (practice or whole location), and no corroborating field that differs.
+const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+const FIELDS = ['practice', 'location']
+const groups = []
 for (const batch of swept.filter(Boolean))
   for (const l of (batch.leads || [])) {
-    const key = `${(l.name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}|${(l.location || l.practice || '').toLowerCase().slice(0, 24)}`
-    if (!seen.has(key)) seen.set(key, l)
-    else {
-      const cur = seen.get(key)
-      cur.signal += ` | ALSO: ${l.signal} (${l.sourceUrl})`
-      if (l.confidence === 'HIGH') cur.confidence = 'HIGH'
-    }
+    const id = { name: norm(l.name) }
+    for (const f of FIELDS) id[f] = norm(l[f])
+    const g = groups.find(g => g.id.name === id.name &&
+      FIELDS.some(f => id[f] && id[f] === g.id[f]) &&
+      FIELDS.every(f => !id[f] || !g.id[f] || id[f] === g.id[f]))
+    if (!g) { groups.push({ id, lead: l }); continue }
+    for (const f of FIELDS) g.id[f] ||= id[f]
+    g.lead.signal += ` | ALSO: ${l.signal} (${l.sourceUrl})`
+    if (l.confidence === 'HIGH') g.lead.confidence = 'HIGH'
   }
-const candidates = [...seen.values()]
+const candidates = groups.map(g => g.lead)
 log(`dedupe: ${candidates.length} unique candidates from ${swept.filter(Boolean).length} lanes`)
 
 phase('Verify')
