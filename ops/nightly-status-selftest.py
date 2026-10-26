@@ -23,9 +23,10 @@ class NightlyStatusTests(unittest.TestCase):
         (self.root / "bin/routine-credential-env.sh").write_text(
             'carr_clear_routine_db_env() { return 0; }\n'
             'carr_load_routine_db_env() { return 0; }\n'
-            'carr_routine_exec() { "$@"; }\n')
+            'carr_routine_exec() { CARR_TEST_CLEAN=1 "$@"; }\n')
         (self.root / "bin/run-scheduled.sh").write_text(
-            '#!/bin/zsh\nkey="$2"; shift 2\nrc=0\n'
+            '#!/bin/zsh\n[ "${CARR_TEST_CLEAN:-}" = 1 ] || exit 91\n'
+            'key="$2"; shift 2\nrc=0\n'
             '[ ! -f "$HOME/outcomes/$key" ] || rc="$(cat "$HOME/outcomes/$key")"\n'
             'print -r -- "$key $rc" >> "$HOME/receipts"\n'
             'print -r -- "child-output $key"\n'
