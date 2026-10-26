@@ -3,7 +3,7 @@ import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.js";
 import { invoiceTrackerTools } from "./invoice-tracker.js";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
-import { isCalendarDate } from "./calendar-date.js";
+import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.js";
 import { factObservationTools } from "./fact-observations.js";
 import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.js";
@@ -83,8 +83,8 @@ import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
 import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.js";
 import { partyIdentityTools } from "./party-identity.js";
-import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.js";
-import { readBriefAssurance } from "./brief-assurance.js";
+import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.ts";
+import { readBriefAssurance } from "./brief-assurance.ts";
 import { readNeedsJoe } from "./needs-joe.js";
 import { scheduleBoardTools } from "./schedule-board.js";
 export { canExercisePartnerAuthority, partnerAuthoritySlugForActor };
@@ -93,7 +93,7 @@ export { canExercisePartnerAuthority, partnerAuthoritySlugForActor };
 
 // Defined in a leaf module so modules tools.js depends on can throw typed,
 // self-naming failures too; re-exported here so existing imports keep working.
-import { ToolError } from "./tool-error.js";
+import { ToolError } from "./tool-error.ts";
 export { ToolError };
 import { parksADecision, classifyLoopText, needsDecider, loopRowText,
          ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.js";
@@ -2622,7 +2622,6 @@ function morningCostSnapshot(value) {
     action: "owner orchestrator: run the cost collector, restore missing billing reads, and verify a fresh complete-day snapshot; auto-clear after a valid snapshot younger than 36 hours." };
   const money = (n) => typeof n === "number" && Number.isFinite(n) && n >= 0;
   const text = (s) => typeof s === "string" && s.length > 0 && s.length <= 500;
-  const date = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && isCalendarDate(s);
   const month = (s) => typeof s === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
   const amounts = (o) => {
     if (!o || typeof o !== "object" || Array.isArray(o) || Object.keys(o).length > 500) throw Error("invalid cost map");
@@ -2633,7 +2632,7 @@ function morningCostSnapshot(value) {
     const age = Date.now() - Date.parse(value?.observed_at);
     if (value?.schema !== "carr-system-costs.v1" || !["ready", "partial"].includes(value.state)
         || !Number.isFinite(age) || age < -300000 || age > 36 * 3600000
-        || !month(value.month) || !date(value.through) || !text(value.action)
+        || !month(value.month) || !isCalendarDate(value.through) || !text(value.action)
         || !Array.isArray(value.providers) || value.providers.length > 30
         || !Array.isArray(value.months) || value.months.length > 24
         || !Array.isArray(value.alerts) || value.alerts.length > 100) return unavailable;
@@ -2649,7 +2648,7 @@ function morningCostSnapshot(value) {
         reason: row.reason, mtd_usd: row.mtd_usd, projection_usd: row.projection_usd,
         budget_usd: row.budget_usd, ...(typeof row.estimated === "boolean" ? { estimated: row.estimated } : {}),
         daily: row.daily.map((day) => {
-          if (!date(day.day) || !money(day.usd)) throw Error("invalid cost day");
+          if (!isCalendarDate(day.day) || !money(day.usd)) throw Error("invalid cost day");
           return { day: day.day, usd: day.usd, drivers: amounts(day.drivers) };
         }) };
     });
@@ -3439,7 +3438,7 @@ export const TOOLS = {
         value = { items: await readBriefLoops(c) };
         key = briefLoopKey(scope.sponsor);
       }
-      const page = await briefQueuePage(value.items, { ...args, key, ToolError,
+      const page = await briefQueuePage(value.items, { ...args, key,
         scope: JSON.stringify([organizationTenantForActor(actor), scope.sponsor, args.queue]) });
       return { ...value, ...page, count: page.returned, sponsor: scope.sponsor, state: value.state ?? (page.total ? "ready" : "empty"),
         total_scope: value.state === "partial" ? "available_sources" : "eligible_queue" };
@@ -3459,7 +3458,7 @@ export const TOOLS = {
       if (scope.status !== "personal") throw new ToolError({ error: "morning_brief_requires_partner_scope" });
       try {
         return { sponsor: scope.sponsor, ...await briefQueuePage(await readBriefAssurance(c, scope.sponsor), { ...args,
-          key: briefAssuranceKey, ToolError,
+          key: briefAssuranceKey,
           scope: JSON.stringify([organizationTenantForActor(actor), scope.sponsor, "assurance_cadence"]) }) };
       } catch (error) {
         if (error instanceof ToolError) throw error;

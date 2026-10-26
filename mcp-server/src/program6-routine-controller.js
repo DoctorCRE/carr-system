@@ -5,7 +5,7 @@
 // a route adapter rather than a second mutation implementation.
 import { callTool } from "./mcp.js";
 import { needsJoeAdvisory } from "./jev-needs-joe-advisory.js";
-import { ToolError } from "./tools.js";
+import { ToolError } from "./tool-error.ts";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const HUMAN_REF = /^WR-[0-9]{1,12}$/;
