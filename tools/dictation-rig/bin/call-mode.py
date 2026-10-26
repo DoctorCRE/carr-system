@@ -212,7 +212,9 @@ def current_state(recordings: Path = RECORDINGS) -> dict[str, Any]:
             age = time.time() - newest.stat().st_mtime
         except OSError:
             age = TERMINAL_AGE_SECONDS + 1
-        if age <= TERMINAL_AGE_SECONDS:
+        post_call_status = read_json(newest / post_call.STATUS_FILE) or {}
+        needs_attention = post_call_status.get("state") == "needs_attention"
+        if needs_attention or age <= TERMINAL_AGE_SECONDS:
             context = read_json(newest / CONTEXT_FILE) or {}
             base = {
                 "session": newest.name,
@@ -220,6 +222,8 @@ def current_state(recordings: Path = RECORDINGS) -> dict[str, Any]:
                 "speaker_labels": context.get("speaker_labels") or {},
                 "local_partner": local_partner,
             }
+            if needs_attention:
+                return {"state": "needs_attention", "extraction_attempts": post_call_status.get("extraction_attempts", 0), **base}
             if (newest / "ingested.json").exists():
                 return {"state": "filed", **base}
             if (newest / "transcript.json").exists():
@@ -369,8 +373,8 @@ header{background:var(--deep);color:white;padding:18px 22px;display:flex;align-i
 const $=(s)=>document.querySelector(s);let snapshot={state:'idle'};
 const elapsed=(iso)=>{if(!iso)return'0:00';const n=Math.max(0,Math.floor((Date.now()-Date.parse(iso))/1000));return Math.floor(n/60)+':'+String(n%60).padStart(2,'0')};
 function paint(s){snapshot=s;const rec=s.state==='recording';$('#stage').classList.toggle('recording',rec);$('#startRow').hidden=rec;$('#consentRow').hidden=rec;$('#stop').hidden=!rec;
-  $('#timer').textContent=rec?elapsed(s.started_at):({idle:'Ready',transcribing:'Processing',ready_to_extract:'Transcript ready',filed:'Summary saved',state_unknown:'Check Quill'}[s.state]||s.state);
-  $('#status').textContent=rec?'Recording is live.':s.state==='transcribing'?'Quill is transcribing both audio tracks locally.':s.state==='ready_to_extract'?'The local transcript is ready for extraction.':s.state==='filed'?'The confirmed meeting summary has been saved.':s.state==='state_unknown'?'A partial session was found, but Call Mode cannot verify that Quill is still recording.':'Quill is ready on this Mac.';
+  $('#timer').textContent=rec?elapsed(s.started_at):({idle:'Ready',transcribing:'Processing',ready_to_extract:'Transcript ready',filed:'Summary saved',state_unknown:'Check Quill',needs_attention:'Needs attention'}[s.state]||s.state);
+  $('#status').textContent=rec?'Recording is live.':s.state==='needs_attention'?'Post-call extraction stopped after three attempts. The local transcript is saved for investigation.':s.state==='transcribing'?'Quill is transcribing both audio tracks locally.':s.state==='ready_to_extract'?'The local transcript is ready for extraction.':s.state==='filed'?'The confirmed meeting summary has been saved.':s.state==='state_unknown'?'A partial session was found, but Call Mode cannot verify that Quill is still recording.':'Quill is ready on this Mac.';
   const l=s.speaker_labels||{};$('#speakers').innerHTML=l.mic?'<b>'+l.mic+'</b> on the microphone · <b>'+l.system+'</b> on system audio':'Separate tracks identify the local partner and the other side without a third-party voiceprint.'}
 async function api(path,body){const r=await fetch('/api/'+path,{method:body?'POST':'GET',headers:body?{'content-type':'application/json','X-CARR-Call-Mode':'deal-room-v1'}:{},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw new Error(d.error||'Call Mode failed');return d}
 async function refresh(){try{paint(await api('state'))}catch(e){$('#status').textContent=e.message}}
