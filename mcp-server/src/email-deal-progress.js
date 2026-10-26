@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 
 const CONTRACT = 'email-deal-progress.v1';
+const transitions = new Map([
+  ['site_selection', { toPhase: 'negotiation', additionalEvidence: [] }],
+  ['negotiation', { toPhase: 'legal', additionalEvidence: [/\b(?:signed|executed)\b/i] }],
+]);
 const properties = {
   deal: { type: 'string', format: 'uuid' },
   activity_id: { type: 'string', format: 'uuid' },
@@ -20,13 +24,15 @@ export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lo
         and a.kind='email_in' and a.occurred_at<=now()
       ${lock ? 'for update of d for share of a,cl,p' : ''}`, [args.deal,args.activity_id])).rows[0];
     if (!row) fail('email_deal_evidence_not_found');
-    if (row.phase !== 'site_selection') fail('email_deal_phase_not_eligible');
+    const transition = transitions.get(row.phase);
+    if (!transition || !transition.additionalEvidence.every(pattern => pattern.test(args.evidence_quote)))
+      fail('email_deal_phase_not_eligible');
     if (!row.detail?.includes(args.evidence_quote) ||
         !/\b(?:LOI|letter of intent)\b/i.test(args.evidence_quote)) fail('email_deal_quote_invalid');
     const source = { activity_id: row.activity_id, summary: row.summary,
       occurred_at: new Date(row.occurred_at).toISOString(), evidence_ref: `activity:${row.activity_id}` };
     const result = { contract: CONTRACT, status: 'proposed', deal: row.deal_id, deal_name: row.name,
-      client_id: row.client_id, base_version: row.version, from_phase: row.phase, to_phase: 'negotiation',
+      client_id: row.client_id, base_version: row.version, from_phase: row.phase, to_phase: transition.toPhase,
       evidence_quote: args.evidence_quote, source, requires_confirmation: true };
     const digest = createHash('sha256').update(JSON.stringify({ ...result,
       activity_version: row.activity_version, captured_body: row.detail })).digest('hex');
@@ -35,7 +41,7 @@ export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lo
   return {
     'confirm-email-deal-progress': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: 'Joe confirms the displayed LOI-receipt proposal. Requires the preview digest and unchanged source text, linkage and deal version. Moves only site selection to negotiation through update-deal and retains the email quote in deal history. No sends or automatic phase moves.',
+      description: 'Joe confirms the displayed LOI-receipt or signed-LOI proposal. Requires the preview digest and unchanged source text, linkage and deal version. Moves site selection to negotiation for LOI receipt, or negotiation to legal for a signed or executed LOI, through update-deal and retains the email quote in deal history. No sends or automatic phase moves.',
       inputSchema: schema({ proposal_digest: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' },
         idempotency_key: { type: 'string', minLength: 1, maxLength: 200 } }),
       handler: async (c, actor, args) => {
@@ -58,7 +64,7 @@ export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lo
     },
     'preview-email-deal-progress': {
       write: false,
-      description: 'Propose site selection to negotiation from a selected captured inbound email and a literal LOI evidence quote. Select the exact deal first. Captured text may be a preview. This does not classify, execute email instructions, or change a record. Joe must review whether the quote proves LOI receipt.',
+      description: 'Propose site selection to negotiation for LOI receipt, or negotiation to legal for a signed or executed LOI, from a selected captured inbound email and a literal evidence quote. Select the exact deal first. Captured text may be a preview. This does not classify, execute email instructions, or change a record. Joe must review whether the quote proves LOI receipt or signing. Signed or executed wording is a review cue, not proof of execution.',
       inputSchema: schema({}),
       handler: (c, _actor, args) => proposal(c, args),
     },
