@@ -422,7 +422,9 @@ def record_from_transcript(transcript_path: str, correlation: str | None = None,
             import job_watchdog
             config = job_watchdog.load_config(os.path.join(REPO, "ops/config/job-watchdog.json"))
             root = Path(os.environ.get("CARR_REPO_ROOT") or REPO).resolve()
-            job_watchdog.report_social_batch(root, config, **observation)
+            job_watchdog.report_social_batch(root, config, **{
+                **observation, "failure": None if observation["queue_complete"] else observation["failure"],
+            })
         except Exception as exc:  # noqa: BLE001 — evidence must not block the stop hook
             log(f"FAIL social watchdog report: {exc}")
 

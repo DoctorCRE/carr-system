@@ -8,7 +8,7 @@ import {
   deriveRuleDeliverySource,
   literalTriggerMatches,
   ruleDeliverySourceDigest,
-} from "../src/rule-delivery-source.js";
+} from "../src/rule-delivery-source.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "../..");
@@ -148,7 +148,7 @@ test("semantic key order is stable while bound facts change the digest", async (
 
 test("SIEP-02 source never uses the enforcement compiler or flips policy", async () => {
   const files = [
-    await readFile(join(REPO, "mcp-server/src/rule-delivery-source.js"), "utf8"),
+    await readFile(join(REPO, "mcp-server/src/rule-delivery-source.ts"), "utf8"),
     await readFile(join(REPO, "mcp-server/src/work-request-intake.js"), "utf8"),
   ].join("\n");
   assert.equal(files.includes("ops.applicable_rules"), false);

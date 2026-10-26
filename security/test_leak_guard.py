@@ -482,6 +482,22 @@ class LeakGuardTest(unittest.TestCase):
         self.assertEqual(self.matches(corpus, '"version": "2.0.0"\nscores 000 0 000\n'), [])
         self.assertEqual(self.matches(corpus, 'call 212.234.' + '6789\n'), ['client-data'])
 
+    def test_public_county_names_are_not_client_data(self):
+        # A client record can hold a bare county or city name (an address field), which put
+        # "santa rosa" in the corpus; a source file listing the team's counties then failed the push.
+        salt = '12' * 32
+        corpus = guard.make_corpus(['Fictional' + ' Person'], salt)
+        corpus['hashes'] = sorted(corpus['hashes'] + [corpus_hash(salt, 'santa', 'rosa'),
+                                                      corpus_hash(salt, 'walton', 'county')])
+        del corpus['starts'], corpus['start_lengths']
+        corpus = guard.validate_corpus(corpus)
+        counties = 'const COUNTIES = ["Escambia", "Santa Rosa", "Okaloosa", "Walton", "Bay"];\n'
+        self.assertEqual(self.matches(corpus, counties), [])
+        self.assertEqual(self.matches(corpus, 'Walton County and Santa Rosa County\n'), [])
+        self.assertEqual(self.matches(corpus, counties + 'Fictional' + ' Person\n'), ['client-data'])
+        rebuilt = guard.make_corpus(['Santa Rosa', 'Okaloosa County', 'Fictional' + ' Person'], salt)
+        self.assertEqual(rebuilt['hashes'], [corpus_hash(salt, 'fictional', 'person')])
+
     def test_corpus_before_separator_hashing_is_refused_without_values(self):
         corpus = guard.make_corpus(['Fictional' + ' Person'], '12' * 32)
         corpus['schema'] = 'leak-guard-corpus.v1'

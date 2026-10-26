@@ -320,6 +320,21 @@ def main() -> int:
           and "no batch output" in context, out + digest.stderr + context)
     os.unlink(p)
 
+    sid = "selftest-social-zero-" + uuid.uuid4().hex[:8]
+    p = write_fixture([LAUNCH.format(sid=sid, task="social-batch-weekly"),
+                       json.dumps(social_failure)])
+    rc, out = run_hook({"hook_event_name": "Stop", "session_id": sid,
+                         "transcript_path": p, "stop_hook_active": False},
+                        env=unreachable_db_env())
+    digest = subprocess.run([PY, os.path.join(REPO, "hooks", "job-watchdog-digest.py")],
+                            input="{}", text=True, capture_output=True, timeout=30,
+                            env=dict(unreachable_db_env(), CARR_JOB_ROOT=PRIVATE_ROOT))
+    context = json.loads(digest.stdout)["hookSpecificOutput"]["additionalContext"] if digest.stdout else ""
+    check("a social batch reporting zero drafts reaches the existing watchdog digest",
+          rc == 0 and digest.returncode == 0 and "zero drafts" in context,
+          out + digest.stderr + context)
+    os.unlink(p)
+
     print(f"\nTIER 1: {len(PASSES)} passed, {len(FAILURES)} failed")
 
     # ── TIER 2 — only with a real (staging) DATABASE_URL already set ────

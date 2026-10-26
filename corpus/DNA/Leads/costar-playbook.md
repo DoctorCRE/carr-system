@@ -1,6 +1,6 @@
 # CoStar Playbook — what's actually in there, and the ten workflows worth building
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Created 2026-07-13 from a live walk of Joe's logged-in CoStar (Tenants → Tenant Locations, Pensacola - FL market). Everything below was SEEN, not assumed. Where the data is missing, this file says so.*
 

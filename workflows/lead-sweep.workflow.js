@@ -50,7 +50,8 @@ const FINDINGS = { type: 'object', required: ['leads'], properties: { leads: { t
     confidence: { type: 'string', enum: ['HIGH', 'MEDIUM', 'LOW'] } } } } } }
 
 const CHECKS = { type: 'object', required: ['checks'], properties: { checks: { type: 'array', items: {
-  type: 'object', required: ['name', 'exists', 'note'], properties: {
+  type: 'object', required: ['item', 'name', 'exists', 'note'], properties: {
+    item: { type: 'integer', description: 'the claim number from the numbered list' },
     name: { type: 'string', description: 'the lead name EXACTLY as given in the numbered list' },
     exists: { type: 'boolean', description: 'the cited source really says what the finder claims' },
     note: { type: 'string' },
@@ -99,12 +100,15 @@ const BATCH = 5
 const batches = []
 for (let i = 0; i < candidates.length; i += BATCH) batches.push(candidates.slice(i, i + BATCH))
 const checked = await parallel(batches.map((b, bi) => () => agent(
-  `Fresh-context source checks — you have not seen any finder's reasoning. For EACH numbered claim below: open the cited source (plus one cheap corroborating search if warranted) and report whether it actually supports the claim. You are checking EXISTENCE and accuracy only — never whether a lead is "good enough"; qualification belongs to Joe on the board. Unreachable or ambiguous source = say so in the note, do not guess. Echo each name exactly.\n${b.map((l, i) => `${i + 1}. "${l.name}"${l.practice ? ` (${l.practice})` : ''} — ${l.signal.slice(0, 300)} — source: ${l.sourceUrl}`).join('\n')}`,
+  `Fresh-context source checks — you have not seen any finder's reasoning. For EACH numbered claim below: open the cited source (plus one cheap corroborating search if warranted) and report whether it actually supports the claim. You are checking EXISTENCE and accuracy only — never whether a lead is "good enough"; qualification belongs to Joe on the board. Unreachable or ambiguous source = say so in the note, do not guess. Echo each claim number and name exactly.\n${b.map((l, i) => `${i + 1}. "${l.name}"${l.practice ? ` (${l.practice})` : ''} — ${l.signal.slice(0, 300)} — source: ${l.sourceUrl}`).join('\n')}`,
   { label: `verify:batch${bi + 1}`, phase: 'Verify', model: 'sonnet', schema: CHECKS })))
-const byName = new Map()
-for (const c of checked.filter(Boolean))
-  for (const k of (c.checks || [])) byName.set((k.name || '').toLowerCase().trim(), k)
-const verified = candidates.map(l => ({ ...l, check: byName.get((l.name || '').toLowerCase().trim()) || null }))
+// Join by batch + claim number, never by name: same-name leads at different locations
+// stay separate after Dedupe and must keep their own check (WR-000513).
+const byLead = new Map()
+checked.forEach((c, bi) => {
+  for (const k of (c?.checks || [])) if (batches[bi][k.item - 1]) byLead.set(batches[bi][k.item - 1], k)
+})
+const verified = candidates.map(l => ({ ...l, check: byLead.get(l) || null }))
 
 phase('Present')
 const out = verified.filter(Boolean).map(l => ({

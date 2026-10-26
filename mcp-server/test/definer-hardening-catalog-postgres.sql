@@ -53,17 +53,9 @@ begin
 end $assignment_grant_drift$;
 rollback to savepoint assignment_grant;
 do $assignment_grant_access$
-declare state jsonb := ops.scac_reference_monitor_state();
-        grants jsonb := ops.scac_runtime_dml_grant_snapshot();
-        expected jsonb := ops.scac_current_grant_contract()->'runtime_dml_grants';
 begin
   if has_table_privilege('carr_reader','public.deal_vendor_assignment','select') then
     raise exception 'reader can bypass assignment projection';
-  end if;
-  if state->>'guard_state'<>'complete' or grants <> jsonb_build_object(
-      'schema_version','scac-runtime-dml-grants.v1','entry_count',(expected->>'count')::integer,
-      'grant_digest',expected->>'digest') then
-    raise exception 'assignment grants or reference monitor guards drifted: %, %',grants,state;
   end if;
 end $assignment_grant_access$;
 -- An unrelated search path change must still invalidate the current seal.

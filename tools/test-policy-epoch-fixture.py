@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Rollback-only fixture construction must leave usable planner estimates."""
-import importlib.util
 import pathlib
 import sys
 import unittest
@@ -31,17 +30,13 @@ class PlannerCursor:
 
 class FixturePlannerTests(unittest.TestCase):
     def test_bulk_fixture_estimates_match_inserted_rows(self):
-        for name in ("siep12-policy-epoch-local-pg-gate", "siep18-reference-monitor-local-pg-gate"):
-            with self.subTest(gate=name):
-                spec = importlib.util.spec_from_file_location(name, REPO / "ops" / (name + ".py"))
-                assert spec and spec.loader
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                cursor = PlannerCursor()
-                module.seed_reviewed_rule_projection(cursor)
-                self.assertGreater(cursor.rows, 0)
-                self.assertEqual(cursor.estimate, cursor.rows,
-                                 "rollback-only fixture rows cannot be analyzed by autovacuum")
+        from rule_projection_fixture import seed_reviewed_rule_projection
+        cursor = PlannerCursor()
+        seed_reviewed_rule_projection(cursor, slug="policy-epoch-fixture", title="Policy epoch fixture",
+                                      rule_label="Reviewed projection fixture", uuid_tail="000000000001")
+        self.assertGreater(cursor.rows, 0)
+        self.assertEqual(cursor.estimate, cursor.rows,
+                         "rollback-only fixture rows cannot be analyzed by autovacuum")
 
 
 if __name__ == "__main__":

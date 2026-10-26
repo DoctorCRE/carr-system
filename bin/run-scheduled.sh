@@ -84,7 +84,11 @@ counts = frozenset("emails events_past events_upcoming logged preview_only full_
                    "error_key_reuse error_transport_oversized error_no_acknowledgement error_reply_unreadable "
                    "error_transport_error error_invalid_request error_subject_unresolved error_database_refused "
                    "error_setup_failed error_contacts_empty error_contacts_read_failed "
-                   "error_next_action_conflict error_legacy_action_guard_required".split())
+                   "error_next_action_conflict error_legacy_action_guard_required error_agenda_version_conflict "
+                   "calendar_agenda_items calendar_agenda_canceled calendar_agenda_conflicts "
+                   "calendar_agenda_other_accounts calendar_agenda_published calendar_agenda_failed "
+                   "calendar_agenda_time_changed calendar_agenda_recurring calendar_agenda_trimmed "
+                   "calendar_agenda_undecoded".split())
 receipt = None
 with open(sys.argv[1]) as output:
     for line in output:
@@ -109,6 +113,27 @@ PY_RECEIPT
     fi
     print -r -- "outlook-intake-receipt $detail"
   fi
+  "$PY" - "$receipt_file" <<'PY_ROUTER_RECEIPT'
+import json
+import sys
+
+counts = frozenset("emails routed model_failed abandoned recorded refused dropped write_failed "
+                   "queue_failed more out_of_time error".split())
+receipt = None
+with open(sys.argv[1]) as output:
+    for line in output:
+        if line.startswith("email-router-receipt "):
+            try:
+                receipt = json.loads(line[len("email-router-receipt "):])
+            except ValueError:
+                receipt = None
+if (isinstance(receipt, dict) and receipt.get("state") in ("succeeded", "failed", "skipped")
+        and isinstance(receipt.get("counts"), dict)
+        and all(k in counts and type(v) is int and 0 <= v <= 1_000_000_000
+                for k, v in receipt["counts"].items())):
+    print("email-router-receipt " + json.dumps(
+        {k: receipt[k] for k in ("state", "counts")}, sort_keys=True))
+PY_ROUTER_RECEIPT
   rm -f "$receipt_file"
 fi
 

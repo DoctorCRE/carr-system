@@ -45,9 +45,12 @@ import post_call
 
 HOST = "127.0.0.1"
 PORT = 4682
-RECORDINGS = Path.home() / "Recordings"
-CAPTURE_CONFIG = Path.home() / ".config" / "carr-capture" / "config.json"
-LOG_PATH = Path.home() / "Library" / "Logs" / "carr-call-mode.log"
+# The environment overrides exist for the end-to-end rehearsal, which runs this
+# companion against a disposable record layer; capture-poll.sh honours the
+# same CARR_RECORDINGS_DIR.
+RECORDINGS = Path(os.environ.get("CARR_RECORDINGS_DIR") or Path.home() / "Recordings")
+CAPTURE_CONFIG = Path(os.environ.get("CARR_CAPTURE_CONFIG") or Path.home() / ".config" / "carr-capture" / "config.json")
+LOG_PATH = Path(os.environ.get("CARR_CALL_MODE_LOG") or Path.home() / "Library" / "Logs" / "carr-call-mode.log")
 LOCK_PATH = Path.home() / "Library" / "Application Support" / "CARR Call Mode" / "operation.lock"
 CONTEXT_FILE = "call-context.json"
 # The production Deal Room is served at app.doctorcre.com, while
@@ -358,7 +361,7 @@ header{background:var(--deep);color:white;padding:18px 22px;display:flex;align-i
 </style></head><body><main><header><span class="brand">CARR Call Mode</span><span class="bridge">Quill local recorder</span></header>
 <section class="stage" id="stage"><div class="orb">●</div><div class="timer" id="timer">Ready</div><div class="status" id="status">Quill is ready on this Mac.</div><div class="speakers" id="speakers">Separate tracks identify the local partner and the other side without a third-party voiceprint.</div></section>
 <section class="actions"><label id="consentRow" style="display:flex;gap:10px;align-items:flex-start;font-size:12px;color:var(--muted);line-height:1.4"><input id="consent" type="checkbox" style="margin-top:2px">I have told everyone on this call that it will be recorded.</label><div class="row" id="startRow"><button class="primary" data-start="weekly_deal_call">Start weekly deal call</button><button data-start="other_call">Start another call</button></div><button class="danger" id="stop" hidden>Stop and process</button></section>
-<p class="note">The audible recording announcement remains part of Quill. Stopping the call starts local transcription. Deal updates stay in review until Joe or Dell confirms them.</p></main>
+<p class="note">The audible recording announcement remains part of Quill. Stopping the call starts local transcription. Next steps and phases stated plainly update the cards, each listed with Undo; anything unsettled waits for Joe or Dell. Emails stay drafts.</p></main>
 <script>
 const $=(s)=>document.querySelector(s);let snapshot={state:'idle'};
 const elapsed=(iso)=>{if(!iso)return'0:00';const n=Math.max(0,Math.floor((Date.now()-Date.parse(iso))/1000));return Math.floor(n/60)+':'+String(n%60).padStart(2,'0')};

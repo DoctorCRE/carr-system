@@ -21,9 +21,9 @@ const ID = "20000000-0000-0000-0000-000000000032";
 async function rejected(fn) { try { await fn(); assert.fail("expected refusal"); } catch (e) { assert.ok(e instanceof ToolError); return e.payload; } }
 
 class WithdrawFake {
-  constructor({ from = "captured", refusal = null } = {}) {
+  constructor({ from = "captured", refusal = null, hidden = false } = {}) {
     this.calls = []; this.toolCalls = new Map(); this.state = from; this.version = from === "triaged" ? 2 : 1;
-    this.from = from; this.refusal = refusal;
+    this.from = from; this.refusal = refusal; this.hidden = hidden;
   }
   async query(text, params = []) {
     const sql = text.replace(/\s+/g, " ").trim(); this.calls.push({ sql, params });
@@ -46,6 +46,7 @@ class WithdrawFake {
       return { rows: [{ ref: "WR-000032", state: this.state, version: this.version,
         exit_reason: params[2], closed_at: "2026-08-28T00:00:00Z", superseded_by_ref: params[3] }] };
     }
+    if (sql.includes("work-request-intake:withdrawn-subject") && this.hidden) return { rows: [] };
     if (sql.includes("work-request-intake:withdrawn-subject")) return { rows: [{ id: ID, state: this.state, was_triaged: this.from === "triaged" }] };
     if (sql.startsWith("insert into event")) return { rows: [] };
     if (sql.startsWith("insert into tool_call")) { this.toolCalls.set(params[0], { request_hash: params[3], response: JSON.parse(params[4]),
@@ -151,6 +152,20 @@ test("decline returns a clean refusal naming each disallowed state", async () =>
   }
 });
 
+test("decline reads its subject without a row lock and refuses by name when it is unseen", async () => {
+  // carr_writer's RLS update policy hides SIEP program rows from FOR UPDATE
+  // reads; the lock returned no row and the verb threw a TypeError.
+  const db = new WithdrawFake({ from: "ready" });
+  await executeRegisteredTool(db, LOCAL, "decline-work-request", { ...DECLINE, human_ref: "WR-SIEP-00" });
+  const read = db.calls.find(x => x.sql.includes("work-request-intake:withdrawn-subject"));
+  assert.equal(/for update/i.test(read.sql), false);
+  const hidden = new WithdrawFake({ from: "ready", hidden: true });
+  const out = await rejected(() => executeRegisteredTool(hidden, LOCAL, "decline-work-request",
+    { ...DECLINE, idempotency_key: "10000000-0000-0000-0000-000000000098", human_ref: "WR-SIEP-00" }));
+  assert.deepEqual(out, { error: "work_request_not_found", human_ref: "WR-SIEP-00" });
+  assert.equal(hidden.calls.some(x => x.sql.includes("decline_sourced_work_request")), false);
+});
+
 test("decline leaves unexpected database failures visible", async () => {
   const db = new WithdrawFake({ refusal: "connection terminated unexpectedly" });
   await assert.rejects(() => executeRegisteredTool(db, JOE, "decline-work-request", DECLINE),
@@ -208,6 +223,14 @@ test("an empty reason, an unknown field and a self-supersession refuse before an
     assert.equal(out.error, error, `${verb} ${JSON.stringify(args)}`);
     assert.equal(db.calls.length, 0, "an invalid withdrawal never reaches the database");
   }
+});
+
+test("a receipt-key conflict reaches the caller by name and writes no event", async () => {
+  const detail = `withdrawal_receipt_conflict: idempotency key ${KEY} already holds a withdrawal receipt; nothing was declined`;
+  const db = new WithdrawFake({ refusal: detail });
+  const out = await rejected(() => executeRegisteredTool(db, JOE, "decline-work-request", structuredClone(DECLINE)));
+  assert.deepEqual(out, { error: "withdrawal_receipt_conflict", human_ref: DECLINE.human_ref, detail });
+  assert.equal(db.calls.some(x => x.sql.startsWith("insert into event")), false);
 });
 
 test("decline passes the old program catalogs' refs to the database and refuses other shapes", async () => {
