@@ -1,4 +1,5 @@
 import { ToolError } from './tool-error.ts';
+import type { Db, VerbInputs } from './verb-contract.ts';
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 export function clientPortalTools() {
   return {
@@ -10,7 +11,7 @@ export function clientPortalTools() {
         properties: { slug: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,62}$' }, password: { type: 'string', minLength: 1, maxLength: 1024 } },
         required: ['slug', 'password'],
       },
-      handler: async (c, _actor, args) => {
+      handler: async (c: Db, _actor: unknown, args: VerbInputs['read-client-portal']) => {
         if (Object.keys(args).some(key => !['slug', 'password'].includes(key)) ||
             typeof args.slug !== 'string' || !SLUG.test(args.slug) ||
             typeof args.password !== 'string' || !args.password.length || args.password.length > 1024)

@@ -3,7 +3,7 @@ import { ToolError } from "./tool-error.ts";
 import { organizationTenantForActor } from "./identity.js";
 import { NEEDS_JOE_LOCAL_BOARD } from "./needs-joe.js";
 import { partnerAuthoritySlugForActor } from "./partner-authority.js";
-import { integerFields, normalizedEnvelope } from "./safe-integer.js";
+import { integerFields, normalizedEnvelope } from "./safe-integer.ts";
 
 const REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

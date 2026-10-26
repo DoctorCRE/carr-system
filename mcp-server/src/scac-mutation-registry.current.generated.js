@@ -359,7 +359,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "backfill-deal-items": {
     "ingress_key": "mcp-tool:backfill-deal-items",
-    "source_locator": "mcp-server/src/deal-items.js",
+    "source_locator": "mcp-server/src/deal-items.ts",
     "schema_digest": "951a874c8854706a552b3080ed6c371efc6956c400e10757c317d618fe617791",
     "write": true,
     "human_only": true,
@@ -514,7 +514,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "compare-fact-observations": {
     "ingress_key": "mcp-tool:compare-fact-observations",
-    "source_locator": "mcp-server/src/fact-observations.js",
+    "source_locator": "mcp-server/src/fact-observations.ts",
     "schema_digest": "361ab3e2f12dd524f23f96410eaa6507e72339f6494ca585082ef456bb9c598f",
     "write": false,
     "human_only": false,
@@ -541,7 +541,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "complete-deal-item": {
     "ingress_key": "mcp-tool:complete-deal-item",
-    "source_locator": "mcp-server/src/deal-items.js",
+    "source_locator": "mcp-server/src/deal-items.ts",
     "schema_digest": "afab113d866bf2081d0599cdff0eba72209372e77ac0c1573cacf1c4aae91926",
     "write": true,
     "human_only": true,
@@ -559,7 +559,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "confirm-email-deal-progress": {
     "ingress_key": "mcp-tool:confirm-email-deal-progress",
-    "source_locator": "mcp-server/src/email-deal-progress.js",
+    "source_locator": "mcp-server/src/email-deal-progress.ts",
     "schema_digest": "8fcdab540e2c25d37e00d0d25975dc1e4d5d3aca7112c326b59eb64bd051a722",
     "write": true,
     "human_only": true,
@@ -568,7 +568,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "confirm-email-next-step": {
     "ingress_key": "mcp-tool:confirm-email-next-step",
-    "source_locator": "mcp-server/src/email-next-step.js",
+    "source_locator": "mcp-server/src/email-next-step.ts",
     "schema_digest": "28abed1df7d49464dfb3df1fb1cb1a3a49c37500e81379e2202d345c6c5b4f3a",
     "write": true,
     "human_only": true,
@@ -949,7 +949,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "instruct-deal-item": {
     "ingress_key": "mcp-tool:instruct-deal-item",
-    "source_locator": "mcp-server/src/deal-items.js",
+    "source_locator": "mcp-server/src/deal-items.ts",
     "schema_digest": "eb212d3b90bab7fae46ce103f966ac8a290531a0fa731f4d765164e09cfd973a",
     "write": true,
     "human_only": true,
@@ -1084,7 +1084,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "list-fact-conflicts": {
     "ingress_key": "mcp-tool:list-fact-conflicts",
-    "source_locator": "mcp-server/src/fact-observations.js",
+    "source_locator": "mcp-server/src/fact-observations.ts",
     "schema_digest": "fc8a1ff80543bb7a4fac294c21044da3990f1264c375e02aa9901df765f9449b",
     "write": false,
     "human_only": false,
@@ -1410,7 +1410,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "preview-email-deal-progress": {
     "ingress_key": "mcp-tool:preview-email-deal-progress",
-    "source_locator": "mcp-server/src/email-deal-progress.js",
+    "source_locator": "mcp-server/src/email-deal-progress.ts",
     "schema_digest": "01563165207c5295db5f140cf83fcfc593ba0e9e8973a033244709709a4c2d25",
     "write": false,
     "human_only": false,
@@ -1419,7 +1419,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "preview-email-next-step": {
     "ingress_key": "mcp-tool:preview-email-next-step",
-    "source_locator": "mcp-server/src/email-next-step.js",
+    "source_locator": "mcp-server/src/email-next-step.ts",
     "schema_digest": "722b7eb2945b75dabf92a52f9ba999c3d33c39dca8c1c5fe79635e3b819747e0",
     "write": false,
     "human_only": false,
@@ -1428,7 +1428,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "promote-fact": {
     "ingress_key": "mcp-tool:promote-fact",
-    "source_locator": "mcp-server/src/fact-observations.js",
+    "source_locator": "mcp-server/src/fact-observations.ts",
     "schema_digest": "5976b93047ba504a919ec7770d0dac843953d7059ac284832ed3d56e20e9f9a9",
     "write": true,
     "human_only": false,
@@ -1455,7 +1455,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "propose-email-lead": {
     "ingress_key": "mcp-tool:propose-email-lead",
-    "source_locator": "mcp-server/src/email-lead-proposal.js",
+    "source_locator": "mcp-server/src/email-lead-proposal.ts",
     "schema_digest": "4ec94c09f595baa72fd5c6d82c7f1bab50f656d58d6e6fd6543c765509f33e25",
     "write": true,
     "human_only": false,
@@ -1572,7 +1572,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "read-client-portal": {
     "ingress_key": "mcp-tool:read-client-portal",
-    "source_locator": "mcp-server/src/client-portal.js",
+    "source_locator": "mcp-server/src/client-portal.ts",
     "schema_digest": "25c4425e3887511ffa3b9a7d402b99e4167a424450ee8f986d53e1f1bd686c7a",
     "write": true,
     "human_only": false,
@@ -1977,7 +1977,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "record-deal-item": {
     "ingress_key": "mcp-tool:record-deal-item",
-    "source_locator": "mcp-server/src/deal-items.js",
+    "source_locator": "mcp-server/src/deal-items.ts",
     "schema_digest": "3adafb91a5d32c51e7386ca06582b49fb074888c19eceb1e5a11415e98f75ae5",
     "write": true,
     "human_only": true,
@@ -2040,7 +2040,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "record-fact-observations": {
     "ingress_key": "mcp-tool:record-fact-observations",
-    "source_locator": "mcp-server/src/fact-observations.js",
+    "source_locator": "mcp-server/src/fact-observations.ts",
     "schema_digest": "ffc4b25e1062de68b6fe937d51d4559f32bf2b5ca3a64a7a5f820b946de96a19",
     "write": true,
     "human_only": false,

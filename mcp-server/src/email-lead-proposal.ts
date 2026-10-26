@@ -4,12 +4,13 @@
 // creates a party or a lead and never reopens a row a partner already judged.
 import { sha256 } from './sha256.ts';
 import { ToolError } from './tool-error.ts';
+import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
 
 const ADDRESS = /^[a-z0-9._%+'-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/;
 const SOURCE = 'outlook-intake';
 
-export function emailLeadProposalTools({ withEnvelope, writeEvent }) {
-  const fail = error => { throw new ToolError({ error }); };
+export function emailLeadProposalTools({ withEnvelope, writeEvent }: { withEnvelope: WithEnvelope; writeEvent: WriteEvent }) {
+  const fail = (error: string): never => { throw new ToolError({ error }); };
   return {
     'propose-email-lead': {
       write: true,
@@ -22,7 +23,7 @@ export function emailLeadProposalTools({ withEnvelope, writeEvent }) {
         first_seen_at: { type: 'string', format: 'date-time' },
         message_ref: { type: 'string', minLength: 1, maxLength: 100 },
       }, required: ['idempotency_key', 'address', 'summary', 'first_seen_at', 'message_ref'] },
-      handler: (c, actor, args) => withEnvelope(c, actor, 'propose-email-lead', args, async () => {
+      handler: (c: Db, actor: Actor, args: VerbInputs['propose-email-lead']) => withEnvelope(c, actor, 'propose-email-lead', args, async () => {
         const address = String(args.address || '').trim().toLowerCase();
         const summary = String(args.summary || '').trim();
         const seen = Date.parse(args.first_seen_at);
