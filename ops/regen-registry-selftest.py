@@ -23,6 +23,7 @@ class RegistryMergeTests(unittest.TestCase):
         shutil.copy(ROOT / 'mcp-server/package.json', self.repo / 'mcp-server/package.json')
         (self.repo / 'mcp-server/node_modules').symlink_to(ROOT / 'mcp-server/node_modules')
         shutil.copy(ROOT / 'ops/scac-mutation-inventory.mjs', self.repo / 'ops')
+        shutil.copy(ROOT / 'ops/git_env.py', self.repo / 'ops')
         shutil.copy(ROOT / 'run.sh', self.repo)
         if (ROOT / 'tools/regen.py').exists():
             shutil.copy(ROOT / 'tools/regen.py', self.repo / 'tools')
@@ -51,8 +52,8 @@ class RegistryMergeTests(unittest.TestCase):
         self.assertIn(REGISTRY, self.git('diff', '--name-only', '--diff-filter=U').stdout)
         self.conflicted = (self.repo / REGISTRY).read_bytes()
 
-    def command(self, *args, check=True):
-        result = subprocess.run(args, cwd=self.repo, env=self.environment, capture_output=True, text=True)
+    def command(self, *args, check=True, input=None):
+        result = subprocess.run(args, cwd=self.repo, env=self.environment, capture_output=True, text=True, input=input)
         if check:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result
@@ -88,9 +89,58 @@ class RegistryMergeTests(unittest.TestCase):
         (self.repo / 'mcp-server/src/fixture-b.js').write_text('invalid javascript !\n')
         result = self.regen()
         self.assertNotEqual(result.returncode, 0)
+        self.assertIn('SyntaxError', result.stderr)
         self.assertEqual((self.repo / REGISTRY).read_bytes(), self.conflicted)
         self.assertEqual(self.git('diff', '--name-only', '--diff-filter=U').stdout.strip(), REGISTRY)
 
+    def test_sealed_metadata_conflict_is_refused_unchanged(self):
+        theirs = self.git('show', f':3:{REGISTRY}').stdout
+        changed = theirs.replace('SCAC_MUTATION_DB_METADATA_AUTHORITY = true',
+                                 'SCAC_MUTATION_DB_METADATA_AUTHORITY = false')
+        blob = self.command('git', 'hash-object', '-w', '--stdin', input=changed).stdout.strip()
+        self.command('git', 'update-index', '--index-info', input=f'100644 {blob} 3\t{REGISTRY}\n')
+        before = self.git('ls-files', '--stage').stdout
+        result = self.regen()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('sealed metadata or grants', result.stderr)
+        self.assertEqual((self.repo / REGISTRY).read_bytes(), self.conflicted)
+        self.assertEqual(self.git('ls-files', '--stage').stdout, before)
+
+    def test_source_conflict_is_refused_unchanged(self):
+        source = 'mcp-server/src/fixture-b.js'
+        blob = self.git('rev-parse', f'HEAD:{source}').stdout.strip()
+        entries = f'0 {"0" * 40}\t{source}\n'
+        entries += ''.join(f'100644 {blob} {stage}\t{source}\n' for stage in (1, 2, 3))
+        self.command('git', 'update-index', '--index-info', input=entries)
+        before = self.git('ls-files', '--stage').stdout
+        result = self.regen()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('resolve source conflicts', result.stderr)
+        self.assertEqual((self.repo / REGISTRY).read_bytes(), self.conflicted)
+        self.assertEqual(self.git('ls-files', '--stage').stdout, before)
+
+
+    def test_manual_metadata_edit_is_preserved_on_refusal(self):
+        edited = self.conflicted.replace(b'SCAC_MUTATION_DB_METADATA_AUTHORITY = true',
+                                         b'SCAC_MUTATION_DB_METADATA_AUTHORITY = false')
+        (self.repo / REGISTRY).write_bytes(edited)
+        before = self.git('ls-files', '--stage').stdout
+        result = self.regen()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('edits outside operations', result.stderr)
+        self.assertEqual((self.repo / REGISTRY).read_bytes(), edited)
+        self.assertEqual(self.git('ls-files', '--stage').stdout, before)
+
+    def test_inherited_index_cannot_redirect_regeneration(self):
+        other_index = self.repo / 'other-index'
+        shutil.copy(self.repo / '.git/index', other_index)
+        before = other_index.read_bytes()
+        self.environment['GIT_INDEX_FILE'] = str(other_index)
+        result = self.regen()
+        del self.environment['GIT_INDEX_FILE']
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(other_index.read_bytes(), before)
+        self.assertEqual(self.git('diff', '--name-only', '--diff-filter=U').stdout, '')
 
 if __name__ == '__main__':
     unittest.main()
