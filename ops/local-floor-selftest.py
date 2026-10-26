@@ -2,6 +2,7 @@
 """Exercise the real local Git hooks and push floor in disposable repositories."""
 from pathlib import Path
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -115,6 +116,7 @@ class PushFloorTests(RepositoryFixture):
     def setUp(self):
         super().setUp()
         self.copy("ops/ci.sh")
+        self.copy("ops/ci-pushfloor.py")
         self.copy("ops/node_test_summary.py")
         for name in ("ops/no-client-deliverables-gate.py", "ops/hook-deletion-check.py",
                      "ops/ci-selftest.py"):
@@ -128,7 +130,8 @@ class PushFloorTests(RepositoryFixture):
         self.write("ops/example-selftest.py", "from pathlib import Path\n"
                    "with Path('calls').open('a') as log:\n    log.write('paired\\n')\n")
         self.write("mcp-server/src/scac-mutation-registry.current.generated.js", "// baseline\n")
-        self.commit("ops/ci.sh", "ops/node_test_summary.py", "ops/no-client-deliverables-gate.py",
+        self.commit("ops/ci.sh", "ops/ci-pushfloor.py", "ops/node_test_summary.py",
+                    "ops/no-client-deliverables-gate.py",
                     "ops/hook-deletion-check.py", "ops/ci-selftest.py", "bin/type-check.sh",
                     "bin/node", "hooks/example.py", "ops/example-selftest.py",
                     "mcp-server/src/scac-mutation-registry.current.generated.js")
@@ -173,6 +176,76 @@ class PushFloorTests(RepositoryFixture):
         result = self.run_floor("ops/example-selftest.py")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.calls(), ["paired"])
+
+    def verdict(self, result):
+        match = re.search(r"(OK|FAIL)\s+pushfloor\s+(.*)", re.sub(r"\x1b\[[0-9;]*m", "", result.stdout))
+        self.assertIsNotNone(match, result.stdout + result.stderr)
+        return match.groups()
+
+    def stub(self, name, call, status=0):
+        self.write(name, "from pathlib import Path\nimport sys\n"
+                   "with Path('calls').open('a') as log:\n"
+                   f"    log.write(' '.join([{call!r}, *sys.argv[1:]]) + '\\n')\n"
+                   f"raise SystemExit({status})\n")
+        self.commit(name)
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+
+    def test_summary_names_the_checks_that_ran(self):
+        result = self.run_floor("hooks/example.py")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.verdict(result)[0], "OK")
+        self.assertRegex(self.verdict(result)[1], r"^\d+s · baseline, path shape \+ types gate-closure$")
+
+    def test_failures_are_named_with_remedies_and_failed_logs_kept(self):
+        self.write("ops/no-client-deliverables-gate.py", "print('tracked client path')\nraise SystemExit(1)\n")
+        with (self.repo / "ops/example-selftest.py").open("a") as source:
+            source.write("raise SystemExit(7)\n")
+        result = self.run_floor("hooks/example.py")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(self.verdict(result)[0], "FAIL")
+        self.assertRegex(self.verdict(result)[1],
+                         r"^failed: no-client-deliverables example-selftest \(\d+s\)$")
+        self.assertIn("tracked client path", result.stderr)
+        self.assertIn("git rm it", result.stderr)
+        self.assertIn("fails its own acceptance test: .venv/bin/python ops/example-selftest.py",
+                      result.stderr)
+        logs = Path(re.search(r"ci-retained-logs: (.*)", result.stderr).group(1))
+        self.addCleanup(shutil.rmtree, logs, True)
+        log = logs / "pushfloor-no-client-deliverables.log"
+        self.assertEqual(log.read_text(), "tracked client path\n")
+        self.assertEqual(Path(f"{log}.rc").read_text(), "1\n")
+        self.assertTrue((logs / "pushfloor-example-selftest.log.rc").is_file())
+        self.assertFalse((logs / "pushfloor-hook-deletion.log").exists())
+
+    def test_absent_mypy_is_reported_as_not_run(self):
+        self.write("bin/type-check.sh", "#!/bin/sh\nexit 78\n").chmod(0o755)
+        result = self.run_floor("hooks/example.py")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("not run\x1b[0m  types — mypy absent", result.stderr)
+        self.assertRegex(self.verdict(result)[1], r"path shape \+ gate-closure$")
+
+    def test_path_hygiene_judges_only_paths_new_to_main(self):
+        self.stub("ops/githooks/path-hygiene-check.py", "hygiene")
+        self.write("notes/new-note.txt", "new\n")
+        result = self.run_floor("notes/new-note.txt", "hooks/example.py")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), ["hygiene --paths notes/new-note.txt", "paired"])
+
+    def test_migration_change_runs_the_structure_gate(self):
+        self.stub("ops/migration-order-gate.py", "order", status=3)
+        self.write("migrations/0001_fixture.sql", "select 1;\n")
+        result = self.run_floor("migrations/0001_fixture.sql")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), ["order"])
+        self.assertIn("reserve a forward migration number", result.stderr)
+        self.assertRegex(self.verdict(result)[1], r"^failed: migration-structure \(\d+s\)$")
+
+    def test_a_runner_that_dies_without_a_verdict_fails_the_class(self):
+        self.write("ops/ci-pushfloor.py", "raise SystemExit(2)\n")
+        result = self.run_floor("hooks/example.py")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(self.verdict(result),
+                         ("FAIL", "push floor runner exited 2 without a verdict"))
 
 
 if __name__ == "__main__":

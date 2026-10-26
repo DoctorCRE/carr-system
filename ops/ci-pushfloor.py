@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+"""Run ops/ci.sh's pushfloor class: the diff-scoped checks a push must pass locally.
+
+ci.sh calls this from the repository root and owns the class verdict. Detail goes to
+stderr; the one stdout line is the verdict text. Exit 0 passes the class, 1 fails it.
+Each check writes <logdir>/pushfloor-<name>.log and .rc, which ci.sh's exit trap
+keeps only for failures.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+RED, YELLOW, RESET = "\033[31m", "\033[33m", "\033[0m"
+MIGRATION_STRUCTURE = re.compile(
+    r"^(migrations/|db/migration-baseline\.json$|tools/migration_(number_contract|baseline|source)\.py$"
+    r"|ops/migration-order-gate\.py$)")
+TEST_COLLECTION = re.compile(r"(^ops/ci\.sh$|(^|/)(test[^/]*|[^/]*selftest[^/]*)\.(py|sh|mjs|js)$)")
+SCAC_ATLAS = re.compile(
+    r"^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.current\.generated\.js"
+    r"|ops/config/scac-registry-.*\.json)$")
+GATE_SURFACE = re.compile(
+    r"^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/[^/]+-selftest\.py)")
+MISSING_PACKAGE = re.compile(r"Error.*Cannot find package '")
+
+
+def git_lines(*args):
+    """Output lines of a git command, or None when it fails."""
+    result = subprocess.run(["git", *args], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    if result.returncode != 0:
+        return None
+    return [line for line in result.stdout.decode(errors="surrogateescape").splitlines() if line]
+
+
+def words(lines):
+    """Split like an unquoted shell expansion of newline-joined lines."""
+    return " ".join(lines).split()
+
+
+class Floor:
+    def __init__(self, logdir, python):
+        self.logdir = Path(logdir)
+        self.python = python
+        self.failures = []
+        self.ran = []
+
+    def run(self, name, *command):
+        log = self.logdir / f"pushfloor-{name}.log"
+        with log.open("wb") as out:
+            try:
+                rc = subprocess.run(command, stdout=out, stderr=subprocess.STDOUT).returncode
+            except OSError as error:
+                out.write(f"{command[0]}: {error.strerror}\n".encode())
+                rc = 127
+        Path(f"{log}.rc").write_text(f"{rc}\n")
+        return rc, log
+
+    def py(self, name, script, *args):
+        return self.run(name, self.python, script, *args)
+
+    def fail(self, name, remedy, log=None, tail=None):
+        if log is not None:
+            lines = log.read_bytes().splitlines(keepends=True)
+            sys.stderr.buffer.write(b"".join(lines if tail is None else lines[-tail:]))
+            sys.stderr.flush()
+        self.failures.append(name)
+        print(f"        {RED}{name}{RESET} — {remedy}", file=sys.stderr, flush=True)
+
+
+def changed_paths(diff_range):
+    """Paths this push changes that also differ from main; main unreadable keeps them all."""
+    if not diff_range:
+        return []
+    changed = git_lines("diff", "--name-only", "--diff-filter=ACMR", diff_range) or []
+    main_changed = git_lines("diff", "--name-only", "origin/main", "HEAD")
+    if main_changed is not None:
+        changed = sorted(set(changed) & set(main_changed))
+    return changed
+
+
+def new_to_main(diff_range):
+    added = git_lines("diff", "--name-only", "--diff-filter=ACR", diff_range) or []
+    main_paths = git_lines("ls-tree", "-r", "--name-only", "origin/main")
+    if main_paths is not None:
+        added = sorted(set(added) - set(main_paths))
+    return added
+
+
+def check(floor, diff_range, gates_deferred):
+    changed = changed_paths(diff_range)
+
+    rc, log = floor.py("no-client-deliverables", "ops/no-client-deliverables-gate.py")
+    if rc:
+        floor.fail("no-client-deliverables", "a client-deliverable path is tracked. git rm it — "
+                   "this repo is public and must carry no client record.", log, 12)
+
+    rc, log = floor.py("hook-deletion", "ops/hook-deletion-check.py")
+    if rc:
+        floor.fail("hook-deletion", "remove hook registrations before deleting or renaming their scripts", log)
+
+    if changed and Path("ops/githooks/path-hygiene-check.py").is_file():
+        added = new_to_main(diff_range)
+        if added:
+            rc, log = floor.py("path-hygiene", "ops/githooks/path-hygiene-check.py", "--paths", *words(added))
+            if rc:
+                floor.fail("path-hygiene", "rename the path before it is published — depth or draft/final "
+                           "naming (rule 0e22e34a). After the push it needs a history rewrite.", log, 12)
+
+    if any(MIGRATION_STRUCTURE.search(path) for path in changed):
+        floor.ran.append("migration-structure")
+        rc, log = floor.py("migration-structure", "ops/migration-order-gate.py")
+        if rc:
+            floor.fail("migration-structure",
+                       "reserve a forward migration number and repair every reference before push", log, 15)
+
+    if any(TEST_COLLECTION.search(path) for path in changed):
+        floor.ran.append("test-collection")
+        rc, log = floor.py("test-collection", "ops/ci-selftest.py", "--collection-only")
+        if rc:
+            floor.fail("test-collection",
+                       "include the new test in CI's collection or its named decision exception", log, 12)
+
+    if any(path.endswith(".py") for path in changed):
+        rc, log = floor.run("types", "./bin/type-check.sh")
+        if rc == 78:
+            print(f"        {YELLOW}not run{RESET}  types — mypy absent; the hosted types class still covers this",
+                  file=sys.stderr, flush=True)
+        else:
+            floor.ran.append("types")
+            if rc:
+                floor.fail("types", "run the configured type check: ./bin/type-check.sh", log, 20)
+
+    if any(SCAC_ATLAS.search(path) for path in changed):
+        floor.ran.append("scac-atlas")
+        rc, log = floor.run("scac-atlas", "node", "--test",
+                            "mcp-server/test/atlas-inventory-graph-read.test.mjs",
+                            "mcp-server/test/atlas-inventory-graph-web.test.mjs")
+        if rc:
+            tail = log.read_bytes().splitlines(keepends=True)[-18:]
+            sys.stderr.buffer.write(b"".join(tail))
+            missing = next((line for line in log.read_text(errors="replace").splitlines()
+                            if MISSING_PACKAGE.search(line)), None)
+            if missing is not None:
+                sys.stderr.buffer.write(missing.encode(errors="replace") + b"\n")
+                floor.fail("scac-atlas", "missing Node packages; run npm ci --prefix mcp-server before push")
+            else:
+                floor.fail("scac-atlas", "active registry changed; update the Atlas version contract "
+                           "or repair its reader before push")
+
+    surface = [path for path in changed if GATE_SURFACE.search(path)]
+    if surface:
+        floor.ran.append("gate-closure")
+        unclassified = []
+        hooks = [path for path in surface
+                 if re.search(r"^hooks/[^/]+\.py$", path) and not path.endswith("-selftest.py")]
+        for gate in words(hooks):
+            base = Path(gate).name[:-len(".py")] if gate.endswith(".py") else Path(gate).name
+            paired = f"ops/{base}-selftest.py"
+            if not Path(paired).is_file():
+                unclassified.append(base)
+            elif paired not in surface:  # A changed selftest runs in the next loop.
+                rc, log = floor.py(f"{base}-selftest", paired)
+                if rc:
+                    floor.fail(f"{base}-selftest", "the gate you changed fails its own acceptance test: "
+                               f".venv/bin/python {paired}", log, 15)
+
+        for paired in words(path for path in surface if re.search(r"^ops/[^/]+-selftest\.py$", path)):
+            if Path(paired).is_file():
+                name = Path(paired).name
+                rc, log = floor.py(name, paired)
+                if rc:
+                    floor.fail(name, f"run it alone: .venv/bin/python {paired}", log, 15)
+
+        for isolation in ("ops/hook-env-isolation-selftest.py", "ops/selftest-git-isolation-check.py"):
+            if Path(isolation).is_file():
+                name = Path(isolation).name
+                rc, log = floor.py(name, isolation)
+                if rc:
+                    floor.fail(name, f"run it alone to iterate: .venv/bin/python {isolation}", log, 12)
+
+        if unclassified and gates_deferred:
+            floor.ran.append("gates-deferred")
+            print(f"        {YELLOW}deferred{RESET}   gates — no paired selftest for: {' '.join(unclassified)}"
+                  " — the full class runs hosted (required check on main)", file=sys.stderr)
+            print("                   run it locally now: ops/ci.sh --only gates"
+                  " · durable fix: add ops/<gate>-selftest.py", file=sys.stderr, flush=True)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--logdir", required=True)
+    parser.add_argument("--gates-deferred", action="store_true",
+                        help="the gates class is not selected in this run")
+    args = parser.parse_args(argv)
+    started = int(time.time())
+    floor = Floor(args.logdir, sys.executable)
+    check(floor, os.environ.get("CARR_CI_RANGE", ""), args.gates_deferred)
+    seconds = int(time.time()) - started
+    if floor.failures:
+        print(f"failed: {' '.join(floor.failures)} ({seconds}s)")
+        return 1
+    ran = f" + {' '.join(floor.ran)}" if floor.ran else ""
+    print(f"{seconds}s · baseline, path shape{ran}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

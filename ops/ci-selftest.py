@@ -37,7 +37,7 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/node_test_summary.py",
+            "ops/ci.sh", "ops/ci-pushfloor.py", "ops/node_test_summary.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
             "ops/hook-deletion-check.py", "ops/githooks/path-hygiene-check.py",
