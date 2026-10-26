@@ -1,3 +1,4 @@
+// Tests complete decision reads by identifier and prefix.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { TOOLS } from '../src/tools.js';
