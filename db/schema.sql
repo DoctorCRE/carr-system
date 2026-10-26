@@ -83644,7 +83644,7 @@ CREATE TABLE public.critical_date (
     created_by uuid NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by uuid,
-    CONSTRAINT critical_date_status_check CHECK ((status = ANY (ARRAY['open'::text, 'passed'::text, 'cleared'::text])))
+    CONSTRAINT critical_date_status_check CHECK ((status = ANY (ARRAY['open'::text, 'passed'::text, 'cleared'::text, 'dropped'::text, 'done'::text])))
 );
 
 
@@ -122779,6 +122779,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0985_call_mode_auto_apply.sql	df11b5b4b02f9062ff62c77c692e39263f5d6be59a1884143487cdde21f93f3f	1970-01-01 00:00:00+00
 0986_decline_requires_its_receipt.sql	293e6e21f95341bf47a2b8a10a9ab0f4f27024358843fa7182056d4fe96f7868	1970-01-01 00:00:00+00
 0987_email_proposal.sql	c0ab5328442e86d95e28c629575002b6b73ef28dd0d183f7ddee253bcaea77fd	1970-01-01 00:00:00+00
+0988_critical_date_resolution.sql	539b1b091142e7c9376499a610eff336acf51836cc99749d2b0a0c8ac7c8a7fe	1970-01-01 00:00:00+00
 \.
 
 
