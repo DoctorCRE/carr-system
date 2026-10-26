@@ -783,6 +783,38 @@ test('confirming through the existing verbs resolves the stored proposal', async
   assert.ok(rows.every(row => row.resolved_by === actor.id));
 });
 
+test('confirming a stored proposal twice resolves it once', async () => {
+  await c.query('delete from email_proposal');
+  const source = await email();
+  await record({ kind: 'phase_move', activity_id: source.activity_id, evidence_quote: quote });
+  const [item] = await listed();
+  const key = randomUUID();
+  const first = await confirm(item.preview, { idempotency_key: key }, actor, 'carr_writer');
+  const replay = await confirm(item.preview, { idempotency_key: key }, actor, 'carr_writer');
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.email_proposal_id, first.email_proposal_id);
+  await assert.rejects(confirm(item.preview, {}, actor, 'carr_writer'),
+    error => error.payload?.error === 'email_deal_phase_not_eligible');
+  const rows = (await c.query('select status,version from email_proposal')).rows;
+  assert.deepEqual(rows, [{ status: 'confirmed', version: 2 }]);
+});
+
+test('Joe confirming from a stale card after a dismissal wins and keeps the dismissal as a note', async () => {
+  await c.query('delete from email_proposal');
+  const ask = await email(askQuote);
+  const recorded = await record({ kind: 'next_step', activity_id: ask.activity_id, evidence_quote: askQuote,
+    text: 'Send the floor plan', next_date: '2027-01-08' });
+  const [card] = await listed();
+  await command('dismiss-email-proposal', { idempotency_key: randomUUID(), proposal_id: recorded.proposal_id,
+    base_version: 1, reason: 'Dell already sent it' }, { ...actor, slug: 'dell' }, 'carr_writer');
+  const result = await confirmStep(card.preview, {}, actor, 'carr_writer');
+  assert.equal(result.email_proposal_id, recorded.proposal_id);
+  const row = (await c.query('select status,version,resolution_reason from email_proposal')).rows[0];
+  assert.deepEqual(row, { status: 'confirmed', version: 3,
+    resolution_reason: 'Confirmed by Joe after dismissal: Dell already sent it' });
+  assert.deepEqual(await listed(), []);
+});
+
 test('a partner dismisses a stored proposal at the version read, and it never returns', async () => {
   await c.query('delete from email_proposal');
   const source = await email();
@@ -803,8 +835,10 @@ test('a partner dismisses a stored proposal at the version read, and it never re
   assert.deepEqual(await listed(), []);
   const room = await command('get-deal-room', { deal });
   assert.equal(room.phase, 'site_selection');
-  const events = room.events.filter(event => event.verb === 'dismiss-email-proposal');
-  assert.equal(events.at(-1).new_value.reason, 'Already handled by phone');
+  const events = room.events.filter(event => event.verb === 'dismiss-email-proposal'
+    && event.new_value.proposal_id === recorded.proposal_id);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].new_value.reason, 'Already handled by phone');
 });
 
 test('stored proposals need literal email evidence and refuse instructions to the record layer', async () => {

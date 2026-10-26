@@ -1,6 +1,6 @@
 {
   "schema": "doc-drift-baseline/v1",
-  "source_sha": "c992a50908d0eb83a368dc68355de23e7e9935dc",
+  "source_sha": "25d322b5ce89e7d674f224b77d2823d54da48daf",
   "findings": [
     {
       "file": ".agents/skills/codebase-design/UPSTREAM.md",
@@ -13,9 +13,34 @@
       "target": "agents/openai.yaml"
     },
     {
-      "file": "README.md",
+      "file": ".agents/skills/scrawl/SKILL.md",
       "kind": "path",
-      "target": "CRITIQUE-LOG.md"
+      "target": "scrawl.json"
+    },
+    {
+      "file": ".agents/skills/scrawl/SKILL.md",
+      "kind": "path",
+      "target": "scrawl.json"
+    },
+    {
+      "file": ".agents/skills/scrawl/SKILL.md",
+      "kind": "path",
+      "target": "scrawl.json"
+    },
+    {
+      "file": ".claude/skills/scrawl/SKILL.md",
+      "kind": "path",
+      "target": "scrawl.json"
+    },
+    {
+      "file": ".claude/skills/scrawl/SKILL.md",
+      "kind": "path",
+      "target": "scrawl.json"
+    },
+    {
+      "file": ".claude/skills/scrawl/SKILL.md",
+      "kind": "path",
+      "target": "scrawl.json"
     },
     {
       "file": "README.md",
@@ -38,89 +63,129 @@
       "target": "renewal-radar.json"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "RECOVERY.md",
       "kind": "path",
-      "target": ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md"
+      "target": "exporters/dossier-roster.local.json"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "RECOVERY.md",
       "kind": "path",
-      "target": ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md"
+      "target": "exporters/templates"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "RECOVERY.md",
       "kind": "path",
-      "target": ".cursor/automations/benny/skills/setup-benny/SKILL.md"
+      "target": "tools/dictation-rig/vocab-local.txt"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "_to_delete/frontier-finding/comparison-report.md",
       "kind": "path",
-      "target": ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md"
+      "target": "compare_targets.py"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "_to_delete/frontier-finding/comparison-report.md",
       "kind": "path",
-      "target": ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md"
+      "target": "gen_frontier_manifest.py"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "_to_delete/frontier-finding/comparison-report.md",
       "kind": "path",
-      "target": ".cursor/benny/configuration.yaml"
+      "target": "migrations/0454-0471"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "_to_delete/frontier-finding/comparison-report.md",
       "kind": "path",
-      "target": ".cursor/benny/feature-map.md"
+      "target": "migrations/0454-0471"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "_to_delete/frontier-finding/comparison-report.md",
       "kind": "path",
-      "target": ".cursor/benny/routing.md"
+      "target": "migrations/0454-0471"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "_to_delete/frontier-finding/comparison-report.md",
       "kind": "path",
-      "target": ".cursor/settings.json"
+      "target": "migrations/0454-0471"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "_to_delete/frontier-finding/comparison-report.md",
       "kind": "path",
-      "target": ".cursor/settings.json"
+      "target": "parse_extract_targets.py"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "_to_delete/frontier-finding/comparison-report.md",
       "kind": "path",
-      "target": ".cursor/settings.json"
+      "target": "rerender_observed_comments.py"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "_to_delete/frontier-finding/cs-review-trail.md",
       "kind": "path",
-      "target": "FOR_AGENTS.md"
+      "target": "db-tap.py"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "_to_delete/frontier-finding/cs-review-trail.md",
       "kind": "path",
-      "target": "FOR_AGENTS.md"
+      "target": "db-tap.py"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
       "kind": "path",
-      "target": "FOR_AGENTS.md"
+      "target": "breakglass-run.py"
     },
     {
-      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
       "kind": "path",
-      "target": "FOR_AGENTS.md"
+      "target": "census-reconciliation-matrix.v1.json"
     },
     {
-      "file": "_to_delete/benny-skills/triage-issue-reports/SKILL.md",
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
       "kind": "path",
-      "target": "trigger.ts"
+      "target": "docs/frontier-finding/breakglass-run.py"
     },
     {
-      "file": "_to_delete/benny-skills/triage-issue-reports/references/routing.example.md",
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
       "kind": "path",
-      "target": ".cursor/benny/routing.md"
+      "target": "frontier-touched-objects.v1.json"
+    },
+    {
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
+      "kind": "path",
+      "target": "gen-breakglass-run.py"
+    },
+    {
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
+      "kind": "path",
+      "target": "gen-census-matrix.py"
+    },
+    {
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
+      "kind": "path",
+      "target": "gen-frontier-manifest.py"
+    },
+    {
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
+      "kind": "path",
+      "target": "migrations/0467"
+    },
+    {
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
+      "kind": "path",
+      "target": "migrations/0471"
+    },
+    {
+      "file": "_to_delete/frontier-finding/r13-frontier-forensics.md",
+      "kind": "path",
+      "target": "ops/config/scac-registry-full-entry-set-seals.json"
+    },
+    {
+      "file": "_to_delete/frontier-finding/r13-frontier-forensics.md",
+      "kind": "path",
+      "target": "ops/schema-snapshot-registry-seed-selftest.py"
+    },
+    {
+      "file": "_to_delete/frontier-finding/target-identity-contract.md",
+      "kind": "path",
+      "target": "migrations/0454"
     },
     {
       "file": "claude-tree/agents/README.md",
@@ -229,8 +294,18 @@
     },
     {
       "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "command",
+      "target": "check"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
       "kind": "path",
       "target": "Management/panhandle-team-deals.json"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "bin/refresh-rules.sh"
     },
     {
       "file": "claude-tree/agents/it-lane-worker.md",
@@ -445,6 +520,11 @@
     {
       "file": "claude-tree/skills/network-debrief/SKILL.md",
       "kind": "path",
+      "target": "vendor/prospect"
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "kind": "path",
       "target": "weekly-routine.md"
     },
     {
@@ -508,9 +588,24 @@
       "target": "Management/system-evolution-plan.md"
     },
     {
+      "file": "corpus/00_Context/model-tiering.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "corpus/DNA/Deal Management/deal-analysis-toolkit.md",
       "kind": "path",
       "target": "Media/content-inspiration-bank.md"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/deal-analysis-toolkit.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/legal-considerations-lease-review.md",
+      "kind": "verb",
+      "target": "teach"
     },
     {
       "file": "corpus/DNA/Deal Management/pipeline-coo-doctrine.md",
@@ -521,6 +616,26 @@
       "file": "corpus/DNA/Deal Management/pipeline-coo-doctrine.md",
       "kind": "path",
       "target": "Management/panhandle-team-deals.json"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/pipeline-coo-doctrine.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/playbooks/diligence-and-valuation.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/playbooks/financing.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/playbooks/negotiation.md",
+      "kind": "verb",
+      "target": "teach"
     },
     {
       "file": "corpus/DNA/Deal Management/playbooks/practice-os-playbooks.md",
@@ -543,6 +658,16 @@
       "target": "introduction-rules.md"
     },
     {
+      "file": "corpus/DNA/Deal Management/playbooks/practice-os-playbooks.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/playbooks/renewals.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "corpus/DNA/Deal Management/purchase-vs-lease-fill-guide.md",
       "kind": "path",
       "target": "fill-engine/fill-it-in-workflow.md"
@@ -556,6 +681,16 @@
       "file": "corpus/DNA/Deal Management/purchase-vs-lease-fill-guide.md",
       "kind": "path",
       "target": "fill-it-in-workflow.md"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/purchase-vs-lease-fill-guide.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Leads/costar-playbook.md",
+      "kind": "verb",
+      "target": "teach"
     },
     {
       "file": "corpus/DNA/Leads/pipeline-craft.md",
@@ -593,6 +728,16 @@
       "target": "national-accounts-toolkit.md"
     },
     {
+      "file": "corpus/DNA/Leads/pipeline-craft.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/community-group-playbook-2026.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "corpus/DNA/Marketing/Social Media/facebook-ads-playbook-2026.md",
       "kind": "path",
       "target": "hooks-deep-reference-2026.md"
@@ -608,9 +753,19 @@
       "target": "voice-profile.md"
     },
     {
+      "file": "corpus/DNA/Marketing/Social Media/facebook-ads-playbook-2026.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "corpus/DNA/Marketing/Social Media/facebook-strategy-2026.md",
       "kind": "path",
       "target": "Media/x-strategy-2026.md"
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/facebook-strategy-2026.md",
+      "kind": "verb",
+      "target": "teach"
     },
     {
       "file": "corpus/DNA/Marketing/Social Media/instagram-strategy-2026.md",
@@ -623,11 +778,26 @@
       "target": "hooks-deep-reference-2026.md"
     },
     {
+      "file": "corpus/DNA/Marketing/Social Media/instagram-strategy-2026.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "corpus/DNA/Marketing/Social Media/linkedin-strategy-2026.md",
       "kind": "path",
       "target": "Media/x-strategy-2026.md"
     },
     {
+      "file": "corpus/DNA/Marketing/Social Media/linkedin-strategy-2026.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/marketing-playbook.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "corpus/DNA/Network/vendor-by-industry-reference.md",
       "kind": "path",
       "target": "introduction-rules.md"
@@ -636,6 +806,11 @@
       "file": "corpus/DNA/Network/vendor-by-industry-reference.md",
       "kind": "path",
       "target": "introduction-rules.md"
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-by-industry-reference.md",
+      "kind": "verb",
+      "target": "teach"
     },
     {
       "file": "corpus/DNA/Network/vendor-intro-timeline.md",
@@ -658,6 +833,11 @@
       "target": "vendor_intro_for_stage.py"
     },
     {
+      "file": "corpus/DNA/Network/vendor-intro-timeline.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "corpus/DNA/Network/vendor-relationship-craft.md",
       "kind": "path",
       "target": "introduction-rules.md"
@@ -666,6 +846,46 @@
       "file": "corpus/DNA/Network/vendor-relationship-craft.md",
       "kind": "path",
       "target": "introduction-rules.md"
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-relationship-craft.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Reference/dental-vertical-guide.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Reference/medical-vertical-guide.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Reference/other-healthcare-vertical-guide.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Reference/vet-vertical-guide.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Reference/vision-vertical-guide.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Research/costar-how-to.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Research/maps-and-demographics.md",
+      "kind": "verb",
+      "target": "teach"
     },
     {
       "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
@@ -763,6 +983,26 @@
       "target": "social-media-workflow.md"
     },
     {
+      "file": "corpus/DNA/Team/dell-starter-kit/structure-manifest.md",
+      "kind": "path",
+      "target": "vendor/client"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/structure-manifest.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/structure-manifest.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/template-INDEX.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "corpus/DNA/brand-voice.md",
       "kind": "path",
       "target": "instagram-strategy-2026.md"
@@ -778,6 +1018,21 @@
       "target": "social-media-workflow.md"
     },
     {
+      "file": "corpus/DNA/brand-voice.md",
+      "kind": "path",
+      "target": "vendor/industry"
+    },
+    {
+      "file": "corpus/DNA/brand-voice.md",
+      "kind": "path",
+      "target": "vendor/industry"
+    },
+    {
+      "file": "corpus/DNA/brand-voice.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "corpus/DNA/carr-profile.md",
       "kind": "path",
       "target": "Media/social-media-workflow.md"
@@ -788,6 +1043,16 @@
       "target": "clients-active.md"
     },
     {
+      "file": "corpus/DNA/carr-profile.md",
+      "kind": "path",
+      "target": "vendor/referral"
+    },
+    {
+      "file": "corpus/DNA/carr-profile.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "corpus/DNA/objection-bank.md",
       "kind": "path",
       "target": "question-bank.md"
@@ -796,6 +1061,21 @@
       "file": "corpus/DNA/objection-bank.md",
       "kind": "path",
       "target": "referral-network.md"
+    },
+    {
+      "file": "corpus/DNA/objection-bank.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/templates.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/DNA/ux-doctrine.md",
+      "kind": "verb",
+      "target": "teach"
     },
     {
       "file": "corpus/DNA/writing-rules.md",
@@ -811,6 +1091,11 @@
       "file": "corpus/DNA/writing-rules.md",
       "kind": "path",
       "target": "writing-audit/SKILL.md"
+    },
+    {
+      "file": "corpus/DNA/writing-rules.md",
+      "kind": "verb",
+      "target": "teach"
     },
     {
       "file": "corpus/INDEX.md",
@@ -881,6 +1166,21 @@
       "file": "corpus/INDEX.md",
       "kind": "path",
       "target": "renewal-radar-sop.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "verb",
+      "target": "teach"
     },
     {
       "file": "corpus/Marketing/Social Media/social-media-workflow.md",
@@ -1003,6 +1303,11 @@
       "target": "x-strategy-2026.md"
     },
     {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "corpus/Marketing/Social Media/x-article-playbook.md",
       "kind": "path",
       "target": "content-inspiration-bank.md"
@@ -1016,6 +1321,11 @@
       "file": "corpus/Marketing/Social Media/x-article-playbook.md",
       "kind": "path",
       "target": "x-strategy-2026.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/x-article-playbook.md",
+      "kind": "verb",
+      "target": "teach"
     },
     {
       "file": "corpus/_home/.claude/skills/catchup/SKILL.md",
@@ -1048,9 +1358,24 @@
       "target": "team-loops.md"
     },
     {
+      "file": "corpus/_home/.claude/skills/catchup/SKILL.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "corpus/_home/.claude/skills/checkpoint/SKILL.md",
       "kind": "path",
       "target": "checkpoints/2025-06-01-1430.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/checkpoint/SKILL.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/crux/SKILL.md",
+      "kind": "verb",
+      "target": "teach"
     },
     {
       "file": "corpus/_home/.claude/skills/decide/SKILL.md",
@@ -1088,6 +1413,11 @@
       "target": "docs/adr"
     },
     {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "corpus/_home/.claude/skills/handoff/SKILL.md",
       "kind": "path",
       "target": "decision-history.md"
@@ -1103,6 +1433,11 @@
       "target": "open-loops.md"
     },
     {
+      "file": "corpus/_home/.claude/skills/handoff/SKILL.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "corpus/_home/.claude/skills/loose-ends/SKILL.md",
       "kind": "path",
       "target": "open-loops-backlog.md"
@@ -1111,6 +1446,31 @@
       "file": "corpus/_home/.claude/skills/loose-ends/SKILL.md",
       "kind": "path",
       "target": "open-loops.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/loose-ends/SKILL.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/onboard/SKILL.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/options/SKILL.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/premortem/SKILL.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/redteam/SKILL.md",
+      "kind": "verb",
+      "target": "teach"
     },
     {
       "file": "corpus/_home/.claude/skills/til/SKILL.md",
@@ -1128,9 +1488,24 @@
       "target": "gotchas.md"
     },
     {
+      "file": "corpus/_home/.claude/skills/til/SKILL.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/understand-check/SKILL.md",
+      "kind": "verb",
+      "target": "teach"
+    },
+    {
       "file": "design/doctrine-store-build-2026-08-07.md",
       "kind": "path",
       "target": "shared/personal"
+    },
+    {
+      "file": "design/situation-retrieval-build-plan-2026-08-16.md",
+      "kind": "path",
+      "target": "evals/retrieval/baselines/doctrine-fts.2026-08-15.v1.json"
     },
     {
       "file": "design/situation-retrieval-build-plan-2026-08-16.md",
@@ -1143,109 +1518,9 @@
       "target": "docs/adr"
     },
     {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
+      "file": "evals/README.md",
       "kind": "path",
-      "target": "migrations/0454-0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "migrations/0454-0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "migrations/0454-0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "migrations/0454-0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/cs-review-trail.md",
-      "kind": "path",
-      "target": "db-tap.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/cs-review-trail.md",
-      "kind": "path",
-      "target": "db-tap.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "breakglass-run.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "docs/frontier-finding/breakglass-run.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "gen-breakglass-run.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "gen-census-matrix.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "gen-frontier-manifest.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "migrations/0467"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "migrations/0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/target-identity-contract.md",
-      "kind": "path",
-      "target": "migrations/0454"
-    },
-    {
-      "file": "evals/rule-delivery/README.md",
-      "kind": "path",
-      "target": "lib/rule_delivery_preuse.semantic_delivery"
-    },
-    {
-      "file": "evals/rule-delivery/README.md",
-      "kind": "path",
-      "target": "ops/rule_trigger_delivery.advise"
-    },
-    {
-      "file": "hooks/SETTINGS-BLOCK.md",
-      "kind": "path",
-      "target": "gate-baseline.json"
-    },
-    {
-      "file": "hooks/SETTINGS-BLOCK.md",
-      "kind": "path",
-      "target": "hooks/install-record-home-gate.py"
-    },
-    {
-      "file": "hooks/SETTINGS-BLOCK.md",
-      "kind": "path",
-      "target": "hooks/ledger-boundary-sweep.py"
-    },
-    {
-      "file": "hooks/SETTINGS-BLOCK.md",
-      "kind": "path",
-      "target": "ledger-boundary-sweep.py"
-    },
-    {
-      "file": "hooks/SETTINGS-BLOCK.md",
-      "kind": "path",
-      "target": "settings.json"
+      "target": "run_eval.py"
     },
     {
       "file": "migrations/0066_marketing_campaign_and_measurement_spec.md",
@@ -1255,12 +1530,12 @@
     {
       "file": "migrations/README.md",
       "kind": "path",
-      "target": "bin/migrate-prod.sh --through NNNN_name.sql"
+      "target": "tools/next-migration.py"
     },
     {
-      "file": "migrations/README.md",
+      "file": "ops/fixtures/brief-check/gap1.md",
       "kind": "path",
-      "target": "record-layer/schema-draft-2026-07-30.sql"
+      "target": "ops/release-pipeline.py"
     },
     {
       "file": "ops/fixtures/brief-check/gap17.md",
@@ -1268,14 +1543,44 @@
       "target": "are"
     },
     {
+      "file": "ops/fixtures/brief-check/gap9.md",
+      "kind": "path",
+      "target": "ops/claude-continuity-hook.py"
+    },
+    {
+      "file": "ops/fixtures/brief-check/gap9.md",
+      "kind": "path",
+      "target": "ops/claude-continuity-selftest.py"
+    },
+    {
+      "file": "ops/fixtures/brief-check/gap9.md",
+      "kind": "path",
+      "target": "ops/fixtures/real-replay/hook-advisories.jsonl"
+    },
+    {
+      "file": "ops/fixtures/brief-check/gatefix.md",
+      "kind": "path",
+      "target": "hooks/escalation-gate.py"
+    },
+    {
+      "file": "ops/fixtures/brief-check/gatefix.md",
+      "kind": "path",
+      "target": "hooks/escalation-gate.py"
+    },
+    {
+      "file": "ops/flash-reference.md",
+      "kind": "path",
+      "target": "job-flash-knowledge/flash-knowledge.md"
+    },
+    {
       "file": "ops/scheduled-tasks/ai-capability-builder.SKILL.md",
       "kind": "path",
       "target": "SKILL.md"
     },
     {
-      "file": "ops/scheduled-tasks/cc-update-audit.SKILL.md",
-      "kind": "path",
-      "target": "repos/anthropics/claude-code/contents/CHANGELOG.md"
+      "file": "ops/scheduled-tasks/ai-capability-builder.SKILL.md",
+      "kind": "verb",
+      "target": "capability-program"
     },
     {
       "file": "ops/scheduled-tasks/linkedin-engagement-daily.SKILL.md",
@@ -1286,6 +1591,16 @@
       "file": "ops/scheduled-tasks/linkedin-engagement-daily.SKILL.md",
       "kind": "path",
       "target": "Media/linkedin-engagement-engine.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/linkedin-engagement-daily.SKILL.md",
+      "kind": "path",
+      "target": "vendor/referral"
+    },
+    {
+      "file": "ops/scheduled-tasks/linkedin-engagement-daily.SKILL.md",
+      "kind": "path",
+      "target": "vendor/referral-network"
     },
     {
       "file": "ops/scheduled-tasks/notes-sweep-hourly.SKILL.md",
@@ -1438,34 +1753,39 @@
       "target": "weekly-learning-latest.md"
     },
     {
-      "file": "runbooks/rollback-worker.md",
+      "file": "secrets-inventory.md",
       "kind": "path",
-      "target": "server/wrangler.toml"
-    },
-    {
-      "file": "runbooks/rollback-worker.md",
-      "kind": "path",
-      "target": "wrangler.toml"
-    },
-    {
-      "file": "runbooks/rollback-worker.md",
-      "kind": "path",
-      "target": "wrangler.toml"
-    },
-    {
-      "file": "runbooks/rollback-worker.md",
-      "kind": "path",
-      "target": "wrangler.toml"
-    },
-    {
-      "file": "runbooks/rollback-worker.md",
-      "kind": "path",
-      "target": "wrangler.toml"
+      "target": "google-oidc.js"
     },
     {
       "file": "secrets-inventory.md",
       "kind": "path",
-      "target": "google-oidc.js"
+      "target": "ops/typesafe_client.py"
+    },
+    {
+      "file": "secrets-inventory.md",
+      "kind": "path",
+      "target": "tools/check.sh"
+    },
+    {
+      "file": "spec/outlook/README.md",
+      "kind": "path",
+      "target": "manifest.json"
+    },
+    {
+      "file": "spec/outlook/README.md",
+      "kind": "path",
+      "target": "manifest.json"
+    },
+    {
+      "file": "spec/outlook/README.md",
+      "kind": "path",
+      "target": "vendor/hxprobe/target/release/hxprobe"
+    },
+    {
+      "file": "spec/outlook/studio-settings-migration.md",
+      "kind": "path",
+      "target": ".config/carr/outlook-nightly-sweep.folders.md"
     },
     {
       "file": "specs/agent-write-attribution.md",
@@ -1526,6 +1846,11 @@
       "file": "specs/read-path-traversal.md",
       "kind": "path",
       "target": "DECISIONS.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "command",
+      "target": "check"
     },
     {
       "file": "specs/rule-curation-plan-2026-08-02.md",
@@ -1788,34 +2113,29 @@
       "target": "transcribe-session.sh"
     },
     {
+      "file": "tools/dictation-rig/README.md",
+      "kind": "path",
+      "target": "transcript.json"
+    },
+    {
+      "file": "tools/dictation-rig/README.md",
+      "kind": "path",
+      "target": "vendor/product"
+    },
+    {
+      "file": "tools/dictation-rig/README.md",
+      "kind": "path",
+      "target": "vendor/product"
+    },
+    {
+      "file": "tools/dictation-rig/README.md",
+      "kind": "path",
+      "target": "vendor/product"
+    },
+    {
       "file": "tools/doc-convo/README.md",
       "kind": "path",
       "target": "assets/hot-context.md"
-    },
-    {
-      "file": "tools/link-model-bakeoff/README.md",
-      "kind": "path",
-      "target": "results.json"
-    },
-    {
-      "file": "tools/partner-line/README.md",
-      "kind": "path",
-      "target": "partner_ping.py"
-    },
-    {
-      "file": "tools/partner-line/README.md",
-      "kind": "path",
-      "target": "partner_ping.py"
-    },
-    {
-      "file": "tools/partner-line/README.md",
-      "kind": "path",
-      "target": "partner_ping.py"
-    },
-    {
-      "file": "tools/partner-line/README.md",
-      "kind": "path",
-      "target": "partner_ping.py"
     },
     {
       "file": "vendor-patches/README.md",

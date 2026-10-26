@@ -100,7 +100,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'dismiss-email-proposal': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: 'Joe or Dell dismisses one pending email proposal at the version they read, with a reason kept in deal history. The router never re-creates a dismissed proposal for the same deal, email and kind. Changes nothing else.',
+      description: 'Joe or Dell dismisses one pending email proposal at the version they read, with a reason kept in deal history. The router never re-creates a dismissed proposal for the same deal, email and kind. If Joe later confirms the same proposal through its confirm verb, the confirmation wins and the row becomes confirmed with the dismissal kept as a note. Changes nothing else.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: ['idempotency_key', 'proposal_id', 'base_version', 'reason'],
         properties: {
@@ -133,8 +133,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
 
 export async function resolveEmailProposal(c, actor, kind, deal, activityId) {
   const row = (await c.query(`update email_proposal set status='confirmed',version=version+1,
-      resolved_by=$4,resolved_at=now()
-    where kind=$1 and deal_id=$2 and activity_id=$3 and status='pending' returning id`,
+      resolved_by=$4,resolved_at=now(),resolution_reason=case when status='dismissed'
+        then left('Confirmed by Joe after dismissal: '||resolution_reason,500) end
+    where kind=$1 and deal_id=$2 and activity_id=$3 and status in ('pending','dismissed') returning id`,
   [kind, deal.toLowerCase(), activityId.toLowerCase(), actor.id])).rows[0];
   return row?.id ?? null;
 }
