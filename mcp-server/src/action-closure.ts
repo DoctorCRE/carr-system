@@ -1,3 +1,4 @@
+// Close partner-directed actions and critical dates with recorded reasons.
 import { ToolError } from './tool-error.ts';
 import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
 

@@ -864,6 +864,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "37bdfaed2e83c1ff6dea605289fad775ce558d9e9b0e8a3b052844576bbba880",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2672,6 +2673,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "41bc49bd69fc88114bbfd298dfd0ea096ec1ebecdeedaaa5502cda463b495cf2",
     "write": true,
     "human_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },

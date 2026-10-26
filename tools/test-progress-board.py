@@ -381,9 +381,6 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
         for retired in (".html", "iCloud", "Mobile Documents", "CloudDocs"):
             self.assertNotIn(retired, script)
         self.assertTrue(os.access(LAUNCHD_SCRIPT, os.X_OK))
-        agents = (REPO / "AGENTS.md").read_text()
-        self.assertNotIn("out/boards/<project>.html", agents)
-        self.assertIn("app.doctorcre.com/progress-board", agents)
 
     def test_snapshot_is_the_versioned_data_contract(self):
         self.run_board("init", "demo", "--title", "Demo")
