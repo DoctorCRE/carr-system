@@ -225,6 +225,48 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         e.old_value.next_date === yesterday && e.new_value.next_date === null));
     }));
 
+    await t.test('set-next-action records an undated action without an unchanged empty date event', async () => transaction(async () => {
+      await fixture(false);
+      await c.query('update deal set next_date=null where id=$1', [id(4)]);
+      const action = await executeRegisteredTool(c, actor, 'set-next-action', {
+        idempotency_key: randomUUID(), ref: id(4), description: 'Review synthetic terms',
+      });
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_date, null);
+      assert.equal(room.next_actions.find(a => a.id === action.next_action_id).status, 'open');
+      assert.equal(room.events.filter(e => e.verb === 'set-next-action' && e.field === 'next_date').length, 0);
+      assert.equal(room.events.filter(e => e.verb === 'set-next-action' && e.new_value?.next_action === 'Review synthetic terms').length, 1);
+    }));
+
+    await t.test('set-next-action records only changed dates and clears a replaced owner action date', async () => transaction(async () => {
+      await fixture(false);
+      await c.query('update deal set next_date=null where id=$1', [id(4)]);
+      const dates = (await c.query("select (current_date+7)::text as first, (current_date+14)::text as second")).rows[0];
+      const steps = [
+        { due: dates.first, old: null, count: 1 },
+        { due: dates.first, old: null, count: 1 },
+        { due: dates.second, old: dates.first, count: 2 },
+        { due: null, old: dates.second, count: 3 },
+      ];
+      let previous;
+      for (const [index, step] of steps.entries()) {
+        const action = await executeRegisteredTool(c, actor, 'set-next-action', {
+          idempotency_key: randomUUID(), ref: id(4), description: `Review synthetic terms ${index}`,
+          ...(step.due ? { due_on: step.due } : {}),
+        });
+        const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+        assert.equal(room.next_date, step.due);
+        const events = room.events.filter(e => e.verb === 'set-next-action' && e.field === 'next_date');
+        assert.equal(events.length, step.count);
+        assert.ok(events.some(e => e.old_value.next_date === step.old && e.new_value.next_date === step.due));
+        const current = room.next_actions.find(a => a.id === action.next_action_id);
+        assert.equal(current.status, 'open');
+        assert.equal(current.due_on, step.due);
+        if (previous) assert.equal(room.next_actions.find(a => a.id === previous).status, 'dropped');
+        previous = action.next_action_id;
+      }
+    }));
+
     await t.test('set-next-action keeps the current step and its date together', async () => transaction(async () => {
       await fixture(false);
       const dates = (await c.query("select (current_date-1)::text as past, (current_date+7)::text as future")).rows[0];
