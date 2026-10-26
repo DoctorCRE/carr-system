@@ -1,3 +1,4 @@
+// Tests Tour operations foundation contracts, fixtures, and migration safeguards.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";

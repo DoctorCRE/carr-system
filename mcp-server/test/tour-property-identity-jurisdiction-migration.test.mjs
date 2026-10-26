@@ -1,3 +1,4 @@
+// Tests property identity, jurisdiction, and entrance verification migration.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
