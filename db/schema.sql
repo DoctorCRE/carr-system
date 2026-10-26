@@ -84001,6 +84001,39 @@ CREATE TABLE public.document (
 
 
 --
+-- Name: email_proposal; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.email_proposal (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    kind text NOT NULL,
+    deal_id uuid NOT NULL,
+    activity_id uuid NOT NULL,
+    evidence_quote text NOT NULL,
+    task_text text,
+    next_date date,
+    owner text,
+    confidence numeric NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    created_by uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    resolved_by uuid,
+    resolved_at timestamp with time zone,
+    resolution_reason text,
+    CONSTRAINT email_proposal_check CHECK ((((kind = 'phase_move'::text) AND (task_text IS NULL) AND (next_date IS NULL) AND (owner IS NULL)) OR ((kind = 'next_step'::text) AND (task_text IS NOT NULL) AND (next_date IS NOT NULL) AND (owner IS NOT NULL)))),
+    CONSTRAINT email_proposal_check1 CHECK ((((status = 'pending'::text) AND (resolved_by IS NULL) AND (resolved_at IS NULL) AND (resolution_reason IS NULL)) OR ((status = 'confirmed'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL)) OR ((status = 'dismissed'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL) AND (resolution_reason IS NOT NULL)))),
+    CONSTRAINT email_proposal_confidence_check CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))),
+    CONSTRAINT email_proposal_evidence_quote_check CHECK (((length(evidence_quote) >= 10) AND (length(evidence_quote) <= 2000))),
+    CONSTRAINT email_proposal_kind_check CHECK ((kind = ANY (ARRAY['phase_move'::text, 'next_step'::text]))),
+    CONSTRAINT email_proposal_owner_check CHECK ((owner = ANY (ARRAY['joe'::text, 'dell'::text]))),
+    CONSTRAINT email_proposal_resolution_reason_check CHECK (((length(btrim(resolution_reason)) >= 1) AND (length(btrim(resolution_reason)) <= 500))),
+    CONSTRAINT email_proposal_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'confirmed'::text, 'dismissed'::text]))),
+    CONSTRAINT email_proposal_task_text_check CHECK (((length(btrim(task_text)) >= 1) AND (length(btrim(task_text)) <= 500)))
+);
+
+
+--
 -- Name: event; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -99100,6 +99133,22 @@ ALTER TABLE ONLY public.document
 
 
 --
+-- Name: email_proposal email_proposal_kind_deal_id_activity_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_proposal
+    ADD CONSTRAINT email_proposal_kind_deal_id_activity_id_key UNIQUE (kind, deal_id, activity_id);
+
+
+--
+-- Name: email_proposal email_proposal_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_proposal
+    ADD CONSTRAINT email_proposal_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: event event_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -101310,6 +101359,13 @@ CREATE INDEX doctrine_section_review_idx ON public.doctrine_section USING btree 
 --
 
 CREATE INDEX doctrine_section_title_search_idx ON public.doctrine_section USING gin (title_search_vector);
+
+
+--
+-- Name: email_proposal_pending; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX email_proposal_pending ON public.email_proposal USING btree (created_at, id) WHERE (status = 'pending'::text);
 
 
 --
@@ -115101,6 +115157,38 @@ ALTER TABLE ONLY public.document
 
 
 --
+-- Name: email_proposal email_proposal_activity_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_proposal
+    ADD CONSTRAINT email_proposal_activity_id_fkey FOREIGN KEY (activity_id) REFERENCES public.activity(id);
+
+
+--
+-- Name: email_proposal email_proposal_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_proposal
+    ADD CONSTRAINT email_proposal_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.actor(id);
+
+
+--
+-- Name: email_proposal email_proposal_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_proposal
+    ADD CONSTRAINT email_proposal_deal_id_fkey FOREIGN KEY (deal_id) REFERENCES public.deal(id);
+
+
+--
+-- Name: email_proposal email_proposal_resolved_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_proposal
+    ADD CONSTRAINT email_proposal_resolved_by_fkey FOREIGN KEY (resolved_by) REFERENCES public.actor(id);
+
+
+--
 -- Name: event event_actor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -119247,6 +119335,9 @@ grant select on table public.doctrine_snapshot to dot_reader;
 grant select on table public.document to carr_jobs;
 grant insert, select, update on table public.document to carr_writer;
 grant select on table public.document to dot_reader;
+grant select on table public.email_proposal to carr_reader;
+grant insert, select, update on table public.email_proposal to carr_writer;
+grant select on table public.email_proposal to dot_reader;
 grant insert, select on table public.event to carr_authority;
 grant insert, select on table public.event to carr_jobs;
 grant insert, select, update on table public.event to carr_writer;
@@ -122115,6 +122206,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0978_doctrine_title_topic_ranking.sql	852b8da1601a9277e7f9e2cd5fbf1385785af2356b4a08bc92438378c994c72b	1970-01-01 00:00:00+00
 0979_decline_unstarted_ready_work_request.sql	f343b16316d6a744dcf6c20073bedfb9e38695d5f06c56d292ba8797b9c261d6	1970-01-01 00:00:00+00
 0981_client_portal_writer_denials.sql	2380f08e4b75a3ed447b5b99854cfb8b9348308dab81a24c74986602feb56b86	1970-01-01 00:00:00+00
+0982_email_proposal.sql	b2add0c7ca86740b25319442cee3f5680104ef4feca05ec90538209173477585	1970-01-01 00:00:00+00
 \.
 
 

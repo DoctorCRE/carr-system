@@ -13,7 +13,7 @@ const schema = extra => ({ type: 'object', additionalProperties: false,
   properties: { ...properties, ...extra },
   required: [...Object.keys(properties).filter(key => key !== 'owner'), ...Object.keys(extra)] });
 
-export function emailNextStepTools({ ToolError, withEnvelope, writeEvent, lockDealField, setNextStep, setNextAction }) {
+export function emailNextStepTools({ ToolError, withEnvelope, writeEvent, lockDealField, setNextStep, setNextAction, resolveEmailProposal }) {
   const fail = error => { throw new ToolError({ error }); };
   async function proposal(c, args, lock = false) {
     if (!args.text.trim() || !isCalendarDate(args.next_date) || args.next_date.startsWith('0000'))
@@ -77,7 +77,8 @@ export function emailNextStepTools({ ToolError, withEnvelope, writeEvent, lockDe
               cause: 'human_stated', idempotency_key: args.idempotency_key });
           return { ...current, status: 'confirmed', requires_confirmation: false,
             ...(current.owner === 'joe' ? { next_step_id: result.next_step_id } : {}),
-            next_action_id: result.next_action_id };
+            next_action_id: result.next_action_id,
+            email_proposal_id: await resolveEmailProposal(c, actor, 'next_step', current.deal, current.source.activity_id) };
         });
       },
     },
