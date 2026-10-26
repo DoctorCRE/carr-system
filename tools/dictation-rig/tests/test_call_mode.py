@@ -615,12 +615,12 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0]["candidate_status"], "pending")
         self.assertEqual(post_call.sanitized_candidates(self.session)["legacy_items"], [])
         post_call.apply_candidate_statuses(self.session, {"note-candidate": "confirmed"})
-        self.assertIsNone(post_call.retention_ready(self.session, "report-hash"))
+        self.assertIsNone(post_call.retention_ready(self.session, "a" * 64))
         post_call.apply_candidate_statuses(self.session, {"next-step-candidate": "skipped"})
         update = post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0]
         self.assertEqual(update["candidate_status"], "confirmed")
         self.assertEqual(update["next_step"]["candidate_status"], "skipped")
-        self.assertIsNotNone(post_call.retention_ready(self.session, "report-hash"))
+        self.assertIsNotNone(post_call.retention_ready(self.session, "a" * 64))
 
     def test_explicit_phase_move_reaches_review_and_waits_for_its_own_disposition(self) -> None:
         post_call.store_context(self.session, self.context)
@@ -642,10 +642,10 @@ class PostCallTests(unittest.TestCase):
         post_call.apply_candidate_ids(self.session, shaped["bindings"], ["note-candidate", "phase-candidate"])
         self.assertEqual(post_call.sanitized_candidates(self.session)["legacy_items"], [])
         post_call.apply_candidate_statuses(self.session, {"note-candidate": "confirmed"})
-        self.assertIsNone(post_call.retention_ready(self.session, "report-hash"))
+        self.assertIsNone(post_call.retention_ready(self.session, "a" * 64))
         post_call.apply_candidate_statuses(self.session, {"phase-candidate": "skipped"})
         self.assertEqual(post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0]["phase_move"]["candidate_status"], "skipped")
-        self.assertIsNotNone(post_call.retention_ready(self.session, "report-hash"))
+        self.assertIsNotNone(post_call.retention_ready(self.session, "a" * 64))
 
     def test_phase_proposals_reject_unsupported_shapes_and_quarantine_unknown_deals(self) -> None:
         invalid_phases: tuple[object, ...] = ({}, "legal", {"value": "closed"}, {"value": "invoiced"},
@@ -785,7 +785,7 @@ class PostCallTests(unittest.TestCase):
     def test_retention_requires_final_candidate_dispositions(self) -> None:
         post_call.store_context(self.session, self.context)
         post_call.process_session(self.session, distiller=lambda _request: self.output())
-        self.assertIsNone(post_call.retention_ready(self.session, "backend-report-hash"))
+        self.assertIsNone(post_call.retention_ready(self.session, "b" * 64))
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
         assert report is not None
         for list_name in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals"):
@@ -793,9 +793,64 @@ class PostCallTests(unittest.TestCase):
                 item["candidate_id"] = f"{list_name}-{index}"
                 item["candidate_status"] = "confirmed"
         post_call.write_private(self.session / post_call.REPORT_FILE, report)
-        receipt = post_call.retention_ready(self.session, "backend-report-hash")
+        receipt = post_call.retention_ready(self.session, "b" * 64)
         self.assertEqual(receipt["pending_items"], 0)
         self.assertTrue(receipt["aggregate_report_hash"])
+
+    def test_retention_rejects_malformed_backend_report_digest(self) -> None:
+        post_call.store_context(self.session, self.context)
+        post_call.process_session(self.session, distiller=lambda _request: self.output())
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        assert report is not None
+        for list_name in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals"):
+            for index, item in enumerate(report[list_name]):
+                item["candidate_id"] = f"{list_name}-{index}"
+                item["candidate_status"] = "confirmed"
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+
+        for digest in ("", "report-hash", "0" * 63, "g" * 64):
+            with self.subTest(digest=digest):
+                self.assertIsNone(post_call.retention_ready(self.session, digest))
+        unchanged = post_call.read_json(self.session / post_call.REPORT_FILE)
+        self.assertNotIn("backend_report_sha256", unchanged)
+
+    def test_purger_holds_malformed_post_call_hashes_and_preserves_consent(self) -> None:
+        home = Path(self.tmp.name) / "home"
+        session = home / "Recordings" / "2026.01.01-1200"
+        session.mkdir(parents=True)
+        (home / "Library" / "Logs").mkdir(parents=True)
+        (session / "mic.caf").write_bytes(b"synthetic audio")
+        (session / "transcript.json").write_text("synthetic transcript")
+        (session / "announcement.json").write_text('{"announced_at":"synthetic"}')
+        marker = {
+            "post_call": True,
+            "aggregate_report_hash": "not-a-digest",
+            "backend_report_sha256": "not-a-digest",
+            "pending_items": 0,
+            "ingested_at": "2000-01-01T00:00:00Z",
+        }
+        (session / "ingested.json").write_text(json.dumps(marker))
+        script = BIN_DIR / "purge-recordings.sh"
+
+        subprocess.run(["/bin/sh", str(script)], check=True, env={"HOME": str(home), "PATH": os.environ["PATH"]})
+
+        self.assertTrue((session / "mic.caf").exists())
+        self.assertTrue((session / "transcript.json").exists())
+        self.assertTrue((session / "announcement.json").exists())
+        self.assertIn("no-filed-report-hash", (home / "Library" / "Logs" / "recordings-purge.log").read_text())
+
+        marker["aggregate_report_hash"] = "a" * 64
+        (session / "ingested.json").write_text(json.dumps(marker))
+        subprocess.run(["/bin/sh", str(script)], check=True, env={"HOME": str(home), "PATH": "/usr/bin:/bin"})
+        self.assertIn("no-backend-report-hash", (home / "Library" / "Logs" / "recordings-purge.log").read_text())
+
+        marker["backend_report_sha256"] = "b" * 64
+        (session / "ingested.json").write_text(json.dumps(marker))
+        subprocess.run(["/bin/sh", str(script)], check=True, env={"HOME": str(home), "PATH": "/usr/bin:/bin"})
+
+        self.assertFalse((session / "mic.caf").exists())
+        self.assertFalse((session / "transcript.json").exists())
+        self.assertTrue((session / "announcement.json").exists())
 
     def test_command_distiller_is_injectable_and_never_runs_a_real_command_in_tests(self) -> None:
         class Result:

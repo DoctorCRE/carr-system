@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -565,7 +566,7 @@ def apply_candidate_statuses(session_dir: Path, statuses: dict[str, str]) -> dic
 def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | None:
     """Return a purge-safe filing receipt only after every candidate is final."""
     report = read_json(session_dir / REPORT_FILE)
-    if report is None or not isinstance(report_sha256, str) or not report_sha256.strip():
+    if report is None or not isinstance(report_sha256, str) or re.fullmatch(r"[0-9a-fA-F]{64}", report_sha256) is None:
         return None
     items = _report_candidates(report)
     if any(item.get("candidate_status") not in {"confirmed", "skipped", "rejected"} for item in items):
