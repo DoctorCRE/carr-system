@@ -1378,6 +1378,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "party-duplicate-candidates": {
+    "ingress_key": "mcp-tool:party-duplicate-candidates",
+    "source_locator": "mcp-server/src/party-duplicate-candidates.js",
+    "schema_digest": "32955ab25ea9e9e83715fb8807d7a2a43f2216819966fcd0835bbf3eb9537ca9",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "patch-deal-field": {
     "ingress_key": "mcp-tool:patch-deal-field",
     "source_locator": "mcp-server/src/tools.js",
@@ -1889,6 +1898,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-v5-a02-rule-enforcement-coverage",
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-vendor-meetings": {
+    "ingress_key": "mcp-tool:read-vendor-meetings",
+    "source_locator": "mcp-server/src/vendor-meetings.js",
+    "schema_digest": "e15d4a8922a0f8c019e4cdfcc06bfb8ae4b506a00d0bbe319e5eb8fdbd5390cc",
     "write": false,
     "human_only": false,
     "authority_only": false,
