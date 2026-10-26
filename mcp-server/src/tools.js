@@ -44,6 +44,7 @@ import { resourceObservationTools } from "./resource-observation.v5.js";
 import { invoiceAutomation } from "./invoice-automation.js";
 import { emailDealProgressTools } from "./email-deal-progress.js";
 import { emailNextStepTools } from "./email-next-step.js";
+import { emailLeadProposalTools } from "./email-lead-proposal.js";
 import { leadAutomationTools } from "./lead-automation.js";
 import { workflowCutoverTools } from "./workflow-cutover.v5.js";
 import { engineeringRuntimeTools } from "./engineering-runtime.js";
@@ -8852,6 +8853,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "invoice-automation": "mcp-server/src/invoice-automation.js",
   "email-deal-progress": "mcp-server/src/email-deal-progress.js",
   "email-next-step": "mcp-server/src/email-next-step.js",
+  "email-lead-proposal": "mcp-server/src/email-lead-proposal.js",
   "workflow-cutover": "mcp-server/src/workflow-cutover.v5.js",
   "memory": "mcp-server/src/memory.js",
   "codex-continuity": "mcp-server/src/codex-continuity.js",
@@ -10316,6 +10318,7 @@ registerTools(emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lock
 registerTools(emailNextStepTools({ ToolError, withEnvelope, writeEvent, lockDealField,
   setNextStep: (c, actor, args) => TOOLS["set-next-step"].handler(c, actor, args),
   setNextAction: (c, actor, args) => TOOLS["set-next-action"].handler(c, actor, args) }), "email-next-step");
+registerTools(emailLeadProposalTools({ ToolError, withEnvelope, writeEvent }), "email-lead-proposal");
 const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealField,
   updateDeal:(c,actor,args)=>TOOLS["update-deal"].handler(c,actor,args),
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});
