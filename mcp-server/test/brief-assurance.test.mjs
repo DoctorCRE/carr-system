@@ -1,3 +1,4 @@
+// Tests brief assurance queue reads and routing.
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';

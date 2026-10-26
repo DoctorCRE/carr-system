@@ -1,3 +1,4 @@
+// Tests nested argument forwarding through the call-verb tool.
 
 import test from "node:test";
 import assert from "node:assert/strict";
