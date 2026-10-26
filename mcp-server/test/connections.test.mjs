@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CONNECTION_PROVIDERS, connectionsProjection } from '../src/connections.v1.js';
+import { CONNECTION_PROVIDERS, connectionsProjection } from '../src/connections.v1.ts';
 import { resourceObservationTools } from '../src/resource-observation.v5.js';
 const dashboard={generated_at:'2026-10-02T12:00:00Z',providers:[{provider:'model_route',state:'ok',observed_at:'2026-10-02T12:00:00Z',charge:99,estimate:12,allowance:500,configured_capacity:{configured:true}}]};
 test('every named provider appears; configuration and capacity never imply connected or dollar spend',()=>{

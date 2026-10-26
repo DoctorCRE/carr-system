@@ -1,6 +1,6 @@
 // A compiled projection of the cited doctrine, never an independently editable
 // task ledger. A changed or retired source disables the projection until reviewed.
-import { isCalendarDate } from './calendar-date.js';
+import { isCalendarDate } from './calendar-date.ts';
 export const CHECKLIST_SOURCES = Object.freeze([
   { document: 'deal-room-kit', section_id: '5f8a3cbd-fe89-4557-b3f4-5b0bbc53276c', version: 1, content_hash: 'fe11a8c2bf371dcab98a0fba969594df46ee64c6a8be047dba9b6befc3dc6424' },
   { document: 'deal-room-kit', section_id: '7e263aa0-9823-477b-86e3-bd8cf0c32003', version: 1, content_hash: '6d1a03dacdff6d1ae8b5b0ca333f4fd98bcb0f380fa57f99ccaff8cff4a8d14e' },
