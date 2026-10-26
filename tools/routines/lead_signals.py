@@ -4,9 +4,11 @@ import csv
 import io
 import json
 import re
+import sys
 import urllib.parse
 import urllib.request
 import zipfile
+from collections import Counter
 from datetime import timedelta
 from html.parser import HTMLParser
 from pathlib import Path
@@ -85,19 +87,26 @@ def parse_nppes(rows, *, as_of, source, practice_locations=None):
     """Enumeration is the trigger; updates do not fabricate a startup date."""
     cutoff = as_of - timedelta(days=14)
     result = []
+    rejected = Counter()
     locations = practice_locations or {}
     for raw in rows:
-        npi = _text(raw.get("NPI"))
-        if not re.fullmatch(r"\d{10}", npi):
-            raise ValueError("NPPES row requires a 10-digit NPI")
         if "Provider Enumeration Date" not in raw or "Entity Type Code" not in raw:
             raise ValueError("NPPES provider CSV has missing required columns")
-        enumerated = _date(raw.get("Provider Enumeration Date"))
+        npi = _text(raw.get("NPI"))
+        if not re.fullmatch(r"\d{10}", npi):
+            rejected["invalid_npi"] += 1
+            continue
+        try:
+            enumerated = _date(raw.get("Provider Enumeration Date"))
+        except ValueError:
+            rejected["invalid_enumeration_date"] += 1
+            continue
         if enumerated is None or not cutoff <= enumerated <= as_of:
             continue
         entity = _text(raw.get("Entity Type Code"))
         if entity not in {"1", "2"}:
-            raise ValueError("unknown NPPES entity type")
+            rejected["unknown_entity_type"] += 1
+            continue
         addresses = [{"city": raw.get("Provider Business Practice Location Address City Name"),
                       "state": raw.get("Provider Business Practice Location Address State Name"),
                       "zip": raw.get("Provider Business Practice Location Address Postal Code"),
@@ -110,7 +119,8 @@ def parse_nppes(rows, *, as_of, source, practice_locations=None):
         name = (_text(raw.get("Provider Organization Name (Legal Business Name)")) if entity == "2" else
                 " ".join(_text(raw.get(k)) for k in ("Provider First Name", "Provider Middle Name", "Provider Last Name (Legal Name)")).strip())
         if not name:
-            raise ValueError("NPPES provider name missing")
+            rejected["missing_name"] += 1
+            continue
         # A mailing-only tie remains visible with its weak evidence explicitly marked.
         selected = local or mailing
         codes = [_text(raw.get(f"Healthcare Provider Taxonomy Code_{i}")) for i in range(1, 16)]
@@ -123,6 +133,8 @@ def parse_nppes(rows, *, as_of, source, practice_locations=None):
                        "authorized_official": {
                            "name": " ".join(value for field in ("First Name", "Middle Name", "Last Name") if (value := _text(raw.get("Authorized Official " + field)))),
                            "title": _text(raw.get("Authorized Official Title or Position"))}})
+    if rejected:
+        print("NPPES rejected rows: " + json.dumps(rejected, sort_keys=True), file=sys.stderr)
     return result
 
 

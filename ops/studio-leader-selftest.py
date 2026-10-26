@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib.studio_failover import Leader
+from lib.disposable_pg_fixture import postgres_bin_dir
 
 
 class PostgresLeaderTests(unittest.TestCase):
@@ -19,9 +20,10 @@ class PostgresLeaderTests(unittest.TestCase):
         try: import psycopg
         except ImportError: raise unittest.SkipTest('psycopg not installed')
         cls.psycopg = psycopg
-        pg_ctl = next((p for p in ('/opt/homebrew/opt/postgresql@17/bin/pg_ctl',
-                                  '/usr/lib/postgresql/17/bin/pg_ctl') if Path(p).is_file()), shutil.which('pg_ctl'))
-        if not pg_ctl: raise unittest.SkipTest('disposable PostgreSQL binaries unavailable')
+        try:
+            pg_ctl = str(postgres_bin_dir() / 'pg_ctl')
+        except FileNotFoundError:
+            raise unittest.SkipTest('disposable PostgreSQL binaries unavailable')
         if os.getuid() == 0: raise unittest.SkipTest('initdb requires non-root fixture user')
         cls.temp = tempfile.TemporaryDirectory(prefix='carr-failover-pg-', dir='/tmp')
         cls.base = Path(cls.temp.name)

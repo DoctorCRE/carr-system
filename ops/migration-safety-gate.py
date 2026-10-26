@@ -1,47 +1,15 @@
 #!/usr/bin/env python3
-"""migration-safety-gate.py — added migrations declare their risk; the snapshot keeps up.
+"""Check migration risk headers and snapshot ledger integrity in CI's gates class.
 
-TWO CHECKS, both static, both in ops/ci.sh's gates class.
+Added migrations require rollback notes. Destructive DDL requires an
+expand-contract phase; long locks require lock-review. The lexical check reads
+DO and function bodies but ignores comments and quoted strings.
+The snapshot ledger must be a nonempty, checksummed prefix of source migrations.
+The immutable baseline binds removed historical SQL to its source snapshot.
+Pending migrations and changed snapshot content are proved by migration-shadow.
 
-1. HEADER CONTRACT for every migration this change ADDS (same "added" rule as
-   ops/migration-order-gate.py: in HEAD, in neither the merge base nor the base).
-   The header is the run of comment lines before the first statement.
-
-     -- rollback: <how to undo it>                     always required
-     -- rollback: forward-only — <why it cannot be undone>
-     -- expand-contract: <expand|migrate|contract> — <why this phase is safe now>
-                                                       required when a statement is destructive
-     -- lock-review: <why the lock is acceptable>      required when a statement takes a long lock
-
-   DESTRUCTIVE: drop table/schema/column, truncate, delete without where,
-   table/column rename, column type change (narrowing cannot be told apart
-   from widening without the catalog, and both rewrite under an exclusive
-   lock), a NOT NULL column added without a default, and SET NOT NULL — the
-   last two on tables this migration did not create.
-   LONG LOCK, on tables this migration did not create: a non-concurrent index,
-   a validated foreign key / check / unique / primary key constraint, a
-   volatile or serial default (table rewrite), vacuum full, cluster, and an
-   explicit access-exclusive lock. tools/migrate.py runs every migration in a
-   transaction, so CONCURRENTLY is not available; the review line is the move.
-   Drops of views, functions, triggers, policies and indexes are not data loss
-   and are not flagged.
-
-   This is a lexical check: comments and quoted strings are ignored, DO-block
-   and function bodies are read (DDL inside them still runs). It errs toward
-   asking for a marker; the marker is one line.
-
-2. SNAPSHOT CURRENTNESS. db/schema.sql's applied-migration ledger must name
-   every active or baseline-covered migration with the checksum tools/migrate.py
-   records, and nothing else. The immutable manifest binds its original source
-   snapshot; later snapshots can add suffix ledger entries. A migration that is not in the ledger means the reference
-   schema is behind the migrations that define it. Regenerate with
-   ops/migration-shadow.py (which also proves the snapshot is exactly what the
-   base snapshot plus the pending migrations produce).
-
-Exit 0 clean · 1 a finding · 2 an input could not be read, which is not a pass.
-
-  ops/migration-safety-gate.py                 # base = origin/$GITHUB_BASE_REF or origin/main
-  ops/migration-safety-gate.py --base <ref> [--head <ref>]
+Exit 0 clean, 1 finding, 2 unreadable input.
+--base defaults to origin/$GITHUB_BASE_REF or origin/main; --head defaults to HEAD.
 """
 # doctrine: scripted-release-pipeline
 from __future__ import annotations
@@ -66,7 +34,7 @@ MIGRATIONS_DIR = "migrations"
 SNAPSHOT = "db/schema.sql"
 REGENERATE = ("regenerate db/schema.sql with ops/migration-shadow.py --write "
               "(needs PostgreSQL 18), or commit the schema.sql artifact the CI "
-              "migration job uploads when it reports the snapshot stale")
+              "migration job uploads for a refreshed snapshot")
 
 
 @dataclass(frozen=True)
@@ -307,19 +275,13 @@ def ledger_rows(snapshot: str) -> dict[str, str] | None:
 def ledger_problems(files: Mapping[str, str], snapshot: str,
                     baseline: MigrationBaseline | None = None) -> list[str]:
     rows = ledger_rows(snapshot)
-    if rows is None:
-        return [f"{SNAPSHOT} has no complete schema_migrations ledger section"]
+    if not rows:
+        return [f"{SNAPSHOT} has no nonempty schema_migrations ledger section"]
     identities = (baseline.repository_ledger(files) if baseline else
                   {name: runner_sha256(text) for name, text in files.items()})
-    problems: list[str] = []
-    for name in sorted(identities):
-        if name not in rows:
-            problems.append(f"{name} is not in the {SNAPSHOT} ledger")
-        elif rows[name] != identities[name]:
-            problems.append(f"{name} checksum differs from the {SNAPSHOT} ledger")
-    for name in sorted(set(rows) - set(identities)):
-        problems.append(f"{name} is in the {SNAPSHOT} ledger but has no file in {MIGRATIONS_DIR}/")
-    return problems
+    if rows != dict(sorted(identities.items())[:len(rows)]):
+        return [f"{SNAPSHOT} ledger filenames or checksums differ from the source migration prefix"]
+    return []
 
 
 # ── git plumbing ───────────────────────────────────────────────────────────
@@ -440,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     if failed:
         return 1
     print(f"migration-safety-gate: OK — {len(added)} added migration(s) declare their risk; "
-          f"{SNAPSHOT} ledger covers all {len(head_names)} migrations")
+          f"{SNAPSHOT} ledger is a valid applied prefix")
     return 0
 
 

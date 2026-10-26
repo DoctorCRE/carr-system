@@ -88,12 +88,35 @@ bad()  { RAN=$((RAN+1)); printf '  \033[31mFAIL\033[0m  %-11s %s\n' "$1" "${2:-}
 skip() { RAN=$((RAN+1)); printf '  \033[33mSKIP\033[0m  %-11s %s\n' "$1" "${2:-}"; SKIPPED=$((SKIPPED+1)); SKIPPED_CLASSES="$SKIPPED_CLASSES $1"; }
 
 run_quiet() {  # run_quiet <logfile> <cmd...>  — capture output, return status
-  local log="$1"; shift
+  local log="$1" rc; shift
   "$@" >"$log" 2>&1
+  rc=$?
+  printf '%s\n' "$rc" >"$log.rc"
+  return "$rc"
 }
 
-LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/carr-ci.XXXXXX")"
-trap 'rm -rf "$LOGDIR"' EXIT
+LOGDIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/carr-ci.XXXXXX")" || exit 1
+trap '
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    rm -rf "$LOGDIR"
+  else
+    for status in "$LOGDIR"/*.rc; do
+      [ -f "$status" ] || continue
+      log="${status%.rc}"
+      case "$log" in *.log) ;; *) log="$log.log" ;; esac
+      [ "$(cat "$status")" != 0 ] || rm -f "$log" "$status"
+    done
+    if [ "${GITHUB_ACTIONS:-}" = true ]; then
+      for log in "$LOGDIR"/*.log; do
+        [ -f "$log" ] || continue
+        "$PY" ops/ci-secret-scan.py --redact <"$log" >"$log.redacted" || rm -f "$log.redacted"
+      done
+    fi
+    printf "ci-retained-logs: %s\n" "$LOGDIR" >&2
+  fi
+  exit "$rc"
+' EXIT
 
 fail_tail() {  # fail_tail <logfile>
   local log="$1" lines window
@@ -174,6 +197,12 @@ check_types() {
 
 check_contract() {
   local failures=""
+  local pg_paths rc=0
+  pg_paths="$(git grep -n -F '/opt/homebrew/opt/postgresql@17' -- '*.py' ':!lib/disposable_pg_fixture.py')" || rc=$?
+  if [ "$rc" -ne 1 ]; then
+    failures="$failures PostgreSQL-paths"
+    printf '%s\n' "PostgreSQL paths must use lib/disposable_pg_fixture.py (grep exit $rc)" "$pg_paths" >&2
+  fi
   if [ -f workspace/contracts/validate.mjs ]; then
     run_quiet "$LOGDIR/contract-workspace.log" node workspace/contracts/validate.mjs \
       || { failures="$failures workspace/contracts"; tail -20 "$LOGDIR/contract-workspace.log" >&2; }
@@ -242,8 +271,8 @@ PYEOF
   for t in ops/*-selftest.py tools/test-*.py tools/test_*.py tools/*-selftest.py \
            tools/room-bridge/test_*_unit.py \
            tools/room-bridge/test_activation_reliability.py \
-           test/doc_drift/test_*.py test/doc_drift_product/test_*.py \
-           ops/migration-production-proof.py; do
+           tools/dictation-rig/tests/test_call_mode_runtime.py \
+           test/doc_drift/test_*.py test/doc_drift_product/test_*.py; do
     [ -f "$t" ] || continue
     local base; base="$(basename "$t")"
     local why; why="$(excluded_reason "$base")"
@@ -273,10 +302,9 @@ PYEOF
     if [ "$grc" -eq 124 ]; then
       failures="$failures TIMEOUT:$base"
       gates_timed_out=1
-      printf '        \033[31mTIMEOUT\033[0m  %s — exceeded %ss (pool-scaled); aborting remaining gate selftests\n' \
+      printf '        \033[31mTIMEOUT\033[0m  %s — exceeded %ss (pool-scaled); reporting all completed Python gate results\n' \
         "$base" "$pooled_timeout" >&2
-      tail -12 "$LOGDIR/gate-$base.log" >&2
-      break
+      fail_tail "$LOGDIR/gate-$base.log"
     elif [ "$grc" -eq 78 ]; then
       skiplist="$skiplist $base"
       printf '        \033[33mnot run\033[0m  %s — NOT CONFIGURED (exit 78): %s\n' \
@@ -480,8 +508,13 @@ check_pushfloor() {
       mcp-server/test/atlas-inventory-graph-read.test.mjs \
       mcp-server/test/atlas-inventory-graph-web.test.mjs \
       || { tail -18 "$LOGDIR/pushfloor-scac-atlas.log" >&2
-           floor_fail scac-atlas \
-             "active registry changed; update the Atlas version contract or repair its reader before push"; }
+           if grep -m 1 -E "Error.*Cannot find package '" "$LOGDIR/pushfloor-scac-atlas.log" >&2; then
+             floor_fail scac-atlas \
+               "missing Node packages; run npm ci --prefix mcp-server before push"
+           else
+             floor_fail scac-atlas \
+               "active registry changed; update the Atlas version contract or repair its reader before push"
+           fi; }
   fi
 
   local gate_surface=""
@@ -568,7 +601,7 @@ check_migration_fixtures() {
       return
     fi
   fi
-  if [[ "$MIGRATION_PART" = all ]]; then
+  if [[ "$MIGRATION_PART" = all || "$MIGRATION_PART" = fixtures || "$MIGRATION_PART" = equivalence ]]; then
     if ! run_quiet "$LOGDIR/migration-restore-security.log" \
          "$PY" ops/restore-rehearse-record-selftest.py --postgres; then
       tail -30 "$LOGDIR/migration-restore-security.log" >&2
@@ -594,7 +627,7 @@ check_migration_fixtures() {
          fi
          shadow_note="; migration shadow not run (no PostgreSQL 18 here)" ;;
       *) tail -60 "$LOGDIR/migration-shadow.log" >&2
-         bad migration "migration shadow: pending migrations did not apply over the base snapshot, or db/schema.sql is not what they produce"
+         bad migration "migration shadow: pending migrations failed, or a changed db/schema.sql does not match their result"
          return ;;
     esac
   fi
@@ -1041,13 +1074,13 @@ check_binding() {
       problems="$problems worker-boot"
       tail -40 "$LOGDIR/binding-worker-boot.log" >&2
     fi
-  else
-    printf '        \033[33mskip\033[0m  worker-boot-check — wrangler not installed (run npm install in mcp-server/)\n' >&2
   fi
   if [ -n "$problems" ]; then
     bad binding "drift:$problems"
+  elif [ ! -x mcp-server/node_modules/.bin/wrangler ]; then
+    skip binding "worker boot not checked; wrangler not installed (run npm ci in mcp-server/)"
   else
-    ok binding "worker config declared; worker boot checked when wrangler is installed"
+    ok binding "worker config declared; worker boot passed"
   fi
 }
 

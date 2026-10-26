@@ -10,6 +10,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { TOOLS } from "../src/tools.js";
 import { buildRelease } from "../src/release.js";
 import { mutationManifestIdentity } from "../src/mutation-registry.js";
 
@@ -76,6 +77,10 @@ test("buildRelease: full shape when everything is reachable and stamped", async 
   assert.equal(out.ok, true);
   assert.equal(out.ts, "2026-08-13T21:00:00.000Z");
   assert.equal(out.verb_count, 103);
+  assert.ok(out.verbs.length > 0);
+  assert.ok(out.verbs.every((name) => typeof name === "string"));
+  assert.deepEqual(new Set(out.verbs), new Set(Object.keys(TOOLS)));
+  assert.deepEqual(out.verbs, [...out.verbs].sort());
   assert.equal(out.provider, "cloudflare-workers");
   assert.deepEqual(out.worker_version, {
     id: "cf-version-123",

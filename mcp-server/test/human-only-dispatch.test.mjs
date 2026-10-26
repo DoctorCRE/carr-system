@@ -79,10 +79,17 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "answer-work-request-for-joe",
     "approve-lead-draft",
     "approve-lead-move",
+    "approve-retrieval-proposals",
+    "backfill-deal-items",
+    "cancel-pending-deal",
     "claim-lead",
+    "commit-winning-property",
 
+    "complete-deal-item",
+    "confirm-email-deal-progress",
     "confirm-merge",
     "decide-doc-suggestion",
+    "instruct-deal-item",
     "link-lead-client",
     "propose-doc-correction",
     // V5-F01: installing the field-authority/retention policy and appending a
@@ -92,12 +99,16 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     // calendar adapter to READ their own carr.us mailbox, and its withdrawal.
     "record-commission-receipt",
     "record-correspondence-adapter-consent",
+    "record-deal-closing",
+    "record-deal-item",
     // V5-J102: a lifecycle correction rewrites recorded history, so it is a
     // partner act on the authority connection.
     "record-lifecycle-correction",
     "record-tour-map-promotion-receipt",
     "record-tour-pdf-human-review",
     "register-record-source-authority-policy",
+    "resolve-post-call-candidate",
+    "retire-retrieval-curation",
     "review-and-triage",
     "revoke-correspondence-adapter-consent",
     // V5-RW02: only a verified partner revokes Dell's Salesforce read consent.
@@ -117,8 +128,8 @@ test("the actor classes this gate refuses are the classes identity.js derives", 
 // THE BLOCKING FINDING ITSELF, named on its own so a failure reads as the
 // release defect it is rather than as one row of a loop.
 
-test("verified sponsor-bound agents pass partner-authority gates except human identity merges", async () => {
-  for (const verb of humanOnlyVerbs.filter(name => name !== "confirm-merge")) {
+test("verified sponsor-bound agents pass partner-authority gates except literal-human acts", async () => {
+  for (const verb of humanOnlyVerbs.filter(name => TOOLS[name].humanCallerOnly !== true)) {
     for (const [label, actor] of SPONSORED_PARTNER_ACTORS) {
       const error = await executeRegisteredTool(forbiddenClient, actor, verb, {})
         .then(() => null, (e) => e);

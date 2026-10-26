@@ -176,11 +176,11 @@ class DatabaseDesign(unittest.TestCase):
                          sequence=sequence, role='human', body='Synthetic body', msg_id=uuid.uuid4(),
                          origin_actor='joe')
 
-    def job(self, cognition=None):
+    def job(self):
         key = 'dot-' + uuid.uuid4().hex
         self.c.execute('set local session_replication_role=replica')
         self.c.execute("insert into ops.job_definition(key,version,risk,execution_kind,execution_contract,recurrence,retry_policy,deduplication,completion_contract) values(%s,1,'green',%s,%s,'{}','{}','{}','{}')",
-                       (key, 'cognition' if cognition else 'deterministic', Jsonb({'cognition_job': cognition} if cognition else {'entrypoint': 'synthetic'})))
+                       (key, 'deterministic', Jsonb({'entrypoint': 'synthetic'})))
         token = uuid.uuid4()
         job = self.insert('ops.job', definition_key=key, definition_version=1, idempotency_key=str(uuid.uuid4()),
                           scheduled_for=self.one('select now()'), state='running', attempt=1, max_attempts=1,
@@ -189,13 +189,6 @@ class DatabaseDesign(unittest.TestCase):
         self.insert('ops.job_attempt', job_id=job, attempt=1, lease_owner='synthetic', lease_token=token, state='running')
         self.c.execute('set local session_replication_role=origin')
         return job, token
-
-    def cognition(self):
-        key = 'dot-' + uuid.uuid4().hex
-        self.c.execute('set local session_replication_role=replica')
-        self.c.execute("insert into ops.cognition_job(key,version,input_schema_version,output_schema_version,input_schema,output_schema,max_tokens,max_cost_usd,timeout_seconds,provider_routes) values(%s,1,1,1,'{}','{}',1,1,60,array['synthetic'])", (key,))
-        self.c.execute('set local session_replication_role=origin')
-        return key
 
     def meeting(self):
         return self.seed('ops.meeting', id=uuid.uuid4(), organization_tenant_id='carr-internal',
@@ -352,15 +345,6 @@ class DatabaseDesign(unittest.TestCase):
         refusal=self.refuses("select ops.complete_job(%s,null,'{}','synthetic')",(job,))
         self.assertIsNotNone(refusal, 'NULL lease completed job while attempt stayed running')
 
-    def test_12_cache_collision_preserves_matching_metadata(self):
-        a,b = self.cognition(),self.cognition()
-        ja,ta=self.job(a); jb,tb=self.job(b)
-        key=uuid.uuid4().hex
-        self.one("select ops.put_cognition_cache_for_job(%s,%s,%s,%s,1,1,'{\"contract\":\"A\"}','{}',60)",(ja,ta,key,a))
-        self.one("select ops.put_cognition_cache_for_job(%s,%s,%s,%s,1,1,'{\"contract\":\"B\"}','{}',60)",(jb,tb,key,b))
-        row=self.c.execute('select cognition_key,proposal from ops.cognition_result_cache where cache_key=%s',(key,)).fetchone()
-        self.assertEqual(row, (b,{'contract':'B'}), row)
-
     def test_13_month_boundary_counts_settled_reservations(self):
         j,t=self.job(); j2,t2=self.job(); route=uuid.uuid4().hex
         self.c.execute("insert into ops.provider_route(route_key,priority,endpoint_ref,monthly_budget_usd) values(%s,(select coalesce(max(priority),0)+1 from ops.provider_route),'synthetic',10)",(route,))
@@ -368,13 +352,6 @@ class DatabaseDesign(unittest.TestCase):
         rid=self.one('select ops.reserve_job_cost(%s,%s,%s,6)',(j,t,route))
         self.one('select ops.settle_job_cost(%s,%s,%s,1,1,6)',(rid,j,t))
         self.assertIsNotNone(self.refuses('select ops.reserve_job_cost(%s,%s,%s,6)',(j2,t2,route)), 'second $6 admitted after $6 settled this month')
-
-    def test_14_invalidation_counts_changed_cache_rows(self):
-        a=self.cognition();j,t=self.job(a); key=uuid.uuid4().hex; dep=uuid.uuid4().hex
-        for attempt in range(2):
-            self.one("select ops.put_cognition_cache_for_job(%s,%s,%s,%s,1,1,'{}',array[%s],60)",(j,t,key,a,dep))
-            n=self.one('select ops.invalidate_cognition_cache_for_job(%s,%s,%s)',(j,t,dep))
-            self.assertEqual(n,1, f'invalidation {attempt+1} changed row but returned {n}')
 
     def test_15_cadence_does_not_read_temporary_actor(self):
         before=self.one("select ops.v5_a05_assurance_cadence_batch('joe')")
@@ -558,6 +535,37 @@ class DatabaseDesign(unittest.TestCase):
                 self.assertIsInstance(second,dict,(first,second))
                 self.assertIn(second['refused'],('40001','25001'))
                 self.assertEqual([result['refused'] for result in (first,second)],['25001','25001'])
+
+    def test_26_cache_works_without_unused_evidence_column(self):
+        self.assertFalse(self.one("""select exists(select 1 from information_schema.columns
+            where table_schema='ops' and table_name='cognition_result_cache'
+              and column_name='evidence_refs')"""))
+        cognition = 'dot-' + uuid.uuid4().hex
+        self.c.execute('set local session_replication_role=replica')
+        self.c.execute("insert into ops.cognition_job(key,version,input_schema_version,output_schema_version,input_schema,output_schema,max_tokens,max_cost_usd,timeout_seconds,provider_routes) values(%s,1,1,1,'{}','{}',1,1,60,array['synthetic'])", (cognition,))
+        self.c.execute('set local session_replication_role=origin')
+        key, dependency = uuid.uuid4().hex, uuid.uuid4().hex
+        self.c.execute('set local role carr_jobs')
+        for proposal in ({'synthetic': 'first'}, {'synthetic': 'replacement'}):
+            self.assertTrue(self.one(
+                'select ops.put_cognition_cache(%s,%s,1,1,%s,array[%s],60)',
+                (key, cognition, Jsonb(proposal), dependency)))
+            self.assertEqual(self.one('select ops.get_cognition_cache(%s)', (key,)), proposal)
+        self.assertEqual(self.one('select ops.invalidate_cognition_cache(%s)', (dependency,)), 1)
+        self.assertIsNone(self.one('select ops.get_cognition_cache(%s)', (key,)))
+        self.assertEqual(self.one('select ops.invalidate_cognition_cache(%s)', (dependency,)), 0)
+
+    def test_27_cache_evidence_retirement_refuses_unexpected_dependency(self):
+        self.c.execute("alter table ops.cognition_result_cache add column evidence_refs text[] not null default '{}'")
+        self.c.execute("create temp view synthetic_cache_evidence as select evidence_refs from ops.cognition_result_cache")
+        migration = ROOT / 'migrations/0965_retire_cache_evidence_refs.sql'
+        refusal = self.refuses(migration.read_text())
+        self.assertIsNotNone(refusal, 'retirement removed an unexpected dependent view')
+        self.assertEqual(refusal[0], '2BP01')
+        self.assertTrue(self.one("""select exists(select 1 from information_schema.columns
+            where table_schema='ops' and table_name='cognition_result_cache'
+              and column_name='evidence_refs')"""))
+        self.assertEqual(self.c.execute('select * from synthetic_cache_evidence').fetchall(), [])
 
     def test_19_refused_conversation_rename_leaves_no_revision(self):
         self.isolated_race_database()

@@ -21,6 +21,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib import outlook_intake as intake
+from lib.outlook_settings import load_settings
+from outlook_test_support import write_settings
 
 NOW = datetime(2026, 10, 20, 15, 0, tzinfo=timezone.utc)
 SCHEMA = """
@@ -157,13 +159,20 @@ class Fake:
 
 class IntakeTest(unittest.TestCase):
     def setUp(self):
-        internal = patch.object(intake, '_internal', side_effect=lambda address: address.lower() in (OWNER, PARTNER))
+        scope = patch('lib.outlook_settings.OutlookSettings.verify_helper')
+        scope.start()
+        self.addCleanup(scope.stop)
+        internal = patch.object(intake, '_internal', side_effect=lambda address, domain: address.lower() in (OWNER, PARTNER))
         internal.start()
         self.addCleanup(internal.stop)
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.repo = self.tmp / 'repo'
         self.home = self.tmp / 'home'
+        write_settings(self.home, self.repo, owner='joe')
+        settings = patch.object(intake, 'load_settings', lambda home=None: load_settings(home or self.home))
+        settings.start()
+        self.addCleanup(settings.stop)
         self.store = self.home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity/HxStore.hxd'
         self.store.parent.mkdir(parents=True)
         self.store.write_bytes(b'Nostromo-fixture')
@@ -176,7 +185,9 @@ class IntakeTest(unittest.TestCase):
         copier.start()
         self.addCleanup(copier.stop)
 
-    def copy_snapshot(self, command, *, cwd, **kwargs):
+    def copy_snapshot(self, command, *, cwd=None, **kwargs):
+        if command[-1] == '--scope':
+            return subprocess.CompletedProcess(command, 0, stdout=f'{self.store.parent}\n{self.repo / intake.OUT}\n{self.repo}\n')
         self.assertEqual(command, [str(self.home / 'carr-local/bin/outlook-intake-copy')])
         shutil.copyfile(self.store, cwd / 'store.hxd')
         os.chmod(cwd / 'store.hxd', 0o600)
@@ -274,7 +285,7 @@ class IntakeTest(unittest.TestCase):
                 args.update(kind=kind, summary='Meeting: synthetic', occurred_at=intake._iso(ts(-timedelta(hours=2))))
             else:
                 args.update(description='Synthetic reminder', due_on='2026-10-21',
-                            owner=intake.BALL_OWNER, expected_action=None)
+                            owner=load_settings(self.home).owner, expected_action=None)
             requests[ident] = dict(verb=verb, payload=json.dumps(args), acknowledged=False,
                                    created_at=ts(-timedelta(hours=1)))
         (self.out() / intake.STATE).write_text(json.dumps({'requests': requests}))
@@ -307,7 +318,7 @@ class IntakeTest(unittest.TestCase):
     def test_main_emits_monitoring_receipt_from_the_actual_outcome(self):
         from io import StringIO
         outcome = intake.Outcome('failed', 'writes_failed', {'writes_failed': 3})
-        with patch.object(intake, 'run', return_value=outcome), patch('sys.stdout', new_callable=StringIO) as stdout:
+        with patch.object(intake, 'load_settings', return_value=load_settings(self.home)), patch.object(type(load_settings(self.home)), 'require_repo'), patch.object(intake, 'run', return_value=outcome), patch('sys.stdout', new_callable=StringIO) as stdout:
             self.assertEqual(intake.main(), 1)
         receipt = stdout.getvalue().split('outlook-intake-receipt ', 1)[1]
         self.assertEqual(json.loads(receipt), {'state': 'failed', 'reason': 'writes_failed', 'counts': {'writes_failed': 3}})
@@ -316,7 +327,7 @@ class IntakeTest(unittest.TestCase):
         from types import SimpleNamespace
         for rows, code in (([], 'contacts_empty'), (ValueError('PRIVATE-SENTINEL'), 'contacts_read_failed')):
             with self.subTest(code=code):
-                def read_view(view):
+                def read_view(view, **kwargs):
                     if isinstance(rows, Exception):
                         raise rows
                     return [], rows
@@ -667,19 +678,60 @@ class IntakeTest(unittest.TestCase):
                                  'subject_hash': hashlib.sha256(b'Suite question').hexdigest(),
                                  'sender_email': 'pat@example.test'})
 
-    def test_preview_refresh_expires_after_eight_days_with_an_unchanged_store(self):
-        preview = mail('pat@example.test', -timedelta(hours=1), body='Can we meet', kind='preview')
+    def test_hydration_rechecks_sidecars_and_infers_only_from_full_text(self):
+        preview = mail('pat@example.test', -timedelta(hours=1), body='Hello', kind='preview', copy_key='hydrate')
         self.assertEqual(self.run_intake([preview]).state, 'succeeded')
-        path = self.out() / intake.REFRESH_LIST
-        self.assertEqual(len(json.loads(path.read_text())), 1)
-        decodes, calls = self.fake.decodes, len(self.fake.calls)
-        self.fake.now += timedelta(days=8)
-        self.assertEqual(self.run_intake([preview], touch=False).state, 'succeeded')
-        self.assertEqual(json.loads(path.read_text()), [], 'expired previews leave the refresh list')
-        self.assertEqual(self.fake.decodes, decodes, 'expiry needs no decode')
-        self.assertEqual(len(self.fake.calls), calls, 'expiry needs no record call')
-        self.assertEqual(self.run_intake([preview], touch=False).reason, 'store_unchanged')
-        self.assertEqual(json.loads(path.read_text()), [], 'expiry persists across runs')
+        self.assertEqual(self.fake.model_calls, [], 'a preview cannot settle an obligation')
+        self.fake.now += timedelta(minutes=30)
+        full = {**preview, 'body': 'Hello. Send the floor plan by Thursday.', 'body_kind': 'full'}
+        self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': '2026-10-22'}
+        self.assertEqual(self.run_intake([full], touch=False).state, 'succeeded')
+        self.assertEqual([m['text'] for m in self.fake.model_calls], [full['body']])
+        self.assertEqual([a['description'] for _, a in self.fake.writes('set-next-action')], ['Send the floor plan'])
+        self.assertEqual(json.loads((self.out() / intake.REFRESH_LIST).read_text()), [])
+        self.run_intake([full], touch=False)
+        self.assertEqual(len(self.fake.model_calls), 1)
+
+    def test_expired_hydration_remains_visible_and_can_recover(self):
+        preview = mail('pat@example.test', -timedelta(hours=1), body='Hello', kind='preview', copy_key='expired')
+        self.run_intake([preview])
+        self.fake.now += timedelta(days=12)
+        result = self.run_intake([preview], touch=False)
+        self.assertEqual(result.counts['hydration_expired'], 1)
+        [entry] = json.loads((self.out() / intake.REFRESH_LIST).read_text())
+        self.assertTrue(entry['expired'])
+        self.assertEqual(self.fake.model_calls, [])
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertNotIn(intake.key('log-activity', CLIENT.ref, ident(preview)), state['requests'])
+        self.fake.now += timedelta(minutes=30)
+        self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
+        self.fake.actions[CLIENT.ref, 'joe'] = {
+            'id': 'synthetic-human-action', 'version': 2, 'updated_at': NOW.isoformat()}
+        full = {**preview, 'body': 'Hello. Send the floor plan.', 'body_kind': 'full'}
+        self.run_intake([full], touch=False)
+        self.assertEqual(len(self.fake.model_calls), 1)
+        self.assertEqual(self.fake.writes('set-next-action'), [], 'keep the intervening human action')
+        self.assertEqual(json.loads((self.out() / intake.REFRESH_LIST).read_text()), [])
+
+    def test_legacy_preview_null_is_reconsidered_after_full_body_note_ack(self):
+        preview = mail('pat@example.test', -timedelta(hours=1), body='Hello', kind='preview', copy_key='legacy')
+        self.run_intake([preview])
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        state['pending_full'][ident(preview)].pop('outbound')
+        state['pending_full'][ident(preview)].pop('who')
+        state_path.write_text(json.dumps(state))
+        full = {**preview, 'body': 'Hello. Send the floor plan.', 'body_kind': 'full'}
+        self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
+        self.fake.fail_verbs.add('log-activity')
+        self.fake.now += timedelta(minutes=30)
+        self.run_intake([full], touch=False)
+        self.assertEqual(self.fake.model_calls, [], 'full text must be acknowledged first')
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=30)
+        self.run_intake([full], touch=False)
+        self.assertEqual([m['text'] for m in self.fake.model_calls], [full['body']])
+        self.assertEqual(len(self.fake.writes('set-next-action')), 1)
 
     def test_once_the_full_body_decodes_it_is_logged_as_a_note_and_leaves_the_list(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='Can we meet', kind='preview', copy_key='k2')
@@ -985,7 +1037,7 @@ class IntakeTest(unittest.TestCase):
 
 
     def test_outside_seven_to_seven_nothing_is_decoded_or_called(self):
-        local = intake.LOCAL
+        local = load_settings(self.home).timezone
         for when in (datetime(2026, 10, 20, 0, 0, tzinfo=local), datetime(2026, 10, 20, 6, 59, tzinfo=local),
                      datetime(2026, 10, 20, 19, 31, tzinfo=local)):
             self.fake.now = when
@@ -1136,7 +1188,7 @@ class ScheduleTest(unittest.TestCase):
         self.assertNotIn('RunAtLoad', plist)
         self.assertNotIn('StartInterval', plist)
         self.assertEqual(plist['ProgramArguments'],
-                         ['{{HOME}}/carr-local/bin/outlook-intake-copy', '--run-intake'])
+                         ['{{COPY_HELPER}}', '--run-intake'])
         services = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
         [env] = [s for s in services if s['key'] == 'outlook-intake'][0]['environments']
         self.assertEqual(env['runs_on'], 'primary')
@@ -1179,6 +1231,7 @@ class StoreResolverTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
+        write_settings(self.home, self.home / 'repo', owner='joe')
         self.profiles = self.home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles'
         self.env = patch.dict(os.environ, {}, clear=False)
         self.env.start()

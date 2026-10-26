@@ -74,6 +74,11 @@ class Host:
     def body(self, job, declaration=False):
         source = ROOT / job['source'] if declaration else self.path(job['source'])
         text = source.read_text()
+        if job['label'].startswith('com.carr.outlook-'):
+            from lib.outlook_settings import load_settings
+            settings = load_settings(self.home)
+            settings.require_repo(self.repo)
+            text = settings.render_plist(text.encode()).decode()
         for token, value in [('{{REPO}}', str(self.repo)), ('{{HOME}}', str(self.home))]: text = text.replace(token, value)
         if '{{' in text: raise RuntimeError('unresolved plist token')
         return guarded_plist(text, self.repo, self.target, {j['label'] for j in self.config['jobs']})

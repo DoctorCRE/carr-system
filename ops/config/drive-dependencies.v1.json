@@ -19,10 +19,6 @@
       "reason": "versioned rendered deliverables"
     },
     {
-      "path": "roadmap-revisions/*.docx",
-      "reason": "versioned Word document artifacts"
-    },
-    {
       "path": "tools/dictation-rig/assets/*.aiff",
       "reason": "versioned audio asset"
     },
@@ -162,11 +158,11 @@
       "replacement": {
         "status": "accepted",
         "target": "today-triage, deal-room-board, and loop-board; legacy HTML requires explicit recovery",
-        "normal_path": "normal_path_repointed_to_record_native_front_door",
+        "normal_path": "normal_path_repointed_to_record_native_boards",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
         "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
-        "verified": "generators/build-open-items-dashboard.py accepts a Drive root only with --recovery --vault. Exercised live 2026-08-22: the nightly logged the record-native Front Door step OK."
+        "verified": "generators/build-open-items-dashboard.py accepts a Drive root only with --recovery --vault."
       }
     },
     {
@@ -336,29 +332,6 @@
       "replacement": {
         "status": "unrepointed",
         "target": "git/record canonical sources"
-      }
-    },
-    {
-      "id": "normal-front-door-launch-links",
-      "class": "normal_runtime",
-      "sources": [
-        "pipelines/build-front-door.py",
-        "pipelines/front-door.html"
-      ],
-      "path_pattern": "{{VAULT}}/**",
-      "producer": "active front-door launcher",
-      "consumers": [
-        "Joe interactive sessions"
-      ],
-      "canonicality": "canonical",
-      "replacement": {
-        "status": "accepted",
-        "target": "record-native launcher destinations",
-        "normal_path": "normal_path_repointed_to_record_native_launcher",
-        "accepted_by": "joe",
-        "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
-        "verified": "pipelines/build-front-door.py refuses outright: 'no folder or recovery arguments are accepted' (line 10)."
       }
     },
     {

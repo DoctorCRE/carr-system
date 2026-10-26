@@ -3,7 +3,105 @@
 Generated from [hxstore-atlas.json](hxstore-atlas.json).
 Regenerate with `python3 ops/hxstore-atlas.py render spec/outlook/hxstore-atlas.json`.
 
-Catalog of pinned decoder contracts. No store read and no empirical mailbox coverage claim.
+Catalog of pinned decoder contracts. Research observations below do not establish empirical mailbox coverage.
+
+## Stable message identity research, WR-000502
+
+Status is INCONCLUSIVE. No stable local selector is proven. The first experiment below was access-blocked.
+That does not show that HxStore contains no stable message ID. Audit PR
+[#2196](https://github.com/DoctorCRE/carr-system/pull/2196), slice B2, remains blocked.
+The observations below were made on Studio on 2026-10-25 at 08:03 CDT.
+Outlook's AppleScript `version` returned `16.114.1`.
+
+### First experiment, preserved from PR #2229
+
+Paths below are relative to
+`/Users/booko/Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/`.
+Only file-system metadata was obtained. Directory sizes are not content sizes.
+
+| Path | Observation | File bytes |
+| --- | --- | --- |
+| `Main Identity/` | Directory exists. Listing denied. | Not applicable |
+| `Main Identity/HxStore.hxd` | File exists. Header-only read denied. | 29,392,384 |
+| `Main Identity/Files/` | Directory exists. | Not applicable |
+| `Main Identity/Files/S0/` | Directory exists. Listing not obtained. | Not applicable |
+| `Main Identity/HxStore.hxi` | Exact-path stat returned ENOENT. | Not applicable |
+| `Main Identity/Outlook.sqlite` | Exact-path stat returned ENOENT. | Not applicable |
+
+Account separation is NOT VERIFIED. These observations do not establish that this
+is the only profile or that either account owns a separate store file.
+`ls` of the Outlook directory returned `Operation not permitted`. A second runtime's
+`fs.readdir` returned `EPERM`. Opening only the first 64 store bytes also returned
+`EPERM`. The System Events directory query returned no usable inventory.
+The human-only dependency is macOS permission for the job host to access Outlook's
+protected directory. No protected bytes were read, and no store copy was created.
+
+The existing [copy helper](../../tools/outlook-intake-copy.c) copies `HxStore.hxd`
+and every account's `Files/S0/*/EFMData/*.dat`. It was inspected but not executed.
+That whole-profile operation cannot satisfy this job's account-isolation rule.
+The harness allows caller-held shared snapshots, but Joe's narrower instruction
+for WR-000502 controls this experiment. Work-account files must not be copied.
+
+### Candidate evidence table
+
+A0 means draft A saved, A1 and A2 mean its two edits, and B0 means a separate draft
+with identical text. U is a separately captured unchanged control. Every cell says
+not captured because the required account-isolation check could not complete.
+No draft was created or edited, no mail was sent, and no mailbox values were decoded.
+
+| Field or selector | A0 | A1 | A2 | B0 | U | Stability evidence and verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| Local message key, classes `00ca` and `00bf`, object offsets 10, 30, 38 | Not captured | Not captured | Not captured | Not captured | Not captured | `folder::message_key` checks equal nonzero u64 values. Candidate only. Revision stability and distinct-message uniqueness untested. |
+| 51-byte metadata tail before final folder key, class `00bf` | Not captured | Not captured | Not captured | Not captured | Not captured | `folder::Index::observe` checks the five-byte prefix and calls the tail an immutable message ID in a comment. It does not expose or prove that identity. Candidate only. |
+| `ImmId` string run | Not captured | Not captured | Not captured | Not captured | Not captured | `record::is_opaque_blob` names it alongside other opaque IDs. No independent `ImmId` selector is established. |
+| Current `ConversationId` selector | Not captured | Not captured | Not captured | Not captured | Not captured | `schema::build_bounded` groups long hex and hyphen runs together, including possible revision and conversation IDs. Shape cannot establish message identity. |
+| Current `InternetMessageId` selector | Not captured | Not captured | Not captured | Not captured | Not captured | `main::cmd_db` excludes it from identity because pinned recovery observations show conversation collisions and revision splits. Not a verified logical selector. |
+| Physical `record_id` | Not captured | Not captured | Not captured | Not captured | Not captured | The [harness contract](hxstore-harness.json) defines snapshot-scoped block and payload coordinates. It makes no logical identity guarantee. |
+| Sender plus earliest timestamp, or content `copy_key` | Not captured | Not captured | Not captured | Not captured | Not captured | Existing recovery heuristics have no cross-revision uniqueness contract. They cannot substitute for independently established identity. |
+
+The inspected code is revision `cfba29a073eff9d99b3bc601a35a5643e9d52b1f`.
+Source anchors are [folder.rs](../../vendor/hxprobe/src/folder.rs), functions
+`message_key` and `Index::observe`; [schema.rs](../../vendor/hxprobe/src/schema.rs),
+`build_bounded`; [record.rs](../../vendor/hxprobe/src/record.rs), `is_opaque_blob`;
+and [main.rs](../../vendor/hxprobe/src/main.rs), `cmd_db`.
+The [pinned upstream SPEC section 4.7](https://github.com/ukd1/hxstore-reverse-engineering/blob/191b54e42757687806202f8f696e9066f0514e11/SPEC.md#47-record-identity-and-deduplication-verified)
+reports recovery limitations. It does not rule out a stable local ID.
+
+### Original experiment plan
+
+The falsifiable check is equality for A0, A1, and A2, inequality for B0 despite
+identical text, and an unchanged control. Each transition needs its own private
+immutable snapshot and comparison before the next change. This can support the
+observed lifecycle operations, not universal stability across every operation.
+Snapshots belong under `~/carr-system/scratchpad/outlook-snapshots/`, outside git.
+If the store is shared, the work must remain within Joe's structure-and-field-
+metadata restriction without copying work-account files. That constraint must be
+resolved before applying the harness's shared-copy workflow.
+
+The next source is the test account's Outlook data, decoded with the existing
+Rust hxprobe reader. Joe's direction is to use Rust and the test account to decode
+all Outlook data. The employer forbids Microsoft Graph, so it is not an option
+or fallback for this work.
+First establish account isolation and obtain the required macOS access. Then
+capture the test-account snapshots above and compare the candidate identity
+fields across each transition. Extend the Rust decoder only from observed
+format evidence. Preserve the distinction between a message identity, a revision
+identifier, and a conversation identifier until the experiment proves each role.
+No hxprobe identity decoder or synthetic identity claim was added in that experiment.
+
+### Copied-store candidate comparison
+
+The follow-up [research record](stable-message-id-research.md) records a Rust
+metadata study of existing private TEST-account campaign copies and the
+`identity-compare --immutable-copies` command. It compares caller-selected
+repeated local keys and framed metadata tails without emitting their values.
+The repeated key agreed near one synthetic draft marker across seven snapshots.
+Cached revisions and provisional marker association prevent a stable-ID claim.
+WR-000502 AC-1 still needs two independently revised, distinct messages.
+The earlier matrix remains the uncaptured first experiment, not this follow-up.
+No identity field is promoted to proven, and intake/send behavior is unchanged.
+
+## Catalog confidence
 
 Null means the first Outlook version is unknown. The pinned source revision establishes catalog provenance, not an Outlook build or introduction version.
 

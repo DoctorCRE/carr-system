@@ -45,9 +45,10 @@ R2 object exists, decrypts, or restores. Confirm the selected copy independently
 
 ### Operator-held state inventory
 
-Names only. This list is not a backup package or evidence that off-host copies
-exist. Recover or deliberately reconstruct each required item before enabling
-writers. Never put values or client contents into this runbook or a PR.
+Names only. Recover the required local state through independently retained copies.
+The inventory does not prove an off-host copy exists. Recover or deliberately
+reconstruct each required item before enabling writers. Never put values or
+client contents into this runbook or a PR.
 
 | State or capability | Recovery requirement |
 |---|---|
@@ -63,6 +64,12 @@ writers. Never put values or client contents into this runbook or a PR.
 | Drive and OneDrive vault files, attachments, finished deliverables, and R2 document objects | Recover file bytes through provider-specific retention. Database references are not file backups. |
 | Provider configuration, `neon_auth`, Worker bindings, secrets, and Durable Object state | Recover live provider state separately from source declarations. |
 | Matching age identity, historical decryption identities, credentials, signing material, sessions, keychains, and account recovery factors | Verify independent custody or reissue specific capabilities privately. Reissuing credentials cannot unlock old ciphertext without its matching identity. |
+
+Preserve required local state with native archive and copy tools while writers are
+stopped. Verify an independent off-host copy before relying on it. This repository
+provides no dedicated Studio state archive or automated restoration tool.
+Recover the complete intake checkpoint and reconcile outbound history with
+Microsoft before enabling senders. A local copy alone does not prove recovery.
 
 ---
 
@@ -106,10 +113,13 @@ definition alone is not scheduler registration. The retained headless option is
 `ops/headless-tasks/install.sh install restore-rehearse-weekly`; disable any
 duplicate registration and verify the reviewed host timezone first.
 
-The nine-job failover inventory does not prove Outlook capability recovery.
+The failover inventory includes intake and refresh state requirements and an
+explicit Outlook permission and outbound reconciliation prerequisite. Triage
+must run on the host named by the current services catalog. The inventory does
+not prove Full Disk Access, Accessibility, mailbox access, or a working helper.
 If state is unavailable, record its loss and reconcile pending outbound work
-before enabling senders. Local state backup and clean-Mac capability validation
-remain separate work; these instructions do not implement them.
+before enabling senders. A clean-Mac walkthrough and actual off-host state
+recovery remain operational checks, not outcomes established by this source.
 
 ---
 

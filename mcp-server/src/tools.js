@@ -5,6 +5,7 @@ import { invoiceTrackerTools } from "./invoice-tracker.js";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.js";
 import { readDealChecklist } from "./deal-checklist.js";
+import { factObservationTools } from "./fact-observations.js";
 import { dealItemTools, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.js";
 import { bindReferralDeal } from "./relationship-network.js";
 import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
@@ -35,11 +36,13 @@ import { workPortfolioTools } from "./work-portfolio.js";
 import { leaseTermComparisonTools } from "./lease-term-comparison.js";
 import { partnerRoomTools } from "./partner-room.js";
 import { agentProfileTools } from "./agent-profiles.js";
+import { clientPortalTools } from "./client-portal.js";
 import { memoryTools } from "./memory.js";
 import { codexContinuityTools } from "./codex-continuity.js";
 import { incidentTools } from "./incident.js";
 import { resourceObservationTools } from "./resource-observation.v5.js";
 import { invoiceAutomation } from "./invoice-automation.js";
+import { emailDealProgressTools } from "./email-deal-progress.js";
 import { leadAutomationTools } from "./lead-automation.js";
 import { workflowCutoverTools } from "./workflow-cutover.v5.js";
 import { engineeringRuntimeTools } from "./engineering-runtime.js";
@@ -77,6 +80,8 @@ import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
 import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.js";
 import { partyIdentityTools } from "./party-identity.js";
+import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.js";
+import { readBriefAssurance } from "./brief-assurance.js";
 import { readNeedsJoe } from "./needs-joe.js";
 import { scheduleBoardTools } from "./schedule-board.js";
 export { canExercisePartnerAuthority, partnerAuthoritySlugForActor };
@@ -329,7 +334,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["set-next-step", "set-market-agent", "set-national-account-owner"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
@@ -3401,6 +3406,65 @@ export const TOOLS = {
     },
   },
 
+  "morning-brief-queue": {
+    write: false,
+    description: "Continue a full morning queue. Today uses the partner triage cursor; loops sort due date first, caller first only on tied dates, then kind/number fingerprint; Needs Joe sorts blocking tier, oldest timestamp to millisecond precision, source/identity fingerprint after exclusions and duplicate collapse. Defaults to 50 rows. Returns total, returned, remaining (loops/Needs Joe), has_more, next_cursor. Pass the cursor and same queue. Cursors bind tenant, sponsor and queue. Live keysets are not snapshots; restart to include rows whose sort keys change before the cursor. Needs Joe totals cover available sources only when partial. No audience argument.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["queue"], properties: {
+      queue: { type: "string", enum: ["today", "loops", "needs_joe"] },
+      limit: { type: "integer", minimum: 1, maximum: 50 },
+      cursor: { type: "string", minLength: 1, maxLength: 8000 },
+    } },
+    handler: async (c, actor, args) => {
+      const scope = personalScopeForActor(actor);
+      if (scope.status !== "personal") throw new ToolError({ error: "morning_brief_requires_partner_scope" });
+      if (args.queue === "today") {
+        const value = await executeRegisteredTool(c, actor, "today-triage", {
+          owners: "partners", ...(args.limit === undefined ? {} : { limit: args.limit }),
+          ...(args.cursor === undefined ? {} : { cursor: args.cursor }),
+        });
+        return { ...value, sponsor: scope.sponsor, returned: value.items.length, items: value.items.map(row => ({ ...row,
+          owner_partner: row.owner ? TODO_OWNER_PARTNER.get(String(row.owner).toLowerCase()) : null })) };
+      }
+      let value, key;
+      if (args.queue === "needs_joe") {
+        if (scope.sponsor !== "joe") throw new ToolError({ error: "needs_joe_not_applicable" });
+        value = (await executeRegisteredTool(c, actor, "governance-queue", {})).needs_joe;
+        value = { ...value, items: value.items.map(row => ({ ...row,
+          title: row.title || `Decision ${row.key}` })) };
+        key = briefNeedsJoeKey;
+      } else {
+        value = { items: await readBriefLoops(c) };
+        key = briefLoopKey(scope.sponsor);
+      }
+      const page = await briefQueuePage(value.items, { ...args, key, ToolError,
+        scope: JSON.stringify([organizationTenantForActor(actor), scope.sponsor, args.queue]) });
+      return { ...value, ...page, count: page.returned, sponsor: scope.sponsor, state: value.state ?? (page.total ? "ready" : "empty"),
+        total_scope: value.state === "partial" ? "available_sources" : "eligible_queue" };
+    },
+  },
+
+  "morning-assurance-queue": {
+    write: false,
+    writerConnection: true,
+    description: "Full assurance cadence queue for the authenticated partner. Read-only writer transaction uses existing notification grants. Includes unread delivery cadence alerts only; active morning holds stay hidden. Failure leads action-required then completion; each severity sorts oldest timestamp then notification UUID. Returns total, returned, remaining, has_more, next_cursor; pass cursor to continue. Live keyset, not a snapshot. No recipient argument.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      limit: { type: "integer", minimum: 1, maximum: 50 },
+      cursor: { type: "string", minLength: 1, maxLength: 8000 },
+    } },
+    handler: async (c, actor, args) => {
+      const scope = personalScopeForActor(actor);
+      if (scope.status !== "personal") throw new ToolError({ error: "morning_brief_requires_partner_scope" });
+      try {
+        return { sponsor: scope.sponsor, ...await briefQueuePage(await readBriefAssurance(c, scope.sponsor), { ...args,
+          key: briefAssuranceKey, ToolError,
+          scope: JSON.stringify([organizationTenantForActor(actor), scope.sponsor, "assurance_cadence"]) }) };
+      } catch (error) {
+        if (error instanceof ToolError) throw error;
+        throw new ToolError({ error: "source_unavailable" });
+      }
+    },
+  },
+
   "morning-brief": {
     write: false,
     description: "The record-native morning brief for the authenticated Joe or Dell context. It composes Needs Joe when applicable, live triage, claim-card, deal-room, loop-board, the redacted renewal decision queue, assurance cadence, and published system costs. Sections preserve ready, empty, partial, or unavailable. Coverage names every required section, points to its response content, and counts returned rows only, never queue totals. Unavailable is never rewritten as empty. Takes no audience, sponsor, or partner argument.",
@@ -3769,7 +3833,9 @@ export const TOOLS = {
     description: "The complete, safe worked-lead board. All leads surface, including weak, suppressed, and terminal rows: qualification is the human's job and this read is never pre-qualified or silently truncated. Returns the authoritative base_version needed by update-lead, ordered stage vocabulary including empty stages, score/confidence/freshness signals, and no phone, email, address, notes, or raw source detail.",
     inputSchema: LEAD_WORKSPACE_SCHEMA,
     handler: async (c, _actor, args = {}) => {
-      if (args.workspace === "leads") return readLeadWorkspace(c, args);
+      if (args.workspace === "leads") return readLeadWorkspace(c, args, ToolError);
+      if (args.correspondence_cursor !== undefined || args.stage_history_cursor !== undefined)
+        throw new ToolError({ error: "invalid_history_cursor" });
       const stages = (await c.query(
         `select slug,label,sort
            from v_lead_board_stage
@@ -8738,11 +8804,14 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "work-shape": "mcp-server/src/work-shape.js",
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
+  "fact-observations": "mcp-server/src/fact-observations.js",
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
+  "client-portal": "mcp-server/src/client-portal.js",
   "resource-observation": "mcp-server/src/resource-observation.v5.js",
   "lead-automation": "mcp-server/src/lead-automation.js",
   "invoice-automation": "mcp-server/src/invoice-automation.js",
+  "email-deal-progress": "mcp-server/src/email-deal-progress.js",
   "workflow-cutover": "mcp-server/src/workflow-cutover.v5.js",
   "memory": "mcp-server/src/memory.js",
   "codex-continuity": "mcp-server/src/codex-continuity.js",
@@ -8912,6 +8981,53 @@ registerTools({
         premises: premises.rows, negotiation_rounds: negotiation.rows,
         documents: documents.rows, events: history.rows });
     },
+  },
+
+  "ping-deal-checklist": {
+    write: true,
+    description: "Queue action-required notifications for one active deal's due and overdue standard checklist items. The recorded deal owner must be Joe or Dell. Uses current doctrine, sourced deadlines, quiet hours and recipient/item/date deduplication. Returns queued notification receipts, never a delivery claim. Does not schedule, send a device message or change deal facts.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      deal: { type: "string" }, idempotency_key: { type: "string" },
+    }, required: ["deal", "idempotency_key"] },
+    handler: async (c, actor, args) => withEnvelope(c, actor, "ping-deal-checklist", args, async () => {
+      const subject = await resolveSubject(c, args.deal);
+      if (subject.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: subject });
+      const deal = (await c.query(
+        `select id, type, owner, phase, operating_state, outcome, closed_on, invoiced_on
+           from v_deal_room_board where id=$1`, [subject.id])).rows[0];
+      const result = { ok: true, schema_version: "deal-checklist-pings.v1", deal_id: subject.id,
+        queued: 0, deduplicated: 0, notifications: [] };
+      if (!deal || deal.operating_state !== "active" || deal.outcome != null || deal.closed_on || deal.invoiced_on || ["closed", "invoiced"].includes(deal.phase))
+        return { ...result, reason: "deal_not_active" };
+      if (!PARTNER_SLUGS.includes(deal.owner)) return { ...result, reason: "partner_owner_not_recorded" };
+      const dates = (await c.query(
+        "select id, kind, due_on::text as due_on, source, status from critical_date where deal_id=$1 order by due_on, id",
+        [deal.id])).rows;
+      const checklist = await readDealChecklist(c, { ...deal, critical_dates: dates });
+      if (!["current", "deal_type_unknown"].includes(checklist.template_state))
+        throw new ToolError({ error: "deal_checklist_unavailable", template_state: checklist.template_state });
+      for (const item of checklist.due_items) {
+        await writeEvent(c, actor, "ping-deal-checklist", "deal", deal.id, {
+          field: "checklist_ping", new: { checklist_item_id: item.id, due_on: item.due_on, recipient: deal.owner },
+          cause: "automation_job", idempotency_key: args.idempotency_key,
+        });
+        const eventId = (await c.query(
+          `select id from event where subject_type='deal' and subject_id=$1 and verb='ping-deal-checklist'
+             and field='checklist_ping' and idempotency_key=$2 and new_value->>'checklist_item_id'=$3
+           order by recorded_at desc,id desc limit 1`, [deal.id, args.idempotency_key, item.id])).rows[0]?.id;
+        const minted = (await c.query(
+          "select ops.mint_notification($1,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11) as result",
+          ["event", eventId, "deal", deal.id, "A deal checklist item is due. Open the deal checklist for details.",
+            "action_required", "/notifications", `deal-checklist:${deal.id}:${item.id}:${item.due_on}`,
+            deal.owner, false, false])).rows[0]?.result;
+        if (!minted?.ok || !minted.notification_id)
+          throw new ToolError({ error: "deal_checklist_notification_unavailable" });
+        result[minted.deduplicated ? "deduplicated" : "queued"]++;
+        result.notifications.push({ checklist_item_id: item.id, due_on: item.due_on,
+          notification_id: minted.notification_id, deduplicated: minted.deduplicated === true });
+      }
+      return result;
+    }),
   },
 
   "read-home-agenda": {
@@ -9513,6 +9629,7 @@ registerTools({
 
   "resolve-post-call-candidate": {
     write: true,
+    humanOnly: true,
     description: "Human-only resolution for one Call Mode proposal. assigned_action creates a real next action for the explicit Joe or Dell assignee. email_draft only confirms metadata and its local body hash: it never creates or sends an email or Outlook draft.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, candidate_id: { type: "string" },
@@ -9717,6 +9834,24 @@ registerTools({
                    "problem, not a lapse: say so rather than filing the next one quietly."
                  : "first of its class." };
     }),
+  },
+  "read-decision": {
+    write: false,
+    description: "Read one recorded decision in full, including its title, human quote, complete agent rationale and provenance. Pass the decision_id from find-precedent or log-decision, as a full UUID or an unambiguous ID prefix. Ambiguous prefixes return candidates instead of choosing a decision. Reads the current record, including corrections made by update-decision. Read-only.",
+    inputSchema: { type: "object", properties: {
+      decision_id: { type: "string", description: "Full decision UUID or an unambiguous prefix, including the 8-character short form." } },
+      required: ["decision_id"], additionalProperties: false },
+    handler: async (c, _a, args) => {
+      const decisionId = await resolveDecisionId(c, args.decision_id);
+      const decision = (await c.query(
+        `select decision_id, event_id, entry_date, occurred_at, title, human_quote,
+                agent_rationale, provenance, author, session_key, source_file,
+                external_key, cause, quote_absent, cost_delta, quality_delta, priced
+           from v_decision_entry where decision_id = $1`, [decisionId])).rows[0];
+      if (!decision) throw new ToolError({ error: "decision_not_found", decision_id: args.decision_id,
+        hint: "pass the decision_id log-decision returned, not the event_id" });
+      return { ok: true, decision };
+    },
   },
   "find-precedent": {
     write: false,
@@ -9959,15 +10094,19 @@ registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 
 // Pure workbook-derived lease economics. No database, model, or write path.
 registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
+registerTools(factObservationTools({ ToolError }), "fact-observations");
 
 // The partner room (Idea 78): shared AI-to-AI transcript both Macs poll; raw
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
 registerTools(agentProfileTools(), "agent-profile");
+registerTools(clientPortalTools({ ToolError }), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
 // src/resource-observation.v5.js.
 registerTools(resourceObservationTools({ withEnvelope, ToolError }), "resource-observation");
+registerTools(emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lockDealField,
+  updateDeal: (c, actor, args) => TOOLS["update-deal"].handler(c, actor, args) }), "email-deal-progress");
 const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealField,
   updateDeal:(c,actor,args)=>TOOLS["update-deal"].handler(c,actor,args),
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});

@@ -33,6 +33,8 @@ export async function doctrineRoutingFixture() {
     const start = qualified.indexOf('CREATE OR REPLACE FUNCTION public.search_doctrine_situations(');
     await client.query(qualified.slice(start, qualified.indexOf('$function$;', start) + 11));
     await client.query(readFileSync(new URL('../../../migrations/0955_retrieval_concept_question_matching.sql', import.meta.url), 'utf8'));
+    const titleTopics = readFileSync(new URL('../../../migrations/0978_doctrine_title_topic_ranking.sql', import.meta.url), 'utf8');
+    await client.query(titleTopics.slice(0, titleTopics.indexOf('create or replace function public.search_doctrine_semantic(')));
     return {
       client, close,
       async insert(section, document = {}) {

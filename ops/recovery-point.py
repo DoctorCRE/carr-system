@@ -107,18 +107,37 @@ def local_path(repo: str = REPO) -> dict:
     failure: on Joe's Mac that absence is the design (see 0119_backup_role.sql),
     and calling it a gap is what produced the false alarm this module removes.
     """
-    files = sorted(glob.glob(os.path.join(repo, "backups", "*.sql.age")),
-                   key=os.path.getmtime, reverse=True)
+    files = glob.glob(os.path.join(repo, "backups", "*.sql.age"))
     configured = bool(os.environ.get("CARR_DB_BACKUP_URL"))
     if not files:
         return {"path": "local", "state": "none", "configured": configured,
                 "detail": "no encrypted dump in backups/"}
-    newest = files[0]
-    when = datetime.fromtimestamp(os.path.getmtime(newest), tz=timezone.utc)
+    dated: list[tuple[datetime, str]] = []
+    uncertain = False
+    for path in files:
+        match = re.fullmatch(r"carr-([0-9]{8})(?:-[0-9a-f]{32})?\.sql\.age",
+                             os.path.basename(path))
+        try:
+            if match is None:
+                raise ValueError("unrecognized producer filename")
+            when = datetime.strptime(match[1], "%Y%m%d").replace(tzinfo=timezone.utc)
+            if when > _now():
+                raise ValueError("future producer date")
+        except ValueError:
+            uncertain = True
+            continue
+        dated.append((when, path))
+    if not dated:
+        return {"path": "local", "state": "unknown", "configured": configured,
+                "detail": "no usable producer date in local backup filenames"}
+    when, newest = max(dated)
+    if uncertain and _age_hours(when) >= RPO_HOURS:
+        return {"path": "local", "state": "unknown", "configured": configured,
+                "detail": "stale dated copies alongside unrecognized local backup dates"}
     return {"path": "local", "state": "present", "configured": configured,
             "at": when.isoformat().replace("+00:00", "Z"),
             "age_hours": round(_age_hours(when), 1),
-            "detail": os.path.basename(newest)}
+            "detail": os.path.basename(newest) + "; producer-date bound at midnight UTC"}
 
 
 class CloudUnknown(RuntimeError):

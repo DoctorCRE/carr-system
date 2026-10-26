@@ -1,7 +1,7 @@
-"""Outlook intake: Joe's mail and calendar into the record layer, by code.
+"""Outlook intake: local mail and calendar into the record layer, by code.
 
 Every 30 minutes from 07:00 to 19:00 local (com.carr.outlook-intake) this reads
-a private copy of Main Identity's HxStore.hxd and its EFMData body sidecars,
+a private copy of the configured profile's HxStore.hxd and its EFMData body sidecars,
 never the live files, decodes it with the pinned hxprobe fork
 (vendor-patches/hxprobe-calendar-and-bodies.patch), and writes what it finds
 through the named record-layer verbs:
@@ -24,14 +24,14 @@ reports failed and does not advance its watermark.
 
 An email whose body is still only Outlook's preview is logged with the preview,
 flagged preview_only, and listed in out/outlook-intake/needs-refresh.json for the
-evening triage job to open. The file is a JSON array, mode 0600, one object per
+same-host refresh worker to open. The file is a JSON array, mode 0600, one object per
 email:
 
     {"message_id": "<opaque intake id>", "subject_hash": "<sha256 hex of the subject>",
-     "sent_utc": "<ISO 8601>", "sender_email": "<address>", "opened_at": "<ISO 8601, triage adds it>"}
+     "sent_utc": "<ISO 8601>", "sender_email": "<address>", "opened_at": "<ISO 8601, refresh worker adds it>"}
 
-Triage finds the email by sender_email and subject_hash and adds opened_at; this
-job owns every other field and keeps opened_at when it rewrites the file. Once a
+The refresh worker finds the email by sender_email and subject_hash and adds opened_at; this
+intake job owns every other field and keeps opened_at when it rewrites the file. Once a
 listed email decodes with its full body, the next run logs that text as a
 log-activity note (activities cannot be updated in place: the verb refuses a
 reused key with new arguments) and drops the entry.
@@ -58,18 +58,13 @@ import subprocess
 import tempfile
 from typing import Callable
 import uuid
-import zoneinfo
 
-HXPROBE = Path('carr-local/hxstore-reverse-engineering/hxprobe/target/release/hxprobe')
-COPY_HELPER = Path('carr-local/bin/outlook-intake-copy')
-PROFILE = Path('Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity')
+from lib.outlook_settings import load_settings, OutlookSettings
 OUT = Path('out/outlook-intake')
 REFRESH_LIST = 'needs-refresh.json'
 STATE = 'state.json'
 WORK_PREFIX = 'work-'
-LOCAL = zoneinfo.ZoneInfo('America/Chicago')
 WINDOW = (time(7, 0), time(19, 30))
-INTERNAL_DOMAIN = 'carr.us'
 WRITE_VERBS = frozenset({'log-activity', 'set-next-action'})
 RECORD_REF = re.compile(r'^[CLV]-')
 EXIT = {'succeeded': 0, 'skipped': 78, 'failed': 1}
@@ -78,15 +73,15 @@ BACKFILL = timedelta(hours=48)
 LOOKBACK = timedelta(hours=6)
 UPCOMING = timedelta(days=7)
 REFRESH_DAYS = timedelta(days=7)
+REFRESH_INTERVAL = timedelta(minutes=30)
 COPY_WINDOW = 86_400
 VERIFIED_MIN = 0.95
 MODEL_BODY_CHARS = 12_000
-BALL_OWNER = 'joe'
 
 
 def resolve_store(home: Path) -> Path:
-    """The Studio intake and its copy helper use only Main Identity."""
-    store = home / PROFILE / 'HxStore.hxd'
+    """Use only the explicitly configured profile."""
+    store = load_settings(home).profile / 'HxStore.hxd'
     if not store.is_file():
         raise FileNotFoundError(f'No Outlook store found: {store}')
     return store
@@ -199,8 +194,8 @@ def _domain(address: str) -> str:
     return address.rsplit('@', 1)[-1].lower()
 
 
-def _internal(address: str) -> bool:
-    return _domain(address) == INTERNAL_DOMAIN
+def _internal(address: str, domain: str) -> bool:
+    return _domain(address) == domain
 
 
 def _addresses(text: str | None) -> list[str]:
@@ -216,7 +211,7 @@ def _clean_name(name: str | None, subject: str | None) -> str | None:
 
 
 def in_window(now: datetime) -> bool:
-    return WINDOW[0] <= now.astimezone(LOCAL).time() <= WINDOW[1]
+    return WINDOW[0] <= now.astimezone(load_settings().timezone).time() <= WINDOW[1]
 
 
 # ---- the decoded store -------------------------------------------------------
@@ -241,7 +236,9 @@ def _load(db: Path) -> tuple[dict, list[dict], list[dict]]:
 
 
 def _snapshot(home: Path, work: Path) -> None:
-    helper = home / COPY_HELPER
+    settings = load_settings(home)
+    settings.verify_helper()
+    helper = settings.copy_helper
     try:
         done = subprocess.run([str(helper)], cwd=work, capture_output=True, timeout=900)
         if done.returncode in (errno.EPERM, errno.EACCES):
@@ -298,11 +295,11 @@ def _best_copies(mails: list[dict]) -> list[dict]:
 # ---- matching ----------------------------------------------------------------
 
 class Matcher:
-    def __init__(self, contacts: list):
+    def __init__(self, contacts: list, domain: str):
         self.by_email: dict[str, set] = {}
         self.unsupported: set[str] = set()
         for c in contacts:
-            if '@' in c.email and not _internal(c.email):
+            if '@' in c.email and not _internal(c.email, domain):
                 if RECORD_REF.match(c.ref):
                     self.by_email.setdefault(c.email.lower(), set()).add(c.ref)
                 else:
@@ -376,12 +373,13 @@ def ask_model(mail: dict, today: date) -> dict:
 # ---- one run -----------------------------------------------------------------
 
 class Run:
-    def __init__(self, ports: Ports, state: dict, now: datetime, out: Path):
+    def __init__(self, ports: Ports, state: dict, now: datetime, out: Path, settings: OutlookSettings):
+        self.settings = settings
         self.ports, self.state, self.now, self.out = ports, state, now, out
-        self.today = now.astimezone(LOCAL).date()
+        self.today = now.astimezone(self.settings.timezone).date()
         self.counts = {k: 0 for k in ('emails', 'logged', 'preview_only',
                                       'full_text_notes', 'balls_set', 'balls_kept', 'unmatched',
-                                      'model_failed', 'steps_pending', 'writes_failed',
+                                      'model_failed', 'steps_pending', 'hydration_expired', 'writes_failed',
                                       'writes_deferred', 'requests_blocked')}
         self.written: list[tuple[str, str, str, str]] = []
         self.unmatched: set[tuple[str, str, str]] = set()
@@ -432,9 +430,9 @@ class Run:
         return True
 
     def open_ball(self, ref: str) -> dict | None:
-        """Read Joe's canonical ordinary action, including its replacement version."""
-        reply = self.ports.carr('get-next-action', {'ref': ref, 'owner': BALL_OWNER})
-        if reply.get('ok') is not True or reply.get('owner') != BALL_OWNER or 'action' not in reply:
+        """Read the owner's canonical ordinary action, including its replacement version."""
+        reply = self.ports.carr('get-next-action', {'ref': ref, 'owner': self.settings.owner})
+        if reply.get('ok') is not True or reply.get('owner') != self.settings.owner or 'action' not in reply:
             raise CarrError(code='reply_unreadable')
         action = reply['action']
         if action is not None:
@@ -458,7 +456,7 @@ class Run:
             return True
         note = 'no prior ball' if existing is None else 'replaced ball'
         args = {'idempotency_key': key('set-next-action', ref, source), 'ref': ref,
-                'description': description, 'due_on': due_on, 'owner': BALL_OWNER,
+                'description': description, 'due_on': due_on, 'owner': self.settings.owner,
                 'expected_action': {k: action[k] for k in ('id', 'version')} if action else None}
         if not self.write('set-next-action', args, who, note):
             return False
@@ -487,8 +485,8 @@ class Run:
                 continue
             if m['ident'] not in unresolved and any(abs(t - m['sent_unix']) <= COPY_WINDOW for t in done.get(m['ck'], [])):
                 continue
-            outbound = _internal(m['sender'])
-            parties = ([(a, None) for a in _addresses(m['recipients']) if not _internal(a)] if outbound
+            outbound = _internal(m['sender'], self.settings.internal_domain)
+            parties = ([(a, None) for a in _addresses(m['recipients']) if not _internal(a, self.settings.internal_domain)] if outbound
                        else [(m['sender'].lower(), _clean_name(m['sender_name'], m['subject']))])
             if not parties:
                 done.setdefault(m['ck'], []).append(m['sent_unix'])
@@ -520,9 +518,11 @@ class Run:
             if not m['full']:
                 pending.setdefault(m['ident'], {'refs': refs, 'ck': m['ck'], 'sent': m['sent_unix'],
                                                 'sender_email': m['sender'].lower(),
-                                                'subject_hash': _hash(m['subject'] or '')})
+                                                'subject_hash': _hash(m['subject'] or ''),
+                                                'who': who, 'outbound': outbound})
                 pending[m['ident']]['refs'] = sorted(set(pending[m['ident']]['refs']) | set(refs))
-            steps.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0],
+            if m['full'] and m['ident'] not in pending:
+                steps.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0],
                                            'who': who, 'outbound': outbound,
                                            'activity_keys': [key('log-activity', ref, m['ident']) for ref in refs]})
             results = [self.write('log-activity', {
@@ -546,11 +546,16 @@ class Run:
         for m in mails:
             by_ck.setdefault(m['ck'], []).append(m)
         for ident, s in sorted(steps.items(), key=lambda kv: kv[1]['sent']):
+            if ident in self.state.get('pending_full', {}):
+                del steps[ident]
+                continue
             if not all(self.state['requests'].get(k, {}).get('acknowledged') for k in s.get('activity_keys', [])):
                 self.counts['steps_pending'] += 1
                 continue
             if 'reply' not in s:
                 found = [m for m in by_ck.get(s['ck'], []) if abs(m['first_sent'] - s['sent']) <= COPY_WINDOW]
+                if found and not found[0]['full']:
+                    continue
                 if not found:
                     self.counts['steps_pending'] += 1
                     continue
@@ -579,7 +584,8 @@ class Run:
             match = [m for m in full.get(p['ck'], []) if abs(m['first_sent'] - p['sent']) <= COPY_WINDOW]
             if not match:
                 if p['sent'] < self.now.timestamp() - REFRESH_DAYS.total_seconds():
-                    del pending[ident]
+                    p['expired'] = True
+                    self.counts['hydration_expired'] += 1
                 continue
             m = match[0]
             ok = all([self.write('log-activity', {
@@ -588,6 +594,15 @@ class Run:
                 'occurred_at': _iso(p['sent'])}, p['sender_email'], 'full text follow-up') for ref in p['refs']])
             if ok:
                 self.counts['full_text_notes'] += 1
+                steps = self.state.setdefault('steps', {})
+                steps.pop(ident, None)
+                steps.setdefault(f'fullbody|{ident}', {
+                    'ck': p['ck'], 'sent': p['sent'], 'ref': p['refs'][0],
+                    'who': p.get('who', p['sender_email']),
+                    'outbound': p.get('outbound', _internal(p['sender_email'], self.settings.internal_domain)),
+                    'activity_keys': [key('log-activity', ref, ident) for ref in p['refs']
+                                      if key('log-activity', ref, ident) in self.state['requests']] +
+                                     [key('log-activity', ref, f'fullbody|{ident}') for ref in p['refs']]})
                 del pending[ident]
 
     # calendar
@@ -601,9 +616,9 @@ class Run:
             evidence[candidate] = {'status': 'unsupported', 'reason': 'hxstore_lifecycle_unverified',
                                    'evidence': 'provisional_schedule',
                                    'start_unix': e['start_unix'], 'end_unix': e['end_unix']}
-            people = [(email, name) for name, email in e['attendees'] if email and not _internal(email)]
+            people = [(email, name) for name, email in e['attendees'] if email and not _internal(email, self.settings.internal_domain)]
             org = (e['organizer_email'] or '').lower()
-            if org and not _internal(org):
+            if org and not _internal(org, self.settings.internal_domain) and org not in [p for p, _ in people]:
                 people.append((org, e['organizer_name']))
             missing = {_hash(email): matcher.reason(email) for email, _ in people if matcher.reason(email)}
             if missing or not people:
@@ -618,7 +633,7 @@ class Run:
         self.counts.update(calendar_counts(self.state))
 
     def report(self, out: Path, refresh_count: int) -> None:
-        lines = [f'# Outlook intake {self.now.astimezone(LOCAL):%Y-%m-%d %H:%M %Z}', '', '## Counts', '']
+        lines = [f'# Outlook intake {self.now.astimezone(self.settings.timezone):%Y-%m-%d %H:%M %Z}', '', '## Counts', '']
         lines += [f'- {k}: {v}' for k, v in sorted(self.counts.items())]
         lines += [f'- needs_refresh_listed: {refresh_count}', '', '## Writes', '']
         lines += [f'- {who} | {ref} | {verb}' + (f' | {note}' if note else '') for who, ref, verb, note in self.written]
@@ -630,7 +645,7 @@ class Run:
                              f'retry_at={request.get("retry_at")}')
         lines += ['', '## Unmatched', '']
         lines += [f'- {name} | {domain} | {reason}' for name, domain, reason in sorted(self.unmatched)]
-        _private_write(out / f'report-{self.now.astimezone(LOCAL):%Y%m%d-%H%M%S}.md', '\n'.join(lines) + '\n')
+        _private_write(out / f'report-{self.now.astimezone(self.settings.timezone):%Y%m%d-%H%M%S}.md', '\n'.join(lines) + '\n')
 
 
 def _refresh_list(out: Path, pending: dict) -> int:
@@ -644,6 +659,8 @@ def _refresh_list(out: Path, pending: dict) -> int:
     for ident, p in sorted(pending.items(), key=lambda kv: kv[1]['sent']):
         entry = {'message_id': ident, 'subject_hash': p['subject_hash'], 'sent_utc': _iso(p['sent']),
                  'sender_email': p['sender_email']}
+        if p.get('expired'):
+            entry['expired'] = True
         if ident in opened:
             entry['opened_at'] = opened[ident]
         entries.append(entry)
@@ -657,7 +674,9 @@ def mapping_counts(state: dict) -> dict:
     participants = {}
     for item in [*mail.values(), *calendar.values()]:
         participants.update(item.get('participants', {}))
-    return {'unresolved_messages': len(mail),
+    return {'hydration_pending': len(state.get('pending_full', {})),
+            'hydration_expired': sum(bool(p.get('expired')) for p in state.get('pending_full', {}).values()),
+            'unresolved_messages': len(mail),
             'unresolved_calendar': len(calendar), 'unresolved_addresses': len(participants),
             'unmatched': len(participants),
             **{'mapping_' + reason: list(participants.values()).count(reason)
@@ -699,6 +718,8 @@ def _quarantine_calendar_requests(state: dict) -> None:
 
 
 def run(repo: Path, home: Path, ports: Ports) -> Outcome:
+    settings = load_settings(home)
+    settings.require_repo(repo)
     if not in_window(ports.now()):
         return Outcome('skipped', 'outside_window')
     out = repo / OUT
@@ -725,6 +746,7 @@ def _save(out: Path, state: dict) -> None:
 
 
 def _run(out: Path, home: Path, ports: Ports) -> Outcome:
+    settings = load_settings(home)
     try:
         store = resolve_store(home)
     except FileNotFoundError:
@@ -739,15 +761,16 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     matcher = None
     if state.get('mail_unresolved') or state.get('calendar_unresolved'):
         try:
-            matcher = Matcher(ports.contacts())
+            matcher = Matcher(ports.contacts(), settings.internal_domain)
         except CarrError as error:
             return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code)
     contacts_changed = matcher is not None and state.get('contact_map') != matcher.fingerprint()
     pending_writes = any(not r['acknowledged'] and r.get('disposition') != 'calendar_unsupported'
                          for r in state.get('requests', {}).values())
-    if state.get('store') == signature and not contacts_changed and not state.get('steps') and not pending_writes and state.get('calendar_policy') == 1:
+    hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
+    if state.get('store') == signature and not hydration_due and not contacts_changed and not state.get('steps') and not pending_writes and state.get('calendar_policy') == 1:
         if state.get('pending_full'):
-            Run(ports, state, now, out).full_text([])
+            Run(ports, state, now, out, settings).full_text([])
             _refresh_list(out, state['pending_full'])
             _save(out, state)
         counts = {**mapping_counts(state), **calendar_counts(state)}
@@ -768,7 +791,8 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     high = state.get('high_water')
     since = int((datetime.fromtimestamp(high, timezone.utc) - LOOKBACK if high else now - BACKFILL).timestamp())
     mails = _best_copies(mails)
-    work = Run(ports, state, now, out)
+    state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
+    work = Run(ports, state, now, out, settings)
     try:
         _quarantine_calendar_requests(state)
         _save(out, state)
@@ -776,11 +800,11 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
             if not request['acknowledged'] and request.get('disposition') != 'calendar_unsupported':
                 args = json.loads(request['payload'])
                 if request['verb'] == 'set-next-action' and (
-                        args.get('owner') != BALL_OWNER or 'expected_action' not in args):
+                        args.get('owner') != work.settings.owner or 'expected_action' not in args):
                     request.update(disposition='blocked', retry_at=None,
                                    error_code='legacy_action_guard_required')
                 work.write(request['verb'], args, 'pending write')
-        matcher = matcher or Matcher(ports.contacts())
+        matcher = matcher or Matcher(ports.contacts(), settings.internal_domain)
         work.emails(mails, matcher, since)
         work.full_text(mails)
         work.next_steps(mails)
@@ -817,7 +841,7 @@ def _carr(repo: Path) -> Callable[[str, dict], dict]:
     def call(verb: str, args: dict) -> dict:
         try:
             done = subprocess.run([str(repo / 'run.sh'), 'call', verb, '-'], input=json.dumps(args), cwd=repo,
-                                  capture_output=True, text=True, timeout=120)
+                                  capture_output=True, text=True, timeout=120, env=load_settings().transport_environment())
         except subprocess.TimeoutExpired:
             raise CarrError(code='timeout') from None
         except OSError as error:
@@ -853,7 +877,7 @@ def _contacts(repo: Path) -> Callable[[], list]:
         rows = []
         try:
             for view, id_col, name_col, org_col in matcher.RECORD_VIEWS:
-                _, found = matcher.read_view(view)
+                _, found = matcher.read_view(view, credential_file=load_settings().database_credentials)
                 for r in found:
                     email = str(r.get('Email') or '').strip().lower()
                     if '@' in email and not r.get('_out_of_market'):
@@ -870,7 +894,7 @@ def _contacts(repo: Path) -> Callable[[], list]:
 def _decoder(home: Path) -> Callable[[Path, Path, Path], None]:
     def decode(copy: Path, files: Path, db: Path) -> None:
         try:
-            done = subprocess.run([str(home / HXPROBE), 'db', str(copy), str(db), str(files)],
+            done = subprocess.run([str(load_settings(home).decoder), 'db', str(copy), str(db), str(files)],
                                   capture_output=True, timeout=900)
         except (OSError, subprocess.TimeoutExpired):
             raise DecodeError('hxprobe did not run') from None
@@ -882,6 +906,9 @@ def _decoder(home: Path) -> Callable[[Path, Path, Path], None]:
 def main() -> int:
     repo = Path(__file__).resolve().parents[1]
     home = Path.home()
+    settings = load_settings(home)
+    settings.require_repo(repo)
+    settings.require_service('intake')
     ports = Ports(carr=_carr(repo), contacts=_contacts(repo), next_step=ask_model,
                   decode=_decoder(home), now=lambda: datetime.now(timezone.utc))
     outcome = run(repo, home, ports)

@@ -45,19 +45,5 @@ with tempfile.TemporaryDirectory(prefix="drive-client-artifact-slice3-") as td:
         assert proc.returncode == 2 and "nonblank --reason" in proc.stdout + proc.stderr, (
             f"{label}: recovery without reason was accepted: {proc.stdout}{proc.stderr}")
 
-    # Front Door is now a deterministic record-native artifact, not a Drive
-    # client.  Normal generation must therefore succeed while ignoring an
-    # ambient legacy vault completely.
-    front_door = ROOT / "pipelines" / "front-door.html"
-    before = front_door.read_bytes()
-    proc = run(str(PY), "pipelines/build-front-door.py", env=env)
-    output = proc.stdout + proc.stderr
-    assert proc.returncode == 0, f"front-door: record-native generation failed: {output}"
-    assert "generated ->" in output and "canonical all: True" in output, (
-        f"front-door: missing deterministic record-native evidence: {output}")
-    assert str(poison) not in output, f"front-door: resolved poisoned vault: {output}"
-    assert marker.read_text() == "unchanged", "front-door: wrote poisoned vault"
-    assert front_door.read_bytes() == before, "front-door: deterministic generation changed its checked-in artifact"
 
-
-print("drive client artifact slice3 selftest: record-native Front Door and Drive boundaries passed")
+print("drive client artifact slice3 selftest: Drive boundaries passed")

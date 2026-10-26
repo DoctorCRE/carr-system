@@ -1,0 +1,57 @@
+{
+  "work_request": "WR-AI-008",
+  "adjudication": "pending-human-review",
+  "provenance": "Agent-authored synthetic policy examples. No client records or human adjudication claimed.",
+  "pairs": [
+    {
+      "id": "corroborated-name", "expected": "duplicate",
+      "rationale": "The same full practice name and location identify one synthetic practice across lanes.",
+      "leads": [{"name": "Example Dental", "location": "Example City"}, {"name": "Example Dental", "location": "Example City"}]
+    },
+    {
+      "id": "name-punctuation", "expected": "duplicate",
+      "rationale": "Punctuation does not change this synthetic name, with the same corroborating location.",
+      "leads": [{"name": "Example-Dental", "location": "Example City"}, {"name": "Example Dental", "location": "Example City"}]
+    },
+    {
+      "id": "practice-corroboration", "expected": "duplicate",
+      "rationale": "An identical full person name and practice corroborate this synthetic identity without a location.",
+      "leads": [{"name": "Avery Example", "practice": "Example Dental"}, {"name": "Avery Example", "practice": "Example Dental"}]
+    },
+    {
+      "id": "location-case", "expected": "duplicate",
+      "rationale": "Case does not change the same synthetic practice and location.",
+      "leads": [{"name": "Example Dental", "location": "EXAMPLE CITY"}, {"name": "Example Dental", "location": "example city"}]
+    },
+    {
+      "id": "name-only", "expected": "distinct",
+      "rationale": "Same-name leads without any corroboration must stay distinct under the Work Request.",
+      "leads": [{"name": "Avery Example"}, {"name": "Avery Example"}]
+    },
+    {
+      "id": "location-prefix-collision", "expected": "distinct",
+      "rationale": "Different numbered suites distinguish these synthetic practices despite a shared 24-character prefix.",
+      "leads": [{"name": "Example Dental", "location": "100 Example Medical Plaza Suite 100"}, {"name": "Example Dental", "location": "100 Example Medical Plaza Suite 200"}]
+    },
+    {
+      "id": "location-spacing", "expected": "duplicate",
+      "rationale": "Trailing whitespace does not change this synthetic practice location.",
+      "leads": [{"name": "Example Dental", "location": "Example City"}, {"name": "Example Dental", "location": "Example City "}]
+    },
+    {
+      "id": "location-practice-fallback", "expected": "duplicate",
+      "rationale": "Both observations share a person and practice, but only one supplies a location.",
+      "leads": [{"name": "Avery Example", "practice": "Example Dental", "location": "Example City"}, {"name": "Avery Example", "practice": "Example Dental"}]
+    },
+    {
+      "id": "different-name", "expected": "distinct",
+      "rationale": "Different full names at the same location do not establish one identity.",
+      "leads": [{"name": "Avery Example", "location": "Example City"}, {"name": "Blair Example", "location": "Example City"}]
+    },
+    {
+      "id": "different-location", "expected": "distinct",
+      "rationale": "These synthetic same-name practices have different locations and no other corroboration.",
+      "leads": [{"name": "Example Dental", "location": "Example City"}, {"name": "Example Dental", "location": "Other Example City"}]
+    }
+  ]
+}

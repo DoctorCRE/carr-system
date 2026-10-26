@@ -1,4 +1,4 @@
-"""Nightly Inbox triage: file Joe's already-read Inbox email into Outlook folders.
+"""Nightly Inbox triage: file the user's already-read Inbox email into Outlook folders.
 
 Code only: no agent session and no model. launchd fires `fire()` every 15
 minutes from 19:15 to 21:00, and both `fire()` and `run()` refuse any other time. Once a
@@ -17,7 +17,7 @@ and must add up to the Inbox unread badge before anything is touched, and after
 the moves the unread set must be exactly the same, new arrivals included (a
 difference fails the run and a later fire retries). Any failed move fails the
 run; two in a row stop it at once. The folder tree and the sender table come
-from Joe's private ~/.config/carr folder guide, which must be 0600; the report in
+from the configured private folder guide, which must be 0600; the report in
 out/outlook-triage/ (0700/0600) carries counts and a 12-character sha256 of each
 moved row's label, never a sender, subject or folder.
 
@@ -25,7 +25,7 @@ Before filing, up to 50 already-read emails the intake job lists as missing
 their full body are opened so Outlook downloads them: found by searching the
 sender address and matching the subject's sha256, selected, and given time to
 render; it counts as opened only when a fresh read shows it selected. A listed
-email that is still unread is skipped until Joe reads it. The
+email that is still unread is skipped until the user reads it. The
 intake job owns that list; triage only adds opened_at. REFRESH_LIST's path and
 the hash are a provisional contract until the intake job publishes its own.
 """
@@ -43,20 +43,16 @@ import stat
 import subprocess
 import sys
 from typing import Callable
-from zoneinfo import ZoneInfo
 
 from lib.outlook_ui import (EXIT, CuaError, Moved, Outcome, ReadState, Refreshed, Row, UiError, Waits,
                             Window, outlook_pid, prepare_outlook, private_file, usable_window)
 
-GUIDE = Path('.config/carr/outlook-nightly-sweep.folders.md')
+from lib.outlook_settings import load_settings
 OUT = Path('out/outlook-triage')
 REFRESH_LIST = Path('out/outlook-intake/needs-refresh.json')
 REFRESH_FIELDS = ('message_id', 'subject_hash', 'sent_utc', 'sender_email')
-ZONE = ZoneInfo('America/Chicago')
 FIRST_FIRE, LAST_FIRE, WINDOW_CLOSE = clock(19, 15), clock(21, 0), clock(21, 15)
 IDLE_SECONDS = 600
-DEALS = 'Deals/'
-VENDORS = 'Networking/Vendors/A.List/'
 MAP_LINE = re.compile(r'^map:\s*(?P<key>\S.*?)\s*->\s*(?P<path>\S.*?)\s*$')
 EMAIL = re.compile(r'[^\s<>@,]+@[^\s<>@,]+\.[^\s<>@,]+')
 SERVICE, RUN_KEY = 'outlook-triage', 'outlook.triage'
@@ -99,12 +95,14 @@ def person_name(display: str) -> str:
 
 @dataclass(frozen=True)
 class FolderGuide:
-    """The folder tree and sender table parsed from Joe's private guide."""
+    """The folder tree and sender table parsed from the user's private guide."""
     paths: frozenset[str]
+    deal_prefix: str
+    vendor_prefix: str
     maps: tuple[tuple[str, str], ...] = ()
 
     @classmethod
-    def parse(cls, text: str) -> FolderGuide:
+    def parse(cls, text: str, *, deal_prefix: str, vendor_prefix: str) -> FolderGuide:
         paths, maps = set(), []
         for raw in text.splitlines():
             line = re.sub(r'\s{2,}\(.*\)$', '', raw).strip()
@@ -113,8 +111,8 @@ class FolderGuide:
                 maps.append((mapped['key'], mapped['path']))
             elif line and not line.startswith(('#', '-', '*')) and not line.endswith(':') and ': ' not in line:
                 paths.add(line)
-        guide = cls(frozenset(paths), tuple(maps))
-        if not any(p.startswith(DEALS) for p in guide.paths):
+        guide = cls(frozenset(paths), deal_prefix, vendor_prefix, tuple(maps))
+        if not any(p.startswith(guide.deal_prefix) for p in guide.paths):
             raise ValueError('no Deals folders')
         if any(path not in guide.paths for _, path in guide.maps):
             raise ValueError('map names an unknown folder')
@@ -143,7 +141,8 @@ class CarrFinder:
         if name not in self.cache:
             try:
                 result = subprocess.run([str(self.repo / 'run.sh'), 'call', 'find', json.dumps({'query': name})],
-                                        cwd=self.repo, capture_output=True, text=True, timeout=90)
+                                        cwd=self.repo, capture_output=True, text=True, timeout=90,
+                                        env=load_settings().transport_environment())
                 value = json.loads(result.stdout)
             except (OSError, subprocess.TimeoutExpired, ValueError):
                 raise FindError from None
@@ -165,11 +164,11 @@ def _deal_rule(sender: str, guide: FolderGuide, find) -> list[str] | None:
     if len((party.get('name') or '').split()) >= 2:
         names.append(party['name'].split()[-1])
     names += [d.get('name') for d in found.get('deals') or [] if d.get('client_ref') == party.get('ref')]
-    return [p for p in guide.leaves_under(DEALS) if any(_same(guide.leaf(p), n) for n in names)]
+    return [p for p in guide.leaves_under(guide.deal_prefix) if any(_same(guide.leaf(p), n) for n in names)]
 
 
 def _vendor_rule(sender: str, guide: FolderGuide, find) -> list[str]:
-    return [p for p in guide.leaves_under(VENDORS)
+    return [p for p in guide.leaves_under(guide.vendor_prefix)
             if _same(guide.leaf(p), sender) or _same(guide.leaf(p), person_name(sender))]
 
 
@@ -255,6 +254,13 @@ def _unread(tabs: dict[str | None, list[Row]]) -> Counter:
 
 def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report: Report,
                refresh_list: Path, closed: Callable[[], bool]) -> Outcome:
+    return preserve_unread(window, report, lambda tabs: (
+        refresh_all(window, refresh_list, limits, report, closed)
+        or _move_all(window, tabs, guide, find, limits, report, closed)))
+
+
+def preserve_unread(window: Window, report: Report, action: Callable[[dict], Outcome]) -> Outcome:
+    """Verify the unread set before and after any read-mail operation."""
     badge, tabs = _inbox(window)
     unread = _unread(tabs)
     if any(r.selected and r.read_state is not ReadState.READ for rows in tabs.values() for r in rows):
@@ -263,8 +269,7 @@ def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report:
         report.left['unread_set_unverified'] += sum(len(rows) for rows in tabs.values())
         return Outcome('failed', 'unread_set_unverified')
     try:
-        outcome = (refresh_all(window, refresh_list, limits, report, closed)
-                   or _move_all(window, tabs, guide, find, limits, report, closed))
+        outcome = action(tabs)
     except ValueError:
         outcome = Outcome('failed', 'refresh_list_invalid')
     except UiError as exc:
@@ -374,14 +379,16 @@ def _move_all(window: Window, tabs: dict[str | None, list[Row]], guide: FolderGu
 
 def triage(repo: Path, home: Path, waits: Waits, limits: Limits,
            closed: Callable[[], bool]) -> tuple[Outcome, Report]:
+    settings = load_settings(home)
     report = Report()
     try:
-        mode = stat.S_IMODE((home / GUIDE).stat().st_mode)
+        mode = stat.S_IMODE(settings.folder_guide.stat().st_mode)
         if mode != 0o600:
             print(f'outlook-triage: the folder guide names clients, so it must be mode 0600, not {mode:04o}; '
-                  f'run chmod 600 ~/{GUIDE}', file=sys.stderr)
+                  f'run chmod 600 {settings.folder_guide}', file=sys.stderr)
             return Outcome('failed', 'folder_guide_not_0600'), report
-        guide = FolderGuide.parse((home / GUIDE).read_text())
+        guide = FolderGuide.parse(settings.folder_guide.read_text(), deal_prefix=settings.deal_prefix,
+                                  vendor_prefix=settings.vendor_prefix)
     except OSError:
         return Outcome('failed', 'folder_guide_missing'), report
     except ValueError:
@@ -422,17 +429,18 @@ def _settled(repo: Path, day: str) -> Path:
 
 
 def _minute(moment: datetime) -> clock:
-    return moment.astimezone(ZONE).time().replace(second=0, microsecond=0)
+    return moment.astimezone(load_settings().timezone).time().replace(second=0, microsecond=0)
 
 
 def run(repo: Path, home: Path, now: datetime, waits: Waits = Waits(), limits: Limits = Limits(),
-        now_fn: Callable[[], datetime] = lambda: datetime.now(ZONE)) -> Outcome:
+        now_fn: Callable[[], datetime] = lambda: datetime.now(load_settings().timezone)) -> Outcome:
     """One triage run, only from 19:15 to 21:00; it selects nothing once now_fn() reaches 21:15."""
+    load_settings(home).require_repo(repo)
     os.umask(0o077)
     if not FIRST_FIRE <= _minute(now) <= LAST_FIRE:
         print('outlook-triage skipped outside_window moved=0 left=0')
         return Outcome('skipped', 'outside_window')
-    close = datetime.combine(now.astimezone(ZONE).date(), WINDOW_CLOSE, ZONE)
+    close = datetime.combine(now.astimezone(load_settings().timezone).date(), WINDOW_CLOSE, load_settings().timezone)
     if now_fn() >= close:
         print('outlook-triage timed_out window_closed moved=0 left=0')
         return Outcome('timed_out', 'window_closed')
@@ -454,7 +462,10 @@ def run(repo: Path, home: Path, now: datetime, waits: Waits = Waits(), limits: L
 def fire(repo: Path | None = None, now: datetime | None = None) -> int:
     """launchd entry: nothing to do outside 19:15-21:00 or once today is settled, else run the job."""
     repo = repo or Path(__file__).resolve().parents[1]
-    now = now or datetime.now(ZONE)
+    settings = load_settings()
+    settings.require_repo(repo)
+    settings.require_service('triage')
+    now = now or datetime.now(load_settings().timezone)
     if not FIRST_FIRE <= _minute(now) <= LAST_FIRE:
         return 0
     if _settled(repo, now.strftime('%Y-%m-%d')).exists():
@@ -465,5 +476,6 @@ def fire(repo: Path | None = None, now: datetime | None = None) -> int:
 
 
 def main() -> int:
-    outcome = run(Path(__file__).resolve().parents[1], Path.home(), datetime.now(ZONE))
+    load_settings().require_service('triage')
+    outcome = run(Path(__file__).resolve().parents[1], Path.home(), datetime.now(load_settings().timezone))
     return EXIT[outcome.state]

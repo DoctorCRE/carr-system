@@ -43,11 +43,17 @@ from __future__ import annotations
 
 import json
 import plistlib
+import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 PLIST_DIR = REPO / "ops" / "launchd"
 SCOPE = REPO / "ops" / "config" / "ci-check-scope.json"
+sys.path.insert(0, str(REPO))
+from lib.outlook_settings import load_settings
+from outlook_test_support import write_settings
+
 SELF = Path(__file__).name
 HOMEBREW_BIN = "/opt/homebrew/bin"
 
@@ -92,7 +98,13 @@ def main() -> int:
         # deliberately unchecked: job-watchdog puts Homebrew first, the older jobs
         # append it so every binary they already resolved keeps resolving the same.
         with open(path, "rb") as handle:
-            env = plistlib.load(handle).get("EnvironmentVariables") or {}
+            definition = plistlib.load(handle)
+        if definition.get('Label', '').startswith('com.carr.outlook-'):
+            with tempfile.TemporaryDirectory() as temp:
+                home = Path(temp).resolve()
+                write_settings(home, home / 'repo')
+                definition = plistlib.loads(load_settings(home).render_plist(path))
+        env = definition.get("EnvironmentVariables") or {}
         check(f"{path.name} declares a PATH that reaches Homebrew",
               HOMEBREW_BIN in str(env.get("PATH", "")).split(":"),
               f"EnvironmentVariables.PATH is {env.get('PATH')!r}")

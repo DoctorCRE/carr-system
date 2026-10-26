@@ -14,13 +14,19 @@
 set -eu
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO"
+PY="$REPO/.venv/bin/python"
+"$PY" -m lib.outlook_settings service intake
+"$PY" -m lib.outlook_settings service refresh
 LABEL="com.carr.outlook-intake"
 SOURCE="$REPO/ops/launchd/$LABEL.plist"
 DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
 RENDERED="$REPO/out/$LABEL.plist"
 LOG="$REPO/out/outlook-intake-launchd.log"
 COMMIT="191b54e42757687806202f8f696e9066f0514e11"
-VENDOR="$HOME/carr-local/hxstore-reverse-engineering"
+VENDOR="$("$PY" -m lib.outlook_settings field vendor)"
+HELPER="$("$PY" -m lib.outlook_settings field copy_helper)"
+VENDOR_PARENT="$(dirname "$VENDOR")"
 PATCH="$REPO/vendor-patches/hxprobe-calendar-and-bodies.patch"
 PIN="$VENDOR/.carr-pin"
 WANT_PIN="$COMMIT $(/usr/bin/shasum -a 256 "$PATCH" | cut -d' ' -f1)"
@@ -31,22 +37,16 @@ if [ ! -f "$SOURCE" ]; then
   print -u2 -- "install-outlook-intake: missing source plist: $SOURCE"
   exit 1
 fi
-if ! (cd "$REPO" && "$REPO/.venv/bin/python" -c \
-    "import sys; from lib import machine_role; from lib.launchd_scope import allowed_on_machine; sys.exit(0 if allowed_on_machine('$LABEL.plist', machine_role.is_primary('$REPO')) else 1)" \
-    2>/dev/null); then
-  print -u2 -- "install-outlook-intake: this Mac's role does not run $LABEL (see ops/config/services.json runs_on)"
-  exit 1
-fi
 
 if [ ! -x "$VENDOR/hxprobe/target/release/hxprobe" ] || [ "$(cat "$PIN" 2>/dev/null)" != "$WANT_PIN" ]; then
   if [ -e "$VENDOR" ]; then
     print -u2 -- "install-outlook-intake: $VENDOR exists but is not the pinned, patched build; move it aside first"
     exit 1
   fi
-  mkdir -p "$HOME/carr-local"
+  mkdir -p "$VENDOR_PARENT"
   /usr/bin/curl -fsSL "https://codeload.github.com/ukd1/hxstore-reverse-engineering/tar.gz/$COMMIT" \
-    | /usr/bin/tar -xz -C "$HOME/carr-local"
-  mv "$HOME/carr-local/hxstore-reverse-engineering-$COMMIT" "$VENDOR"
+    | /usr/bin/tar -xz -C "$VENDOR_PARENT"
+  mv "$VENDOR_PARENT/hxstore-reverse-engineering-$COMMIT" "$VENDOR"
   (cd "$VENDOR" && /usr/bin/patch -p1 --quiet < "$PATCH")
   (cd "$VENDOR/hxprobe" && cargo test --release --locked --quiet && cargo build --release --locked --quiet)
   print -- "$WANT_PIN" > "$PIN"
@@ -63,14 +63,18 @@ import tempfile
 
 repo, home = (Path(value).resolve() for value in sys.argv[1:])
 sys.path.insert(0, str(repo))
-from lib.outlook_intake import COPY_HELPER, OUT, PROFILE
+from lib.outlook_settings import load_settings
+
+settings = load_settings(home)
+settings.require_repo(repo)
 
 source = repo / 'tools/outlook-intake-copy.c'
-helper = home / COPY_HELPER
+helper = settings.copy_helper
+work_root = settings.repo / 'out/outlook-intake'
 flags = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
-         f'-DOUTLOOK_PROFILE={json.dumps(str(home / PROFILE))}',
-         f'-DOUTLOOK_WORK_ROOT={json.dumps(str(repo / OUT))}',
-         f'-DOUTLOOK_REPO={json.dumps(str(repo))}']
+         f'-DOUTLOOK_PROFILE={json.dumps(str(settings.profile))}',
+         f'-DOUTLOOK_WORK_ROOT={json.dumps(str(work_root))}',
+         f'-DOUTLOOK_REPO={json.dumps(str(settings.repo))}']
 pin = helper.with_suffix('.pin')
 wanted = hashlib.sha256(source.read_bytes() + json.dumps(flags).encode()).hexdigest()
 helper.parent.mkdir(parents=True, exist_ok=True)
@@ -81,10 +85,11 @@ if not (helper.is_file() and os.access(helper, os.X_OK) and pin.is_file() and pi
         built.chmod(0o700)
         os.replace(built, helper)
     pin.write_text(wanted)
+settings.verify_helper()
 PY
 
 mkdir -p "$REPO/out"
-/usr/bin/sed -e "s|{{REPO}}|$REPO|g" -e "s|{{HOME}}|$HOME|g" "$SOURCE" > "$TMP"
+"$PY" -m lib.outlook_settings render "$SOURCE" > "$TMP"
 /usr/bin/plutil -lint "$TMP" >/dev/null
 cp "$TMP" "$RENDERED"
 chmod 644 "$RENDERED"
@@ -93,9 +98,24 @@ touch "$LOG"
 chmod 600 "$LOG"
 
 print -- "install-outlook-intake: hxprobe pinned and built; plist rendered to $RENDERED"
-print -- "install-outlook-intake: one-time step on the Mac Studio: grant Full Disk Access to $HOME/carr-local/bin/outlook-intake-copy"
+print -- "install-outlook-intake: one-time step: grant Full Disk Access to $HELPER"
 print -- "  System Settings > Privacy & Security > Full Disk Access > add the helper above."
 print -- "install-outlook-intake: it is NOT loaded. To load it, run:"
 print -- "  install -m 644 '$RENDERED' '$DEST'"
 print -- "  launchctl bootstrap gui/$(id -u) '$DEST'"
 print -- "install-outlook-intake: private reports: $REPO/out/outlook-intake/"
+
+LABEL="com.carr.outlook-refresh"
+SOURCE="$REPO/ops/launchd/$LABEL.plist"
+DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
+RENDERED="$REPO/out/$LABEL.plist"
+LOG="$REPO/out/outlook-refresh-launchd.log"
+"$PY" -m lib.outlook_settings render "$SOURCE" > "$TMP"
+/usr/bin/plutil -lint "$TMP" >/dev/null
+cp "$TMP" "$RENDERED"
+chmod 644 "$RENDERED"
+touch "$LOG"
+chmod 600 "$LOG"
+print -- "install-outlook-intake: refresh worker rendered for the same host and user; it is NOT loaded."
+print -- "  install -m 644 '$RENDERED' '$DEST'"
+print -- "  launchctl bootstrap gui/$(id -u) '$DEST'"

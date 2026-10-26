@@ -701,11 +701,9 @@
       ],
       "tests": [
         "SURFACE-PARITY-001",
-        "SURFACE-WRITER-001",
-        "FRONTDOOR-USAGE-001"
+        "SURFACE-WRITER-001"
       ],
       "open_decisions": [
-        "OPEN-FRONTDOOR-001",
         "OPEN-SURFACE-001",
         "OPEN-SURFACE-002",
         "OPEN-SURFACE-003"

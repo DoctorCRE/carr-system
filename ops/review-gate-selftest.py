@@ -1,0 +1,87 @@
+"""Offline fixtures for the review-gate policy and GitHub event adapter."""
+import importlib.util
+import pathlib
+import unittest
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location("gate", pathlib.Path(__file__).with_name("review-gate.py"))
+assert spec is not None and spec.loader is not None
+gate = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gate)
+
+
+class ReviewGate(unittest.TestCase):
+    def test_threshold(self):
+        for net, expected in [(150, True), (151, False), (-20, True)]:
+            with self.subTest(net=net):
+                self.assertEqual(gate.approved({"changed_files": 0, "additions": net, "deletions": 0, "head": {"sha": "abc"}}, [], []), expected)
+
+    def test_risky_paths_and_renames(self):
+        paths = ["LaunchAgents/job", "a/job.plist", "ops/install-job.sh", "outlook/a", "hxstore/a", "hxprobe/a", "calendar.js", ".github/workflows/deploy.yml", "migrations/a", "db/a", "wrangler.toml", "tools/migrate.py"]
+        for path in paths:
+            for key in ("filename", "previous_filename"):
+                with self.subTest(path=path, key=key):
+                    self.assertFalse(gate.approved({"changed_files": 1, "head": {"sha": "abc"}, "additions": 0, "deletions": 0}, [{key: path}], []))
+
+    def test_added_machinery(self):
+        pr = {"changed_files": 1, "additions": 1, "deletions": 0, "head": {"sha": "abc"}}
+        for path, status, expected in [("bin/foo", "added", False), ("bin/codex-job", "modified", True), ("docs/x.md", "added", True)]:
+            with self.subTest(path=path, status=status):
+                self.assertEqual(gate.approved(pr, [{"filename": path, "status": status}], []), expected)
+
+    def test_sha_bound_comment_format(self):
+        pr = {"changed_files": 0, "additions": 151, "deletions": 0, "head": {"sha": "abc"}}
+        for body, expected in [("VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok", True), ("VERDICT: APPROVE\r\nReviewed-SHA: abc\r\nReviewer: grok", True), ("VERDICT: CHANGES\nReviewed-SHA: abc", False), ("VERDICT: APPROVE\nReviewed-SHA: old\nReviewer: grok", False), ("prefix\nReviewed-SHA: abc\nReviewer: grok\nVERDICT: APPROVE", False), ("VERDICT: APPROVE\nReviewed-SHA: abcd\nReviewer: grok", False)]:
+            with self.subTest(body=body):
+                self.assertEqual(gate.approved(pr, [], [{"body": body}]), expected)
+
+    def test_approval_requires_recognized_third_line_reviewer(self):
+        pr = {"changed_files": 0, "additions": 151, "deletions": 0, "head": {"sha": "abc"}}
+        for reviewer, expected in [("grok", True), ("Grok", True), ("Grok internal review", True),
+                                   ("the Dot", True), ("orchestrator re-pin", True), ("Claude", True), ("Claude (Opus subagent)", True), ("Claudette", False),
+                                   ("builder", False), ("", False), ("groking", False), ("the Dot extra", False)]:
+            with self.subTest(reviewer=reviewer):
+                body = f"VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: {reviewer}"
+                self.assertEqual(gate.approved(pr, [], [{"body": body}]), expected)
+        for suffix in ("", "\n", "\nFindings\nReviewer: grok", "\ngrok"):
+            with self.subTest(suffix=suffix):
+                self.assertFalse(gate.approved(pr, [], [{"body": "VERDICT: APPROVE\nReviewed-SHA: abc" + suffix}]))
+
+    def test_changes_vetoes_approval_at_same_head(self):
+        for additions in (1, 151):
+            for reviewed_sha, expected in [("abc", False), ("old", True)]:
+                with self.subTest(additions=additions, reviewed_sha=reviewed_sha):
+                    pr = {"changed_files": 0, "additions": additions, "deletions": 0, "head": {"sha": "abc"}}
+                    comments = [{"body": f"VERDICT: CHANGES\nReviewed-SHA: {reviewed_sha}"},
+                                {"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}]
+                    self.assertEqual(gate.approved(pr, [], comments), expected)
+
+    def test_event_adapter(self):
+        pr = {"base": {"ref": "main"}, "additions": 151, "deletions": 0, "head": {"sha": "abc"}, "changed_files": 1}
+        for event in ({"number": 4}, {"issue": {"number": 4}}):
+            for approved in (False, True):
+                comments = [{"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}] if approved else []
+                with patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "safe"}], comments, pr, {}]) as api:
+                    gate.run(event, "owner/repo")
+                    self.assertEqual(api.call_args.args[1]["state"], "success" if approved else "failure")
+        pr["additions"] = 0
+        for comments, expected in [([], "failure"), ([{"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}], "success")]:
+            with patch.object(gate, "api", side_effect=[pr, {}, [], comments, pr, {}]) as api:
+                gate.run({"number": 4}, "owner/repo")
+                self.assertEqual(api.call_args.args[1]["state"], expected)
+        with patch.object(gate, "api", return_value={"base": {"ref": "feature"}}) as api:
+            gate.run({"issue": {"number": 4}}, "owner/repo")
+            self.assertEqual(api.call_count, 1)
+        with patch.object(gate, "api") as api:
+            gate.run({"merge_group": {"head_sha": "queue"}}, "owner/repo")
+            self.assertEqual(api.call_args.args[0], "repos/owner/repo/statuses/queue")
+            self.assertEqual(api.call_args.args[1]["state"], "success")
+
+    def test_paginated_api(self):
+        from types import SimpleNamespace
+        with patch.object(gate.time, "sleep"), patch.object(gate.subprocess, "run", return_value=SimpleNamespace(stdout='[[{"body":"first"}],[{"body":"last"}]]')) as process:
+            self.assertEqual(gate.api("repos/owner/repo/issues/4/comments"), [{"body": "first"}, {"body": "last"}])
+            self.assertIn("--paginate", process.call_args.args[0])
+
+if __name__ == "__main__":
+    unittest.main()

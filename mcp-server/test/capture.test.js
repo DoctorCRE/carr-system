@@ -375,7 +375,7 @@ test("candidate batches are atomic at validation, idempotent, and never auto-wri
   assert.equal(typeof queue.candidates[0].created_at, "string");
 });
 
-test("post-call legacy lane accepts only note activities with exact active deal UUIDs", async () => {
+test("post-call note activities require exact active deal UUIDs and reject phase moves", async () => {
   const db = new CaptureFake();
   const r = rig(db);
   const environment = { CAPTURE_TOKENS: '{"mac-studio":"device-secret"}' };
@@ -402,6 +402,56 @@ test("post-call legacy lane accepts only note activities with exact active deal 
   assert.equal(db.candidates.length, 1);
   assert.equal(db.candidates[0].payload.ref, ids.deal);
   assert.equal(db.candidates[0].payload.kind, "note");
+});
+
+test("post-call next-step proposals stay pending, validate exact deals, and replay safely", async () => {
+  const db = new CaptureFake();
+  const r = rig(db);
+  const response = await r.handler.fetch(claimRequest(validPostCallClaim),
+    { CAPTURE_TOKENS: '{"mac-studio":"device-secret"}' });
+  const token = (await response.json()).session_token;
+  const item = { kind: "next_step", payload: {
+    deal: ids.deal, text: "Call landlord", next_date: "2028-02-29",
+  }, evidence_quote: "Call landlord on February 29, 2028", confidence: 0.5 };
+  const batch = { session_token: token, idempotency_key: "next-step", items: [item] };
+  const submitted = await post(r.handler, "/capture/candidates", batch);
+  assert.equal(submitted.status, 200);
+  const receipt = await submitted.json();
+  const replay = await post(r.handler, "/capture/candidates", batch);
+  assert.deepEqual(await replay.json(), receipt);
+  const changed = await post(r.handler, "/capture/candidates", {
+    ...batch, items: [{ ...item, payload: { ...item.payload, next_date: null } }],
+  });
+  assert.equal(changed.status, 409);
+  const queue = await TOOLS["capture-queue"].handler(db, joe, {});
+  assert.deepEqual(queue.candidates[0].payload, item.payload);
+  const session = await r.handler.fetch(new Request("https://worker.test/capture/session",
+    { headers: { authorization: `Bearer ${token}` } }), {});
+  assert.equal((await session.json()).candidate_statuses[0].status, "pending");
+  assert.equal(db.events.length, 0);
+  assert.equal(db.activities.length, 0);
+  assert.equal(db.nextActions.length, 0);
+
+  const invalid = [
+    { ...item.payload, deal: "Deal Alpha" },
+    { ...item.payload, deal: "20000000-0000-0000-0000-000000000099" },
+    { ...item.payload, text: " " }, { ...item.payload, text: "x".repeat(501) },
+    { ...item.payload, next_date: "2027-02-29" },
+    { ...item.payload, next_date: "tomorrow" }, { ...item.payload, next_date: true },
+    { ...item.payload, ref: ids.deal },
+    { deal: ids.deal, text: "Call landlord" },
+  ];
+  for (const [index, payload] of invalid.entries()) {
+    const denied = await post(r.handler, "/capture/candidates", {
+      ...batch, idempotency_key: `invalid-${index}`, items: [{ ...item, payload }],
+    });
+    assert.equal(denied.status, 400, JSON.stringify(payload));
+  }
+  const undated = await post(r.handler, "/capture/candidates", {
+    ...batch, idempotency_key: "undated", items: [{ ...item, payload: { ...item.payload, next_date: null } }],
+  });
+  assert.equal(undated.status, 200);
+  assert.equal(db.candidates.length, 2);
 });
 
 test("resolve accept executes once as confirmer; reject only skips; double resolve is inert", async () => {
@@ -535,7 +585,7 @@ test("post-call lifecycle cannot finalize after one acceptance and stores only s
     description: "Unrelated Dell task", status: "open" });
   await assert.rejects(executeRegisteredTool(db, { ...joe, human: false }, "resolve-post-call-candidate",
     { idempotency_key: "machine-no", candidate_id: first.id, accept: true }),
-  error => error instanceof ToolError && error.payload.error === "human_only");
+  error => error instanceof ToolError && error.payload.error === "human_only_verb_requires_verified_partner");
   const acceptedAction = await TOOLS["resolve-post-call-candidate"].handler(db, joe,
     { idempotency_key: "accept-action", candidate_id: first.id, accept: true });
   assert.equal(acceptedAction.assignee, "dell");
