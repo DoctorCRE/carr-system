@@ -503,6 +503,7 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
     { ...item.payload, value: "not-a-phase" }, { ...item.payload, field: "owner" },
     { ...item.payload, base_event_id: null }, { ...item.payload, value: true },
     { ...item.payload, human_quote: "Joe said move it" },
+    { ...item.payload, started_on: "2026-13-40" }, { ...item.payload, started_on: "October 20" },
   ];
   for (const [index, payload] of invalid.entries()) {
     const denied = await post(r.handler, "/capture/candidates", {
@@ -516,6 +517,16 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
   });
   assert.equal(noHistory.status, 200);
   assert.equal(db.candidates[1].payload.base_event_id, null);
+  const dated = await post(r.handler, "/capture/candidates", {
+    ...batch, idempotency_key: "phase-started-on",
+    items: [{ ...item, payload: { ...item.payload, started_on: "2026-10-20" } }],
+  });
+  assert.equal(dated.status, 200);
+  assert.equal(db.candidates[2].payload.started_on, "2026-10-20");
+  // Only a partner's own post-call session may apply a change automatically.
+  await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
+    idempotency_key: "phase-automatic-refused", candidate_id: db.candidates[2].id, accept: true, automatic: true,
+  }), error => error instanceof ToolError && error.payload.error === "automatic_apply_not_allowed");
 });
 
 test("resolve accept executes once as confirmer; reject only skips; double resolve is inert", async () => {

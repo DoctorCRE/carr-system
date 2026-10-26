@@ -20,6 +20,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from lib import email_router
+from lib import model_call
 from lib import outlook_intake as intake
 from lib.outlook_settings import load_settings
 from outlook_test_support import write_settings
@@ -32,7 +34,8 @@ CREATE TABLE messages (id INTEGER PRIMARY KEY, block INTEGER, sender TEXT, sende
   preview TEXT, body_source TEXT, copies INTEGER, copy_key TEXT);
 CREATE TABLE events (id INTEGER PRIMARY KEY, goid TEXT NOT NULL, start_unix INTEGER NOT NULL,
   end_unix INTEGER NOT NULL, start_utc TEXT NOT NULL, end_utc TEXT NOT NULL, subject TEXT,
-  location TEXT, organizer_name TEXT, organizer_email TEXT, body TEXT, UNIQUE (goid, start_unix));
+  location TEXT, organizer_name TEXT, organizer_email TEXT, body TEXT,
+  lifecycle_status TEXT NOT NULL DEFAULT 'unsupported', lifecycle_reason TEXT NOT NULL DEFAULT 'hxstore_lifecycle_unverified');
 CREATE TABLE event_attendees (event_id INTEGER NOT NULL, name TEXT, email TEXT);
 CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
 """
@@ -47,10 +50,10 @@ def ts(delta: timedelta) -> int:
 
 
 def mail(sender, sent, subject='Suite question', body='Can we meet Thursday?', name=None,
-         recipients=OWNER, kind='full', copy_key=None):
+         recipients=OWNER, kind='full', copy_key=None, local_keys=None):
     return dict(sender=sender, sender_name=name, recipients=recipients, subject=subject,
                 body=body, body_kind=kind, sent_unix=ts(sent),
-                copy_key=copy_key or f'{sender}\x1f{subject.lower()}\x1f{body.lower()}')
+                copy_key=copy_key or f'{sender}\x1f{subject.lower()}\x1f{body.lower()}', local_keys=local_keys)
 
 
 def ident(m):
@@ -66,12 +69,18 @@ def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer
 def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identities=None, decoded=None):
     con = sqlite3.connect(path)
     con.executescript(SCHEMA)
+    # Decoders built before WR-000502 have no local_keys column; keep testing that shape.
+    keyed = any(m.get('local_keys') for m in mails)
+    if keyed:
+        con.execute('ALTER TABLE messages ADD COLUMN local_keys TEXT')
     for m in mails:
         con.execute('INSERT INTO messages(sender,sender_name,recipients,subject,body,preview,'
                     'body_kind,sent_unix,copy_key) VALUES (?,?,?,?,?,?,?,?,?)',
                     (m['sender'], m['sender_name'], m['recipients'], m['subject'],
                      m['body'] if m['body_kind'] == 'full' else '', m['body'][:200],
                      m['body_kind'], m['sent_unix'], m['copy_key']))
+        if keyed:
+            con.execute('UPDATE messages SET local_keys = ? WHERE id = last_insert_rowid()', (m.get('local_keys'),))
     for e in events:
         cur = con.execute('INSERT INTO events(goid,start_unix,end_unix,start_utc,end_utc,subject,location,'
                           'organizer_name,organizer_email,body) VALUES (?,?,?,?,?,?,?,?,?,?)',
@@ -107,8 +116,14 @@ class Fake:
         self.contacts_rows = [CLIENT, LEAD]
         self.now = NOW
         self.on_decode = None
+        self.board_calls = []
+        self.agenda = None
+        self.agenda_version = 0
+        self.board_conflicts = 0
 
     def carr(self, verb, args):
+        if verb in ('read-progress-board', 'publish-board-snapshot'):
+            return self.board(verb, args)
         self.calls.append((verb, args))
         if verb in self.fail_verbs:
             raise intake.CarrError()
@@ -129,6 +144,21 @@ class Fake:
             self.actions[args['ref'], args.get('owner', 'runtime')] = {
                 'id': action_id, 'version': 1, 'updated_at': self.now.isoformat()}
             return {'ok': True, 'next_action_id': action_id}
+        return {'ok': True}
+
+    def board(self, verb, args):
+        """The display-snapshot store, kept apart from record writes."""
+        self.board_calls.append((verb, args))
+        if verb in self.fail_verbs:
+            raise intake.CarrError()
+        if verb == 'read-progress-board':
+            return {'ok': True, 'snapshot': self.agenda and {'version': self.agenda_version}}
+        if self.board_conflicts:
+            self.board_conflicts -= 1
+            self.agenda_version += 1
+            raise intake.CarrError(code='agenda_version_conflict')
+        self.test.assertEqual(args['base_version'], self.agenda_version if self.agenda else 0)
+        self.agenda, self.agenda_version = args['snapshot'], args['base_version'] + 1
         return {'ok': True}
 
     def contacts(self):
@@ -379,10 +409,62 @@ class IntakeTest(unittest.TestCase):
     def test_main_emits_monitoring_receipt_from_the_actual_outcome(self):
         from io import StringIO
         outcome = intake.Outcome('failed', 'writes_failed', {'writes_failed': 3})
-        with patch.object(intake, 'load_settings', return_value=load_settings(self.home)), patch.object(type(load_settings(self.home)), 'require_repo'), patch.object(intake, 'run', return_value=outcome), patch('sys.stdout', new_callable=StringIO) as stdout:
+        with patch.object(intake, 'load_settings', return_value=load_settings(self.home)), patch.object(type(load_settings(self.home)), 'require_repo'), patch.object(intake, 'run', return_value=outcome), patch.object(email_router, 'step', return_value=0), patch('sys.stdout', new_callable=StringIO) as stdout:
             self.assertEqual(intake.main(), 1)
         receipt = stdout.getvalue().split('outlook-intake-receipt ', 1)[1]
         self.assertEqual(json.loads(receipt), {'state': 'failed', 'reason': 'writes_failed', 'counts': {'writes_failed': 3}})
+
+    def test_main_runs_the_router_after_intake_releases_its_lock_without_changing_the_result(self):
+        write_settings(self.home, ROOT, model='sonnet')
+        settings = load_settings(self.home)
+        order, models = [], []
+
+        def fake_run(repo, home, ports):
+            order.append('intake')
+            ports.next_step({'outbound': False, 'subject': 'S', 'text': 'T'}, datetime(2026, 10, 26).date())
+            ports.lead_intent({'subject': 'S', 'text': 'T'}, datetime(2026, 10, 26).date())
+            return intake.Outcome('succeeded', 'ok')
+
+        def fake_ask(prompt, *, model, schema, system_prompt):
+            models.append(model)
+            return {'next_step': None, 'due_on': None} if schema is intake.REPLY_SCHEMA else {'business': False, 'summary': None}
+
+        def fake_step(repo, given):
+            order.append('router')
+            self.assertIs(given, settings)
+            return 1
+        with patch.object(intake, 'load_settings', return_value=settings), patch.object(type(settings), 'require_repo'), \
+                patch.object(intake, 'run', side_effect=fake_run), patch.object(intake.model_call, 'ask', side_effect=fake_ask), \
+                patch.object(email_router, 'step', side_effect=fake_step), patch('sys.stdout'):
+            self.assertEqual(intake.main(), 0, 'a failed router step never changes the intake result')
+        self.assertEqual(order, ['intake', 'router'])
+        self.assertEqual(models, ['sonnet', 'sonnet'])
+        for reason in ('outside_window', 'previous_run_active'):
+            with patch.object(intake, 'load_settings', return_value=settings), patch.object(type(settings), 'require_repo'), \
+                    patch.object(intake, 'run', return_value=intake.Outcome('skipped', reason)), \
+                    patch.object(email_router, 'step') as step, patch('sys.stdout'):
+                self.assertEqual(intake.main(), 78)
+            step.assert_not_called()
+
+    def test_a_router_that_cannot_import_or_raises_never_changes_the_intake_result(self):
+        import lib
+        from io import StringIO
+        settings = load_settings(self.home)
+        for outcome, code in ((intake.Outcome('succeeded', 'ok'), 0), (intake.Outcome('failed', 'writes_failed'), 1)):
+            saved = lib.email_router
+            del lib.email_router
+            try:
+                with patch.dict(sys.modules, {'lib.email_router': None}), \
+                        patch.object(intake, 'load_settings', return_value=settings), patch.object(type(settings), 'require_repo'), \
+                        patch.object(intake, 'run', return_value=outcome), patch('sys.stdout', new_callable=StringIO) as stdout:
+                    self.assertEqual(intake.main(), code)
+            finally:
+                lib.email_router = saved
+            self.assertIn('email-router-receipt {"state": "failed"', stdout.getvalue())
+            with patch.object(intake, 'load_settings', return_value=settings), patch.object(type(settings), 'require_repo'), \
+                    patch.object(intake, 'run', return_value=outcome), \
+                    patch.object(email_router, 'step', side_effect=RuntimeError('boom')), patch('sys.stdout'):
+                self.assertEqual(intake.main(), code)
 
     def test_contact_failures_have_safe_distinct_reasons(self):
         from types import SimpleNamespace
@@ -709,6 +791,47 @@ class IntakeTest(unittest.TestCase):
                               body='the whole message body', copy_key='k1')])
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual(args['detail'], 'the whole message body')
+
+    def mail_keys(self):
+        return json.loads((self.out() / intake.STATE).read_text()).get('mail_keys', {})
+
+    def test_each_email_record_carries_its_store_local_key(self):
+        a = mail('pat@example.test', -timedelta(hours=2), local_keys='9001')
+        b = mail('lee@example.test', -timedelta(hours=1), subject='Tour', local_keys='9002')
+        self.run_intake([a, b])
+        self.assertEqual(self.mail_keys(), {ident(a): ['9001'], ident(b): ['9002']})
+
+    def test_unresolved_and_skipped_emails_carry_their_local_key_too(self):
+        unknown = mail('new@example.test', -timedelta(hours=1), local_keys='77')
+        internal_only = mail(PARTNER, -timedelta(hours=2), subject='Lunch', recipients=OWNER, local_keys='78')
+        self.run_intake([unknown, internal_only])
+        self.assertEqual(self.mail_keys(), {ident(unknown): ['77'], ident(internal_only): ['78']})
+
+    def test_identical_template_emails_joined_as_copies_keep_both_local_keys(self):
+        # Two distinct store items with the same sender, subject and opening
+        # (the WR-000502 twins) still collapse here; the record names both
+        # keys so slice B2 can split them.
+        first = mail('pat@example.test', -timedelta(hours=2), copy_key='template', local_keys='9102')
+        second = mail('pat@example.test', -timedelta(hours=2) + timedelta(minutes=5), copy_key='template',
+                      local_keys='9101')
+        self.run_intake([first, second])
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+        self.assertEqual(self.mail_keys(), {ident(first): ['9101', '9102']})
+
+    def test_a_decoder_row_that_merged_two_store_items_keeps_both_keys(self):
+        m = mail('pat@example.test', -timedelta(hours=1), local_keys='9101,9102')
+        self.run_intake([m])
+        self.assertEqual(self.mail_keys(), {ident(m): ['9101', '9102']})
+
+    def test_a_decoder_without_local_keys_logs_mail_and_records_no_keys(self):
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+        self.assertEqual(self.mail_keys(), {})
+
+    def test_local_keys_expire_with_the_mail_they_describe(self):
+        state = {'mail_keys': {'old:1': ['5'], f'new:{int(NOW.timestamp())}': ['6']}}
+        intake._prune(state, NOW)
+        self.assertEqual(state['mail_keys'], {f'new:{int(NOW.timestamp())}': ['6']})
 
     def test_a_sender_name_that_is_really_the_subject_or_a_file_is_dropped(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=2), name='Suite question'),
@@ -1249,6 +1372,49 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(args['ref'], 'C-901')
         self.assertEqual(result.counts['unmatched'], 0)
 
+    def test_a_role_address_flagged_on_one_record_is_not_exact_on_any_record(self):
+        self.fake.contacts_rows += intake.record_contacts('pat@practice.test; info@practice.test', 'C-901', 'Pat')
+        self.fake.contacts_rows += intake.record_contacts('info@practice.test', 'L-905', 'Practice Office')
+        result = self.run_intake([mail('info@practice.test', -timedelta(hours=1))])
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(result.counts['mapping_shared_role'], 1)
+
+    def test_unresolved_mail_expires_after_thirty_days_and_is_counted(self):
+        old = mail('old@example.test', -timedelta(days=31), subject='Old')
+        recent = mail('recent@example.test', -timedelta(days=29), subject='Recent')
+        unresolved = {}
+        for m in (old, recent):
+            ck = intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'])[0]
+            unresolved[ident(m)] = {'ck': ck, 'sent': m['sent_unix'], 'participants': {m['sender']: 'missing'}}
+        self.out().mkdir(parents=True)
+        (self.out() / intake.STATE).write_text(json.dumps({'mail_unresolved': unresolved}))
+        result = self.run_intake([old, recent])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['unresolved_expired'], 1, 'the expiring run reports it')
+        self.assertEqual(result.counts['unresolved_messages'], 1)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual(list(state['mail_unresolved']), [ident(recent)])
+        result = self.run_intake([old, recent])
+        self.assertEqual(result.counts['unresolved_expired'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 1)
+        self.fake.contacts_rows.append(intake.Contact('old@example.test', 'L-911', 'Old Sender'))
+        self.run_intake([old, recent], touch=False)
+        self.assertEqual(self.fake.writes('log-activity'), [], 'expired mail is not revived')
+
+    def test_unresolved_calendar_candidates_expire_after_thirty_days(self):
+        old = event('old-visit', -timedelta(days=31), attendees=[('Old Visitor', 'old.visitor@example.test')])
+        recent = event('recent-visit', -timedelta(days=29), attendees=[('Recent Visitor', 'recent.visitor@example.test')])
+        result = self.run_intake(events=[old, recent])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['unresolved_calendar'], 1)
+        self.assertEqual(result.counts['calendar_unresolved_expired'], 1)
+        result = self.run_intake(events=[old, recent])
+        self.assertEqual(result.counts['unresolved_calendar'], 1, 'an expired candidate never comes back')
+        self.fake.now += timedelta(days=2)
+        result = self.run_intake(events=[old, recent])
+        self.assertEqual(result.counts['unresolved_calendar'], 0)
+        self.assertEqual(result.counts['calendar_unresolved_expired'], 2)
+
     def test_machine_senders_are_skipped_as_not_business(self):
         mails = [mail('no-reply@vendor.test', -timedelta(hours=1), subject='Receipt'),
                  mail('Bounce+abc@service.test', -timedelta(hours=1), subject='Bounce'),
@@ -1398,6 +1564,127 @@ class IntakeTest(unittest.TestCase):
         self.assertTrue(line.startswith('outlook-intake succeeded'))
 
 
+    # calendar agenda: the display snapshot the morning brief shows
+
+    def gid(self, n, instance='00000000'):
+        return f'040000008200E00074C5B7101A82E008{instance}{n:012X}'
+
+    def codes(self):
+        return [w['code'] for w in self.fake.agenda['warnings']]
+
+    def test_agenda_shows_only_meetings_that_name_joe(self):
+        events = [
+            event(self.gid(1), timedelta(hours=2), subject='Synthetic lender call', attendees=[('Pat', 'pat@example.test')]),
+            event(self.gid(2), timedelta(days=3), subject='Synthetic partner meeting', organizer=('Partner', PARTNER),
+                  attendees=[('Owner', OWNER)]),
+            event(self.gid(3), timedelta(days=1), subject='Synthetic test-account item', organizer=('Tester', 'tester@example.test')),
+            event(self.gid(4), timedelta(days=1), subject='Synthetic partner-only block', organizer=('Partner', PARTNER)),
+            event(self.gid(5), timedelta(days=15), subject='Synthetic far meeting'),
+            event(self.gid(6), -timedelta(days=2), subject='Synthetic past meeting'),
+        ]
+        outcome = self.run_intake(events=events)
+        self.assertEqual(outcome.state, 'succeeded')
+        snapshot = self.fake.agenda
+        self.assertEqual(snapshot['schema'], intake.AGENDA_SCHEMA)
+        self.assertEqual([i['title'] for i in snapshot['items']], ['Synthetic lender call', 'Synthetic partner meeting'])
+        call = snapshot['items'][0]
+        self.assertEqual((call['start'], call['location']), (intake._iso(ts(timedelta(hours=2))), 'Example Room'))
+        self.assertEqual(call['organizer'], {'name': 'Owner', 'email': OWNER})
+        self.assertEqual(call['attendees'], [{'name': 'Pat', 'email': 'pat@example.test'}])
+        self.assertNotIn('Agenda', json.dumps(snapshot), 'meeting notes never leave the private copy')
+        self.assertEqual(self.codes(), ['responses_unverified', 'group_invites_not_shown'])
+        self.assertEqual((outcome.counts['calendar_agenda_items'], outcome.counts['calendar_agenda_other_accounts']), (2, 2))
+        self.assertEqual(outcome.counts['calendar_agenda_published'], 1)
+        self.assertEqual(self.fake.writes(), [], 'the agenda never becomes a reminder or an activity')
+
+    def test_a_copy_without_joe_keeps_the_meeting_out(self):
+        self.run_intake(events=[event(self.gid(1), timedelta(days=1), attendees=[('Owner', OWNER)], organizer=('Partner', PARTNER)),
+                                event(self.gid(1), timedelta(days=1), organizer=('Partner', PARTNER))])
+        self.assertEqual(self.fake.agenda['items'], [])
+
+    def test_agenda_collapses_by_id_hides_cancelled_and_flags_moved_meetings(self):
+        events = [
+            event(self.gid(1), timedelta(days=2), subject='Synthetic review'),
+            event(self.gid(1), timedelta(days=2), minutes=90, subject='Synthetic review', attendees=[('Pat', 'pat@example.test')]),
+            event(self.gid(2), timedelta(days=3), subject='Synthetic budget'),
+            event(self.gid(2), timedelta(days=3), subject='Canceled: Synthetic budget'),
+            event(self.gid(3), timedelta(days=4), subject='Synthetic moved'),
+            event(self.gid(3), timedelta(days=5), subject='Synthetic moved'),
+        ]
+        outcome = self.run_intake(events=events)
+        review, moved = self.fake.agenda['items']
+        self.assertEqual((review['candidates'], review['conflict'], review['time_changed']), (2, True, False))
+        self.assertEqual(review['end'], intake._iso(ts(timedelta(days=2, minutes=90))))
+        self.assertEqual((moved['title'], moved['time_changed']), ('Synthetic moved', True))
+        self.assertEqual(moved['times'], [intake._iso(ts(timedelta(days=4))), intake._iso(ts(timedelta(days=5)))])
+        self.assertEqual(outcome.counts['calendar_agenda_canceled'], 1)
+        self.assertIn('time_changed', self.codes())
+
+    def test_recurring_occurrences_show_without_their_series_master(self):
+        master = self.gid(9)
+        events = [event(master, -timedelta(days=30), subject='Synthetic weekly'),
+                  event(self.gid(9, '07EA0A15'), timedelta(days=1), subject='Synthetic weekly'),
+                  event(self.gid(9, '07EA0A1C'), timedelta(days=8), subject='Synthetic weekly')]
+        outcome = self.run_intake(events=events)
+        self.assertEqual([i['recurring'] for i in self.fake.agenda['items']], [True, True])
+        self.assertEqual(outcome.counts['calendar_agenda_recurring'], 2)
+        self.assertIn('recurring_unverified', self.codes())
+
+    def test_a_series_with_no_stored_occurrence_in_the_window_still_warns(self):
+        master = self.gid(7)
+        self.run_intake(events=[event(master, -timedelta(days=30), subject='Synthetic weekly'),
+                                event(self.gid(7, '07EA0A0D'), -timedelta(days=7), subject='Synthetic weekly'),
+                                event(self.gid(8), timedelta(hours=3), subject='Synthetic one-off')])
+        self.assertEqual([i['title'] for i in self.fake.agenda['items']], ['Synthetic one-off'])
+        self.assertIn({'code': 'recurring_unverified', 'count': 1}, self.fake.agenda['warnings'])
+
+    def test_unread_calendar_items_are_counted_in_the_snapshot(self):
+        outcome = self.run_intake(events=[event(self.gid(1), timedelta(hours=3))], identities=4)
+        self.assertEqual(self.fake.agenda['warnings'][-1], {'code': 'undecoded', 'count': 3})
+        self.assertEqual(outcome.counts['calendar_agenda_undecoded'], 3)
+
+    def test_an_all_day_event_is_marked_and_kept_for_its_whole_day(self):
+        local = NOW.astimezone(load_settings(self.home).timezone)
+        midnight = local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        e = event(self.gid(1), midnight - NOW, minutes=24 * 60, subject='Synthetic conference')
+        self.run_intake(events=[e])
+        [item] = self.fake.agenda['items']
+        self.assertTrue(item['all_day'])
+        self.assertEqual(item['start'], intake._iso(int(midnight.timestamp())))
+
+    def test_a_large_agenda_is_trimmed_to_fit_and_says_so(self):
+        crowd = [(f'Guest {n}', f'guest{n}@example.test') for n in range(60)] + [('Owner', OWNER)]
+        events = [event(self.gid(n), timedelta(hours=n + 1), subject='Synthetic ' + 'x' * 2000, attendees=crowd)
+                  for n in range(120)]
+        outcome = self.run_intake(events=events)
+        self.assertLessEqual(len(json.dumps(self.fake.agenda)), intake.AGENDA_MAX_BYTES)
+        self.assertTrue(all(len(i['attendees']) == intake.AGENDA_ATTENDEES for i in self.fake.agenda['items']))
+        self.assertGreater(outcome.counts['calendar_agenda_trimmed'], 0)
+        self.assertEqual(self.fake.agenda['warnings'][-1]['code'], 'trimmed')
+
+    def test_agenda_publish_failure_never_fails_mail_and_republishes_on_the_next_decode(self):
+        m = mail('pat@example.test', -timedelta(hours=1))
+        self.fake.fail_verbs.add('publish-board-snapshot')
+        outcome = self.run_intake([m], [event(self.gid(1), timedelta(hours=4))])
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertEqual((outcome.counts['calendar_agenda_published'], outcome.counts['calendar_agenda_failed']), (0, 1))
+        self.assertEqual([(v, a.get('kind')) for v, a in self.fake.writes()], [('log-activity', 'email_in')])
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=30)
+        self.assertEqual(self.run_intake([m], [event(self.gid(1), timedelta(hours=4))]).counts['calendar_agenda_published'], 1)
+        self.assertEqual(len(self.fake.agenda['items']), 1)
+        self.assertEqual(len(self.fake.writes()), 1, 'mail is not logged twice')
+
+    def test_agenda_rereads_once_on_a_version_conflict(self):
+        self.run_intake(events=[event(self.gid(1), timedelta(hours=4))])
+        self.fake.board_conflicts = 1
+        self.fake.now += timedelta(minutes=30)
+        outcome = self.run_intake(events=[event(self.gid(2), timedelta(hours=5), subject='Synthetic second')])
+        self.assertEqual(outcome.counts['calendar_agenda_published'], 1)
+        self.assertEqual([i['title'] for i in self.fake.agenda['items']], ['Synthetic second'])
+        self.fake.board_conflicts = 2
+        self.fake.now += timedelta(minutes=30)
+        self.assertEqual(self.run_intake(events=[event(self.gid(3), timedelta(hours=6))]).counts['calendar_agenda_failed'], 1)
 class FolderTest(unittest.TestCase):
     FOLDERS = """
     CREATE TABLE folders (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, name TEXT,
@@ -1454,6 +1741,8 @@ class FolderTest(unittest.TestCase):
         self.assertEqual(best['folders'], ['Active Deals/Deal A', 'Inbox'])
 
 
+
+
 class ScheduleTest(unittest.TestCase):
     def test_intake_runs_only_on_the_studio_primary_role(self):
         from lib.launchd_scope import allowed_on_machine
@@ -1487,13 +1776,34 @@ class ScheduleTest(unittest.TestCase):
 
 class ModelCallTest(unittest.TestCase):
     def test_the_model_runs_isolated_with_no_tools_settings_or_mcp(self):
-        command = intake.model_command()
+        command = model_call.command('haiku', intake.REPLY_SCHEMA, intake.SYSTEM_PROMPT)
         for flag in ('--tools', '--setting-sources', '--strict-mcp-config', '--disable-slash-commands',
                      '--no-session-persistence', '--json-schema'):
             self.assertIn(flag, command)
         self.assertEqual(command[command.index('--tools') + 1], '')
         self.assertEqual(command[command.index('--setting-sources') + 1], '')
         self.assertEqual(command[command.index('--model') + 1], 'haiku')
+
+    def test_the_model_name_comes_from_settings_and_defaults_to_haiku(self):
+        with tempfile.TemporaryDirectory() as home:
+            write_settings(Path(home), ROOT)
+            self.assertEqual(load_settings(Path(home)).model, 'haiku')
+            write_settings(Path(home), ROOT, model='sonnet')
+            self.assertEqual(load_settings(Path(home)).model, 'sonnet')
+            write_settings(Path(home), ROOT, model='haiku; rm -rf')
+            with self.assertRaises(ValueError):
+                load_settings(Path(home))
+        seen = {}
+
+        def fake(cmd, **kwargs):
+            seen['model'] = cmd[cmd.index('--model') + 1]
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(
+                {'is_error': False, 'structured_output': {'next_step': None, 'due_on': None}}), '')
+        mail = {'outbound': False, 'subject': 'Synthetic', 'text': 'Synthetic body'}
+        with patch('subprocess.run', side_effect=fake):
+            self.assertEqual(intake.ask_model(mail, datetime(2026, 10, 26).date(), 'sonnet'),
+                             {'next_step': None, 'due_on': None})
+        self.assertEqual(seen['model'], 'sonnet')
 
     def test_reply_parsing_accepts_only_the_schema(self):
         good = {'next_step': 'Reply', 'due_on': '2026-10-22'}

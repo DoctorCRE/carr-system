@@ -1,6 +1,6 @@
 # CARR Training — Other Healthcare Reference (Chiropractic + Therapy: build-out, parking, the low-TI angle)
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Captured July 7, 2026 from CARR's internal Agent Training Portal (`training.carr.us`), the "Other Healthcare" dashboard. CARR proprietary agent knowledge — internal use. Source pages at the bottom. Companion to `dental-`, `medical-`, `vet-`, and `vision-vertical-guide.md`.*
 

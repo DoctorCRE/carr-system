@@ -2,6 +2,7 @@
 // consumes those dated activities; it never opens a mailbox or sends a message.
 import { createHash } from "node:crypto";
 import { canExercisePartnerAuthority } from "./partner-authority.js";
+import { isCalendarDate } from "./calendar-date.ts";
 export const LEAD_AUTOMATION_CONTRACT = "lead-automation.v1";
 const bodyDigest = body => createHash("sha256").update(body).digest("hex");
 const ACTIVE = ["new", "qualified", "outreach_active", "engaged"];
@@ -82,7 +83,7 @@ export function planLeadMoves(leads, activities, drafts, now) {
         // Silence and unstructured interpretations stay weak. A dated inbound
         // deferral or a held tour supplies a factual boundary for the move.
         strong = exact && ((to === "nurture_drip" && reply &&
-          /^\d{4}-\d{2}-\d{2}$/.test(m.follow_up_after || "") && Date.parse(m.follow_up_after) > clock && new Date(m.follow_up_after).toISOString().slice(0,10) === m.follow_up_after) ||
+          isCalendarDate(m.follow_up_after) && Date.parse(m.follow_up_after) > clock) ||
           (to === "opportunity" && meeting && a.kind === "tour" && lead.event_confidence === "high" && Number.isFinite(Date.parse(lead.est_lease_event || ""))));
       }
       if (to) {

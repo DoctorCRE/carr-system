@@ -58,6 +58,17 @@ class PecosPoolCliTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.output("pecos.json").read_bytes(), before)
 
+    def test_extract_dates_preserve_the_existing_data_quarter_labels(self):
+        for extract, quarter in (("2026.04.01", "2026Q1"), ("2026.01.01", "2025Q4")):
+            with self.subTest(extract=extract):
+                self.source = self.root / f"PPEF_{extract}_Enrollment_Extract.csv"
+                self.write_source()
+                result = self.run_cli()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                baseline = self.script.parent / "_data" / f"pecos-baseline-{quarter}.json"
+                self.assertTrue(baseline.exists(), result.stdout)
+                self.assertEqual(json.loads(baseline.read_text()), ["1234567890|I20250102000100"])
+
     def test_replaying_the_same_quarter_with_changed_content_is_refused(self):
         self.write_source()
         first = self.run_cli()

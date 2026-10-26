@@ -8,6 +8,9 @@
     "noEmit": true,
     "allowJs": true,
     "checkJs": false,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
     "types": []
   },
   "include": [".generated/**/*.d.ts", "src/**/*.ts", "src/**/*.js", "type-tests/**/*"]

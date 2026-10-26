@@ -79,7 +79,7 @@ def parse_quarter(filename, today):
     year, month = map(int, match.groups())
     if not 1 <= month <= 12:
         raise ValueError("source filename has an invalid data vintage")
-    return f"{year}Q{(month - 1) // 3 + 1}"
+    return f"{year}Q{(month - 2) // 3 + 1}" if month > 1 else f"{year - 1}Q4"
 
 def read_source_header(path):
     with open(path, newline="", encoding="latin1") as stream:

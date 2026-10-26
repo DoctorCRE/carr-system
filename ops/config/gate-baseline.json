@@ -17,7 +17,7 @@
     "rule-claim-gate.py": "12cb7ada8be8d7069daab0783da3677806095001fa875d0cdeea8d59eb127e64",
     "rule-pack-preuse-reselection.py": "4a34f065aecd9542314c87ac99a95e1a0d5b8a7d1a8c222e403455202f8133b5",
     "scheduled-run-record.py": "34d230bf7dc9ad92fd30de7b21ce6263624fb3d1dfdf56a72ba121f613e31c80",
-    "session-brief.py": "9f1d6324629be14184409ea711c859d24da0fcd3570def8e600dc9e121175e28",
+    "session-brief.py": "63e6a6fd56ab9fe65cf612fe17ebe0813ae5f724cdf6008ca759976ce9c4f1d1",
     "turn_origin.py": "7fe75beaec283cd3ce3a3c8a109ef36e44999eb1b27dcebbffafff590a261f7e",
     "worktree-self-plumb.py": "cbaaf8325f88cb0cf289853d53e1afd7944964c1cb40987b3c82624d41d22d17"
   },

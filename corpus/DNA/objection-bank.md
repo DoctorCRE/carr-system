@@ -1,6 +1,6 @@
 # Objection Bank + Outreach Levers — healthcare CRE
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file pull request (AGENTS.md "Guidance changes") or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Created July 24, 2026 (adapted from Dimitar Angelov's B2B outreach principles, filtered for a local relationship broker). Companion to `templates.md`. Deliberately NOT a cold-email machine: your market is a few thousand local practice owners, so this is precision and relationship, never volume. Everything here stays warm, honest, CARR-affiliated, and broker-approved.*
 

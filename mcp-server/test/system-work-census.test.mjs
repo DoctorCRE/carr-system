@@ -160,6 +160,8 @@ test('actions obey owning workflow states rather than advertising illegal writes
  assert.equal(systemWorkActions({kind:'incident',state:'detected',identity:{ref:'INC-synthetic'}}).length,2);
  for(const kind of ['loop','investigation','retrieval_proposal','ready_plan_amendment','cutover_plan','slice_proposal','capability_session'])
   assert.deepEqual(systemWorkActions({kind,state:'cancelled',cancelled:true,identity:{sequence:1,stage:'cutover'}}),[]);
+ // cancel-capability-session is retired, so an open session offers no write.
+ assert.deepEqual(systemWorkActions({kind:'capability_session',state:'in_progress',identity:{sequence:1}}),[]);
 });
 test('source navigation selects supported owning WRs or explicitly reports unavailable',async()=>{
  const client=fixture(),query=client.query;

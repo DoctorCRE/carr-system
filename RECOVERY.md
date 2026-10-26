@@ -57,7 +57,7 @@ client contents into this runbook or a PR.
 | `out/outlook-send/ledger.jsonl` and `~/.local/state/carr/outlook-send/ledger.jsonl` | Recover the ledger for the configured caller. Reconcile outbound history before sending again. |
 | `out/calendar-archive/` | Recover historical snapshots separately from the current calendar feed. |
 | `out/boards/` | Recover local notes and questions. |
-| `exporters/templates/`, `exporters/dossier-roster.local.json`, `tools/dictation-rig/vocab-local.txt` | Recover local export inputs and vocabulary separately from Git. |
+| `~/carr-system/exporters/templates/`, `~/carr-system/exporters/dossier-roster.local.json`, `~/carr-system/tools/dictation-rig/vocab-local.txt` (all gitignored) | Recover local export inputs and vocabulary separately from Git. |
 | Uncommitted work and other ignored working state | Classify losses or recover independent copies. |
 | Installed job configuration, disabled jobs, machine-role marker, and OS permissions | Reconstruct deliberately from trusted configuration and incident records. |
 | Outlook profile, mailbox access, Full Disk Access, and helper installation | Reauthenticate and rebuild capability. Mailbox retention is separate from SQL backup. |

@@ -1,11 +1,11 @@
 // The deliberately small Program 6 bridge: source a problem from the current
 // deterministic situation index, capture it, and expose a safe read card. It
 // does not own a lifecycle transition, an executor, or an approval.
-import { WORK_REQUEST_PROJECTION_STATE, WORK_REQUEST_READ_STATES, readableWorkRequestSql } from "./work-request-read.js";
+import { WORK_REQUEST_PROJECTION_STATE, WORK_REQUEST_READ_STATES, readableWorkRequestSql } from "./work-request-read.ts";
 import { searchDoctrineSituations } from "./situation-retrieval.js";
 import { authorizationClassForActor, organizationTenantForActor } from "./identity.js";
-import { deriveRuleDeliverySource, normalizeRuleMapDigest } from "./rule-delivery-source.js";
-import { publicError } from "./public-errors.js";
+import { deriveRuleDeliverySource, normalizeRuleMapDigest } from "./rule-delivery-source.ts";
+import { publicError } from "./public-errors.ts";
 
 const FIELDS = new Set(["idempotency_key", "situation", "title", "desired_outcome", "acceptance_criteria"]);
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
@@ -18,7 +18,7 @@ const DECLINE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", 
 const DECLINE_REF_PATTERN = "^WR-(?:[0-9]{1,12}|AI-[0-9]{3}|SIEP-[0-9A-Z]{2,3})$";
 const DECLINE_REF = new RegExp(DECLINE_REF_PATTERN);
 const SUPERSEDE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "exit_reason", "superseded_by"]);
-const DECLINE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor", "sponsored_actor_required", "work_request_not_declinable", "work_request_not_found"]);
+const DECLINE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor", "sponsored_actor_required", "work_request_not_declinable", "work_request_not_found", "withdrawal_receipt_conflict"]);
 const SUPERSEDE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor", "successor_not_found",
   "successor_is_self", "successor_withdrawn", "successor_not_sourced", "supersession_cycle",
   "triaged_work_request_has_downstream_evidence", "triaged_work_request_requires_read_committed"]);
@@ -778,9 +778,14 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         // Bind replays to the authenticated actor without admitting actor data
         // into the closed client schema.
         return withEnvelope(c, actor, "decline-work-request", { ...args, _server_actor_id: actor.id }, async () => {
+          // No FOR UPDATE: carr_writer's RLS update policy hides SIEP program
+          // rows from row-locking reads, so a lock here returned no row. The
+          // definer function below locks the row and checks base_version.
           const subject = await c.query(
-            `select id, state from ops.work_request where ref = $1 for update
+            `select id, state from ops.work_request where ref = $1
                /* work-request-intake:withdrawn-subject */`, [args.human_ref]);
+          if (!subject.rows.length)
+            throw new ToolError({ error: "work_request_not_found", human_ref: args.human_ref });
           let result;
           try {
             result = await c.query(

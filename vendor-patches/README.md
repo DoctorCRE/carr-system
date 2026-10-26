@@ -4,71 +4,13 @@ Local changes to third-party tools that live OUTSIDE this repo. The tools are
 installed under `~/carr-local/`; only the diffs live here, so a rebuild is
 reproducible and the changes are not stranded on one machine.
 
-## hxprobe-calendar-and-bodies.patch
+## hxprobe (no patch)
 
-Applies to `ukd1/hxstore-reverse-engineering` @
-191b54e42757687806202f8f696e9066f0514e11 (MIT), the `hxprobe` Rust crate,
-installed at `~/carr-local/hxstore-reverse-engineering`. The Outlook intake job
-(`lib/outlook_intake.py`, com.carr.outlook-intake) runs its `db` command on a
-private copy of `HxStore.hxd`.
-
-SECURITY REVIEW (2026-10-20): Rust, MIT. Dependencies are memmap2, memchr and
-rusqlite with bundled SQLite; the patch adds flate2 on its pure-Rust backend.
-No networking and no subprocesses anywhere in `src`. Apart from tests, the only
-file it writes is the SQLite database named on its command line. Its one
-`unsafe` block is the read-only mmap of the input file, which is why the intake
-job decodes a copy and never the live store Outlook rewrites. Blocks are
-CRC-checked before they are decompressed. Build with `cargo build --release
---locked` so the patched Cargo.lock pins every crate.
-
-WHAT THE PATCH ADDS to `hxprobe db <file> [out.db] [files-dir]`:
-- Calendar events (`src/calendar.rs`) in `events` and `event_attendees`: GOID,
-  start and end, subject, location, organizer and attendees. Byte-distinct
-  candidates remain separate; only exact serialized copies collapse. GOID and
-  start are observed grouping fields. Every row exports unsupported lifecycle
-  status. Current occurrence state and attendance remain unverified. See
-  [calendar lifecycle limits](../vendor/hxprobe/UPSTREAM.md#calendar-lifecycle-limits).
-- Full bodies from EFMData sidecars (`src/body.rs`). These are gzip files at
-  `Files/S0/<N>/EFMData/<id>.dat`. `<N>` is 845 on Joe's machine, so every
-  `S0/*` folder is read rather than one hard-coded number. A sidecar is
-  accepted only when its text contains the record's own preview opening.
-- Copy collapse. Revisions of one message are joined by sender, normalized
-  subject and preview opening within a day. A preview-only copy then joins the
-  one full copy with the same sender and opening. The full body always wins,
-  and `copy_key` is stored as the identity the copies share.
-- Folders for the 2026-10 Outlook build (WR-000469). Its folder, compact-message
-  and metadata envelopes use new tags (`04d8`, `074e`, `02b8`); the old tags stay
-  accepted. `folders.parent_status` and `parent_id` come from the parent reference
-  at folder object +792, so paths such as Inbox/Active Deals/<deal> resolve. On the
-  2026-10-21 TEST-campaign copies: 0 folders before, 236 after (208 with a parent,
-  28 top-level), and 2,104 of 2,121 messages linked to a folder.
-- Attachment metadata (WR-000469 AC-ATTACH, `src/attachment.rs`). Class `016a`
-  objects (tag `0318`) give `attachments`: message key (typed reference at +360),
-  name (the cache file name without Outlook's `[<digits>]` suffix), declared MIME
-  type, size (+558) and the profile-relative cache path
-  `~/Files/S0/<n>/Attachments/<k>/<file>`. `message_keys` maps message rows to the
-  local keys of their message objects. No bytes are read; `lib/outlook_attachments.py`
-  reads, type-checks by magic bytes, caps and hashes cached files from a private
-  copy. On the 2026-10-21 copies: 15,130 objects, 7,017 attachments, 566 linked to
-  exactly one message row.
-- A `meta` table with block verification, message, collapse, sidecar and event
-  counts, which the intake job checks before it trusts a run (at least 95% of
-  blocks verified).
-
-Measured on a fresh copy, email from the last seven days:
-- Before: 253 unique emails, 79 with a full body (31%).
-- After: 164 emails, 80 with a full body (49%), 9 of them from EFMData.
-- The other emails are preview-only because Outlook never downloaded their
-  body. The evening triage job opens those, so Outlook downloads them.
-
-REBUILD:
-  curl -sL https://codeload.github.com/ukd1/hxstore-reverse-engineering/tar.gz/191b54e42757687806202f8f696e9066f0514e11 | tar -xz -C ~/carr-local
-  mv ~/carr-local/hxstore-reverse-engineering-191b54e42757687806202f8f696e9066f0514e11 ~/carr-local/hxstore-reverse-engineering
-  cd ~/carr-local/hxstore-reverse-engineering
-  patch -p1 < ~/carr-system/vendor-patches/hxprobe-calendar-and-bodies.patch
-  cd hxprobe && cargo test --release --locked && cargo build --release --locked
-
-`bin/install-outlook-intake.sh` runs these steps when the binary is missing.
+The hxprobe decoder is not patched here. Its CARR source lives in
+[vendor/hxprobe](../vendor/hxprobe/UPSTREAM.md), the tree CI tests, and
+`bin/install-outlook-intake.sh` builds the installed decoder from that tree.
+The former `hxprobe-calendar-and-bodies.patch` was retired because it had
+drifted from the tree.
 
 ## hxstore-decode-field-alignment.patch
 

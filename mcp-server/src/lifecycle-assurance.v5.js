@@ -82,14 +82,14 @@
 //     second argument is not a policy question.
 //
 // DECISION BINDING. Q017.D1, Q036.D1, Q067.D1 and Q086.D1, carried in
-// V5_A02_DECISION_IDS by gate-zero-assurance.v5.js and re-exported here so both
+// V5_A02_DECISION_IDS by gate-zero-assurance.v5.ts and re-exported here so both
 // halves of the slice bind one list. Only their routing is readable (see that
 // file's header); this module claims no knowledge of their text.
 
 import { canonicalJson, digest } from "./artifact-trust.js";
 import { V5BoundaryError, V5_NO_EFFECTS } from "./global-boundaries.v5.js";
 import { ORGANIZATION_TENANT_ID } from "./identity.js";
-import { V5_A02_DECISION_IDS } from "./gate-zero-assurance.v5.js";
+import { V5_A02_DECISION_IDS } from "./gate-zero-assurance.v5.ts";
 
 export { V5_A02_DECISION_IDS, V5_NO_EFFECTS };
 
