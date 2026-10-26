@@ -508,7 +508,7 @@ def run_session(session_dir: Path) -> dict[str, Any]:
     capture-poll's next sweep while the partners look at the Deal Room.
     """
     entry = Path(__file__).resolve()
-    python = entry.parents[3] / ".venv" / "bin" / "python3"
+    python = os.environ.get("CARR_POST_CALL_PYTHON") or entry.parents[3] / ".venv" / "bin" / "python3"
     result = subprocess.run(
         [str(python), str(entry), str(session_dir)],
         capture_output=True, text=True, check=True, timeout=1800,

@@ -187,7 +187,7 @@ test('a recorded weekly call updates every confidently discussed card and leaves
     speaker_labels: { mic: 'Joe', system: 'Dell' }, speaker_method: 'separate audio channels; no third-party voiceprint' });
   writeFileSync(path.join(root, 'capture.json'), JSON.stringify({ base_url: baseUrl, device_id: 'quill-joe-mac', token: 'synthetic-device-token' }));
   const env = { ...process.env, CARR_RECORDINGS_DIR: recordings, CARR_CAPTURE_CONFIG: path.join(root, 'capture.json'),
-    CARR_CAPTURE_LOG: path.join(root, 'capture-bridge.log'), CARR_CALL_MODE_LOG: path.join(root, 'call-mode.log'),
+    CARR_CAPTURE_LOG: path.join(root, 'capture-bridge.log'), CARR_CALL_MODE_LOG: path.join(root, 'call-mode.log'), CARR_POST_CALL_PYTHON: PYTHON,
     CARR_POST_CALL_VERB_COMMAND: `node ${fileURLToPath(new URL('./helpers/rehearsal-verb.mjs', import.meta.url))} ${baseUrl}/rehearsal/verb`,
     HOME: process.env.HOME };
   if (!SONNET) env.CARR_POST_CALL_DISTILLER_COMMAND = `${PYTHON} ${path.join(REPO, 'tools/dictation-rig/tests/fixtures/rehearsal_distiller.py')}`;
