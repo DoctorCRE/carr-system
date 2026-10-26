@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Nightly exit status agrees with synthetic child outcomes in both modes."""
 from pathlib import Path
+import os
 import shutil
 import subprocess
 import tempfile
@@ -14,7 +15,7 @@ class NightlyStatusTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
-        for name in ("bin/nightly.sh", "bin/run-lock.sh", "bin/step-timeout.zsh"):
+        for name in ("bin/nightly.sh", "bin/run-lock.sh", "bin/step-timeout.zsh", "ops/nightly-log.py"):
             target = self.root / name
             target.parent.mkdir(exist_ok=True)
             shutil.copy2(ROOT / name, target)
@@ -27,6 +28,8 @@ class NightlyStatusTests(unittest.TestCase):
             '#!/bin/zsh\nkey="$2"; shift 2\nrc=0\n'
             '[ ! -f "$HOME/outcomes/$key" ] || rc="$(cat "$HOME/outcomes/$key")"\n'
             'print -r -- "$key $rc" >> "$HOME/receipts"\n'
+            'print -r -- "child-output $key"\n'
+            'print -ru2 -- "child-error $key"\n'
             'print -r -- "$*" >> "$HOME/commands"\n'
             'for arg in "$@"; do\n'
             '  case "$arg" in HC_CHAIN_RC=*|HC_EXPORTS_RC=*|HC_BACKUP_RC=*)\n'
@@ -43,7 +46,63 @@ class NightlyStatusTests(unittest.TestCase):
                  "CARR_LOCK_DIR": str(self.root / "locks")},
             text=True, capture_output=True, timeout=20)
         receipts = (self.root / "receipts").read_text().splitlines()
+        self.assertFalse(list((self.root / "locks").glob("*.lock")))
         return result, receipts
+
+    def test_active_run_prevents_duplicate_children_and_logs(self):
+        lock = self.root / "locks/carr-nightly-record-layer.lock"
+        lock.mkdir(parents=True)
+        (lock / "pid").write_text(str(os.getpid()))
+        result = subprocess.run(
+            ["/bin/zsh", str(self.root / "bin/nightly.sh")], cwd=self.root,
+            env={"HOME": str(self.root), "PATH": "/usr/bin:/bin",
+                 "CARR_LOCK_DIR": str(self.root / "locks")},
+            text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("LOCKED", result.stdout)
+        self.assertFalse((self.root / "receipts").exists())
+        self.assertFalse((self.root / "out/nightly-runs").exists())
+        self.assertTrue(lock.exists())
+
+    def test_run_log_names_failed_step_preserves_output_and_later_steps(self):
+        result, _ = self.run_nightly({"recovery-point": 7, "verb-probe": 78})
+        self.assertEqual(result.returncode, 7, result.stderr)
+        logs = list((self.root / "out/nightly-runs").glob("nightly-*.log"))
+        self.assertEqual(len(logs), 1)
+        content = logs[0].read_text()
+        self.assertRegex(content, r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z  START recovery point")
+        self.assertIn("child-output nightly.recovery-point", content)
+        self.assertIn("child-error nightly.recovery-point", content)
+        self.assertIn("FAIL recovery point (exit 7)", content)
+        self.assertIn("SKIP verb probe (exit 78)", content)
+        self.assertIn("OK nightly ping (exit 0)", content)
+        self.assertIn("nightly result: chain_failed (exit 7)", content)
+        self.assertEqual(content, (self.root / "out/nightly.log").read_text())
+
+    def test_each_invocation_keeps_a_distinct_log_in_both_modes(self):
+        for args in ((), (), ("--exports",)):
+            result, _ = self.run_nightly({}, *args)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        logs = list((self.root / "out/nightly-runs").glob("*.log"))
+        self.assertEqual(len(logs), 3)
+        self.assertEqual(len([p for p in logs if p.name.startswith("nightly-exports-")]), 1)
+        for path in logs:
+            self.assertIn("nightly result: chain_ok (exit 0)", path.read_text())
+
+    def test_early_configuration_failure_keeps_a_final_run_receipt(self):
+        (self.root / "bin/routine-credential-env.sh").write_text(
+            'carr_clear_routine_db_env() { return 0; }\n'
+            'carr_load_routine_db_env() { return 78; }\n')
+        result = subprocess.run(
+            ["/bin/zsh", str(self.root / "bin/nightly.sh")], cwd=self.root,
+            env={"HOME": str(self.root), "PATH": "/usr/bin:/bin",
+                 "CARR_LOCK_DIR": str(self.root / "locks")},
+            text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 78, result.stderr)
+        logs = list((self.root / "out/nightly-runs").glob("nightly-*.log"))
+        self.assertEqual(len(logs), 1)
+        self.assertIn("nightly result: chain_skipped (exit 78)", logs[0].read_text())
+        self.assertFalse((self.root / "receipts").exists())
 
     def test_failed_nightly_remains_failed_after_reporter_failure(self):
         result, receipts = self.run_nightly({"recovery-point": 7, "nightly-ping": 9})
