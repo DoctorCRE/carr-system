@@ -32,14 +32,32 @@ def ooxml(part: str) -> bytes:
     return buf.getvalue()
 
 
-def plain_zip() -> bytes:
+def plain_zip(name: str = 'a.txt') -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w') as z:
-        z.writestr('a.txt', 'a')
+        z.writestr(name, 'a')
     return buf.getvalue()
 
 
+def unsupported_zip() -> bytes:
+    """Byte 38 of this archive is a central-directory version zipfile refuses with NotImplementedError."""
+    data = bytearray(plain_zip('x'))
+    data[38] = 0xff
+    return bytes(data)
+
+
 class DetectTest(unittest.TestCase):
+    def test_hostile_zip_headers_are_not_documents(self):
+        with self.assertRaises(NotImplementedError):
+            zipfile.ZipFile(io.BytesIO(unsupported_zip())).namelist()
+        self.assertIsNone(att.detect(unsupported_zip()))
+        data = bytearray(ooxml('word/document.xml'))
+        for at in range(len(data)):
+            for value in (0, 1, 0x7f, 0xff):
+                changed = bytearray(data)
+                changed[at] = value
+                self.assertIn(att.detect(bytes(changed)), (None, 'zip', 'docx'))
+
     def test_magic_bytes_decide_the_type(self):
         cases = {PDF: 'pdf', OLE: 'ole', PNG: 'png', b'\xff\xd8\xff\xe0': 'jpeg', b'GIF89a..': 'gif',
                  ooxml('word/document.xml'): 'docx', ooxml('xl/workbook.xml'): 'xlsx',
@@ -89,7 +107,7 @@ class ExtractTest(unittest.TestCase):
         self.add('LOI.pdf', PDF)
         self.add('Lease.docx', ooxml('word/document.xml'), declared='application/msword')
         out = self.root / 'out'
-        found = self.by_name(att.extract(self.db, self.files, out))
+        found = self.by_name(att.extract(self.db, self.files, out, messages={1}))
         loi = found['LOI.pdf']
         self.assertEqual((loi['status'], loi['detected_type'], loi['byte_length']), ('stored', 'pdf', len(PDF)))
         self.assertEqual(loi['sha256'], hashlib.sha256(PDF).hexdigest())
@@ -104,7 +122,7 @@ class ExtractTest(unittest.TestCase):
     def test_declared_type_and_extension_never_decide(self):
         self.add('site-plan.pdf', b'MZ\x90\x00not a pdf')
         self.add('logo.pdf', PNG)
-        found = self.by_name(att.extract(self.db, self.files, self.root / 'out'))
+        found = self.by_name(att.extract(self.db, self.files, self.root / 'out', messages={1}))
         self.assertEqual(found['site-plan.pdf']['status'], 'type_refused')
         self.assertEqual(found['logo.pdf']['detected_type'], 'png')
         self.assertEqual(found['logo.pdf']['status'], 'type_refused')
@@ -113,7 +131,7 @@ class ExtractTest(unittest.TestCase):
     def test_size_cap_and_uncached_files(self):
         self.add('big.pdf', PDF + b'x' * 100)
         self.add('later.pdf', PDF, write=False)
-        found = self.by_name(att.extract(self.db, self.files, self.root / 'out', cap=len(PDF)))
+        found = self.by_name(att.extract(self.db, self.files, self.root / 'out', cap=len(PDF), messages={1}))
         self.assertEqual(found['big.pdf']['status'], 'too_large')
         self.assertIsNone(found['big.pdf']['sha256'])
         self.assertEqual(found['later.pdf']['status'], 'not_cached')
@@ -132,7 +150,7 @@ class ExtractTest(unittest.TestCase):
         (self.root / '0').mkdir()
         (self.root / '0' / 'd[1].pdf').write_bytes(PDF)
         self.add('d.pdf', None, path='~/Files/S0/43/Attachments/0/d[1].pdf')
-        found = self.by_name(att.extract(self.db, self.files, self.root / 'out'))
+        found = self.by_name(att.extract(self.db, self.files, self.root / 'out', messages={1}))
         self.assertEqual(found['a.pdf']['status'], 'path_refused')
         self.assertEqual(found['b.pdf']['status'], 'path_refused')
         self.assertEqual(found['c.pdf']['status'], 'unreadable')
@@ -152,12 +170,37 @@ class ExtractTest(unittest.TestCase):
         con.execute('INSERT INTO message_keys VALUES (?,?)', (2, 1001))
         con.commit()
         con.close()
-        self.assertEqual(att.extract(self.db, self.files, self.root / 'out'), [])
+        self.assertEqual(att.extract(self.db, self.files, self.root / 'out', messages={1}), [])
+
+    def test_writing_requires_the_matched_messages(self):
+        self.add('LOI.pdf', PDF)
+        with self.assertRaises(ValueError):
+            att.extract(self.db, self.files, self.root / 'out')
+        self.assertFalse((self.root / 'out').exists())
+        [read] = att.extract(self.db, self.files)
+        self.assertEqual(read['status'], 'read')
+
+    def test_one_bad_attachment_does_not_stop_the_batch(self):
+        self.add('bad.docx', unsupported_zip())
+        self.add('nul.pdf', None, path='~/Files/S0/42/Attachments/0/a\x00b[1].pdf')
+        self.add('LOI.pdf', PDF)
+        found = self.by_name(att.extract(self.db, self.files, self.root / 'out', messages={1}))
+        self.assertIn(found['bad.docx']['status'], ('type_refused', 'error'))
+        self.assertIn(found['nul.pdf']['status'], ('error', 'path_refused', 'unreadable'))
+        self.assertEqual(found['LOI.pdf']['status'], 'stored')
+
+    def test_file_count_and_total_byte_caps(self):
+        for i in range(4):
+            self.add(f'doc{i}.pdf', PDF)
+        found = att.extract(self.db, self.files, self.root / 'out', messages={1}, max_files=2)
+        self.assertEqual([r['status'] for r in found], ['stored', 'stored', 'batch_cap', 'batch_cap'])
+        found = att.extract(self.db, self.files, messages={1}, max_total=len(PDF) + 1)
+        self.assertEqual([r['status'] for r in found], ['read', 'batch_cap', 'batch_cap', 'batch_cap'])
 
     def test_older_decoders_have_no_attachments(self):
         old = self.root / 'old.db'
         sqlite3.connect(old).execute('CREATE TABLE messages (id INTEGER)').connection.close()
-        self.assertEqual(att.extract(old, self.files, self.root / 'out'), [])
+        self.assertEqual(att.extract(old, self.files, self.root / 'out', messages={1}), [])
 
     def test_cli_prints_one_json_object_per_attachment(self):
         self.add('LOI.pdf', PDF)
@@ -165,6 +208,13 @@ class ExtractTest(unittest.TestCase):
                               cwd=ROOT, capture_output=True, text=True, check=True)
         [row] = [json.loads(line) for line in done.stdout.splitlines()]
         self.assertEqual((row['name'], row['status'], row['detected_type']), ('LOI.pdf', 'read', 'pdf'))
+        refused = subprocess.run([sys.executable, '-m', 'lib.outlook_attachments', str(self.db), str(self.files),
+                                  str(self.root / 'out')], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(refused.returncode, 2)
+        self.assertFalse((self.root / 'out').exists())
+        subprocess.run([sys.executable, '-m', 'lib.outlook_attachments', str(self.db), str(self.files),
+                        str(self.root / 'out'), '1'], cwd=ROOT, capture_output=True, text=True, check=True)
+        self.assertEqual(len(list((self.root / 'out').iterdir())), 1)
 
 
 if __name__ == '__main__':

@@ -6,9 +6,12 @@ This module resolves that path inside a caller's private copy of the profile's
 `Files` folder, never the live profile, and reads at most `cap` bytes. The type is
 detected from the file's own bytes; the declared type and the file name are never
 trusted for it. Only deal document types (PDF, Word, Excel, PowerPoint, and legacy
-Office) are written, as `<sha256>.<ext>` with mode 0600, to a caller-named folder.
+Office) are written, as `<sha256>.<ext>` with mode 0600, to a caller-named folder,
+and only for message rows the caller names (its matched mail), never for all mail.
+One call reads at most MAX_FILES files and MAX_TOTAL bytes; one bad attachment gets
+an `error` status and never stops the rest.
 
-    python -m lib.outlook_attachments <store.db> <Files copy> [<out dir>]
+    python -m lib.outlook_attachments <store.db> <Files copy> [<out dir> <message id>...]
 
 prints one JSON object per attachment. Run it only on private copies: the output
 holds file names.
@@ -27,6 +30,8 @@ import sys
 import zipfile
 
 CAP = 25 * 1024 * 1024
+MAX_FILES = 50
+MAX_TOTAL = 100 * 1024 * 1024
 DEAL_TYPES = {'pdf': 'application/pdf',
               'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
               'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -51,7 +56,7 @@ def detect(data: bytes) -> str | None:
     if data.startswith(b'PK\x03\x04'):
         try:
             names = zipfile.ZipFile(io.BytesIO(data)).namelist()
-        except (zipfile.BadZipFile, ValueError, OSError):
+        except Exception:  # zipfile raises several types on hostile input
             return None
         if '[Content_Types].xml' in names:
             for prefix, kind in OOXML:
@@ -126,19 +131,33 @@ def rows(db: Path) -> list[dict]:
 
 
 def extract(db: Path, files: Path, out: Path | None = None, cap: int = CAP,
-            messages: set[int] | None = None) -> list[dict]:
+            messages: set[int] | None = None, max_files: int = MAX_FILES,
+            max_total: int = MAX_TOTAL) -> list[dict]:
     """One result per attachment; bytes are written only for deal types when `out` is set.
 
-    `messages` limits the work to those message row ids (the caller's matched mail)."""
+    `messages` limits the work to those message row ids (the caller's matched mail) and
+    is required whenever `out` is set. Without `out`, None reads every message."""
+    if out is not None and messages is None:
+        raise ValueError('writing attachments requires the matched message ids')
     files = Path(files)
-    results = []
+    results, read_files, read_bytes = [], 0, 0
     for row in rows(db):
         if messages is not None and row['message'] not in messages:
             continue
-        status, data = _read(files, row['path'], cap)
-        result = {**row, 'status': status, 'detected_type': None, 'byte_length': None,
+        result = {**row, 'status': 'batch_cap', 'detected_type': None, 'byte_length': None,
                   'sha256': None, 'stored': None}
-        if data is not None:
+        results.append(result)
+        if read_files >= max_files or read_bytes >= max_total:
+            continue
+        try:
+            status, data = _read(files, row['path'], min(cap, max_total - read_bytes))
+            if status == 'too_large' and cap > max_total - read_bytes:
+                status = 'batch_cap'
+            result['status'] = status
+            if data is None:
+                continue
+            read_files += 1
+            read_bytes += len(data)
             kind = detect(data)
             digest = hashlib.sha256(data).hexdigest()
             result.update(detected_type=kind, byte_length=len(data), sha256=digest)
@@ -146,16 +165,19 @@ def extract(db: Path, files: Path, out: Path | None = None, cap: int = CAP,
                 result['status'] = 'type_refused'
             elif out is not None:
                 result.update(status='stored', stored=str(_write(Path(out), digest, kind, data)))
-        results.append(result)
+        except Exception as error:  # one attachment never stops the batch
+            result.update(status='error', error=type(error).__name__, stored=None)
     return results
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) not in (3, 4):
-        print('usage: python -m lib.outlook_attachments <store.db> <Files copy> [<out dir>]', file=sys.stderr)
+    if len(argv) == 4 or len(argv) < 3 or not all(a.isdigit() for a in argv[4:]):
+        print('usage: python -m lib.outlook_attachments <store.db> <Files copy> [<out dir> <message id>...]',
+              file=sys.stderr)
         return 2
-    out = Path(argv[3]) if len(argv) == 4 else None
-    for result in extract(Path(argv[1]), Path(argv[2]), out):
+    out = Path(argv[3]) if len(argv) > 4 else None
+    messages = {int(a) for a in argv[4:]} if out is not None else None
+    for result in extract(Path(argv[1]), Path(argv[2]), out, messages=messages):
         print(json.dumps(result, sort_keys=True))
     return 0
 

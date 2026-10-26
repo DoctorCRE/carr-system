@@ -96,7 +96,8 @@ fn display_name(file: &str) -> Option<String> {
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) || open == 0 {
         return None;
     }
-    Some(format!("{}{}", &stem[..open], ext))
+    let name = format!("{}{}", &stem[..open], ext);
+    (name != "." && name != "..").then_some(name)
 }
 
 /// The first short ASCII `type/subtype` string between the fixed header and the path.
@@ -232,6 +233,9 @@ mod tests {
         assert_eq!(display_name("x[].pdf"), None);
         assert_eq!(display_name("[5].pdf"), None);
         assert_eq!(display_name("plain.pdf"), None);
+        assert_eq!(display_name(".[1]"), None);
+        assert_eq!(display_name("..[1]"), None);
+        assert_eq!(display_name(".[1]."), None);
     }
 
     #[test]
