@@ -189,6 +189,11 @@ class InstallerTest(unittest.TestCase):
         self.assertIn('move it aside first', result.stderr)
         self.assertEqual(decoder.read_text(), '#!/bin/sh\nexit 99\n')
         self.assertFalse(self.helper.exists())
+        (self.vendor / '.carr-pin').unlink()
+        (self.vendor / 'hxprobe/Cargo.toml').write_text('[package]\n')
+        result = self.install(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('move it aside first', result.stderr)
 
     def test_uncommitted_decoder_source_is_refused_before_any_build(self):
         (self.repo / 'spec/outlook/hxstore-atlas.json').write_text('edited\n')

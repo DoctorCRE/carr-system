@@ -78,8 +78,10 @@ fi
 WANT_PIN="source $(git -C "$REPO" rev-parse "${SOURCES[@]/#/HEAD:}" | /usr/bin/paste -sd' ' -)"
 HAVE_PIN="$(cat "$PIN" 2>/dev/null || true)"
 if [ ! -x "$DECODER" ] || [ "$HAVE_PIN" != "$WANT_PIN" ]; then
-  if [ -e "$VENDOR" ] && [ "${HAVE_PIN#source }" = "$HAVE_PIN" ]; then
-    print -u2 -- "install-outlook-intake: $VENDOR exists but is not a decoder this installer built; move it aside first"
+  # Only the old upstream-plus-patch checkout is refused; a folder left by a
+  # failed build of this installer has no pin and no crate, and is retried.
+  if [ -e "$VENDOR/hxprobe/Cargo.toml" ] || { [ -n "$HAVE_PIN" ] && [ "${HAVE_PIN#source }" = "$HAVE_PIN" ]; }; then
+    print -u2 -- "install-outlook-intake: $VENDOR holds the old upstream decoder checkout; move it aside first"
     exit 1
   fi
   mkdir -p "$VENDOR/hxprobe/target/release"

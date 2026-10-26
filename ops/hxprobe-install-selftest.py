@@ -100,6 +100,22 @@ class InstalledDecoderTest(unittest.TestCase):
         self.assertEqual(sha256(self.decoder), self.ci_build)
         self.assertEqual(self.helper.stat().st_mtime_ns, helper_before, 'the Full Disk Access helper is not rebuilt')
 
+    def test_a_failed_first_build_is_retried_once_the_receipt_is_fixed(self):
+        receipt = self.repo / 'vendor/hxprobe/BUILD-SHA256'
+        good = receipt.read_text()
+        receipt.write_text('0' * 64 + '  target/release/hxprobe\n')
+        self.commit('stale receipt')
+        result = self.install(check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('differs from vendor/hxprobe/BUILD-SHA256', result.stderr)
+        self.assertFalse(self.decoder.exists())
+        self.assertFalse((self.vendor / '.carr-pin').exists())
+        receipt.write_text(good)
+        self.commit('fixed receipt')
+        self.install()
+        self.assertEqual(sha256(self.decoder), self.ci_build)
+        self.assertTrue((self.vendor / '.carr-pin').read_text().startswith('source '))
+
     def test_a_build_that_differs_from_the_receipt_keeps_the_installed_decoder(self):
         self.install()
         pin = (self.vendor / '.carr-pin').read_text()
