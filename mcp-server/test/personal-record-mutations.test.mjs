@@ -1,3 +1,4 @@
+// Tests authorization for personal record mutations.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { executeRegisteredTool, ToolError, TOOLS } from "../src/tools.js";
