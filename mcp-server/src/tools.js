@@ -3735,7 +3735,7 @@ export const TOOLS = {
       b.phase, b.phase_sort, b.segment, b.outcome, b.lead_owner, b.last_touch, b.notes_path,
       d.operating_state, d.parking_note, to_jsonb(d.invoiced_on)#>>'{}' as invoiced_on,
       to_jsonb(d.closed_on)#>>'{}' as closed_on, d.lane
-      from v_deal_board b join v_deal_room_board d on d.id=b.id
+      from v_deal_board b join v_open_deal_room_board d on d.id=b.id
       order by b.phase_sort, b.name /* dealboard:operating-state */`)).rows }),
   },
 
@@ -3802,7 +3802,7 @@ export const TOOLS = {
                              and e.field = any($3::text[])
                            order by e.field, e.recorded_at desc, e.id desc) latest
                 ), '{}'::jsonb) as field_base
-           from v_deal_room_board b
+           from v_open_deal_room_board b
            join v_deal_reconciliation_read r on r.id=b.id
            join v_client_engagement_status ce on ce.client_id=b.client_id
           where ($1 = 'all' or b.workspace_kind = $1)
@@ -3820,7 +3820,7 @@ export const TOOLS = {
                 case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind
            from v_deal_board b
            left join v_client_account a on a.client_id=b.client_id and a.is_sub_client
-          where (b.phase = 'closed' or b.outcome is not null or b.invoiced_on is not null)
+          where (b.phase in ('closed', 'invoiced') or b.outcome is not null or b.closed_on is not null or b.invoiced_on is not null)
             and ($1 = 'all' or case when a.account_client_id is null then 'team' else 'national_account' end = $1)
             and ($2::uuid is null or a.account_client_id = $2::uuid)
           order by b.closed_on desc nulls last, b.name, b.id
@@ -3844,7 +3844,7 @@ export const TOOLS = {
             and ($3::uuid is null or account_client_id=$3::uuid)
           order by started_at desc limit 1`,
         [actor.slug, workspace, args.account_client_id || null]);
-      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows.map(d => ({ ...d, short_name: shortDealHeading(d) })), closed_deals: closedDeals.rows.filter(d => d.outcome === 'won' || !d.outcome && (d.closed_on || d.invoiced_on)), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
+      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows.map(d => ({ ...d, short_name: shortDealHeading(d) })), closed_deals: closedDeals.rows.filter(d => d.outcome !== 'lost'), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
         open_session: session.rows[0] || null };
     },
   },
@@ -3930,8 +3930,10 @@ export const TOOLS = {
            from capture_call_context($1::uuid[])
           order by deal_name,deal_id,participant_role,participant_name
           /* capture:tool-call-context */`, [ids])).rows;
-      if (new Set(rows.map(row => String(row.deal_id))).size !== ids.length)
-        throw new ToolError({ error: "invalid_call_context_deals" });
+      const returnedIds = new Set(rows.map(row => String(row.deal_id).toLowerCase()));
+      if (returnedIds.size !== ids.length)
+        throw new ToolError({ error: "invalid_call_context_deals",
+          invalid_deal_ids: ids.filter(id => !returnedIds.has(id.toLowerCase())) });
       const byDeal = new Map();
       for (const row of rows) {
         const deal = byDeal.get(row.deal_id) || { id: row.deal_id, name: row.deal_name,
@@ -9182,10 +9184,9 @@ registerTools({
                  b.workspace_kind, b.account_client_id, b.operating_state, b.outcome,
                  to_jsonb(b.closed_on)#>>'{}' as closed_on,
                  to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on
-            from v_deal_room_board b
+            from v_open_deal_room_board b
             join v_client_engagement_status ce on ce.client_id = b.client_id
-           where b.operating_state = 'active' and b.phase <> 'closed'
-             and b.outcome is null and b.closed_on is null and b.invoiced_on is null
+           where b.operating_state = 'active'
            order by b.id limit 1001
         ), dates as materialized (
           select d.deal_id, d.id, d.kind, to_jsonb(d.due_on)#>>'{}' as due_on, d.note, d.status
