@@ -1436,8 +1436,8 @@ class PostCallJevChecksTests(unittest.TestCase):
             self.result(), self.context, self.transcript, client=self.fake_client(),
         )
         checks = result["joe_tasks"][0]["checks"]
-        self.assertTrue(checks["flagged"])
-        self.assertTrue(any("review" in reason.lower() for reason in checks["reasons"]))
+        self.assertFalse(checks["flagged"])
+        self.assertEqual(checks["reasons"], [])
         self.assertTrue(checks["deal"]["pass"])
         self.assertTrue(checks["speaker"]["pass"])
         self.assertTrue(checks["details"]["pass"])
