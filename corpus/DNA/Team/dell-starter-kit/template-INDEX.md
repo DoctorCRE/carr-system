@@ -5,7 +5,7 @@
 ## Session reading order
 **Always read:** this file → `DNA/compiled-rules-shared.md` **and** `DNA/compiled-rules-dell.md` (BOTH — the personal half is the one that gets skipped) → `DNA/Clients/clients-active.md` → `00_Context/open-loops.md`
 
-State the COUNT of each rule file back to Dell in your FIRST response of the session, then name only the handful that bear on the task. Never paste the full set back at him. Both rule files are GENERATED; never hand-edit either. Standing lessons are captured with the `teach` verb, never by writing into a file.
+State the COUNT of each rule file back to Dell in your FIRST response of the session, then name only the handful that bear on the task. Never paste the full set back at him. Both rule files are GENERATED; never hand-edit either. Standing lessons are proposed as a guidance-file pull request (AGENTS.md "Guidance changes"), never by writing into a generated file.
 **Then by task type:**
 | Session is about… | Also read |
 |---|---|
