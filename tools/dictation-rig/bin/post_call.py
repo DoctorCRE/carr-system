@@ -281,6 +281,12 @@ RELATIVE_DAY = re.compile(
     r"\b(day after tomorrow|tomorrow|today|next week|"
     r"(?:(?:next|this)\s+)?(?:" + "|".join(WEEKDAYS) + r"))\b", re.IGNORECASE,
 )
+DEADLINE_QUALIFIER = r"\b(?:end|middle|mid|late|later|early|sometime)\b"
+QUALIFIED_RELATIVE_DAY = re.compile(
+    DEADLINE_QUALIFIER + r"(?:\s+of)?[\s-]+" + RELATIVE_DAY.pattern
+    + "|" + RELATIVE_DAY.pattern + r"[\s-]+" + DEADLINE_QUALIFIER,
+    re.IGNORECASE,
+)
 PAST_RELATIVE_DAY = re.compile(
     r"\b(?:last|previous|since|(?:talked|met|spoke|called|discussed|sent|received|reviewed)"
     r"(?:\s+(?:on|since|last))?)\s+" + RELATIVE_DAY.pattern, re.IGNORECASE,
@@ -341,6 +347,8 @@ def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
         return None
     if CALENDAR_DAY.search(evidence):
         return None
+    if QUALIFIED_RELATIVE_DAY.search(PAST_RELATIVE_DAY.sub("", evidence)):
+        return DeadlineResolution(None, "The quoted deadline is qualified; clarify the exact date.")
     phrases = _relative_phrases(evidence)
     if not phrases and re.search(r"\bbefore (?:the )?lunch call\b", evidence, re.IGNORECASE):
         lunch_anchors = [sentence for sentence in re.split(r"[.!?]", spoken)
@@ -348,6 +356,8 @@ def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
                          and _words(sentence) != _words(evidence)
                          and (RELATIVE_DAY.search(sentence) or CALENDAR_DAY.search(sentence))]
         if lunch_anchors:
+            if any(QUALIFIED_RELATIVE_DAY.search(sentence) for sentence in lunch_anchors):
+                return DeadlineResolution(None, "The lunch call deadline is qualified; clarify the exact date.")
             anchored = [_relative_phrases(sentence) for sentence in lunch_anchors]
             if not all(anchored):
                 return None

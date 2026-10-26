@@ -838,6 +838,22 @@ class PostCallTests(unittest.TestCase):
 
     def test_ambiguous_deadlines_keep_items_for_review_without_blocking_the_call(self) -> None:
         cases = (
+            ("I will call Vendor A by the end of next week.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A middle of next week.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A mid next week.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A later next week.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A late next week.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A early next week.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A sometime next week.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A next week sometime.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A by the end of Friday.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A middle of Friday.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A mid-Friday.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A late Friday.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A later Friday.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A early Friday.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A sometime Friday.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A Friday sometime.", "2026-10-27T00:30:00Z"),
             ("I will call Vendor A Tuesday and Friday.", "2026-10-27T00:30:00Z"),
             ("I will call Vendor A today or tomorrow.", "2026-10-27T00:30:00Z"),
             ("I will call Vendor A tomorrow.", None),
@@ -851,7 +867,7 @@ class PostCallTests(unittest.TestCase):
             ("I will call Vendor A about last Friday.", "2026-10-27T00:30:00Z"),
         )
         for quote, started_at in cases:
-            for supplied in (None, "2026-10-27"):
+            for supplied in (None, "2026-10-27", "2026-11-06"):
                 with self.subTest(quote=quote, supplied=supplied):
                     (self.session / post_call.REPORT_FILE).unlink(missing_ok=True)
                     post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": started_at})
@@ -936,6 +952,25 @@ class PostCallTests(unittest.TestCase):
         action = post_call.sanitized_candidates(self.session)["post_call_items"][0]
         self.assertEqual(action["due_on"], "2026-10-30")
         self.assertEqual(action["evidence_quote"], quote)
+
+    def test_lunch_deadline_with_qualified_event_date_needs_review(self) -> None:
+        post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": "2026-10-27T00:30:00Z"})
+        post_call.store_context(self.session, self.context)
+        quote = "I will call before the lunch call."
+        post_call.write_private(self.session / "transcript.json", {"segments": [
+            {"speaker": "Dell", "text": "The lunch call is sometime next week."},
+            {"speaker": "Joe", "text": quote},
+        ]})
+        output = self.output(joe_tasks=[{
+            "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
+            "evidence": quote, "due_on": "2026-11-02",
+        }], deal_updates=[], draft_proposals=[])
+        status = post_call.process_session(self.session, distiller=lambda _request: output)
+        self.assertEqual(status["state"], "ready_review")
+        report = post_call.report_for_deal_room(self.session)["report"]
+        self.assertTrue(report["review_questions"])
+        action = post_call.sanitized_candidates(self.session)["post_call_items"][0]
+        self.assertIsNone(action["due_on"])
 
     def test_long_relative_evidence_retains_the_spoken_deadline(self) -> None:
         post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": "2026-10-27T00:30:00Z"})
