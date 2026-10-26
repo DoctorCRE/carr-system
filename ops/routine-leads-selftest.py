@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Exercise the weekly lead-signals routine against fixture NPPES files and records.
 import copy
 import csv
 import io
