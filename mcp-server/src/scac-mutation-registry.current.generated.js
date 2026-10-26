@@ -521,6 +521,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "compare-fact-observations": {
+    "ingress_key": "mcp-tool:compare-fact-observations",
+    "source_locator": "mcp-server/src/fact-observations.js",
+    "schema_digest": "fabaa603b5ffeaf1648ad43bca2ec51be0b6e5ce9cf3e6378fc544e846b4207b",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "compare-lease-terms": {
     "ingress_key": "mcp-tool:compare-lease-terms",
     "source_locator": "mcp-server/src/lease-term-comparison.js",
