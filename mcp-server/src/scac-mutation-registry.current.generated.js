@@ -575,6 +575,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "confirm-email-next-step": {
+    "ingress_key": "mcp-tool:confirm-email-next-step",
+    "source_locator": "mcp-server/src/email-next-step.js",
+    "schema_digest": "3b0cc27fe124cc7b9d48aa15b05ad8c3be387737a735cd987e217336c41f020b",
+    "write": true,
+    "human_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "confirm-merge": {
     "ingress_key": "mcp-tool:confirm-merge",
     "source_locator": "mcp-server/src/tools.js",
@@ -1403,6 +1412,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:preview-email-deal-progress",
     "source_locator": "mcp-server/src/email-deal-progress.js",
     "schema_digest": "01563165207c5295db5f140cf83fcfc593ba0e9e8973a033244709709a4c2d25",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "preview-email-next-step": {
+    "ingress_key": "mcp-tool:preview-email-next-step",
+    "source_locator": "mcp-server/src/email-next-step.js",
+    "schema_digest": "a565d9f5afc3fb8dc8c0c3c84f512f1f16f374de0013f505e32e7743bef49b9a",
     "write": false,
     "human_only": false,
     "authority_only": false,
