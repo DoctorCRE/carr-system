@@ -47,13 +47,13 @@ import { fileURLToPath } from "node:url";
 
 const SRC = fileURLToPath(new URL("../src", import.meta.url));
 
-/** Every .js/.mjs file under dir, recursively. */
+/** Every .js/.mjs/.ts file under dir, recursively. */
 function sourceFiles(dir) {
   const found = [];
   for (const entry of readdirSync(dir)) {
     const path = join(dir, entry);
     if (statSync(path).isDirectory()) { found.push(...sourceFiles(path)); continue; }
-    if (/\.(js|mjs)$/.test(entry)) found.push(path);
+    if (/\.(js|mjs|ts)$/.test(entry)) found.push(path);
   }
   return found;
 }

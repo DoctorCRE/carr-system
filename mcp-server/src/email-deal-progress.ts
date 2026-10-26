@@ -1,9 +1,13 @@
-import { createHash } from 'node:crypto';
+import { sha256 } from './sha256.ts';
+import { ToolError } from './tool-error.ts';
+import type { Actor, Db, DelegatedHandler, LockDealField, ResolveEmailProposal, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
+
+type ProgressRule = { instrument: RegExp; excludedInstrument?: RegExp; dealTypes?: string[]; additionalEvidence: RegExp[] };
 
 const CONTRACT = 'email-deal-progress.v1';
 const loi = /\b(?:LOI|letter of intent)\b/i;
 const leaseTypes = ['startup', 'relocation', 'expansion', 'additional_office', 'lease', 'renewal'];
-const transitions = new Map([
+const transitions = new Map<string, { toPhase: string; rules: ProgressRule[] }>([
   ['research', { toPhase: 'site_selection', rules: [{ instrument: /\btours?\b/i,
     additionalEvidence: [/\b(?:scheduled|confirmed|set)\b/i] }] }],
   ['site_selection', { toPhase: 'negotiation', rules: [{ instrument: loi, additionalEvidence: [] }] }],
@@ -20,12 +24,15 @@ const properties = {
   activity_id: { type: 'string', format: 'uuid' },
   evidence_quote: { type: 'string', minLength: 10, maxLength: 2000 },
 };
-const schema = extra => ({ type: 'object', additionalProperties: false,
+const schema = (extra: Record<string, object>) => ({ type: 'object', additionalProperties: false,
   properties: { ...properties, ...extra }, required: [...Object.keys(properties), ...Object.keys(extra)] });
 
-export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lockDealField, updateDeal, resolveEmailProposal }) {
-  const fail = error => { throw new ToolError({ error }); };
-  async function proposal(c, args, lock = false) {
+export function emailDealProgressTools({ withEnvelope, writeEvent, lockDealField, updateDeal, resolveEmailProposal }: {
+  withEnvelope: WithEnvelope; writeEvent: WriteEvent; lockDealField: LockDealField; updateDeal: DelegatedHandler;
+  resolveEmailProposal: ResolveEmailProposal;
+}) {
+  const fail: (error: string) => never = error => { throw new ToolError({ error }); };
+  async function proposal(c: Db, args: VerbInputs['preview-email-deal-progress'], lock = false) {
     const row = (await c.query(`select d.id as deal_id,d.name,d.client_id,d.phase,d.version,d.deal_type,
         a.id as activity_id,a.version as activity_version,a.kind,a.summary,a.detail,a.occurred_at
       from deal d join client cl on cl.id=d.client_id join party p on p.id=cl.party_id
@@ -45,10 +52,10 @@ export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lo
     const source = { activity_id: row.activity_id, summary: row.summary,
       occurred_at: new Date(row.occurred_at).toISOString(), evidence_ref: `activity:${row.activity_id}` };
     const result = { contract: CONTRACT, status: 'proposed', deal: row.deal_id, deal_name: row.name,
-      client_id: row.client_id, base_version: row.version, from_phase: row.phase, to_phase: transition.toPhase,
+      client_id: row.client_id, base_version: row.version, from_phase: row.phase, to_phase: transition!.toPhase,
       evidence_quote: args.evidence_quote, source, requires_confirmation: true };
-    const digest = createHash('sha256').update(JSON.stringify({ ...result,
-      activity_version: row.activity_version, captured_body: row.detail })).digest('hex');
+    const digest = sha256(JSON.stringify({ ...result,
+      activity_version: row.activity_version, captured_body: row.detail }));
     return { ...result, proposal_digest: `sha256:${digest}` };
   }
   return {
@@ -57,7 +64,7 @@ export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lo
       description: 'Joe confirms the displayed tour-set, LOI-receipt, signed-LOI, lease-out or executed-lease proposal. Requires the preview digest and unchanged source text, linkage and deal version. Moves research to site selection for a scheduled or confirmed tour, or site selection to negotiation for LOI receipt, or negotiation to legal for a signed or executed LOI or a lease sent for review on a lease or renewal deal, or legal to closing for a signed or executed lease on a lease or renewal deal, through update-deal and retains the email quote in deal history. No sends or automatic phase moves.',
       inputSchema: schema({ proposal_digest: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' },
         idempotency_key: { type: 'string', minLength: 1, maxLength: 200 } }),
-      handler: async (c, actor, args) => {
+      handler: async (c: Db, actor: Actor, args: VerbInputs['confirm-email-deal-progress']) => {
         if (actor.human !== true || actor.slug !== 'joe') fail('joe_confirmation_required');
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
         return withEnvelope(c, actor, 'confirm-email-deal-progress', args, async () => {
@@ -80,7 +87,7 @@ export function emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lo
       write: false,
       description: 'Propose research to site selection for a scheduled or confirmed tour, or site selection to negotiation for LOI receipt, or negotiation to legal for a signed or executed LOI or a lease sent for review on a lease or renewal deal, or legal to closing for a signed or executed lease on a lease or renewal deal, from a selected captured inbound email and a literal evidence quote. Select the exact deal first. Captured text may be a preview. This does not classify, execute email instructions, or change a record. Lease-out and lease-execution quotes must exclude LOI wording. Joe must review whether the quote proves a tour is set, LOI receipt, LOI signing, lease review or lease execution. Scheduling, delivery, signing or execution wording is a review cue, not proof of the milestone.',
       inputSchema: schema({}),
-      handler: (c, _actor, args) => proposal(c, args),
+      handler: (c: Db, _actor: Actor, args: VerbInputs['preview-email-deal-progress']) => proposal(c, args),
     },
   };
 }

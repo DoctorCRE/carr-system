@@ -30,6 +30,8 @@ test('Home agenda real SQL preserves eligibility, nullable dates, holds and read
         last_touch timestamptz, last_review_at timestamptz, workspace_kind text default 'team', account_client_id uuid,
         operating_state text default 'active', outcome text, closed_on date, invoiced_on date, client_name text, market text);
       create view v_deal_room_board as select * from board_source;
+      create view v_open_deal_room_board as select * from board_source
+        where outcome is null and closed_on is null and invoiced_on is null and phase not in ('closed','invoiced');
       create view v_client_engagement_status as select 'aa000000-0000-4000-8000-000000000100'::uuid as client_id, 'prospect'::text as client_status, 'active'::text as prospect_engagement_status;
       create table actor (id uuid primary key, slug text);
       create table next_action (id uuid primary key, subject_type text, subject_id uuid, owner_id uuid,
@@ -44,7 +46,7 @@ test('Home agenda real SQL preserves eligibility, nullable dates, holds and read
         select n.id, n.subject_id as deal_id, a.slug as owner, n.description, n.due_on, n.status, n.updated_at
         from next_action n join actor a on a.id=n.owner_id where n.subject_type='deal';
       grant usage on schema public to carr_reader;
-      grant select on v_deal_room_board, v_client_engagement_status, v_deal_room_critical_date, v_deal_room_action to carr_reader;
+      grant select on v_deal_room_board, v_open_deal_room_board, v_client_engagement_status, v_deal_room_critical_date, v_deal_room_action to carr_reader;
     `);
     await c.query(readFileSync(new URL('../../migrations/0927_deal_action_hold_date.sql', import.meta.url), 'utf8'));
     const actionView = readFileSync(new URL('../../db/schema.sql', import.meta.url), 'utf8').match(/CREATE VIEW public\.v_deal_room_action AS[\s\S]*?;/)[0];

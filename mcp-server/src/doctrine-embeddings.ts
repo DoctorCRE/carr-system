@@ -1,13 +1,21 @@
+import type { Db } from './verb-contract.ts';
+
 const DOCTRINE_EMBEDDING_MODEL = '@cf/baai/bge-small-en-v1.5';
 const EMBEDDING_VERSION = `${DOCTRINE_EMBEDDING_MODEL}:cls:chunks-v1`;
 const DIMENSIONS = 384;
 const TIMEOUT_MS = 2000;
 
+/** The Workers AI binding, as far as this module calls it. */
+type EmbeddingAi = { run(model: string, input: { text: string[]; pooling: string }): Promise<unknown> };
+/** The database client tools.js hands doctrine verbs: it carries the AI binding and its transaction state. */
+type DoctrineDb = Db & { ai?: EmbeddingAi; inTransaction?: boolean };
+type Vector = number[];
+
 // Conservative UTF-8 bounds stay inside the 512-token context, including special tokens.
-function embeddingChunks(text) {
+function embeddingChunks(text: string) {
   const characters = Array.from(text);
   const sizes = characters.map(character => new TextEncoder().encode(character).length);
-  const chunks = [];
+  const chunks: string[] = [];
   for (let start = 0; start < characters.length;) {
     let end = start, bytes = 0;
     while (end < characters.length && bytes + sizes[end] <= 480) bytes += sizes[end++];
@@ -20,35 +28,37 @@ function embeddingChunks(text) {
   return chunks.length ? chunks : [''];
 }
 
-async function doctrineEmbeddings(ai, texts) {
+async function doctrineEmbeddings(ai: EmbeddingAi | undefined, texts: string[]): Promise<Vector[]> {
   if (!ai?.run) throw new Error('binding_unavailable');
-  let timeout;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    const result = await Promise.race([
-      ai.run(DOCTRINE_EMBEDDING_MODEL, { text: texts, pooling: 'cls' }),
+    const result = await Promise.race<{ data?: unknown } | undefined>([
+      ai.run(DOCTRINE_EMBEDDING_MODEL, { text: texts, pooling: 'cls' }) as Promise<{ data?: unknown } | undefined>,
       new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('embedding_timeout')), TIMEOUT_MS); }),
     ]);
     if (!Array.isArray(result?.data) || result.data.length !== texts.length ||
-        result.data.some(vector => !Array.isArray(vector) || vector.length !== DIMENSIONS ||
+        result.data.some((vector: unknown) => !Array.isArray(vector) || vector.length !== DIMENSIONS ||
           vector.some(value => !Number.isFinite(value)) || !vector.some(value => value !== 0)))
       throw new Error('invalid_embedding');
-    return result.data;
+    return result.data as Vector[];
   } finally {
-    clearTimeout(timeout);
+    // Unset only if ai.run threw before the race began; clearTimeout ignores that.
+    clearTimeout(timeout!);
   }
 }
 
-async function embedChunks(ai, texts) {
-  const vectors = [];
+async function embedChunks(ai: EmbeddingAi | undefined, texts: string[]) {
+  const vectors: Vector[] = [];
   for (let offset = 0; offset < texts.length; offset += 16)
     vectors.push(...await doctrineEmbeddings(ai, texts.slice(offset, offset + 16)));
   return vectors;
 }
 
-export async function searchDoctrineWithEmbeddings(c, args, actorId) {
+export async function searchDoctrineWithEmbeddings(c: DoctrineDb,
+  args: { q: string; content_classes?: string[]; limit?: number; policy_id?: string }, actorId: string) {
   if (!args.q.trim()) return { semantic: { status: 'unavailable', model: DOCTRINE_EMBEDDING_MODEL,
     pooling: 'cls', reason: 'empty_query' } };
-  let vectors;
+  let vectors: Vector[];
   try {
     vectors = await embedChunks(c.ai, embeddingChunks(args.q));
   } catch {
@@ -76,11 +86,11 @@ export async function searchDoctrineWithEmbeddings(c, args, actorId) {
   }
 }
 
-export async function embedDoctrineRevisions(c, revisions) {
+export async function embedDoctrineRevisions(c: DoctrineDb, revisions: { revision_id: string; plain_text: string }[]) {
   if (!revisions.length) return { status: 'ready', embedded: 0 };
   const chunks = revisions.flatMap(revision => embeddingChunks(revision.plain_text)
     .map((text, index) => ({ revisionId: revision.revision_id, index, text })));
-  let vectors;
+  let vectors: Vector[];
   try {
     vectors = await embedChunks(c.ai, chunks.map(chunk => chunk.text));
   } catch {
@@ -89,7 +99,7 @@ export async function embedDoctrineRevisions(c, revisions) {
   }
   await c.query('savepoint doctrine_embedding_write');
   try {
-    const embedded = new Set();
+    const embedded = new Set<string>();
     for (let i = 0; i < chunks.length; i++) {
       const result = await c.query(
         `insert into doctrine_embedding(revision_id,model,embedding,chunk_index)
@@ -109,7 +119,7 @@ export async function embedDoctrineRevisions(c, revisions) {
   }
 }
 
-export async function backfillDoctrineEmbeddings(c, actorId, limit) {
+export async function backfillDoctrineEmbeddings(c: DoctrineDb, actorId: string, limit: number) {
   const pending = await c.query(
     `select s.current_revision_id as revision_id,c.plain_text
        from current_retrievable_doctrine($1::uuid,null) c

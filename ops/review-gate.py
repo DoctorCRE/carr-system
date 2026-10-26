@@ -1,5 +1,6 @@
 """Publish a SHA-bound review-gate commit status using trusted GitHub event data."""
 import fnmatch
+import re
 import json
 import os
 import subprocess
@@ -11,7 +12,13 @@ RISKY = ("*launchagents*", "*.plist", "install-*.sh", "*/install-*.sh",
          ".github/workflows/deploy*", "migrations/*", "db/*", "*wrangler*", "tools/migrate.py")
 
 
+# GitHub skips every push workflow for these title markers, so a merged PR would never deploy.
+SKIP_CI = re.compile(r"\[(skip ci|ci skip|no ci|skip actions|actions skip)\]", re.I)
+
+
 def approved(pr, files, comments):
+    if SKIP_CI.search(pr.get("title") or ""):
+        return False
     if any(c["body"].splitlines()[:1] == ["VERDICT: CHANGES"]
            and f'Reviewed-SHA: {pr["head"]["sha"]}' in c["body"].splitlines() for c in comments):
         return False
@@ -44,7 +51,7 @@ def run(event, repo):
     root = f"repos/{repo}"
     def status(sha, state):
         api(f"{root}/statuses/{sha}", {"context": "review-gate", "state": state,
-            "description": "Small safe diff or current-head approval required"})
+            "description": "No [skip ci] title; small safe diff or current-head approval required"})
     if "merge_group" in event:
         status(event["merge_group"]["head_sha"], "success")
         return

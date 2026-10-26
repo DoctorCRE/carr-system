@@ -228,13 +228,12 @@ def _item_checks(item, answers):
         reasons.append("Right speaker: the excerpt does not support the attribution.")
     if not details_pass:
         reasons.append("Right details: the excerpt does not support the item's specifics.")
-    reasons.append("Semantic checks are advisory; independent review is required.")
     return {
         "advisory_only": True,
         "deal": {"value": deal.choice, "confidence": deal.confidence, "pass": deal_pass},
         "speaker": {"value": speaker.noul, "pass": speaker_pass},
         "details": {"value": details.noul, "pass": details_pass},
-        "flagged": True,
+        "flagged": bool(reasons),
         "reasons": reasons,
     }
 

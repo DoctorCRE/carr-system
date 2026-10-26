@@ -4,7 +4,7 @@ import { readCommandCenterSummary } from "../src/workspace-command-center.js";
 
 const DEALS = { team_active: "5", team_flagged: "2", mine_active: "2", mine_flagged: "1" };
 const WORK = { needs_viewer: "1", doc_at_work: "2", changed_count: "3", changed_at: "2026-08-24T14:30:00.000Z", legacy_unscoped_held: "0", legacy_unscoped_recent: "0" };
-const clientFor = (deals = {}, work = {}) => ({ query: async (sql) => ({ rows: [sql.includes("v_deal_room_board") ? { ...DEALS, ...deals } : { ...WORK, ...work }] }) });
+const clientFor = (deals = {}, work = {}) => ({ query: async (sql) => ({ rows: [sql.includes("v_open_deal_room_board") ? { ...DEALS, ...deals } : { ...WORK, ...work }] }) });
 const TEAM_FLAGGED = "/deals?workspace=team&filter=flagged";
 const MY_FLAGGED = "/deals?workspace=team&filter=flagged&owner=me";
 
@@ -12,7 +12,7 @@ test("Command Center returns the contract-shaped team and mine aggregate read wi
   const queries = [];
   const client = { async query(sql, params) {
     queries.push({ sql, params });
-    return { rows: [sql.includes("v_deal_room_board") ? DEALS : WORK] };
+    return { rows: [sql.includes("v_open_deal_room_board") ? DEALS : WORK] };
   } };
   const result = await readCommandCenterSummary({ client, actor: { slug: "joe" }, tenant: "carr-internal", correlationId: "corr-joe", now: () => new Date("2026-08-24T15:00:00.000Z") });
   assert.deepEqual(Object.keys(result).sort(), ["doc_at_work", "metrics", "needs_you_now", "this_week", "recent_calls", "recent_activity", "source", "viewer"].sort());
@@ -49,7 +49,7 @@ test("team counts are owner-independent and mine counts are bound to the authent
   const queries = [];
   const client = { async query(sql, params) {
     queries.push({ sql, params });
-    return { rows: [sql.includes("v_deal_room_board") ? DEALS : WORK] };
+    return { rows: [sql.includes("v_open_deal_room_board") ? DEALS : WORK] };
   } };
   await readCommandCenterSummary({ client, actor: { slug: "dell" }, correlationId: "corr-dell" });
   const [teamActive, teamFlagged, mineActive, mineFlagged] = queries[0].sql.split("count(*) filter").slice(1);

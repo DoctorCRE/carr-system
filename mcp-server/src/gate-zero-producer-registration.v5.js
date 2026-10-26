@@ -5,7 +5,7 @@
 // had no producer anywhere: no role, no oracle, no output schema, no evidence
 // scope, no gate id. Three modules on main say so and refuse to invent one
 // (benchmark-minimum.v5.js:52-67, journey-one-clock-input-store.v5.js:1501,
-// gate-zero-assurance.v5.js). Decision `20c83902-f150-4d59-beca-915c5c871f95`
+// gate-zero-assurance.v5.ts). Decision `20c83902-f150-4d59-beca-915c5c871f95`
 // (2026-09-11) adopts Option B PROVISIONALLY: Gate Zero becomes the eighth
 // independent boundary receipt, issued by an independent oracle seat, reusing
 // consumer-gate-receipt.v1 rather than growing a schema of its own; retryable
@@ -42,7 +42,7 @@
 //     the desk that charter describes, so `oracle_seat_bound` is true here and
 //     `oracle_seat_owed` is null. Nothing implements the ROLE: there is no code
 //     behind `seam:gate-zero-read-only-outcome-producer`, so
-//     gate-zero-assurance.v5.js's producer seam stays unbound and its answer
+//     gate-zero-assurance.v5.ts's producer seam stays unbound and its answer
 //     stays `passable: false`. A staffed seat is who may sign, not a signature.
 //   * It is NOT a Gate Zero receipt, and nothing here can become one.
 //   * `r7_entry_witness` IS NOT TRUE HERE, and it is not a flag a caller can
@@ -461,7 +461,7 @@ function deepFreeze(value) {
  * values that were, and where each was read from, are in RESOLVED_FROM_R7.
  *
  * `depends_on_step_refs` is NOT restated here as a literal — it is read from
- * gate-zero-assurance.v5.js's frozen predecessor list, which the V5-A02 test
+ * gate-zero-assurance.v5.ts's frozen predecessor list, which the V5-A02 test
  * already proves identical to the validator's assertion at
  * tools/doctorcre-v5-review.cjs:1234-1244. Two copies would be two authorities.
  */
@@ -615,7 +615,7 @@ export const V5_A02_GATE_ZERO_R7_ENTRY_WITNESS =
  * choosing, because there is nothing to hand in but the packet itself, and only
  * one byte-string in the world hashes to the pinned digest.
  *
- * gate-zero-assurance.v5.js re-exports this rather than keeping a second copy:
+ * gate-zero-assurance.v5.ts re-exports this rather than keeping a second copy:
  * two implementations of one digest comparison would be two authorities.
  */
 export const v5A02GateZeroR7Presence = (r7DesignPacketBytes) =>
