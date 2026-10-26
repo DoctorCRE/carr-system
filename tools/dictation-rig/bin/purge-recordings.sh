@@ -70,9 +70,10 @@ try:
 except Exception:
     print("HOLD unreadable-marker"); raise SystemExit(0)
 if marker.get("post_call") is True:
-    if not str(marker.get("aggregate_report_hash") or "").strip():
+    import re
+    if re.fullmatch(r"[0-9a-fA-F]{64}", str(marker.get("aggregate_report_hash") or "")) is None:
         print("HOLD no-filed-report-hash"); raise SystemExit(0)
-    if not str(marker.get("backend_report_sha256") or "").strip():
+    if re.fullmatch(r"[0-9a-fA-F]{64}", str(marker.get("backend_report_sha256") or "")) is None:
         print("HOLD no-backend-report-hash"); raise SystemExit(0)
     if marker.get("pending_items") != 0:
         print("HOLD pending-post-call-items"); raise SystemExit(0)

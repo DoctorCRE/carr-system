@@ -7,8 +7,8 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
-import { readDealItems } from '../src/deal-items.js';
-import { CHECKLIST_SOURCES } from '../src/deal-checklist.js';
+import { readDealItems } from '../src/deal-items.ts';
+import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
 
 let fixture, admin, database, c, actor, deal;
 before(async () => {
@@ -212,21 +212,39 @@ test('due checklist pings reach only the owner feed and replay without duplicate
     }
     await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic other partner') on conflict(slug) do update set active=true");
     const date = (await c.query("insert into critical_date(deal_id,kind,due_on,source,created_by) values($1,'attorney_review','2000-01-01','synthetic:lease',$2) returning id", [deal,actor.id])).rows[0].id;
+    await c.query("update next_action set due_on='2099-01-01' where subject_type='deal' and subject_id=$1", [deal]);
+    const stored = await executeRegisteredTool(c, actor, 'record-deal-item', {
+      deal, ...item('Synthetic vendor follow-up'), due_on: '2000-01-01', idempotency_key: randomUUID(),
+    });
+    const future = await executeRegisteredTool(c, actor, 'record-deal-item', {
+      deal, ...item('Future vendor follow-up'), due_on: '2099-01-01', idempotency_key: randomUUID(),
+    });
+    const nonce = randomUUID();
+    const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,session_token_hash,expires_at,state_at)
+      values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now()) returning id`, [nonce,actor.id])).rows[0].id;
+    const candidate = (await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,item_index,kind,deal_id,assignee_slug,action_description,due_on,evidence_quote,confidence)
+      values($1,$2,'synthetic',0,'assigned_action',$3,'dell','Call the synthetic vendor','2000-01-01','Call the vendor',0.9) returning id`, [session,randomUUID(),deal])).rows[0].id;
     await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
     await c.query('set local role carr_writer');
+    const captured = await executeRegisteredTool(c, actor, 'resolve-post-call-candidate', {
+      candidate_id: candidate, accept: true, idempotency_key: randomUUID(),
+    });
     const key = randomUUID();
     const ping = key => executeRegisteredTool(c, actor, 'ping-deal-checklist', { deal, idempotency_key: key });
     const first = await ping(key);
-    assert.equal(first.queued, 1);
+    assert.equal(first.queued, 3);
+    assert.deepEqual(first.notifications.map(n => n.checklist_item_id).sort(),
+      [`critical-date:${date}`, `deal-item:${stored.item.id}`, `deal-item:${captured.ref}`].sort());
+    assert.ok(!first.notifications.some(n => n.checklist_item_id === `deal-item:${future.item.id}`));
     assert.equal((await ping(key)).replayed, true);
     const retry = await ping(randomUUID());
     assert.equal(retry.queued, 0);
-    assert.equal(retry.deduplicated, 1);
+    assert.equal(retry.deduplicated, 3);
     assert.equal(retry.notifications[0].notification_id, first.notifications[0].notification_id);
     const feed = await executeRegisteredTool(c, actor, 'notification-feed', {});
-    assert.equal(feed.unread_count, 1);
-    assert.deepEqual(feed.notifications.map(n => [n.id,n.subject_type,n.subject_ref,n.severity]),
-      [[first.notifications[0].notification_id,'deal',deal,'action_required']]);
+    assert.equal(feed.unread_count, 3);
+    assert.deepEqual(feed.notifications.map(n => [n.id,n.subject_type,n.subject_ref,n.severity]).sort(),
+      first.notifications.map(n => [n.notification_id,'deal',deal,'action_required']).sort());
     assert.deepEqual(feed.notifications[0].delivery, [{ channel: 'in_app', state: 'pending' }]);
     await c.query('savepoint failed_ping');
     const failedKey = randomUUID();
@@ -239,6 +257,16 @@ test('due checklist pings reach only the owner feed and replay without duplicate
     assert.deepEqual(unchanged, feed);
     assert.equal((await c.query('select count(*)::int as count from event where idempotency_key=$1', [failedKey])).rows[0].count, 0);
     assert.equal((await c.query('select count(*)::int as count from tool_call where idempotency_key=$1', [failedKey])).rows[0].count, 0);
+
+    for (const id of [stored.item.id, captured.ref]) {
+      await executeRegisteredTool(c, actor, 'complete-deal-item', {
+        deal, item_id: id, idempotency_key: randomUUID(),
+      });
+    }
+    const afterCompletion = await ping(randomUUID());
+    assert.equal(afterCompletion.queued, 0);
+    assert.deepEqual(afterCompletion.notifications.map(n => n.checklist_item_id), [`critical-date:${date}`]);
+    assert.equal((await executeRegisteredTool(c, actor, 'notification-feed', {})).unread_count, 3);
 
     await c.query("select set_config('carr.acting_actor_slug','dell',true), set_config('carr.verified_human_actor_slug','dell',true)");
     assert.equal((await executeRegisteredTool(c, { ...actor, slug: 'dell' }, 'notification-feed', {})).unread_count, 0);
@@ -254,4 +282,93 @@ test('due checklist pings reach only the owner feed and replay without duplicate
     assert.equal(inactive.queued, 0);
 
   } finally { await c.query('rollback'); }
+});
+
+
+test('Home discovers pending call follow-ups through existing grants without executing them', async t => {
+  const nonce = randomUUID();
+  const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,
+      consent_announced_at,session_token_hash,expires_at,state_at,state,post_call)
+    values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now(),'distilling',true)
+    returning id`, [nonce,actor.id])).rows[0].id;
+  const recipient = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic vendor contact',$1,$1) returning id,ref", [actor.id])).rows[0];
+  const first = 'ab000000-0000-4000-8000-000000000001';
+  const second = 'ab000000-0000-4000-8000-000000000002';
+  await c.query(`insert into capture_post_call_candidate(id,session_id,idempotency_key,batch_hash,item_index,kind,deal_id,
+      assignee_slug,action_description,due_on,evidence_quote,confidence,created_at)
+    values($1,$2,'synthetic-home','synthetic',0,'assigned_action',$3,'dell','Call the synthetic lender',null,
+      'Dell will call the lender',0.9,'2026-10-20T12:00:00Z')`, [first,session,deal]);
+  await c.query(`insert into capture_post_call_candidate(id,session_id,idempotency_key,batch_hash,item_index,kind,deal_id,
+      recipient_party_id,recipient_ref,email_subject,body_sha256,evidence_quote,confidence,created_at)
+    values($1,$2,'synthetic-home','synthetic',1,'email_draft',$3,$4,$5,'Synthetic vendor follow-up',$6,
+      'Draft a vendor follow-up',0.9,'2026-10-20T12:00:00Z')`, [second,session,deal,recipient.id,recipient.ref,'a'.repeat(64)]);
+  const read = async () => {
+    await c.query('begin read only');
+    try {
+      await c.query('set local role carr_writer');
+      let queries = 0;
+      const result = await executeRegisteredTool({ query(...args) { queries++; return c.query(...args); } }, actor, 'read-post-call-followups', {});
+      assert.equal(queries, 1);
+      return result;
+    } finally { await c.query('rollback'); }
+  };
+  await t.test('task and email metadata retain exact refs and local-body hash in stable order', async () => {
+    const result = await read();
+    for (const candidate of result.candidates) candidate.created_at = new Date(candidate.created_at).toISOString();
+    assert.deepEqual(result, { schema_version:'post-call-followups.v1', send:false, candidates:[
+      { id:first, session_id:session, kind:'assigned_action', deal_id:deal, deal_name:'Synthetic coastal purchase',
+        payload:{deal_id:deal,assignee:'dell',action:'Call the synthetic lender',due_on:null},
+        evidence_quote:'Dell will call the lender',created_at:'2026-10-20T12:00:00.000Z' },
+      { id:second, session_id:session, kind:'email_draft', deal_id:deal, deal_name:'Synthetic coastal purchase',
+        payload:{deal_id:deal,recipient_party_id:recipient.id,recipient_ref:recipient.ref,subject:'Synthetic vendor follow-up',body_sha256:'a'.repeat(64)},
+        evidence_quote:'Draft a vendor follow-up',created_at:'2026-10-20T12:00:00.000Z' },
+    ] });
+    assert.equal((await c.query('select count(*)::int as count from capture_post_call_report where session_id=$1',[session])).rows[0].count,0);
+  });
+  await t.test('live recording, failed, completed, expired and legacy sessions offer no follow-ups', async () => {
+    for (const state of ['recording','transcribing','failed','done']) {
+      await c.query('update capture_session set state=$2 where id=$1',[session,state]);
+      assert.deepEqual((await read()).candidates,[],state);
+    }
+    await c.query("update capture_session set state='distilling',expires_at=now()-interval '1 second' where id=$1",[session]);
+    assert.deepEqual((await read()).candidates,[]);
+    await c.query("update capture_session set expires_at=now()+interval '1 hour',post_call=false where id=$1",[session]);
+    assert.deepEqual((await read()).candidates,[]);
+    await c.query('update capture_session set post_call=true where id=$1',[session]);
+    assert.equal((await read()).candidates.length,2);
+  });
+  await t.test('parked, terminal and inactive-prospect deals offer no follow-ups', async () => {
+    for (const patch of ["operating_state='parked',parking_reason='client_paused',parking_note='Synthetic pause',parked_at=now(),parked_by=(select id from actor where slug='joe')",
+      "phase='closed'", "outcome='lost'", "closed_on='2026-10-20'", "invoiced_on='2026-10-20'"]) {
+      try {
+        await c.query(`update deal set ${patch} where id=$1`,[deal]);
+        assert.deepEqual((await read()).candidates,[],patch);
+      } finally {
+        await c.query("update deal set phase='research',outcome=null,closed_on=null,invoiced_on=null,operating_state='active',parking_reason=null,parking_note=null,parked_at=null,parked_by=null where id=$1",[deal]);
+      }
+    }
+    await c.query("insert into client_status(slug,label) values('prospect','Synthetic prospect') on conflict do nothing");
+    await c.query("update client set status='prospect',prospect_engagement_status='inactive' where id=(select client_id from deal where id=$1)",[deal]);
+    assert.deepEqual((await read()).candidates,[]);
+    await c.query("update client set status='fixture_active' where id=(select client_id from deal where id=$1)",[deal]);
+  });
+  await t.test('human dispositions remove only the reviewed candidate', async () => {
+    await command('resolve-post-call-candidate',{candidate_id:first,accept:false});
+    assert.deepEqual((await read()).candidates.map(row=>row.id),[second]);
+    const accepted = await command('resolve-post-call-candidate',{candidate_id:second,accept:true});
+    assert.equal(accepted.local_only,true);
+    assert.equal(accepted.send,false);
+    assert.deepEqual((await read()).candidates,[]);
+  });
+  await t.test('one thousand pending candidates fit; one more refuses the whole snapshot', async () => {
+    await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,item_index,kind,deal_id,
+        assignee_slug,action_description,evidence_quote,confidence)
+      select $1,'synthetic-limit','synthetic',n,'assigned_action',$2,'joe','Synthetic follow-up','Call the vendor',0.5
+      from generate_series(1,1000) n`,[session,deal]);
+    assert.equal((await read()).candidates.length,1000);
+    await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,item_index,kind,deal_id,
+        assignee_slug,action_description,evidence_quote,confidence)
+      values($1,'synthetic-limit','synthetic',1001,'assigned_action',$2,'joe','Synthetic overflow','Call the vendor',0.5)`,[session,deal]);
+    await assert.rejects(read,e=>e.payload.error==='post_call_followups_limit_exceeded' && e.payload.limit===1000);
+  });
 });

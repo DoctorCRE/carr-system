@@ -46,7 +46,7 @@
 // `trusted` are unknown fields, so a request that tries to narrow the test
 // cannot be read at all — the closed-key discipline that makes `enforced_axes`
 // unreadable in command-version-compatibility.v5.js and `skip_checks`
-// unreadable in command-supervisor-admission.v5.js. The check list is a module
+// unreadable in command-supervisor-admission.v5.ts. The check list is a module
 // constant in a FIXED ORDER, and the order is load-bearing: the first check that
 // does not pass refuses and everything after it reports `not_reached`. That is
 // how "an unauthorized actor refuses BEFORE any binding is compared" is a
@@ -55,7 +55,7 @@
 // A LABEL NEVER OUTVOTES THE CLOCK. A capability whose reported state says
 // "active" while its own `expires_at` has passed is EXPIRED. The reported state
 // is carried into the answer so a reader can see what was claimed; it decides
-// nothing on its own. This is command-supervisor-admission.v5.js's rule — a
+// nothing on its own. This is command-supervisor-admission.v5.ts's rule — a
 // label never outvotes a digest — applied to time.
 //
 // THE DATA BOUNDARY IS STRUCTURAL, NOT ADVISORY. Capabilities here are OPAQUE
@@ -71,7 +71,7 @@
 // decides. The action registry, the capability each action requires and the
 // controls each action names are global-boundaries.v5.js's `V5_ACTIONS`, read
 // and never copied. The nonce vocabulary, the capability-state vocabulary and
-// the per-check state vocabulary are command-supervisor-admission.v5.js's —
+// the per-check state vocabulary are command-supervisor-admission.v5.ts's —
 // V5-F07 is a declared source build dependency of this slice, and importing its
 // constants means a drift there breaks here instead of two lists silently
 // disagreeing. The actor authority answer is global-boundaries.v5.js's, READ AS
@@ -135,7 +135,7 @@ import {
   V5_ADMISSION_CHECK_STATES,
   V5_CAPABILITY_STATES,
   V5_NONCE_STATES,
-} from "./command-supervisor-admission.v5.js";
+} from "./command-supervisor-admission.v5.ts";
 
 export const V5_EFFECT_ENVELOPE_SCHEMA_VERSION = "doctorcre-v5-workflow-effect-envelope.v1";
 export const V5_EFFECT_ENVELOPE_POLICY_VERSION = 1;

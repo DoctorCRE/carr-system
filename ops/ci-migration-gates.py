@@ -18,7 +18,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
-ROLLBACK_ONLY_GATES = {'siep12-policy-epoch-local-pg-gate.py', 'siep18-reference-monitor-local-pg-gate.py'}
+ROLLBACK_ONLY_GATES: set[str] = set()
 
 # WR-000258. PR 1708's hosted migration job spent 732 s in the database gates and
 # 330 s in the proofs before them, almost all of it re-validating the sealed SCAC
@@ -38,7 +38,7 @@ ROLLBACK_ONLY_GATES = {'siep12-policy-epoch-local-pg-gate.py', 'siep18-reference
 #    CARR_GATE_SHARD=<i>/<N>. The gate declares its scenarios and each shard
 #    reports the ones it ran; the union must be the whole declared set.
 BEFORE_ISOLATED_MARKER = '# ci: db-gate-before-isolated'
-SHARDED_GATES = {'siep12-policy-epoch-local-pg-gate.py': 2}
+SHARDED_GATES: dict[str, int] = {}
 
 
 def postgres_binaries():

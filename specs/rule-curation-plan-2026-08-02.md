@@ -242,7 +242,7 @@ Each pass is one sitting. Each states what activates and what text is deleted fr
 3. Rules with no `scope.section` (the 29 active shared, the 15 Joe-personal) render into a named trailing section. **Ship the fallback first — it needs no migration and no gate.**
 4. In the same edit, fix the exporter's `ai-operating-notes.md` literal at `:355` and `:492` to point at wherever the standing rules now live.
 
-**Done-test:** `~/carr-system/run.sh export --only compiled-rules` produces sectioned files with counts unchanged (29 shared / 15 joe / 19 intro) and a clean `run.sh check`.
+**Done-test:** `~/carr-system/run.sh export --only compiled-rules` produces sectioned files with counts unchanged (29 shared / 15 joe / 19 intro).
 
 **Follow-on, optional:** a migration backfilling `scope.section` on the 44 unsectioned active rules. Joe runs it (`db-tap.py … --apply --yes`); Claude cannot.
 

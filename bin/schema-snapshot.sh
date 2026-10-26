@@ -2199,105 +2199,45 @@ insert into public.doctrine_meta (id, generation) values (1, 0);
 
 DOCTRINE_META
 
-# THE SIEP MANIFEST AND ITS WORK REQUESTS joined on 2026-08-27, the sixth entry
-# in the seeded-configuration category above, and the first whose seed is SEALED.
-# The trap is the control-catalog one a level deeper (incident INC-20260827-04's
-# sibling, defect class snapshot-cannot-rebuild-sealed-seeded-manifest): 0324
-# seeds ops.siep_package_contract / siep_program_dependency / siep_component_alias
-# and then seals all three with unconditional before-insert triggers, and the
-# package contract carries NOT NULL foreign keys into ops.work_request rows that
-# 0324 itself creates. Once 0324 enters this snapshot's ledger nothing replays,
-# the vocabulary dump cannot pass the seals, and a rebuilt database has SIEP
-# structure with an empty, unseedable manifest (found on the first post-0324 snapshot,
-# pull request 712, closed unmerged).
-#
-# THE SHAPE CHOSEN, of the three recorded on WR-000016: a deterministic block
-# that restores the exact production rows with the seals and the two
-# work-request insert guards (plus the shape gate) disabled for the restore
-# only, then re-enabled, then VERIFIED — the block ends by asserting
-# ops.siep_manifest_digest() equals the digest read from production at snapshot
-# time, so the seal's intent (no unreviewed manifest) survives the trip: a
-# tampered block fails the rebuild instead of building quietly. The manifest
-# rows are literal in reviewed migration 0324, so the production dump IS the
-# reviewed content, and the digest proves it twice — here at write time and
-# again at load time. The SIEP work requests are internal program rows created
-# by 0324's own literal package list (requester joe, owner joe, no client,
-# party, deal, event, doctrine or credential reference; their only outbound
-# foreign key is public.actor, which this snapshot already carries).
-# jsonb_populate_record keeps the block column-list-free so a later work_request
-# column cannot silently rot it. The ref sequence is advanced to production's
-# value so a rebuilt database cannot mint a colliding WR ref. Never widen this
-# to siep_command_receipt, siep_lane_lock, or any other runtime/evidence table.
-SIEP_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0324_siep_program_authority.sql')" \
-  2>/dev/null)"
-case "$SIEP_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the SIEP ledger state" >&2; exit 1 ;;
-esac
-
-if [ "$SIEP_APPLIED" = t ]; then
-  SIEP_DIGEST="$("$PSQL" -Atqc "select ops.siep_manifest_digest()" 2>/dev/null)"
-  case "$SIEP_DIGEST" in
-    sha256:*) ;;
-    *) echo "schema-snapshot: SIEP manifest digest unreadable — nothing written" >&2; exit 1 ;;
-  esac
-  SIEP_PKG_COUNT="$("$PSQL" -Atqc "select count(*) from ops.siep_package_contract" 2>/dev/null)"
-  if [ -z "$SIEP_PKG_COUNT" ] || [ "$SIEP_PKG_COUNT" -lt 40 ]; then
-    echo "schema-snapshot: SIEP package set implausibly small ($SIEP_PKG_COUNT) — nothing written" >&2
-    exit 1
-  fi
-
-  cat >> "$TMP" <<'SIEP_HEADER'
--- CARR SIEP MANIFEST AND PROGRAM WORK REQUESTS (bin/schema-snapshot.sh) —
--- exact sealed rows, digest-verified below. The seals and the work-request
--- insert guards are disabled ONLY for this byte-exact restore of rows that
--- already passed them on production; the closing DO block refuses the whole
--- rebuild if the restored manifest does not hash to production's reviewed
--- digest. Never dump receipt, lock, or evidence tables here.
+# THE SIEP PROGRAM WORK REQUESTS are the one carried subset of ops.work_request.
+# 0324 created them from its own literal package list (requester and owner joe,
+# no client, party, deal, event, doctrine or credential reference; their only
+# outbound foreign key is public.actor, which this snapshot already carries).
+# Until 0983 they were restored with the sealed SIEP manifest (package
+# contracts, dependency DAG, component aliases) and a digest check; 0983 dropped
+# that manifest with the retired programme (WR-SIEP-26), so only the rows and
+# the ref sequence remain. The work-request insert guards are disabled for this
+# byte-exact restore only. jsonb_populate_record keeps the block
+# column-list-free so a later work_request column cannot silently rot it. The
+# ref sequence is advanced to the source's value so a rebuilt database cannot
+# mint a colliding WR ref. Never widen this to sourced captures.
+cat >> "$TMP" <<'SIEP_HEADER'
+-- CARR SIEP PROGRAM WORK REQUESTS (bin/schema-snapshot.sh) — the internal
+-- programme rows, restored byte-exact with the insert guards disabled only for
+-- this block, then the WR ref sequence.
 alter table ops.work_request disable trigger work_request_shape_gate;
 alter table ops.work_request disable trigger work_in_progress_limit;
 alter table ops.work_request disable trigger completion_capsule;
-alter table ops.siep_package_contract disable trigger siep_package_contract_sealed_before_insert;
-alter table ops.siep_program_dependency disable trigger siep_program_dependency_sealed_before_insert;
-alter table ops.siep_component_alias disable trigger siep_component_alias_sealed_before_insert;
 SIEP_HEADER
 
-  if ! "$PSQL" -X -Atq -v ON_ERROR_STOP=1 >> "$TMP" <<'SIEP_ROWS'
+if ! "$PSQL" -X -Atq -v ON_ERROR_STOP=1 >> "$TMP" <<'SIEP_ROWS'
 select format('insert into ops.work_request select * from jsonb_populate_record(null::ops.work_request, %L::jsonb) on conflict (id) do nothing;', to_jsonb(w))
   from ops.work_request w
- where exists (select 1 from ops.siep_package_contract c where c.work_request_id = w.id)
+ where w.program_key = 'carr-system-integrity-elimination-v1'
  order by w.ref;
-select format('insert into ops.siep_package_contract select * from jsonb_populate_record(null::ops.siep_package_contract, %L::jsonb) on conflict do nothing;', to_jsonb(c))
-  from ops.siep_package_contract c order by c.package_key;
-select format('insert into ops.siep_program_dependency select * from jsonb_populate_record(null::ops.siep_program_dependency, %L::jsonb) on conflict do nothing;', to_jsonb(d))
-  from ops.siep_program_dependency d order by d.package_key, d.depends_on_package_key;
-select format('insert into ops.siep_component_alias select * from jsonb_populate_record(null::ops.siep_component_alias, %L::jsonb) on conflict do nothing;', to_jsonb(a))
-  from ops.siep_component_alias a order by a.alias_key;
 select format('select pg_catalog.setval(%L, %s, true);', 'ops.work_request_ref_seq', last_value) from ops.work_request_ref_seq;
 SIEP_ROWS
-  then
-    echo "schema-snapshot: could not render the SIEP manifest block — nothing written" >&2
-    exit 1
-  fi
+then
+  echo "schema-snapshot: could not render the SIEP program work requests — nothing written" >&2
+  exit 1
+fi
 
-  cat >> "$TMP" <<SIEP_FOOTER
-alter table ops.siep_component_alias enable trigger siep_component_alias_sealed_before_insert;
-alter table ops.siep_program_dependency enable trigger siep_program_dependency_sealed_before_insert;
-alter table ops.siep_package_contract enable trigger siep_package_contract_sealed_before_insert;
+cat >> "$TMP" <<'SIEP_FOOTER'
 alter table ops.work_request enable trigger completion_capsule;
 alter table ops.work_request enable trigger work_in_progress_limit;
 alter table ops.work_request enable trigger work_request_shape_gate;
-do \$carr_siep_manifest\$
-begin
-  if ops.siep_manifest_digest() is distinct from '$SIEP_DIGEST' then
-    raise exception 'SIEP manifest restore does not match the reviewed production digest $SIEP_DIGEST — refuse the rebuild';
-  end if;
-end
-\$carr_siep_manifest\$;
 
 SIEP_FOOTER
-fi
 
 # THE SCAC MUTATION REGISTRY is bounded, immutable security configuration.
 # Once 0468 enters this snapshot's ledger, the seed chain no longer replays;

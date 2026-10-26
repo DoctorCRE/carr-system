@@ -196,6 +196,10 @@ by definition: `CARR_ALLOW_MAIN_COMMIT=1 git commit ...`, for one command only.
 
 ## Checks
 
+New logic goes in tested Python, not shell (decision 4825f2a3, WR-000288
+V2-SHELL-PYTHON). A new shell script (.sh, .zsh or extensionless) is a launcher
+that only hands off to Python.
+
 `ops/ci.sh` is the ONE check script. The GitHub workflow and the pre-push hook
 both call it; neither contains check logic, so a check added there appears in
 both. Run one class while iterating:

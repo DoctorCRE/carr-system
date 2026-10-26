@@ -47,7 +47,10 @@ pathlib.Path(os.environ['FAKE_ARGS']).write_text(json.dumps({
     'api_key_present': 'ANTHROPIC_API_KEY' in os.environ}))
 mode = os.environ.get('FAKE_MODE', 'success')
 if mode == 'timeout':
-    pathlib.Path(os.environ['FAKE_ARGS']+'.pid').write_text(str(os.getpid()))
+    pidfile = pathlib.Path(os.environ['FAKE_ARGS']+'.pid')
+    temporary_pidfile = pidfile.with_name(pidfile.name+'.tmp')
+    temporary_pidfile.write_text(str(os.getpid()))
+    temporary_pidfile.replace(pidfile)
     time.sleep(60)
 if mode == 'denied':
     print(json.dumps({'type':'system','subtype':'permission_denied'}), flush=True)

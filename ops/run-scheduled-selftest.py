@@ -70,6 +70,27 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertNotIn("SYNTHETIC_PRIVATE", observed)
         self.assertFalse(list((self.root / "out").glob("outlook-intake-receipt.*")))
 
+    def test_calendar_receipts_preserve_counts_and_failure_class(self):
+        for reason, code in (('writes_failed', 1), ('calendar_lifecycle_unsupported', 0)):
+            receipt = {'state': 'failed' if code else 'succeeded', 'reason': reason,
+                       'counts': {'calendar_lifecycle_unsupported': 4,
+                                  'calendar_agenda_items': 5, 'calendar_agenda_canceled': 1,
+                                  'calendar_agenda_conflicts': 1, 'calendar_agenda_other_accounts': 2,
+                                  'calendar_agenda_published': 0, 'calendar_agenda_failed': 1,
+                                  'calendar_agenda_time_changed': 1, 'calendar_agenda_recurring': 2,
+                                  'calendar_agenda_trimmed': 0, 'calendar_agenda_undecoded': 3,
+                                  'error_agenda_version_conflict': 0,
+                                  'calendar_requests_quarantined': 2,
+                                  'hydration_pending': 1, 'hydration_expired': 0,
+                                  'error_next_action_conflict': 0, 'error_legacy_action_guard_required': 0}}
+            with self.subTest(reason=reason):
+                result = self.invoke_intake(receipt, code=code)
+                self.assertEqual(result.returncode, code)
+                args = json.loads(self.rows()[-1][3])
+                self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+                if code:
+                    self.assertEqual(args[args.index('--failure-class') + 1], reason)
+
     def test_intake_invalid_receipts_fail_closed_without_private_output(self):
         cases = [
             {"state": "failed", "reason": "SYNTHETIC_PRIVATE_REASON", "counts": {}},

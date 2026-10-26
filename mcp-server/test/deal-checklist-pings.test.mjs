@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { TOOLS } from '../src/tools.js';
 import { PROFILES } from '../src/mcp.js';
-import { CHECKLIST_SOURCES } from '../src/deal-checklist.js';
+import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
 
 const dealId = '10000000-0000-4000-8000-000000000001';
 const actor = { id: '20000000-0000-4000-8000-000000000001', slug: 'joe', human: true };
@@ -17,8 +17,8 @@ function database(overrides = {}) {
     { id: 'cleared', kind: 'option', due_on: '2000-01-01', source: 'fixture:lease', status: 'cleared' },
   ];
   const sources = CHECKLIST_SOURCES.map(s => ({ id: s.section_id, status: 'active', body_hash: s.content_hash }));
-  const receipts = new Map(), notifications = new Map(), events = [];
-  const client = { deal, dates, sources, events, notifications, receipts, async query(sql, values = []) {
+  const receipts = new Map(), notifications = new Map(), events = [], items = [];
+  const client = { deal, dates, sources, events, notifications, receipts, items, async query(sql, values = []) {
     if (sql.includes('pg_advisory_xact_lock')) return { rows: [] };
     if (sql.startsWith('select request_hash, response')) return { rows: receipts.has(values[0]) ? [receipts.get(values[0])] : [] };
     if (sql.startsWith('insert into tool_call')) {
@@ -29,6 +29,7 @@ function database(overrides = {}) {
     if (sql.includes('from v_deal_room_board where id=$1')) return { rows: deal.prospect_engagement_status === 'inactive' ? [] : [deal] };
     if (sql.includes('from critical_date where deal_id=$1')) return { rows: dates };
     if (sql.includes('checklist:doctrine')) return { rows: sources };
+    if (sql.includes('deal-items:read')) return { rows: items };
     if (sql.startsWith('insert into event')) {
       const event = { id: randomUUID(), verb: values[2], subject_type: values[3], subject_id: values[4],
         field: values[5], new_value: JSON.parse(values[7]), idempotency_key: values[10] };
@@ -157,4 +158,53 @@ test('an unknown deal type retains sourced due dates without inventing a documen
   const result = await ping(c);
   assert.equal(result.queued, 1);
   assert.deepEqual(result.notifications.map(n => n.checklist_item_id), ['critical-date:late']);
+});
+
+
+test('stored open checklist deadlines join critical dates without exposing their text', async () => {
+  const c = database();
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago',
+    year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const base = { title: 'Synthetic vendor follow-up', source_ref: 'synthetic:private-source', status: 'open' };
+  c.items.push(...[
+    { id: 'late', due_on: '2000-01-01' },
+    { id: 'today', due_on: today },
+    { id: 'future', due_on: '2099-01-01' },
+    { id: 'undated', due_on: null },
+    { id: 'invalid', due_on: '2026-02-30' },
+    { id: 'done', due_on: '2000-01-01', status: 'done' },
+    { id: 'dropped', due_on: '2000-01-01', status: 'dropped' },
+    { id: 'unsourced', due_on: '2000-01-01', source_ref: ' ' },
+  ].map(item => ({ ...base, ...item })));
+  const result = await ping(c);
+  assert.equal(result.queued, 3);
+  assert.deepEqual(result.notifications.map(n => n.checklist_item_id),
+    ['critical-date:late', 'deal-item:late', 'deal-item:today']);
+  const notifications = [...c.notifications.values()];
+  assert.ok(notifications.every(n => n.recipient === 'dell' && !n.bypass && !n.hold));
+  assert.ok(notifications.every(n => !/Synthetic vendor|private-source/.test(n.reason)));
+  assert.deepEqual(notifications[1].source.new_value,
+    { checklist_item_id: 'deal-item:late', due_on: '2000-01-01', recipient: 'dell' });
+});
+
+
+test('stored item reminders deduplicate across requests and stop after completion', async () => {
+  const c = database();
+  c.dates.length = 0;
+  c.items.push({ id: 'stored', status: 'open', source_ref: 'synthetic:call', due_on: '2000-01-01' });
+  const key = randomUUID();
+  const first = await ping(c, key);
+  assert.equal(first.queued, 1);
+  assert.deepEqual(await ping(c, key), { replayed: true, ...first });
+  const retry = await ping(c);
+  assert.equal(retry.queued, 0);
+  assert.equal(retry.deduplicated, 1);
+  assert.equal(retry.notifications[0].notification_id, first.notifications[0].notification_id);
+  c.items[0].due_on = '2000-01-02';
+  assert.equal((await ping(c)).queued, 1);
+  c.deal.owner = 'joe';
+  assert.equal((await ping(c)).queued, 1);
+  c.items[0].status = 'done';
+  assert.deepEqual((await ping(c)).notifications, []);
+  assert.equal(c.notifications.size, 3);
 });

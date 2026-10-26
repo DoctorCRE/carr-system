@@ -22,8 +22,10 @@
 //! subject is the field written twice, and subject, location, organizer name
 //! and organizer address sit together in that order.
 //!
-//! Identity is Global Object ID plus start: a recurring series shares one ID
-//! and materializes each occurrence with its own start.
+//! Global Object ID plus start groups observed schedule candidates. It cannot
+//! distinguish a moved occurrence from a recurring exception. Cancellation,
+//! deletion, revision ordering, recurrence and response semantics are unverified.
+//! No candidate establishes current schedule state or attendance.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -60,10 +62,10 @@ pub struct Event {
     pub attendees: Vec<Attendee>,
 }
 
-/// Every calendar item seen in the store, merged across revisions.
+/// Distinct serialized candidates, never combined into an invented revision.
 #[derive(Default)]
 pub struct Index {
-    pub events: BTreeMap<(String, i64), Event>,
+    pub events: BTreeMap<Vec<u8>, Event>,
     /// Identities seen on any revision, whether or not one fully decoded.
     pub identities: BTreeSet<(String, i64)>,
     pub objects: usize,
@@ -78,12 +80,7 @@ impl Index {
             self.objects += 1;
             self.identities.insert((goid.clone(), start));
             let Some(ev) = parse(obj, goid, start, end) else { continue };
-            match self.events.get_mut(&(ev.goid.clone(), start)) {
-                Some(prev) => merge(prev, ev),
-                None => {
-                    self.events.insert((ev.goid.clone(), start), ev);
-                }
-            }
+            self.events.entry(obj.to_vec()).or_insert(ev);
         }
     }
 }
@@ -170,13 +167,36 @@ fn is_text(s: &str) -> bool {
     total == 0 || latin * 5 >= total * 4
 }
 
+/// True when the object's last field is a NUL-terminated copy of an earlier text field.
+fn ends_at_repeated_subject(obj: &[u8], g: usize) -> bool {
+    let len = obj.len();
+    if len < g + 6 || obj[len - 2..] != [0, 0] {
+        return false;
+    }
+    let lo = g + (len - g) % 2;
+    let fields: Vec<String> = utf16(&obj[lo..len - 2]).split(|u| *u == 0).map(String::from_utf16_lossy).collect();
+    let Some((last, earlier)) = fields.split_last() else { return false };
+    last.chars().count() >= 2 && is_text(last) && earlier.iter().any(|f| f.ends_with(last.as_str()))
+}
+
 fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
     let g = memchr::memmem::find(obj, &GOID_PREFIX.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>())?;
     // The earliest block that parses to the end. Scanning from the end instead
     // stops at the trailing status bytes, which read as a count of zero.
+    // An item with no attendees (an own appointment, a block of time) carries
+    // no attendee block: its NUL-terminated fields run to the object end, which
+    // is then the subject written a second time. Anything else at the end is an
+    // attendee list this parser could not read, so the item stays undecoded and
+    // counted rather than becoming a meeting with nobody in it. A zero-count
+    // block is held to the same test, since stray zero bytes read as one.
     let (ap, attendees) = (g + 2..obj.len().saturating_sub(3))
         .filter(|p| obj[p - 2..*p] == [0, 0])
-        .find_map(|p| attendees_at(obj, p).map(|a| (p, a)))?;
+        .find_map(|p| {
+            attendees_at(obj, p)
+                .filter(|a| !a.is_empty() || ends_at_repeated_subject(&obj[..p], g))
+                .map(|a| (p, a))
+        })
+        .or_else(|| ends_at_repeated_subject(obj, g).then(|| (obj.len(), Vec::new())))?;
     // The length-prefixed time-zone strings shift byte parity, so the field
     // run is aligned to where it ends, not to where the object starts.
     let lo = g + (ap - g) % 2;
@@ -228,27 +248,6 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
         body,
         attendees,
     })
-}
-
-/// Combine a later revision into the copy already held, field by field.
-fn merge(prev: &mut Event, ev: Event) {
-    prev.end_unix = prev.end_unix.max(ev.end_unix);
-    for (slot, value) in [
-        (&mut prev.subject, ev.subject),
-        (&mut prev.location, ev.location),
-        (&mut prev.organizer_name, ev.organizer_name),
-        (&mut prev.organizer_email, ev.organizer_email),
-    ] {
-        if slot.is_none() {
-            *slot = value;
-        }
-    }
-    if ev.body.as_ref().map_or(0, String::len) > prev.body.as_ref().map_or(0, String::len) {
-        prev.body = ev.body;
-    }
-    if ev.attendees.len() > prev.attendees.len() {
-        prev.attendees = ev.attendees;
-    }
 }
 
 #[cfg(test)]
@@ -332,6 +331,34 @@ mod tests {
     }
 
     #[test]
+    fn an_appointment_without_an_attendee_block_decodes() {
+        // Observed on a TEST-account appointment (2026-10-21 study pair): the
+        // object ends at the repeated subject, with no attendee count at all.
+        let mut obj = object(true, &[]);
+        obj.truncate(obj.len() - 4);
+        let mut idx = Index::default();
+        idx.observe(&envelope(&obj));
+        assert_eq!(idx.events.len(), 1, "the identity decodes instead of vanishing");
+        let ev = idx.events.values().next().unwrap();
+        assert_eq!(ev.subject.as_deref(), Some("Quarterly Site Review"));
+        assert_eq!(ev.location.as_deref(), Some("Example Room"));
+        assert_eq!(ev.organizer_email.as_deref(), Some("ada@example.test"));
+        assert!(ev.attendees.is_empty());
+    }
+
+    #[test]
+    fn an_unreadable_attendee_list_stays_undecoded() {
+        // Joe as attendee plus two stray zero bytes: the attendee block no longer
+        // parses to the end, and it must not turn into a meeting with no one in it.
+        let mut obj = object(true, &[("Joe Example", "joe@example.test")]);
+        obj.extend([0, 0]);
+        let mut idx = Index::default();
+        idx.observe(&envelope(&obj));
+        assert_eq!(idx.objects, 1, "the identity is still counted");
+        assert!(idx.events.is_empty(), "and left undecoded");
+    }
+
+    #[test]
     fn working_hours_without_a_global_id_are_not_meetings() {
         let mut idx = Index::default();
         idx.observe(&envelope(&object(false, &[])));
@@ -340,13 +367,31 @@ mod tests {
     }
 
     #[test]
-    fn revisions_merge_into_one_event() {
+    fn distinct_revisions_remain_separate_candidates() {
         let mut idx = Index::default();
         let one = envelope(&object(true, &[]));
         let two = envelope(&object(true, &[("Bo Example", "bo@example.test")]));
         idx.observe(&[one, two].concat());
         assert_eq!(idx.objects, 2, "both revisions seen");
-        assert_eq!(idx.events.len(), 1, "one identity");
-        assert_eq!(idx.events.values().next().unwrap().attendees.len(), 1, "the fuller attendee list wins");
+        assert_eq!(idx.events.len(), 2, "an attendee removal must not be merged with an older list");
+        let sizes: BTreeSet<_> = idx.events.values().map(|e| e.attendees.len()).collect();
+        assert_eq!(sizes, BTreeSet::from([0, 1]));
     }
+
+    #[test]
+    fn opaque_lifecycle_and_response_changes_remain_separate_candidates() {
+        let original = object(true, &[("Bo Example", "bo@example.test")]);
+        let mut changed_metadata = original.clone();
+        changed_metadata[100] = 1;
+        let mut changed_response = original.clone();
+        let at = changed_response.len() - STATUS_BYTES;
+        changed_response[at] = 1;
+        let mut idx = Index::default();
+        for candidate in [&original, &changed_metadata, &changed_response, &original] {
+            idx.observe(&envelope(candidate));
+        }
+        assert_eq!(idx.objects, 4);
+        assert_eq!(idx.events.len(), 3, "unknown bytes cannot establish equivalent current state");
+    }
+
 }

@@ -99,7 +99,7 @@ import { TOOLS } from "./tools.js";
 import { buildRelease } from "./release.js";
 import { readCommandCenterSummary } from "./workspace-command-center.js";
 import { wrapWithCorrelation } from "./correlation.js";
-import { publicError } from "./public-errors.js";
+import { publicError } from "./public-errors.ts";
 import { withFailureRecording, scheduleFailureRecord, actorUnresolvedFailureClass } from "./trace.js";
 import { createTourInternalWebHandler } from "./tour-internal-web.js";
 import { createReportsWebHandler, isReportsHostRequest } from "./reports-web.js";

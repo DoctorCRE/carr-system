@@ -3,11 +3,11 @@
 // registered tool envelope; public reads accept digests only.
 import { Pool } from "@neondatabase/serverless";
 import { callTool } from "./mcp.js";
-import { ToolError } from "./tool-error.js";
+import { ToolError } from "./tool-error.ts";
 import { trustedTourRendererResult } from "./tour-artifacts.js";
 import { tourSharingBrowserAccess } from "./tour-sharing.js";
 import { authorizationClassForActor, organizationTenantForActor } from "./identity.js";
-import { readPropertyEvidence } from "./tour-property-evidence.js";
+import { readPropertyEvidence } from "./tour-property-evidence.ts";
 
 const sharing = tourSharingBrowserAccess({ ToolError });
 
