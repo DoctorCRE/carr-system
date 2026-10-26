@@ -1265,7 +1265,10 @@ class IntakeTest(unittest.TestCase):
             unresolved[ident(m)] = {'ck': ck, 'sent': m['sent_unix'], 'participants': {m['sender']: 'missing'}}
         self.out().mkdir(parents=True)
         (self.out() / intake.STATE).write_text(json.dumps({'mail_unresolved': unresolved}))
-        self.assertEqual(self.run_intake([old, recent]).state, 'succeeded')
+        result = self.run_intake([old, recent])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['unresolved_expired'], 1, 'the expiring run reports it')
+        self.assertEqual(result.counts['unresolved_messages'], 1)
         state = json.loads((self.out() / intake.STATE).read_text())
         self.assertEqual(list(state['mail_unresolved']), [ident(recent)])
         result = self.run_intake([old, recent])
@@ -1274,6 +1277,20 @@ class IntakeTest(unittest.TestCase):
         self.fake.contacts_rows.append(intake.Contact('old@example.test', 'L-911', 'Old Sender'))
         self.run_intake([old, recent], touch=False)
         self.assertEqual(self.fake.writes('log-activity'), [], 'expired mail is not revived')
+
+    def test_unresolved_calendar_candidates_expire_after_thirty_days(self):
+        old = event('old-visit', -timedelta(days=31), attendees=[('Old Visitor', 'old.visitor@example.test')])
+        recent = event('recent-visit', -timedelta(days=29), attendees=[('Recent Visitor', 'recent.visitor@example.test')])
+        result = self.run_intake(events=[old, recent])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['unresolved_calendar'], 1)
+        self.assertEqual(result.counts['calendar_unresolved_expired'], 1)
+        result = self.run_intake(events=[old, recent])
+        self.assertEqual(result.counts['unresolved_calendar'], 1, 'an expired candidate never comes back')
+        self.fake.now += timedelta(days=2)
+        result = self.run_intake(events=[old, recent])
+        self.assertEqual(result.counts['unresolved_calendar'], 0)
+        self.assertEqual(result.counts['calendar_unresolved_expired'], 2)
 
     def test_machine_senders_are_skipped_as_not_business(self):
         mails = [mail('no-reply@vendor.test', -timedelta(hours=1), subject='Receipt'),
