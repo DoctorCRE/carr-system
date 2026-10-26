@@ -29,7 +29,8 @@ import { agentActorForToken } from '../src/identity.js';
 
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 const BIN = path.join(REPO, 'tools/dictation-rig/bin');
-const PYTHON = existsSync(path.join(REPO, '.venv/bin/python3')) ? path.join(REPO, '.venv/bin/python3') : 'python3';
+const PYTHON = process.env.CARR_POST_CALL_PYTHON || process.env.CARR_CI_PYTHON
+  || (existsSync(path.join(REPO, '.venv/bin/python3')) ? path.join(REPO, '.venv/bin/python3') : 'python3');
 const AUDIO = process.env.CARR_REHEARSAL_AUDIO === '1';
 const SONNET = AUDIO || process.env.CARR_REHEARSAL_SONNET === '1';
 const run = promisify(execFile);
@@ -70,6 +71,13 @@ const deal = async name => (await c.query(
      from deal d join v_deal_room_board b on b.id=d.id where d.name=$1`, [name])).rows[0];
 
 before(async () => {
+  try {
+    await run(PYTHON, ['-c', 'import sys; sys.path.insert(0, sys.argv[1]); import post_call_jev', BIN]);
+  } catch (error) {
+    throw new Error(`Call Mode rehearsal Python ${PYTHON} cannot import post_call_jev. `
+      + 'Install requirements.lock in a virtual environment and set CARR_POST_CALL_PYTHON to its Python executable.\n'
+      + (error.stderr || error.message), { cause: error });
+  }
   const ciDsn = process.env.CARR_CI_DATABASE_URL;
   let bin, connection;
   if (ciDsn) {
