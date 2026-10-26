@@ -601,6 +601,42 @@ test('Joe confirms an email ask into the canonical deal plan and action once wit
   await assert.rejects(confirmStep(proposal), error => error.payload?.error === 'email_next_step_proposal_stale');
 });
 
+test('Joe can confirm an email ask as a Dell action while preserving Joe’s open action', async () => {
+  const source = await email(askQuote);
+  const initial = await command('get-deal-room', { deal });
+  await command('set-next-step', { deal, text: 'Joe’s existing plan', next_date: '2027-01-06',
+    base_version: initial.base_version, idempotency_key: randomUUID() });
+  const before = await command('get-deal-room', { deal });
+  const dell = (await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic partner') on conflict(slug) do update set active=true returning id")).rows[0];
+  await c.query(`insert into next_action(subject_type,subject_id,owner_id,due_on,description,created_by)
+    values('deal',$1,$2,'2027-01-05','Review the draft',$3)`, [deal, dell.id, actor.id]);
+  const args = { ...nextStepArgs(source.activity_id), owner: 'dell' };
+  const proposal = await command('preview-email-next-step', args, actor, 'carr_reader');
+  assert.equal(proposal.owner, 'dell');
+  assert.deepEqual(proposal.current_owner_actions, [{ description: 'Review the draft', due_date: '2027-01-05' }]);
+  await c.query("update next_action set description='Review the revised draft' where subject_id=$1 and owner_id=$2",
+    [deal, dell.id]);
+  await assert.rejects(command('confirm-email-next-step', { ...args, proposal_digest: proposal.proposal_digest,
+    idempotency_key: randomUUID() }, actor, 'carr_writer'),
+  error => error.payload?.error === 'email_next_step_proposal_stale');
+  const current = await command('preview-email-next-step', args, actor, 'carr_reader');
+  const result = await command('confirm-email-next-step', { ...args, proposal_digest: current.proposal_digest,
+    idempotency_key: randomUUID() }, actor, 'carr_writer');
+  assert.equal(result.owner, 'dell');
+  const room = await command('get-deal-room', { deal });
+  assert.equal(room.next_step, 'Send the floor plan');
+  assert.equal(room.next_date, '2027-01-08');
+  const action = room.next_actions.find(row => row.id === result.next_action_id);
+  assert.equal(action.description, 'Send the floor plan');
+  assert.equal(action.owner, 'dell');
+  assert.equal(action.due_on, '2027-01-08');
+  assert.ok(room.next_actions.some(row => row.owner === 'joe' && row.description === before.next_step && row.status === 'open'));
+  assert.equal(room.next_actions.find(row => row.owner === 'dell' && row.status === 'open' && row.id !== action.id), undefined);
+  const event = room.events.find(row => row.verb === 'confirm-email-next-step');
+  assert.equal(event.new_value.owner, 'dell');
+  assert.equal(event.new_value.evidence_quote, askQuote);
+});
+
 test('email next-step previews disclose the plan and date that confirmation will replace', async () => {
   const before = await command('get-deal-room', { deal });
   await command('set-next-step', { deal, text: 'Call counsel', next_date: '2027-01-06',

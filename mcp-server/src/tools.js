@@ -10141,7 +10141,8 @@ registerTools(resourceObservationTools({ withEnvelope, ToolError }), "resource-o
 registerTools(emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lockDealField,
   updateDeal: (c, actor, args) => TOOLS["update-deal"].handler(c, actor, args) }), "email-deal-progress");
 registerTools(emailNextStepTools({ ToolError, withEnvelope, writeEvent, lockDealField,
-  setNextStep: (c, actor, args) => TOOLS["set-next-step"].handler(c, actor, args) }), "email-next-step");
+  setNextStep: (c, actor, args) => TOOLS["set-next-step"].handler(c, actor, args),
+  setNextAction: (c, actor, args) => TOOLS["set-next-action"].handler(c, actor, args) }), "email-next-step");
 const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealField,
   updateDeal:(c,actor,args)=>TOOLS["update-deal"].handler(c,actor,args),
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});
