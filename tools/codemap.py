@@ -8,7 +8,11 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXTENSIONS = {".py", ".sh", ".zsh", ".js", ".mjs", ".ts"}
+EXTENSIONS = {".py", ".sh", ".zsh", ".js", ".mjs", ".cjs", ".ts", ".applescript"}
+
+
+def in_scope(path):
+    return path.parts[0] in {"bin", "ops", "tools", "hooks"} or path.parent == Path("mcp-server/src")
 
 
 def description(path):
@@ -23,15 +27,16 @@ def description(path):
                 break
         else:
             return ""
-        for marker in ("#", "//"):
+        markers = ("--",) if path.suffix == ".applescript" else ("#", "//")
+        for marker in markers:
             if line.startswith(marker):
                 return line[len(marker):].strip()
         quote = re.match(r'''[rRuU]?("""|\x27\x27\x27)''', line)
         if quote:
             ending = quote[1]
             line = line[quote.end():]
-        elif line.startswith("/*"):
-            ending = "*/"
+        elif line.startswith("/*") or (path.suffix == ".applescript" and line.startswith("(*")):
+            ending = "*/" if line.startswith("/*") else "*)"
             line = line[2:]
         else:
             return ""
@@ -47,7 +52,10 @@ def description(path):
 
 def main():
     parser = argparse.ArgumentParser(description="Map tracked scripts by folder.")
-    parser.add_argument("--missing", action="store_true", help="list scripts without opening descriptions")
+    output = parser.add_mutually_exclusive_group()
+    output.add_argument("--missing", action="store_true", help="list scripts without opening descriptions")
+    output.add_argument("--check", nargs="?", const="origin/main", metavar="BASE",
+                        help="require descriptions under 100 characters for scripts changed since BASE")
     args = parser.parse_args()
     tracked = subprocess.check_output(
         ["git", "-C", str(ROOT), "ls-files", "--stage", "-z"],
@@ -63,9 +71,24 @@ def main():
         path = ROOT / name
         if mode not in (b"100644", b"100755") or path.is_symlink() or not path.is_file():
             continue
-        if path.suffix not in EXTENSIONS and not (name.startswith("bin/") and mode == b"100755"):
+        if path.suffix not in EXTENSIONS and not (in_scope(Path(name)) and mode == b"100755"):
             continue
         entries[name] = description(path)
+    if args.check is not None:
+        base = subprocess.check_output(
+            ["git", "-C", str(ROOT), "merge-base", args.check, "HEAD"],
+            stderr=subprocess.PIPE,
+        ).strip().decode("ascii")
+        raw_changed = subprocess.check_output(
+            ["git", "-C", str(ROOT), "diff", "--name-only", "--no-renames", "-z", base, "--"], stderr=subprocess.PIPE,
+        )
+        changed = {os.fsdecode(path) for path in raw_changed.split(b"\0") if path}
+        invalid = False
+        for name, summary in sorted(entries.items()):
+            if name in changed and in_scope(Path(name)) and not 0 < len(summary) < 100:
+                invalid = True
+                print(f"{name}: add an opening description under 100 characters")
+        return int(invalid)
     group = None
     missing = False
     for name, summary in sorted(entries.items(), key=lambda entry: (

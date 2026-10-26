@@ -4,6 +4,8 @@ Code lives here. The CARR Record Layer owns business, brand, persona, deal
 context and doctrine. Query its verbs or `./run.sh retrieve "<question>"`
 before declaring anything absent.
 
+To find a script and its purpose, run `./run.sh map` for a fresh path-and-description map.
+
 ## Always-on rules
 
 <!-- Generated from ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
