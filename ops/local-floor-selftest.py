@@ -240,6 +240,38 @@ class PushFloorTests(RepositoryFixture):
         self.assertIn("reserve a forward migration number", result.stderr)
         self.assertRegex(self.verdict(result)[1], r"^failed: migration-structure \(\d+s\)$")
 
+    def assert_gate_only_change_closes_gates(self, gate_file):
+        self.stub("ops/hook-env-isolation-selftest.py", "isolation")
+        self.write(gate_file, "{}\n")
+        result = self.run_floor(gate_file)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), ["isolation"])
+        self.assertRegex(self.verdict(result)[1], r"path shape \+ gate-closure$")
+
+    def test_codex_hooks_config_only_change_closes_gates(self):
+        self.assert_gate_only_change_closes_gates("ops/config/codex-hooks.json")
+
+    def test_git_hook_only_change_closes_gates(self):
+        self.assert_gate_only_change_closes_gates("ops/githooks/example-hook")
+
+    def test_missing_atlas_packages_route_to_npm_ci(self):
+        self.write("bin/node", "#!/bin/sh\nprintf '%s\\n' \"Error [ERR_MODULE_NOT_FOUND]: "
+                   "Cannot find package 'atlas-dependency'\"\nexit 1\n").chmod(0o755)
+        result = self.run_floor("mcp-server/src/scac-mutation-registry.current.generated.js")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Cannot find package 'atlas-dependency'", result.stderr)
+        self.assertIn("missing Node packages; run npm ci --prefix mcp-server", result.stderr)
+        self.assertNotIn("active registry changed", result.stderr)
+        self.assertRegex(self.verdict(result)[1], r"^failed: scac-atlas \(\d+s\)$")
+
+    def test_new_test_file_runs_collection_check(self):
+        self.stub("ops/ci-selftest.py", "collection")
+        self.write("notes/test_fixture.mjs", "export {};\n")
+        result = self.run_floor("notes/test_fixture.mjs")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), ["collection --collection-only"])
+        self.assertRegex(self.verdict(result)[1], r"path shape \+ test-collection$")
+
     def test_a_runner_that_dies_without_a_verdict_fails_the_class(self):
         self.write("ops/ci-pushfloor.py", "raise SystemExit(2)\n")
         result = self.run_floor("hooks/example.py")
