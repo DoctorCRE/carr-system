@@ -72,6 +72,13 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> int:
+    duplicates = [str(path.relative_to(REPO))
+                  for directory in (REPO / "tools/dictation-rig/launchd", REPO / "tools/doc-convo/launchd")
+                  for path in sorted(directory.glob("*.plist"))
+                  if path.name != "com.carr.call-mode.plist" and (PLIST_DIR / path.name).exists()]
+    check("tool-local templates do not compete with installed sources except the Call Mode override",
+          not duplicates, ", ".join(duplicates))
+
     plists = sorted(PLIST_DIR.glob("*.plist"))
     # An empty directory would make every assertion below vacuously true, which
     # is the failure mode this whole file exists to stop happening elsewhere.
