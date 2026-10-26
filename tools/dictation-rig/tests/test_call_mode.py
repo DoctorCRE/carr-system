@@ -466,7 +466,7 @@ class PostCallTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.session = Path(self.tmp.name) / "2026.08.10-1234"
         self.session.mkdir()
-        self.context = {
+        self.context: dict[str, Any] = {
             "session": self.session.name,
             "workspace_kind": "deal_room",
             "generated_at": "2026-08-10T12:34:00Z",
@@ -496,6 +496,143 @@ class PostCallTests(unittest.TestCase):
         }
         result.update(overrides)
         return result
+
+    def test_weekly_transcript_without_app_fetches_context_and_processes_once(self) -> None:
+        call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        replies = [
+            {"ok": True, "deals": [{"id": "deal-a", "operating_state": "active", "outcome": None}]},
+            {"ok": True, "deals": [{**self.context["deals"][0], "owner": None}]},
+        ]
+        completed = [SimpleNamespace(returncode=0, stdout=json.dumps(reply)) for reply in replies]
+        distiller = Mock(return_value=self.output(draft_proposals=[]))
+        with patch.object(post_call.subprocess, "run", side_effect=completed) as route:
+            status = post_call.process_session(self.session, distiller=distiller)
+            again = post_call.process_session(self.session, distiller=distiller)
+        self.assertEqual(status["state"], "ready_review")
+        self.assertEqual(again, status)
+        self.assertEqual(distiller.call_count, 1)
+        self.assertEqual([call.args[0][-2] for call in route.call_args_list], ["deal-room-board", "get-call-context"])
+        self.assertEqual(json.loads(route.call_args_list[1].args[0][-1]), {"deal_ids": ["deal-a"]})
+        self.assertEqual(distiller.call_args.args[0]["context"]["deals"][0]["owner"], "")
+        self.assertIsNone(post_call.context_from_session(self.session))
+        self.assertEqual(post_call.report_for_deal_room(self.session)["report"]["report"]["summary"], "Summary")
+
+    def test_weekly_fetch_failure_is_visible_and_next_poll_retries(self) -> None:
+        call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        (self.session / ".capture.json").write_text(json.dumps({"session_token": "synthetic"}))
+        failure = SimpleNamespace(returncode=1, stdout='{"ok": false, "error": "unavailable"}')
+        distiller = Mock(return_value=self.output(draft_proposals=[]))
+        cfg = {"base_url": "https://capture.example.test"}
+        worker = lambda path, **kwargs: post_call.process_session(path, distiller=distiller)
+        with (patch.object(capture_bridge.post_call, "run_session", side_effect=worker),
+              patch.object(post_call.subprocess, "run", return_value=failure)):
+            self.assertEqual(capture_bridge.poll_cmd(cfg, self.session), capture_bridge.Outcome.UNAVAILABLE)
+        status = post_call.read_json(self.session / post_call.STATUS_FILE)
+        self.assertEqual(status["state"], "awaiting_context")
+        self.assertIn("deal-room-board", status["reason"])
+        distiller.assert_not_called()
+        replies = [
+            SimpleNamespace(returncode=0, stdout=json.dumps({"ok": True, "deals": [{"id": "deal-a", "operating_state": "active"}]})),
+            SimpleNamespace(returncode=0, stdout=json.dumps({"ok": True, "deals": [self.context["deals"][0]]})),
+        ]
+        with (patch.object(capture_bridge.post_call, "run_session", side_effect=worker) as run,
+              patch.object(post_call.subprocess, "run", side_effect=replies),
+              patch.object(capture_bridge, "publish_cmd", return_value=0),
+              patch.object(capture_bridge, "http_request", return_value=(200, {"state": "distilling", "meeting_record": None}))):
+            self.assertEqual(capture_bridge.poll_cmd(cfg, self.session), capture_bridge.Outcome.VERIFIED)
+        self.assertFalse(run.call_args.kwargs["publish"])
+        self.assertEqual(post_call.read_json(self.session / post_call.STATUS_FILE)["state"], "ready_review")
+        self.assertEqual(distiller.call_count, 1)
+
+    def test_app_context_wins_and_late_duplicate_cannot_restore_consumed_index(self) -> None:
+        call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        post_call.store_context(self.session, self.context)
+        replacement = {**self.context, "generated_at": "2026-08-11T12:34:00Z", "deals": []}
+        post_call.store_context(self.session, replacement)
+        self.assertEqual(post_call.context_from_session(self.session), self.context)
+        distiller = Mock(return_value=self.output())
+        with patch.object(post_call.subprocess, "run") as route:
+            first = post_call.process_session(self.session, distiller=distiller)
+            post_call.store_context(self.session, replacement)
+            again = post_call.process_session(self.session, distiller=distiller)
+        route.assert_not_called()
+        self.assertEqual(first["state"], "ready_review")
+        self.assertEqual(again, first)
+        self.assertEqual(distiller.call_count, 1)
+        self.assertIsNone(post_call.context_from_session(self.session))
+
+    def test_app_context_arriving_during_worker_fetch_wins(self) -> None:
+        call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        def route(argv, **kwargs):
+            if argv[-2] == "deal-room-board":
+                return SimpleNamespace(returncode=0, stdout=json.dumps({"ok": True, "deals": [{"id": "deal-a", "operating_state": "active"}]}))
+            post_call.store_context(self.session, self.context)
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"ok": True, "deals": []}))
+        distiller = Mock(return_value=self.output())
+        with patch.object(post_call.subprocess, "run", side_effect=route):
+            status = post_call.process_session(self.session, distiller=distiller)
+        self.assertEqual(status["state"], "ready_review")
+        self.assertEqual(distiller.call_args.args[0]["context"], self.context)
+
+    def test_weekly_context_fetch_is_only_attempted_with_a_transcript(self) -> None:
+        call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        (self.session / "transcript.json").unlink()
+        with patch.object(post_call.subprocess, "run") as route:
+            status = post_call.process_session(self.session, distiller=Mock())
+        route.assert_not_called()
+        self.assertEqual(status["state"], "awaiting_context")
+
+    def test_report_saved_before_worker_exit_recovers_without_distilling_again(self) -> None:
+        call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        post_call.store_context(self.session, self.context)
+        post_call.write_private(self.session / post_call.REPORT_FILE, self.output())
+        post_call.write_private(self.session / post_call.STATUS_FILE, {"state": "awaiting_context"})
+        distiller = Mock()
+        with patch.object(post_call.subprocess, "run") as route:
+            status = post_call.process_session(self.session, distiller=distiller)
+        self.assertEqual(status["state"], "ready_review")
+        self.assertEqual(status["candidate_counts"]["joe_tasks"], 1)
+        self.assertIsNone(post_call.context_from_session(self.session))
+        distiller.assert_not_called()
+        route.assert_not_called()
+
+    def test_weekly_index_uses_active_deals_in_bounded_batches(self) -> None:
+        call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        deals = [{**self.context["deals"][0], "id": f"deal-{index}"} for index in range(51)]
+        excluded = [
+            {"id": "parked", "operating_state": "parked"},
+            {"id": "closed", "operating_state": "active", "outcome": "won"},
+            {"id": "invoiced", "operating_state": "active", "invoiced_on": "2026-08-10"},
+        ]
+        requests = []
+        def route(argv, **kwargs):
+            requests.append((argv[-2], json.loads(argv[-1])))
+            rows = deals + excluded if argv[-2] == "deal-room-board" else [
+                deal for deal in deals if deal["id"] in requests[-1][1]["deal_ids"]]
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"ok": True, "deals": rows}))
+        distiller = Mock(return_value=self.output(joe_tasks=[], deal_updates=[], draft_proposals=[]))
+        with patch.object(post_call.subprocess, "run", side_effect=route):
+            status = post_call.process_session(self.session, distiller=distiller)
+        self.assertEqual(status["state"], "ready_review")
+        self.assertEqual([len(args["deal_ids"]) for verb, args in requests if verb == "get-call-context"], [50, 1])
+        self.assertEqual(len(distiller.call_args.args[0]["context"]["deals"]), 51)
+
+    def test_weekly_context_refusal_and_malformed_board_remain_retryable(self) -> None:
+        call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        cases = [
+            [{"ok": True, "deals": [{"id": "deal-a", "operating_state": "active"}]},
+             {"ok": False, "error": "invalid_call_context_deals"}],
+            [{"ok": True, "deals": [None]}],
+        ]
+        for replies in cases:
+            with self.subTest(replies=replies):
+                completed = [SimpleNamespace(returncode=0, stdout=json.dumps(reply)) for reply in replies]
+                with patch.object(post_call.subprocess, "run", side_effect=completed):
+                    status = post_call.process_session(self.session, distiller=Mock())
+                self.assertEqual(status["state"], "awaiting_context")
+                self.assertTrue(status["reason"])
+                self.assertIsNone(post_call.context_from_session(self.session))
+                self.assertFalse((self.session / post_call.REPORT_FILE).exists())
 
     def test_context_allows_same_party_on_different_deals_but_exact_output_attaches_to_its_deal(self) -> None:
         post_call.validate_context(self.context, self.session.name)

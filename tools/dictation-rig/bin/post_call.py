@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Private Call Mode post-call processing.
 
-This module has no send implementation. Deal Room supplies an exact,
-short-lived context index; transcript, report and email body remain in 0600
-files in the recording session. Headless Sonnet uses the Claude subscription
-login; an injected command contract keeps tests offline. Advisory Jev item
+This module has no send implementation. Weekly calls fetch an exact context
+index through the local record-layer route when Deal Room has not supplied one.
+Transcript, report and email body remain in 0600 files in the recording session.
+Headless Sonnet uses the Claude subscription login; an injected command
+contract keeps tests offline. Advisory Jev item
 checks in post_call_jev.py can never block the review pack.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -232,14 +234,28 @@ def shape_record_layer_context(value: Any) -> Any:
     return shaped
 
 
+@contextlib.contextmanager
+def context_lock(session_dir: Path):
+    path = session_dir / ".call-context.lock"
+    path.touch(exist_ok=True)
+    path.chmod(0o600)
+    with path.open("a+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        yield
+
+
 def store_context(session_dir: Path, context: dict[str, Any]) -> dict[str, Any]:
     context = validate_context(shape_record_layer_context(context), session_dir.name)
-    old = read_json(session_dir / CONTEXT_FILE) or {}
-    # Retain physical-channel labels written at recording start; only Deal Room's
-    # exact index becomes available to the model, and it is consumed on success.
-    stored: dict[str, Any] = {key: old[key] for key in ("schema", "mode", "started_at", "recorder", "speaker_labels", "speaker_method") if key in old}
-    stored["call_context"] = context
-    write_private(session_dir / CONTEXT_FILE, stored)
+    with context_lock(session_dir):
+        existing = context_from_session(session_dir)
+        if existing is not None:
+            return existing
+        if (session_dir / REPORT_FILE).exists():
+            return context
+        old = read_json(session_dir / CONTEXT_FILE) or {}
+        stored: dict[str, Any] = {key: old[key] for key in ("schema", "mode", "started_at", "recorder", "speaker_labels", "speaker_method") if key in old}
+        stored["call_context"] = context
+        write_private(session_dir / CONTEXT_FILE, stored)
     return context
 
 
@@ -506,7 +522,48 @@ def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
     return reply["structured_output"]
 
 
-def run_session(session_dir: Path) -> dict[str, Any]:
+def call_verb(verb: str, args: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+    """Use the partner's existing local identity; rehearsals inject an offline route."""
+    command = os.environ.get("CARR_POST_CALL_VERB_COMMAND")
+    argv = shlex.split(command) if command else [sys.executable, str(Path(__file__).resolve().parents[3] / "tools" / "call-verb.py")]
+    try:
+        done = subprocess.run(argv + [verb, json.dumps(args)], capture_output=True, text=True,
+                              timeout=60, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, {"error": type(exc).__name__}
+    reply: dict[str, Any] = {}
+    for line in reversed(done.stdout.strip().splitlines()):
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            reply = parsed
+            break
+    return done.returncode == 0 and reply.get("ok") is True, reply
+
+
+def fetch_context(session_dir: Path) -> dict[str, Any]:
+    ok, board = call_verb("deal-room-board", {"workspace": "all"})
+    if not ok or not isinstance(board.get("deals"), list):
+        raise ContractError("deal-room-board unavailable while fetching call context")
+    if any(not isinstance(deal, dict) or not isinstance(deal.get("id"), str) or not deal["id"]
+           for deal in board["deals"]):
+        raise ContractError("deal-room-board returned invalid call context deal IDs")
+    ids = [deal["id"] for deal in board["deals"]
+           if deal.get("operating_state") == "active" and deal.get("outcome") is None
+           and not deal.get("closed_on") and not deal.get("invoiced_on")
+           and deal.get("phase") not in {"closed", "invoiced"}]
+    deals: list[dict[str, Any]] = []
+    for start in range(0, len(ids), 50):
+        ok, reply = call_verb("get-call-context", {"deal_ids": ids[start:start + 50]})
+        if not ok or not isinstance(reply.get("deals"), list):
+            raise ContractError("get-call-context unavailable while fetching call context")
+        deals.extend(reply["deals"])
+    return {"session": session_dir.name, "workspace_kind": "all", "generated_at": now(), "deals": deals}
+
+
+def run_session(session_dir: Path, *, publish: bool = True) -> dict[str, Any]:
     """Keep model dependencies out of the Accessibility-granted companion.
 
     A ready report is filed and its confident changes applied right away
@@ -520,7 +577,7 @@ def run_session(session_dir: Path) -> dict[str, Any]:
         capture_output=True, text=True, check=True, timeout=1800,
     )
     status = json.loads(result.stdout)
-    if status.get("state") == "ready_review":
+    if publish and status.get("state") == "ready_review":
         subprocess.run(
             [sys.executable, str(entry.with_name("capture-bridge.py")), "poll", str(session_dir)],
             capture_output=True, text=True, timeout=600, check=False,
@@ -529,9 +586,6 @@ def run_session(session_dir: Path) -> dict[str, Any]:
 
 
 def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]] = default_distiller) -> dict[str, Any]:
-    existing = read_json(session_dir / STATUS_FILE)
-    if (session_dir / REPORT_FILE).exists() and existing is not None:
-        return existing
     lock_path = session_dir / LOCK_FILE
     lock_path.touch(exist_ok=True)
     lock_path.chmod(0o600)
@@ -543,13 +597,41 @@ def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dic
         return _process_session_locked(session_dir, distiller)
 
 
+def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, Any]:
+    with context_lock(session_dir):
+        stored = read_json(session_dir / CONTEXT_FILE) or {}
+        stored.pop("call_context", None)
+        write_private(session_dir / CONTEXT_FILE, stored)
+    status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "ready_review", "updated_at": now(), "review_questions": len(report["review_questions"]), "candidate_counts": {k: len(report[k]) for k in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals")}}
+    write_private(session_dir / STATUS_FILE, status)
+    return status
+
+
 def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
+    if (session_dir / REPORT_FILE).exists():
+        existing = read_json(session_dir / STATUS_FILE)
+        if existing is not None and existing.get("state") in {"ready_review", "filed"}:
+            return existing
+        report = read_json(session_dir / REPORT_FILE)
+        if report is None:
+            raise ContractError("post-call report is unreadable")
+        return _complete_session(session_dir, report)
     context = context_from_session(session_dir)
+    metadata = read_json(session_dir / CONTEXT_FILE) or {}
+    transcript = read_json(session_dir / "transcript.json")
+    reason = None
+    if context is None and transcript is not None and metadata.get("mode") == "weekly_deal_call":
+        try:
+            context = store_context(session_dir, fetch_context(session_dir))
+        except (ContractError, OSError, subprocess.SubprocessError) as exc:
+            reason = str(exc)
+            context = context_from_session(session_dir)
     if context is None:
         status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "awaiting_context", "updated_at": now()}
+        if reason:
+            status["reason"] = reason
         write_private(session_dir / STATUS_FILE, status)
         return status
-    transcript = read_json(session_dir / "transcript.json")
     if transcript is None:
         raise ContractError("transcript.json is required before post-call processing")
     request = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "context": context, "transcript": transcript}
@@ -570,13 +652,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         pass  # Jev never blocks the pack; a change without a passing deal check stays a card.
     result = mark_automatic(result, transcript, context)
     write_private(session_dir / REPORT_FILE, result)
-    # Context is single-use: no later caller gets a searchable customer index.
-    stored = read_json(session_dir / CONTEXT_FILE) or {}
-    stored.pop("call_context", None)
-    write_private(session_dir / CONTEXT_FILE, stored)
-    status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "ready_review", "updated_at": now(), "review_questions": len(result["review_questions"]), "candidate_counts": {k: len(result[k]) for k in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals")}}
-    write_private(session_dir / STATUS_FILE, status)
-    return status
+    return _complete_session(session_dir, result)
 
 
 def _report_candidates(report: dict[str, Any]) -> list[dict[str, Any]]:
