@@ -196,26 +196,11 @@ check_types() {
 }
 
 check_contract() {
-  local failures=""
-  local pg_paths rc=0
-  pg_paths="$(git grep -n -F '/opt/homebrew/opt/postgresql@17' -- '*.py' ':!lib/disposable_pg_fixture.py')" || rc=$?
-  if [ "$rc" -ne 1 ]; then
-    failures="$failures PostgreSQL-paths"
-    printf '%s\n' "PostgreSQL paths must use lib/disposable_pg_fixture.py (grep exit $rc)" "$pg_paths" >&2
-  fi
-  if [ -f workspace/contracts/validate.mjs ]; then
-    run_quiet "$LOGDIR/contract-workspace.log" node workspace/contracts/validate.mjs \
-      || { failures="$failures workspace/contracts"; tail -20 "$LOGDIR/contract-workspace.log" >&2; }
-  fi
-  for t in control-room/test/contracts.test.mjs control-room/test/work-request-projection.test.mjs; do
-    [ -f "$t" ] || continue
-    run_quiet "$LOGDIR/contract-$(basename "$t").log" node --test "$t" \
-      || { failures="$failures $t"; tail -20 "$LOGDIR/contract-$(basename "$t").log" >&2; }
-  done
-  if [ -n "$failures" ]; then
-    bad contract "contract checks failed:$failures"
-  else
+  if run_quiet "$LOGDIR/contract.log" "$PY" ops/ci-contract.py; then
     ok contract "workspace + control-room contracts validate"
+  else
+    fail_tail "$LOGDIR/contract.log"
+    bad contract "contract checks failed"
   fi
 }
 

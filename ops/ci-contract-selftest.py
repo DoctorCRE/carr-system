@@ -18,10 +18,12 @@ class ContractClassTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         (self.root / 'ops/config').mkdir(parents=True)
-        for name in ('ci.sh', 'ci-contract.py'):
+        for name in ('ci.sh', 'ci-contract.py', 'ci-secret-scan.py', 'pii_guard.py'):
             source = ROOT / 'ops' / name
             if source.is_file():
                 shutil.copy2(source, self.root / 'ops' / name)
+        shutil.copy2(ROOT / 'ops/config/public-source-identities.v1.json',
+                     self.root / 'ops/config/public-source-identities.v1.json')
         self.env = fixture_env()
         subprocess.run(['git', 'init', '-q', str(self.root)], env=self.env, check=True)
         self.write('fixture.py', 'value = 1\n')
@@ -40,6 +42,13 @@ class ContractClassTests(unittest.TestCase):
         result = subprocess.run([sys.executable, 'ops/ci-contract.py'], cwd=self.root,
                                 env=self.env, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_missing_python_runner_fails_the_class(self):
+        (self.root / 'ops/ci-contract.py').unlink()
+        result = self.run_class()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('FAIL', result.stdout)
+        self.assertIn('contract checks failed', result.stdout)
 
     def test_absent_optional_contracts_pass(self):
         result = self.run_class()
@@ -72,7 +81,7 @@ class ContractClassTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         for label in ('workspace/contracts', 'control-room/test/contracts.test.mjs',
                       'control-room/test/work-request-projection.test.mjs'):
-            self.assertIn(label, result.stdout)
+            self.assertIn(label, result.stdout + result.stderr)
         for diagnostic in ('workspace failed', 'contracts failed', 'work-request-projection failed'):
             self.assertIn(diagnostic, result.stderr)
 
