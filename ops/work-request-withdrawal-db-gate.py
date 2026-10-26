@@ -45,6 +45,7 @@ import argparse
 import hashlib
 import os
 import pathlib
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -58,6 +59,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connection  # noqa: E402
 
 REFUSALS = 0
+# The decline verb's subject read, taken from its source so the gate runs the shipped text.
+_INTAKE = (pathlib.Path(__file__).resolve().parents[1] / "mcp-server/src/work-request-intake.js").read_text()
+_SUBJECT = re.search(r"`(select id, state from ops\.work_request where ref = \$1[^`]*)`", _INTAKE)
+if _SUBJECT is None:
+    raise SystemExit("work-request-withdrawal-db-gate: decline subject read not found in work-request-intake.js")
+SUBJECT_SQL = _SUBJECT.group(1)
 
 DOC = "aaaaaaaa-0000-4000-8000-00000000d0c1"
 SEC = "aaaaaaaa-0000-4000-8000-00000000cec1"
@@ -633,6 +640,15 @@ def main() -> int:
                 values ('WR-AI-999','Gate program row','ready','joe','joe','carr-internal',
                         'carr-ai-engineering-suite-v1',999)""")
             for program_ref in ("WR-AI-999", "WR-SIEP-26"):
+                # The verb's own subject read must see the row as carr_writer;
+                # a FOR UPDATE there was hidden by RLS for SIEP rows.
+                cur.execute("set local role carr_writer")
+                try:
+                    seen = cur.execute(SUBJECT_SQL.replace("$1", "%s"), (program_ref,)).fetchall()
+                finally:
+                    cur.execute("reset role")
+                if len(seen) != 1:
+                    raise RuntimeError(f"decline verb's subject read cannot see {program_ref} as carr_writer")
                 version = cur.execute("select version from ops.work_request where ref=%s",
                                       (program_ref,)).fetchone()
                 if version is None:
