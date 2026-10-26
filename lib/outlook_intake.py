@@ -25,7 +25,8 @@ lookback. Records are never created, merged or renamed.
 
 A role address (front desk, info, office...) that shares a record's email field
 with other addresses is flagged shared_role, never matched: it may serve many people.
-Unresolved mail expires after 30 days (counted in unresolved_expired). Mail
+Unresolved mail and calendar candidates expire after 30 days (unresolved_expired,
+calendar_unresolved_expired). Mail
 whose only unknown participants are machine senders (no-reply, mailer-daemon,
 postmaster, bounces) is not business: it is retained, uncounted as unresolved, and
 logs if a record later carries the address. Any other unknown inbound sender gets
@@ -808,6 +809,8 @@ class Run:
         """Keep opaque schedule evidence, never infer attendance or current lifecycle."""
         evidence = {}
         unresolved = {}
+        expired = 0
+        oldest = self.now.timestamp() - UNRESOLVED_DAYS.total_seconds()
         for e in events:
             candidate = _hash(json.dumps(e, sort_keys=True))
             evidence[candidate] = {'status': 'unsupported', 'reason': 'hxstore_lifecycle_unverified',
@@ -819,14 +822,17 @@ class Run:
                 people.append((org, e['organizer_name']))
             people = [(email, name) for email, name in people if matcher.classify(email) != 'automated']
             missing = {_hash(email): matcher.reason(email) for email, _ in people if matcher.reason(email)}
-            if missing:
+            if missing and e['end_unix'] < oldest:
+                expired += 1
+            elif missing:
                 unresolved[candidate] = {'participants': missing}
             if e['end_unix'] >= since and e['start_unix'] <= (self.now + UPCOMING).timestamp():
                 for email, name in people:
                     reason = matcher.reason(email)
                     if reason is not None:
                         self.unmatched.add((name or '(no name)', _domain(email), reason))
-        self.state.update(calendar_evidence=evidence, calendar_unresolved=unresolved, calendar_policy=CALENDAR_POLICY)
+        self.state.update(calendar_evidence=evidence, calendar_unresolved=unresolved, calendar_policy=CALENDAR_POLICY,
+                          calendar_unresolved_expired=expired)
         self.state.pop('calendar_due_at', None)
         self.state.pop('upcoming', None)
         self.counts.update(calendar_counts(self.state))
@@ -881,6 +887,7 @@ def mapping_counts(state: dict) -> dict:
             'hydration_expired': sum(bool(p.get('expired')) for p in state.get('pending_full', {}).values()),
             'unresolved_messages': len(mail) - machine_only, 'skipped_automated': machine_only,
             'unresolved_expired': state.get('unresolved_expired', 0),
+            'calendar_unresolved_expired': state.get('calendar_unresolved_expired', 0),
             'unresolved_calendar': len(calendar), 'unresolved_addresses': len(participants),
             'unmatched': len(participants),
             **{'mapping_' + reason: list(participants.values()).count(reason)
@@ -1160,6 +1167,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint())
     _prune(state, now)
     _save(out, state)
+    counts.update(mapping_counts(state))  # a run that expires items reports them itself
     return Outcome('succeeded', 'processed' if mail_processed else 'nothing_new', counts)
 
 
