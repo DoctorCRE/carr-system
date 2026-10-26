@@ -162,6 +162,10 @@ def _grok_session_row():
         sys.path.insert(0, os.path.join(REPO_ROOT, "ops"))
         from grok_session import health_row
         line = health_row()
+        # Joe 2026-10-26: a signed-out Grok is not a failure; switch to a comparable model.
+        # Only a refused sign-in downgrades to WARN. A broken check or incident write stays red.
+        if line.startswith("FAIL Grok session") and "authentication refused" in line and "FAILED" not in line:
+            return "WARN" + line[len("FAIL"):], 0
         return line, int(line.startswith("FAIL") or "FAILED" in line)
     except Exception as exc:
         return (f"UNAVAILABLE Grok session — {type(exc).__name__} · on breach: "

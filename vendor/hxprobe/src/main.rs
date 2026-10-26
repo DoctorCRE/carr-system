@@ -239,7 +239,11 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              id               INTEGER PRIMARY KEY, -- local store key
              account_id       INTEGER NOT NULL,    -- local account key
              name             TEXT,                -- NULL if revisions disagree
-             block            INTEGER NOT NULL
+             block            INTEGER NOT NULL,
+             -- 'top' (no parent), 'folder' (parent_id is set) or 'unknown'
+             -- (no recognized reference, or revisions disagree).
+             parent_status    TEXT NOT NULL,
+             parent_id        INTEGER              -- may name an unlisted folder
          );
          CREATE TABLE messages (
              id           INTEGER PRIMARY KEY,
@@ -516,11 +520,18 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     {
         let mut ins_folder = tx
             .prepare(
-                "INSERT INTO folders(id,account_id,name,block) VALUES (?1,?2,?3,?4)"
+                "INSERT INTO folders(id,account_id,name,block,parent_status,parent_id)
+                 VALUES (?1,?2,?3,?4,?5,?6)"
             )
             .expect("prepare folders");
         for f in folders.folders.values() {
-            ins_folder.execute(rusqlite::params![f.id as i64, f.account_id as i64, f.name, f.block as i64])
+            let (status, parent) = match f.parent {
+                folder::Parent::Top => ("top", None),
+                folder::Parent::Folder(id) => ("folder", Some(id as i64)),
+                folder::Parent::Unknown => ("unknown", None),
+            };
+            ins_folder
+                .execute(rusqlite::params![f.id as i64, f.account_id as i64, f.name, f.block as i64, status, parent])
                 .expect("insert folder");
         }
         let mut ins_link = tx
@@ -605,6 +616,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("event_identities", events.identities.len()),
             ("events_decoded", events.events.len()),
             ("calendar_lifecycle_unsupported", events.events.len()),
+            ("folders", folders.folders.len()),
+            ("messages_with_folder", with_folder),
         ] {
             ins_meta.execute(rusqlite::params![key, value as i64]).expect("insert meta");
         }
