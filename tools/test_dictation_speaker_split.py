@@ -211,7 +211,7 @@ class ProcessSessionWiringTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def transcript(self) -> dict:
-        self.lines = []
+        self.lines: list[str] = []
         transcribe_session.process_session(self.session, self.lines.append)
         return json.loads((self.session / "transcript.json").read_text())
 
