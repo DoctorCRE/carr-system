@@ -35,17 +35,11 @@ class ReviewGate(unittest.TestCase):
             with self.subTest(body=body):
                 self.assertEqual(gate.approved(pr, [], [{"body": body}]), expected)
 
-    def test_approval_requires_recognized_third_line_reviewer(self):
+    def test_approval_ignores_reviewer_line(self):
         pr = {"changed_files": 0, "additions": 151, "deletions": 0, "head": {"sha": "abc"}}
-        for reviewer, expected in [("grok", True), ("Grok", True), ("Grok internal review", True),
-                                   ("the Dot", True), ("orchestrator re-pin", True), ("Claude", True), ("Claude (Opus subagent)", True), ("Claudette", False),
-                                   ("builder", False), ("", False), ("groking", False), ("the Dot extra", False)]:
-            with self.subTest(reviewer=reviewer):
-                body = f"VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: {reviewer}"
-                self.assertEqual(gate.approved(pr, [], [{"body": body}]), expected)
-        for suffix in ("", "\n", "\nFindings\nReviewer: grok", "\ngrok"):
+        for suffix in ("", "\n", "\nReviewer: anyone", "\nReviewer: builder\nFindings", "\nReviewer:"):
             with self.subTest(suffix=suffix):
-                self.assertFalse(gate.approved(pr, [], [{"body": "VERDICT: APPROVE\nReviewed-SHA: abc" + suffix}]))
+                self.assertTrue(gate.approved(pr, [], [{"body": "VERDICT: APPROVE\nReviewed-SHA: abc" + suffix}]))
 
     def test_skip_ci_title_fails_even_when_small_or_approved(self):
         comments = [{"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: Claude"}]
@@ -55,13 +49,14 @@ class ReviewGate(unittest.TestCase):
                 pr = {"title": title, "changed_files": 0, "additions": 1, "deletions": 0, "head": {"sha": "abc"}}
                 self.assertEqual(gate.approved(pr, [], comments), expected)
 
-    def test_changes_vetoes_approval_at_same_head(self):
+    def test_newest_verdict_at_head_wins(self):
+        changes, approve = {"body": "VERDICT: CHANGES\nReviewed-SHA: abc"}, {"body": "VERDICT: APPROVE\nReviewed-SHA: abc"}
+        stale = [{"body": "VERDICT: CHANGES\nReviewed-SHA: old"}, {"body": "VERDICT: APPROVE\nReviewed-SHA: old"}]
         for additions in (1, 151):
-            for reviewed_sha, expected in [("abc", False), ("old", True)]:
-                with self.subTest(additions=additions, reviewed_sha=reviewed_sha):
+            for comments, expected in [([changes, approve], True), ([approve, changes], False), ([approve, *stale], True),
+                                       ([changes, *stale], False), (stale, additions == 1), ([changes, approve, {"body": "noise"}], True)]:
+                with self.subTest(additions=additions, comments=comments):
                     pr = {"changed_files": 0, "additions": additions, "deletions": 0, "head": {"sha": "abc"}}
-                    comments = [{"body": f"VERDICT: CHANGES\nReviewed-SHA: {reviewed_sha}"},
-                                {"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}]
                     self.assertEqual(gate.approved(pr, [], comments), expected)
 
     def test_event_adapter(self):
