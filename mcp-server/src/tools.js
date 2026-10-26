@@ -3802,7 +3802,7 @@ export const TOOLS = {
                              and e.field = any($3::text[])
                            order by e.field, e.recorded_at desc, e.id desc) latest
                 ), '{}'::jsonb) as field_base
-           from v_deal_room_board b
+           from v_open_deal_room_board b
            join v_deal_reconciliation_read r on r.id=b.id
            join v_client_engagement_status ce on ce.client_id=b.client_id
           where ($1 = 'all' or b.workspace_kind = $1)
@@ -3820,7 +3820,7 @@ export const TOOLS = {
                 case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind
            from v_deal_board b
            left join v_client_account a on a.client_id=b.client_id and a.is_sub_client
-          where (b.phase = 'closed' or b.outcome is not null or b.invoiced_on is not null)
+          where (b.phase in ('closed', 'invoiced') or b.outcome is not null or b.closed_on is not null or b.invoiced_on is not null)
             and ($1 = 'all' or case when a.account_client_id is null then 'team' else 'national_account' end = $1)
             and ($2::uuid is null or a.account_client_id = $2::uuid)
           order by b.closed_on desc nulls last, b.name, b.id
@@ -9182,7 +9182,7 @@ registerTools({
                  b.workspace_kind, b.account_client_id, b.operating_state, b.outcome,
                  to_jsonb(b.closed_on)#>>'{}' as closed_on,
                  to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on
-            from v_deal_room_board b
+            from v_open_deal_room_board b
             join v_client_engagement_status ce on ce.client_id = b.client_id
            where b.operating_state = 'active'
            order by b.id limit 1001

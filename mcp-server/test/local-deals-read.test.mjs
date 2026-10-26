@@ -58,7 +58,8 @@ test('deal room includes closed and invoiced history from the all-deal read', as
   assert.deepEqual(result.closed_deals,[archived]);
   assert.match(archiveQuery,/from v_deal_board b/);
   assert.doesNotMatch(archiveQuery,/join v_deal_room_board/);
-  assert.match(archiveQuery,/b.phase = 'closed'/);
+  assert.match(archiveQuery,/b\.phase in \('closed', 'invoiced'\)/);
+  assert.match(archiveQuery,/b\.closed_on is not null/);
   assert.match(archiveQuery,/b.outcome is not null/);
   assert.match(archiveQuery,/b.invoiced_on is not null/);
 });
