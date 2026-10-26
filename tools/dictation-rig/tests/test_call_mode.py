@@ -762,6 +762,156 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual([(item["assignee"], item["due_on"]) for item in actions],
                          [("joe", "2028-02-29"), ("dell", None)])
 
+    def test_relative_dates_use_recorded_chicago_day_in_report_and_candidates(self) -> None:
+        cases = (
+            ("2026-10-27T00:30:00Z", "Friday morning", "2026-10-30", "2026-10-26"),
+            ("2026-10-27T00:30:00Z", "next week", "2026-11-02", "2026-10-26"),
+            ("2026-10-27T00:30:00Z", "before the lunch call", "2026-10-26", "2026-10-26"),
+            ("2026-12-31T18:00:00Z", "next week", "2027-01-04", "2026-12-31"),
+            ("2026-10-30T18:00:00Z", "Friday morning", "2026-10-30", "2026-10-30"),
+            ("2026-10-30T18:00:00Z", "next Friday", "2026-11-06", "2026-10-30"),
+            ("2026-10-27T00:30:00Z", "Friday next week", "2026-11-06", "2026-10-26"),
+            ("2026-10-27T00:30:00Z", "review Friday's proposal before the lunch call", "2026-10-26", "2026-10-26"),
+            ("2026-11-02T05:30:00Z", "tomorrow", "2026-11-02", "2026-11-01"),
+            ("2026-10-27T00:30:00Z", "before Friday's lunch call", "2026-10-30", "2026-10-26"),
+        )
+        for started_at, phrase, expected, call_date in cases:
+            with self.subTest(phrase=phrase):
+                (self.session / post_call.REPORT_FILE).unlink(missing_ok=True)
+                post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": started_at})
+                post_call.store_context(self.session, self.context)
+                quote = f"For A, call Vendor A {phrase}."
+                (self.session / "transcript.json").write_text(json.dumps({"segments": [
+                    {"speaker": "Joe", "text": quote},
+                    {"speaker": "Dell", "text": "I will review the proposal."},
+                ]}))
+                output = self.output(joe_tasks=[{
+                    "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
+                    "evidence": quote, "due_on": None,
+                }], dell_tasks=[{
+                    "title": "Review proposal", "deal_id": "deal-b", "participant_ids": [],
+                    "evidence": "I will review the proposal.", "due_on": None,
+                }], deal_updates=[{
+                    "deal_id": "deal-a", "summary": "Agreed next step", "participant_ids": [],
+                    "evidence": quote, "next_step": {
+                        "text": "Call Vendor A", "next_date": None, "needs_review": None,
+                    },
+                }], draft_proposals=[])
+                requests = []
+
+                def distill(request):
+                    requests.append(request)
+                    return output
+
+                status = post_call.process_session(self.session, distiller=distill)
+                self.assertEqual(status["state"], "ready_review")
+                report = post_call.report_for_deal_room(self.session)["report"]
+                self.assertEqual(report["joe_tasks"][0]["due_on"], expected)
+                self.assertEqual(report["deal_updates"][0]["next_step"]["next_date"], expected)
+                self.assertEqual(report["joe_tasks"][0]["evidence"], quote)
+                self.assertIsNone(report["dell_tasks"][0]["due_on"])
+                self.assertEqual(requests[0]["call_date"], call_date)
+                candidates = post_call.sanitized_candidates(self.session)
+                self.assertEqual(candidates["post_call_items"][0]["due_on"], expected)
+                self.assertEqual(candidates["legacy_items"][1]["payload"]["next_date"], expected)
+
+    def test_dell_deadline_uses_quill_start_and_corrects_model_calendar_math(self) -> None:
+        (self.session / "meta.json").write_text(json.dumps({"started": "2026-10-27T00:30:00Z"}))
+        post_call.store_context(self.session, self.context)
+        quote = "I will review the proposal tomorrow."
+        (self.session / "transcript.json").write_text(json.dumps({"segments": [
+            {"speaker": "Dell", "text": quote},
+        ]}))
+        output = self.output(joe_tasks=[], dell_tasks=[{
+            "title": "Review proposal", "deal_id": "deal-b", "participant_ids": [],
+            "evidence": quote, "due_on": "2026-10-28",
+        }], deal_updates=[], draft_proposals=[])
+        status = post_call.process_session(self.session, distiller=lambda _request: output)
+        self.assertEqual(status["state"], "ready_review")
+        report = post_call.report_for_deal_room(self.session)["report"]
+        self.assertEqual(report["dell_tasks"][0]["due_on"], "2026-10-27")
+        self.assertEqual(report["dell_tasks"][0]["evidence"], quote)
+        self.assertEqual(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_on"], "2026-10-27")
+
+    def test_relative_deadline_without_recorded_start_blocks_instead_of_using_processing_date(self) -> None:
+        post_call.store_context(self.session, self.context)
+        quote = "I will call Vendor A tomorrow."
+        (self.session / "transcript.json").write_text(json.dumps({"segments": [
+            {"speaker": "Joe", "text": quote},
+        ]}))
+        output = self.output(joe_tasks=[{
+            "title": "Call Vendor A", "deal_id": "deal-a", "participant_ids": [],
+            "evidence": quote, "due_on": None,
+        }], deal_updates=[], draft_proposals=[])
+        status = post_call.process_session(self.session, distiller=lambda _request: output)
+        self.assertEqual(status["state"], "blocked")
+        self.assertIn("record", status["reason"].lower())
+        self.assertFalse((self.session / post_call.REPORT_FILE).exists())
+
+    def test_relative_date_validation_preserves_explicit_and_unmatched_evidence_dates(self) -> None:
+        cases = (
+            ("I will call Friday, November 6, 2026.", "2026-11-06", "2026-11-06"),
+            ("I will call before the lunch call on November 6, 2026.", "2026-11-06", "2026-11-06"),
+            ("I will call two weeks from Friday.", "2026-11-13", "2026-11-13"),
+            ("Review last Friday's proposal.", None, None),
+            ("I will review Friday's proposal.", None, None),
+            ("I will call Vendor A tomorrow.", None, None),
+        )
+        for quote, supplied, expected in cases:
+            with self.subTest(quote=quote):
+                (self.session / post_call.REPORT_FILE).unlink(missing_ok=True)
+                post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": "2026-10-27T00:30:00Z"})
+                post_call.store_context(self.session, self.context)
+                spoken = "We have no commitment to call." if quote == "I will call Vendor A tomorrow." else quote
+                (self.session / "transcript.json").write_text(json.dumps({"segments": [
+                    {"speaker": "Joe", "text": spoken},
+                ]}))
+                output = self.output(joe_tasks=[{
+                    "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
+                    "evidence": quote, "due_on": supplied,
+                }], deal_updates=[], draft_proposals=[])
+                status = post_call.process_session(self.session, distiller=lambda _request: output)
+                self.assertEqual(status["state"], "ready_review")
+                report = post_call.report_for_deal_room(self.session)["report"]
+                self.assertEqual(report["joe_tasks"][0]["due_on"], expected)
+                self.assertEqual(report["joe_tasks"][0]["evidence"], quote)
+
+    def test_lunch_deadline_uses_event_date_stated_elsewhere_in_call(self) -> None:
+        post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": "2026-10-27T00:30:00Z"})
+        post_call.store_context(self.session, self.context)
+        quote = "I will call before the lunch call."
+        (self.session / "transcript.json").write_text(json.dumps({"segments": [
+            {"speaker": "Dell", "text": "The lunch call is Friday."},
+            {"speaker": "Joe", "text": quote},
+        ]}))
+        output = self.output(joe_tasks=[{
+            "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
+            "evidence": quote, "due_on": "2026-10-30",
+        }], deal_updates=[], draft_proposals=[])
+        status = post_call.process_session(self.session, distiller=lambda _request: output)
+        self.assertEqual(status["state"], "ready_review")
+        action = post_call.sanitized_candidates(self.session)["post_call_items"][0]
+        self.assertEqual(action["due_on"], "2026-10-30")
+        self.assertEqual(action["evidence_quote"], quote)
+
+    def test_long_relative_evidence_retains_the_spoken_deadline(self) -> None:
+        post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": "2026-10-27T00:30:00Z"})
+        post_call.store_context(self.session, self.context)
+        quote = "I will call Vendor A about the requested proposal and the revised terms before Friday morning."
+        (self.session / "transcript.json").write_text(json.dumps({"segments": [
+            {"speaker": "Joe", "text": quote},
+        ]}))
+        output = self.output(joe_tasks=[{
+            "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
+            "evidence": quote, "due_on": None,
+        }], deal_updates=[], draft_proposals=[])
+        status = post_call.process_session(self.session, distiller=lambda _request: output)
+        self.assertEqual(status["state"], "ready_review")
+        action = post_call.sanitized_candidates(self.session)["post_call_items"][0]
+        self.assertEqual(action["due_on"], "2026-10-30")
+        self.assertEqual(action["evidence_quote"],
+                         "will call Vendor A about the requested proposal and the revised terms before Friday morning.")
+
     def test_invalid_action_dates_block_without_creating_candidates(self) -> None:
         invalid_dates: tuple[object, ...] = (
             "2027-02-29", "2026-04-31", "20261025", "2026-1-01",
@@ -877,6 +1027,7 @@ class PostCallTests(unittest.TestCase):
         self.assertFalse(runner.call_args.kwargs["shell"])
 
     def test_default_sonnet_command_produces_a_review_pack(self) -> None:
+        post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": "2026-10-27T00:30:00Z"})
         post_call.store_context(self.session, self.context)
         reply = {"is_error": False, "structured_output": self.output()}
         overrides = {name: "synthetic-override" for name in (
@@ -890,6 +1041,9 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(status["state"], "ready_review")
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
         self.assertEqual(report["joe_tasks"][0]["title"], "Call vendor")
+        payload = json.loads(runner.call_args.kwargs["input"])
+        self.assertEqual(payload["CALL_DATE"], "2026-10-26")
+        self.assertEqual(payload["TIME_ZONE"], "America/Chicago")
         argv = runner.call_args.args[0]
         self.assertEqual(argv[:4], ["claude", "-p", "--model", "sonnet"])
         self.assertIn("--no-session-persistence", argv)
