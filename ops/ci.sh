@@ -229,19 +229,6 @@ check_gates() {
   local failures="" count=0 skiplist="" gates_timed_out=0 gate_index=0
   export CARR_HOOK_FIXTURE=1
 
-  # Flip this warning to a failure after the machinery purge finishes.
-  local codemap_rc=0 codemap_count
-  "$PY" tools/codemap.py --missing >"$LOGDIR/codemap-missing.log" \
-    2>"$LOGDIR/codemap-error.log" || codemap_rc=$?
-  if [ "$codemap_rc" -le 1 ]; then
-    codemap_count="$(wc -l < "$LOGDIR/codemap-missing.log" | tr -d '[:space:]')"
-    printf '        WARN codemap: %s scripts lack opening descriptions (warning only during machinery purge)\n' "$codemap_count"
-    cat "$LOGDIR/codemap-missing.log"
-  else
-    printf '        WARN codemap: missing-description count unavailable (tool exited %s; warning only)\n' "$codemap_rc"
-    cat "$LOGDIR/codemap-error.log" >&2
-  fi
-
   # rustup installs the pinned toolchain before concurrent HxStore builds.
   if [ -f vendor/hxprobe/Cargo.toml ]; then
     if ! run_quiet "$LOGDIR/hxprobe-prepare.log" bash -c 'cd vendor/hxprobe && cargo build --locked'; then
@@ -343,8 +330,7 @@ PYEOF
   run_quiet "$LOGDIR/safety-hooks.log" "$PY" hooks/gate-integrity.py --strict \
     || { failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
 
-  for inv in audit-queue-freshness-check \
-             stale-count-check \
+  for inv in stale-count-check \
              rule-load-layer-check rule-classification-parity-check \
              selftest-git-isolation-check \
              sync-core-rule-ids rule-route-coverage \

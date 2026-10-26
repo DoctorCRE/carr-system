@@ -119,22 +119,6 @@ class CodemapTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(result.stdout, "missing.py\n")
 
-    def test_strict_ci_warns_without_failing_for_missing_descriptions(self):
-        (self.repo / "ops").mkdir()
-        (self.repo / "hooks").mkdir()
-        checker = self.repo / "ops/ci.sh"
-        shutil.copyfile(ROOT / "ops/ci.sh", checker)
-        checker.chmod(0o755)
-        (self.repo / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
-        self.track("missing.py", "print('missing')\n")
-        result = subprocess.run([str(checker), "--strict", "--only", "gates"],
-                                cwd=self.tmp.name, env=self.env, text=True,
-                                capture_output=True, timeout=30)
-        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        self.assertIn("1 scripts lack opening descriptions", result.stdout)
-        self.assertIn("warning only during machinery purge", result.stdout)
-        self.assertIn("\nmissing.py\n", result.stdout)
-
 
 if __name__ == "__main__":
     unittest.main()
