@@ -6,10 +6,15 @@ const CONTRACTS = {
 };
 const EXPENSE_BASES = ['nnn', 'modified_gross', 'full_service_gross', 'gross'];
 const DECIMAL = /^(?:0|[1-9][0-9]{0,29})(?:\.[0-9]{1,18})?$/;
+const CONTENT_HASH = /^[a-fA-F0-9]{64}$/;
 const text = maxLength => ({ type: 'string', minLength: 1, maxLength });
 const sourceSchema = { type: 'object', additionalProperties: false, properties: {
   document_ref: text(200), page_start: { type: 'integer', minimum: 1, maximum: 100000 },
   page_end: { type: 'integer', minimum: 1, maximum: 100000 }, cited_text: text(4000),
+  content_hash: { type: 'string', pattern: CONTENT_HASH.source, minLength: 64, maxLength: 64 },
+  document_family_id: text(200),
+  derivation_chain: { type: 'array', maxItems: 20, items: text(200),
+    description: 'Caller-asserted upstream document-family references, not verified lineage.' },
 }, required: ['document_ref', 'page_start', 'page_end', 'cited_text'] };
 const observationProperties = {
   id: text(100), fact_key: { type: 'string', enum: Object.keys(CONTRACTS) },
@@ -58,9 +63,16 @@ function validate(args, ToolError) {
     const contract = CONTRACTS[o.fact_key];
     if (typeof o.unit !== 'string' || !Object.hasOwn(contract.units, o.unit) || typeof o.value !== 'string' || !DECIMAL.test(o.value)) invalid();
     if (contract.expenseBasis ? !EXPENSE_BASES.includes(o.expense_basis) : Object.hasOwn(o, 'expense_basis')) invalid();
-    object(o.source, sourceSchema.required);
+    object(o.source, Object.keys(sourceSchema.properties), sourceSchema.required);
     string(o.source.document_ref, 200);
     string(o.source.cited_text, 4000);
+    if (Object.hasOwn(o.source, 'content_hash') && (typeof o.source.content_hash !== 'string'
+      || o.source.content_hash.length !== 64 || !CONTENT_HASH.test(o.source.content_hash))) invalid();
+    if (Object.hasOwn(o.source, 'document_family_id')) string(o.source.document_family_id, 200);
+    if (Object.hasOwn(o.source, 'derivation_chain')) {
+      if (!Array.isArray(o.source.derivation_chain) || o.source.derivation_chain.length > 20) invalid();
+      for (const ref of o.source.derivation_chain) string(ref, 200);
+    }
     for (const page of [o.source.page_start, o.source.page_end])
       if (!Number.isInteger(page) || page < 1 || page > 100000) invalid();
     if (o.source.page_start > o.source.page_end) invalid();
@@ -74,7 +86,7 @@ export function factObservationTools({ ToolError }) {
   return {
     'compare-fact-observations': {
       write: false,
-      description: 'Compare supplied economic fact observations using exact decimal normalization and project review items by field with their competing observations, supplied citations, normalized values, and routing tiers. Effective confidence tiers are conservative routing labels, not verified confidence. OCR always requires human review because dual-engine agreement is not proven. Preserves supplied citations but does not verify sources, read stored records, establish independent evidence, promote facts, or write records.',
+      description: 'Compare supplied economic fact observations using exact decimal normalization and project review items by field with their competing observations, supplied citations, normalized values, and routing tiers. Optional caller-asserted source hashes, document families, and upstream family references expose conservative shared-source groups, not verified lineage. An empty group list does not establish independence. Effective confidence tiers are conservative routing labels, not verified confidence. OCR always requires human review because dual-engine agreement is not proven. Preserves supplied citations but does not verify sources, read stored records, establish independent evidence, promote facts, or write records.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         entity_ref: { ...text(200), description: 'Caller-asserted entity for this comparable set. No stored identity or document binding is checked.' }, observations: { type: 'array', minItems: 1, maxItems: 100, items: observationSchema },
       }, required: ['entity_ref', 'observations'] },
@@ -97,6 +109,20 @@ export function factObservationTools({ ToolError }) {
             : new Set(group.map(o => JSON.stringify(o.normalized))).size === 1 ? 'agreement' : 'conflict',
           observation_ids: group.map(o => o.input.id),
         }));
+        const shared_source_groups = [...groups].flatMap(([fact_key, group]) => ['document_ref', 'content_hash', 'document_family_id'].flatMap(basis => {
+          const sources = new Map();
+          for (const { input } of group) {
+            const source = input.source;
+            const refs = basis === 'document_family_id' ? [source.document_family_id, ...(source.derivation_chain || [])]
+              : [basis === 'content_hash' ? source.content_hash?.toLowerCase() : source.document_ref];
+            for (const ref of new Set(refs.filter(value => value !== undefined))) {
+              if (!sources.has(ref)) sources.set(ref, []);
+              sources.get(ref).push(input.id);
+            }
+          }
+          return [...sources].filter(([, ids]) => ids.length > 1)
+            .map(([source_ref, observation_ids]) => ({ fact_key, basis, source_ref, observation_ids }));
+        }));
         const review_items = fields.flatMap(field => {
           const tiers = new Set(groups.get(field.fact_key).map(o => o.effective_confidence_tier));
           const reasons = [
@@ -111,7 +137,7 @@ export function factObservationTools({ ToolError }) {
         }).sort((a, b) => Number(b.priority === 'high') - Number(a.priority === 'high'));
         return { ok: true, schema_version: 'fact-observation-comparison.v1', entity_ref: args.entity_ref,
           canonical: false, records_written: 0, source_verification: 'unverified', entity_binding: 'caller_asserted',
-          evidence_independence: 'not_assessed', observations, review_items,
+          evidence_independence: 'not_assessed', observations, review_items, shared_source_groups,
           fields, conflicts: fields.filter(f => f.status === 'conflict').map(({ fact_key, observation_ids }) => ({ fact_key, observation_ids })),
         };
       },

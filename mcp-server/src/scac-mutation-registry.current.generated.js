@@ -524,7 +524,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "compare-fact-observations": {
     "ingress_key": "mcp-tool:compare-fact-observations",
     "source_locator": "mcp-server/src/fact-observations.js",
-    "schema_digest": "fabaa603b5ffeaf1648ad43bca2ec51be0b6e5ce9cf3e6378fc544e846b4207b",
+    "schema_digest": "a85876a0b3f6ad211eb0341cc89ffc1c371e955af653a733859211c4c248058f",
     "write": false,
     "human_only": false,
     "authority_only": false,

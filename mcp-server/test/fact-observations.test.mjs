@@ -14,6 +14,135 @@ const compare = observations => TOOLS['compare-fact-observations'].handler(db, a
   entity_ref: 'synthetic-deal-1', observations,
 });
 
+test('repeated document evidence is reported without treating agreement as independent support', async () => {
+  const out = await compare([observation('annual'), observation('monthly', { value: '2', unit: 'USD/SF/month' })]);
+  assert.deepEqual(out.shared_source_groups, [{
+    fact_key: 'base_rent_per_sf', basis: 'document_ref', source_ref: 'synthetic-lease-v1',
+    observation_ids: ['annual', 'monthly'],
+  }]);
+  assert.equal(out.fields[0].status, 'agreement');
+  assert.equal(out.evidence_independence, 'not_assessed');
+  assert.equal(out.source_verification, 'unverified');
+  assert.equal(out.canonical, false);
+  assert.equal(out.records_written, 0);
+});
+
+test('different document references with the same hash report a shared source and preserve supplied hash case', async () => {
+  const inputs = [
+    observation('lease', { source: { ...observation('x').source, document_ref: 'lease', content_hash: 'aB'.repeat(32) } }),
+    observation('copy', { source: { ...observation('x').source, document_ref: 'copy', content_hash: 'Ab'.repeat(32) } }),
+  ];
+  const original = structuredClone(inputs);
+  const out = await compare(inputs);
+  assert.deepEqual(out.shared_source_groups, [{
+    fact_key: 'base_rent_per_sf', basis: 'content_hash', source_ref: 'ab'.repeat(32), observation_ids: ['lease', 'copy'],
+  }]);
+  assert.deepEqual(out.observations.map(o => o.input), original);
+  assert.deepEqual(inputs, original);
+  assert.equal(out.evidence_independence, 'not_assessed');
+});
+
+test('shared roots and ancestor references expose common source families once per observation', async () => {
+  const inputs = [
+    observation('original', { source: { ...observation('x').source, document_ref: 'original', document_family_id: 'root' } }),
+    observation('revision', { source: { ...observation('x').source, document_ref: 'revision', document_family_id: 'root', derivation_chain: ['root', 'upstream', 'upstream'] } }),
+    observation('quote', { source: { ...observation('x').source, document_ref: 'quote', document_family_id: 'quote', derivation_chain: ['upstream', 'root'] } }),
+  ];
+  const original = structuredClone(inputs);
+  const out = await compare(inputs);
+  assert.deepEqual(out.shared_source_groups, [
+    { fact_key: 'base_rent_per_sf', basis: 'document_family_id', source_ref: 'root', observation_ids: ['original', 'revision', 'quote'] },
+    { fact_key: 'base_rent_per_sf', basis: 'document_family_id', source_ref: 'upstream', observation_ids: ['revision', 'quote'] },
+  ]);
+  assert.deepEqual(out.observations.map(o => o.input), original);
+  assert.deepEqual(inputs, original);
+  assert.equal(out.evidence_independence, 'not_assessed');
+});
+
+test('missing and distinct lineage leave independence unknown and never join different fact fields', async () => {
+  const first = observation('rent', { source: { ...observation('x').source,
+    content_hash: 'a'.repeat(64), document_family_id: 'rent-root', derivation_chain: ['rent-upstream'],
+  } });
+  const term = observation('term', { fact_key: 'term_months', value: '60', unit: 'months', source: { ...first.source } });
+  delete term.expense_basis;
+  const inputs = [first, term,
+    observation('other-rent', { source: { ...observation('x').source, document_ref: 'other', content_hash: 'b'.repeat(64),
+      document_family_id: 'other-root', derivation_chain: [] } }),
+    observation('unknown-rent', { source: { ...observation('x').source, document_ref: 'unknown' } }),
+  ];
+  for (const observations of [inputs, [first], [observation('legacy')]]) {
+    const out = await compare(observations);
+    assert.deepEqual(out.shared_source_groups, []);
+    assert.equal(out.evidence_independence, 'not_assessed');
+    assert.equal(out.source_verification, 'unverified');
+    assert.equal(out.canonical, false);
+    assert.equal(out.records_written, 0);
+  }
+  const ancestorOnly = await compare([
+    observation('a', { source: { ...observation('x').source, document_ref: 'a', derivation_chain: ['upstream'] } }),
+    observation('b', { source: { ...observation('x').source, document_ref: 'b', derivation_chain: ['upstream'] } }),
+  ]);
+  assert.deepEqual(ancestorOnly.shared_source_groups, [{ fact_key: 'base_rent_per_sf', basis: 'document_family_id',
+    source_ref: 'upstream', observation_ids: ['a', 'b'] }]);
+});
+
+test('malformed source lineage refuses as a public validation error without exposing cited text', async t => {
+  t.mock.method(console, 'error', () => {});
+  const patches = [
+    ...['a'.repeat(63), 'a'.repeat(65), `${'a'.repeat(64)}\n`, 'g'.repeat(64), null, 42, ['a'.repeat(64)], undefined]
+      .map(content_hash => ({ content_hash })),
+    ...['', ' ', 'f'.repeat(201), null, 42, [], undefined].map(document_family_id => ({ document_family_id })),
+    ...[null, 'root', {}, [null], [42], [''], [' '], ['x'.repeat(201)], new Array(1),
+      Array.from({ length: 21 }, () => 'root'), [{ document_family_id: 'root' }], undefined]
+      .map(derivation_chain => ({ derivation_chain })),
+    { independence_verified: true }, { canonical: true },
+  ];
+  for (const patch of patches) await assert.rejects(() => compare([
+    observation('bad', { source: { ...observation('x').source, ...patch } }),
+  ]), error => {
+    assert.equal(error.payload?.error, 'validation_error');
+    const out = publicError(error, { inputSchema: TOOLS['compare-fact-observations'].inputSchema });
+    assert.equal(out.error, 'validation_error');
+    assert.equal(JSON.stringify(out).includes('Base rent is'), false);
+    return true;
+  });
+  const maxChain = Array.from({ length: 20 }, (_, i) => `synthetic-root-${i}`);
+  const out = await compare([observation('bounded', { source: { ...observation('x').source,
+    document_family_id: 'x'.repeat(200), derivation_chain: maxChain, content_hash: 'F'.repeat(64),
+  } })]);
+  assert.deepEqual(out.observations[0].input.source.derivation_chain, maxChain);
+  assert.deepEqual(out.shared_source_groups, []);
+});
+
+test('registered source groups retain conflict review evidence and OCR escalation in deterministic order', async () => {
+  const source = { ...observation('x').source, content_hash: 'C'.repeat(64), document_family_id: 'same-root',
+    derivation_chain: ['old-root', 'same-root'] };
+  const rent = [observation('first', { source }), observation('scan', { value: '25', method: 'ocr', source })];
+  const term = observation('term', { fact_key: 'term_months', value: '60', unit: 'months', source });
+  delete term.expense_basis;
+  const args = { entity_ref: 'synthetic-lineage-deal', observations: [term, rent[0], rent[1]] };
+  const original = structuredClone(args);
+  const out = await executeRegisteredTool(db, actor, 'compare-fact-observations', args);
+  assert.deepEqual(out.shared_source_groups, [
+    { fact_key: 'base_rent_per_sf', basis: 'document_ref', source_ref: 'synthetic-lease-v1', observation_ids: ['first', 'scan'] },
+    { fact_key: 'base_rent_per_sf', basis: 'content_hash', source_ref: 'c'.repeat(64), observation_ids: ['first', 'scan'] },
+    { fact_key: 'base_rent_per_sf', basis: 'document_family_id', source_ref: 'same-root', observation_ids: ['first', 'scan'] },
+    { fact_key: 'base_rent_per_sf', basis: 'document_family_id', source_ref: 'old-root', observation_ids: ['first', 'scan'] },
+  ]);
+  assert.deepEqual(out.fields, [
+    { fact_key: 'term_months', status: 'single_observation', observation_ids: ['term'] },
+    { fact_key: 'base_rent_per_sf', status: 'conflict', observation_ids: ['first', 'scan'] },
+  ]);
+  assert.deepEqual(out.review_items[0].observations.map(o => o.input), rent);
+  assert.deepEqual(out.review_items[0].observations.map(o => o.effective_confidence_tier), ['auto_accept', 'human_review']);
+  assert.deepEqual(out.review_items[0].reasons, ['conflict', 'human_review', 'ocr']);
+  assert.equal(out.review_items[0].priority, 'high');
+  assert.equal(out.canonical, false);
+  assert.equal(out.records_written, 0);
+  assert.equal(out.evidence_independence, 'not_assessed');
+  assert.deepEqual(args, original);
+});
+
 test('monthly and annual rent agree exactly without confirming supplied citations or facts', async () => {
   assert.equal(TOOLS['compare-fact-observations']?.write, false);
   const input = [observation('annual'), observation('monthly', { value: '2.00', unit: 'USD/SF/month' })];
