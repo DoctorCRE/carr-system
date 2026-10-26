@@ -3930,8 +3930,10 @@ export const TOOLS = {
            from capture_call_context($1::uuid[])
           order by deal_name,deal_id,participant_role,participant_name
           /* capture:tool-call-context */`, [ids])).rows;
-      if (new Set(rows.map(row => String(row.deal_id))).size !== ids.length)
-        throw new ToolError({ error: "invalid_call_context_deals" });
+      const returnedIds = new Set(rows.map(row => String(row.deal_id).toLowerCase()));
+      if (returnedIds.size !== ids.length)
+        throw new ToolError({ error: "invalid_call_context_deals",
+          invalid_deal_ids: ids.filter(id => !returnedIds.has(id.toLowerCase())) });
       const byDeal = new Map();
       for (const row of rows) {
         const deal = byDeal.get(row.deal_id) || { id: row.deal_id, name: row.deal_name,
@@ -9182,8 +9184,7 @@ registerTools({
                  to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on
             from v_deal_room_board b
             join v_client_engagement_status ce on ce.client_id = b.client_id
-           where b.operating_state = 'active' and b.phase <> 'closed'
-             and b.outcome is null and b.closed_on is null and b.invoiced_on is null
+           where b.operating_state = 'active'
            order by b.id limit 1001
         ), dates as materialized (
           select d.deal_id, d.id, d.kind, to_jsonb(d.due_on)#>>'{}' as due_on, d.note, d.status

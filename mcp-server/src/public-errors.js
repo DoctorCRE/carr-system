@@ -10,6 +10,7 @@ const PUBLIC_ERRORS = new Map([
   ["needs_disambiguation", "Choose an exact record reference from the candidates before retrying."],
   ["loop_not_open", "Re-read the loop before choosing another action."],
   ["unauthorized", "Authentication is required."],
+  ["invalid_call_context_deals", "Choose only open, active deal UUIDs from the current deal board."],
   ["invalid_field_value", "Check the named fields against the tool's documented input."],
   ["validation_error", "Check the named fields against the tool's documented input."],
   ["value_not_in_declared_vocabulary", "Use a value from the field's documented vocabulary."],
@@ -102,6 +103,9 @@ export function publicError(error, { env, inputSchema, fallback = "unhandled_ver
     if (Array.isArray(payload?.retired_aliases))
       result.retired_aliases = publicCandidates(payload.retired_aliases, [["ref", "name"]]);
   }
+  if (code === "invalid_call_context_deals")
+    result.invalid_deal_ids = [...new Set((Array.isArray(payload?.invalid_deal_ids) ? payload.invalid_deal_ids : [])
+      .filter(id => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id)))].slice(0, 50);
   if (code === "version_conflict" && Number.isSafeInteger(payload?.current_version) && payload.current_version >= 0)
     result.current_version = payload.current_version;
   if (["invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields"].includes(code)) {

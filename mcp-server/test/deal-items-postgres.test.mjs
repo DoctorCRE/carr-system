@@ -1,6 +1,6 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
@@ -42,6 +42,7 @@ before(async () => {
   const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
   if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
+  await c.query(readFileSync(new URL('../../migrations/0989_call_context_open_deals.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
@@ -105,6 +106,31 @@ test('instruction and completion affect exactly one item and preserve its siblin
   const after = await readDealItems(c, deal);
   assert.equal(after.find(i => i.id === target.id).status, 'done');
   assert.deepEqual(after.find(i => i.id === sibling.id), sibling);
+});
+
+test('Call Mode and the active agenda share open board eligibility', async () => {
+  await c.query('begin');
+  try {
+    const base = (await c.query('select client_id from deal where id=$1', [deal])).rows[0];
+    const excluded = [];
+    for (const fields of ["outcome='lost'", "outcome='won'", "phase='closed'", "closed_on='2026-10-20'", "invoiced_on='2026-10-20'"]) {
+      const id = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic terminal deal',$1,'purchase','pending','joe',$2,$2) returning id", [base.client_id, actor.id])).rows[0].id;
+      await c.query(`update deal set ${fields} where id=$1`, [id]);
+      excluded.push(id);
+    }
+    const parked = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,operating_state,parking_reason,parking_note,parked_at,parked_by,created_by,updated_by) values('Synthetic parked deal',$1,'purchase','pending','joe','parked','other','Synthetic pause',now(),$2,$2,$2) returning id", [base.client_id, actor.id])).rows[0].id;
+    const board = await TOOLS['deal-room-board'].handler(c, actor, {});
+    for (const id of excluded) assert.ok(!board.deals.some(d => d.id === id), 'terminal deals cannot enter the call agenda');
+    assert.ok(board.deals.some(d => d.id === parked), 'parked work remains available on its board');
+    const agenda = await executeRegisteredTool(c, actor, 'read-home-agenda', {});
+    assert.deepEqual(agenda.deals.map(d => d.id), [deal]);
+    await c.query('set local role carr_reader');
+    const context = await executeRegisteredTool(c, actor, 'get-call-context', { deal_ids: agenda.deals.map(d => d.id) });
+    assert.deepEqual(context.deals.map(d => d.id), [deal]);
+    for (const id of [...excluded, parked]) {
+      await assert.rejects(executeRegisteredTool(c, actor, 'get-call-context', { deal_ids: [deal, id] }), e => e.payload?.error === 'invalid_call_context_deals');
+    }
+  } finally { await c.query('rollback'); }
 });
 
 test('board and detail expose the same stored item contract', async () => {

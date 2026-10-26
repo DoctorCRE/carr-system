@@ -29,7 +29,8 @@ test('Home agenda real SQL preserves eligibility, nullable dates, holds and read
         client_id uuid default 'aa000000-0000-4000-8000-000000000100', type text default 'lease', attention boolean default false, next_step text, next_date date,
         last_touch timestamptz, last_review_at timestamptz, workspace_kind text default 'team', account_client_id uuid,
         operating_state text default 'active', outcome text, closed_on date, invoiced_on date, client_name text, market text);
-      create view v_deal_room_board as select * from board_source;
+      create view v_deal_room_board as select * from board_source
+        where outcome is null and closed_on is null and invoiced_on is null and phase not in ('closed','invoiced');
       create view v_client_engagement_status as select 'aa000000-0000-4000-8000-000000000100'::uuid as client_id, 'prospect'::text as client_status, 'active'::text as prospect_engagement_status;
       create table actor (id uuid primary key, slug text);
       create table next_action (id uuid primary key, subject_type text, subject_id uuid, owner_id uuid,
