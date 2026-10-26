@@ -1,3 +1,4 @@
+# Test product document drift workflow integration.
 import importlib.util
 import json
 import subprocess

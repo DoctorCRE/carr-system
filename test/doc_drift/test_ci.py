@@ -1,3 +1,4 @@
+# Test CI integration for the document drift checker.
 import json
 import importlib.util
 import os

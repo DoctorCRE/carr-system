@@ -1,3 +1,4 @@
+# Test leak guard detection, handling, and reporting.
 import json
 import contextlib
 import io

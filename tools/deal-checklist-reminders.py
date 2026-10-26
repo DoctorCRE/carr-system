@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Create agenda reminders for deal checklist items.
 import argparse
 import json
 import re
