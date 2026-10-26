@@ -7,9 +7,10 @@ Catalog of pinned decoder contracts. Research observations below do not establis
 
 ## Stable message identity research, WR-000502
 
-Status is INCONCLUSIVE. No stable local selector is proven. The first experiment below was access-blocked.
-That does not show that HxStore contains no stable message ID. Audit PR
-[#2196](https://github.com/DoctorCRE/carr-system/pull/2196), slice B2, remains blocked.
+Status, 2026-10-26: the `00ca` local object key is the intake's stable email ID, scoped to one
+store item in one store. See the controlled comparison below. Moves, an Outlook restart and a
+store rebuild remain untested. Audit PR [#2196](https://github.com/DoctorCRE/carr-system/pull/2196),
+slice B2, can bind to it. The sections that follow preserve the earlier, blocked experiments.
 The observations below were made on Studio on 2026-10-25 at 08:03 CDT.
 Outlook's AppleScript `version` returned `16.114.1`.
 
@@ -100,6 +101,23 @@ Cached revisions and provisional marker association prevent a stable-ID claim.
 WR-000502 AC-1 still needs two independently revised, distinct messages.
 The earlier matrix remains the uncaptured first experiment, not this follow-up.
 No identity field is promoted to proven, and intake/send behavior is unchanged.
+
+### Controlled TEST-account comparison, 2026-10-26
+
+[The research record](stable-message-id-research.md#controlled-test-account-comparison-2026-10-26)
+compares the repeated `00ca` key across all twelve private TEST-account campaign copies.
+One draft kept one key through subject entry, an attachment and edits. One received
+message kept one key through two flag revisions and a reply. Two received messages with
+identical sender, subject and preview had different keys, and so did a reply and its
+parent. Across the shared store, no key's revisions disagreed on Message-ID, and 777 of
+777 keys kept the same Message-ID set from the first copy to the last. The key identifies
+a store item, not one logical email across folders or accounts.
+
+`hxprobe db` exports the keys as `messages.local_keys`, and the intake records them per
+email as `mail_keys`. Rows without a key keep the copy-hash plus send-time ID as the
+fallback, which was observed to merge the identical-template pair. Moves, an Outlook
+restart, a store rebuild and identical drafts to different recipients remain untested.
+A fresh capture is blocked until the research snapshot helper regains Full Disk Access.
 
 ## Catalog confidence
 
@@ -1076,7 +1094,8 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   "wire_type": "u64le",
   "decoder": "folder::message_key",
   "confidence": "inferred",
-  "first_seen_version": null
+  "first_seen_version": null,
+  "notes": "WR-000502 TEST-account copies, 2026-10-21 campaign, studied 2026-10-26: stable across draft edits, attachment, flag revisions, reply-to and read-state preparation; distinct for identical-template messages and for a reply. Store-local. Moves, restart and store rebuild untested. Exported by db as messages.local_keys."
 }
 ```
 

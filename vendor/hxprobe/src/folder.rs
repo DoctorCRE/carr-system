@@ -120,6 +120,42 @@ fn trailing_name(data: &[u8]) -> Option<String> {
     (!name.chars().any(char::is_control)).then_some(name)
 }
 
+/// Expanded message objects embedded in transaction wrappers have no
+/// individual length envelope. Bound each header by the next message object
+/// or known envelope, and by 4096 bytes.
+fn message_headers(data: &[u8]) -> Vec<(usize, &[u8])> {
+    let starts: Vec<_> = memchr::memmem::find_iter(data, &signature(0x00ca))
+        .filter(|&p| message_key(&data[p..], 0x00ca).is_some())
+        .collect();
+    let boundaries: BTreeSet<_> = [
+        (0x04c2, 0x004d),
+        (0x0430, 0x004f),
+        (0x0740, 0x00ca),
+        (0x02c8, 0x00bf),
+    ]
+    .into_iter()
+    .flat_map(|(tag, class)| envelopes(data, tag, class).into_iter().map(|(p, _)| p - 10))
+    .collect();
+    starts
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &start)| {
+            let next_envelope = boundaries
+                .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
+                .next()
+                .copied()
+                .unwrap_or(data.len());
+            let end = starts
+                .get(i + 1)
+                .copied()
+                .unwrap_or(data.len())
+                .min(next_envelope)
+                .min(start.saturating_add(4096));
+            Some((start, data.get(start..end)?))
+        })
+        .collect()
+}
+
 impl Index {
     /// First pass: gather the catalog and message/view membership references.
     pub fn observe(&mut self, block: usize, data: &[u8]) {
@@ -184,50 +220,10 @@ impl Index {
                 self.link_single_anchor(&mut links, start, object, needle, folders);
             }
         }
-        // Expanded message objects embedded in transaction wrappers include
-        // a full typed folder reference at +408. Unlike compact objects, they
-        // do not have an individual length envelope. Bound the header by the
-        // next message object, and only take its first ItemClass anchor.
-        let starts: Vec<_> = memchr::memmem::find_iter(data, &signature(0x00ca))
-            .filter(|&p| message_key(&data[p..], 0x00ca).is_some())
-            .collect();
-        let boundaries: BTreeSet<_> = [
-            (0x04c2, 0x004d),
-            (0x0430, 0x004f),
-            (0x0740, 0x00ca),
-            (0x02c8, 0x00bf),
-        ]
-        .into_iter()
-        .flat_map(|(tag, class)| envelopes(data, tag, class).into_iter().map(|(p, _)| p - 10))
-        .collect();
-        for (i, &start) in starts.iter().enumerate() {
-            let next_envelope = boundaries
-                .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
-                .next()
-                .copied()
-                .unwrap_or(data.len());
-            let end = starts
-                .get(i + 1)
-                .copied()
-                .unwrap_or(data.len())
-                .min(next_envelope)
-                .min(start.saturating_add(4096));
-            let Some(object) = data.get(start..end) else {
+        for (start, object) in message_headers(data) {
+            let Some(id) = self.catalogued_folder(object) else {
                 continue;
             };
-            let Some(field) = object.get(408..) else {
-                continue;
-            };
-            let Some((id, account)) = reference(field, 0x004d, &[2, 0x02ac]) else {
-                continue;
-            };
-            if !self
-                .folders
-                .get(&id)
-                .is_some_and(|f| f.account_id == account)
-            {
-                continue;
-            }
             let Some(rel) = memchr::memmem::find(object, needle) else {
                 continue;
             };
@@ -240,6 +236,42 @@ impl Index {
                 .insert(id);
         }
         links
+    }
+
+    /// Resolve IPM.Note anchor positions to the local key of their message
+    /// object. The key is a store-local candidate identity; see
+    /// spec/outlook/stable-message-id-research.md for what it has been
+    /// observed to survive.
+    pub fn keys(&self, data: &[u8], needle: &[u8]) -> BTreeMap<usize, u64> {
+        let mut keys = BTreeMap::new();
+        for (start, object) in envelopes(data, 0x0740, 0x00ca) {
+            let Some(key) = message_key(object, 0x00ca) else {
+                continue;
+            };
+            let mut anchors = memchr::memmem::find_iter(object, needle);
+            if let (Some(anchor), None) = (anchors.next(), anchors.next()) {
+                keys.insert(start + anchor, key);
+            }
+        }
+        for (start, object) in message_headers(data) {
+            let Some(rel) = memchr::memmem::find(object, needle) else {
+                continue;
+            };
+            if rel < 454 {
+                continue;
+            }
+            if let Some(key) = message_key(object, 0x00ca) {
+                keys.insert(start + rel, key);
+            }
+        }
+        keys
+    }
+
+    /// The typed folder reference at +408 of an expanded header, when it
+    /// names a catalogued folder of the same account.
+    fn catalogued_folder(&self, object: &[u8]) -> Option<u64> {
+        let (id, account) = reference(object.get(408..)?, 0x004d, &[2, 0x02ac])?;
+        self.folders.get(&id).is_some_and(|f| f.account_id == account).then_some(id)
     }
 
     fn link_single_anchor(
@@ -393,6 +425,25 @@ mod tests {
         view.extend(note());
         expanded.extend(envelope(0x430, &view));
         assert_eq!(index.links(&expanded, &note())[&610], BTreeSet::from([51]));
+    }
+
+    #[test]
+    fn keys_follow_message_headers_without_a_folder_catalog() {
+        let index = Index::default();
+        let mut expanded = object(0xca, 70, 0, 70, 500);
+        expanded.extend(note());
+        let mut early = object(0xca, 71, 0, 71, 100);
+        early.extend(note());
+        let mut compact = object(0xca, 72, 0, 72, 100);
+        compact.extend(note());
+        let mut data = expanded.clone();
+        data.extend(&early);
+        data.extend(envelope(0x740, &compact));
+        let keys = index.keys(&data, &note());
+        assert_eq!(keys.get(&500), Some(&70));
+        assert_eq!(keys.len(), 2, "an anchor inside the fixed header is not keyed");
+        assert_eq!(keys.values().copied().collect::<BTreeSet<_>>(), BTreeSet::from([70, 72]));
+        assert!(index.links(&data, &note()).is_empty(), "keys do not invent folder links");
     }
 
     #[test]

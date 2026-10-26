@@ -47,10 +47,10 @@ def ts(delta: timedelta) -> int:
 
 
 def mail(sender, sent, subject='Suite question', body='Can we meet Thursday?', name=None,
-         recipients=OWNER, kind='full', copy_key=None):
+         recipients=OWNER, kind='full', copy_key=None, local_keys=None):
     return dict(sender=sender, sender_name=name, recipients=recipients, subject=subject,
                 body=body, body_kind=kind, sent_unix=ts(sent),
-                copy_key=copy_key or f'{sender}\x1f{subject.lower()}\x1f{body.lower()}')
+                copy_key=copy_key or f'{sender}\x1f{subject.lower()}\x1f{body.lower()}', local_keys=local_keys)
 
 
 def ident(m):
@@ -66,12 +66,18 @@ def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer
 def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identities=None, decoded=None):
     con = sqlite3.connect(path)
     con.executescript(SCHEMA)
+    # Decoders built before WR-000502 have no local_keys column; keep testing that shape.
+    keyed = any(m.get('local_keys') for m in mails)
+    if keyed:
+        con.execute('ALTER TABLE messages ADD COLUMN local_keys TEXT')
     for m in mails:
         con.execute('INSERT INTO messages(sender,sender_name,recipients,subject,body,preview,'
                     'body_kind,sent_unix,copy_key) VALUES (?,?,?,?,?,?,?,?,?)',
                     (m['sender'], m['sender_name'], m['recipients'], m['subject'],
                      m['body'] if m['body_kind'] == 'full' else '', m['body'][:200],
                      m['body_kind'], m['sent_unix'], m['copy_key']))
+        if keyed:
+            con.execute('UPDATE messages SET local_keys = ? WHERE id = last_insert_rowid()', (m.get('local_keys'),))
     for e in events:
         cur = con.execute('INSERT INTO events(goid,start_unix,end_unix,start_utc,end_utc,subject,location,'
                           'organizer_name,organizer_email,body) VALUES (?,?,?,?,?,?,?,?,?,?)',
@@ -695,6 +701,47 @@ class IntakeTest(unittest.TestCase):
                               body='the whole message body', copy_key='k1')])
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual(args['detail'], 'the whole message body')
+
+    def mail_keys(self):
+        return json.loads((self.out() / intake.STATE).read_text()).get('mail_keys', {})
+
+    def test_each_email_record_carries_its_store_local_key(self):
+        a = mail('pat@example.test', -timedelta(hours=2), local_keys='524142')
+        b = mail('lee@example.test', -timedelta(hours=1), subject='Tour', local_keys='528221')
+        self.run_intake([a, b])
+        self.assertEqual(self.mail_keys(), {ident(a): ['524142'], ident(b): ['528221']})
+
+    def test_unresolved_and_skipped_emails_carry_their_local_key_too(self):
+        unknown = mail('new@example.test', -timedelta(hours=1), local_keys='77')
+        internal_only = mail(PARTNER, -timedelta(hours=2), subject='Lunch', recipients=OWNER, local_keys='78')
+        self.run_intake([unknown, internal_only])
+        self.assertEqual(self.mail_keys(), {ident(unknown): ['77'], ident(internal_only): ['78']})
+
+    def test_identical_template_emails_joined_as_copies_keep_both_local_keys(self):
+        # Two distinct store items with the same sender, subject and opening
+        # (the WR-000502 twins) still collapse here; the record names both
+        # keys so slice B2 can split them.
+        first = mail('pat@example.test', -timedelta(hours=2), copy_key='template', local_keys='522596')
+        second = mail('pat@example.test', -timedelta(hours=2) + timedelta(minutes=5), copy_key='template',
+                      local_keys='521716')
+        self.run_intake([first, second])
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+        self.assertEqual(self.mail_keys(), {ident(first): ['521716', '522596']})
+
+    def test_a_decoder_row_that_merged_two_store_items_keeps_both_keys(self):
+        m = mail('pat@example.test', -timedelta(hours=1), local_keys='521716,522596')
+        self.run_intake([m])
+        self.assertEqual(self.mail_keys(), {ident(m): ['521716', '522596']})
+
+    def test_a_decoder_without_local_keys_logs_mail_and_records_no_keys(self):
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+        self.assertEqual(self.mail_keys(), {})
+
+    def test_local_keys_expire_with_the_mail_they_describe(self):
+        state = {'mail_keys': {'old:1': ['5'], f'new:{int(NOW.timestamp())}': ['6']}}
+        intake._prune(state, NOW)
+        self.assertEqual(state['mail_keys'], {f'new:{int(NOW.timestamp())}': ['6']})
 
     def test_a_sender_name_that_is_really_the_subject_or_a_file_is_dropped(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=2), name='Suite question'),

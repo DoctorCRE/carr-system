@@ -221,9 +221,12 @@ def _load(db: Path) -> tuple[dict, list[dict], list[dict]]:
     con.row_factory = sqlite3.Row
     try:
         meta = {r['key']: r['value'] for r in con.execute('SELECT key, value FROM meta')}
+        # Decoders built before WR-000502 export no local_keys column.
+        columns = {r['name'] for r in con.execute('PRAGMA table_info(messages)')}
+        local_keys = 'local_keys' if 'local_keys' in columns else 'NULL AS local_keys'
         mails = [dict(r) for r in con.execute(
-            'SELECT sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key '
-            'FROM messages WHERE sent_unix IS NOT NULL AND sender IS NOT NULL')]
+            'SELECT sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key, '
+            f'{local_keys} FROM messages WHERE sent_unix IS NOT NULL AND sender IS NOT NULL')]
         events = [dict(r) for r in con.execute('SELECT * FROM events')]
         attendees: dict[int, list] = {}
         for r in con.execute('SELECT event_id, name, email FROM event_attendees'):
@@ -275,6 +278,7 @@ def _best_copies(mails: list[dict]) -> list[dict]:
     rows = []
     for m in mails:
         m['ck'], m['ident'] = mail_identity(m['copy_key'], m['sender'], m['subject'] or '', m['sent_unix'])
+        m['local_keys'] = sorted(set((m['local_keys'] or '').split(',')) - {''})
         m['full'] = m['body_kind'] == 'full' and bool((m['body'] or '').strip())
         m['text'] = (m['body'] or '').strip() or (m['preview'] or '').strip()
         rows.append(m)
@@ -283,6 +287,7 @@ def _best_copies(mails: list[dict]) -> list[dict]:
     for m in rows:
         last = out[-1] if out else None
         if last and last['ck'] == m['ck'] and m['sent_unix'] - last['first_sent'] <= COPY_WINDOW:
+            m['local_keys'] = last['local_keys'] = sorted(set(last['local_keys']) | set(m['local_keys']))
             if (m['full'], len(m['text'])) > (last['full'], len(last['text'])):
                 m['first_sent'], m['sent_unix'], m['ident'] = last['first_sent'], last['sent_unix'], last['ident']
                 out[-1] = m
@@ -473,6 +478,7 @@ class Run:
         unresolved = self.state.setdefault('mail_unresolved', {})
         pending = self.state.setdefault('pending_full', {})
         steps = self.state.setdefault('steps', {})
+        keys = self.state.setdefault('mail_keys', {})
         retries: dict[str, list] = {}
         for ident, item in unresolved.items():
             retries.setdefault(item['ck'], []).append((ident, item['sent']))
@@ -485,6 +491,8 @@ class Run:
                 continue
             if m['ident'] not in unresolved and any(abs(t - m['sent_unix']) <= COPY_WINDOW for t in done.get(m['ck'], [])):
                 continue
+            if m['local_keys']:
+                keys[m['ident']] = sorted(set(keys.get(m['ident'], [])) | set(m['local_keys']))
             outbound = _internal(m['sender'], self.settings.internal_domain)
             parties = ([(a, None) for a in _addresses(m['recipients']) if not _internal(a, self.settings.internal_domain)] if outbound
                        else [(m['sender'].lower(), _clean_name(m['sender_name'], m['subject']))])
@@ -688,6 +696,8 @@ def _prune(state: dict, now: datetime) -> None:
     horizon = now.timestamp() - (BACKFILL + UPCOMING).total_seconds() - 2 * COPY_WINDOW
     state['mail_done'] = {ck: ts for ck, ts in ((ck, [t for t in v if t >= horizon])
                                                  for ck, v in state.get('mail_done', {}).items()) if ts}
+    state['mail_keys'] = {ident: k for ident, k in state.get('mail_keys', {}).items()
+                          if int(ident.rsplit(':', 1)[1]) >= horizon}
     state['requests'] = {k: r for k, r in state.get('requests', {}).items()
                          if not r['acknowledged'] or r['created_at'] >= horizon}
     for name in ('events_logged', 'events_balled'):

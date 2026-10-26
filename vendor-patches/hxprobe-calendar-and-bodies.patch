@@ -671,6 +671,174 @@ new file mode 100644
 +    }
 +
 +}
+diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
+--- a/hxprobe/src/folder.rs
++++ b/hxprobe/src/folder.rs
+@@ -113,6 +113,42 @@ fn trailing_name(data: &[u8]) -> Option<String> {
+     (!name.chars().any(char::is_control)).then_some(name)
+ }
+ 
++/// Expanded message objects embedded in transaction wrappers have no
++/// individual length envelope. Bound each header by the next message object
++/// or known envelope, and by 4096 bytes.
++fn message_headers(data: &[u8]) -> Vec<(usize, &[u8])> {
++    let starts: Vec<_> = memchr::memmem::find_iter(data, &signature(0x00ca))
++        .filter(|&p| message_key(&data[p..], 0x00ca).is_some())
++        .collect();
++    let boundaries: BTreeSet<_> = [
++        (0x04c2, 0x004d),
++        (0x0430, 0x004f),
++        (0x0740, 0x00ca),
++        (0x02c8, 0x00bf),
++    ]
++    .into_iter()
++    .flat_map(|(tag, class)| envelopes(data, tag, class).into_iter().map(|(p, _)| p - 10))
++    .collect();
++    starts
++        .iter()
++        .enumerate()
++        .filter_map(|(i, &start)| {
++            let next_envelope = boundaries
++                .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
++                .next()
++                .copied()
++                .unwrap_or(data.len());
++            let end = starts
++                .get(i + 1)
++                .copied()
++                .unwrap_or(data.len())
++                .min(next_envelope)
++                .min(start.saturating_add(4096));
++            Some((start, data.get(start..end)?))
++        })
++        .collect()
++}
++
+ impl Index {
+     /// First pass: gather the catalog and message/view membership references.
+     pub fn observe(&mut self, block: usize, data: &[u8]) {
+@@ -183,50 +219,10 @@ impl Index {
+                 self.link_single_anchor(&mut links, start, object, needle, folders);
+             }
+         }
+-        // Expanded message objects embedded in transaction wrappers include
+-        // a full typed folder reference at +408. Unlike compact objects, they
+-        // do not have an individual length envelope. Bound the header by the
+-        // next message object, and only take its first ItemClass anchor.
+-        let starts: Vec<_> = memchr::memmem::find_iter(data, &signature(0x00ca))
+-            .filter(|&p| message_key(&data[p..], 0x00ca).is_some())
+-            .collect();
+-        let boundaries: BTreeSet<_> = [
+-            (0x04c2, 0x004d),
+-            (0x0430, 0x004f),
+-            (0x0740, 0x00ca),
+-            (0x02c8, 0x00bf),
+-        ]
+-        .into_iter()
+-        .flat_map(|(tag, class)| envelopes(data, tag, class).into_iter().map(|(p, _)| p - 10))
+-        .collect();
+-        for (i, &start) in starts.iter().enumerate() {
+-            let next_envelope = boundaries
+-                .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
+-                .next()
+-                .copied()
+-                .unwrap_or(data.len());
+-            let end = starts
+-                .get(i + 1)
+-                .copied()
+-                .unwrap_or(data.len())
+-                .min(next_envelope)
+-                .min(start.saturating_add(4096));
+-            let Some(object) = data.get(start..end) else {
++        for (start, object) in message_headers(data) {
++            let Some(id) = self.catalogued_folder(object) else {
+                 continue;
+             };
+-            let Some(field) = object.get(408..) else {
+-                continue;
+-            };
+-            let Some((id, account)) = reference(field, 0x004d, &[2, 0x02ac]) else {
+-                continue;
+-            };
+-            if !self
+-                .folders
+-                .get(&id)
+-                .is_some_and(|f| f.account_id == account)
+-            {
+-                continue;
+-            }
+             let Some(rel) = memchr::memmem::find(object, needle) else {
+                 continue;
+             };
+@@ -241,6 +237,42 @@ impl Index {
+         links
+     }
+ 
++    /// Resolve IPM.Note anchor positions to the local key of their message
++    /// object. The key is a store-local candidate identity; see
++    /// spec/outlook/stable-message-id-research.md for what it has been
++    /// observed to survive.
++    pub fn keys(&self, data: &[u8], needle: &[u8]) -> BTreeMap<usize, u64> {
++        let mut keys = BTreeMap::new();
++        for (start, object) in envelopes(data, 0x0740, 0x00ca) {
++            let Some(key) = message_key(object, 0x00ca) else {
++                continue;
++            };
++            let mut anchors = memchr::memmem::find_iter(object, needle);
++            if let (Some(anchor), None) = (anchors.next(), anchors.next()) {
++                keys.insert(start + anchor, key);
++            }
++        }
++        for (start, object) in message_headers(data) {
++            let Some(rel) = memchr::memmem::find(object, needle) else {
++                continue;
++            };
++            if rel < 454 {
++                continue;
++            }
++            if let Some(key) = message_key(object, 0x00ca) {
++                keys.insert(start + rel, key);
++            }
++        }
++        keys
++    }
++
++    /// The typed folder reference at +408 of an expanded header, when it
++    /// names a catalogued folder of the same account.
++    fn catalogued_folder(&self, object: &[u8]) -> Option<u64> {
++        let (id, account) = reference(object.get(408..)?, 0x004d, &[2, 0x02ac])?;
++        self.folders.get(&id).is_some_and(|f| f.account_id == account).then_some(id)
++    }
++
+     fn link_single_anchor(
+         &self,
+         links: &mut BTreeMap<usize, BTreeSet<u64>>,
+@@ -394,6 +426,25 @@ mod tests {
+         assert_eq!(index.links(&expanded, &note())[&610], BTreeSet::from([51]));
+     }
+ 
++    #[test]
++    fn keys_follow_message_headers_without_a_folder_catalog() {
++        let index = Index::default();
++        let mut expanded = object(0xca, 70, 0, 70, 500);
++        expanded.extend(note());
++        let mut early = object(0xca, 71, 0, 71, 100);
++        early.extend(note());
++        let mut compact = object(0xca, 72, 0, 72, 100);
++        compact.extend(note());
++        let mut data = expanded.clone();
++        data.extend(&early);
++        data.extend(envelope(0x740, &compact));
++        let keys = index.keys(&data, &note());
++        assert_eq!(keys.get(&500), Some(&70));
++        assert_eq!(keys.len(), 2, "an anchor inside the fixed header is not keyed");
++        assert_eq!(keys.values().copied().collect::<BTreeSet<_>>(), BTreeSet::from([70, 72]));
++        assert!(index.links(&data, &note()).is_empty(), "keys do not invent folder links");
++    }
++
+     #[test]
+     fn conflicting_folder_names_are_not_silently_overwritten() {
+         let mut index = Index::default();
 diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 --- a/hxprobe/src/main.rs
 +++ b/hxprobe/src/main.rs
@@ -686,7 +854,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
  //!   hxprobe map    <file> [n]        dump the named field map for n records
  //!   hxprobe find   <file> <term>     show records whose text contains <term>
  //! ```
-@@ -25,6 +28,8 @@
+@@ -25,6 +28,8 @@ use std::fs::File;
  use memmap2::Mmap;
  
  mod block;
@@ -695,7 +863,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
  mod folder;
  mod header;
  mod lz;
-@@ -202,7 +207,7 @@
+@@ -202,7 +207,7 @@ fn cmd_find(path: &str, term: &str, limit: usize) {
  }
  
  /// Parse the whole store into a SQLite database with a full-text index.
@@ -704,7 +872,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      let mm = map(path);
      let needle = record::anchor_needle();
      let offs = block::find_all(&mm);
-@@ -210,9 +215,12 @@
+@@ -210,9 +215,12 @@ fn cmd_db(path: &str, db_path: &str) {
  
      // Folder catalogs and membership metadata can occur after the messages.
      let mut folders = folder::Index::default();
@@ -717,7 +885,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
          }
      }
  
-@@ -249,7 +257,13 @@
+@@ -249,7 +257,17 @@ fn cmd_db(path: &str, db_path: &str) {
               sent_utc     TEXT,
               -- 1 when the subject came from another record in the same
               -- conversation, because this record stores none of its own.
@@ -728,11 +896,15 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 +             copies       INTEGER,   -- revisions collapsed into this row
 +             -- sender, normalized subject and preview opening: the identity
 +             -- this row's copies share; NULL when too short to identify.
-+             copy_key     TEXT
++             copy_key     TEXT,
++             -- store-local keys of the message objects merged into this row,
++             -- decimal, comma-separated and ascending; NULL when none linked.
++             -- More than one means this row joined distinct store items.
++             local_keys   TEXT
           );
           CREATE TABLE message_folders (
               message_id INTEGER NOT NULL REFERENCES messages(id),
-@@ -259,6 +273,28 @@
+@@ -259,6 +277,28 @@ fn cmd_db(path: &str, db_path: &str) {
           CREATE INDEX message_folders_folder ON message_folders(folder_id);
           CREATE INDEX messages_sent ON messages(sent_unix);
           CREATE INDEX messages_sender ON messages(sender);
@@ -761,7 +933,20 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
           CREATE VIRTUAL TABLE messages_fts USING fts5(
               sender, sender_name, recipients, subject, body,
               content='messages', content_rowid='id', tokenize='porter unicode61'
-@@ -314,9 +349,17 @@
+@@ -278,10 +318,12 @@ fn cmd_db(path: &str, db_path: &str) {
+         let Some(b) = block::parse(&mm, o) else { continue };
+         blocks_ok += 1;
+         let folder_links = folders.links(&b.data, &needle);
++        let local_keys = folders.keys(&b.data, &needle);
+ 
+         for loc in records(&b.data, &needle) {
+             let mut r = record::parse(o, &b.data, loc.anchor);
+             r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
++            r.local_keys.extend(local_keys.get(&loc.anchor));
+             let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);
+ 
+             // The named map is authoritative for every field it covers: it
+@@ -314,9 +356,17 @@ fn cmd_db(path: &str, db_path: &str) {
                  .filter(|t| Some(**t) != r.sender.as_deref())
                  .map(|t| t.to_string())
                  .collect();
@@ -781,7 +966,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
                  }
              }
  
-@@ -389,9 +432,80 @@
+@@ -389,9 +439,80 @@ fn cmd_db(path: &str, db_path: &str) {
          }
      }
  
@@ -864,15 +1049,15 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      println!("  {} folders; {with_folder}/{stored} messages linked ({multi_folder} with multiple observed folders)", folders.folders.len());
      let tx = db.transaction().expect("tx");
      {
-@@ -414,13 +528,13 @@
+@@ -414,13 +535,13 @@ fn cmd_db(path: &str, db_path: &str) {
                  "INSERT INTO messages
                     (block,sender,sender_name,recipients,subject,message_id,body,
                      html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
 -                    subject_inherited)
-+                    subject_inherited,preview,body_source,copies,copy_key)
++                    subject_inherited,preview,body_source,copies,copy_key,local_keys)
                   VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,
 -                         datetime(?12,'unixepoch'),?13)",
-+                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17)",
++                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17,?18)",
              )
              .expect("prepare");
  
@@ -881,7 +1066,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
              ins.execute(rusqlite::params![
                  r.offset as i64,
                  r.sender,
-@@ -435,6 +549,10 @@
+@@ -435,6 +556,11 @@ fn cmd_db(path: &str, db_path: &str) {
                  if r.html.is_some() { "full" } else { "preview" },
                  r.sent_unix,
                  r.subject_inherited as i64,
@@ -889,10 +1074,11 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 +                r.body_source,
 +                r.copies as i64,
 +                body::copy_key(r),
++                local_keys(r),
              ])
              .expect("insert");
              let message_id = tx.last_insert_rowid();
-@@ -444,6 +562,54 @@
+@@ -444,6 +570,56 @@ fn cmd_db(path: &str, db_path: &str) {
              }
          }
      }
@@ -927,6 +1113,8 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 +            ("messages", stored),
 +            ("messages_full", best.iter().filter(|r| r.html.is_some()).count()),
 +            ("copies_collapsed", collapsed),
++            ("local_key_linked", best.iter().filter(|r| !r.local_keys.is_empty()).count()),
++            ("local_key_conflicts", best.iter().filter(|r| r.local_keys.len() > 1).count()),
 +            ("sidecar_files", sidecars.len()),
 +            ("sidecar_linked", sidecars.linked),
 +            ("sidecar_rejected", sidecars.rejected),
@@ -947,10 +1135,20 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      tx.commit().expect("commit");
  
      db.execute_batch(
-@@ -474,6 +638,10 @@
+@@ -471,9 +647,20 @@ fn cmd_db(path: &str, db_path: &str) {
+     }
+ }
+ 
++/// The local keys of every revision merged into this row.
++fn local_keys(r: &record::Record) -> Option<String> {
++    (!r.local_keys.is_empty())
++        .then(|| r.local_keys.iter().map(u64::to_string).collect::<Vec<_>>().join(","))
++}
++
  /// Combine a later revision of a message into the copy already held.
  fn merge(prev: &mut record::Record, r: record::Record) {
      prev.folder_ids.extend(r.folder_ids);
++    prev.local_keys.extend(r.local_keys);
 +    prev.copies += r.copies;
 +    if prev.preview.is_none() {
 +        prev.preview = r.preview;
@@ -958,7 +1156,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      if prev.subject.is_none() {
          prev.subject = r.subject;
      }
-@@ -491,11 +659,14 @@
+@@ -491,10 +678,13 @@ fn merge(prev: &mut record::Record, r: record::Record) {
          (Some(a), Some(b)) => b.len() > a.len(),
          _ => false,
      };
@@ -969,13 +1167,12 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 -    }
 -    if r.body.len() > prev.body.len() {
 +        prev.body_source = r.body_source;
-         prev.body = r.body;
-+    } else if prev.html.is_none() && r.body.len() > prev.body.len() {
 +        prev.body = r.body;
++    } else if prev.html.is_none() && r.body.len() > prev.body.len() {
+         prev.body = r.body;
      }
  }
- 
-@@ -504,7 +675,9 @@
+@@ -504,7 +694,9 @@ hxprobe — parse HxStore.hxd, the New Outlook for Mac message store
  
  usage:
    hxprobe blocks <file>              verify every block, report coverage
@@ -986,7 +1183,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
    hxprobe map    <file> [n]          dump the field map for n records (0 = stats)
    hxprobe find   <file> <term> [n]   show records whose text contains <term>
  
-@@ -521,7 +694,11 @@
+@@ -521,7 +713,11 @@ fn main() {
  
      match args[1].as_str() {
          "blocks" => cmd_blocks(&args[2]),
@@ -1002,7 +1199,16 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 diff --git a/hxprobe/src/record.rs b/hxprobe/src/record.rs
 --- a/hxprobe/src/record.rs
 +++ b/hxprobe/src/record.rs
-@@ -40,6 +40,13 @@
+@@ -29,6 +29,8 @@ pub struct Record {
+     pub recipients: Vec<String>,
+     /// Folder keys observed across cached revisions; this is not a live view.
+     pub folder_ids: std::collections::BTreeSet<u64>,
++    /// Local message-object keys observed across merged revisions.
++    pub local_keys: std::collections::BTreeSet<u64>,
+     pub subject: Option<String>,
+     pub message_id: Option<String>,
+     /// Plain text, tags stripped and entities decoded.
+@@ -40,6 +42,13 @@ pub struct Record {
      /// True when the subject came from a sibling record in the same
      /// conversation rather than from this record's own bytes.
      pub subject_inherited: bool,
@@ -1016,7 +1222,7 @@ diff --git a/hxprobe/src/record.rs b/hxprobe/src/record.rs
  }
  
  /// Selecting the send time from the ticks in a record.
-@@ -513,7 +520,7 @@
+@@ -513,7 +522,7 @@ fn undouble(t: &str) -> String {
  /// used to be duplicated; this one is kept because the body is not a UTF-16LE
  /// run and so is not part of the named map.
  pub fn parse(offset: usize, blob: &[u8], anchor: usize) -> Record {

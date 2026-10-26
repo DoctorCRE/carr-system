@@ -267,7 +267,11 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              copies       INTEGER,   -- revisions collapsed into this row
              -- sender, normalized subject and preview opening: the identity
              -- this row's copies share; NULL when too short to identify.
-             copy_key     TEXT
+             copy_key     TEXT,
+             -- store-local keys of the message objects merged into this row,
+             -- decimal, comma-separated and ascending; NULL when none linked.
+             -- More than one means this row joined distinct store items.
+             local_keys   TEXT
          );
          CREATE TABLE message_folders (
              message_id INTEGER NOT NULL REFERENCES messages(id),
@@ -318,10 +322,12 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         let Some(b) = block::parse(&mm, o) else { continue };
         blocks_ok += 1;
         let folder_links = folders.links(&b.data, &needle);
+        let local_keys = folders.keys(&b.data, &needle);
 
         for loc in records(&b.data, &needle) {
             let mut r = record::parse(o, &b.data, loc.anchor);
             r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
+            r.local_keys.extend(local_keys.get(&loc.anchor));
             let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);
 
             // The named map is authoritative for every field it covers: it
@@ -533,9 +539,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 "INSERT INTO messages
                    (block,sender,sender_name,recipients,subject,message_id,body,
                     html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
-                    subject_inherited,preview,body_source,copies,copy_key)
+                    subject_inherited,preview,body_source,copies,copy_key,local_keys)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,
-                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17)",
+                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17,?18)",
             )
             .expect("prepare");
 
@@ -558,6 +564,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 r.body_source,
                 r.copies as i64,
                 body::copy_key(r),
+                local_keys(r),
             ])
             .expect("insert");
             let message_id = tx.last_insert_rowid();
@@ -598,6 +605,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("messages", stored),
             ("messages_full", best.iter().filter(|r| r.html.is_some()).count()),
             ("copies_collapsed", collapsed),
+            ("local_key_linked", best.iter().filter(|r| !r.local_keys.is_empty()).count()),
+            ("local_key_conflicts", best.iter().filter(|r| r.local_keys.len() > 1).count()),
             ("sidecar_files", sidecars.len()),
             ("sidecar_linked", sidecars.linked),
             ("sidecar_rejected", sidecars.rejected),
@@ -642,9 +651,16 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     }
 }
 
+/// The local keys of every revision merged into this row.
+fn local_keys(r: &record::Record) -> Option<String> {
+    (!r.local_keys.is_empty())
+        .then(|| r.local_keys.iter().map(u64::to_string).collect::<Vec<_>>().join(","))
+}
+
 /// Combine a later revision of a message into the copy already held.
 fn merge(prev: &mut record::Record, r: record::Record) {
     prev.folder_ids.extend(r.folder_ids);
+    prev.local_keys.extend(r.local_keys);
     prev.copies += r.copies;
     if prev.preview.is_none() {
         prev.preview = r.preview;

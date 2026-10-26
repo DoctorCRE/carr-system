@@ -1,8 +1,14 @@
 # Stable message identity research for WR-000502
 
-Status is inconclusive. The repeated local object key is a candidate, not an
-established logical message identity. Audit [#2196](https://github.com/DoctorCRE/carr-system/pull/2196)
-slice B2 remains blocked. Intake and send retain their existing identity behavior.
+Status, 2026-10-26: the `00ca` local object key is the stable email ID for
+Outlook intake, scoped to one store item in one `HxStore.hxd`. On TEST-account
+copies it stayed the same across every observed edit of two revised messages.
+It differed between two distinct messages with identical sender, subject and
+preview, and between a reply and its parent. Moves, an Outlook restart and a
+store rebuild remain untested; see [what is still open](#still-open).
+Intake now carries the key on every email record that has one. Audit
+[#2196](https://github.com/DoctorCRE/carr-system/pull/2196) slice B2 can bind
+undo, deduplication and proposal links to it. Send keeps its existing behavior.
 
 ## Candidate comparison
 
@@ -84,7 +90,91 @@ established, no identical-content distinct-message comparison was established,
 and no metadata-tail lifecycle comparison was established. No second message
 identity is inferred from a changed physical location or the reply operation.
 
-## Remaining experiment
+## Controlled TEST-account comparison, 2026-10-26
+
+This study ran on Studio between 06:50 and 07:10 CDT on 2026-10-26. It reused
+the twelve private copies of campaign `outlook-decode-study-2026-10-21-01a15e6e`
+(`001-control` through `012-control`). Their TEST-account operations were a new
+draft, a calendar event, read-state preparation, two flag attempts, an attached
+file and an unsent reply. No mail was sent, and no new mailbox change was made.
+
+A fresh capture was not possible. `com.carr.outlook-research-copy` exited with
+EPERM (errno 1) at 06:51, so its helper lacks Full Disk Access. The request to
+drive Outlook for a move and a restart was denied. Both are human-only steps.
+
+A temporary, uncommitted hxprobe command wrote the verified blocks that
+contained the TEST address into private scratch files. For each repeated-key
+`00ca` header, the header was bounded by the next header or 4096 bytes, and the
+IPM.Note anchor inside that span was read. Five TEST-account store items were
+found. The labels below are local to this study. Raw keys stay private.
+
+| Item | What it is | Snapshots present | Observed revisions | Key across snapshots |
+| --- | --- | --- | --- | --- |
+| D | Synthetic draft `HX-study-...-draft-001` | 002 to 012 | Last-modified tick changed at 003, 007 and 008; new header variants at 003, 005 and 008 | One key, unchanged |
+| W1 | Received vendor welcome email | 001 to 012 | Header fields at +104 and +312 changed at 008 and 009 (flag); replied to at 010 | One key, unchanged |
+| W2 | Second welcome email, same sender, subject and preview as W1 | 001 to 012 | None observed | One key, unchanged, different from W1 |
+| R | Unsent reply to W1, carrying W1's Message-ID string | 010 to 011 | None observed | One key, different from W1 and D |
+| X | Unchanged TEST control item | 002 to 012 | None | One key, unchanged |
+
+W1 and W2 are distinct messages: their InternetMessageId values and send times
+differ, while sender, subject and preview are identical. The existing copy join
+(sender, normalized subject and opening, within a day) merges them into one
+row. That is the B2 duplicate-template case. R shows why a Message-ID string
+cannot serve: the reply's record contains its parent's ID.
+
+Whole-store consistency was measured on the shared copies with hashed field
+values only. No content was printed or kept.
+
+| Check, decoder-level | `001-control` | `012-control` |
+| --- | --- | --- |
+| IPM.Note anchors with a key | 3,275 of 4,232 | 3,309 of 4,297 |
+| Distinct keys | 779 | 786 |
+| Keys whose revisions disagree on Message-ID | 0 | 0 |
+| Keys with the same Message-ID set in both snapshots | 777 of 777 | |
+| Message-IDs whose key set changed between the snapshots | 2 of 656 | |
+| Content-identical groups spanning more than one key | 16 | 16 |
+
+Sender and subject extraction disagree inside 411 keys. The TEST items show
+the cause: quoted headers in replies feed the heuristic field map. Those fields
+are not identity evidence either way. Ten of the 16 content-identical groups
+share a Message-ID across keys. That fits one email held as two store items, such
+as a sent copy and a received copy, but this study did not establish it. The key
+identifies a store item, not one logical email across folders or accounts.
+
+### Decoder and intake change
+
+`hxprobe db` now writes `messages.local_keys`: the comma-separated keys of every
+message object merged into the row, and NULL when none was linked. On
+`012-control`, the installer-equivalent build linked 1,825 of 2,133 rows; 283
+of them held more than one key. Through the intake loader, 1,465 of 1,772 intake
+rows carried at least one key and 284 carried two or more. The TEST welcome row
+carried both W1 and W2, which exposes the merge for B2 to split.
+
+The intake records the keys per intake ID in its private state as `mail_keys`.
+They expire with the mail they describe. A decoder without the column still
+runs, and its mail simply records no keys. Merging and idempotency keys are
+unchanged; B2 decides how to split rows.
+
+### Fallback when no key is linked
+
+Rows without a key keep the existing intake ID: a 20-hex hash of `copy_key`
+(sender, normalized subject, opening) plus the first send time. That composite
+was observed to merge W1 and W2, so B2 must not treat it as unique. It remains
+the fallback for the rows the key does not reach.
+
+## Still open
+
+The following are untested. Each needs a fresh capture before and after one
+TEST-account change, using the snapshot helper after Joe re-grants Full Disk
+Access to `~/carr-local/bin/outlook-research-copy`.
+
+- Moving a message between folders.
+- Quitting and restarting Outlook, and a full resync.
+- A store rebuild or account removal, which may renumber every key.
+- Two drafts with identical text and different recipients, as the original plan
+  specified. W1 and W2 cover identical content with the same recipient.
+
+## Original remaining experiment, superseded
 
 The current work-request card requires at least two revised and two distinct
 messages. Establish TEST-account ownership and independent current revision

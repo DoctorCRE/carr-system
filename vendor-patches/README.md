@@ -36,6 +36,11 @@ WHAT THE PATCH ADDS to `hxprobe db <file> [out.db] [files-dir]`:
   subject and preview opening within a day. A preview-only copy then joins the
   one full copy with the same sender and opening. The full body always wins,
   and `copy_key` is stored as the identity the copies share.
+- Store-local message keys (WR-000502). `messages.local_keys` lists, comma-separated,
+  the key of every message object merged into the row; more than one means the
+  copy join merged distinct store items. `local_key_linked` and
+  `local_key_conflicts` count them. See
+  [the identity study](../spec/outlook/stable-message-id-research.md).
 - A `meta` table with block verification, message, collapse, sidecar and event
   counts, which the intake job checks before it trusts a run (at least 95% of
   blocks verified).

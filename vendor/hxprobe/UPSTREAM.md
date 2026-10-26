@@ -87,6 +87,15 @@ The extraction selectors and SQLite contracts retain their existing behavior.
 rename and checks the actual `map` output using a synthetic block.
 The repository gates class discovers this test alongside the existing surface tests.
 
+## Local message keys
+
+WR-000502 adds `messages.local_keys` to `db`. Each IPM.Note anchor inside a
+bounded `00ca` message header takes that header's repeated u64 key. The same
+change is spliced into `vendor-patches/hxprobe-calendar-and-bodies.patch`, so
+the intake installer builds it too. The patch keeps its other sections byte for
+byte. [The identity study](../../spec/outlook/stable-message-id-research.md)
+records which operations the key was observed to survive.
+
 ## Calendar lifecycle limits
 
 The maintained decoder and installer patch preserve byte-distinct calendar
