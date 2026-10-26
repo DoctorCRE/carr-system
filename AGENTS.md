@@ -181,7 +181,7 @@ gh pr merge <n> --squash --delete-branch
 ```
 
 PR branches are never rebased or force-pushed, `--force-with-lease` included.
-To catch up with main, merge `origin/main` into the branch. This overrides the
+To catch up with main, merge origin/main into the branch. This overrides the
 rebase and force-push steps in the tstack skills (`modernize`, `full-send`,
 `full-stop`); Joe 2026-10-26: "Keep never-rebase/never-force-push."
 
