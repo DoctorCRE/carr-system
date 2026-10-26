@@ -269,6 +269,39 @@ class RuleClaimGateTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.run_hook(self.turn(assistant(text))).get('decision'), 'block')
 
+    def test_email_rule_reports_do_not_require_local_enforcement_code(self):
+        for text in [
+            'I created an Outlook mail rule. I checked Gmail delivery.',
+            'I added a Gmail rule to forward incoming mail.',
+            'I saved an email rule.',
+            'I created an inbox rule.',
+            'I added a forwarding rule.',
+            'The Outlook rule is saved.',
+            'The Outlook mail rule is now in place.',
+            'The Gmail rule has been created.',
+        ]:
+            with self.subTest(text=text):
+                self.assertNotEqual(self.run_hook(self.turn(assistant(text)))
+                                    .get('decision'), 'block')
+
+    def test_email_rules_do_not_exempt_durable_claims(self):
+        for text in [
+            'I created a mail rule and a lesson.',
+            'I added a mail rule and a durable rule.',
+            'I added an Outlook mail rule and saved a lesson.',
+            'I created a Gmail rule and added a durable rule.',
+            "The Outlook rule is now in place and I'll remember this.",
+            'I saved a lesson after creating the Outlook mail rule.',
+            'I added an Outlook mail rule. The rule is saved.',
+            'I added a rule to remember to check Outlook.',
+            'The Gmail lesson is saved.',
+            'I added an Outlook mail rule and the lesson is now in place.',
+            "I created a mail rule. It won't happen again.",
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(self.run_hook(self.turn(assistant(text)))
+                                 .get('decision'), 'block')
+
     def test_conditional_dispatch_segment_counts(self):
         command = 'false && bin/codex-job DoctorCRE/carr-system build/rule "Build a gate"'
         self.assertNotEqual(self.run_hook(self.turn(call('Bash', command=command),
