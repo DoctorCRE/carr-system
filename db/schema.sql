@@ -69627,7 +69627,7 @@ $$;
 CREATE FUNCTION public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings public.vector[]) RETURNS jsonb
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'pg_temp'
-    AS $$
+    AS $_$
 with policy as materialized (
   select policy_id,version from public.retrieval_ranking_policy
    where policy_id=coalesce(p_policy_id,
@@ -69635,7 +69635,11 @@ with policy as materialized (
      and status in ('candidate','active')
 ),
 visible as materialized (
-  select c.*, s.current_revision_id as revision_id
+  select c.*, s.current_revision_id as revision_id,
+         p_query ~ '^[[:alpha:][:space:]]+$'
+           and lower(p_query) !~ '(^|[[:space:]])or([[:space:]]|$)'
+           and pg_catalog.numnode(pg_catalog.plainto_tsquery('english',p_query)) > 0
+           and pg_catalog.strip(pg_catalog.to_tsvector('english',coalesce(c.section_title,''))) = pg_catalog.strip(pg_catalog.to_tsvector('english',p_query)) as title_topic_match
     from public.current_retrievable_doctrine(p_actor_id,p_content_classes) c
     join public.doctrine_section s on s.id=c.section_id
 ),
@@ -69649,7 +69653,7 @@ coverage as materialized (
 ),
 lexical as materialized (
   select l.*, row_number() over (
-    order by l.final_score desc,l.concept_score desc,l.lexical_score desc,l.section_key,l.section_id) as position
+    order by (l.provenance->>'title_topic_match')::boolean desc,l.final_score desc,l.concept_score desc,l.lexical_score desc,l.section_key,l.section_id) as position
     from public.search_doctrine_situations(p_query,p_actor_id,p_content_classes,100,p_policy_id,true) l
 ),
 chunk_scores as materialized (
@@ -69671,12 +69675,13 @@ semantic as (
     from nearest n where similarity > 0
 ),
 blended as (
-  select v.section_id,v.section_key,v.section_title as title,v.doc_slug,v.content_class,
+  select v.section_id,v.section_key,v.section_title as title,v.doc_slug,v.content_class,v.title_topic_match,
          coalesce(l.snippet,left(v.plain_text,240)) as snippet,
          coalesce(l.lexical_score,0) as lexical_score,
          coalesce(l.concept_score,0) as concept_score,
          (30.5 * (coalesce(1.0/(60+l.position),0) + coalesce(1.0/(60+s.position),0)))::double precision as final_score,
          coalesce(l.provenance,'{}'::jsonb) || jsonb_build_object(
+           'title_topic_match',v.title_topic_match,
            'complete',true,'policy_id',p.policy_id,'policy_version',p.version,
            'blend_id','rrf-60-v1','rrf_k',60,'rrf_scale',30.5,
            'lexical_position',l.position,'semantic_position',s.position,
@@ -69691,13 +69696,13 @@ blended as (
 ),
 limited as (
   select b.*,b.final_score as rank from blended b
-   order by final_score desc,similarity desc,concept_score desc,lexical_score desc,section_key,section_id
+   order by title_topic_match desc,final_score desc,similarity desc,concept_score desc,lexical_score desc,section_key,section_id
    limit greatest(1,least(coalesce(p_limit,20),100))
 ),
 hits as (
-  select coalesce(jsonb_agg((to_jsonb(l)-'similarity') || jsonb_build_object(
+  select coalesce(jsonb_agg((to_jsonb(l)-'similarity'-'title_topic_match') || jsonb_build_object(
     'provenance',l.provenance || jsonb_build_object('final_score',l.final_score))
-    order by l.final_score desc,l.similarity desc,l.concept_score desc,l.lexical_score desc,l.section_key,l.section_id),'[]'::jsonb) as value
+    order by l.title_topic_match desc,l.final_score desc,l.similarity desc,l.concept_score desc,l.lexical_score desc,l.section_key,l.section_id),'[]'::jsonb) as value
   from limited l
 )
 select jsonb_build_object('visible',c.visible,'embedded',c.embedded,'hits',
@@ -69706,7 +69711,7 @@ select jsonb_build_object('visible',c.visible,'embedded',c.embedded,'hits',
        from public.search_doctrine_situations(p_query,p_actor_id,p_content_classes,p_limit,p_policy_id,true) l)
   else h.value end)
 from coverage c cross join hits h
-$$;
+$_$;
 
 
 --
@@ -69732,7 +69737,12 @@ with
     select websearch_to_tsquery('english', q) as tsq from normalized
   ),
   current_set as materialized (
-    select * from public.current_retrievable_doctrine(p_actor_id, p_content_classes)
+    select c.*, n.q ~ '^[[:alpha:][:space:]]+$'
+       and n.q !~ '(^|[[:space:]])or([[:space:]]|$)'
+       and numnode(plainto_tsquery('english', n.q)) > 0
+       and strip(to_tsvector('english',coalesce(c.section_title,''))) = strip(to_tsvector('english', n.q)) as title_topic_match
+      from public.current_retrievable_doctrine(p_actor_id, p_content_classes) c
+      cross join normalized n
   ),
   lexical_raw as (
     select c.section_id,
@@ -69856,7 +69866,7 @@ with
   limited as materialized (
     select * from scored
      where final_score > 0
-     order by final_score desc, concept_score desc, lexical_score desc, section_key asc
+     order by title_topic_match desc, final_score desc, concept_score desc, lexical_score desc, section_key asc, section_id asc
      limit greatest(1, least(coalesce(p_limit, 20), 100))
   )
 select l.section_id, l.section_key, l.section_title, l.doc_slug, l.content_class,
@@ -69864,6 +69874,7 @@ select l.section_id, l.section_key, l.section_title, l.doc_slug, l.content_class
        coalesce(l.snippet, left(l.plain_text, 240)) as snippet,
        l.lexical_score, l.concept_score, l.final_score,
        jsonb_build_object(
+         'title_topic_match', l.title_topic_match,
          'complete', true, 'policy_id', l.policy_id, 'policy_version', l.policy_version,
          'lexical_score', l.lexical_score, 'concept_score', l.concept_score,
          'final_score', l.final_score, 'phrase_ids', to_jsonb(l.phrase_ids),
@@ -69871,7 +69882,7 @@ select l.section_id, l.section_key, l.section_title, l.doc_slug, l.content_class
        || case when l.used_fallback then jsonb_build_object('fallback', true)
                else '{}'::jsonb end
   from limited l
- order by l.final_score desc, l.concept_score desc, l.lexical_score desc, l.section_key asc
+ order by l.title_topic_match desc, l.final_score desc, l.concept_score desc, l.lexical_score desc, l.section_key asc, l.section_id asc
 $_$;
 
 
@@ -122069,6 +122080,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0975_client_portal.sql	32530aadc4b1c5c4d9b7ac5fd8328fab2a091c53d9ecae52c5054577dfe5d6ad	1970-01-01 00:00:00+00
 0976_client_portal_binding.sql	ddca815f5bccff21ea9ad828e928a56ca318fdbc3dd7d9fe74106aa3b7f00a44	1970-01-01 00:00:00+00
 0977_retire_work_shape_admission.sql	1a9b2f3abd4b673b073a2fa57fca31be046447c33c1f6309b2d034b775b726f3	1970-01-01 00:00:00+00
+0978_doctrine_title_topic_ranking.sql	852b8da1601a9277e7f9e2cd5fbf1385785af2356b4a08bc92438378c994c72b	1970-01-01 00:00:00+00
 \.
 
 
