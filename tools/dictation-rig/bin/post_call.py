@@ -685,6 +685,9 @@ def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any], 
     model cannot place is kicked back as an approval card. Confident here is
     deterministic and checkable, never the model's own say-so.
     """
+    unavailable = report.get("deal_check")
+    if isinstance(unavailable, dict) and unavailable.get("status") == "unavailable":
+        return f"Deal check unavailable ({unavailable['exception_class']})."
     value: dict[str, Any] = update[field]
     if value.get("needs_review"):
         return str(value["needs_review"])
@@ -702,9 +705,6 @@ def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any], 
         return "The call stated more than one version of this change."
     # Jev's RIGHT DEAL answers "unclear which deal". Its RIGHT DETAILS judges
     # the update's summary, not this change, so it stays advisory here.
-    unavailable = report.get("deal_check")
-    if isinstance(unavailable, dict) and unavailable.get("status") == "unavailable":
-        return f"Deal check unavailable ({unavailable['exception_class']})."
     deal_check = (update.get("checks") or {}).get("deal")
     if not isinstance(deal_check, dict):
         return "The automatic deal check did not run."
