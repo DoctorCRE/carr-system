@@ -22,11 +22,15 @@ Writes:
   _data/pecos-baseline-<Q>.json — compact NPI|ENRLMT_ID set of ALL FL/AL rows
     (individuals + orgs, no names) so next quarter's run can diff true
     newly-appearing enrollments instead of relying on the date decode.
+  _data/pecos-checkpoint-<Q>.json — resumable progress for an interrupted run;
+    removed after both final outputs and the source receipt are committed.
+  _data/pecos-source-<Q>.json — source digest that makes a completed quarter
+    idempotent and refuses changed-content replays.
 
 Usage: python3 build-pecos-pool.py <PPEF_Enrollment_Extract.csv>
 Then DELETE the raw CSV and the zip it came from.
 """
-import sys, os, json, csv, re
+import sys, os, json, csv, re, hashlib, tempfile
 from datetime import date
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +38,12 @@ UP = os.path.join(HERE, "upstream")
 DATA = os.path.join(HERE, "_data")
 STATES = {"FL", "AL"}
 WINDOW_MONTHS = 24
+CHECKPOINT_INTERVAL = 10000
+REQUIRED_COLUMNS = {
+    "NPI", "MULTIPLE_NPI_FLAG", "PECOS_ASCT_CNTL_ID", "ENRLMT_ID",
+    "PROVIDER_TYPE_CD", "PROVIDER_TYPE_DESC", "STATE_CD", "FIRST_NAME",
+    "MDL_NAME", "LAST_NAME", "ORG_NAME",
+}
 
 def tc(s): return " ".join(w.capitalize() for w in str(s).split())
 
@@ -44,50 +54,128 @@ def enrl_date(enrlmt_id):
     try: return date(int(s[1:5]), int(s[5:7]), int(s[7:9]))
     except ValueError: return None
 
+def atomic_json(path, value):
+    fd, temporary = tempfile.mkstemp(prefix=".pecos-", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, indent=1)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary): os.unlink(temporary)
+
+def digest_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+def parse_quarter(filename, today):
+    match = re.search(r"(\d{4})\.(\d{2})\.\d{2}", os.path.basename(filename))
+    if not match:
+        return f"{today.year}Q{(today.month - 1) // 3 + 1}"
+    year, month = map(int, match.groups())
+    if not 1 <= month <= 12:
+        raise ValueError("source filename has an invalid data vintage")
+    return f"{year}Q{(month - 1) // 3 + 1}"
+
+def read_source_header(path):
+    with open(path, newline="", encoding="latin1") as stream:
+        header = next(csv.reader(stream), None)
+    if not header or len(header) != len(set(header)) or not REQUIRED_COLUMNS.issubset(header):
+        missing = sorted(REQUIRED_COLUMNS.difference(header or []))
+        raise ValueError("PECOS source schema drift; missing or duplicate required columns: " + ", ".join(missing))
+
+def save_checkpoint(path, digest, processed, baseline, recent, n_total, n_state):
+    atomic_json(path, {
+        "source_sha256": digest,
+        "processed_rows": processed,
+        "baseline": sorted(baseline),
+        "recent": {key: {**row, "_d": row["_d"].isoformat()} for key, row in recent.items()},
+        "n_total": n_total,
+        "n_state": n_state,
+    })
+
 def main():
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: build-pecos-pool.py <PPEF_Enrollment_Extract.csv>")
     src = sys.argv[1]
     today = date.today()
     cutoff = date(today.year - WINDOW_MONTHS // 12, today.month, 1)
-    # Label the baseline by the DATA vintage (extract date in the filename),
-    # not the run date — CMS's "Q1" file is the April extract.
-    m = re.search(r"(\d{4})\.(\d{2})\.\d{2}", os.path.basename(src))
-    if m:
-        y, mo = int(m.group(1)), int(m.group(2))
-        quarter = f"{y}Q{(mo - 2) // 3 + 1}" if mo > 1 else f"{y - 1}Q4"
-    else:
-        quarter = f"{today.year}Q{(today.month - 1) // 3 + 1}"
+    quarter = parse_quarter(src, today)
+    digest = digest_file(src)
+    read_source_header(src)
+    os.makedirs(UP, exist_ok=True)
+    os.makedirs(DATA, exist_ok=True)
+    checkpoint_path = os.path.join(DATA, f"pecos-checkpoint-{quarter}.json")
+    receipt_path = os.path.join(DATA, f"pecos-source-{quarter}.json")
+    if os.path.exists(receipt_path):
+        receipt = json.load(open(receipt_path))
+        if receipt.get("source_sha256") != digest:
+            raise ValueError("PECOS quarter replay changed source content; preserve outputs and review the new source")
+        print(f"[replay] {quarter} source already processed; outputs remain unchanged")
+        return
 
-    baseline = set()
-    recent = {}   # NPI|state -> row, newest enrollment wins
-    n_total = n_state = 0
+    if os.path.exists(checkpoint_path):
+        checkpoint = json.load(open(checkpoint_path))
+        if checkpoint.get("source_sha256") != digest:
+            raise ValueError("PECOS checkpoint belongs to different source content; preserve it and review the new source")
+        processed = checkpoint["processed_rows"]
+        baseline = set(checkpoint["baseline"])
+        recent = {key: {**row, "_d": date.fromisoformat(row["_d"])} for key, row in checkpoint["recent"].items()}
+        n_total, n_state = checkpoint["n_total"], checkpoint["n_state"]
+    else:
+        processed = n_total = n_state = 0
+        baseline, recent = set(), {}
+
+    def checkpoint_now():
+        save_checkpoint(checkpoint_path, digest, processed, baseline, recent, n_total, n_state)
+
     with open(src, newline="", encoding="latin1") as fh:
         rd = csv.DictReader(fh)
-        for r in rd:
+        for row_number, r in enumerate(rd, 1):
+            if row_number <= processed:
+                continue
             n_total += 1
-            if r.get("STATE_CD") not in STATES: continue
+            state = r["STATE_CD"].strip()
+            if state not in STATES:
+                processed = row_number
+                if processed % CHECKPOINT_INTERVAL == 0: checkpoint_now()
+                continue
             n_state += 1
-            baseline.add(f"{r['NPI']}|{r['ENRLMT_ID']}")
+            npi, enrollment_id = r["NPI"].strip(), r["ENRLMT_ID"].strip()
+            if not re.fullmatch(r"\d{10}", npi) or not re.fullmatch(r"[IO]\d{8}\d+", enrollment_id):
+                raise ValueError(f"PECOS row {row_number} has an invalid NPI or enrollment id")
+            baseline.add(f"{npi}|{enrollment_id}")
             last, first = r.get("LAST_NAME", "").strip(), r.get("FIRST_NAME", "").strip()
-            if not (last and first): continue   # org rows can't join by person name
-            d = enrl_date(r["ENRLMT_ID"])
-            if d is None or d < cutoff: continue
-            k = f"{r['NPI']}|{r['STATE_CD']}"
-            if k in recent and recent[k]["_d"] >= d: continue
-            prof = tc(r.get("PROVIDER_TYPE_DESC", "").replace("PRACTITIONER - ", ""))
-            recent[k] = {"_d": d,
-                "name": f"{tc(first)} {tc(last)}",
-                "profession": prof, "city": "", "county": "",
-                "state": r["STATE_CD"], "date": d.strftime("%m/%d/%Y"),
-                "detail": f"new Medicare enrollment ({prof}) filed {d.isoformat()}, "
-                          f"NPI {r['NPI']}, enrolled state {r['STATE_CD']} "
-                          f"(practice geography from NPPES via enrich-pecos-nppes.py)"}
+            if first and last:
+                d = enrl_date(enrollment_id)
+                if d is not None and d >= cutoff:
+                    k = f"{npi}|{state}"
+                    if k not in recent or recent[k]["_d"] < d:
+                        prof = tc(r.get("PROVIDER_TYPE_DESC", "").replace("PRACTITIONER - ", ""))
+                        recent[k] = {"_d": d,
+                            "name": f"{tc(first)} {tc(last)}",
+                            "profession": prof, "city": "", "county": "",
+                            "state": state, "date": d.strftime("%m/%d/%Y"),
+                            "detail": f"new Medicare enrollment ({prof}) filed {d.isoformat()}, "
+                                      f"NPI {npi}, enrolled state {state} "
+                                      f"(practice geography from NPPES via enrich-pecos-nppes.py)"}
+            processed = row_number
+            if processed % CHECKPOINT_INTERVAL == 0:
+                checkpoint_now()
 
     rows = [{k: v for k, v in r.items() if k != "_d"}
             for r in sorted(recent.values(), key=lambda r: r["_d"], reverse=True)]
     out = os.path.join(UP, "pecos.json")
-    json.dump(rows, open(out, "w"), indent=1)
     bl = os.path.join(DATA, f"pecos-baseline-{quarter}.json")
-    json.dump(sorted(baseline), open(bl, "w"))
+    checkpoint_now()
+    atomic_json(out, rows)
+    atomic_json(bl, sorted(baseline))
+    atomic_json(receipt_path, {"source_sha256": digest, "rows_scanned": n_total})
+    os.unlink(checkpoint_path)
     print(f"[in] {n_total} rows scanned, {n_state} FL/AL")
     print(f"[out] {len(rows)} recent-enrollment practitioner rows (since {cutoff}) -> {out}")
     print(f"[out] {len(baseline)} NPI|enrollment baseline ids -> {bl}")
