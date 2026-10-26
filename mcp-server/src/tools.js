@@ -1,3 +1,4 @@
+import { vendorMeetingTools } from "./vendor-meetings.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
@@ -60,6 +61,7 @@ import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./
 import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
          permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
+import { isPersonalRecordOwner } from "./personal-record-ownership.ts";
 import { assertRegisteredOperation, mutationManifestIdentity, MutationRegistryRefusal } from "./mutation-registry.js";
 import { readRuleEnforcementCoverage } from "./lifecycle-assurance.v5.js";
 import { recordSourceAuthorityStoreTools } from "./record-source-authority-store.v5.js";
@@ -83,6 +85,7 @@ import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
 import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.js";
 import { partyIdentityTools } from "./party-identity.js";
+import { partyDuplicateCandidateTools } from "./party-duplicate-candidates.js";
 import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.ts";
 import { readBriefAssurance } from "./brief-assurance.ts";
 import { readNeedsJoe } from "./needs-joe.js";
@@ -1227,24 +1230,31 @@ async function resolveSubject(client, ref) {
 // closed — so it opts in rather than the default widening for everyone.
 async function resolveLoop(client, args, opts = {}) {
   const anyStatus = opts.anyStatus === true;
+  const lock = opts.actor ? " for update of li" : "";
+  const authorize = async row => {
+    if (opts.actor && row.tier === "personal" &&
+        !await isPersonalRecordOwner(client, opts.actor, row.personal_to))
+      throw new ToolError({ error: "personal_loop_not_owner" });
+    return row;
+  };
   if (args.loop_id) {
     const r = await client.query(
       `select li.id, li.kind, li.number, li.status, li.marker, li.due_on,
-              li.close_outcome, li.blocker_class, lb.block_key as section
+              li.close_outcome, li.blocker_class, li.tier, li.personal_to, lb.block_key as section
          from loop_item li join loop_block lb on lb.id = li.block_id
-        where li.id = $1`, [args.loop_id]);
+        where li.id = $1${lock}`, [args.loop_id]);
     if (!r.rows.length) throw new ToolError({ error: "not_found", loop_id: args.loop_id });
-    return r.rows[0];
+    return authorize(r.rows[0]);
   }
   if (!args.number)
     throw new ToolError({ error: "missing_loop_ref",
       hint: "pass loop_id, or number (plus kind when the number is shared across kinds)" });
   const r = await client.query(
     `select li.id, li.kind, li.number, li.status, li.marker, li.due_on,
-            li.close_outcome, li.blocker_class, lb.block_key as section, lb.rel_path
+            li.close_outcome, li.blocker_class, li.tier, li.personal_to, lb.block_key as section, lb.rel_path
        from loop_item li join loop_block lb on lb.id = li.block_id
       where li.number = $1 and (${anyStatus ? "true" : "li.status = 'open'"})
-        and ($2::text is null or li.kind = $2)`, [args.number, args.kind || null]);
+        and ($2::text is null or li.kind = $2)${lock}`, [args.number, args.kind || null]);
   if (!r.rows.length)
     throw new ToolError({ error: "loop_not_found", number: args.number, kind: args.kind || null,
       hint: anyStatus ? "no row, open or closed, carries this number — pass loop_id"
@@ -1256,7 +1266,7 @@ async function resolveLoop(client, args, opts = {}) {
       hint: "this number names more than one live row — pass loop_id to act on one now, and " +
             "fix the collision itself with update-loop's `number` (plus renumber_reason). " +
             "Migration 0112 makes a new one impossible; anything left is pre-0112 history." });
-  return r.rows[0];
+  return authorize(r.rows[0]);
 }
 
 // read-loop's amendment attachment. loop_amendment_history() (migration 0702)
@@ -3735,7 +3745,7 @@ export const TOOLS = {
       b.phase, b.phase_sort, b.segment, b.outcome, b.lead_owner, b.last_touch, b.notes_path,
       d.operating_state, d.parking_note, to_jsonb(d.invoiced_on)#>>'{}' as invoiced_on,
       to_jsonb(d.closed_on)#>>'{}' as closed_on, d.lane
-      from v_deal_board b join v_deal_room_board d on d.id=b.id
+      from v_deal_board b join v_open_deal_room_board d on d.id=b.id
       order by b.phase_sort, b.name /* dealboard:operating-state */`)).rows }),
   },
 
@@ -3802,7 +3812,7 @@ export const TOOLS = {
                              and e.field = any($3::text[])
                            order by e.field, e.recorded_at desc, e.id desc) latest
                 ), '{}'::jsonb) as field_base
-           from v_deal_room_board b
+           from v_open_deal_room_board b
            join v_deal_reconciliation_read r on r.id=b.id
            join v_client_engagement_status ce on ce.client_id=b.client_id
           where ($1 = 'all' or b.workspace_kind = $1)
@@ -3820,7 +3830,7 @@ export const TOOLS = {
                 case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind
            from v_deal_board b
            left join v_client_account a on a.client_id=b.client_id and a.is_sub_client
-          where (b.phase = 'closed' or b.outcome is not null or b.invoiced_on is not null)
+          where (b.phase in ('closed', 'invoiced') or b.outcome is not null or b.closed_on is not null or b.invoiced_on is not null)
             and ($1 = 'all' or case when a.account_client_id is null then 'team' else 'national_account' end = $1)
             and ($2::uuid is null or a.account_client_id = $2::uuid)
           order by b.closed_on desc nulls last, b.name, b.id
@@ -3844,7 +3854,7 @@ export const TOOLS = {
             and ($3::uuid is null or account_client_id=$3::uuid)
           order by started_at desc limit 1`,
         [actor.slug, workspace, args.account_client_id || null]);
-      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows.map(d => ({ ...d, short_name: shortDealHeading(d) })), closed_deals: closedDeals.rows.filter(d => d.outcome === 'won' || !d.outcome && (d.closed_on || d.invoiced_on)), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
+      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows.map(d => ({ ...d, short_name: shortDealHeading(d) })), closed_deals: closedDeals.rows.filter(d => d.outcome !== 'lost'), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
         open_session: session.rows[0] || null };
     },
   },
@@ -3930,8 +3940,10 @@ export const TOOLS = {
            from capture_call_context($1::uuid[])
           order by deal_name,deal_id,participant_role,participant_name
           /* capture:tool-call-context */`, [ids])).rows;
-      if (new Set(rows.map(row => String(row.deal_id))).size !== ids.length)
-        throw new ToolError({ error: "invalid_call_context_deals" });
+      const returnedIds = new Set(rows.map(row => String(row.deal_id).toLowerCase()));
+      if (returnedIds.size !== ids.length)
+        throw new ToolError({ error: "invalid_call_context_deals",
+          invalid_deal_ids: ids.filter(id => !returnedIds.has(id.toLowerCase())) });
       const byDeal = new Map();
       for (const row of rows) {
         const deal = byDeal.get(row.deal_id) || { id: row.deal_id, name: row.deal_name,
@@ -7448,7 +7460,7 @@ export const TOOLS = {
       section: { type: "string", enum: ["hot", "backlog", "open"], description: "move the row to this section of its file" } },
       required: ["idempotency_key"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "update-loop", args, async () => {
-      const cur = await resolveLoop(c, args);
+      const cur = await resolveLoop(c, args, { actor });
       await versionGuard(c, "loop_item", cur.id, args.base_version);
       if (cur.status !== "open")
         throw new ToolError({ error: "loop_not_open", loop_id: cur.id, status: cur.status,
@@ -7734,7 +7746,7 @@ export const TOOLS = {
           hint: "close-loop will not close a loop silently — say what came of it. " +
                 "If nothing came of it and you are abandoning it, say that and pass resolution 'dropped'." });
 
-      const cur = await resolveLoop(c, args);
+      const cur = await resolveLoop(c, args, { actor });
       await versionGuard(c, "loop_item", cur.id, args.base_version);
       if (cur.status !== "open")
         throw new ToolError({ error: "loop_not_open", loop_id: cur.id, status: cur.status,
@@ -7894,7 +7906,7 @@ export const TOOLS = {
       // rather than call resolveLoop as every other loop verb does: it is the
       // one verb whose entire purpose is acting on a row every other number
       // lookup would refuse to find.
-      const cur = await resolveLoop(c, args, { anyStatus: true });
+      const cur = await resolveLoop(c, args, { anyStatus: true, actor });
       await versionGuard(c, "loop_item", cur.id, args.base_version);
       if (cur.status === "open")
         throw new ToolError({ error: "loop_open", loop_id: cur.id, status: cur.status,
@@ -7933,14 +7945,8 @@ export const TOOLS = {
             hint: "the successor must be a different open loop" });
       }
 
-      // The prior outcome, read from resolveLoop's row — BEFORE versionGuard's
-      // `for update` lock, not from it. That read is still safe: it is the
-      // version check right above, not the lock itself, that makes it so — a
-      // concurrent amend that changed the row between this read and the lock
-      // moves the version, versionGuard throws version_conflict on the stale
-      // base_version, and this priorOutcome is never written. Not from the
-      // args, not reconstructed either way — the actual current text this
-      // amendment is correcting.
+      // Resolution locked and authorized this exact target before versionGuard;
+      // its prior outcome remains stable until this transaction commits.
       const priorOutcome = cur.close_outcome || "";
       const priorResolution = cur.status;
 
@@ -8970,10 +8976,12 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "board-answers": "mcp-server/src/board-answers.js",
   "research-sites": "mcp-server/src/research-sites.js",
   "party-identity": "mcp-server/src/party-identity.js",
+  "party-duplicate-candidates": "mcp-server/src/party-duplicate-candidates.js",
   "schedule-board": "mcp-server/src/schedule-board.js",
   "doc-suggestions": "mcp-server/src/doc-suggestions.js",
   "whats-new": "mcp-server/src/whats-new.js",
   "invoice-tracker": "mcp-server/src/invoice-tracker.js",
+  "vendor-meetings": "mcp-server/src/vendor-meetings.js",
 });
 
 function bindToolSource(tool, source) {
@@ -9118,7 +9126,7 @@ registerTools({
 
   "ping-deal-checklist": {
     write: true,
-    description: "Queue action-required notifications for one active deal's due and overdue standard checklist deadlines and open sourced stored checklist items. The recorded deal owner must be Joe or Dell. Uses current doctrine, sourced deadlines, quiet hours and recipient/item/date deduplication. Returns queued notification receipts, never a delivery claim. Does not schedule, send a device message or change deal facts.",
+    description: "Queue action-required notifications for one active deal's due and overdue standard checklist deadlines and open sourced stored checklist items. The recorded deal owner must be Joe or Dell. Uses current doctrine, sourced deadlines, morning holds and recipient/item/date deduplication. Returns queued notification receipts, never a delivery claim. Does not schedule, send a device message or change deal facts.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       deal: { type: "string" }, idempotency_key: { type: "string" },
     }, required: ["deal", "idempotency_key"] },
@@ -9143,20 +9151,26 @@ registerTools({
         .filter(item => item.status === "open" && item.source_ref?.trim()
           && isCalendarDate(item.due_on) && item.due_on <= checklist.observed_on)
         .map(item => ({ id: `deal-item:${item.id}`, due_on: item.due_on }));
+      await c.query("select pg_advisory_xact_lock(hashtextextended('deal-checklist:' || $1, 0))", [deal.id]);
       for (const item of [...checklist.due_items, ...storedDue]) {
-        await writeEvent(c, actor, "ping-deal-checklist", "deal", deal.id, {
-          field: "checklist_ping", new: { checklist_item_id: item.id, due_on: item.due_on, recipient: deal.owner },
-          cause: "automation_job", idempotency_key: args.idempotency_key,
-        });
-        const eventId = (await c.query(
-          `select id from event where subject_type='deal' and subject_id=$1 and verb='ping-deal-checklist'
-             and field='checklist_ping' and idempotency_key=$2 and new_value->>'checklist_item_id'=$3
-           order by recorded_at desc,id desc limit 1`, [deal.id, args.idempotency_key, item.id])).rows[0]?.id;
+        const eventQuery = `select id from event where subject_type='deal' and subject_id=$1 and verb='ping-deal-checklist'
+             and field='checklist_ping' and new_value->>'checklist_item_id'=$2
+             and new_value->>'due_on'=$3 and new_value->>'recipient'=$4
+           order by recorded_at desc,id desc limit 1`;
+        const eventArgs = [deal.id, item.id, item.due_on, deal.owner];
+        let eventId = (await c.query(eventQuery, eventArgs)).rows[0]?.id;
+        if (!eventId) {
+          await writeEvent(c, actor, "ping-deal-checklist", "deal", deal.id, {
+            field: "checklist_ping", new: { checklist_item_id: item.id, due_on: item.due_on, recipient: deal.owner },
+            cause: "automation_job", idempotency_key: args.idempotency_key,
+          });
+          eventId = (await c.query(eventQuery, eventArgs)).rows[0]?.id;
+        }
         const minted = (await c.query(
           "select ops.mint_notification($1,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11) as result",
           ["event", eventId, "deal", deal.id, "A deal checklist item is due. Open the deal checklist for details.",
             "action_required", "/notifications", `deal-checklist:${deal.id}:${item.id}:${item.due_on}`,
-            deal.owner, false, false])).rows[0]?.result;
+            deal.owner, false, true])).rows[0]?.result;
         if (!minted?.ok || !minted.notification_id)
           throw new ToolError({ error: "deal_checklist_notification_unavailable" });
         result[minted.deduplicated ? "deduplicated" : "queued"]++;
@@ -9182,10 +9196,9 @@ registerTools({
                  b.workspace_kind, b.account_client_id, b.operating_state, b.outcome,
                  to_jsonb(b.closed_on)#>>'{}' as closed_on,
                  to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on
-            from v_deal_room_board b
+            from v_open_deal_room_board b
             join v_client_engagement_status ce on ce.client_id = b.client_id
-           where b.operating_state = 'active' and b.phase <> 'closed'
-             and b.outcome is null and b.closed_on is null and b.invoiced_on is null
+           where b.operating_state = 'active'
            order by b.id limit 1001
         ), dates as materialized (
           select d.deal_id, d.id, d.kind, to_jsonb(d.due_on)#>>'{}' as due_on, d.note, d.status
@@ -10282,6 +10295,7 @@ registerTools(systemWorkTools(), "system-work-census");
 registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
 registerTools(researchSiteTools({ withEnvelope, writeEvent }), "research-sites");
 registerTools(partyIdentityTools({ withEnvelope, writeEvent, versionGuard, resolvePartyForWrite }), "party-identity");
+registerTools(partyDuplicateCandidateTools(), "party-duplicate-candidates");
 registerTools(scheduleBoardTools(), "schedule-board");
 registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject,
   canExercisePartnerAuthority, partnerAuthoritySlugForActor }), "deal-items");
@@ -10453,5 +10467,7 @@ registerTools(assuranceHealthStoreTools({ withEnvelope, ToolError }), "assurance
 // to receive server-established actor/sponsor transaction settings; its tool
 // contract remains read-only and the SQL function is stable.
 registerTools(ruleContextRuntimeTools({ withEnvelope, ToolError }), "rule-context-runtime");
+
+registerTools(vendorMeetingTools(), "vendor-meetings");
 
 Object.freeze(TOOLS);

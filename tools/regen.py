@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate CARR operation contracts, including an operations-only Git conflict."""
+"""Regenerate CARR operation contracts or the generated schema snapshot."""
 import argparse
 from pathlib import Path
 import re
@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / 'ops'))
 from git_env import scrubbed_env
 
 REGISTRY = 'mcp-server/src/scac-mutation-registry.current.generated.js'
+SCHEMA = 'db/schema.sql'
 OPERATIONS = re.compile(rb'export const SCAC_MUTATION_OPERATIONS = Object.freeze\(\{[\s\S]*?\n\}\);')
 
 
@@ -46,12 +47,33 @@ def regenerate():
     print('Registry regenerated' + (' and its Git conflict resolved.' if resolving else '.'))
 
 
+def regenerate_schema():
+    unresolved = git('diff', '--name-only', '--diff-filter=U', '-z').split(b'\0')
+    unresolved = [path.decode() for path in unresolved if path]
+    if any(path != SCHEMA for path in unresolved):
+        raise ValueError('resolve source conflicts before regenerating the schema')
+    target = ROOT / SCHEMA
+    original = target.read_bytes()
+    resolving = SCHEMA in unresolved
+    if resolving and b'<<<<<<< ' not in original:
+        raise ValueError('schema conflict markers are missing; preserve manual edits before regeneration')
+    try:
+        subprocess.run([sys.executable, ROOT / 'ops/migration-shadow.py', '--write'],
+                       cwd=ROOT, env=scrubbed_env(), check=True)
+        if resolving:
+            git('add', '--', SCHEMA)
+    except BaseException:
+        target.write_bytes(original)
+        raise
+    print('Schema regenerated' + (' and its Git conflict resolved.' if resolving else '.'))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('target', choices=['registry'])
-    parser.parse_args()
+    parser.add_argument('target', choices=['registry', 'schema'])
+    target = parser.parse_args().target
     try:
-        regenerate()
+        regenerate() if target == 'registry' else regenerate_schema()
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(f'regen: {error}', file=sys.stderr)
         return 1

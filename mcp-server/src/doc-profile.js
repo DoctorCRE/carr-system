@@ -5,7 +5,7 @@ export const DOC_TOOL_NAMES = Object.freeze([
   "catch-me-up", "today-triage", "find", "find-and-catch-up", "deal-board",
   "get-deal-room", "ping-deal-checklist", "vendor-assignment-context", "who-do-we-know", "counterparty-history", "lead-board",
   "schedule-board", "search-tour-properties", "read-doctrine", "search-doctrine",
-  "recall-memory", "add-deal-note", "log-activity", "set-next-step", "add-critical-date", "log-capture",
+  "recall-memory", "read-vendor-meetings", "add-deal-note", "log-activity", "set-next-step", "add-critical-date", "log-capture",
 ]);
 
 export const DOC_INSTRUCTIONS =
@@ -19,6 +19,7 @@ export const DOC_INSTRUCTIONS =
   "next steps, critical dates or source captures. For a vendor role stated during a deal call, " +
   "read vendor-assignment-context, then use log-activity vendor_assignments with its exact existing IDs and base_version. " +
   "Never infer a role or create identities. Show the role, company and contact from get-deal-room vendors. " +
+  "When the partner asks who they should meet, read read-vendor-meetings and present only its Suggested people; it never composes or sends an introduction. " +
   "Use find for names and catch-me-up or get-deal-room " +
   "before discussing a record. Writes use a fresh idempotency_key for each intended action; " +
   "keep that key on retries and preserve any base_version required by the tool. " +
