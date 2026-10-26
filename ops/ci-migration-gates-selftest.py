@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Tests migration gate scheduling, isolation, and failure handling.
 import importlib.util
 from pathlib import Path
 import socket
