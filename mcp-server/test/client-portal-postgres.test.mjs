@@ -21,6 +21,8 @@ test('a password opens only its client portal and the live deal roadmap', async 
     await c.query(await readFile(new URL('../../migrations/0975_client_portal.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/0976_client_portal_binding.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/0981_client_portal_writer_denials.sql', import.meta.url), 'utf8'));
+    // The current grant contract also carries later registered definers and writer grants.
+    await c.query(await readFile(new URL('../../migrations/0983_fact_store.sql', import.meta.url), 'utf8'));
     await c.query('create function ops.scac_reference_monitor_guard() returns trigger language plpgsql as $$begin return coalesce(new,old); end$$');
     await c.query(await readFile(new URL('../../migrations/0984_email_proposal.sql', import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')", [actor.id]);

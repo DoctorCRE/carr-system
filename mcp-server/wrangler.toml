@@ -227,3 +227,59 @@ bucket_name = "carr-documents"
 
 [ai]
 binding = "AI"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGING: the separate Worker carr-mcp-staging, deployed from main by the
+# staging job in .github/workflows/deploy.yml (WR-000511). Every binding below
+# is its own; nothing is shared with production.
+[env.staging]
+name = "carr-mcp-staging"
+main = "src/index.js"
+compatibility_date = "2026-07-01"
+compatibility_flags = ["global_fetch_strictly_public", "nodejs_compat"]
+workers_dev = true
+
+# `routes = []` IS LOAD-BEARING. Wrangler inherits `routes` into an env that
+# omits the key: on 2026-08-13 a staging deploy without this line took over the
+# production custom domains. The empty list overrides the inherited value.
+# ops/environment-matrix-selftest.py fails if this key is removed or filled.
+routes = []
+
+# This table REPLACES [vars] above rather than merging: a var added there must
+# be repeated here when staging needs it.
+[env.staging.vars]
+CARR_ENV = "staging"
+APP_HOST = "carr-mcp-staging.joe-bookout-carr-us.workers.dev"
+DOCTORCRE_APP_HOST = "doctorcre-app-staging.joe-bookout-carr-us.workers.dev"
+CARR_MCP_ALLOWED_ORIGINS = '["https://carr-mcp-staging.joe-bookout-carr-us.workers.dev","https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev"]'
+DEALROOM_PROGRAM6_ACTIONS_ENABLED = "true"
+WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true"
+CONTINUITY_SURFACE_ENFORCEMENT = "required"
+CANONICAL_OWNERSHIP_RUNTIME_MODE = "disabled"
+CANONICAL_OWNERSHIP_ISSUER_ACTIVE_GENERATION = "none"
+CANONICAL_OWNERSHIP_CANARY_JOB_ID = "none"
+
+[env.staging.version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[env.staging.assets]
+directory = "../out/doctorcre-artifacts/current"
+binding = "ASSETS"
+run_worker_first = true
+
+# Its own OAuth store: a shared namespace would make a staging grant a
+# production grant.
+[[env.staging.kv_namespaces]]
+binding = "OAUTH_KV"
+id = "faa513fd07ec45d88abc5949f323aec5"
+
+[[env.staging.durable_objects.bindings]]
+name = "OAUTH_CONSENT_STATE"
+class_name = "OAuthConsentState"
+
+[env.staging.observability]
+enabled = true
+
+# Wrangler does not inherit `ai` into a named environment.
+[env.staging.ai]
+binding = "AI"
