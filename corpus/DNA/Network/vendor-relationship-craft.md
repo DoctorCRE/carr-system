@@ -1,6 +1,6 @@
 # Vendor Relationship Craft — Our Playbook (by vendor type)
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file PR ([AGENTS.md#guidance-changes](../../../AGENTS.md#guidance-changes)), the record-layer verbs or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Our unified vendor-relationship doctrine (consolidated July 8, 2026; sources in the ingestion ledger): how to earn referrals from each vendor type. Bankers = the #1 referral category; supply reps = the largest. Feeds the enrichment interview's story-mode questions and the 5-layer vendor email stack.*
 
@@ -56,14 +56,14 @@
 ## Cross-references
 - `DNA/Leads/lead-system.md` — vendor referrals (bankers ~70%) enter as leads; report-back + reciprocity rules apply.
 - `vendor-intro-timeline.md` — bankers are the **Initial Call** stage intro; the referral-ethics rules (multi-lender "shot at the deal") apply.
-- `vendors.xlsx` — the 44 banker records; the DSO-friendly lenders (Live Oak `V-BNK-045`, Citibank `V-BNK-046`) sit here too.
+- `vendors.xlsx` — the 44 banker records; the DSO-friendly lenders (`V-BNK-045`, `V-BNK-046`) sit here too.
 - INTERNAL agent craft — no content-bank/templates routing (the retention/fee angles are vendor-facing, not doctor-education).
 
 
 ---
 
 # Part B — Supply & equipment reps (the largest category)
-*Created 2026-07-07 by Claude Code (watch-video skill), distilled from CARR's EDU call "Tailoring the Message — Merchandise Reps" (the ex-supply-rep trainer, 15 yrs clinical then a Henry Schein / Benco / Burkhart rep). **Supply/Equipment Reps are the LARGEST vendor category in `vendors.xlsx` (49 records) and a core referral source.** Sibling to `vendor-relationship-craft.md`. Verbatim material and timestamps not retained (paraphrase-only policy, July 8, 2026); the source session is identified in the Source Material ingestion ledger.*
+*Created 2026-07-07 by Claude Code (watch-video skill), distilled from CARR's EDU call "Tailoring the Message — Merchandise Reps" (the ex-supply-rep trainer, 15 yrs clinical then a rep for several dental distributors). **Supply/Equipment Reps are the LARGEST vendor category in `vendors.xlsx` (49 records) and a core referral source.** Sibling to `vendor-relationship-craft.md`. Verbatim material and timestamps not retained (paraphrase-only policy, July 8, 2026); the source session is identified in the Source Material ingestion ledger.*
 
 > **The whole game is empathy → trust.** Reps are bombarded by vendors pushing product daily; you win by understanding their brutal job and showing how *you* help *them*, not by talking about how great CARR is (the ex-supply-rep trainer's own opening mistake).
 
@@ -97,7 +97,7 @@ CARR saves their client money on the lease (or relocates them → a chance to se
 
 ## Q&A
 - **Merch rep vs. equipment rep**: years ago equipment reps got the leads; now the doctor relies on the local **merch rep as the ringleader**, who brings the equipment person in. Bring the equipment rep in, but lead with the merchandise rep.
-  - **⚠️ Qualified 2026-07-31 by a live case.** On the Brandvold C-153 deal a Patterson **Equipment & CAD/CAM Specialist** sourced the client, made the introduction to Dell, and is running the project himself. **Split the rule by deal type: lead with the merchandise rep on an ESTABLISHED account, lead with the equipment specialist on a PROJECT** (start-up, second office, relocation), because the equipment specialist owns the build and their commission is gated on the doctor securing space. Full channel breakdown, the per-operatory economics, and the Cirrus Consulting Group competitor finding: `vendor-by-industry-reference.md` §1.
+  - **⚠️ Qualified 2026-07-31 by a live case.** On a recent second-office deal a distributor's **Equipment & CAD/CAM Specialist** sourced the client, made the introduction to Dell, and is running the project himself. **Split the rule by deal type: lead with the merchandise rep on an ESTABLISHED account, lead with the equipment specialist on a PROJECT** (start-up, second office, relocation), because the equipment specialist owns the build and their commission is gated on the doctor securing space. Full channel breakdown, the per-operatory economics, and the Cirrus Consulting Group competitor finding: `vendor-by-industry-reference.md` §1.
 - **Sponsoring the branch monthly meeting**: find the **branch admin** for a vendor slot — but it's hard (big suppliers like 3M book months out; small slots; the message is diluted by 11am after 15 vendors). Grab the early 8am slot if you can, but 1:1 tends to work better in busy markets.
 - **Rep already loyal to another realtor**: sell the CARR-is-different story (lean on any healthcare background), then **ask for an at-bat** — *"I appreciate your loyalty; I'm just asking that you give both names and let the best person win for the client — it's an emotional process, your client deserves an option."*
 
@@ -123,7 +123,7 @@ CARR saves their client money on the lease (or relocates them → a chance to se
 Counterintuitive but core: **the vendors protective of their time are usually the ones whose time is most valuable — and who sit on the best deal information.** They're busy doing their job and networking, so they're hard to reach; it can take a year or two to get on their radar. Conversely, **be wary of the "chirping bird" vendor** who chases *you* — often they have no deals to give and just want your referrals. Be protective of your own time too; making yourself available to every vendor who wants a meeting isn't a recipe for success. You screen them as they screen you. (You must also *do* something before the good ones refer — chicken-and-egg; fight through it with "this is what CARR does," which isn't a lie.)
 
 ## 2. Stop asking for referrals — start CONNECTING vendors to each other (be the hub)
-Sam's biggest level-up: he went from always asking vendors for referrals to **introducing his vendors to one another** — "do you know the Live Oak banker? do you know this contractor? let's all go to lunch." It became organic: the equipment specialist who ignored him for two years now calls *him* asking for contractor referrals. **"I like being viewed as the guy in the center of the team."** Introduce everybody to everybody — banker ↔ contractor ↔ CPA ↔ architect ↔ listing agent — and you become the connector nobody wants to be left out of.
+Sam's biggest level-up: he went from always asking vendors for referrals to **introducing his vendors to one another** — "do you know this SBA banker? do you know this contractor? let's all go to lunch." It became organic: the equipment specialist who ignored him for two years now calls *him* asking for contractor referrals. **"I like being viewed as the guy in the center of the team."** Introduce everybody to everybody — banker ↔ contractor ↔ CPA ↔ architect ↔ listing agent — and you become the connector nobody wants to be left out of.
 
 ## 3. Run vendor networking groups / facilitated lunches
 Both Sam and the mapping team do this and rate it their most effective move.
@@ -148,7 +148,7 @@ There's **always** a political layer because there's always competition (classic
 - **The Benco confrontation (West Michigan):** Benco saw Instagram deals tied to Patterson, summoned the agents to a table of six reps — "we see these deals, we're not in them, what do we do?" The agent flipped it: *"those suppliers brought them to the table; I need more from YOUR reps — let's drum deals up together and celebrate together."* Aha: don't passively wait for a supplier to refer — work collaboratively, and don't let a quiet supplier feel entitled to deals they didn't source.
 
 ## 8. The "bring it to me first and I'll protect you" pact
-a senior CARR agent's line that cemented the Alabama equipment rep: **"Bring the deal to me first, and I'll protect you."** The rep started telling Mike about every startup/grand-opening he heard of *before* anyone else; on a **Talladega** deal, a competitor (Atlanta Dental) was also courting the doctor, but because the rep brought it to Mike first, Mike **pushed the rep in and protected him**. Lesson: explicitly offer your best reps protection in exchange for first look — it builds a loyalty loop that beats a scramble. (Ties to `vendor-intro-timeline.md` reciprocity logic.)
+a senior CARR agent's line that cemented the Alabama equipment rep: **"Bring the deal to me first, and I'll protect you."** The rep started telling Mike about every startup/grand-opening he heard of *before* anyone else; on a **Talladega** deal, a competing regional supplier was also courting the doctor, but because the rep brought it to Mike first, Mike **pushed the rep in and protected him**. Lesson: explicitly offer your best reps protection in exchange for first look — it builds a loyalty loop that beats a scramble. (Ties to `vendor-intro-timeline.md` reciprocity logic.)
 
 ## 9. Target the CONSULTATIVE territory reps (and how to find them)
 Meet the **equipment rep** (the manager) and ask: *"Who are your most consultative territory reps?"* — the ones **diagnosing** the practice (profitability, growth plans, challenges), not just selling off a product menu. **Menu reps won't refer deals** — they're not asking the questions that surface a real-estate need, and you usually can't teach it. Over a long territory tenure you learn who they are (the Alabama panelist noted every rep in a market eventually knows who the consultative, deal-making reps are).

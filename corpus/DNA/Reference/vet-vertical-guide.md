@@ -1,6 +1,6 @@
 # CARR Training — Veterinary Vertical Reference (build-out, sizing, the landlord pitch)
 
-> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through the `teach` verb or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
+> **Doctrine ownership: single writer.** One seat edits this file, the Fable design seat. Every other session, either brain, proposes changes through a guidance-file PR ([AGENTS.md#guidance-changes](../../../AGENTS.md#guidance-changes)), the record-layer verbs or a team-board row, and the seat lands them. Set 2026-08-01 per ORDER 38 (two-writer endgame D3).
 
 *Captured July 7, 2026 from CARR's internal Agent Training Portal (`training.carr.us/sessions/…`), Veterinary branch. CARR proprietary agent knowledge — internal use. The portal's Vet Sample Floorplan is marked "do not print/distribute to clients." Use this to size a vet client's space, run due-diligence, and negotiate TI/free rent. Source pages at the bottom. Companion to `dental-vertical-guide.md` and `medical-vertical-guide.md`.*
 
@@ -65,7 +65,7 @@
 
 - **A veterinary use is THE most secure use a landlord can have.** **< 1% default rate even for startups**, and a built-out vet space in a nice center re-leases fast — a new lease is often executed **before the prior tenant is even out.** Vets rarely relocate (construction cost).
 - **Justifying a large TI:** the TI protects the client's practice-loan position and funds the equipment the intended services require. Money spent building out the space is money that can't go toward being successful.
-- **Downside is still fine for the landlord:** if the client relocates — or in the < 1% default case — the landlord still holds a very desirable, built-out asset. Contrast the bank: **BofA / Wells Fargo trip over themselves to write ~$500k startup loans**, yet on default the bank's only fallback is equipment worth **pennies on the dollar** (well over half the loan went to leasehold improvements + working capital). They hold billions of these loans anyway and compete hard for them.
+- **Downside is still fine for the landlord:** if the client relocates — or in the < 1% default case — the landlord still holds a very desirable, built-out asset. Contrast the bank: **the big national banks trip over themselves to write ~$500k startup loans**, yet on default the bank's only fallback is equipment worth **pennies on the dollar** (well over half the loan went to leasehold improvements + working capital). They hold billions of these loans anyway and compete hard for them.
 - **Why vets don't default:** rather than bankruptcy, a struggling vet **sells the "bones" of the practice to a veterinary group** — there are **billions in enterprise money** pouring into vet acquisition. The landlord ends up with a *stronger* tenant, not an empty box.
 - **Net-worth objection:** a young doctor often has *negative* net worth — but it's overwhelmingly **student-loan** debt, and banks still compete hard to lend (no collateral recourse) despite it.
 - **"I don't like the vet use" — the deal-killer objection, two flavors (unique to vet, handle head-on):**
