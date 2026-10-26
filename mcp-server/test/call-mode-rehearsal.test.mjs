@@ -45,6 +45,8 @@ const CALL = [
   ['Dell', 'No, keep Pinecrest in site selection for now. We have not agreed on that one.'],
   ['Joe', 'Please email the Bayside landlord contact a short update.'],
   ['Dell', 'I will call the Harbor lender this week.'],
+  ['Dell', 'Next step for Gulf Imaging: confirm the floor plan with the architect by November 10, 2026.'],
+  ['Joe', 'Yes, agreed on the Gulf Imaging floor plan.'],
 ];
 
 let fixture, admin, database, pool, c, server, baseUrl, companion, root, session, deals = {};
@@ -106,7 +108,8 @@ before(async () => {
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
   const client = (await c.query("insert into client(party_id,status,created_by,updated_by) values($1,'fixture_active',$2,$2) returning id", [party, joe.id])).rows[0].id;
   for (const [name, phase] of [['Synthetic Bayside Dental Relocation', 'research'],
-    ['Synthetic Harbor Clinic Expansion', 'site_selection'], ['Synthetic Pinecrest Lab Lease', 'site_selection']]) {
+    ['Synthetic Harbor Clinic Expansion', 'site_selection'], ['Synthetic Pinecrest Lab Lease', 'site_selection'],
+    ['Synthetic Gulf Imaging Center', 'site_selection']]) {
     deals[name] = (await c.query(`insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by)
       values($1,$2,'lease',$3,'joe',$4,$4) returning id`, [name, client, phase, joe.id])).rows[0].id;
     await c.query("insert into deal_participant(deal_id,actor_id,role,set_by) values($1,$2,'lead',$2)", [deals[name], joe.id]);
@@ -118,7 +121,8 @@ before(async () => {
   // Each deal already carries a step Joe set by hand before the call.
   for (const [name, text, date] of [['Synthetic Bayside Dental Relocation', 'Old Bayside step', '2026-10-01'],
     ['Synthetic Harbor Clinic Expansion', 'Old Harbor step', '2026-10-30'],
-    ['Synthetic Pinecrest Lab Lease', 'Old Pinecrest step', '2026-10-30']]) {
+    ['Synthetic Pinecrest Lab Lease', 'Old Pinecrest step', '2026-10-30'],
+    ['Synthetic Gulf Imaging Center', 'Old Gulf step', '2026-10-01']]) {
     const current = await deal(name);
     await verb(joe, 'set-next-step', { deal: current.id, text, next_date: date, base_version: current.version });
   }
@@ -190,7 +194,10 @@ test('a recorded weekly call updates every confidently discussed card and leaves
     CARR_CAPTURE_LOG: path.join(root, 'capture-bridge.log'), CARR_CALL_MODE_LOG: path.join(root, 'call-mode.log'), CARR_POST_CALL_PYTHON: PYTHON,
     CARR_POST_CALL_VERB_COMMAND: `node ${fileURLToPath(new URL('./helpers/rehearsal-verb.mjs', import.meta.url))} ${baseUrl}/rehearsal/verb`,
     HOME: process.env.HOME };
-  if (!SONNET) env.CARR_POST_CALL_DISTILLER_COMMAND = `${PYTHON} ${path.join(REPO, 'tools/dictation-rig/tests/fixtures/rehearsal_distiller.py')}`;
+  if (!SONNET) {
+    env.CARR_POST_CALL_DISTILLER_COMMAND = `${PYTHON} ${path.join(REPO, 'tools/dictation-rig/tests/fixtures/rehearsal_distiller.py')}`;
+    env.CARR_POST_CALL_JEV_FIXTURE = path.join(REPO, 'tools/dictation-rig/tests/fixtures/rehearsal_jev.py');
+  }
 
   // 1. Recording start: the capture rig claims the session with consent proof.
   await run(PYTHON, [path.join(BIN, 'capture-bridge.py'), 'claim', session], { env });
@@ -237,13 +244,14 @@ test('a recorded weekly call updates every confidently discussed card and leaves
   const bayside = await deal('Synthetic Bayside Dental Relocation');
   const harbor = await deal('Synthetic Harbor Clinic Expansion');
   const pinecrest = await deal('Synthetic Pinecrest Lab Lease');
+  const gulf = await deal('Synthetic Gulf Imaging Center');
   const { calls } = await verb(joe, 'read-call-outcomes');
   assert.equal(calls.length, 1);
   const outcome = calls[0];
   const applied = (dealId, kind) => outcome.applied.find(a => a.deal_id === dealId && a.kind === kind);
   // The deterministic stand-in states all three plainly. Live Sonnet makes its
   // own call: whatever it did not apply must be waiting as an approval card.
-  for (const [target, kind] of [[bayside, 'phase_move'], [bayside, 'next_step'], [harbor, 'next_step']]) {
+  for (const [target, kind] of [[bayside, 'phase_move'], [bayside, 'next_step'], [harbor, 'next_step'], [gulf, 'next_step']]) {
     if (applied(target.id, kind)) continue;
     assert.ok(SONNET, `${kind} on ${target.id} should have applied: ${JSON.stringify(outcome)}`);
     assert.ok(outcome.open_cards.some(card => card.deal_id === target.id && card.kind === kind), JSON.stringify(outcome.open_cards));
@@ -279,7 +287,34 @@ test('a recorded weekly call updates every confidently discussed card and leaves
   // Vendor email stays a draft: nothing created in Outlook, nothing sent.
   assert.ok(!existsSync(path.join(session, 'outlook-drafts.json')));
 
-  // 6. Undo reverts through the record layer, guarded by the deal's version.
+  // 6. Undo reverts through the record layer, guarded by the deal's version,
+  //    and never overwrites work done on the card after the call.
+  const items = async candidateId => (await c.query(
+    "select id, status from next_action where source_ref=$1 and item_title is not null order by created_at, id",
+    [`capture_candidate:${candidateId}`])).rows;
+  const gulfStep = applied(gulf.id, 'next_step');
+  if (gulfStep) {
+    // The call's step superseded Joe's overdue Gulf step; undo puts that ball back.
+    const undo = { candidate_id: gulfStep.candidate_id, base_version: (await deal('Synthetic Gulf Imaging Center')).version };
+    const result = await verb(joe, 'undo-call-change', undo);
+    const restored = await deal('Synthetic Gulf Imaging Center');
+    assert.equal(restored.next_step, 'Old Gulf step');
+    assert.equal(restored.next_date, '2026-10-01');
+    assert.ok(result.reverted.reopened_action_ids.length >= 1, JSON.stringify(result));
+    assert.ok((await items(gulfStep.candidate_id)).every(i => i.status === 'dropped'));
+    // A second undo of the same change is a no-op, not a second write.
+    assert.equal((await verb(joe, 'undo-call-change', { ...undo, base_version: restored.version })).already, 'undone');
+    assert.equal((await deal('Synthetic Gulf Imaging Center')).version, restored.version);
+  }
+  const baysideStep = applied(bayside.id, 'next_step');
+  if (baysideStep) {
+    // Joe replaced the step by hand after the call: undo refuses and keeps his edit.
+    const current = await deal('Synthetic Bayside Dental Relocation');
+    await verb(joe, 'set-next-step', { deal: bayside.id, text: 'Later Bayside step', next_date: '2026-11-12', base_version: current.version });
+    await assert.rejects(verb(joe, 'undo-call-change', { candidate_id: baysideStep.candidate_id,
+      base_version: (await deal('Synthetic Bayside Dental Relocation')).version }), error => error.payload?.error === 'newer_change_exists');
+    assert.equal((await deal('Synthetic Bayside Dental Relocation')).next_step, 'Later Bayside step');
+  }
   const phase = applied(bayside.id, 'phase_move');
   if (phase) {
     await assert.rejects(verb(joe, 'undo-call-change', { candidate_id: phase.candidate_id, base_version: bayside.version - 1 }),
@@ -289,14 +324,16 @@ test('a recorded weekly call updates every confidently discussed card and leaves
     const afterUndo = (await verb(joe, 'read-call-outcomes')).calls[0];
     assert.ok(afterUndo.applied.find(a => a.candidate_id === phase.candidate_id).undone_at);
   }
-  const step = applied(harbor.id, 'next_step');
-  if (step) {
-    await verb(joe, 'undo-call-change', { candidate_id: step.candidate_id, base_version: (await deal('Synthetic Harbor Clinic Expansion')).version });
-    const restored = await deal('Synthetic Harbor Clinic Expansion');
-    assert.equal(restored.next_step, 'Old Harbor step');
-    assert.equal(restored.next_date, '2026-10-30');
-    const items = (await c.query("select status from next_action where source_ref=$1 and item_title is not null", [`capture_candidate:${step.candidate_id}`])).rows;
-    assert.ok(items.length && items.every(i => i.status === 'dropped'));
+  const harborStep = applied(harbor.id, 'next_step');
+  if (harborStep) {
+    // Joe ticked off a checklist item after the call: undo refuses, the tick stays.
+    const [item] = await items(harborStep.candidate_id);
+    assert.ok(item, 'the applied step carries its checklist items');
+    await verb(joe, 'complete-deal-item', { deal: harbor.id, item_id: item.id });
+    await assert.rejects(verb(joe, 'undo-call-change', { candidate_id: harborStep.candidate_id,
+      base_version: (await deal('Synthetic Harbor Clinic Expansion')).version }), error => error.payload?.error === 'newer_change_exists');
+    assert.equal((await items(harborStep.candidate_id)).find(i => i.id === item.id).status, 'done');
+    assert.match((await deal('Synthetic Harbor Clinic Expansion')).next_step, /second walkthrough/i);
   }
 
   // 7. Once a partner has looked it over, the outcome leaves Home.

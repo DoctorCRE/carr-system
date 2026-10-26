@@ -272,8 +272,12 @@ def _calendar_date_or_none(value: Any, field: str) -> None:
         raise ContractError(f"{field} must be a YYYY-MM-DD calendar date or null")
 
 
+UNSAID_REVIEW = "The model did not say whether this was settled."
+
+
 def _review_note(change: dict[str, Any], field: str) -> None:
-    note = change.setdefault("needs_review", None)
+    # A missing flag fails closed: only an explicit null means plainly stated.
+    note = change.setdefault("needs_review", UNSAID_REVIEW)
     if note is not None and not isinstance(note, str):
         raise ContractError(f"{field} must be a string or null")
     if isinstance(note, str) and not note.strip():
@@ -449,6 +453,8 @@ def _distiller_instruction() -> str:
         "Set needs_review to null only when Joe and Dell plainly stated the change for that exact deal and nobody "
         "disputed it. Otherwise set needs_review to one short sentence saying what a partner must decide; it then "
         "waits as an approval card. When they disagree or it is unclear which deal they mean, also add a review question. "
+        "A deal update's evidence must be the exact words that name the deal and state its change; when the phase and "
+        "the next step were said in different sentences, give them as two deal_updates for the same deal. "
         "A request to tell, update, email, or draft a message to an exact attached participant creates a draft_proposals item. "
         "Each item includes a transcript evidence phrase of at most 15 words and only attached participant_ids (an array of exact party_id strings, [] if none). "
         "Draft bodies are concise, professional, factual, and under 900 characters. "
@@ -559,10 +565,10 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         stored_context = read_json(session_dir / CONTEXT_FILE) or {}
         jev_context = {**context, "speaker_labels": stored_context.get("speaker_labels"),
                        "local_partner": stored_context.get("recorder")}
-        result = post_call_jev.check_distillation(result, jev_context, transcript)
+        result = post_call_jev.check_distillation(result, jev_context, transcript, client=_jev_fixture_client())
     except Exception:
-        pass  # Jev's item checks are advisory; they may never block the pack.
-    result = mark_automatic(result, transcript)
+        pass  # Jev never blocks the pack; a change without a passing deal check stays a card.
+    result = mark_automatic(result, transcript, context)
     write_private(session_dir / REPORT_FILE, result)
     # Context is single-use: no later caller gets a searchable customer index.
     stored = read_json(session_dir / CONTEXT_FILE) or {}
@@ -621,7 +627,48 @@ def _words(value: Any) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", str(value or "").lower()))
 
 
-def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any], spoken: str) -> str | None:
+# Words too common in deal names to tie a quote to one deal.
+_GENERIC_NAME_WORDS = {"the", "and", "for", "llc", "inc", "medical", "dental", "clinic", "health",
+                       "office", "building", "lease", "expansion", "relocation", "center", "suite"}
+_STOP_WORDS = {"the", "and", "for", "with", "from", "that", "this", "will", "about", "into", "next", "step"}
+MIN_EVIDENCE_WORDS = 4
+
+
+def _jev_fixture_client() -> Any:
+    """The rehearsal's offline Jev stand-in, a seam like the distiller command; None means live Jev."""
+    path = os.environ.get("CARR_POST_CALL_JEV_FIXTURE")
+    if not path:
+        return None
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("post_call_jev_fixture", path)
+    if spec is None or spec.loader is None:
+        raise ContractError("CARR_POST_CALL_JEV_FIXTURE is not a Python file")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.client()
+
+
+def _supports(evidence: str, field: str, value: dict[str, Any], deal_name: str) -> str | None:
+    """Why the quote does not show this deal and this value, or None when it does."""
+    said = set(evidence.split())
+    if len(evidence.split()) < MIN_EVIDENCE_WORDS:
+        return "The quoted evidence is too short to show the change."
+    names = {word for word in _words(deal_name).split() if len(word) >= 3 and word not in _GENERIC_NAME_WORDS}
+    if not names & said:
+        return "The quoted evidence does not name this deal."
+    if field == "phase_move":
+        wanted = set(_words(str(value.get("value", "")).replace("_", " ")).split())
+        if not wanted or not wanted <= said:
+            return "The quoted evidence does not state this phase."
+    else:
+        wanted = {word for word in _words(value.get("text")).split() if len(word) >= 4 and word not in _STOP_WORDS}
+        if not wanted or len(wanted & said) < min(2, len(wanted)):
+            return "The quoted evidence does not state this next step."
+    return None
+
+
+def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any], spoken: str,
+                    deal_name: str) -> str | None:
     """Why one stated change must stay a card for Joe or Dell, or None to apply it.
 
     Joe's 2026-10-26 ruling: confident changes apply themselves; anything the
@@ -636,6 +683,9 @@ def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any], 
     evidence = _words(update.get("evidence"))
     if not evidence or f" {evidence} " not in f" {spoken} ":
         return "The quoted evidence was not found word for word in the transcript."
+    unsupported = _supports(evidence, field, value, deal_name)
+    if unsupported:
+        return unsupported
     same = [other for other in report.get("deal_updates", [])
             if other.get("deal_id") == update.get("deal_id") and other.get(field) is not None]
     if len(same) > 1:
@@ -643,20 +693,23 @@ def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any], 
     # Jev's RIGHT DEAL answers "unclear which deal". Its RIGHT DETAILS judges
     # the update's summary, not this change, so it stays advisory here.
     deal_check = (update.get("checks") or {}).get("deal")
-    if isinstance(deal_check, dict) and deal_check.get("pass") is False:
+    if not isinstance(deal_check, dict):
+        return "The automatic deal check did not run."
+    if deal_check.get("pass") is not True:
         return "The automatic check matched these words to a different deal."
     return None
 
 
-def mark_automatic(result: dict[str, Any], transcript: dict[str, Any]) -> dict[str, Any]:
+def mark_automatic(result: dict[str, Any], transcript: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Label each stated next step and phase move automatic or for review."""
     segments = transcript.get("segments") if isinstance(transcript, dict) else None
     spoken = _words(" ".join(str(seg.get("text", "")) for seg in segments or [] if isinstance(seg, dict)))
+    names = {deal.get("id"): str(deal.get("name") or "") for deal in context.get("deals", []) if isinstance(deal, dict)}
     for update in result.get("deal_updates", []):
         for field in AUTOMATIC_FIELDS:
             value = update.get(field)
             if isinstance(value, dict):
-                hold = _automatic_hold(update, field, result, spoken)
+                hold = _automatic_hold(update, field, result, spoken, names.get(update.get("deal_id"), ""))
                 value["apply"] = "review" if hold else "automatic"
                 value["review_reason"] = hold
     return result

@@ -1028,7 +1028,7 @@ class AutomaticApplyTests(unittest.TestCase):
 
     def update(self, **change: object) -> dict[str, object]:
         base: dict[str, object] = {"deal_id": "deal-a", "summary": "Bayside", "participant_ids": [],
-                                   "evidence": "send the lease draft by November 6, 2026",
+                                   "evidence": "Next step for Bayside: send the lease draft by November 6, 2026",
                                    "next_step": None, "phase_move": None}
         base.update(change)
         return base
@@ -1037,14 +1037,18 @@ class AutomaticApplyTests(unittest.TestCase):
         return {"text": "Send the lease draft", "next_date": "2026-11-06", "needs_review": None, **extra}
 
     def mark(self, *updates: dict[str, object]) -> Any:
-        return post_call.mark_automatic({"deal_updates": list(updates), "review_questions": []}, self.transcript)
+        context = {"deals": [{"id": "deal-a", "name": "Bayside Dental Relocation"},
+                             {"id": "deal-b", "name": "Harbor Clinic Expansion"}]}
+        # Jev's RIGHT DEAL passes unless a case says otherwise.
+        checked = [{"checks": {"deal": {"pass": True}}, **update} for update in updates]
+        return post_call.mark_automatic({"deal_updates": checked, "review_questions": []}, self.transcript, context)
 
     def test_plainly_stated_change_is_automatic(self) -> None:
-        marked = self.mark(self.update(next_step=self.step(), phase_move={
-            "value": "negotiation", "started_on": None, "needs_review": None}))
-        update = marked["deal_updates"][0]
-        self.assertEqual(update["next_step"]["apply"], "automatic")
-        self.assertEqual(update["phase_move"]["apply"], "automatic")
+        marked = self.mark(self.update(next_step=self.step()),
+                           self.update(evidence="Agreed. Bayside moves to negotiation.", phase_move={
+                               "value": "negotiation", "started_on": None, "needs_review": None}))
+        self.assertEqual(marked["deal_updates"][0]["next_step"]["apply"], "automatic")
+        self.assertEqual(marked["deal_updates"][1]["phase_move"]["apply"], "automatic")
 
     def test_unsettled_changes_stay_cards_with_a_reason(self) -> None:
         cases = {
@@ -1052,14 +1056,46 @@ class AutomaticApplyTests(unittest.TestCase):
             "no date": self.update(next_step=self.step(next_date=None)),
             "invented evidence": self.update(next_step=self.step(), evidence="we will sign the lease today"),
             "wrong deal": self.update(next_step=self.step(), checks={"deal": {"pass": False}}),
+            "deal check did not run": self.update(next_step=self.step(), checks={"unavailable": True}),
+            "no deal check at all": self.update(next_step=self.step(), checks=None),
+            "one-word quote": self.update(next_step=self.step(), evidence="Bayside"),
+            "quote never names the deal": self.update(next_step=self.step(), evidence="send the lease draft by November 6, 2026"),
+            "quote states another change": self.update(next_step=self.step(), evidence="Agreed. Bayside moves to negotiation."),
+            "quote states another phase": self.update(evidence="Agreed. Bayside moves to negotiation.", phase_move={
+                "value": "legal", "started_on": None, "needs_review": None}),
         }
         for name, update in cases.items():
             with self.subTest(name):
-                step = self.mark(update)["deal_updates"][0]["next_step"]
-                self.assertEqual(step["apply"], "review")
-                self.assertTrue(step["review_reason"])
+                marked = self.mark(update)["deal_updates"][0]
+                change = marked["next_step"] or marked["phase_move"]
+                self.assertEqual(change["apply"], "review")
+                self.assertTrue(change["review_reason"])
         twice = self.mark(self.update(next_step=self.step()), self.update(next_step=self.step(text="Other")))
         self.assertEqual({u["next_step"]["apply"] for u in twice["deal_updates"]}, {"review"})
+
+    def test_a_missing_needs_review_flag_fails_closed(self) -> None:
+        raw = {"schema_version": 1, "report": {"summary": "", "decisions": [], "open_questions": []},
+               "joe_tasks": [], "dell_tasks": [], "draft_proposals": [], "review_questions": [],
+               "deal_updates": [self.update(next_step={"text": "Send the lease draft", "next_date": "2026-11-06"})]}
+        result = post_call.normalize_distillation(raw, {"deals": [{"id": "deal-a", "participants": []}]}, self.session.name)
+        self.assertEqual(result["deal_updates"][0]["next_step"]["needs_review"], post_call.UNSAID_REVIEW)
+        step = self.mark(*result["deal_updates"])["deal_updates"][0]["next_step"]
+        self.assertEqual((step["apply"], step["review_reason"]), ("review", post_call.UNSAID_REVIEW))
+
+    def test_a_jev_check_that_throws_does_not_apply(self) -> None:
+        post_call.write_private(self.session / post_call.CONTEXT_FILE, {"call_context": {
+            "session": self.session.name, "workspace_kind": "team", "generated_at": "2026-10-26T14:00:00Z", "deals": [
+                {"id": "deal-a", "name": "Bayside Dental Relocation", "owner": "joe", "operating_state": "active",
+                 "participants": []}]}})
+        post_call.write_private(self.session / "transcript.json", self.transcript)
+        raw = {"schema_version": 1, "report": {"summary": "", "decisions": [], "open_questions": []},
+               "joe_tasks": [], "dell_tasks": [], "draft_proposals": [], "review_questions": [],
+               "deal_updates": [self.update(next_step=self.step())]}
+        with patch("post_call_jev.check_distillation", side_effect=RuntimeError("Jev exploded")):
+            post_call.process_session(self.session, distiller=lambda _request: raw)
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        step = report["deal_updates"][0]["next_step"]
+        self.assertEqual((step["apply"], step["review_reason"]), ("review", "The automatic deal check did not run."))
 
     def test_summary_detail_check_does_not_hold_the_change(self) -> None:
         update = self.update(next_step=self.step(), checks={"deal": {"pass": True}, "details": {"pass": False}})
@@ -1074,7 +1110,7 @@ class AutomaticApplyTests(unittest.TestCase):
         result = post_call.normalize_distillation(raw, context, self.session.name)
         self.assertEqual(result["deal_updates"][0]["phase_move"]["started_on"], "2026-10-20")
         self.assertIsNone(result["deal_updates"][1]["phase_move"]["started_on"])
-        self.assertIsNone(result["deal_updates"][1]["phase_move"]["needs_review"])
+        self.assertEqual(result["deal_updates"][1]["phase_move"]["needs_review"], post_call.UNSAID_REVIEW)
         post_call.write_private(self.session / post_call.REPORT_FILE, result)
         payloads = [item["payload"] for item in post_call.sanitized_candidates(self.session)["legacy_items"]
                     if item["kind"] == "phase_move"]

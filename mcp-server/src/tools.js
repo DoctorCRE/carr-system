@@ -2321,6 +2321,7 @@ async function appendDealNextStep(c, actor, dealId, text, nextDate, key) {
     "select id, text from deal_note where deal_id=$1 and kind='next_step' order by created_at desc, id desc limit 1 /* dealroom:current-step */",
     [dealId],
   );
+  const board = (await c.query("select next_step from v_deal_room_board where id=$1 /* dealroom:board-step */", [dealId])).rows[0];
   const note = await c.query(
     "insert into deal_note (deal_id, kind, text, actor_id, created_at) values ($1,'next_step',$2,$3,clock_timestamp()) returning id, to_jsonb(created_at)#>>'{}' as created_at /* dealroom:add-next-step */",
     [dealId, text, actor.id],
@@ -2334,10 +2335,10 @@ async function appendDealNextStep(c, actor, dealId, text, nextDate, key) {
   // their own on the deal; replacing yours drops (does not complete) it.
   // A partner's own automation (joe-local) replaces that partner's step: the
   // board reads the newest open step, so leaving Joe's open would hide it.
-  await c.query(
+  const replaced = (await c.query(
     `update next_action set status='dropped', updated_by=$1
       where subject_type='deal' and subject_id=$2 and owner_id=any($3::uuid[]) and status='open' and item_title is null
-      /* dealroom:drop-prior-action */`, [actor.id, dealId, await partnerOwnerIds(c, actor)]);
+      returning id /* dealroom:drop-prior-action */`, [actor.id, dealId, await partnerOwnerIds(c, actor)])).rows;
   const action = await c.query(
     `insert into next_action (subject_type, subject_id, owner_id, due_on,
                               description, created_by, updated_by, updated_at)
@@ -2346,8 +2347,9 @@ async function appendDealNextStep(c, actor, dealId, text, nextDate, key) {
     [dealId, actor.id, nextDate, text]);
   await writeEvent(c, actor, "set-next-step", "deal", dealId, {
     field: "next_step",
-    old: { next_step: prior.rows[0]?.text ?? null },
-    new: { next_step: text, next_date: nextDate },
+    old: { next_step: prior.rows[0]?.text ?? null, ...(board ? { board_next_step: board.next_step ?? null } : {}) },
+    new: { next_step: text, next_date: nextDate, next_action_id: action.rows[0].id,
+      replaced_action_ids: replaced.map(row => row.id) },
     recorded_at_after_lock: true,
     idempotency_key: key,
   });
@@ -2428,6 +2430,66 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
     });
   return { superseded_action_ids: supersededIds, superseded_post_call_action_ids: postCall.map(a => a.id),
     ...dealNextStepStatus(next?.description, nextDate) };
+}
+
+// Undo of a next step the weekly call applied (undo-call-change). The apply ran
+// set-next-step under `capture:<candidate>`: supersedeOverdueDealAction then
+// appendDealNextStep. Their events say what the card showed before, which balls
+// they closed and which ball they opened, so the card goes back exactly. Any
+// later edit to the step, its date or one of its checklist items is newer work
+// and refuses the undo instead of being overwritten.
+async function undoAppliedNextStep(c, actor, dealId, candidate, key, args) {
+  await lockDealField(c, dealId, "next_date");
+  await lockDealField(c, dealId, "next_step");
+  await versionGuard(c, "deal", dealId, args.base_version);
+  const events = (await c.query(
+    `select field, old_value, new_value, recorded_at from event
+      where subject_type='deal' and subject_id=$1 and idempotency_key=$2 and field in ('next_step','next_date','next_action')
+      order by recorded_at, id /* call-outcome:undo-step-events */`, [dealId, key])).rows;
+  const first = field => events.find(row => row.field === field);
+  const applied = events.filter(row => row.field === "next_step" && row.new_value?.next_action_id).at(-1);
+  if (!first("next_step") || !first("next_date") || !applied) throw new ToolError({ error: "applied_change_not_found" });
+  const newer = (await c.query(
+    `select 1 from event where subject_type='deal' and subject_id=$1 and field in ('next_step','next_date')
+        and recorded_at > (select max(recorded_at) from event where subject_type='deal' and subject_id=$1 and idempotency_key=$2)
+      limit 1 /* call-outcome:undo-step-newer */`, [dealId, key])).rows;
+  const items = (await c.query(
+    `select n.id, n.status, (select count(*) from event e where e.subject_type='deal' and e.subject_id=$1
+        and e.field in ('deal_item','deal_item_instruction') and e.new_value->>'item_id' = n.id::text) as events
+       from next_action n where n.subject_type='deal' and n.subject_id=$1 and n.source_ref=$2 and n.item_title is not null
+       /* call-outcome:undo-step-items-read */`, [dealId, `capture_candidate:${candidate.id}`])).rows;
+  if (newer.length || items.some(item => item.status !== "open" || Number(item.events) > 1))
+    throw new ToolError({ error: "newer_change_exists",
+      hint: "The next step or one of its checklist items changed after the call. Open the deal and edit it directly." });
+  const stepBefore = first("next_step").old_value ?? {};
+  const priorStep = "board_next_step" in stepBefore ? stepBefore.board_next_step : (stepBefore.next_step ?? null);
+  const priorDate = first("next_date").old_value?.next_date ?? null;
+  const reopenIds = [...events.filter(row => row.field === "next_action").flatMap(row => row.new_value?.superseded_action_ids ?? []),
+    ...(applied.new_value.replaced_action_ids ?? [])];
+  await c.query(
+    `update next_action set status='dropped', updated_by=$2, updated_at=clock_timestamp()
+      where id=any($1::uuid[]) and status='open' /* call-outcome:undo-step-drop */`,
+    [[applied.new_value.next_action_id, ...items.map(item => item.id)], actor.id]);
+  const reopened = [
+    ...(await c.query(`update next_action set status='open', updated_by=$2, updated_at=clock_timestamp()
+      where id=any($1::uuid[]) and status='dropped' returning id /* call-outcome:undo-step-reopen */`, [reopenIds, actor.id])).rows,
+    ...(await c.query(`update capture_post_call_action set status='open', updated_at=clock_timestamp()
+      where id=any($1::uuid[]) and status='dropped' returning id /* call-outcome:undo-step-reopen-post-call */`, [reopenIds])).rows,
+  ].map(row => row.id);
+  await c.query("update deal set next_date=$2, updated_by=$3 where id=$1 /* call-outcome:undo-step-date */", [dealId, priorDate, actor.id]);
+  const shown = (await c.query("select next_step from v_deal_room_board where id=$1", [dealId])).rows[0]?.next_step ?? null;
+  // The board shows the newest open ball, else the newest unhidden note. Put
+  // back the note it showed, or hide the call's note when it showed none.
+  if (priorStep !== null && shown !== priorStep)
+    await c.query("insert into deal_note (deal_id, kind, text, actor_id, created_at) values ($1,'next_step',$2,$3,clock_timestamp()) /* call-outcome:undo-step-note */",
+      [dealId, priorStep, actor.id]);
+  for (const [field, before, after] of [["next_step", candidate.payload.text, priorStep], ["next_date", candidate.payload.next_date ?? null, priorDate]])
+    await writeEvent(c, actor, "undo-call-change", "deal", dealId, {
+      field, old: { [field]: before },
+      new: { [field]: after, ...(field === "next_step" && priorStep === null && shown !== null ? { superseded_action_ids: [] } : {}) },
+      recorded_at_after_lock: true, idempotency_key: args.idempotency_key });
+  return { next_step: priorStep, next_date: priorDate, reopened_action_ids: reopened,
+    dropped_item_ids: items.map(item => item.id) };
 }
 
 async function latestFieldConflict(c, dealId, field, baseEventId) {
@@ -9838,7 +9900,7 @@ registerTools({
 
   "undo-call-change": {
     write: true,
-    description: "Undo one change a pipeline call applied automatically: a phase move goes back to the prior phase, a next step back to the prior step and date (its checklist items are dropped). Needs the deal's base_version from a fresh read-call-outcomes or deal read, and refuses when the card changed again after the call.",
+    description: "Undo one change a pipeline call applied automatically: a phase move goes back to the prior phase; a next step goes back to the step and date the card showed before the call, reopens the balls the call closed, and drops its untouched checklist items. Needs the deal's base_version from a fresh read-call-outcomes or deal read. Refuses with newer_change_exists when the card or one of its checklist items changed after the call.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       idempotency_key: { type: "string" }, candidate_id: { type: "string" }, base_version: { type: "integer" },
     }, required: ["idempotency_key", "candidate_id", "base_version"] },
@@ -9863,39 +9925,7 @@ registerTools({
         reverted = await executeRegisteredTool(c, actor, "revert-deal-field",
           { event_id: applied.id, idempotency_key: `${args.idempotency_key}:phase` });
       } else if (candidate.kind === "next_step") {
-        await lockDealField(c, dealId, "next_date");
-        await lockDealField(c, dealId, "next_step");
-        await versionGuard(c, "deal", dealId, args.base_version);
-        // The first next_step and next_date events under the apply's key hold
-        // the card as it stood before the call changed it.
-        const before = (await c.query(
-          `select distinct on (field) field, old_value -> field as value, recorded_at from event
-            where subject_type='deal' and subject_id=$1 and idempotency_key=$2 and field in ('next_step','next_date')
-            order by field, recorded_at, id /* call-outcome:undo-step-before */`, [dealId, key])).rows;
-        if (before.length !== 2) throw new ToolError({ error: "applied_change_not_found" });
-        const newer = (await c.query(
-          `select 1 from event where subject_type='deal' and subject_id=$1 and field in ('next_step','next_date')
-              and recorded_at > (select max(recorded_at) from event where subject_type='deal' and subject_id=$1 and idempotency_key=$2)
-            limit 1 /* call-outcome:undo-step-newer */`, [dealId, key])).rows;
-        if (newer.length) throw new ToolError({ error: "newer_change_exists",
-          hint: "The next step changed again after the call. Open the deal and edit it directly." });
-        const prior = Object.fromEntries(before.map(row => [row.field, row.value ?? null]));
-        const dropped = (await c.query(
-          `update next_action set status='dropped', updated_by=$3
-            where subject_type='deal' and subject_id=$1 and source_ref=$2 and item_title is not null and status <> 'dropped'
-            returning id /* call-outcome:undo-step-items */`, [dealId, `capture_candidate:${candidate.id}`, actor.id])).rows;
-        if (prior.next_step) {
-          reverted = await appendDealNextStep(c, actor, dealId, prior.next_step, prior.next_date, args.idempotency_key);
-        } else {
-          await c.query("update deal set next_date=$2, updated_by=$3 where id=$1", [dealId, prior.next_date, actor.id]);
-          for (const field of ["next_step", "next_date"])
-            await writeEvent(c, actor, "undo-call-change", "deal", dealId, {
-              field, old: { [field]: field === "next_step" ? candidate.payload.text : candidate.payload.next_date },
-              new: { [field]: prior[field], superseded_action_ids: [] },
-              recorded_at_after_lock: true, idempotency_key: args.idempotency_key });
-          reverted = { next_step: null, next_date: prior.next_date };
-        }
-        reverted.dropped_item_ids = dropped.map(row => row.id);
+        reverted = await undoAppliedNextStep(c, actor, dealId, candidate, key, args);
       } else throw new ToolError({ error: "not_applied_automatically" });
       await c.query("update capture_candidate set undone_at=now(), undone_by=$2 where id=$1 /* call-outcome:undo */",
         [candidate.id, actor.id]);
