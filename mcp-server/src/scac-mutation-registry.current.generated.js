@@ -521,6 +521,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "compare-fact-observations": {
+    "ingress_key": "mcp-tool:compare-fact-observations",
+    "source_locator": "mcp-server/src/fact-observations.js",
+    "schema_digest": "fabaa603b5ffeaf1648ad43bca2ec51be0b6e5ce9cf3e6378fc544e846b4207b",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "compare-lease-terms": {
     "ingress_key": "mcp-tool:compare-lease-terms",
     "source_locator": "mcp-server/src/lease-term-comparison.js",
@@ -1484,6 +1493,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-board-answers",
     "source_locator": "mcp-server/src/board-answers.js",
     "schema_digest": "91e298ac2dd0586ded466af4c10c4d810116cdc191a812e52f4a81dd6b65bfd4",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-client-portal": {
+    "ingress_key": "mcp-tool:read-client-portal",
+    "source_locator": "mcp-server/src/client-portal.js",
+    "schema_digest": "25c4425e3887511ffa3b9a7d402b99e4167a424450ee8f986d53e1f1bd686c7a",
     "write": false,
     "human_only": false,
     "authority_only": false,
@@ -2889,6 +2907,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[])",
       "volatility": "s",
       "ingress_key": "db-function-acl:public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[]):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.read_client_portal(p_slug text, p_password text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.read_client_portal(p_slug text, p_password text):carr_reader:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

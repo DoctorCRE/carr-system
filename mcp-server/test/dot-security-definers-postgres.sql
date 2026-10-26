@@ -54,7 +54,8 @@ grant select on dot_definer_calls to dot_reader;
 -- calls could confound the measurement. Sorted row hashes catch UPDATE and
 -- delete+insert substitutions as well as row-count changes. Sequence state
 -- catches nextval/setval even when the surrounding statement rolls back.
-create function pg_temp.dot_relation_state() returns jsonb language plpgsql as $state$
+create function pg_temp.dot_relation_state() returns jsonb language plpgsql security definer
+  set search_path=pg_catalog,pg_temp as $state$
 declare relation record; fingerprint text; result jsonb := '{}'::jsonb;
 begin
   for relation in

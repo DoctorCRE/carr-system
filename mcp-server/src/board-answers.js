@@ -216,7 +216,10 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
       handler: async (c, actor) => {
         const tenant = organizationTenantForActor(actor), principal = sponsor(actor);
         const result = await c.query(
-          `select board_id,snapshot_json,updated_at from board_snapshot
+          `select board_id,jsonb_build_object(
+              'title',snapshot_json->'title',
+              'project',snapshot_json->'project',
+              'task_counts',snapshot_json->'task_counts') as snapshot_json,updated_at from board_snapshot
             where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id <> $3
             order by case when board_id='carr-v5' then 0 else 1 end,board_id`,
           [tenant, principal, NEEDS_JOE_LOCAL_BOARD]);

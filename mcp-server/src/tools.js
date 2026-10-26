@@ -5,6 +5,7 @@ import { invoiceTrackerTools } from "./invoice-tracker.js";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.js";
 import { readDealChecklist } from "./deal-checklist.js";
+import { factObservationTools } from "./fact-observations.js";
 import { dealItemTools, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.js";
 import { bindReferralDeal } from "./relationship-network.js";
 import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
@@ -35,6 +36,7 @@ import { workPortfolioTools } from "./work-portfolio.js";
 import { leaseTermComparisonTools } from "./lease-term-comparison.js";
 import { partnerRoomTools } from "./partner-room.js";
 import { agentProfileTools } from "./agent-profiles.js";
+import { clientPortalTools } from "./client-portal.js";
 import { memoryTools } from "./memory.js";
 import { codexContinuityTools } from "./codex-continuity.js";
 import { incidentTools } from "./incident.js";
@@ -8801,8 +8803,10 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "work-shape": "mcp-server/src/work-shape.js",
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
+  "fact-observations": "mcp-server/src/fact-observations.js",
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
+  "client-portal": "mcp-server/src/client-portal.js",
   "resource-observation": "mcp-server/src/resource-observation.v5.js",
   "lead-automation": "mcp-server/src/lead-automation.js",
   "invoice-automation": "mcp-server/src/invoice-automation.js",
@@ -10023,11 +10027,13 @@ registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 
 // Pure workbook-derived lease economics. No database, model, or write path.
 registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
+registerTools(factObservationTools({ ToolError }), "fact-observations");
 
 // The partner room (Idea 78): shared AI-to-AI transcript both Macs poll; raw
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
 registerTools(agentProfileTools(), "agent-profile");
+registerTools(clientPortalTools({ ToolError }), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
 // src/resource-observation.v5.js.
