@@ -150,7 +150,7 @@ export function workShapeTools({ withEnvelope, writeEvent, ToolError }) {
   return {
     "read-work-shape": {
       write: false, fullOnly: true,
-      description: "Read the current append-only implementation-shape decision for a canonical Work Request. This exposes why the work should be a verb, UI, scheduled lane, CLI, view, or other form before implementation begins.",
+      description: "Read stored implementation-shape decisions and disposition lineage for a canonical Work Request. Shape analysis is optional and does not gate readiness or implementation.",
       inputSchema: {
         type: "object", additionalProperties: false,
         properties: { work_request: { type: "string" }, include_history: { type: "boolean" } }, required: ["work_request"],
@@ -174,7 +174,7 @@ export function workShapeTools({ withEnvelope, writeEvent, ToolError }) {
     },
     "set-work-shape-disposition": {
       write: true,
-      description: "Explicitly decide whether a Work Request needs shape analysis before implementation. required means a current work-shape revision must exist at claim time. not_required is allowed only when the implementation surface is already fixed and names that surface. Any qualified seat may record this operational disposition; it grants no human-only authority.",
+      description: "Record optional implementation-shape metadata for a Work Request. required records that analysis was chosen; it does not gate readiness or implementation. not_required names an already-fixed implementation surface. Any qualified seat may record this operational disposition; it grants no human-only authority.",
       inputSchema: {
         type: "object", additionalProperties: false,
         properties: {

@@ -42,6 +42,7 @@ import { codexContinuityTools } from "./codex-continuity.js";
 import { incidentTools } from "./incident.js";
 import { resourceObservationTools } from "./resource-observation.v5.js";
 import { invoiceAutomation } from "./invoice-automation.js";
+import { emailDealProgressTools } from "./email-deal-progress.js";
 import { leadAutomationTools } from "./lead-automation.js";
 import { workflowCutoverTools } from "./workflow-cutover.v5.js";
 import { engineeringRuntimeTools } from "./engineering-runtime.js";
@@ -8810,6 +8811,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "resource-observation": "mcp-server/src/resource-observation.v5.js",
   "lead-automation": "mcp-server/src/lead-automation.js",
   "invoice-automation": "mcp-server/src/invoice-automation.js",
+  "email-deal-progress": "mcp-server/src/email-deal-progress.js",
   "workflow-cutover": "mcp-server/src/workflow-cutover.v5.js",
   "memory": "mcp-server/src/memory.js",
   "codex-continuity": "mcp-server/src/codex-continuity.js",
@@ -9786,6 +9788,24 @@ registerTools({
                  : "first of its class." };
     }),
   },
+  "read-decision": {
+    write: false,
+    description: "Read one recorded decision in full, including its title, human quote, complete agent rationale and provenance. Pass the decision_id from find-precedent or log-decision, as a full UUID or an unambiguous ID prefix. Ambiguous prefixes return candidates instead of choosing a decision. Reads the current record, including corrections made by update-decision. Read-only.",
+    inputSchema: { type: "object", properties: {
+      decision_id: { type: "string", description: "Full decision UUID or an unambiguous prefix, including the 8-character short form." } },
+      required: ["decision_id"], additionalProperties: false },
+    handler: async (c, _a, args) => {
+      const decisionId = await resolveDecisionId(c, args.decision_id);
+      const decision = (await c.query(
+        `select decision_id, event_id, entry_date, occurred_at, title, human_quote,
+                agent_rationale, provenance, author, session_key, source_file,
+                external_key, cause, quote_absent, cost_delta, quality_delta, priced
+           from v_decision_entry where decision_id = $1`, [decisionId])).rows[0];
+      if (!decision) throw new ToolError({ error: "decision_not_found", decision_id: args.decision_id,
+        hint: "pass the decision_id log-decision returned, not the event_id" });
+      return { ok: true, decision };
+    },
+  },
   "find-precedent": {
     write: false,
     description: "\"What precedent exists for a fork shaped like this?\" — searches recorded RULING HISTORY plus activated typed precedents. Results carry record_kind: settled_ruling is a recorded decision; typed_precedent is governed guidance and must not be presented as a settled decision. Search before re-arguing a settled point or declaring a fork open. Matches titles, partner wording, and reasoning with trigram similarity; two or three concrete nouns beat a sentence. NOT for doctrine (search-doctrine), records (find), or open work (loop-board). Read-only.",
@@ -10038,6 +10058,8 @@ registerTools(clientPortalTools({ ToolError }), "client-portal");
 // one write door the local, credential-less collector uses. See
 // src/resource-observation.v5.js.
 registerTools(resourceObservationTools({ withEnvelope, ToolError }), "resource-observation");
+registerTools(emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lockDealField,
+  updateDeal: (c, actor, args) => TOOLS["update-deal"].handler(c, actor, args) }), "email-deal-progress");
 const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealField,
   updateDeal:(c,actor,args)=>TOOLS["update-deal"].handler(c,actor,args),
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});

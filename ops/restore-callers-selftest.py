@@ -137,8 +137,9 @@ class RestoreCallers(unittest.TestCase):
                               '--identity', '/synthetic/nonexistent-identity'])
 
     def test_usage_does_not_advertise_the_removed_local_path(self):
-        usage = next(line for line in (ROOT / 'run.sh').read_text().splitlines()
-                     if 'usage: run.sh' in line).split('|restore-rehearse', 1)[1].split('|', 1)[0]
+        result = subprocess.run([str(ROOT / 'run.sh')], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        usage = result.stdout.split('|restore-rehearse', 1)[1].split('|', 1)[0]
         self.assertIn('--backup-run-id', usage)
         self.assertNotIn('--date', usage)
         self.assertNotIn('--dump', usage)

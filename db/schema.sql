@@ -518,26 +518,13 @@ begin
     raise exception 'exact current triaged sourced plan/version required';
   end if;
 
-  if (w.shape_disposition,w.shape_fixed_surface_ref,w.shape_rationale,w.shape_decided_by_actor_id,w.shape_decided_at)
-       is not distinct from (null::text,null::text,null::text,null::uuid,null::timestamptz)
-     and not exists (select 1 from ops.work_shape_revision sr where sr.work_request_id = w.id) then
-    preserve_shape := false;
-  elsif w.shape_disposition = 'required' and w.shape_fixed_surface_ref is null
-     and w.shape_rationale is not null and btrim(w.shape_rationale) <> ''
-     and w.shape_decided_by_actor_id is not null and w.shape_decided_at is not null
-     and exists (select 1 from ops.effective_sourced_work_request_shape_disposition(w) e where e.disposition='required')
-     and (select sr.work_request_version from ops.work_shape_revision sr
-            where sr.work_request_id = w.id order by sr.version desc limit 1) = w.version then
-    preserve_shape := true;
-  elsif w.shape_disposition = 'not_required' and w.shape_fixed_surface_ref is not null
-     and btrim(w.shape_fixed_surface_ref) <> '' and w.shape_rationale is not null
-     and btrim(w.shape_rationale) <> '' and w.shape_decided_by_actor_id is not null
-     and w.shape_decided_at is not null
-     and exists (select 1 from ops.effective_sourced_work_request_shape_disposition(w) e where e.disposition='not_required')
-     and not exists (select 1 from ops.work_shape_revision sr where sr.work_request_id = w.id) then
-    preserve_shape := true;
-  else
-    raise exception 'sourced ready-plan requires either an exact unshaped request or one current receipt-backed shape disposition';
+  preserve_shape := w.shape_disposition is not null;
+  if preserve_shape and not exists (
+    select 1 from ops.sourced_work_request_shape_disposition_lineage(w.id) e
+     where (w.shape_disposition,w.shape_fixed_surface_ref,w.shape_rationale,w.shape_decided_by_actor_id,w.shape_decided_at)
+           is not distinct from (e.disposition,e.fixed_surface_ref,e.rationale,e.decided_by_actor_id,e.decided_at)
+  ) then
+    raise exception 'sourced ready-plan shape metadata must match its historical receipt';
   end if;
 
   perform 1 from public.doctrine_document d join public.doctrine_section s on s.document_id = d.id
@@ -11655,7 +11642,7 @@ COMMENT ON COLUMN ops.work_request.project_context IS 'Session-complete context 
 -- Name: COLUMN work_request.shape_disposition; Type: COMMENT; Schema: ops; Owner: -
 --
 
-COMMENT ON COLUMN ops.work_request.shape_disposition IS 'Mandatory before a request enters implementation: required runs the evidence-backed shape method; not_required cites the already-fixed implementation surface. Null is permitted while work is captured or triaged and on pre-0130 ready rows, which the implementation-entry gate still refuses until classified.';
+COMMENT ON COLUMN ops.work_request.shape_disposition IS 'Historical implementation-shape metadata. Retained for receipt lineage and Work Inventory reads; no shape decision or analysis revision is required for readiness or implementation.';
 
 
 --
@@ -31121,23 +31108,6 @@ begin
      or w.capture_idempotency_key is null or w.organization_tenant_id is distinct from 'carr-internal' then
     raise exception 'exact current triaged sourced Work Request required';
   end if;
-  if not (
-    ((w.shape_disposition,w.shape_fixed_surface_ref,w.shape_rationale,w.shape_decided_by_actor_id,w.shape_decided_at)
-       is not distinct from (null::text,null::text,null::text,null::uuid,null::timestamptz)
-      and not exists (select 1 from ops.work_shape_revision sr where sr.work_request_id=w.id))
-    or
-    (w.shape_disposition='required' and w.shape_fixed_surface_ref is null and w.shape_rationale is not null and btrim(w.shape_rationale) <> ''
-      and exists (select 1 from ops.effective_sourced_work_request_shape_disposition(w) e where e.disposition='required')
-      and (select sr.work_request_version from ops.work_shape_revision sr where sr.work_request_id=w.id order by sr.version desc limit 1)=w.version)
-    or
-    (w.shape_disposition='not_required' and w.shape_fixed_surface_ref is not null and btrim(w.shape_fixed_surface_ref) <> ''
-      and w.shape_rationale is not null and btrim(w.shape_rationale) <> ''
-      and exists (select 1 from ops.effective_sourced_work_request_shape_disposition(w) e where e.disposition='not_required')
-      and not exists (select 1 from ops.work_shape_revision sr where sr.work_request_id=w.id))
-  ) then
-    raise exception 'exact unshaped or current receipt-backed shaped triaged sourced Work Request required';
-  end if;
-
   perform 1 from public.doctrine_document source_document join public.doctrine_section source_section on source_section.document_id=source_document.id
     join public.doctrine_revision source_revision on source_revision.id=source_section.current_revision_id and source_revision.section_id=source_section.id
    where source_document.visibility='shared' and source_section.status='active' and source_section.id=w.doctrine_section_id
@@ -68367,24 +68337,16 @@ $$;
 CREATE FUNCTION ops.work_request_shape_gate() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
-declare
-  shape_work_request_version integer;
 begin
   if tg_op = 'INSERT' then
     if new.state in ('claimed','in_progress','verification','awaiting_release','released','confirmed_closed') then
       raise exception 'new Work Request cannot enter implementation directly';
     end if;
-    if new.state = 'ready' then
-      if new.shape_disposition is null then
-        raise exception 'ready Work Request requires an explicit shape disposition';
-      elsif new.shape_disposition = 'required' then
-        raise exception 'required shape analysis needs a captured or triaged Work Request before ready';
-      end if;
-    end if;
     return new;
   end if;
 
-  if old.state not in ('captured','triaged','ready')
+  if (old.state not in ('captured','triaged','ready')
+      or new.state in ('claimed','in_progress','verification','awaiting_release','released','confirmed_closed'))
      and (new.shape_disposition,
           new.shape_fixed_surface_ref,
           new.shape_rationale,
@@ -68397,57 +68359,6 @@ begin
           old.shape_decided_by_actor_id,
           old.shape_decided_at) then
     raise exception 'implementation shape disposition is frozen after claim';
-  end if;
-
-  if new.state = 'ready' and old.state is distinct from 'ready' then
-    if new.shape_disposition is null then
-      raise exception 'ready Work Request requires an explicit shape disposition';
-    end if;
-    if new.shape_disposition = 'required' then
-      select r.work_request_version into shape_work_request_version
-        from ops.work_shape_revision r
-       where r.work_request_id = old.id
-       order by r.version desc
-       limit 1;
-      if shape_work_request_version is null
-         or shape_work_request_version <> old.version then
-        raise exception 'required work shape is missing or stale for Work Request version %', old.version;
-      end if;
-    end if;
-  end if;
-
-  -- This is the actual implementation-entry gate. It catches application code,
-  -- future verbs, and direct carr_writer SQL equally. Later transitions inside
-  -- the implementation-state set use the disposition frozen at first entry.
-  if new.state in ('claimed','in_progress','verification','awaiting_release','released','confirmed_closed')
-     and old.state not in ('claimed','in_progress','verification','awaiting_release','released','confirmed_closed') then
-    if (new.shape_disposition,
-        new.shape_fixed_surface_ref,
-        new.shape_rationale,
-        new.shape_decided_by_actor_id,
-        new.shape_decided_at)
-       is distinct from
-       (old.shape_disposition,
-        old.shape_fixed_surface_ref,
-        old.shape_rationale,
-        old.shape_decided_by_actor_id,
-        old.shape_decided_at) then
-      raise exception 'shape disposition must be recorded before the implementation transition';
-    end if;
-    if new.shape_disposition is null then
-      raise exception 'Work Request requires an explicit shape disposition before implementation';
-    end if;
-    if new.shape_disposition = 'required' then
-      select r.work_request_version into shape_work_request_version
-        from ops.work_shape_revision r
-       where r.work_request_id = old.id
-       order by r.version desc
-       limit 1;
-      if shape_work_request_version is null
-         or shape_work_request_version <> old.version then
-        raise exception 'required work shape is missing or stale for Work Request version %', old.version;
-      end if;
-    end if;
   end if;
 
   return new;
@@ -69724,7 +69635,7 @@ $$;
 CREATE FUNCTION public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings public.vector[]) RETURNS jsonb
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'pg_temp'
-    AS $$
+    AS $_$
 with policy as materialized (
   select policy_id,version from public.retrieval_ranking_policy
    where policy_id=coalesce(p_policy_id,
@@ -69732,7 +69643,11 @@ with policy as materialized (
      and status in ('candidate','active')
 ),
 visible as materialized (
-  select c.*, s.current_revision_id as revision_id
+  select c.*, s.current_revision_id as revision_id,
+         p_query ~ '^[[:alpha:][:space:]]+$'
+           and lower(p_query) !~ '(^|[[:space:]])or([[:space:]]|$)'
+           and pg_catalog.numnode(pg_catalog.plainto_tsquery('english',p_query)) > 0
+           and pg_catalog.strip(pg_catalog.to_tsvector('english',coalesce(c.section_title,''))) = pg_catalog.strip(pg_catalog.to_tsvector('english',p_query)) as title_topic_match
     from public.current_retrievable_doctrine(p_actor_id,p_content_classes) c
     join public.doctrine_section s on s.id=c.section_id
 ),
@@ -69746,7 +69661,7 @@ coverage as materialized (
 ),
 lexical as materialized (
   select l.*, row_number() over (
-    order by l.final_score desc,l.concept_score desc,l.lexical_score desc,l.section_key,l.section_id) as position
+    order by (l.provenance->>'title_topic_match')::boolean desc,l.final_score desc,l.concept_score desc,l.lexical_score desc,l.section_key,l.section_id) as position
     from public.search_doctrine_situations(p_query,p_actor_id,p_content_classes,100,p_policy_id,true) l
 ),
 chunk_scores as materialized (
@@ -69768,12 +69683,13 @@ semantic as (
     from nearest n where similarity > 0
 ),
 blended as (
-  select v.section_id,v.section_key,v.section_title as title,v.doc_slug,v.content_class,
+  select v.section_id,v.section_key,v.section_title as title,v.doc_slug,v.content_class,v.title_topic_match,
          coalesce(l.snippet,left(v.plain_text,240)) as snippet,
          coalesce(l.lexical_score,0) as lexical_score,
          coalesce(l.concept_score,0) as concept_score,
          (30.5 * (coalesce(1.0/(60+l.position),0) + coalesce(1.0/(60+s.position),0)))::double precision as final_score,
          coalesce(l.provenance,'{}'::jsonb) || jsonb_build_object(
+           'title_topic_match',v.title_topic_match,
            'complete',true,'policy_id',p.policy_id,'policy_version',p.version,
            'blend_id','rrf-60-v1','rrf_k',60,'rrf_scale',30.5,
            'lexical_position',l.position,'semantic_position',s.position,
@@ -69788,13 +69704,13 @@ blended as (
 ),
 limited as (
   select b.*,b.final_score as rank from blended b
-   order by final_score desc,similarity desc,concept_score desc,lexical_score desc,section_key,section_id
+   order by title_topic_match desc,final_score desc,similarity desc,concept_score desc,lexical_score desc,section_key,section_id
    limit greatest(1,least(coalesce(p_limit,20),100))
 ),
 hits as (
-  select coalesce(jsonb_agg((to_jsonb(l)-'similarity') || jsonb_build_object(
+  select coalesce(jsonb_agg((to_jsonb(l)-'similarity'-'title_topic_match') || jsonb_build_object(
     'provenance',l.provenance || jsonb_build_object('final_score',l.final_score))
-    order by l.final_score desc,l.similarity desc,l.concept_score desc,l.lexical_score desc,l.section_key,l.section_id),'[]'::jsonb) as value
+    order by l.title_topic_match desc,l.final_score desc,l.similarity desc,l.concept_score desc,l.lexical_score desc,l.section_key,l.section_id),'[]'::jsonb) as value
   from limited l
 )
 select jsonb_build_object('visible',c.visible,'embedded',c.embedded,'hits',
@@ -69803,7 +69719,7 @@ select jsonb_build_object('visible',c.visible,'embedded',c.embedded,'hits',
        from public.search_doctrine_situations(p_query,p_actor_id,p_content_classes,p_limit,p_policy_id,true) l)
   else h.value end)
 from coverage c cross join hits h
-$$;
+$_$;
 
 
 --
@@ -69829,7 +69745,12 @@ with
     select websearch_to_tsquery('english', q) as tsq from normalized
   ),
   current_set as materialized (
-    select * from public.current_retrievable_doctrine(p_actor_id, p_content_classes)
+    select c.*, n.q ~ '^[[:alpha:][:space:]]+$'
+       and n.q !~ '(^|[[:space:]])or([[:space:]]|$)'
+       and numnode(plainto_tsquery('english', n.q)) > 0
+       and strip(to_tsvector('english',coalesce(c.section_title,''))) = strip(to_tsvector('english', n.q)) as title_topic_match
+      from public.current_retrievable_doctrine(p_actor_id, p_content_classes) c
+      cross join normalized n
   ),
   lexical_raw as (
     select c.section_id,
@@ -69953,7 +69874,7 @@ with
   limited as materialized (
     select * from scored
      where final_score > 0
-     order by final_score desc, concept_score desc, lexical_score desc, section_key asc
+     order by title_topic_match desc, final_score desc, concept_score desc, lexical_score desc, section_key asc, section_id asc
      limit greatest(1, least(coalesce(p_limit, 20), 100))
   )
 select l.section_id, l.section_key, l.section_title, l.doc_slug, l.content_class,
@@ -69961,6 +69882,7 @@ select l.section_id, l.section_key, l.section_title, l.doc_slug, l.content_class
        coalesce(l.snippet, left(l.plain_text, 240)) as snippet,
        l.lexical_score, l.concept_score, l.final_score,
        jsonb_build_object(
+         'title_topic_match', l.title_topic_match,
          'complete', true, 'policy_id', l.policy_id, 'policy_version', l.policy_version,
          'lexical_score', l.lexical_score, 'concept_score', l.concept_score,
          'final_score', l.final_score, 'phrase_ids', to_jsonb(l.phrase_ids),
@@ -69968,7 +69890,7 @@ select l.section_id, l.section_key, l.section_title, l.doc_slug, l.content_class
        || case when l.used_fallback then jsonb_build_object('fallback', true)
                else '{}'::jsonb end
   from limited l
- order by l.final_score desc, l.concept_score desc, l.lexical_score desc, l.section_key asc
+ order by l.title_topic_match desc, l.final_score desc, l.concept_score desc, l.lexical_score desc, l.section_key asc, l.section_id asc
 $_$;
 
 
@@ -122165,7 +122087,9 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0973_deal_history_read_indexes.sql	44e55f3efd9fdece86cd31aea3cd502471bd2057e461f02d71363a413e451dcf	1970-01-01 00:00:00+00
 0975_client_portal.sql	32530aadc4b1c5c4d9b7ac5fd8328fab2a091c53d9ecae52c5054577dfe5d6ad	1970-01-01 00:00:00+00
 0976_client_portal_binding.sql	ddca815f5bccff21ea9ad828e928a56ca318fdbc3dd7d9fe74106aa3b7f00a44	1970-01-01 00:00:00+00
-0977_decline_unstarted_ready_work_request.sql	f343b16316d6a744dcf6c20073bedfb9e38695d5f06c56d292ba8797b9c261d6	1970-01-01 00:00:00+00
+0977_retire_work_shape_admission.sql	1a9b2f3abd4b673b073a2fa57fca31be046447c33c1f6309b2d034b775b726f3	1970-01-01 00:00:00+00
+0978_doctrine_title_topic_ranking.sql	852b8da1601a9277e7f9e2cd5fbf1385785af2356b4a08bc92438378c994c72b	1970-01-01 00:00:00+00
+0979_decline_unstarted_ready_work_request.sql	f343b16316d6a744dcf6c20073bedfb9e38695d5f06c56d292ba8797b9c261d6	1970-01-01 00:00:00+00
 \.
 
 

@@ -14,10 +14,15 @@ from lib.hook_runtime import Verdict, decision, run
 from ops.git_env import scrubbed_env
 
 CLAIM = re.compile(
-    r"\b(?:saved|added|created)\b[^.!?\n]*\b(?:rule|lesson)\b"
-    r"|\b(?:rule|lesson)\b\s+(?:is|was|has been)\s+(?:now\s+)?(?:saved|added|created|in place)\b"
+    r"\b(?P<subject>rule|lesson)\b"
     r"|\bI['’]ll remember\b|\bfrom now on I will\b"
-    r"|\brule is now in place\b|\bwon['’]t happen again\b", re.I)
+    r"|\bwon['’]t happen again\b", re.I)
+ACTIVE_CLAIM = re.compile(r"\b(?:saved|added|created)\b[^.!?\n]*$", re.I)
+PASSIVE_CLAIM = re.compile(
+    r"\s+(?:is|was|has been)\s+(?:now\s+)?(?:saved|added|created|in place)\b", re.I)
+MAIL_RULE_PREFIX = re.compile(
+    r"\b(?:outlook|gmail|mail|e-?mail|inbox|forwarding)"
+    r"(?:\s+(?:mail|e-?mail|inbox|forwarding))*[\s-]+$", re.I)
 
 
 def text_of(record):
@@ -67,13 +72,25 @@ def prose(text):
 
 
 def asserted_claim(sentence):
-    match = CLAIM.search(sentence)
-    if not match or sentence.rstrip().endswith('?'):
+    if sentence.rstrip().endswith('?'):
         return False
-    context = sentence[:match.end()]
-    return not re.search(
-        r"\b(?:if|unless|not|never|haven['’]t|hasn['’]t|hadn['’]t|would|could|should)\b",
-        context, re.I)
+    for match in CLAIM.finditer(sentence):
+        end = match.end()
+        if match.group('subject'):
+            prefix = sentence[:match.start()]
+            passive = PASSIVE_CLAIM.match(sentence[end:])
+            if not ACTIVE_CLAIM.search(prefix) and not passive:
+                continue
+            if match.group('subject').lower() == 'rule' and MAIL_RULE_PREFIX.search(prefix):
+                continue
+            if passive:
+                end += passive.end()
+        context = sentence[:end]
+        if not re.search(
+            r"\b(?:if|unless|not|never|haven['’]t|hasn['’]t|hadn['’]t|would|could|should)\b",
+            context, re.I):
+            return True
+    return False
 
 
 def enforcement_path(path):

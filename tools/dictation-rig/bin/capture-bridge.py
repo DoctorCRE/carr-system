@@ -509,6 +509,9 @@ def file_post_call_report(
 
 def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     name = session_dir.name
+    retired_marker = session_dir / ".capture-retired.json"
+    if retired_marker.is_file():
+        return Outcome.VERIFIED
     capture_marker = session_dir / ".capture.json"
     marker = read_json(capture_marker)
     if marker is None:
@@ -538,6 +541,10 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         log_line(f"ERROR poll network failure session={name}: {exc}")
         return Outcome.UNAVAILABLE
 
+    if status == 404:
+        log_line(f"ERROR poll session gone(404) session={name}")
+        write_json_atomic(retired_marker, {"retired_at": iso_now_utc(), "status": 404}, mode=0o600)
+        return Outcome.UNAVAILABLE
     if status == 401:
         log_line(f"ERROR poll unauthorized(401) session={name} (session token invalid/expired?)")
         return Outcome.UNAVAILABLE

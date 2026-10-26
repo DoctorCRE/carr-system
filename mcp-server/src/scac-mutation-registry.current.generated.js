@@ -566,6 +566,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "confirm-email-deal-progress": {
+    "ingress_key": "mcp-tool:confirm-email-deal-progress",
+    "source_locator": "mcp-server/src/email-deal-progress.js",
+    "schema_digest": "8fcdab540e2c25d37e00d0d25975dc1e4d5d3aca7112c326b59eb64bd051a722",
+    "write": true,
+    "human_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "confirm-merge": {
     "ingress_key": "mcp-tool:confirm-merge",
     "source_locator": "mcp-server/src/tools.js",
@@ -1381,6 +1390,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "preview-email-deal-progress": {
+    "ingress_key": "mcp-tool:preview-email-deal-progress",
+    "source_locator": "mcp-server/src/email-deal-progress.js",
+    "schema_digest": "01563165207c5295db5f140cf83fcfc593ba0e9e8973a033244709709a4c2d25",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "promote-pool": {
     "ingress_key": "mcp-tool:promote-pool",
     "source_locator": "mcp-server/src/tools.js",
@@ -1529,6 +1547,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-deal-reconciliation",
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "c95ca24a7624ac4279c35aa1fa5a3ee0968da2adcbfc03ab6c4d3cd9ddf30190",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-decision": {
+    "ingress_key": "mcp-tool:read-decision",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "afa34011dc484bc3374cfee5833902f94a5a9ea83f5c40ed896d5ade25e9166b",
     "write": false,
     "human_only": false,
     "authority_only": false,

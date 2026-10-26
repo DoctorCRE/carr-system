@@ -386,7 +386,6 @@ def main() -> int:
             cur.execute("reset session authorization")
             cur.execute("rollback to savepoint stale_source")
 
-            # A prior shape decision or revision cannot be silently overwritten.
             set_local_role(cur, "carr_writer")
             shaped_id, shaped_ref, _, shaped_captured_version = capture(
                 cur, source_section, source_revision, origin_ref, "pre-shaped"
@@ -402,15 +401,13 @@ def main() -> int:
             )
             cur.execute("alter table ops.work_request enable trigger sourced_work_request_is_immutable")
             set_local_role(cur, "carr_writer")
-            refusal(
-                cur, """select * from ops.propose_sourced_work_request_plan(
-                     %s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (shaped_ref, shaped_triaged[3], "scope", runbook_ref, Jsonb([]),
-                 "safe:recovery:stop", "safe:observability:run",
-                 Jsonb({"max_steps": 1, "max_duration_minutes": 1}), uuid.uuid4()),
-                "proposal over prior shape decision",
-            )
+            shaped_plan = propose(cur, shaped_ref, shaped_triaged[3], runbook_ref, uuid.uuid4())
             cur.execute("reset role")
+            cur.execute("set session authorization carr_authority_dell")
+            refusal(cur, "select * from ops.accept_sourced_work_request_plan(%s,%s,%s,%s)",
+                    (shaped_ref, shaped_triaged[3], shaped_plan[2], uuid.uuid4()),
+                    "acceptance over unreceipted shape metadata")
+            cur.execute("reset session authorization")
 
             set_local_role(cur, "carr_writer")
             revision_id, revision_ref, _, revision_captured_version = capture(
@@ -428,15 +425,12 @@ def main() -> int:
                  Jsonb([]), Jsonb({}), joe_id),
             )
             set_local_role(cur, "carr_writer")
-            refusal(
-                cur, """select * from ops.propose_sourced_work_request_plan(
-                     %s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (revision_ref, revision_triaged[3], "scope", runbook_ref, Jsonb([]),
-                 "safe:recovery:stop", "safe:observability:run",
-                 Jsonb({"max_steps": 1, "max_duration_minutes": 1}), uuid.uuid4()),
-                "proposal over prior shape revision",
-            )
+            revision_plan = propose(cur, revision_ref, revision_triaged[3], runbook_ref, uuid.uuid4())
             cur.execute("reset role")
+            revision_ready = accept(cur, revision_ref, revision_triaged[3], revision_plan[2], uuid.uuid4(), "joe")
+            if revision_ready[2] != "ready" or one(cur,
+                "select count(*) from ops.work_shape_revision where work_request_id=%s", (revision_id,))[0] != 1:
+                raise RuntimeError("historical shape revision blocked readiness or was lost")
 
             set_local_role(cur, "carr_writer")
             bounded_id, bounded_ref, _, bounded_version = capture(
