@@ -22,11 +22,16 @@ def utf16(text):
 
 def message(key, sender='pat@example.test', sent=1_793_000_000, anchor_at=600,
             preview='Synthetic local key study preview text for one message'):
-    """An expanded 00ca message header: the key repeated at +10, +30 and +38, ItemClass after +454."""
+    """An expanded 00ca message header: the key repeated at +10, +30 and +38, a folder reference at +408,
+    ItemClass after +454."""
     obj = bytearray(anchor_at)
     struct.pack_into('<H', obj, 0, 0x00ca)
     for at in (10, 30, 38):
         struct.pack_into('<Q', obj, at, key)
+    if anchor_at >= 454:
+        # Typed folder reference at +408 (class 004d, kind 2): folder 50 of account 7.
+        struct.pack_into('<H', obj, 408, 0x004d)
+        struct.pack_into('<QIQQQ', obj, 418, 50, 2, 7, 50, 7)
     obj += utf16('IPM.Note') + utf16(sender)
     obj += struct.pack('<Q', sent * 10_000_000 + EPOCH_TICKS)
     obj += utf16(preview)
@@ -53,7 +58,7 @@ class LocalKeyExportTests(unittest.TestCase):
     def test_revisions_of_one_message_export_its_key(self):
         rows, meta = self.export(message(0x1001), message(0x1001))
         self.assertEqual(rows, [('pat@example.test', 1_793_000_000, 2, str(0x1001))])
-        self.assertEqual((meta['local_key_linked'], meta['local_key_conflicts']), (1, 0))
+        self.assertEqual((meta['messages_with_key'], meta['local_key_conflicts']), (1, 0))
 
     def test_distinct_messages_keep_distinct_keys(self):
         # A record's span reaches back to the previous anchor, so the later
@@ -73,14 +78,14 @@ class LocalKeyExportTests(unittest.TestCase):
         # Sender plus send time joins these; the keys say they are two store items.
         rows, meta = self.export(message(0x2002), message(0x3003))
         self.assertEqual(rows, [('pat@example.test', 1_793_000_000, 2, f'{0x2002},{0x3003}')])
-        self.assertEqual((meta['local_key_linked'], meta['local_key_conflicts']), (1, 1))
+        self.assertEqual((meta['messages_with_key'], meta['local_key_conflicts']), (1, 1))
 
     def test_an_anchor_inside_the_fixed_header_or_without_a_header_gets_no_key(self):
         bare = bytearray(message(0x4004, preview='Another synthetic opening without any header'))
         bare[0] = 0xcb
         rows, meta = self.export(message(0x5005, anchor_at=400, sent=1_793_000_100), bare)
         self.assertEqual([r[3] for r in rows], [None, None])
-        self.assertEqual(meta['local_key_linked'], 0)
+        self.assertEqual(meta['messages_with_key'], 0)
 
 
 if __name__ == '__main__':

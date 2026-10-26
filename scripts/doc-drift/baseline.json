@@ -1,6 +1,6 @@
 {
   "schema": "doc-drift-baseline/v1",
-  "source_sha": "25d322b5ce89e7d674f224b77d2823d54da48daf",
+  "source_sha": "d833207aa728552413df6d734cae4da75617cfcb",
   "findings": [
     {
       "file": ".agents/skills/codebase-design/UPSTREAM.md",
@@ -76,116 +76,6 @@
       "file": "RECOVERY.md",
       "kind": "path",
       "target": "tools/dictation-rig/vocab-local.txt"
-    },
-    {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "compare_targets.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "gen_frontier_manifest.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "migrations/0454-0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "migrations/0454-0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "migrations/0454-0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "migrations/0454-0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "parse_extract_targets.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/comparison-report.md",
-      "kind": "path",
-      "target": "rerender_observed_comments.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/cs-review-trail.md",
-      "kind": "path",
-      "target": "db-tap.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/cs-review-trail.md",
-      "kind": "path",
-      "target": "db-tap.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "breakglass-run.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "census-reconciliation-matrix.v1.json"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "docs/frontier-finding/breakglass-run.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "frontier-touched-objects.v1.json"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "gen-breakglass-run.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "gen-census-matrix.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "gen-frontier-manifest.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "migrations/0467"
-    },
-    {
-      "file": "_to_delete/frontier-finding/gated-register-plan.md",
-      "kind": "path",
-      "target": "migrations/0471"
-    },
-    {
-      "file": "_to_delete/frontier-finding/r13-frontier-forensics.md",
-      "kind": "path",
-      "target": "ops/config/scac-registry-full-entry-set-seals.json"
-    },
-    {
-      "file": "_to_delete/frontier-finding/r13-frontier-forensics.md",
-      "kind": "path",
-      "target": "ops/schema-snapshot-registry-seed-selftest.py"
-    },
-    {
-      "file": "_to_delete/frontier-finding/target-identity-contract.md",
-      "kind": "path",
-      "target": "migrations/0454"
     },
     {
       "file": "claude-tree/agents/README.md",

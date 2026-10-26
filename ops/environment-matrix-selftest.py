@@ -29,7 +29,8 @@ THE ASSERTIONS.
   3. PRODUCTION IS PINNED BY ID AND STAGING IS RESOLVED BY NAME, matching
      tools/db-tap.py. Reversing these is the single worst mistake the project
      map could make, so the matrix and the code have to agree out loud.
-  4. DECLARED DOMAINS MATCH THE WORKER CONFIG, in both directions. A domain in
+  4. DECLARED DOMAINS MATCH THE WORKER CONFIG, in both directions, and
+     [env.staging] carries an explicit `routes = []`. A domain in
      the matrix that wrangler does not serve is fiction; a route wrangler serves
      that the matrix does not name is an undeclared production surface.
   5. EVERY OBSERVED STAGING-VS-PRODUCTION BINDING DIFFERENCE IS NAMED. Matched
@@ -47,6 +48,7 @@ REPO = Path(__file__).resolve().parent.parent
 MATRIX = REPO / "ops" / "config" / "environments.json"
 WRANGLER = REPO / "mcp-server" / "wrangler.toml"
 DB_TAP = REPO / "tools" / "db-tap.py"
+DEPLOY = REPO / ".github" / "workflows" / "deploy.yml"
 
 REQUIRED = {"local", "rehearsal", "staging", "production"}
 
@@ -66,6 +68,19 @@ def named(differences: list[dict], *keywords: str) -> bool:
     blob = " ".join((d.get("difference", "") + " " + d.get("why", "")).lower()
                     for d in differences)
     return all(k.lower() in blob for k in keywords)
+
+
+def workflow_jobs(text: str) -> dict[str, str]:
+    """Each top-level job's body in deploy.yml, keyed by job id (text only)."""
+    jobs: dict[str, str] = {}
+    current = None
+    for line in text.split("jobs:\n", 1)[1].splitlines():
+        if line.startswith("  ") and not line.startswith("   ") and line.rstrip().endswith(":"):
+            current = line.strip()[:-1]
+            jobs[current] = ""
+        elif current:
+            jobs[current] += line + "\n"
+    return jobs
 
 
 def main() -> int:
@@ -89,13 +104,25 @@ def main() -> int:
           envs["production"]["worker"].get("name") == wrangler.get("name"),
           f"matrix {envs['production']['worker'].get('name')!r} "
           f"vs wrangler {wrangler.get('name')!r}")
-    check("2b. database diagnostics declare no staging Worker",
-          not envs["staging"]["worker"].get("deployed") and not stg_cfg,
+    check("2b. staging's Worker name matches [env.staging]",
+          envs["staging"]["worker"].get("deployed")
+          and envs["staging"]["worker"].get("name") == stg_cfg.get("name") == "carr-mcp-staging",
           f"matrix {envs['staging']['worker'].get('name')!r} "
           f"vs wrangler {stg_cfg.get('name')!r}")
     check("2c. local and rehearsal declare no Worker",
           not envs["local"]["worker"].get("deployed")
           and not envs["rehearsal"]["worker"].get("deployed"))
+
+    jobs = workflow_jobs(DEPLOY.read_text())
+    staging_job, production_job = jobs.get("staging", ""), jobs.get("deploy", "")
+    check("2d. deploy.yml deploys staging in its own job, in the staging environment",
+          "environment: staging" in staging_job and "--env staging" in staging_job
+          and "STAGING_DATABASE_URL" in staging_job
+          and "PRODUCTION_DATABASE_URL" not in staging_job)
+    check("2e. staging never gates production, and production never gates staging",
+          "needs:" not in staging_job and "needs:" not in production_job
+          and "--env staging" not in production_job,
+          "a `needs:` would let one environment's failure stop the other's deploy")
 
     # ── 3 ────────────────────────────────────────────────────────────────────
     db_tap_src = DB_TAP.read_text()
@@ -127,8 +154,14 @@ def main() -> int:
               "repository": "jbookout/doctorcre-app",
           }] and not (product_hosts & served_prod),
           "app.doctorcre.com must be declared for doctorcre-app and absent from carr-mcp routes")
-    check("4d. staging declares no domain, and wrangler gives it none",
-          not envs["staging"]["domains"] and not stg_cfg.get("routes"))
+    # An OMITTED `routes` key inherits production's custom domains, which is
+    # how a staging deploy took them over on 2026-08-13. Only an explicit empty
+    # list is safe, so a missing key fails exactly like a filled one.
+    check("4d. staging declares no domain, and wrangler gives it an explicit empty routes list",
+          not envs["staging"]["domains"]
+          and "routes" in stg_cfg and stg_cfg["routes"] == []
+          and "route" not in stg_cfg and stg_cfg.get("workers_dev") is True,
+          f"[env.staging] routes={stg_cfg.get('routes', '<missing: inherits production>')!r}")
 
     # ── 5 ────────────────────────────────────────────────────────────────────
     prod_kv = {k.get("id") for k in wrangler.get("kv_namespaces", [])}

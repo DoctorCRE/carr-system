@@ -97,6 +97,279 @@ diff --git a/hxprobe/Cargo.toml b/hxprobe/Cargo.toml
  
  [profile.release]
  opt-level = 3
+diff --git a/hxprobe/src/attachment.rs b/hxprobe/src/attachment.rs
+new file mode 100644
+--- /dev/null
++++ b/hxprobe/src/attachment.rs
+@@ -0,0 +1,268 @@
++//! Attachment objects (class 016a) in verified HxStore block payloads.
++//!
++//! Each object names its message by a typed message reference at +360 and its
++//! locally cached file by a profile-relative path such as
++//! `~/Files/S0/<n>/Attachments/<k>/<name>[<digits>].<ext>`. Outlook writes that
++//! file only once the attachment is cached, so a decoded row does not prove the
++//! bytes exist. Bytes are never read here; the caller resolves the path against
++//! its own private copy of the profile's Files folder.
++
++use std::collections::BTreeMap;
++
++use crate::folder::{envelopes, message_key};
++
++/// Envelope tags observed for attachment objects (2026-10 Studio build).
++pub(crate) const ATTACHMENT: (&[u16], u16) = (&[0x0318], 0x016a);
++
++const MESSAGE_AT: usize = 360;
++const SIZE_AT: usize = 558;
++const MAX_TEXT_UNITS: usize = 1024;
++const PATH_PREFIX: &str = "~/Files/S0/";
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct Attachment {
++    pub id: u64,
++    pub message_key: u64,
++    /// The file name with Outlook's `[<digits>]` cache suffix removed.
++    pub name: String,
++    /// True when that name also appears as its own string in the object.
++    pub name_verified: bool,
++    /// The sender's declared MIME type, as stored; not a detected type.
++    pub content_type: Option<String>,
++    pub size: u64,
++    /// Profile-relative cache path; None when cached revisions disagree.
++    pub path: Option<String>,
++}
++
++#[derive(Default)]
++pub struct Index {
++    pub attachments: BTreeMap<u64, Attachment>,
++    pub objects: usize,
++}
++
++fn u64_at(data: &[u8], at: usize) -> Option<u64> {
++    Some(u64::from_le_bytes(data.get(at..at.checked_add(8)?)?.try_into().ok()?))
++}
++
++/// The NUL-terminated UTF-16LE string starting at `at`, bounded and printable.
++fn utf16z(data: &[u8], at: usize) -> Option<String> {
++    let mut units = Vec::new();
++    let mut p = at;
++    loop {
++        let u = u16::from_le_bytes([*data.get(p)?, *data.get(p + 1)?]);
++        if u == 0 {
++            break;
++        }
++        units.push(u);
++        if units.len() > MAX_TEXT_UNITS {
++            return None;
++        }
++        p += 2;
++    }
++    let s = String::from_utf16(&units).ok()?;
++    (!s.is_empty() && !s.chars().any(char::is_control)).then_some(s)
++}
++
++fn utf16_bytes(s: &str) -> Vec<u8> {
++    s.encode_utf16().flat_map(u16::to_le_bytes).collect()
++}
++
++/// `~/Files/S0/<digits>/Attachments/<digits>/<file>`, with no other segments.
++fn cache_path(object: &[u8]) -> Option<(usize, String)> {
++    let at = memchr::memmem::find(object, &utf16_bytes(PATH_PREFIX))?;
++    let path = utf16z(object, at)?;
++    let parts: Vec<_> = path.split('/').collect();
++    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
++    let ok = parts.len() == 7
++        && parts[..3] == ["~", "Files", "S0"]
++        && digits(parts[3])
++        && parts[4] == "Attachments"
++        && digits(parts[5])
++        && !parts[6].is_empty()
++        && parts[6] != "."
++        && parts[6] != ".."
++        && !parts[6].contains('\\');
++    ok.then_some((at, path))
++}
++
++/// Remove the `[<digits>]` Outlook appends before the extension.
++fn display_name(file: &str) -> Option<String> {
++    let (stem, ext) = match file.rfind('.') {
++        Some(dot) if file[dot..].find(['[', ']']).is_none() => file.split_at(dot),
++        _ => (file, ""),
++    };
++    let open = stem.strip_suffix(']')?.rfind('[')?;
++    let digits = &stem[open + 1..stem.len() - 1];
++    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) || open == 0 {
++        return None;
++    }
++    let name = format!("{}{}", &stem[..open], ext);
++    (name != "." && name != "..").then_some(name)
++}
++
++/// The first short ASCII `type/subtype` string between the fixed header and the path.
++fn declared_type(object: &[u8], end: usize) -> Option<String> {
++    let region = object.get(MESSAGE_AT + 40..end)?;
++    let mut i = 0;
++    while i + 2 <= region.len() {
++        if let Some(s) = utf16z(region, i).filter(|s| s.len() >= 3 && s.len() <= 127) {
++            let mut parts = s.splitn(2, '/');
++            let (a, b) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
++            let token = |t: &str| !t.is_empty() && t.bytes().all(|c| c.is_ascii_alphanumeric() || b".+-".contains(&c));
++            if token(a) && token(b) && a.bytes().all(|c| c.is_ascii_alphabetic()) {
++                return Some(s.to_ascii_lowercase());
++            }
++            i += 2 * (s.encode_utf16().count() + 1);
++        } else {
++            i += 2;
++        }
++    }
++    None
++}
++
++pub(crate) fn parse(object: &[u8]) -> Option<Attachment> {
++    if !object.starts_with(&ATTACHMENT.1.to_le_bytes()) || object.get(2..10)? != [0; 8] {
++        return None;
++    }
++    // The object's own key repeats at +30; +38 repeats its owner instead.
++    let id = u64_at(object, 10).filter(|&id| id != 0 && Some(id) == u64_at(object, 30))?;
++    let message_key = message_key(object.get(MESSAGE_AT..)?, 0x00ca)?;
++    let (path_at, path) = cache_path(object)?;
++    let name = display_name(path.rsplit('/').next()?)?;
++    let mut needle = utf16_bytes(&name);
++    needle.extend([0, 0]);
++    let name_verified = memchr::memmem::find_iter(object, &needle).any(|at| at % 2 == path_at % 2 && at != path_at);
++    Some(Attachment {
++        id,
++        message_key,
++        name,
++        name_verified,
++        content_type: declared_type(object, path_at),
++        size: u64_at(object, SIZE_AT)?,
++        path: Some(path),
++    })
++}
++
++impl Index {
++    pub fn observe(&mut self, data: &[u8]) {
++        for (_, object) in envelopes(data, ATTACHMENT) {
++            self.objects += 1;
++            let Some(a) = parse(object) else { continue };
++            match self.attachments.get_mut(&a.id) {
++                None => {
++                    self.attachments.insert(a.id, a);
++                }
++                Some(prev) => {
++                    // Revisions agree on the message; anything else is
++                    // taken conservatively rather than by block order.
++                    if prev.message_key != a.message_key || prev.path != a.path {
++                        prev.path = None;
++                    }
++                    prev.size = prev.size.max(a.size);
++                    prev.name_verified &= a.name_verified;
++                    if prev.content_type != a.content_type {
++                        prev.content_type = None;
++                    }
++                }
++            }
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn put64(b: &mut [u8], p: usize, v: u64) {
++        b[p..p + 8].copy_from_slice(&v.to_le_bytes());
++    }
++    fn sig(class: u16) -> [u8; 10] {
++        let mut s = [0; 10];
++        s[..2].copy_from_slice(&class.to_le_bytes());
++        s
++    }
++    fn text(s: &str) -> Vec<u8> {
++        let mut b = utf16_bytes(s);
++        b.extend([0, 0]);
++        b
++    }
++    pub(crate) fn object(id: u64, message: u64, size: u64, file: &str, name: &str, mime: &str) -> Vec<u8> {
++        let mut b = vec![0; 600];
++        b[..10].copy_from_slice(&sig(0x016a));
++        put64(&mut b, 10, id);
++        put64(&mut b, 22, 99);
++        put64(&mut b, 30, id);
++        put64(&mut b, 38, 99);
++        b[MESSAGE_AT..MESSAGE_AT + 10].copy_from_slice(&sig(0x00ca));
++        for at in [10, 30, 38] {
++            put64(&mut b, MESSAGE_AT + at, message);
++        }
++        put64(&mut b, SIZE_AT, size);
++        b.extend(text(mime));
++        b.extend([1, 0]);
++        b.extend(text(&format!("~/Files/S0/42/Attachments/0/{file}")));
++        b.extend([9, 9, 1, 1]);
++        b.extend(text(name));
++        b
++    }
++    pub(crate) fn envelope(b: &[u8]) -> Vec<u8> {
++        let mut v = vec![5, 0];
++        v.extend(0x0318u16.to_le_bytes());
++        v.extend(((b.len() + 10) as u32).to_le_bytes());
++        v.extend([0, 0]);
++        v.extend(b);
++        v
++    }
++
++    #[test]
++    fn decodes_message_link_name_type_size_and_cache_path() {
++        let mut index = Index::default();
++        index.observe(&envelope(&object(7, 70, 4096, "Lease draft[123].pdf", "Lease draft.pdf", "application/pdf")));
++        let a = &index.attachments[&7];
++        assert_eq!((a.message_key, a.size), (70, 4096));
++        assert_eq!(a.name, "Lease draft.pdf");
++        assert!(a.name_verified);
++        assert_eq!(a.content_type.as_deref(), Some("application/pdf"));
++        assert_eq!(a.path.as_deref(), Some("~/Files/S0/42/Attachments/0/Lease draft[123].pdf"));
++    }
++
++    #[test]
++    fn cache_suffix_rules() {
++        assert_eq!(display_name("a.b[1].pdf").as_deref(), Some("a.b.pdf"));
++        assert_eq!(display_name("README[22]").as_deref(), Some("README"));
++        assert_eq!(display_name("x[].pdf"), None);
++        assert_eq!(display_name("[5].pdf"), None);
++        assert_eq!(display_name("plain.pdf"), None);
++        assert_eq!(display_name(".[1]"), None);
++        assert_eq!(display_name("..[1]"), None);
++        assert_eq!(display_name(".[1]."), None);
++    }
++
++    #[test]
++    fn rejects_traversal_unlinked_and_truncated_objects() {
++        for file in ["..", "a/../b[1].pdf", "a\\b[1].pdf"] {
++            let mut index = Index::default();
++            index.observe(&envelope(&object(7, 70, 1, file, "x", "text/plain")));
++            assert!(index.attachments.is_empty(), "{file}");
++        }
++        let mut unlinked = object(7, 70, 1, "a[1].pdf", "a.pdf", "application/pdf");
++        put64(&mut unlinked, MESSAGE_AT + 30, 71);
++        let good = envelope(&object(7, 70, 1, "a[1].pdf", "a.pdf", "application/pdf"));
++        let mut index = Index::default();
++        index.observe(&envelope(&unlinked));
++        for cut in 0..good.len() {
++            index.observe(&good[..cut]);
++        }
++        assert!(index.attachments.is_empty());
++    }
++
++    #[test]
++    fn disagreeing_revisions_drop_the_path_and_keep_the_larger_size() {
++        let mut index = Index::default();
++        let first = object(7, 70, 10, "a[1].pdf", "a.pdf", "application/pdf");
++        let moved = object(7, 70, 20, "a[2].pdf", "a.pdf", "application/pdf");
++        index.observe(&[envelope(&first), envelope(&moved)].concat());
++        assert_eq!(index.attachments[&7].path, None);
++        assert_eq!(index.attachments[&7].size, 20);
++    }
++}
 diff --git a/hxprobe/src/body.rs b/hxprobe/src/body.rs
 new file mode 100644
 --- /dev/null
@@ -732,7 +1005,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
  /// `[05 00, tag:u16, length:u32, 00 00, object...]`.
  /// Length includes the ten-byte envelope, not its enclosing transaction.
 -fn envelopes(data: &[u8], tag: u16, class: u16) -> Vec<(usize, &[u8])> {
-+fn envelopes<'a>(data: &'a [u8], (tags, class): (&[u16], u16)) -> Vec<(usize, &'a [u8])> {
++pub(crate) fn envelopes<'a>(data: &'a [u8], (tags, class): (&[u16], u16)) -> Vec<(usize, &'a [u8])> {
 +    let mut found: Vec<_> = tags.iter().flat_map(|&tag| tagged(data, tag, class)).collect();
 +    found.sort_unstable_by_key(|(start, _)| *start);
 +    found
@@ -742,41 +1015,16 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
      let tag_bytes = tag.to_le_bytes();
      let needle = [5, 0, tag_bytes[0], tag_bytes[1]];
      memchr::memmem::find_iter(data, &needle)
-@@ -113,25 +154,61 @@ fn trailing_name(data: &[u8]) -> Option<String> {
-     (!name.chars().any(char::is_control)).then_some(name)
+@@ -75,7 +116,7 @@ fn reference(data: &[u8], class: u16, kinds: &[u32]) -> Option<(u64, u64)> {
+     .then_some((id, owner))
  }
  
-+/// Expanded message objects embedded in transaction wrappers have no
-+/// individual length envelope. Bound each header by the next message object
-+/// or known envelope, and by 4096 bytes.
-+fn message_headers(data: &[u8]) -> Vec<(usize, &[u8])> {
-+    let starts: Vec<_> = memchr::memmem::find_iter(data, &signature(0x00ca))
-+        .filter(|&p| message_key(&data[p..], 0x00ca).is_some())
-+        .collect();
-+    let boundaries: BTreeSet<_> = [FOLDER, VIEW, MESSAGE, METADATA]
-+        .into_iter()
-+        .flat_map(|kind| envelopes(data, kind).into_iter().map(|(p, _)| p - 10))
-+        .collect();
-+    starts
-+        .iter()
-+        .enumerate()
-+        .filter_map(|(i, &start)| {
-+            let next_envelope = boundaries
-+                .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
-+                .next()
-+                .copied()
-+                .unwrap_or(data.len());
-+            let end = starts
-+                .get(i + 1)
-+                .copied()
-+                .unwrap_or(data.len())
-+                .min(next_envelope)
-+                .min(start.saturating_add(4096));
-+            Some((start, data.get(start..end)?))
-+        })
-+        .collect()
-+}
-+
+-fn message_key(data: &[u8], class: u16) -> Option<u64> {
++pub(crate) fn message_key(data: &[u8], class: u16) -> Option<u64> {
+     if !data.starts_with(&signature(class)) {
+         return None;
+     }
+@@ -116,22 +157,27 @@ fn trailing_name(data: &[u8]) -> Option<String> {
  impl Index {
      /// First pass: gather the catalog and message/view membership references.
      pub fn observe(&mut self, block: usize, data: &[u8]) {
@@ -805,7 +1053,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
              // Two copies of the folder's view-collection reference. Require
              // each reference's duplicated key, not an arbitrary nearby u64.
              for at in [160, 360] {
-@@ -145,7 +222,7 @@ impl Index {
+@@ -145,7 +191,7 @@ impl Index {
                  }
              }
          }
@@ -814,7 +1062,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
              let Some(key) = message_key(object, 0x00bf) else {
                  continue;
              };
-@@ -167,7 +244,7 @@ impl Index {
+@@ -167,7 +213,7 @@ impl Index {
      /// Resolve IPM.Note anchor positions to observed folders within this block.
      pub fn links(&self, data: &[u8], needle: &[u8]) -> BTreeMap<usize, BTreeSet<u64>> {
          let mut links = BTreeMap::new();
@@ -823,7 +1071,7 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
              let Some((_, owner)) = reference(object, 0x004f, &[4]) else {
                  continue;
              };
-@@ -175,7 +252,7 @@ impl Index {
+@@ -175,7 +221,7 @@ impl Index {
                  self.link_single_anchor(&mut links, start, object, needle, folders);
              }
          }
@@ -832,11 +1080,10 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
              let Some(key) = message_key(object, 0x00ca) else {
                  continue;
              };
-@@ -183,50 +260,10 @@ impl Index {
-                 self.link_single_anchor(&mut links, start, object, needle, folders);
+@@ -184,36 +230,9 @@ impl Index {
              }
          }
--        // Expanded message objects embedded in transaction wrappers include
+         // Expanded message objects embedded in transaction wrappers include
 -        // a full typed folder reference at +408. Unlike compact objects, they
 -        // do not have an individual length envelope. Bound the header by the
 -        // next message object, and only take its first ItemClass anchor.
@@ -865,70 +1112,84 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
 -                .min(next_envelope)
 -                .min(start.saturating_add(4096));
 -            let Some(object) = data.get(start..end) else {
-+        for (start, object) in message_headers(data) {
-+            let Some(id) = self.catalogued_folder(object) else {
-                 continue;
-             };
--            let Some(field) = object.get(408..) else {
 -                continue;
 -            };
--            let Some((id, account)) = reference(field, 0x004d, &[2, 0x02ac]) else {
--                continue;
--            };
--            if !self
--                .folders
--                .get(&id)
--                .is_some_and(|f| f.account_id == account)
--            {
--                continue;
--            }
-             let Some(rel) = memchr::memmem::find(object, needle) else {
++        // a full typed folder reference at +408. Only take their first
++        // ItemClass anchor.
++        for (start, object) in expanded(data) {
+             let Some(field) = object.get(408..) else {
                  continue;
              };
-@@ -241,6 +278,42 @@ impl Index {
+@@ -241,6 +260,31 @@ impl Index {
          links
      }
  
-+    /// Resolve IPM.Note anchor positions to the local key of their message
-+    /// object. The key is a store-local candidate identity; see
-+    /// spec/outlook/stable-message-id-research.md for what it has been
-+    /// observed to survive.
++    /// Resolve IPM.Note anchor positions to the local message key of the
++    /// message object holding them, so other objects can name the message.
 +    pub fn keys(&self, data: &[u8], needle: &[u8]) -> BTreeMap<usize, u64> {
 +        let mut keys = BTreeMap::new();
 +        for (start, object) in envelopes(data, MESSAGE) {
-+            let Some(key) = message_key(object, 0x00ca) else {
-+                continue;
-+            };
++            let Some(key) = message_key(object, MESSAGE.1) else { continue };
 +            let mut anchors = memchr::memmem::find_iter(object, needle);
 +            if let (Some(anchor), None) = (anchors.next(), anchors.next()) {
 +                keys.insert(start + anchor, key);
 +            }
 +        }
-+        for (start, object) in message_headers(data) {
-+            let Some(rel) = memchr::memmem::find(object, needle) else {
-+                continue;
-+            };
-+            if rel < 454 {
++        for (start, object) in expanded(data) {
++            // Only a real message header carries its typed folder reference;
++            // a bare message reference inside another object does not.
++            if object.get(408..).and_then(|f| reference(f, 0x004d, &[2, 0x02ac])).is_none() {
 +                continue;
 +            }
-+            if let Some(key) = message_key(object, 0x00ca) {
-+                keys.insert(start + rel, key);
++            let Some(key) = message_key(object, MESSAGE.1) else { continue };
++            if let Some(rel) = memchr::memmem::find(object, needle).filter(|&rel| rel >= 454) {
++                keys.entry(start + rel).or_insert(key);
 +            }
 +        }
 +        keys
 +    }
 +
-+    /// The typed folder reference at +408 of an expanded header, when it
-+    /// names a catalogued folder of the same account.
-+    fn catalogued_folder(&self, object: &[u8]) -> Option<u64> {
-+        let (id, account) = reference(object.get(408..)?, 0x004d, &[2, 0x02ac])?;
-+        self.folders.get(&id).is_some_and(|f| f.account_id == account).then_some(id)
-+    }
-+
      fn link_single_anchor(
          &self,
          links: &mut BTreeMap<usize, BTreeSet<u64>>,
-@@ -394,6 +467,90 @@ mod tests {
+@@ -265,6 +309,36 @@ impl Index {
+     }
+ }
+ 
++/// Expanded message objects have no length envelope of their own. Bound each
++/// header by the next message object, the next known envelope, or 4 KiB.
++fn expanded(data: &[u8]) -> Vec<(usize, &[u8])> {
++    let starts: Vec<_> = memchr::memmem::find_iter(data, &signature(0x00ca))
++        .filter(|&p| message_key(&data[p..], 0x00ca).is_some())
++        .collect();
++    let boundaries: BTreeSet<_> = [FOLDER, VIEW, MESSAGE, METADATA]
++        .into_iter()
++        .flat_map(|kind| envelopes(data, kind).into_iter().map(|(p, _)| p - 10))
++        .collect();
++    starts
++        .iter()
++        .enumerate()
++        .filter_map(|(i, &start)| {
++            let next_envelope = boundaries
++                .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
++                .next()
++                .copied()
++                .unwrap_or(data.len());
++            let end = starts
++                .get(i + 1)
++                .copied()
++                .unwrap_or(data.len())
++                .min(next_envelope)
++                .min(start.saturating_add(4096));
++            Some((start, data.get(start..end)?))
++        })
++        .collect()
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -394,6 +468,118 @@ mod tests {
          assert_eq!(index.links(&expanded, &note())[&610], BTreeSet::from([51]));
      }
  
@@ -968,6 +1229,23 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
 +    }
 +
 +    #[test]
++    fn anchors_resolve_to_their_message_key() {
++        let index = Index::default();
++        let mut compact = object(0xca, 70, 0, 70, 100);
++        compact.extend(note());
++        assert_eq!(index.keys(&envelope(0x74e, &compact), &note()), BTreeMap::from([(110, 70)]));
++        let mut twice = compact.clone();
++        twice.extend(note());
++        assert!(index.keys(&envelope(0x74e, &twice), &note()).is_empty());
++        let mut expanded = object(0xca, 71, 0, 71, 500);
++        expanded.extend(note());
++        // A bare message reference with no folder reference at +408 is not a header.
++        assert!(index.keys(&expanded, &note()).is_empty());
++        expanded[408..454].copy_from_slice(&object(0x4d, 50, 2, 7, 46));
++        assert_eq!(index.keys(&expanded, &note()), BTreeMap::from([(500, 71)]));
++    }
++
++    #[test]
 +    fn moved_folder_revisions_leave_the_parent_unknown() {
 +        let mut index = Index::default();
 +        index.observe(0, &current_folder(51, 7, "Deal A", Some((50, 7))));
@@ -976,10 +1254,18 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
 +        assert_eq!(index.folders[&51].name.as_deref(), Some("Deal A"));
 +    }
 +
++    /// An expanded message header with a typed folder reference at +408
++    /// naming a folder the index has never catalogued.
++    fn header(id: u64, size: usize) -> Vec<u8> {
++        let mut b = object(0xca, id, 0, id, size);
++        b[408..454].copy_from_slice(&object(0x4d, 50, 2, 7, 46));
++        b
++    }
++
 +    #[test]
-+    fn keys_follow_message_headers_without_a_folder_catalog() {
++    fn keys_need_a_header_reference_but_no_folder_catalog() {
 +        let index = Index::default();
-+        let mut expanded = object(0xca, 70, 0, 70, 500);
++        let mut expanded = header(70, 500);
 +        expanded.extend(note());
 +        let mut early = object(0xca, 71, 0, 71, 100);
 +        early.extend(note());
@@ -993,23 +1279,26 @@ diff --git a/hxprobe/src/folder.rs b/hxprobe/src/folder.rs
 +        assert_eq!(keys.len(), 2, "an anchor inside the fixed header is not keyed");
 +        assert_eq!(keys.values().copied().collect::<BTreeSet<_>>(), BTreeSet::from([70, 72]));
 +        assert!(index.links(&data, &note()).is_empty(), "keys do not invent folder links");
++        let mut bare = object(0xca, 74, 0, 74, 500);
++        bare.extend(note());
++        assert!(index.keys(&bare, &note()).is_empty(), "no typed folder reference, no key");
 +    }
 +
 +    #[test]
 +    fn keys_never_cross_an_envelope_or_the_header_bound() {
 +        let index = Index::default();
 +        // A view envelope between the header and the next anchor ends the header.
-+        let mut data = object(0xca, 70, 0, 70, 470);
++        let mut data = header(70, 470);
 +        let mut view = object(0x4f, 71, 4, 60, 100);
 +        view.extend(note());
 +        data.extend(envelope(0x430, &view));
 +        assert!(index.keys(&data, &note()).is_empty());
 +        // An anchor 4096 or more bytes past the header belongs to something else.
-+        let mut far = object(0xca, 72, 0, 72, 4096);
++        let mut far = header(72, 4096);
 +        far.extend(note());
 +        assert!(index.keys(&far, &note()).is_empty());
 +        // Only the first anchor inside one header takes its key.
-+        let mut twice = object(0xca, 73, 0, 73, 500);
++        let mut twice = header(73, 500);
 +        twice.extend(note());
 +        twice.extend(vec![0; 40]);
 +        twice.extend(note());
@@ -1034,16 +1323,18 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
  //!   hxprobe map    <file> [n]        dump the named field map for n records
  //!   hxprobe find   <file> <term>     show records whose text contains <term>
  //! ```
-@@ -25,6 +28,8 @@ use std::fs::File;
+@@ -24,7 +27,10 @@ use std::fs::File;
+ 
  use memmap2::Mmap;
  
++mod attachment;
  mod block;
 +mod body;
 +mod calendar;
  mod folder;
  mod header;
  mod lz;
-@@ -202,7 +207,7 @@ fn cmd_find(path: &str, term: &str, limit: usize) {
+@@ -202,7 +208,7 @@ fn cmd_find(path: &str, term: &str, limit: usize) {
  }
  
  /// Parse the whole store into a SQLite database with a full-text index.
@@ -1052,20 +1343,22 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      let mm = map(path);
      let needle = record::anchor_needle();
      let offs = block::find_all(&mm);
-@@ -210,9 +215,12 @@ fn cmd_db(path: &str, db_path: &str) {
+@@ -210,9 +216,14 @@ fn cmd_db(path: &str, db_path: &str) {
  
      // Folder catalogs and membership metadata can occur after the messages.
      let mut folders = folder::Index::default();
 +    let mut events = calendar::Index::default();
++    let mut attachments = attachment::Index::default();
 +    let mut sidecars = files_dir.map(|d| body::Sidecars::open(std::path::Path::new(d))).unwrap_or_default();
      for &o in &offs {
          if let Some(b) = block::parse(&mm, o) {
              folders.observe(o, &b.data);
 +            events.observe(&b.data);
++            attachments.observe(&b.data);
          }
      }
  
-@@ -227,7 +235,11 @@ fn cmd_db(path: &str, db_path: &str) {
+@@ -227,7 +238,11 @@ fn cmd_db(path: &str, db_path: &str) {
               id               INTEGER PRIMARY KEY, -- local store key
               account_id       INTEGER NOT NULL,    -- local account key
               name             TEXT,                -- NULL if revisions disagree
@@ -1078,7 +1371,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
           );
           CREATE TABLE messages (
               id           INTEGER PRIMARY KEY,
-@@ -249,7 +261,17 @@ fn cmd_db(path: &str, db_path: &str) {
+@@ -249,7 +264,17 @@ fn cmd_db(path: &str, db_path: &str) {
               sent_utc     TEXT,
               -- 1 when the subject came from another record in the same
               -- conversation, because this record stores none of its own.
@@ -1097,8 +1390,29 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
           );
           CREATE TABLE message_folders (
               message_id INTEGER NOT NULL REFERENCES messages(id),
-@@ -259,6 +281,28 @@ fn cmd_db(path: &str, db_path: &str) {
+@@ -257,8 +282,49 @@ fn cmd_db(path: &str, db_path: &str) {
+              PRIMARY KEY (message_id, folder_id)
+          );
           CREATE INDEX message_folders_folder ON message_folders(folder_id);
++         -- Local store keys of each message's objects; attachments name these.
++         CREATE TABLE message_keys (
++             message_id INTEGER NOT NULL REFERENCES messages(id),
++             local_key  INTEGER NOT NULL,
++             PRIMARY KEY (message_id, local_key)
++         );
++         CREATE INDEX message_keys_key ON message_keys(local_key);
++         -- Attachment metadata. No bytes: path is the profile-relative cache
++         -- file (~/Files/S0/...), present only once Outlook has cached it.
++         CREATE TABLE attachments (
++             id            INTEGER PRIMARY KEY, -- local store key
++             message_key   INTEGER NOT NULL,    -- message_keys.local_key
++             name          TEXT NOT NULL,
++             name_verified INTEGER NOT NULL,    -- name also stored on its own
++             content_type  TEXT,                -- declared by the sender
++             size          INTEGER NOT NULL,
++             path          TEXT                 -- NULL if revisions disagree
++         );
++         CREATE INDEX attachments_message ON attachments(message_key);
           CREATE INDEX messages_sent ON messages(sent_unix);
           CREATE INDEX messages_sender ON messages(sender);
 +         CREATE TABLE events (
@@ -1126,20 +1440,20 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
           CREATE VIRTUAL TABLE messages_fts USING fts5(
               sender, sender_name, recipients, subject, body,
               content='messages', content_rowid='id', tokenize='porter unicode61'
-@@ -278,10 +322,12 @@ fn cmd_db(path: &str, db_path: &str) {
+@@ -278,10 +344,12 @@ fn cmd_db(path: &str, db_path: &str) {
          let Some(b) = block::parse(&mm, o) else { continue };
          blocks_ok += 1;
          let folder_links = folders.links(&b.data, &needle);
-+        let local_keys = folders.keys(&b.data, &needle);
++        let key_links = folders.keys(&b.data, &needle);
  
          for loc in records(&b.data, &needle) {
              let mut r = record::parse(o, &b.data, loc.anchor);
              r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
-+            r.local_keys.extend(local_keys.get(&loc.anchor));
++            r.local_keys = key_links.get(&loc.anchor).into_iter().copied().collect();
              let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);
  
              // The named map is authoritative for every field it covers: it
-@@ -314,9 +360,17 @@ fn cmd_db(path: &str, db_path: &str) {
+@@ -314,9 +382,17 @@ fn cmd_db(path: &str, db_path: &str) {
                  .filter(|t| Some(**t) != r.sender.as_deref())
                  .map(|t| t.to_string())
                  .collect();
@@ -1159,7 +1473,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
                  }
              }
  
-@@ -389,19 +443,97 @@ fn cmd_db(path: &str, db_path: &str) {
+@@ -389,19 +465,97 @@ fn cmd_db(path: &str, db_path: &str) {
          }
      }
  
@@ -1261,7 +1575,27 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
                  .expect("insert folder");
          }
          let mut ins_link = tx
-@@ -414,13 +546,13 @@ fn cmd_db(path: &str, db_path: &str) {
+@@ -409,18 +563,33 @@ fn cmd_db(path: &str, db_path: &str) {
+                 "INSERT INTO message_folders(message_id,folder_id) VALUES (?1,?2)"
+             )
+             .expect("prepare folder links");
++        let mut ins_key = tx
++            .prepare("INSERT OR IGNORE INTO message_keys(message_id,local_key) VALUES (?1,?2)")
++            .expect("prepare message keys");
++        let mut ins_attachment = tx
++            .prepare(
++                "INSERT INTO attachments(id,message_key,name,name_verified,content_type,size,path)
++                 VALUES (?1,?2,?3,?4,?5,?6,?7)"
++            )
++            .expect("prepare attachments");
++        for a in attachments.attachments.values() {
++            ins_attachment
++                .execute(rusqlite::params![a.id as i64, a.message_key as i64, a.name, a.name_verified as i64,
++                                           a.content_type, a.size as i64, a.path])
++                .expect("insert attachment");
++        }
+         let mut ins = tx
+             .prepare(
                  "INSERT INTO messages
                     (block,sender,sender_name,recipients,subject,message_id,body,
                      html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
@@ -1278,7 +1612,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
              ins.execute(rusqlite::params![
                  r.offset as i64,
                  r.sender,
-@@ -435,6 +567,11 @@ fn cmd_db(path: &str, db_path: &str) {
+@@ -435,6 +604,11 @@ fn cmd_db(path: &str, db_path: &str) {
                  if r.html.is_some() { "full" } else { "preview" },
                  r.sent_unix,
                  r.subject_inherited as i64,
@@ -1290,8 +1624,14 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
              ])
              .expect("insert");
              let message_id = tx.last_insert_rowid();
-@@ -444,6 +581,58 @@ fn cmd_db(path: &str, db_path: &str) {
+@@ -442,8 +616,66 @@ fn cmd_db(path: &str, db_path: &str) {
+                 ins_link.execute(rusqlite::params![message_id, *folder_id as i64])
+                     .expect("insert folder link");
              }
++            for key in &r.local_keys {
++                ins_key.execute(rusqlite::params![message_id, *key as i64])
++                    .expect("insert message key");
++            }
          }
      }
 +    {
@@ -1325,7 +1665,6 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 +            ("messages", stored),
 +            ("messages_full", best.iter().filter(|r| r.html.is_some()).count()),
 +            ("copies_collapsed", collapsed),
-+            ("local_key_linked", best.iter().filter(|r| !r.local_keys.is_empty()).count()),
 +            ("local_key_conflicts", best.iter().filter(|r| r.local_keys.len() > 1).count()),
 +            ("sidecar_files", sidecars.len()),
 +            ("sidecar_linked", sidecars.linked),
@@ -1336,6 +1675,9 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
 +            ("calendar_lifecycle_unsupported", events.events.len()),
 +            ("folders", folders.folders.len()),
 +            ("messages_with_folder", with_folder),
++            ("attachment_objects", attachments.objects),
++            ("attachments", attachments.attachments.len()),
++            ("messages_with_key", best.iter().filter(|r| !r.local_keys.is_empty()).count()),
 +        ] {
 +            ins_meta.execute(rusqlite::params![key, value as i64]).expect("insert meta");
 +        }
@@ -1349,7 +1691,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      tx.commit().expect("commit");
  
      db.execute_batch(
-@@ -471,9 +660,20 @@ fn cmd_db(path: &str, db_path: &str) {
+@@ -471,9 +703,20 @@ fn cmd_db(path: &str, db_path: &str) {
      }
  }
  
@@ -1370,7 +1712,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
      if prev.subject.is_none() {
          prev.subject = r.subject;
      }
-@@ -491,10 +691,13 @@ fn merge(prev: &mut record::Record, r: record::Record) {
+@@ -491,10 +734,13 @@ fn merge(prev: &mut record::Record, r: record::Record) {
          (Some(a), Some(b)) => b.len() > a.len(),
          _ => false,
      };
@@ -1386,7 +1728,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
          prev.body = r.body;
      }
  }
-@@ -504,7 +707,9 @@ hxprobe — parse HxStore.hxd, the New Outlook for Mac message store
+@@ -504,7 +750,9 @@ hxprobe — parse HxStore.hxd, the New Outlook for Mac message store
  
  usage:
    hxprobe blocks <file>              verify every block, report coverage
@@ -1397,7 +1739,7 @@ diff --git a/hxprobe/src/main.rs b/hxprobe/src/main.rs
    hxprobe map    <file> [n]          dump the field map for n records (0 = stats)
    hxprobe find   <file> <term> [n]   show records whose text contains <term>
  
-@@ -521,7 +726,11 @@ fn main() {
+@@ -521,7 +769,11 @@ fn main() {
  
      match args[1].as_str() {
          "blocks" => cmd_blocks(&args[2]),
@@ -1417,7 +1759,7 @@ diff --git a/hxprobe/src/record.rs b/hxprobe/src/record.rs
      pub recipients: Vec<String>,
      /// Folder keys observed across cached revisions; this is not a live view.
      pub folder_ids: std::collections::BTreeSet<u64>,
-+    /// Local message-object keys observed across merged revisions.
++    /// Local message keys of the message objects this record was read from.
 +    pub local_keys: std::collections::BTreeSet<u64>,
      pub subject: Option<String>,
      pub message_id: Option<String>,

@@ -1,5 +1,5 @@
 {
-  "_note": "Runtime and diagnostic environment declarations. Production deployment uses GitHub Actions; staging database diagnostics and assurance binding reads remain.",
+  "_note": "Runtime and diagnostic environment declarations. GitHub Actions (.github/workflows/deploy.yml) deploys production and, in a parallel job, staging from each green main canary; staging database diagnostics and assurance binding reads remain.",
   "_rule": "Every difference between two environments is either INTENTIONAL and listed in intentional_differences, or it is drift. There is no third category, and the check treats an unlisted difference as a failure rather than a curiosity.",
   "version": 1,
   "environments": [
@@ -47,7 +47,7 @@
     },
     {
       "name": "staging",
-      "purpose": "isolated database diagnostics and assurance scope reads",
+      "purpose": "the app's signed-in staging tests, database diagnostics and assurance scope reads; deployed from main alongside production",
       "data_class": "synthetic diagnostics only",
       "database": {
         "kind": "neon-project",
@@ -58,17 +58,20 @@
           "region_id": "aws-us-east-1",
           "compute_min_cu": 0.25,
           "compute_max_cu": 2
-        }
+        },
+        "note": "The Worker's DATABASE_URL points at the newest carr-staging-replacement-* project (floral-frost-74335698 on 2026-10-26: its schema_migrations count and highest file match staging /release), not at the carr-staging project. The deploy workflow migrates whatever the staging environment secret STAGING_DATABASE_URL names, so that secret must point at the same database."
       },
       "worker": {
-        "deployed": false
+        "deployed": true,
+        "name": "carr-mcp-staging",
+        "config": "mcp-server/wrangler.toml [env.staging]"
       },
       "domains": [],
       "secrets": {
-        "source": "existing verified diagnostic credential helpers"
+        "source": "wrangler secrets on carr-mcp-staging; GitHub environment 'staging' holds CLOUDFLARE_API_TOKEN and STAGING_DATABASE_URL for the deploy job"
       },
       "telemetry": {
-        "destination": "local diagnostic output"
+        "destination": "Cloudflare observability on the staging Worker"
       },
       "who_may_write": "any session, without break-glass"
     },
@@ -114,8 +117,16 @@
       "why": "Neither is a serving environment. Local is a workstation; rehearsal is a database branch with a lifetime measured in minutes."
     },
     {
-      "difference": "production has KV, R2 and custom domains; database diagnostics deploy no Worker",
-      "why": "The GitHub production deploy replaced the local pipeline and its staging Worker declaration. Existing database diagnostics retain their isolated project."
+      "difference": "staging has no custom domain while production has four",
+      "why": "A staging hostname on the same zone is one typo and one certificate away from production. workers.dev needs no DNS and is unmistakably not production."
+    },
+    {
+      "difference": "staging has no R2 bucket while production declares carr_documents",
+      "why": "Staging must never inherit production storage; it stays bucketless until an isolated staging bucket is provisioned."
+    },
+    {
+      "difference": "staging and production hold different KV namespace ids",
+      "why": "This is the isolation: a shared namespace would mean shared OAuth grants."
     }
   ]
 }
