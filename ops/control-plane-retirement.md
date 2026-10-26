@@ -5,7 +5,7 @@ watchdog overlap check, deployment definition, and their tests are removed.
 Applied migrations and captured audit evidence remain unchanged.
 
 Forward migrations retire the unused cost-refusal and cache-observation ledgers.
-`0991_retire_scheduler_contracts.sql` retires the remaining provider, cognition,
+`0996_retire_scheduler_contracts.sql` retires the remaining provider, cognition,
 cache, and cost-reservation tables, their exclusive functions, and the three
 writerless legacy schedule contracts. Native schedulers remain unchanged.
 
