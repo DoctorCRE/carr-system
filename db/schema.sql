@@ -65950,11 +65950,10 @@ CREATE FUNCTION public.capture_call_context(requested_deal_ids uuid[]) RETURNS T
     SET search_path TO 'pg_catalog', 'public', 'pg_temp'
     AS $$
   select d.id, d.name, d.owner, d.operating_state, dp.party_id, p.ref, p.name, p.email, dp.role
-    from public.deal d
+    from public.v_open_deal_room_board d
     left join public.deal_participant dp on dp.deal_id=d.id and dp.to_at is null
     left join public.party p on p.id=dp.party_id
    where d.id = any(requested_deal_ids)
-     and d.outcome is null
      and d.operating_state = 'active'
 $$;
 
@@ -84348,6 +84347,46 @@ CREATE VIEW public.v_deal_room_board AS
 
 
 --
+-- Name: v_open_deal_room_board; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_open_deal_room_board AS
+ SELECT id,
+    name,
+    type,
+    phase,
+    owner,
+    attention,
+    next_date,
+    next_step,
+    market,
+    segment,
+    client_id,
+    client_ref,
+    client_name,
+    account_client_id,
+    account_client_ref,
+    account_name,
+    account_owner,
+    market_agent,
+    market_agent_party_id,
+    last_touch,
+    last_review_at,
+    workspace_kind,
+    operating_state,
+    parking_reason,
+    parking_note,
+    parked_at,
+    parked_by,
+    invoiced_on,
+    closed_on,
+    lane,
+    outcome
+   FROM public.v_deal_room_board
+  WHERE ((outcome IS NULL) AND (closed_on IS NULL) AND (invoiced_on IS NULL) AND (phase <> ALL (ARRAY['closed'::text, 'invoiced'::text])));
+
+
+--
 -- Name: v_deal_room_account; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -84368,7 +84407,7 @@ CREATE VIEW public.v_deal_room_account AS
      JOIN public.party p ON ((p.id = c.party_id)))
      LEFT JOIN public.national_account_owner nao ON ((nao.account_client_id = c.id)))
      LEFT JOIN public.actor a ON ((a.id = nao.owner_actor_id)))
-     LEFT JOIN public.v_deal_room_board b ON ((b.account_client_id = c.id)))
+     LEFT JOIN public.v_open_deal_room_board b ON ((b.account_client_id = c.id)))
   WHERE ((c.client_type = 'national_account'::text) AND (c.merged_into IS NULL))
   GROUP BY c.id, c.roster_ref, p.name, a.slug;
 
@@ -111996,6 +112035,9 @@ grant select on table public.v_negotiation_deal to dot_reader;
 grant select on table public.v_negotiation_position to carr_reader;
 grant select on table public.v_negotiation_position to carr_writer;
 grant select on table public.v_negotiation_position to dot_reader;
+grant select on table public.v_open_deal_room_board to carr_reader;
+grant select on table public.v_open_deal_room_board to carr_writer;
+grant select on table public.v_open_deal_room_board to dot_reader;
 grant select on table public.v_orphaned_edge to dot_reader;
 grant select on table public.v_orphaned_role to dot_reader;
 grant select on table public.v_partner_room_turn to carr_reader;
@@ -114375,6 +114417,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0986_decline_requires_its_receipt.sql	293e6e21f95341bf47a2b8a10a9ab0f4f27024358843fa7182056d4fe96f7868	1970-01-01 00:00:00+00
 0987_email_proposal.sql	c0ab5328442e86d95e28c629575002b6b73ef28dd0d183f7ddee253bcaea77fd	1970-01-01 00:00:00+00
 0988_drop_siep_program_leftovers.sql	9c20dcac261bbf29cdd68184c9688e3333cfe95e9134f0e1fa461d402bf8695c	1970-01-01 00:00:00+00
+0989_call_context_open_deals.sql	4c486dfbbd5f52fdf04d4335c048cded481b9676284a0a323ea85395a3f27752	1970-01-01 00:00:00+00
 \.
 
 

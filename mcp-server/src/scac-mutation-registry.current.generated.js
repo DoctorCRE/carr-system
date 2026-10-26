@@ -1378,6 +1378,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "party-duplicate-candidates": {
+    "ingress_key": "mcp-tool:party-duplicate-candidates",
+    "source_locator": "mcp-server/src/party-duplicate-candidates.js",
+    "schema_digest": "32955ab25ea9e9e83715fb8807d7a2a43f2216819966fcd0835bbf3eb9537ca9",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "patch-deal-field": {
     "ingress_key": "mcp-tool:patch-deal-field",
     "source_locator": "mcp-server/src/tools.js",

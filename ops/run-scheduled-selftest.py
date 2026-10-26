@@ -35,13 +35,14 @@ class ScheduledRunTests(unittest.TestCase):
                                f"printf child-out; printf child-err >&2; exit {code}"],
                               cwd=self.root, env=self.env, text=True, capture_output=True, timeout=15)
 
-    def invoke_intake(self, receipt, code=1):
+    def invoke_intake(self, receipt, code=1, router_lines=()):
         child = self.root / "child.py"
         child.write_text("import sys\n"
                          "print('SYNTHETIC_PRIVATE_BODY')\n"
                          "print('synthetic intake failure', file=sys.stderr)\n"
                          f"print({('outlook-intake-receipt ' + json.dumps(receipt))!r})\n"
-                         f"sys.exit({code})\n")
+                         + ''.join(f"print({line!r})\n" for line in router_lines)
+                         + f"sys.exit({code})\n")
         return subprocess.run(["/bin/zsh", str(self.root / "bin/run-scheduled.sh"),
                                "outlook-intake", "outlook.intake", sys.executable, str(child)],
                               cwd=self.root, env=self.env, text=True, capture_output=True, timeout=15)
@@ -121,6 +122,48 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertNotIn("--failure-class", args)
         self.assertEqual(json.loads(args[args.index("--detail") + 1])["counts"],
                          {"unresolved_addresses": 2})
+
+    def test_router_receipt_is_visible_without_changing_intake_result(self):
+        intake = {"state": "succeeded", "reason": "processed", "counts": {"emails": 1}}
+        for state, counts in (("succeeded", {"emails": 1, "routed": 1, "recorded": 2}),
+                              ("failed", {"error": 1}), ("skipped", {})):
+            with self.subTest(state=state):
+                router = {"state": state, "counts": counts, "body": "SYNTHETIC_PRIVATE_BODY"}
+                result = self.invoke_intake(intake, code=0, router_lines=[
+                    'email-router-receipt ' + json.dumps(router)])
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stdout.splitlines(), [
+                    'outlook-intake-receipt ' + json.dumps(intake, sort_keys=True),
+                    'email-router-receipt ' + json.dumps({"state": state, "counts": counts}, sort_keys=True)])
+                args = json.loads(self.rows()[-1][3])
+                self.assertEqual(self.rows()[-1][2], "succeeded")
+                self.assertEqual(json.loads(args[args.index("--detail") + 1]), intake)
+                self.assertNotIn("--failure-class", args)
+                self.assertNotIn("SYNTHETIC_PRIVATE", result.stdout + result.stderr + json.dumps(self.rows()))
+
+    def test_router_invalid_receipts_do_not_leak_or_change_intake_failure(self):
+        intake = {"state": "failed", "reason": "writes_failed", "counts": {"writes_failed": 1}}
+        cases = ["SYNTHETIC_PRIVATE_INVALID_JSON", [],
+                 {"state": ["SYNTHETIC_PRIVATE_STATE"], "counts": {}},
+                 {"state": "SYNTHETIC_PRIVATE_STATE", "counts": {}},
+                 {"state": "failed", "counts": []},
+                 {"state": "failed", "counts": {"SYNTHETIC_PRIVATE_KEY": 1}},
+                 *({"state": "failed", "counts": {"error": value}}
+                   for value in (True, -1, 10**20, 1.5, "SYNTHETIC_PRIVATE_VALUE"))]
+        for router in cases:
+            with self.subTest(router=router):
+                raw = router if isinstance(router, str) else json.dumps(router)
+                result = self.invoke_intake(intake, router_lines=['email-router-receipt ' + raw])
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout.splitlines(), [
+                    'outlook-intake-receipt ' + json.dumps(intake, sort_keys=True)])
+                args = json.loads(self.rows()[-1][3])
+                self.assertEqual(args[args.index("--failure-class") + 1], "writes_failed")
+                self.assertEqual(json.loads(args[args.index("--detail") + 1]), intake)
+                observed = (result.stdout + result.stderr + json.dumps(self.rows())
+                            + (self.root / "out/run-scheduled.log").read_text())
+                self.assertNotIn("SYNTHETIC_PRIVATE", observed)
+                self.assertFalse(list((self.root / "out").glob("outlook-intake-receipt.*")))
 
     def rows(self):
         with closing(sqlite3.connect(self.spool)) as connection:

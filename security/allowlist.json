@@ -316,6 +316,18 @@
       "sha256": "8e2322438ef700c25df8c6f8333c5ee0b4a674565928d8f02c0cacc37a2cb5d3",
       "rule": "pii-email",
       "reason": "Historical research-helper README at 2b1643b8 names the operator-designated TEST mailbox, not a client contact or credential. The literal is removed from the current README; this exception binds only these exact historical documentation bytes."
+    },
+    {
+      "path": "mcp-server/test/party-duplicate-candidates.test.mjs",
+      "sha256": "eced5c16210169cc35c67ec55753bfb08447bb978a18296898156653766cc8f2",
+      "rule": "pii-phone",
+      "reason": "Synthetic duplicate-candidate reader tests use invented 202-555-01xx phone values to prove normalization, nonmatches and paging. No record-layer data or live contact is used. Qualification binds only these exact fixture bytes and the phone detector, including the preserved original PR commit."
+    },
+    {
+      "path": "ops/outlook-intake-selftest.py",
+      "sha256": "3ea854a4192faab8ca31795f12e99dfdeef9ec23912d2e809ab34f9ebb994c23",
+      "rule": "pii-email",
+      "reason": "Historical synthetic account-exclusion fixture introduced by b5ce2848 in PR #2390. The invented longer-domain recipient tests exact-address matching in an offline SQLite fixture, not a real contact. Commit 2ed36da6 replaces it with a reserved .invalid domain. Qualification binds only these exact historical file bytes and this detector because pushed history is retained without force-push."
     }
   ]
 }

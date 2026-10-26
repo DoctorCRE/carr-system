@@ -27,6 +27,7 @@ class NightlyStatusTests(unittest.TestCase):
             '#!/bin/zsh\nkey="$2"; shift 2\nrc=0\n'
             '[ ! -f "$HOME/outcomes/$key" ] || rc="$(cat "$HOME/outcomes/$key")"\n'
             'print -r -- "$key $rc" >> "$HOME/receipts"\n'
+            'print -r -- "$*" >> "$HOME/commands"\n'
             'for arg in "$@"; do\n'
             '  case "$arg" in HC_CHAIN_RC=*|HC_EXPORTS_RC=*|HC_BACKUP_RC=*)\n'
             '    print -r -- "$arg" >> "$HOME/pings";; esac\n'
@@ -52,6 +53,15 @@ class NightlyStatusTests(unittest.TestCase):
         self.assertIn("nightly.nightly-ping 9", receipts)
         self.assertIn("HC_CHAIN_RC=7", (self.root / "pings").read_text())
 
+
+    def test_checklist_reminder_failure_is_reported_without_suppressing_later_jobs(self):
+        result, receipts = self.run_nightly({'deal-checklist-reminders': 1})
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('nightly.deal-checklist-reminders 1', receipts)
+        self.assertIn('./.venv/bin/python tools/deal-checklist-reminders.py --apply',
+                      (self.root / 'commands').read_text().splitlines())
+        self.assertIn('nightly.verb-probe 0', receipts)
+        self.assertIn('HC_CHAIN_RC=1', (self.root / 'pings').read_text())
 
     def test_export_failure_remains_visible_after_later_success(self):
         result, receipts = self.run_nightly({"exports": 7}, "--exports")
