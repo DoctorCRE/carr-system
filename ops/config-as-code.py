@@ -467,7 +467,8 @@ def hook_block_script_paths(block):
 def installed_hook_missing_files():
     """Audit installed client and project hook commands before source deletions ship."""
     problems = []
-    for path in (SETTINGS, CODEX_HOOKS_SRC, os.path.join(REPO, ".claude", "settings.json")):
+    for path in (SETTINGS, CODEX_HOOKS_SRC, os.path.join(REPO, ".claude", "settings.json"),
+                 os.path.join(REPO, ".codex", "hooks.json")):
         raw = read(path)
         if raw is None:
             continue
