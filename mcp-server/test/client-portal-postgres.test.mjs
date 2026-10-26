@@ -20,7 +20,6 @@ test('a password opens only its client portal and the live deal roadmap', async 
     await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader; grant usage on schema ops to dot_reader; alter default privileges in schema ops grant select on tables to dot_reader; create extension pgcrypto');
     await c.query(await readFile(new URL('../../migrations/0975_client_portal.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/0976_client_portal_binding.sql', import.meta.url), 'utf8'));
-    await c.query(await readFile(new URL('../../migrations/0980_client_portal_attempt_limit.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/0981_client_portal_writer_denials.sql', import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')", [actor.id]);
     await c.query("insert into client_status(slug,label) values('active','Active'); insert into deal_phase(slug,label,sort) values('research','Research',1),('negotiation','Negotiation',2)");
@@ -76,6 +75,59 @@ test('a password opens only its client portal and the live deal roadmap', async 
           assert.equal(await hashes() - before, 1, `${slug} denial must pay the bcrypt cost`);
         }
       } finally { await c.query('rollback'); }
+    });
+
+    await t.test('real and unknown slugs verify concurrently and password changes invalidate in-flight guesses', async () => {
+      const callers = Array.from({ length: 3 }, () => new pg.Client(c.connectionParameters));
+      const barrier = 2321;
+      let pending = [];
+      await c.query(`alter function public.crypt(text,text) rename to portal_fixture_crypt;
+        create function public.crypt(text,text) returns text language plpgsql as $body$
+        begin
+          perform pg_advisory_xact_lock_shared(${barrier});
+          return public.portal_fixture_crypt($1,$2);
+        end $body$`);
+      try {
+        await Promise.all(callers.map(caller => caller.connect()));
+        const pids = await Promise.all(callers.map(async caller =>
+          (await caller.query('select pg_backend_pid() as pid')).rows[0].pid));
+        const allVerifying = async slug => {
+          const deadline = Date.now() + 5000;
+          let verifying = 0;
+          while (Date.now() < deadline) {
+            verifying = Number((await c.query(`select count(*) as n from pg_locks
+              where pid=any($1::int[]) and locktype='advisory' and not granted`, [pids])).rows[0].n);
+            if (verifying === callers.length) break;
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+          assert.equal(verifying, callers.length, `${slug} must let every caller reach bcrypt concurrently`);
+        };
+        for (const slug of ['missing', 'synthetic-a']) {
+          await c.query('select pg_advisory_lock($1)', [barrier]);
+          pending = callers.map(caller => caller.query('select ops.read_client_portal($1,$2) as portal', [slug, 'wrong-password']));
+          await allVerifying(slug);
+          await c.query('select pg_advisory_unlock($1)', [barrier]);
+          for (const result of await Promise.all(pending)) assert.equal(result.rows[0].portal, null);
+          pending = [];
+        }
+        await c.query("update ops.client_portal set failed_attempts=0,attempt_window_started_at=null where slug='synthetic-a'");
+        await c.query('select pg_advisory_lock($1)', [barrier]);
+        pending = callers.map(caller => caller.query('select ops.read_client_portal($1,$2) as portal', ['synthetic-a', 'synthetic-password-a']));
+        await allVerifying('synthetic-a');
+        await c.query("update ops.client_portal set password_hash=public.portal_fixture_crypt(encode(digest('changed-password','sha256'),'hex'),gen_salt('bf',12)) where slug='synthetic-a'");
+        await c.query('select pg_advisory_unlock($1)', [barrier]);
+        for (const result of await Promise.all(pending)) assert.equal(result.rows[0].portal, null);
+        pending = [];
+        assert.equal((await c.query("select failed_attempts from ops.client_portal where slug='synthetic-a'")).rows[0].failed_attempts, 0);
+      } finally {
+        await c.query('select pg_advisory_unlock_all()');
+        await Promise.allSettled(pending);
+        await Promise.all(callers.map(caller => caller.end()));
+        await c.query(`drop function public.crypt(text,text);
+          alter function public.portal_fixture_crypt(text,text) rename to crypt;
+          update ops.client_portal set password_hash=crypt(encode(digest('synthetic-password-a','sha256'),'hex'),gen_salt('bf',12)),
+            failed_attempts=0,attempt_window_started_at=null where slug='synthetic-a'`);
+      }
     });
 
     await t.test('the installed grant contract matches the runtime contract', async () => {

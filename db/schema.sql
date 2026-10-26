@@ -31363,6 +31363,7 @@ CREATE FUNCTION ops.read_client_portal(p_slug text, p_password text) RETURNS jso
     AS $_$
 declare
   portal ops.client_portal%rowtype;
+  observed_hash text;
   supplied_hash text;
   result jsonb;
   attempt_time timestamptz;
@@ -31371,6 +31372,10 @@ begin
      or p_password is null or length(p_password) not between 1 and 1024 then
     return null;
   end if;
+  select p.password_hash into observed_hash from ops.client_portal p where p.slug=p_slug;
+  -- Bcrypt must not serialize callers of a real slug while unknown slugs run in parallel.
+  supplied_hash := public.crypt(encode(public.digest(p_password,'sha256'),'hex'),
+    coalesce(observed_hash,'$2a$12$......................0000000000000000000000000000000'));
   select p.* into portal from ops.client_portal p where p.slug=p_slug for update;
   attempt_time := clock_timestamp();
   if portal.attempt_window_started_at is null
@@ -31378,13 +31383,10 @@ begin
     portal.failed_attempts := 0;
     portal.attempt_window_started_at := attempt_time;
   end if;
-  -- A non-secret dummy verifier keeps an unknown slug on the same bcrypt work path.
-  supplied_hash := public.crypt(encode(public.digest(p_password,'sha256'),'hex'),
-    coalesce(portal.password_hash,'$2a$12$......................0000000000000000000000000000000'));
   if portal.failed_attempts >= 5 then
     return null;
   end if;
-  if portal.slug is null then
+  if portal.slug is null or portal.password_hash is distinct from observed_hash then
     return null;
   end if;
   if portal.password_hash is distinct from supplied_hash then
@@ -122112,8 +122114,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0977_retire_work_shape_admission.sql	1a9b2f3abd4b673b073a2fa57fca31be046447c33c1f6309b2d034b775b726f3	1970-01-01 00:00:00+00
 0978_doctrine_title_topic_ranking.sql	852b8da1601a9277e7f9e2cd5fbf1385785af2356b4a08bc92438378c994c72b	1970-01-01 00:00:00+00
 0979_decline_unstarted_ready_work_request.sql	f343b16316d6a744dcf6c20073bedfb9e38695d5f06c56d292ba8797b9c261d6	1970-01-01 00:00:00+00
-0980_client_portal_attempt_limit.sql	dfef0aa50b05a7124ee3aa54775bf0fe1fb6a17f18a3655658112b530432f648	1970-01-01 00:00:00+00
-0981_client_portal_writer_denials.sql	ee180c356db754ecb6f7a1ee7490923133968ef448cf112ae8db078c383e2571	1970-01-01 00:00:00+00
+0981_client_portal_writer_denials.sql	2380f08e4b75a3ed447b5b99854cfb8b9348308dab81a24c74986602feb56b86	1970-01-01 00:00:00+00
 \.
 
 

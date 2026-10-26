@@ -1,10 +1,15 @@
 -- rollback: forward-only; retain committed password limits and uniform bcrypt work.
--- lock-review: replaces one portal function and its execute grant; no table rewrite.
+-- lock-review: adds two fixed-size counters; locks only the requested slug after bcrypt.
+
+alter table ops.client_portal
+  add column failed_attempts integer not null default 0 check (failed_attempts between 0 and 5),
+  add column attempt_window_started_at timestamptz;
 
 create or replace function ops.read_client_portal(p_slug text,p_password text) returns jsonb
 language plpgsql volatile security definer set search_path=pg_catalog,pg_temp as $$
 declare
   portal ops.client_portal%rowtype;
+  observed_hash text;
   supplied_hash text;
   result jsonb;
   attempt_time timestamptz;
@@ -13,6 +18,10 @@ begin
      or p_password is null or length(p_password) not between 1 and 1024 then
     return null;
   end if;
+  select p.password_hash into observed_hash from ops.client_portal p where p.slug=p_slug;
+  -- Bcrypt must not serialize callers of a real slug while unknown slugs run in parallel.
+  supplied_hash := public.crypt(encode(public.digest(p_password,'sha256'),'hex'),
+    coalesce(observed_hash,'$2a$12$......................0000000000000000000000000000000'));
   select p.* into portal from ops.client_portal p where p.slug=p_slug for update;
   attempt_time := clock_timestamp();
   if portal.attempt_window_started_at is null
@@ -20,13 +29,10 @@ begin
     portal.failed_attempts := 0;
     portal.attempt_window_started_at := attempt_time;
   end if;
-  -- A non-secret dummy verifier keeps an unknown slug on the same bcrypt work path.
-  supplied_hash := public.crypt(encode(public.digest(p_password,'sha256'),'hex'),
-    coalesce(portal.password_hash,'$2a$12$......................0000000000000000000000000000000'));
   if portal.failed_attempts >= 5 then
     return null;
   end if;
-  if portal.slug is null then
+  if portal.slug is null or portal.password_hash is distinct from observed_hash then
     return null;
   end if;
   if portal.password_hash is distinct from supplied_hash then
@@ -65,7 +71,7 @@ begin
   contract := ops.scac_current_grant_contract();
   contract := jsonb_set(contract, '{secdef_execute}', (
     select jsonb_agg(case when entry->>'signature'='ops.read_client_portal(p_slug text, p_password text)'
-      then entry || jsonb_build_object('grantee','carr_writer','ingress_key',
+      then entry || jsonb_build_object('volatility','v','grantee','carr_writer','ingress_key',
         'db-function-acl:ops.read_client_portal(p_slug text, p_password text):carr_writer:execute') else entry end order by ordinal)
     from jsonb_array_elements(contract->'secdef_execute') with ordinality as entries(entry,ordinal)
   ));
