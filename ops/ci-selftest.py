@@ -356,7 +356,7 @@ def test_hosted_migration_ownership():
           and "GH_TOKEN" in runner["env"])
     check("hosted migration partitions cover all independent proof groups",
           set(wf["jobs"]["migration-fixtures"].get("strategy", {}).get("matrix", {}).get("part", []))
-          == {"reconstruction", "equivalence", "shadow", "gates-serial", "gates-isolated", "acceptance"}
+          == {"reconstruction", "equivalence", "shadow", "gates", "acceptance"}
           and "--migration-part proofs" in runner["run"])
     check("required aggregate waits for independent fixtures", "migration-fixtures" in wf["jobs"]["checks"]["needs"])
     aggregate = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Fail unless every class group succeeded")
@@ -422,7 +422,7 @@ def test_migration_partitions_execute_complete_inventory():
                      "FAIL_PROGRAM": fail}, capture_output=True, text=True)
             return result.returncode, set(calls.read_text().splitlines())
         fixtures = {}
-        for part in ("reconstruction", "equivalence", "shadow", "fixtures", "proofs", "gates", "gates-serial", "gates-isolated", "acceptance", "core"):
+        for part in ("reconstruction", "equivalence", "shadow", "fixtures", "proofs", "gates", "acceptance", "core"):
             rc, fixtures[part] = run(part)
             check(f"migration {part} partition executes", rc == 0)
         check("fixture partition union retains the complete canonical fixture inventory",
@@ -439,14 +439,14 @@ def test_migration_partitions_execute_complete_inventory():
               for call in fixtures["proofs"]))
         check("DB gate partition excludes consumer proofs", not any(
               "node --test" in call for call in fixtures["gates"]))
-        for partition in ("serial", "isolated"):
-            check(f"gate {partition} partition reaches the canonical selector", any(
-                  f"--partition {partition}" in call for call in fixtures["gates-" + partition]))
+        check("the gate partition runs every DB gate in one runner", any(
+              "ci-migration-gates.py --logdir" in call and "--partition" not in call
+              for call in fixtures["gates"]))
         check("acceptance bootstrap excludes consumer and gate programs", not any(
               "node --test" in call or "ci-migration-gates.py --logdir" in call
               for call in fixtures["acceptance"]))
         check("a failing partition fails the migration verdict", run("reconstruction", "schema-reconstruction-selftest.py")[0] == 1)
-        rc, calls = run("gates-serial", "tools/ops-record.py sync-registry")
+        rc, calls = run("gates", "tools/ops-record.py sync-registry")
         check("service-catalog bootstrap failure stops database gates", rc == 1 and not any(
               "ci-migration-gates.py --logdir" in call for call in calls))
 

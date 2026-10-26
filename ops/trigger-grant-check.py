@@ -101,6 +101,49 @@ def psql(dsn, sql):
     return [line.split(SEP) for line in p.stdout.strip().split("\n") if line]
 
 
+def privileges(dsn, roles, fired, read):
+    """Every privilege answer the check needs, from one query (WR-000540).
+
+    Returns the (role, table) pairs that may INSERT or UPDATE a trigger table,
+    the (role, table) pairs with table-level SELECT on a read table, and per
+    (role, read table) its columns in order with whether the role may SELECT
+    each. has_table_privilege() and has_column_privilege() stay the authority;
+    only the number of round trips changed, from one psql per question.
+    """
+    if not roles or not read:
+        return set(), set(), {}
+
+    def values(items):
+        return ", ".join("('" + i.replace("'", "''") + "')" for i in sorted(items))
+
+    answers = psql(dsn, f"""
+        with r(role) as (values {values(roles)}),
+             f(tbl) as (values {values(fired)}),
+             t(tbl) as (values {values(read)})
+        select 'w', role, tbl, '', 0
+        from r cross join f
+        where has_table_privilege(role, tbl::regclass, 'INSERT')
+           or has_table_privilege(role, tbl::regclass, 'UPDATE')
+        union all
+        select 's', role, tbl, '', 0
+        from r cross join t
+        where has_table_privilege(role, tbl::regclass, 'SELECT')
+        union all
+        select case when has_column_privilege(role, tbl::regclass, a.attnum, 'SELECT')
+                    then 'c' else 'x' end, role, tbl, a.attname, a.attnum
+        from r cross join t
+        join pg_attribute a on a.attrelid = tbl::regclass
+         and a.attnum > 0 and not a.attisdropped
+        order by 1, 2, 3, 5""")
+    writes = {(role, tbl) for kind, role, tbl, _, _ in answers if kind == "w"}
+    selects = {(role, tbl) for kind, role, tbl, _, _ in answers if kind == "s"}
+    columns: dict[tuple[str, str], list[tuple[str, bool]]] = {}
+    for kind, role, tbl, column, _ in sorted((a for a in answers if a[0] in "cx"),
+                                              key=lambda a: (a[1], a[2], int(a[4]))):
+        columns.setdefault((role, tbl), []).append((column, kind == "c"))
+    return writes, selects, columns
+
+
 def main():
     dsn = os.environ.get("CARR_CI_DATABASE_URL", "").strip()
     if not dsn:
@@ -110,49 +153,69 @@ def main():
         return 0
 
     try:
-        # SCHEMA-QUALIFIED THROUGHOUT. A bare name is not resolvable: this
-        # database has an `ops` schema as well as `public`, and '<name>'::regclass
-        # follows search_path, so the first full run died on
-        # `relation "capability_verification" does not exist`. Bodies name tables
-        # bare, so a bare -> qualified map is kept alongside.
-        rows = psql(dsn, """
-            select n.nspname, c.relname from pg_class c
-            join pg_namespace n on n.oid = c.relnamespace
+        # ONE CATALOG READ. Every relation, trigger and app role arrives in one
+        # psql session, tagged by kind (WR-000540). SCHEMA-QUALIFIED THROUGHOUT.
+        # A bare name is not resolvable: this database has an `ops` schema as
+        # well as `public`, and '<name>'::regclass follows search_path, so the
+        # first full run died on `relation "capability_verification" does not
+        # exist`. Bodies name tables bare, so a bare -> qualified map is kept.
+        catalog = psql(dsn, rf"""
+            select 'rel', n.nspname, c.relname, '', '', ''
+            from pg_class c join pg_namespace n on n.oid = c.relnamespace
             where c.relkind in ('r','p','v','m')
-              and n.nspname not in ('pg_catalog','information_schema')""")
-        qualified = {f"{ns}.{rel}" for ns, rel in rows}
-        by_bare: dict[str, list[str]] = {}
-        for ns, rel in rows:
-            by_bare.setdefault(rel.lower(), []).append(f"{ns}.{rel}")
-
-        triggers = psql(dsn, r"""
-            select n.nspname || '.' || c.relname, t.tgname, p.proname, p.prosecdef,
+              and n.nspname not in ('pg_catalog','information_schema')
+            union all
+            select 'trg', n.nspname || '.' || c.relname, t.tgname, p.proname,
+                   case when p.prosecdef then 't' else 'f' end,
                    replace(replace(p.prosrc, E'\n', ' '), E'\t', ' ')
             from pg_trigger t
             join pg_class c on c.oid = t.tgrelid
             join pg_namespace n on n.oid = c.relnamespace
             join pg_proc  p on p.oid = t.tgfoid
             where not t.tgisinternal
-            order by 1, 2""")
-
-        roles = [r[0] for r in psql(dsn, f"""
-            select rolname from pg_roles
-            where rolname like '{ROLE_PREFIX}' order by 1""")
-            if r[0] not in EXCLUDED_ROLES]
+            union all
+            select 'role', rolname, '', '', '', '' from pg_roles
+            where rolname like '{ROLE_PREFIX}'""")
     except RuntimeError as exc:
         print(f"trigger-grant: CANNOT READ the database — {exc}", file=sys.stderr)
         return 1
+    rows = [r[1:3] for r in catalog if r[0] == "rel"]
+    qualified = {f"{ns}.{rel}" for ns, rel in rows}
+    by_bare: dict[str, list[str]] = {}
+    for ns, rel in rows:
+        by_bare.setdefault(rel.lower(), []).append(f"{ns}.{rel}")
+    triggers = sorted(r[1:] for r in catalog if r[0] == "trg")
+    roles = sorted(r[1] for r in catalog if r[0] == "role" and r[1] not in EXCLUDED_ROLES)
 
-    def writes(role, table):
-        r = psql(dsn, f"select has_table_privilege('{role}','{table}','INSERT') "
-                      f"or has_table_privilege('{role}','{table}','UPDATE')")
-        return r[0][0] == "t"
+    # Each invoker-rights trigger body with the real tables it reads.
+    candidates = []
+    for table, tgname, proname, secdef, src in triggers:
+        if secdef == "t":
+            continue                      # runs as owner; grants never apply
+        # Resolve each bare name the body mentions to a real qualified table.
+        # An ambiguous name prefers the trigger table's own schema.
+        schema = table.split(".")[0]
+        reads = set()
+        for raw in READ.findall(src):
+            if "." in raw and raw in qualified:
+                reads.add(raw)
+                continue
+            found = by_bare.get(raw.split(".")[-1].lower(), [])
+            if len(found) == 1:
+                reads.add(found[0])
+            elif found:
+                same = [c for c in found if c.startswith(schema + ".")]
+                reads.add(same[0] if same else found[0])
+        reads.discard(table)
+        if reads:
+            candidates.append((table, tgname, proname, src, sorted(reads)))
 
-    def columns_of(table):
-        return [r[0] for r in psql(dsn, f"""
-            select attname from pg_attribute
-            where attrelid = '{table}'::regclass
-              and attnum > 0 and not attisdropped""")]
+    try:
+        writes, selects, columns = privileges(
+            dsn, roles, {c[0] for c in candidates}, {t for c in candidates for t in c[4]})
+    except RuntimeError as exc:
+        print(f"trigger-grant: CANNOT READ the database — {exc}", file=sys.stderr)
+        return 1
 
     def missing_reads(role, table, body):
         """The columns of `table` this body names that `role` cannot SELECT.
@@ -170,58 +233,29 @@ def main():
         and OLD.x are stripped first — those are the TRIGGERING table's
         columns, not this one's.
         """
-        if psql(dsn, f"select has_table_privilege('{role}','{table}','SELECT')"
-                )[0][0] == "t":
+        if (role, table) in selects:
             return []
         stripped = re.sub(r"\b(?:new|old)\.\w+", " ", body, flags=re.I)
-        named = set(re.findall(r"[a-z_][\w]*", stripped, re.I))
-        wanted = [c for c in columns_of(table) if c.lower() in
-                  {n.lower() for n in named}]
+        named = {n.lower() for n in re.findall(r"[a-z_][\w]*", stripped, re.I)}
+        granted = columns.get((role, table), [])
+        wanted = [(c, ok) for c, ok in granted if c.lower() in named]
         if not wanted:
             # The body names the table but none of its columns by name —
             # `select 1 from t`, `count(*)`. Any read at all is enough.
-            any_col = psql(dsn, f"""
-                select coalesce(bool_or(has_column_privilege(
-                         '{role}','{table}',a.attname,'SELECT')), false)
-                from pg_attribute a
-                where a.attrelid = '{table}'::regclass
-                  and a.attnum > 0 and not a.attisdropped""")[0][0] == "t"
-            return [] if any_col else ["(any column)"]
-        return [c for c in wanted if psql(
-            dsn, f"select has_column_privilege('{role}','{table}','{c}','SELECT')"
-        )[0][0] != "t"]
+            return [] if any(ok for _, ok in granted) else ["(any column)"]
+        return [c for c, ok in wanted if not ok]
 
     findings = []
-    checked = 0
-    for table, tgname, proname, secdef, src in triggers:
-        if secdef == "t":
-            continue                      # runs as owner; grants never apply
-        # Resolve each bare name the body mentions to a real qualified table.
-        # An ambiguous name prefers the trigger table's own schema.
-        schema = table.split(".")[0]
-        reads = set()
-        for raw in READ.findall(src):
-            if "." in raw and raw in qualified:
-                reads.add(raw)
-                continue
-            candidates = by_bare.get(raw.split(".")[-1].lower(), [])
-            if len(candidates) == 1:
-                reads.add(candidates[0])
-            elif candidates:
-                same = [c for c in candidates if c.startswith(schema + ".")]
-                reads.add(same[0] if same else candidates[0])
-        reads.discard(table)
-        if not reads:
-            continue
-        checked += 1
+    for table, tgname, proname, src, reads in candidates:
         for role in roles:
-            if not writes(role, table):
+            if (role, table) not in writes:
                 continue                  # this role cannot fire it
-            for read_table in sorted(reads):
+            for read_table in reads:
                 gaps = missing_reads(role, read_table, src)
                 if gaps:
                     findings.append((tgname, table, read_table, role, proname,
                                      gaps))
+    checked = len(candidates)
 
     if not findings:
         print(f"trigger-grant: OK — {len(triggers)} trigger(s), {checked} of them "

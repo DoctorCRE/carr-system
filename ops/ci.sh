@@ -39,14 +39,14 @@ while [ "$#" -gt 0 ]; do
       shift ;;
     --migration-part) MIGRATION_PART="${2:-}"; shift ;;
     --list)   LIST=1 ;;
-    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|gates-serial|gates-isolated|acceptance|fixtures|reconstruction|equivalence|shadow] [--gate-shard 1/2|2/2] [--list]"; exit 0 ;;
+    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|acceptance|fixtures|reconstruction|equivalence|shadow] [--gate-shard 1/2|2/2] [--list]"; exit 0 ;;
     *) echo "ci.sh: unknown argument: $1" >&2; exit 64 ;;
   esac
   shift
 done
 
 case "$MIGRATION_PART" in
-  all|core|proofs|gates|gates-serial|gates-isolated|acceptance|fixtures|reconstruction|equivalence|shadow) ;;
+  all|core|proofs|gates|acceptance|fixtures|reconstruction|equivalence|shadow) ;;
   *) echo "ci.sh: unknown migration part" >&2; exit 64 ;;
 esac
 
@@ -554,7 +554,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
     return
   fi
 
-  if [[ "$MIGRATION_PART" != gates* && "$MIGRATION_PART" != acceptance ]]; then
+  if [[ "$MIGRATION_PART" != gates && "$MIGRATION_PART" != acceptance ]]; then
     if ! CARR_RULE_TEST_DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-rule-supersession.log" \
         node --test mcp-server/test/find-rule-supersedes.test.mjs; then
       tail -30 "$LOGDIR/migration-rule-supersession.log" >&2
@@ -879,9 +879,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
           db_gate_declared="$db_gate_declared\n            $(basename "$g"): $(sed -n 's/^# ci: runs-outside-ci *— *//p' "$g" | head -1)"
         fi
       done
-      local gate_partition=all
-      case "$MIGRATION_PART" in gates-*) gate_partition="${MIGRATION_PART#gates-}" ;; esac
-      if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" --partition "$gate_partition" $db_gates; then
+      if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" $db_gates; then
         db_gate_failures="isolated/serial DB gate runner (see named failures above)"
       fi
       _mstep gates
@@ -996,6 +994,8 @@ echo "ci-timing:${CLASS_TIMINGS}"
 [ -n "$SKIPPED_CLASSES" ] && echo "ci-skipped-classes:${SKIPPED_CLASSES}"
 
 if [ -n "$FAILED_CLASSES" ]; then
+  # Classes the local push path covers: the floor, and the secret class's scans,
+  # which the pre-push hook runs itself once per push.
   FLOOR_CLASSES="pushfloor secret"
   _floor=""; _relocated=""
   for f in $FAILED_CLASSES; do
