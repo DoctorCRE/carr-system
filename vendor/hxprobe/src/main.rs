@@ -274,7 +274,11 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              copies       INTEGER,   -- revisions collapsed into this row
              -- sender, normalized subject and preview opening: the identity
              -- this row's copies share; NULL when too short to identify.
-             copy_key     TEXT
+             copy_key     TEXT,
+             -- store-local keys of the message objects merged into this row,
+             -- decimal, comma-separated and ascending; NULL when none linked.
+             -- More than one means this row joined distinct store items.
+             local_keys   TEXT
          );
          CREATE TABLE message_folders (
              message_id INTEGER NOT NULL REFERENCES messages(id),
@@ -583,9 +587,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 "INSERT INTO messages
                    (block,sender,sender_name,recipients,subject,message_id,body,
                     html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
-                    subject_inherited,preview,body_source,copies,copy_key)
+                    subject_inherited,preview,body_source,copies,copy_key,local_keys)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,
-                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17)",
+                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17,?18)",
             )
             .expect("prepare");
 
@@ -608,6 +612,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 r.body_source,
                 r.copies as i64,
                 body::copy_key(r),
+                local_keys(r),
             ])
             .expect("insert");
             let message_id = tx.last_insert_rowid();
@@ -652,6 +657,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("messages", stored),
             ("messages_full", best.iter().filter(|r| r.html.is_some()).count()),
             ("copies_collapsed", collapsed),
+            ("local_key_conflicts", best.iter().filter(|r| r.local_keys.len() > 1).count()),
             ("sidecar_files", sidecars.len()),
             ("sidecar_linked", sidecars.linked),
             ("sidecar_rejected", sidecars.rejected),
@@ -699,6 +705,12 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             .unwrap_or(0);
         println!("  {label} {n:>6}  {:>5.1}%", n as f64 * 100.0 / stored as f64);
     }
+}
+
+/// The local keys of every revision merged into this row.
+fn local_keys(r: &record::Record) -> Option<String> {
+    (!r.local_keys.is_empty())
+        .then(|| r.local_keys.iter().map(u64::to_string).collect::<Vec<_>>().join(","))
 }
 
 /// Combine a later revision of a message into the copy already held.
