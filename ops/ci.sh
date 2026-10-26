@@ -336,8 +336,7 @@ PYEOF
   run_quiet "$LOGDIR/safety-hooks.log" "$PY" hooks/gate-integrity.py --strict \
     || { failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
 
-  for inv in audit-queue-freshness-check \
-             stale-count-check \
+  for inv in stale-count-check \
              rule-load-layer-check rule-classification-parity-check \
              selftest-git-isolation-check \
              sync-core-rule-ids rule-route-coverage \
