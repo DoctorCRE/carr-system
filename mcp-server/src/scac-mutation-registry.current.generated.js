@@ -1867,6 +1867,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-vendor-meetings": {
+    "ingress_key": "mcp-tool:read-vendor-meetings",
+    "source_locator": "mcp-server/src/vendor-meetings.js",
+    "schema_digest": "e15d4a8922a0f8c019e4cdfcc06bfb8ae4b506a00d0bbe319e5eb8fdbd5390cc",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-work-shape": {
     "ingress_key": "mcp-tool:read-work-shape",
     "source_locator": "mcp-server/src/work-shape.js",
