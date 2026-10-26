@@ -768,12 +768,15 @@ class PostCallTests(unittest.TestCase):
             ("2026-10-27T00:30:00Z", "next week", "2026-11-02", "2026-10-26"),
             ("2026-10-27T00:30:00Z", "before the lunch call", "2026-10-26", "2026-10-26"),
             ("2026-12-31T18:00:00Z", "next week", "2027-01-04", "2026-12-31"),
-            ("2026-10-30T18:00:00Z", "Friday morning", "2026-10-30", "2026-10-30"),
             ("2026-10-30T18:00:00Z", "next Friday", "2026-11-06", "2026-10-30"),
             ("2026-10-27T00:30:00Z", "Friday next week", "2026-11-06", "2026-10-26"),
             ("2026-10-27T00:30:00Z", "review Friday's proposal before the lunch call", "2026-10-26", "2026-10-26"),
             ("2026-11-02T05:30:00Z", "tomorrow", "2026-11-02", "2026-11-01"),
             ("2026-10-27T00:30:00Z", "before Friday's lunch call", "2026-10-30", "2026-10-26"),
+            ("2026-10-27T00:30:00Z", "today, Monday", "2026-10-26", "2026-10-26"),
+            ("2026-10-27T00:30:00Z", "next Monday", "2026-11-02", "2026-10-26"),
+            ("2026-10-27T00:30:00Z", "Friday since we talked Monday", "2026-10-30", "2026-10-26"),
+            ("2026-10-27T00:30:00Z", "tomorrow since we met Friday", "2026-10-27", "2026-10-26"),
         )
         for started_at, phrase, expected, call_date in cases:
             with self.subTest(phrase=phrase):
@@ -833,20 +836,60 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(report["dell_tasks"][0]["evidence"], quote)
         self.assertEqual(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_on"], "2026-10-27")
 
-    def test_relative_deadline_without_recorded_start_blocks_instead_of_using_processing_date(self) -> None:
-        post_call.store_context(self.session, self.context)
-        quote = "I will call Vendor A tomorrow."
-        (self.session / "transcript.json").write_text(json.dumps({"segments": [
-            {"speaker": "Joe", "text": quote},
-        ]}))
-        output = self.output(joe_tasks=[{
-            "title": "Call Vendor A", "deal_id": "deal-a", "participant_ids": [],
-            "evidence": quote, "due_on": None,
-        }], deal_updates=[], draft_proposals=[])
-        status = post_call.process_session(self.session, distiller=lambda _request: output)
-        self.assertEqual(status["state"], "blocked")
-        self.assertIn("record", status["reason"].lower())
-        self.assertFalse((self.session / post_call.REPORT_FILE).exists())
+    def test_ambiguous_deadlines_keep_items_for_review_without_blocking_the_call(self) -> None:
+        cases = (
+            ("I will call Vendor A Tuesday and Friday.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A today or tomorrow.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A tomorrow.", None),
+            ("I will call Vendor A Monday.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A this Monday.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A Friday morning.", "2026-10-30T18:00:00Z"),
+            ("Since we talked Monday, I will call Vendor A.", "2026-10-27T00:30:00Z"),
+            ("Since we spoke Friday, I will call Vendor A.", "2026-10-27T00:30:00Z"),
+            ("We met on Tuesday; I will call Vendor A.", "2026-10-27T00:30:00Z"),
+            ("Since Friday I have needed to call Vendor A.", "2026-10-27T00:30:00Z"),
+            ("I will call Vendor A about last Friday.", "2026-10-27T00:30:00Z"),
+        )
+        for quote, started_at in cases:
+            for supplied in (None, "2026-10-27"):
+                with self.subTest(quote=quote, supplied=supplied):
+                    (self.session / post_call.REPORT_FILE).unlink(missing_ok=True)
+                    post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": started_at})
+                    post_call.store_context(self.session, self.context)
+                    transcript = {"segments": [
+                        {"speaker": "Joe", "text": quote},
+                        {"speaker": "Dell", "text": "I will review the proposal on November 6, 2026."},
+                    ]}
+                    post_call.write_private(self.session / "transcript.json", transcript)
+                    output = self.output(joe_tasks=[{
+                        "title": "Call Vendor A", "deal_id": "deal-a", "participant_ids": [],
+                        "evidence": quote, "due_on": supplied,
+                    }], dell_tasks=[{
+                        "title": "Review proposal", "deal_id": "deal-b", "participant_ids": [],
+                        "evidence": "I will review the proposal on November 6, 2026.", "due_on": "2026-11-06",
+                    }], deal_updates=[{
+                        "deal_id": "deal-a", "summary": "Vendor follow-up", "participant_ids": [],
+                        "evidence": quote, "next_step": {
+                            "text": "Call Vendor A", "next_date": supplied, "needs_review": None,
+                        },
+                    }])
+                    status = post_call.process_session(self.session, distiller=lambda _request: output)
+                    self.assertEqual(status["state"], "ready_review")
+                    report = post_call.report_for_deal_room(self.session)["report"]
+                    self.assertIsNone(report["joe_tasks"][0]["due_on"])
+                    self.assertEqual(report["dell_tasks"][0]["due_on"], "2026-11-06")
+                    self.assertEqual(len(report["draft_proposals"]), 1)
+                    self.assertTrue(report["review_questions"])
+                    step = report["deal_updates"][0]["next_step"]
+                    self.assertIsNone(step["next_date"])
+                    self.assertTrue(step["needs_review"])
+                    report["deal_updates"][0]["checks"] = {"deal": {"pass": True}}
+                    post_call.mark_automatic(report, transcript, self.context)
+                    self.assertEqual(step["apply"], "review")
+                    candidates = post_call.sanitized_candidates(self.session)
+                    actions = [item for item in candidates["post_call_items"] if item["kind"] == "assigned_action"]
+                    self.assertEqual([item["due_on"] for item in actions], [None, "2026-11-06"])
+                    self.assertIsNone(candidates["legacy_items"][1]["payload"]["next_date"])
 
     def test_relative_date_validation_preserves_explicit_and_unmatched_evidence_dates(self) -> None:
         cases = (

@@ -19,6 +19,7 @@ import sys
 import tempfile
 import urllib.parse
 import fcntl
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -280,6 +281,10 @@ RELATIVE_DAY = re.compile(
     r"\b(day after tomorrow|tomorrow|today|next week|"
     r"(?:(?:next|this)\s+)?(?:" + "|".join(WEEKDAYS) + r"))\b", re.IGNORECASE,
 )
+PAST_RELATIVE_DAY = re.compile(
+    r"\b(?:last|previous|since|(?:talked|met|spoke|called|discussed|sent|received|reviewed)"
+    r"(?:\s+(?:on|since|last))?)\s+" + RELATIVE_DAY.pattern, re.IGNORECASE,
+)
 CALENDAR_DAY = re.compile(
     r"\b(?:\d{4}-\d{2}-\d{2}|(?:January|February|March|April|May|June|July|August|"
     r"September|October|November|December)\s+\d{1,2})\b", re.IGNORECASE,
@@ -304,8 +309,9 @@ def recorded_call_date(session_dir: Path) -> str | None:
 def _relative_phrases(evidence: str) -> list[str]:
     if CALENDAR_DAY.search(evidence):
         return []
+    evidence = PAST_RELATIVE_DAY.sub("", evidence)
     weekdays = "(?:" + "|".join(WEEKDAYS) + ")"
-    if re.search(r"\b(?:last|previous|following)\s+" + weekdays +
+    if re.search(r"\bfollowing\s+" + weekdays +
                  r"\b|\b(?:days?|weeks?|months?)\s+(?:from|after|before)\b|\b" + weekdays +
                  r"\s+after next\b|\bthis time next week\b", evidence, re.IGNORECASE):
         return []
@@ -319,7 +325,14 @@ def _relative_phrases(evidence: str) -> list[str]:
     return phrases
 
 
-def _relative_due_date(evidence: str, transcript: dict[str, Any] | None, call_date: str | None) -> str | None:
+@dataclass(frozen=True)
+class DeadlineResolution:
+    due_on: str | None
+    review_reason: str | None = None
+
+
+def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
+                       call_date: str | None) -> DeadlineResolution | None:
     if transcript is None:
         return None
     spoken = " ".join(str(segment.get("text", "")) for segment in transcript.get("segments", [])
@@ -342,9 +355,11 @@ def _relative_due_date(evidence: str, transcript: dict[str, Any] | None, call_da
         else:
             phrases = ["today"]
     if not phrases:
+        if PAST_RELATIVE_DAY.search(evidence):
+            return DeadlineResolution(None, "The quoted day refers to the past; clarify the deadline.")
         return None
     if call_date is None:
-        raise ContractError("A relative deadline requires the recorded call start date in America/Chicago")
+        return DeadlineResolution(None, "A relative deadline requires the recorded call start date in America/Chicago.")
     anchor = date.fromisoformat(call_date)
     resolved: set[date] = set()
     for phrase in phrases:
@@ -355,10 +370,12 @@ def _relative_due_date(evidence: str, transcript: dict[str, Any] | None, call_da
         else:
             weekday = WEEKDAYS.index(phrase.split()[-1])
             offset = 7 - anchor.weekday() + weekday if phrase.startswith("next ") else (weekday - anchor.weekday()) % 7
+            if offset == 0 and "today" not in phrases:
+                return DeadlineResolution(None, "A weekday matching the call day is ambiguous unless today was stated.")
         resolved.add(anchor + timedelta(days=offset))
     if len(resolved) != 1:
-        raise ContractError("The evidence gives conflicting relative deadlines; clarify the deadline")
-    return resolved.pop().isoformat()
+        return DeadlineResolution(None, "The evidence gives conflicting relative deadlines; clarify the deadline.")
+    return DeadlineResolution(resolved.pop().isoformat())
 
 
 UNSAID_REVIEW = "The model did not say whether this was settled."
@@ -397,7 +414,7 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
         items = value[list_name]
         if not isinstance(items, list):
             raise ContractError(f"{list_name} must be an array")
-        for item in items:
+        for number, item in enumerate(items, 1):
             if not isinstance(item, dict):
                 raise ContractError(f"{list_name} item must be an object")
             is_action = list_name in {"joe_tasks", "dell_tasks"}
@@ -436,9 +453,16 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
                 resolved = _relative_due_date(item["evidence"], transcript, call_date)
                 if resolved is not None:
                     if is_action:
-                        item["due_on"] = resolved
+                        item["due_on"] = resolved.due_on
                     elif step is not None:
-                        step["next_date"] = resolved
+                        step["next_date"] = resolved.due_on
+                        if resolved.review_reason:
+                            step["needs_review"] = resolved.review_reason
+                    if resolved.review_reason:
+                        subject = item.get("title", item.get("summary"))
+                        value["review_questions"].append(
+                            f"{list_name} item {number} ({subject}): {resolved.review_reason}"
+                        )
             if _word_count(item["evidence"]) > 15:
                 # Retain the quoted timing inside the remote 15-word ceiling.
                 # Other evidence keeps its original leading words.
@@ -548,12 +572,15 @@ def _distiller_instruction() -> str:
         "When Dell says he/I/we will do something, create a dell_tasks item. "
         "For each task, resolve spoken deadlines into due_on as YYYY-MM-DD against CALL_DATE in TIME_ZONE, "
         "the recording's America/Chicago calendar date, never the processing date. "
-        "Bare weekdays (including Friday morning) mean the next occurrence including the call day. "
+        "Bare weekdays (including Friday morning) mean the next occurrence after the call day. "
+        "A weekday matching the call day is ambiguous unless today is stated; leave its date null and ask for review. "
+        "Past references such as since we talked Monday are context, not deadlines. "
         "Next weekday means that weekday in the following calendar week. Next week means the following Monday. "
         "Today, tomorrow and day after tomorrow are offsets of zero, one and two calendar days. "
         "Before the lunch call means CALL_DATE unless the transcript dates that lunch call differently. "
         "Preserve an explicitly stated calendar date and year. Include the spoken timing in the evidence quote. "
-        "Use null only when no time was stated. If a stated deadline cannot be resolved or CALL_DATE is missing, "
+        "Use null when no time was stated or the deadline is ambiguous. If multiple days conflict, "
+        "a stated deadline cannot be resolved or CALL_DATE is missing, keep the item with a null date and "
         "add a review question rather than invent a date. "
         "A deal status statement creates a deal_updates item with next_step and phase_move null. "
         "Only an explicitly agreed phase change sets phase_move to an object with value and started_on. "
