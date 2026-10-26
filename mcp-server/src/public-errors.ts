@@ -17,6 +17,8 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["not_found", "The requested record was not found."],
   ["needs_disambiguation", "Choose an exact record reference from the candidates before retrying."],
   ["loop_not_open", "Re-read the loop before choosing another action."],
+  ["personal_doc_not_owner", "This personal doctrine belongs to another owner."],
+  ["personal_loop_not_owner", "This personal loop belongs to another owner."],
   ["unauthorized", "Authentication is required."],
   ["invalid_call_context_deals", "Choose only open, active deal UUIDs from the current deal board."],
   ["invalid_field_value", "Check the named fields against the tool's documented input."],

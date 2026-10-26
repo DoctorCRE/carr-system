@@ -132,8 +132,8 @@ test("PROBE SANITY: both probes pass against the real, unmutated source", async 
 
 test("MUTANT: versionGuard call deleted — a stale base_version silently goes through", async () => {
   const mutant = await loadMutant(
-    `const cur = await resolveLoop(c, args, { anyStatus: true });\n      await versionGuard(c, "loop_item", cur.id, args.base_version);\n      if (cur.status === "open")`,
-    `const cur = await resolveLoop(c, args, { anyStatus: true });\n      if (cur.status === "open")`,
+    `const cur = await resolveLoop(c, args, { anyStatus: true, actor });\n      await versionGuard(c, "loop_item", cur.id, args.base_version);\n      if (cur.status === "open")`,
+    `const cur = await resolveLoop(c, args, { anyStatus: true, actor });\n      if (cur.status === "open")`,
   );
   assert.equal(await staleVersionIsRefused(mutant), false,
     "removing the versionGuard call must make the stale-version probe fail — proving the real call is load-bearing");
