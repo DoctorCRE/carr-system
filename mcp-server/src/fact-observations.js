@@ -94,7 +94,7 @@ export function factObservationTools({ ToolError }) {
   return {
     'compare-fact-observations': {
       write: false,
-      description: 'Compare supplied economic fact observations using exact decimal normalization and project review items by field with their competing observations, supplied citations, normalized values, and routing tiers. Optional caller-asserted source hashes, document families, and upstream family references expose conservative shared-source groups, not verified lineage. Optional extraction pass and model expose shared-extraction groups for identical pairs, not verified failure domains. Missing metadata or empty group lists do not establish independence. Effective confidence tiers are conservative routing labels, not verified confidence. OCR always requires human review because dual-engine agreement is not proven. Preserves supplied citations but does not verify sources, read stored records, establish independent evidence, promote facts, or write records.',
+      description: 'Compare supplied economic fact observations using exact decimal normalization and project review items by field with their competing observations, supplied citations, normalized values, and routing tiers. Optional caller-asserted source hashes, document families, and upstream family references expose conservative shared-source groups, not verified lineage. Optional extraction pass and model expose shared-extraction groups for identical pairs, not verified failure domains. Each review item includes its field-scoped shared-source and shared-extraction groups beside the cited observations. Missing metadata or empty group lists do not establish independence. Effective confidence tiers are conservative routing labels, not verified confidence. OCR always requires human review because dual-engine agreement is not proven. Preserves supplied citations but does not verify sources, read stored records, establish independent evidence, promote facts, or write records.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         entity_ref: { ...text(200), description: 'Caller-asserted entity for this comparable set. No stored identity or document binding is checked.' }, observations: { type: 'array', minItems: 1, maxItems: 100, items: observationSchema },
       }, required: ['entity_ref', 'observations'] },
@@ -152,6 +152,8 @@ export function factObservationTools({ ToolError }) {
           return reasons.length ? [{ entity_ref: args.entity_ref, fact_key: field.fact_key,
             priority: field.status === 'conflict' || tiers.has('human_review') ? 'high' : 'normal',
             observation_ids: field.observation_ids, observations: groups.get(field.fact_key), reasons,
+            shared_source_groups: shared_source_groups.filter(group => group.fact_key === field.fact_key),
+            shared_extraction_groups: shared_extraction_groups.filter(group => group.fact_key === field.fact_key),
           }] : [];
         }).sort((a, b) => Number(b.priority === 'high') - Number(a.priority === 'high'));
         return { ok: true, schema_version: 'fact-observation-comparison.v1', entity_ref: args.entity_ref,
