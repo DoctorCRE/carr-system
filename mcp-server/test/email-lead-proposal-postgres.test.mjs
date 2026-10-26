@@ -53,6 +53,7 @@ after(async () => {
 async function propose(address, extra = {}) {
   await c.query('begin');
   try {
+    await c.query('set local role carr_writer');
     const result = await executeRegisteredTool(c, actor, 'propose-email-lead', { idempotency_key: randomUUID(), address,
       display_name: 'Synthetic Sender', summary: 'Asks about leasing a small clinic suite.',
       first_seen_at: '2026-10-20T15:00:00Z', message_ref: 'abc123:1760972400', ...extra });
