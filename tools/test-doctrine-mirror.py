@@ -1,3 +1,4 @@
+# Test doctrine mirror rendering and atomic publication.
 import hashlib
 import json
 from datetime import date, datetime, timezone

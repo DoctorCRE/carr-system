@@ -1,3 +1,4 @@
+# Test staging home fixture behavior.
 import importlib.util
 import pathlib
 import unittest

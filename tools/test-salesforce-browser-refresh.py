@@ -1,3 +1,4 @@
+# Test Salesforce browser refresh behavior.
 import contextlib
 import io
 import datetime as dt
