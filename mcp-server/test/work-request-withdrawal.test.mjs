@@ -46,7 +46,7 @@ class WithdrawFake {
       return { rows: [{ ref: "WR-000032", state: this.state, version: this.version,
         exit_reason: params[2], closed_at: "2026-08-28T00:00:00Z", superseded_by_ref: params[3] }] };
     }
-    if (sql.includes("work-request-intake:withdrawn-subject")) return { rows: [{ id: ID, was_triaged: this.from === "triaged" }] };
+    if (sql.includes("work-request-intake:withdrawn-subject")) return { rows: [{ id: ID, state: this.state, was_triaged: this.from === "triaged" }] };
     if (sql.startsWith("insert into event")) return { rows: [] };
     if (sql.startsWith("insert into tool_call")) { this.toolCalls.set(params[0], { request_hash: params[3], response: JSON.parse(params[4]),
         actor_id: params[2], organization_tenant_id: params[7] ?? null,
@@ -133,8 +133,16 @@ test("decline preserves the triaged origin in its audit event", async () => {
   assert.equal(event.params[1], BOT.id);
 });
 
+test("ready decline records ready as the prior audit state", async () => {
+  const db = new WithdrawFake({ from: "ready" });
+  const out = await executeRegisteredTool(db, JOE, "decline-work-request", DECLINE);
+  assert.equal(out.state, "declined");
+  const event = db.calls.find(x => x.sql.startsWith("insert into event"));
+  assert.deepEqual(JSON.parse(event.params[6]), { state: "ready", version: 1 });
+});
+
 test("decline returns a clean refusal naming each disallowed state", async () => {
-  for (const state of ["ready", "in_progress", "confirmed_closed", "declined", "superseded"]) {
+  for (const state of ["in_progress", "confirmed_closed", "declined", "superseded"]) {
     const detail = `work_request_not_declinable: WR-000032 is in state ${state}; only captured or triaged requests may be declined`;
     const db = new WithdrawFake({ from: state, refusal: detail });
     const out = await rejected(() => executeRegisteredTool(db, JOE, "decline-work-request", DECLINE));
