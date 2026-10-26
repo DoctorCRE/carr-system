@@ -1,3 +1,4 @@
+// Test situation retrieval sponsorship and registered search.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";

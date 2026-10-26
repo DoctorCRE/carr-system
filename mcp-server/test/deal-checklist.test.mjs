@@ -1,3 +1,4 @@
+// Test doctrine-derived deal checklists and sourced deadlines.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { deriveDealChecklist, CHECKLIST_SOURCES } from '../src/deal-checklist.ts';

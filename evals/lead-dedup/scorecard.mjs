@@ -1,3 +1,4 @@
+// Score lead deduplication evaluation results.
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';

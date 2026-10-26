@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test detection of deleted configured hooks.
 import json
 from pathlib import Path
 import shutil

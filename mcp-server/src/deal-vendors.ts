@@ -1,3 +1,4 @@
+// Manage deal vendor assignments and cards.
 import { ToolError } from './tool-error.ts';
 import type { Actor, Db, WriteEvent } from './verb-contract.ts';
 

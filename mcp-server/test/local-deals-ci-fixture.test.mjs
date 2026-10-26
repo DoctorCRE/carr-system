@@ -1,3 +1,4 @@
+// Test Local Deals CI role provisioning on PostgreSQL.
 import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';

@@ -1,3 +1,4 @@
+// Test successor contracts for lead rule lookup, contacts and workspace actions.
 import test from 'node:test';
 import {assertAdmits} from './helpers/registry-admission.mjs';
 

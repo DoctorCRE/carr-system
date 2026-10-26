@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test migration reservations across worktrees.
 from pathlib import Path
 import os
 import subprocess

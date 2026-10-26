@@ -1,3 +1,4 @@
+// Defines fixtures and tools for ready plan amendment tests.
 import assert from "node:assert/strict";
 import test from "node:test";
 
