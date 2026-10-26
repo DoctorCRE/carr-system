@@ -126,7 +126,8 @@ def test_evidence_failure_runs_checks_and_uses_their_verdict():
 def test_main_retains_migration_shadow_coverage():
     y = CANARY.read_text()
     check('main installs PG18 for the migration shadow',
-          'Install PostgreSQL 18 server for the migration shadow' in y)
+          'run: bash ops/ci-postgres.sh' in y
+          and 'postgresql-18-pgvector' in (REPO / 'ops/ci-postgres.sh').read_text())
     check('main collects migration shadow artifacts',
           'CARR_SHADOW_ARTIFACT_DIR:' in y and 'shadow-schema' in y)
 

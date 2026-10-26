@@ -100,6 +100,7 @@ import { buildRelease } from "./release.js";
 import { readCommandCenterSummary } from "./workspace-command-center.js";
 import { wrapWithCorrelation } from "./correlation.js";
 import { publicError } from "./public-errors.ts";
+import { bearerCredential } from "./bearer.ts";
 import { withFailureRecording, scheduleFailureRecord, actorUnresolvedFailureClass } from "./trace.js";
 import { createTourInternalWebHandler } from "./tour-internal-web.js";
 import { createReportsWebHandler, isReportsHostRequest } from "./reports-web.js";
@@ -142,8 +143,8 @@ async function release(env) {
 }
 
 async function ingest(request, env) {
-  const auth = request.headers.get("authorization") || "";
-  const token = auth.replace(/^Bearer\s+/i, "");
+  const token = bearerCredential(request.headers.get("authorization"));
+  if (!token) return json({ error: "unauthorized" }, 401);
   let tokens;
   try {
     tokens = JSON.parse(env.INGEST_TOKENS || "{}");
@@ -308,8 +309,7 @@ const protectedApiHandler = {
 // authenticates as its own machine actor, locked to three write verbs, and
 // nothing about the humans' OAuth path changes because it exists.
 function probeActorFor(request, env) {
-  const auth = request.headers.get("authorization") || "";
-  const token = auth.replace(/^Bearer\s+/i, "");
+  const token = bearerCredential(request.headers.get("authorization"));
   if (!token) return null;
   let tokens;
   try {
