@@ -1,6 +1,6 @@
 {
   "schema": "doc-drift-baseline/v1",
-  "source_sha": "2d3fc83d0a1ea6b7881a04f44e49b557ca7ff5ce",
+  "source_sha": "700e097d4e61588aea5fa9626c43f71166142c58",
   "findings": [
     {
       "file": ".agents/skills/codebase-design/UPSTREAM.md",
@@ -463,11 +463,6 @@
       "target": "Management/panhandle-team-deals.json"
     },
     {
-      "file": "corpus/DNA/Deal Management/playbooks/financing.md",
-      "kind": "verb",
-      "target": "teach"
-    },
-    {
       "file": "corpus/DNA/Deal Management/playbooks/practice-os-playbooks.md",
       "kind": "path",
       "target": "deals.md"
@@ -583,11 +578,6 @@
       "target": "introduction-rules.md"
     },
     {
-      "file": "corpus/DNA/Network/vendor-by-industry-reference.md",
-      "kind": "verb",
-      "target": "teach"
-    },
-    {
       "file": "corpus/DNA/Network/vendor-intro-timeline.md",
       "kind": "path",
       "target": "introduction-rules.md"
@@ -616,16 +606,6 @@
       "file": "corpus/DNA/Network/vendor-relationship-craft.md",
       "kind": "path",
       "target": "introduction-rules.md"
-    },
-    {
-      "file": "corpus/DNA/Network/vendor-relationship-craft.md",
-      "kind": "verb",
-      "target": "teach"
-    },
-    {
-      "file": "corpus/DNA/Reference/vet-vertical-guide.md",
-      "kind": "verb",
-      "target": "teach"
     },
     {
       "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",

@@ -1,13 +1,13 @@
 import { vendorMeetingTools } from "./vendor-meetings.js";
-import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.js";
+import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
-import { safeInteger, integerFields } from "./safe-integer.js";
+import { safeInteger, integerFields } from "./safe-integer.ts";
 import { invoiceTrackerTools } from "./invoice-tracker.js";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
-import { readDealChecklist } from "./deal-checklist.js";
-import { factObservationTools } from "./fact-observations.js";
-import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.js";
+import { readDealChecklist } from "./deal-checklist.ts";
+import { factObservationTools } from "./fact-observations.ts";
+import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.ts";
 import { bindReferralDeal } from "./relationship-network.js";
 import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
 import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLeadLifecycle } from "./lead-workspace.js";
@@ -30,23 +30,23 @@ import { MEETING_MODE_WRITE_VERBS, meetingModeTools } from "./meeting-mode.js";
 import { notificationTools } from "./notifications.js";
 import { sessionIdentityTools } from "./session-identity.js";
 import { dispatchSpineTools } from "./dispatch-spine.js";
-import { capabilityProgramTools } from "./capability-program.js";
 import { workShapeTools } from "./work-shape.js";
 import { workRequestIntakeTools } from "./work-request-intake.js";
 import { workPortfolioTools } from "./work-portfolio.js";
 import { leaseTermComparisonTools } from "./lease-term-comparison.js";
 import { partnerRoomTools } from "./partner-room.js";
 import { agentProfileTools } from "./agent-profiles.js";
-import { clientPortalTools } from "./client-portal.js";
+import { clientPortalTools } from "./client-portal.ts";
 import { memoryTools } from "./memory.js";
 import { codexContinuityTools } from "./codex-continuity.js";
 import { incidentTools } from "./incident.js";
 import { resourceObservationTools } from "./resource-observation.v5.js";
 import { invoiceAutomation } from "./invoice-automation.js";
-import { emailDealProgressTools } from "./email-deal-progress.js";
-import { emailNextStepTools } from "./email-next-step.js";
+import { emailDealProgressTools } from "./email-deal-progress.ts";
+import { emailNextStepTools } from "./email-next-step.ts";
+import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { CALENDAR_AGENDA_BOARD, calendarSection } from "./brief-calendar.js";
-import { emailLeadProposalTools } from "./email-lead-proposal.js";
+import { emailLeadProposalTools } from "./email-lead-proposal.ts";
 import { leadAutomationTools } from "./lead-automation.js";
 import { workflowCutoverTools } from "./workflow-cutover.v5.js";
 import { engineeringRuntimeTools } from "./engineering-runtime.js";
@@ -338,7 +338,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "dismiss-email-proposal" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
@@ -2095,7 +2095,7 @@ async function resolveRuleId(c, value, field = "rule_id") {
 // AMBIGUITY IS REPORTED, NEVER GUESSED, for a sharper reason than the rules
 // case: amending the wrong decision rewrites a settled ruling's stated
 // rationale, and the entry it overwrote gives no sign it was ever different.
-async function resolveDecisionId(c, value, field = "decision_id") {
+async function resolveDecisionId(c, value, field = "decision_id", source = "event") {
   const raw = String(value || "").trim();
   if (!raw) throw new ToolError({ error: "decision_id_required", field });
 
@@ -2106,13 +2106,19 @@ async function resolveDecisionId(c, value, field = "decision_id") {
       hint: "a decision id is either the full 36-character uuid or the 8-character short " +
             "form this system prints, e.g. 'f58ffba8'" });
 
-  const m = await c.query(
-    `select distinct on (subject_id) subject_id::text as id,
-            left(coalesce(new_value->>'title', '(untitled)'), 70) as title,
-            recorded_at
-       from event
-      where verb = 'log-decision' and subject_id::text like $1 || '%'
-      order by subject_id, recorded_at`, [raw.toLowerCase()]);
+  const m = source === "read_view"
+    ? await c.query(
+      `select decision_id::text as id, left(coalesce(title, '(untitled)'), 70) as title
+         from v_decision_entry
+        where decision_id::text like $1::text || '%'
+        order by decision_id`, [raw.toLowerCase()])
+    : await c.query(
+      `select distinct on (subject_id) subject_id::text as id,
+              left(coalesce(new_value->>'title', '(untitled)'), 70) as title,
+              recorded_at
+         from event
+        where verb = 'log-decision' and subject_id::text like $1 || '%'
+        order by subject_id, recorded_at`, [raw.toLowerCase()]);
   if (!m.rows.length)
     throw new ToolError({ error: "decision_not_found", field, got: raw,
       hint: "no decision id begins with that prefix — check decision-history, and note " +
@@ -2441,6 +2447,9 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
 // later edit to the step, its date or one of its checklist items is newer work
 // and refuses the undo instead of being overwritten.
 async function undoAppliedNextStep(c, actor, dealId, candidate, key, args) {
+  // Same lock order as resolve-candidate's apply: the checklist first, so a
+  // partner completing one of the call's items waits for (or beats) the undo.
+  await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0)) /* call-outcome:undo-items-lock */", [dealId]);
   await lockDealField(c, dealId, "next_date");
   await lockDealField(c, dealId, "next_step");
   await versionGuard(c, "deal", dealId, args.base_version);
@@ -4459,10 +4468,12 @@ export const TOOLS = {
       if (s.type === "deal") {
         await c.query("update deal set next_date=$2, updated_by=$3 where id=$1 /* dealroom:set-next-date */",
           [s.id, args.due_on || null, actor.id]);
-        await writeEvent(c, actor, "set-next-action", "deal", s.id, {
-          field: "next_date", old: { next_date: oldDate }, new: { next_date: args.due_on || null },
-          recorded_at_after_lock: true, idempotency_key: args.idempotency_key,
-        });
+        if (oldDate !== (args.due_on || null)) {
+          await writeEvent(c, actor, "set-next-action", "deal", s.id, {
+            field: "next_date", old: { next_date: oldDate }, new: { next_date: args.due_on || null },
+            recorded_at_after_lock: true, idempotency_key: args.idempotency_key,
+          });
+        }
       }
       return { ok: true, next_action_id: r.rows[0].id, subject: s, owner: ownerSlug,
         dropped_post_call_action_ids: droppedPostCallIds };
@@ -6932,7 +6943,12 @@ export const TOOLS = {
       const aboutRefs = args.about
         ? (Array.isArray(args.about) ? args.about : [args.about]).map(r => String(r || "").trim()).filter(Boolean)
         : [];
-      for (const ref of aboutRefs) await resolveSubject(c, ref);
+      for (const ref of aboutRefs) {
+        if (/^WR-/i.test(ref))
+          throw new ToolError({ error: "unsupported_decision_about", field: "about", ref,
+            hint: "Work Request refs are not supported in about. Use a lead, client, vendor, party or deal ref. For a system-wide ruling, omit about and name the Work Request in the rationale." });
+        await resolveSubject(c, ref);
+      }
 
       // [idea 68, 0085] BOTH HALVES OF A PRICE OR NEITHER. A cost with no
       // quality number is a complaint and a quality number with no cost is a
@@ -8901,7 +8917,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
 
 
 const TOOL_REGISTRATION_SOURCE = Object.freeze({
-  'deal-items': 'mcp-server/src/deal-items.js',
+  'deal-items': 'mcp-server/src/deal-items.ts',
   'feature-switches':'mcp-server/src/feature-switches.js',
   "inline": "mcp-server/src/tools.js",
   "deal-room-inline": "mcp-server/src/tools.js",
@@ -8916,20 +8932,20 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "session-identity": "mcp-server/src/session-identity.js",
   "dispatch-spine": "mcp-server/src/dispatch-spine.js",
   "doc-outcome-cards": "mcp-server/src/tools.js",
-  "capability-program": "mcp-server/src/capability-program.js",
   "work-shape": "mcp-server/src/work-shape.js",
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
-  "fact-observations": "mcp-server/src/fact-observations.js",
+  "fact-observations": "mcp-server/src/fact-observations.ts",
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
-  "client-portal": "mcp-server/src/client-portal.js",
+  "client-portal": "mcp-server/src/client-portal.ts",
   "resource-observation": "mcp-server/src/resource-observation.v5.js",
   "lead-automation": "mcp-server/src/lead-automation.js",
   "invoice-automation": "mcp-server/src/invoice-automation.js",
-  "email-deal-progress": "mcp-server/src/email-deal-progress.js",
-  "email-next-step": "mcp-server/src/email-next-step.js",
-  "email-lead-proposal": "mcp-server/src/email-lead-proposal.js",
+  "email-deal-progress": "mcp-server/src/email-deal-progress.ts",
+  "email-next-step": "mcp-server/src/email-next-step.ts",
+  "email-proposals": "mcp-server/src/email-proposals.js",
+  "email-lead-proposal": "mcp-server/src/email-lead-proposal.ts",
   "workflow-cutover": "mcp-server/src/workflow-cutover.v5.js",
   "memory": "mcp-server/src/memory.js",
   "codex-continuity": "mcp-server/src/codex-continuity.js",
@@ -9817,7 +9833,7 @@ registerTools({
       const item = validateDealItem({ ...proposed[0], bullets: [
         ...proposed.flatMap(i => i.bullets),
         ...shortFacts(candidate.evidence_quote).map(text => ({ date: null, kind: 'call', text })),
-      ] }, ToolError);
+      ] });
       const action = await c.query(
         `insert into capture_post_call_action (candidate_id,deal_id,owner_id,due_on,description,accepted_by,item_title,item_bullets,source_ref)
          values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) returning id
@@ -10095,7 +10111,7 @@ registerTools({
       decision_id: { type: "string", description: "Full decision UUID or an unambiguous prefix, including the 8-character short form." } },
       required: ["decision_id"], additionalProperties: false },
     handler: async (c, _a, args) => {
-      const decisionId = await resolveDecisionId(c, args.decision_id);
+      const decisionId = await resolveDecisionId(c, args.decision_id, "decision_id", "read_view");
       const decision = (await c.query(
         `select decision_id, event_id, entry_date, occurred_at, title, human_quote,
                 agent_rationale, provenance, author, session_key, source_file,
@@ -10269,7 +10285,7 @@ registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
 registerTools(researchSiteTools({ withEnvelope, writeEvent }), "research-sites");
 registerTools(partyIdentityTools({ withEnvelope, writeEvent, versionGuard, resolvePartyForWrite }), "party-identity");
 registerTools(scheduleBoardTools(), "schedule-board");
-registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject, ToolError,
+registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject,
   canExercisePartnerAuthority, partnerAuthoritySlugForActor }), "deal-items");
 
 // WR-AI-006: curation proposals are machine-callable; approval and retirement
@@ -10335,9 +10351,6 @@ registerTools({
   },
 }, "doc-outcome-cards");
 
-// One fixed ordered AI-capability portfolio over canonical Work Requests.
-registerTools(capabilityProgramTools({ withEnvelope, writeEvent, ToolError }), "capability-program");
-
 // Evidence-backed implementation form, linked to canonical Work Requests.
 registerTools(workShapeTools({ withEnvelope, writeEvent, ToolError }), "work-shape");
 
@@ -10347,23 +10360,25 @@ registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 
 // Pure workbook-derived lease economics. No database, model, or write path.
 registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
-registerTools(factObservationTools({ ToolError }), "fact-observations");
+registerTools(factObservationTools(), "fact-observations");
 
 // The partner room (Idea 78): shared AI-to-AI transcript both Macs poll; raw
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
 registerTools(agentProfileTools(), "agent-profile");
-registerTools(clientPortalTools({ ToolError }), "client-portal");
+registerTools(clientPortalTools(), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
 // src/resource-observation.v5.js.
 registerTools(resourceObservationTools({ withEnvelope, ToolError }), "resource-observation");
-registerTools(emailDealProgressTools({ ToolError, withEnvelope, writeEvent, lockDealField,
+registerTools(emailDealProgressTools({ withEnvelope, writeEvent, lockDealField, resolveEmailProposal,
   updateDeal: (c, actor, args) => TOOLS["update-deal"].handler(c, actor, args) }), "email-deal-progress");
-registerTools(emailNextStepTools({ ToolError, withEnvelope, writeEvent, lockDealField,
+registerTools(emailNextStepTools({ withEnvelope, writeEvent, lockDealField, resolveEmailProposal,
   setNextStep: (c, actor, args) => TOOLS["set-next-step"].handler(c, actor, args),
   setNextAction: (c, actor, args) => TOOLS["set-next-action"].handler(c, actor, args) }), "email-next-step");
-registerTools(emailLeadProposalTools({ ToolError, withEnvelope, writeEvent }), "email-lead-proposal");
+registerTools(emailProposalTools({ ToolError, withEnvelope, writeEvent,
+  preview: (c, actor, verb, args) => TOOLS[verb].handler(c, actor, args) }), "email-proposals");
+registerTools(emailLeadProposalTools({ withEnvelope, writeEvent }), "email-lead-proposal");
 const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealField,
   updateDeal:(c,actor,args)=>TOOLS["update-deal"].handler(c,actor,args),
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});

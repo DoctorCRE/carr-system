@@ -129,6 +129,7 @@ test("shared engineering doors are retired while app readers remain registered",
     "assign-profile",
     "bind-slice-criterion-evidence",
     "bind-work-request-criterion-evidence",
+    "cancel-capability-session",
     "capability-program",
     "close-incident",
     "codex-checkpoint",
@@ -195,7 +196,7 @@ test("shared engineering doors are retired while app readers remain registered",
     assert.deepEqual(delegatedError, directError, name);
   }
   for (const name of ["engineering-passport", "read-portfolio", "list-my-codex-sessions",
-    "recall-memory", "cancel-capability-session", "list-shipped-releases", "read-work-shape",
+    "recall-memory", "list-shipped-releases", "read-work-shape",
     "advance-workflow-cutover-stage", "cancel-workflow-cutover-plan", "confirm-slice-completions",
     "list-feature-switches", "check-feature-switches", "incident-board", "triage-incident"])
     assert.ok(TOOLS[name], `${name} remains registered`);

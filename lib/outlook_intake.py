@@ -2,8 +2,8 @@
 
 Every 30 minutes from 07:00 to 19:00 local (com.carr.outlook-intake) this reads
 a private copy of the configured profile's HxStore.hxd and its EFMData body sidecars,
-never the live files, decodes it with the pinned hxprobe fork
-(vendor-patches/hxprobe-calendar-and-bodies.patch), and writes what it finds
+never the live files, decodes it with the vendored hxprobe decoder
+(vendor/hxprobe), and writes what it finds
 through the named record-layer verbs:
 
 - an email to or from a known address becomes log-activity email_in/email_out
@@ -78,6 +78,7 @@ import tempfile
 from typing import Callable
 import uuid
 
+from lib import model_call
 from lib.outlook_settings import load_settings, OutlookSettings
 OUT = Path('out/outlook-intake')
 REFRESH_LIST = 'needs-refresh.json'
@@ -143,8 +144,9 @@ def _reply_error(reply: dict) -> str:
 class CarrError(RuntimeError):
     """A safe diagnostic code; never retain request content or raw process errors."""
 
-    def __init__(self, *, code: str = 'transport_error'):
+    def __init__(self, *, code: str = 'transport_error', tool_refusal: str | None = None):
         self.code = code if code in ERROR_CODES else 'transport_error'
+        self.tool_refusal = tool_refusal
         super().__init__(self.code)
 
 
@@ -454,13 +456,6 @@ SYSTEM_PROMPT = (
     'nothing from the broker. Never invent facts that are not in the email.')
 
 
-def model_command(schema: dict = REPLY_SCHEMA, system: str = SYSTEM_PROMPT) -> list[str]:
-    return ['claude', '-p', '--model', 'haiku', '--no-session-persistence', '--tools', '',
-            '--setting-sources', '', '--strict-mcp-config', '--disable-slash-commands',
-            '--exclude-dynamic-system-prompt-sections', '--output-format', 'json',
-            '--json-schema', json.dumps(schema), '--system-prompt', system]
-
-
 INTENT_SCHEMA = {
     'type': 'object', 'additionalProperties': False, 'required': ['business', 'summary'],
     'properties': {'business': {'type': 'boolean'}, 'summary': {'type': ['string', 'null'], 'maxLength': 300}},
@@ -499,27 +494,19 @@ def parse_reply(reply: dict) -> dict:
     return {'next_step': (step or '').strip() or None, 'due_on': due}
 
 
-def _ask(command: list[str], prompt: str) -> dict:
-    env = {k: v for k, v in os.environ.items() if k not in ('ANTHROPIC_API_KEY', 'CLAUDECODE')}
-    with tempfile.TemporaryDirectory() as empty:
-        done = subprocess.run(command, input=prompt, capture_output=True, text=True,
-                              cwd=empty, env=env, timeout=180)
-    if done.returncode:
-        raise RuntimeError(f'model exit {done.returncode}')
-    return json.loads(done.stdout)
-
-
-def ask_model(mail: dict, today: date) -> dict:
+def ask_model(mail: dict, today: date, model: str) -> dict:
     direction = 'sent by the broker' if mail['outbound'] else 'received by the broker'
     prompt = (f'Today is {today.isoformat()}. This email was {direction}.\n'
               f'Subject: {mail["subject"] or ""}\n\n{mail["text"][:MODEL_BODY_CHARS]}')
-    return parse_reply(_ask(model_command(), prompt))
+    out = model_call.ask(prompt, model=model, schema=REPLY_SCHEMA, system_prompt=SYSTEM_PROMPT)
+    return parse_reply({'is_error': False, 'structured_output': out})
 
 
-def ask_lead_intent(mail: dict, today: date) -> dict:
+def ask_lead_intent(mail: dict, today: date, model: str) -> dict:
     prompt = (f'Today is {today.isoformat()}.\nSubject: {mail["subject"] or ""}\n\n'
               f'{mail["text"][:MODEL_BODY_CHARS]}')
-    return parse_intent(_ask(model_command(INTENT_SCHEMA, INTENT_PROMPT), prompt))
+    out = model_call.ask(prompt, model=model, schema=INTENT_SCHEMA, system_prompt=INTENT_PROMPT)
+    return parse_intent({'is_error': False, 'structured_output': out})
 
 
 # ---- one run -----------------------------------------------------------------
@@ -1193,17 +1180,20 @@ def _carr(repo: Path) -> Callable[[str, dict], dict]:
         except OSError as error:
             raise CarrError(code='transport_oversized' if error.errno == errno.E2BIG else 'transport_error') from None
         if done.returncode:
-            code = 'setup_failed' if done.returncode == 2 else 'transport_error'
+            code, refusal = 'setup_failed' if done.returncode == 2 else 'transport_error', None
             for prefix in ('TOOL ERROR ', 'RPC ERROR '):
                 if prefix in (done.stderr or ''):
                     try:
                         payload, _ = json.JSONDecoder().raw_decode(done.stderr.split(prefix, 1)[1].lstrip())
                         if isinstance(payload, (dict, str)):
                             code = _reply_error(payload if isinstance(payload, dict) else {'error': payload})
+                        if prefix == 'TOOL ERROR ' and isinstance(payload, dict) and isinstance(payload.get('error'), str) \
+                                and re.fullmatch(r'[a-z][a-z0-9_]{0,63}', payload['error']):
+                            refusal = payload['error']
                     except ValueError:
                         pass
                     break
-            raise CarrError(code=code)
+            raise CarrError(code=code, tool_refusal=refusal)
         try:
             reply = json.loads(done.stdout)
         except ValueError:
@@ -1255,10 +1245,18 @@ def main() -> int:
     settings = load_settings(home)
     settings.require_repo(repo)
     settings.require_service('intake')
-    ports = Ports(carr=_carr(repo), contacts=_contacts(repo), next_step=ask_model,
-                  decode=_decoder(home), now=lambda: datetime.now(timezone.utc), lead_intent=ask_lead_intent)
+    ports = Ports(carr=_carr(repo), contacts=_contacts(repo),
+                  next_step=lambda mail, today: ask_model(mail, today, settings.model),
+                  decode=_decoder(home), now=lambda: datetime.now(timezone.utc),
+                  lead_intent=lambda mail, today: ask_lead_intent(mail, today, settings.model))
     outcome = run(repo, home, ports)
     print(status_line(outcome))
     reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
     print('outlook-intake-receipt ' + json.dumps({'state': outcome.state, 'reason': reason, 'counts': outcome.counts}))
+    if outcome.reason not in ('outside_window', 'previous_run_active'):
+        try:
+            from lib import email_router
+            email_router.step(repo, settings)
+        except Exception:
+            print('email-router-receipt ' + json.dumps({'state': 'failed', 'counts': {'error': 1}}))
     return EXIT[outcome.state]

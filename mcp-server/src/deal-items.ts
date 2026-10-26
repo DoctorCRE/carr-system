@@ -1,7 +1,15 @@
 import { isCalendarDate } from './calendar-date.ts';
+import { ToolError } from './tool-error.ts';
+import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
+
+type BulletKind = 'promised' | 'call' | 'suggestion' | 'status';
+type Bullet = { date: string | null; kind: BulletKind; text: string };
+/** A deal checklist item as split from prose, before validateDealItem checks it. */
+export type DealItem = { title: string; due_on: string | null; status?: string; source_ref: string; bullets: Bullet[] };
+type DealItemVerb = 'record-deal-item' | 'backfill-deal-items' | 'instruct-deal-item' | 'complete-deal-item';
 export const DEAL_ITEMS_SCHEMA = 'deal-items.v1';
 
-export function shortDealHeading(deal) {
+export function shortDealHeading(deal: { client_name?: string | null; market?: string | null; city?: string | null; name: string }) {
   const contact = String(deal.client_name || '').replace(/\s*\([^)]*\)\s*$/u,'').trim();
   const doctor = contact.match(/^Dr\.?\s+([\p{L}]+(?:[ .'-][\p{L}]+)*)$/u);
   const market = deal.market || deal.city;
@@ -14,16 +22,16 @@ const GROUPS = [
   { title: 'ETL not completed', matches: /\bETL\b.*\b(?:awaiting|pending|not complet(?:ed|e)|unsigned|sent)\b/i },
 ];
 
-function factKind(text) {
+function factKind(text: string): BulletKind {
   if (/\b(awaiting|pending|not completed|sent|signed)\b/i.test(text)) return 'status';
   if (/\b(do not|raise|rather than|suggest|before|should)\b/i.test(text)) return 'suggestion';
   return 'promised';
 }
 
 const FACT_BREAK = /\s*;\s*|\n+|(?<!\b(?:Dr|Mr|Ms|St|Ave)\.)(?<=[.!?])\s+(?=[A-Z])/u;
-export function shortFacts(text) {
+export function shortFacts(text: unknown): string[] {
   return String(text || '').split(FACT_BREAK).flatMap(part => {
-    const chunks = [];
+    const chunks: string[] = [];
     let rest = part.trim();
     while (rest.length > 240) {
       const at = rest.lastIndexOf(' ', 240);
@@ -35,7 +43,7 @@ export function shortFacts(text) {
   });
 }
 
-function factDate(text, sharedDate = null) {
+function factDate(text: string, sharedDate: string | null = null) {
   const explicit = text.match(/\b\d{4}-\d{2}-\d{2}\b/u)?.[0];
   if (explicit) return isCalendarDate(explicit) ? explicit : null;
   const natural = text.match(/\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:uary|ruary|ch|il|e|y|ust|tember|ober|ember)?\b/iu);
@@ -45,7 +53,7 @@ function factDate(text, sharedDate = null) {
   return isCalendarDate(date) ? date : null;
 }
 
-function numberedItems(text, due_on, source_ref) {
+function numberedItems(text: string, due_on: string | null, source_ref: string): DealItem[] | null {
   const markers = [...text.matchAll(/\((\d+)\)\s*([A-Z][A-Z ]+?)(?=\s*[,—:-])/gu)];
   if (markers.length < 2) return null;
   const shared = text.slice(0, markers[0].index).trim();
@@ -54,7 +62,7 @@ function numberedItems(text, due_on, source_ref) {
     const heading = marker[2].trim();
     const body = text.slice(marker.index + marker[0].length, markers[index + 1]?.index ?? text.length)
       .replace(/^\s*[,—:-]\s*/u,'').trim();
-    const bullets = shared ? [{ date: sharedDate, kind: 'promised', text: shared }] : [];
+    const bullets: Bullet[] = shared ? [{ date: sharedDate, kind: 'promised', text: shared }] : [];
     for (const sentence of body.split(FACT_BREAK)) {
       for (const fact of sentence.split(/\s*[—;]\s*|,\s+(?!\d)/u).flatMap(shortFacts)) {
         bullets.push({ date: factDate(fact,sharedDate), kind: factKind(fact), text: fact.trim() });
@@ -67,54 +75,61 @@ function numberedItems(text, due_on, source_ref) {
   });
 }
 
-export function splitDealNextStep(text, due_on = null, source_ref = 'next_step') {
+export function splitDealNextStep(text: unknown, due_on: string | null = null, source_ref = 'next_step'): DealItem[] {
   const numbered = numberedItems(String(text || ''), due_on, source_ref);
   if (numbered) return numbered;
-  const items = new Map();
-  let current = null;
+  const items = new Map<string, DealItem>();
+  let current: string | null = null;
   for (const raw of shortFacts(text)) {
     const fact = raw.replace(/^\s*(?:[-*]|\d+[).])\s*/u, '').trim();
     if (!fact) continue;
     const group = GROUPS.find(g => g.matches.test(fact));
-    const continues = current === 'Prelim Market Study' && /^(?:walkthrough|\d+[ -]+\d+ exam rooms|~?\$|within|radius)\b/i.test(fact)
+    const continues: boolean = current === 'Prelim Market Study' && /^(?:walkthrough|\d+[ -]+\d+ exam rooms|~?\$|within|radius)\b/i.test(fact)
       || current === 'ETL not completed' && /^(?:raise|rather than|discuss).{0,60}\b(?:package|call|separately)\b/i.test(fact);
-    const title = group?.title || (continues ? current : fact.replace(/[:!?].*$/u, '').replace(/[.]$/u, '').split(/\s+/u).slice(0, 4).join(' '));
+    const title: string = group?.title || (continues ? current! : fact.replace(/[:!?].*$/u, '').replace(/[.]$/u, '').split(/\s+/u).slice(0, 4).join(' '));
     current = title.split(/\s+/u).length < 2 ? 'Deal follow-up' : title;
     if (!items.has(current)) items.set(current, { title: current, due_on, status: 'open', source_ref, bullets: [] });
     const date = fact.match(/\b\d{4}-\d{2}-\d{2}\b/u)?.[0] || null;
-    items.get(current).bullets.push({ date, kind: factKind(fact), text: fact });
+    items.get(current)!.bullets.push({ date, kind: factKind(fact), text: fact });
   }
   return [...items.values()];
 }
 
-export function validateDealItem(item, ErrorType = TypeError) {
-  const invalid = field => { throw new ErrorType({ error: 'invalid_deal_item', field }); };
+// Checks a caller- or prose-supplied item field by field, so it reads item loosely.
+export function validateDealItem(item: Record<string, any>) {
+  const invalid = (field: string) => { throw new ToolError({ error: 'invalid_deal_item', field }); };
   if (typeof item.title !== 'string' || item.title.trim().split(/\s+/u).length < 2 || item.title.trim().split(/\s+/u).length > 4 || item.title.length > 100) invalid('title');
   if (item.due_on != null && !isCalendarDate(item.due_on)) invalid('due_on');
   if (typeof item.source_ref !== 'string' || !item.source_ref.trim() || item.source_ref.length > 500) invalid('source_ref');
   if (!Array.isArray(item.bullets) || !item.bullets.length || item.bullets.length > 60) invalid('bullets');
-  for (const b of item.bullets) {
+  for (const b of item.bullets as Record<string, any>[]) {
     if (!b || !['promised', 'call', 'suggestion', 'status'].includes(b.kind) || typeof b.text !== 'string' || !b.text.trim() || b.text.length > 240 || b.text.split(FACT_BREAK).length > 1) invalid('bullets');
     if (b.date != null && !isCalendarDate(b.date)) invalid('bullets.date');
   }
   return { title: item.title.trim(), due_on: item.due_on || null,
-    source_ref: item.source_ref.trim(), bullets: item.bullets.map(b => ({ date: b.date || null, kind: b.kind, text: b.text.trim() })) };
+    source_ref: item.source_ref.trim(), bullets: item.bullets.map((b: Record<string, any>) => ({ date: b.date || null, kind: b.kind, text: b.text.trim() })) };
 }
 
-export async function readDealItems(c, dealId) {
+export async function readDealItems(c: Db, dealId: string) {
   return (await c.query(`select id, item_title as title, to_jsonb(due_on)#>>'{}' as due_on,
       status, item_bullets as bullets, source_ref from v_deal_room_action
       where deal_id=$1 and item_title is not null and status <> 'dropped'
       order by created_order, id /* deal-items:read */`, [dealId])).rows;
 }
 
-export function dealItemTools({ withEnvelope, writeEvent, resolveSubject, ToolError, canExercisePartnerAuthority, partnerAuthoritySlugForActor }) {
+export function dealItemTools({ withEnvelope, writeEvent, resolveSubject, canExercisePartnerAuthority, partnerAuthoritySlugForActor }: {
+  withEnvelope: WithEnvelope; writeEvent: WriteEvent;
+  resolveSubject: (c: Db, ref: string) => Promise<{ type: string; id: string }>;
+  canExercisePartnerAuthority: (actor: Actor) => boolean;
+  partnerAuthoritySlugForActor: (actor: Actor) => string | null;
+}) {
   const base = { idempotency_key: { type: 'string' }, deal: { type: 'string' } };
   const bullet = { type: 'object', additionalProperties: false,
     properties: { date: { type: ['string', 'null'], format: 'date' }, kind: { type: 'string', enum: ['promised', 'call', 'suggestion', 'status'] }, text: { type: 'string', minLength: 1, maxLength: 240 } }, required: ['kind', 'text'] };
-  const command = (name, description, extra, required, run) => ({ write: true, humanOnly: true, description,
+  const command = <V extends DealItemVerb>(name: V, description: string, extra: Record<string, object>, required: string[],
+    run: (c: Db, actor: Actor, args: VerbInputs[V], dealId: string) => Promise<unknown>) => ({ write: true, humanOnly: true, description,
     inputSchema: { type: 'object', additionalProperties: false, properties: { ...base, ...extra }, required: ['idempotency_key', 'deal', ...required] },
-    handler: async (c, actor, args) => {
+    handler: async (c: Db, actor: Actor, args: VerbInputs[V]) => {
       if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: 'partner_required' });
       if (!args.idempotency_key) throw new ToolError({ error: 'missing_idempotency_key' });
       await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
@@ -126,8 +141,8 @@ export function dealItemTools({ withEnvelope, writeEvent, resolveSubject, ToolEr
       });
     },
   });
-  const record = async (c, actor, dealId, item, key, verb) => {
-    const value = validateDealItem(item, ToolError);
+  const record = async (c: Db, actor: Actor, dealId: string, item: DealItem | VerbInputs['record-deal-item'], key: string, verb: DealItemVerb) => {
+    const value = validateDealItem(item);
     const owner = (await c.query('select id from actor where slug=$1 and active', [partnerAuthoritySlugForActor(actor)])).rows[0];
     if (!owner) throw new ToolError({ error: 'owner_not_provisioned' });
     const added = (await c.query(`insert into next_action(subject_type,subject_id,owner_id,due_on,description,created_by,updated_by,item_title,item_bullets,source_ref,created_at)
@@ -135,10 +150,10 @@ export function dealItemTools({ withEnvelope, writeEvent, resolveSubject, ToolEr
       on conflict (subject_id,source_ref,item_title) where subject_type='deal' and item_title is not null do nothing
       returning id /* deal-items:record */`, [dealId, owner.id, value.due_on, value.title, actor.id, JSON.stringify(value.bullets), value.source_ref])).rows;
     if (added.length) await writeEvent(c, actor, verb, 'deal', dealId, { field: 'deal_item', new: { item_id: added[0].id, ...value }, idempotency_key: key });
-    const itemRow = (await readDealItems(c, dealId)).find(i => i.source_ref === value.source_ref && i.title === value.title);
+    const itemRow = (await readDealItems(c, dealId)).find((i: DealItem) => i.source_ref === value.source_ref && i.title === value.title);
     return { item: itemRow, rows_changed: added.length };
   };
-  const find = async (c, dealId, itemId) => {
+  const find = async (c: Db, dealId: string, itemId: string) => {
     for (const [table, dealColumn] of [['next_action', 'subject_id'], ['capture_post_call_action', 'deal_id']]) {
       const row = (await c.query(`select id,status,item_bullets as bullets from ${table}
         where id=$1 and ${dealColumn}=$2 and item_title is not null ${table === 'next_action' ? "and subject_type='deal'" : ''}

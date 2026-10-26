@@ -359,7 +359,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "backfill-deal-items": {
     "ingress_key": "mcp-tool:backfill-deal-items",
-    "source_locator": "mcp-server/src/deal-items.js",
+    "source_locator": "mcp-server/src/deal-items.ts",
     "schema_digest": "951a874c8854706a552b3080ed6c371efc6956c400e10757c317d618fe617791",
     "write": true,
     "human_only": true,
@@ -394,15 +394,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "delegates_to": [
       "*registered_operation"
     ]
-  },
-  "cancel-capability-session": {
-    "ingress_key": "mcp-tool:cancel-capability-session",
-    "source_locator": "mcp-server/src/capability-program.js",
-    "schema_digest": "41fbf99f4a3a8242ba65ad32896c93a43959a6035ec9edd65ae2e1b3fbf9b505",
-    "write": true,
-    "human_only": false,
-    "authority_only": false,
-    "delegates_to": []
   },
   "cancel-pending-deal": {
     "ingress_key": "mcp-tool:cancel-pending-deal",
@@ -523,7 +514,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "compare-fact-observations": {
     "ingress_key": "mcp-tool:compare-fact-observations",
-    "source_locator": "mcp-server/src/fact-observations.js",
+    "source_locator": "mcp-server/src/fact-observations.ts",
     "schema_digest": "361ab3e2f12dd524f23f96410eaa6507e72339f6494ca585082ef456bb9c598f",
     "write": false,
     "human_only": false,
@@ -550,7 +541,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "complete-deal-item": {
     "ingress_key": "mcp-tool:complete-deal-item",
-    "source_locator": "mcp-server/src/deal-items.js",
+    "source_locator": "mcp-server/src/deal-items.ts",
     "schema_digest": "afab113d866bf2081d0599cdff0eba72209372e77ac0c1573cacf1c4aae91926",
     "write": true,
     "human_only": true,
@@ -568,7 +559,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "confirm-email-deal-progress": {
     "ingress_key": "mcp-tool:confirm-email-deal-progress",
-    "source_locator": "mcp-server/src/email-deal-progress.js",
+    "source_locator": "mcp-server/src/email-deal-progress.ts",
     "schema_digest": "8fcdab540e2c25d37e00d0d25975dc1e4d5d3aca7112c326b59eb64bd051a722",
     "write": true,
     "human_only": true,
@@ -577,7 +568,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "confirm-email-next-step": {
     "ingress_key": "mcp-tool:confirm-email-next-step",
-    "source_locator": "mcp-server/src/email-next-step.js",
+    "source_locator": "mcp-server/src/email-next-step.ts",
     "schema_digest": "28abed1df7d49464dfb3df1fb1cb1a3a49c37500e81379e2202d345c6c5b4f3a",
     "write": true,
     "human_only": true,
@@ -755,6 +746,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "dismiss-email-proposal": {
+    "ingress_key": "mcp-tool:dismiss-email-proposal",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "374acfe499aada092f73ae6412b0efc1b05faf0dca6160f29e95c25daf2f6f62",
+    "write": true,
+    "human_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "doctrine-index": {
     "ingress_key": "mcp-tool:doctrine-index",
     "source_locator": "mcp-server/src/doctrine.js",
@@ -787,6 +787,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "4e3c661894bac221f812e9381c7c6d1ab898a2b3de74c850c2db187864593a7c",
     "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "email-router-queue": {
+    "ingress_key": "mcp-tool:email-router-queue",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "46af38141c2bc3ec08b0ee019d1a9c43a8f97caa53ec955ee10419075768881c",
+    "write": false,
     "human_only": false,
     "authority_only": false,
     "delegates_to": []
@@ -958,7 +967,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "instruct-deal-item": {
     "ingress_key": "mcp-tool:instruct-deal-item",
-    "source_locator": "mcp-server/src/deal-items.js",
+    "source_locator": "mcp-server/src/deal-items.ts",
     "schema_digest": "eb212d3b90bab7fae46ce103f966ac8a290531a0fa731f4d765164e09cfd973a",
     "write": true,
     "human_only": true,
@@ -1091,9 +1100,18 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-email-proposals": {
+    "ingress_key": "mcp-tool:list-email-proposals",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-fact-conflicts": {
     "ingress_key": "mcp-tool:list-fact-conflicts",
-    "source_locator": "mcp-server/src/fact-observations.js",
+    "source_locator": "mcp-server/src/fact-observations.ts",
     "schema_digest": "fc8a1ff80543bb7a4fac294c21044da3990f1264c375e02aa9901df765f9449b",
     "write": false,
     "human_only": false,
@@ -1419,7 +1437,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "preview-email-deal-progress": {
     "ingress_key": "mcp-tool:preview-email-deal-progress",
-    "source_locator": "mcp-server/src/email-deal-progress.js",
+    "source_locator": "mcp-server/src/email-deal-progress.ts",
     "schema_digest": "01563165207c5295db5f140cf83fcfc593ba0e9e8973a033244709709a4c2d25",
     "write": false,
     "human_only": false,
@@ -1428,7 +1446,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "preview-email-next-step": {
     "ingress_key": "mcp-tool:preview-email-next-step",
-    "source_locator": "mcp-server/src/email-next-step.js",
+    "source_locator": "mcp-server/src/email-next-step.ts",
     "schema_digest": "722b7eb2945b75dabf92a52f9ba999c3d33c39dca8c1c5fe79635e3b819747e0",
     "write": false,
     "human_only": false,
@@ -1437,7 +1455,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "promote-fact": {
     "ingress_key": "mcp-tool:promote-fact",
-    "source_locator": "mcp-server/src/fact-observations.js",
+    "source_locator": "mcp-server/src/fact-observations.ts",
     "schema_digest": "5976b93047ba504a919ec7770d0dac843953d7059ac284832ed3d56e20e9f9a9",
     "write": true,
     "human_only": false,
@@ -1464,7 +1482,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "propose-email-lead": {
     "ingress_key": "mcp-tool:propose-email-lead",
-    "source_locator": "mcp-server/src/email-lead-proposal.js",
+    "source_locator": "mcp-server/src/email-lead-proposal.ts",
     "schema_digest": "4ec94c09f595baa72fd5c6d82c7f1bab50f656d58d6e6fd6543c765509f33e25",
     "write": true,
     "human_only": false,
@@ -1581,7 +1599,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "read-client-portal": {
     "ingress_key": "mcp-tool:read-client-portal",
-    "source_locator": "mcp-server/src/client-portal.js",
+    "source_locator": "mcp-server/src/client-portal.ts",
     "schema_digest": "25c4425e3887511ffa3b9a7d402b99e4167a424450ee8f986d53e1f1bd686c7a",
     "write": true,
     "human_only": false,
@@ -1995,7 +2013,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "record-deal-item": {
     "ingress_key": "mcp-tool:record-deal-item",
-    "source_locator": "mcp-server/src/deal-items.js",
+    "source_locator": "mcp-server/src/deal-items.ts",
     "schema_digest": "3adafb91a5d32c51e7386ca06582b49fb074888c19eceb1e5a11415e98f75ae5",
     "write": true,
     "human_only": true,
@@ -2038,6 +2056,15 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "record-email-proposal": {
+    "ingress_key": "mcp-tool:record-email-proposal",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "d053ef06d1b93756dca0e7680244994bb447b94583e2e68f392919eb90ec3944",
+    "write": true,
+    "human_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "record-evidence-subject-link": {
     "ingress_key": "mcp-tool:record-evidence-subject-link",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
@@ -2058,7 +2085,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "record-fact-observations": {
     "ingress_key": "mcp-tool:record-fact-observations",
-    "source_locator": "mcp-server/src/fact-observations.js",
+    "source_locator": "mcp-server/src/fact-observations.ts",
     "schema_digest": "ffc4b25e1062de68b6fe937d51d4559f32bf2b5ca3a64a7a5f820b946de96a19",
     "write": true,
     "human_only": false,
@@ -2938,6 +2965,24 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:public.doctrine_embedding:carr_writer:insert",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.email_proposal",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.email_proposal:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.email_proposal",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.email_proposal:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
     }
   ],
   "secdef_execute": [
@@ -3110,8 +3155,8 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
   "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
   "registry_version": "scac-mutation-registry.v118",
   "runtime_dml_grants": {
-    "count": 339,
-    "digest": "sha256:a210dbda8843ef57aecf1985cb0b97f7ab6fac5e1e99df0926542eb2945254bc"
+    "count": 341,
+    "digest": "sha256:417178cb46966205a188bafec1ceb5d7490249d9dd924264c6f811fb31697ed1"
   },
   "retired_secdef_execute": [
     {
@@ -3350,6 +3395,666 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.put_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_cache_key text, p_cognition_key text, p_cognition_version integer, p_output_schema_version integer, p_proposal jsonb, p_dependency_refs text[], p_ttl_seconds integer)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.put_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_cache_key text, p_cognition_key text, p_cognition_version integer, p_output_schema_version integer, p_proposal jsonb, p_dependency_refs text[], p_ttl_seconds integer):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_capability_token_status(p_token_ref_digest text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_capability_token_status(p_token_ref_digest text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_capability_token_status(p_token_ref_digest text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_capability_token_status(p_token_ref_digest text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_consume_verified_pop_challenge(p_challenge_id uuid, p_challenge_digest text, p_nonce text, p_pop_verification_digest text, p_consume_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.scac_consume_verified_pop_challenge(p_challenge_id uuid, p_challenge_digest text, p_nonce text, p_pop_verification_digest text, p_consume_idempotency_key uuid):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_device_enrollment_status(p_device_ref text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_device_enrollment_status(p_device_ref text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_issue_pop_challenge(p_principal_digest text, p_device_ref text, p_workload_digest text, p_ingress_key text, p_operation_manifest_digest text, p_idempotency_digest text, p_ttl_seconds integer, p_issue_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.scac_issue_pop_challenge(p_principal_digest text, p_device_ref text, p_workload_digest text, p_ingress_key text, p_operation_manifest_digest text, p_idempotency_digest text, p_ttl_seconds integer, p_issue_idempotency_key uuid):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_record_capability_token_receipt(p_challenge_digest text, p_token_ref_digest text, p_signed_payload_digest text, p_signature_digest text, p_issuer_key_digest text, p_issuer_root_event_digest text, p_external_verification_receipt_digest text, p_issued_at timestamp with time zone, p_expires_at timestamp with time zone, p_record_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.scac_record_capability_token_receipt(p_challenge_digest text, p_token_ref_digest text, p_signed_payload_digest text, p_signature_digest text, p_issuer_key_digest text, p_issuer_root_event_digest text, p_external_verification_receipt_digest text, p_issued_at timestamp with time zone, p_expires_at timestamp with time zone, p_record_idempotency_key uuid):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_record_token_verification_binding(p_token_ref_digest text, p_token_payload jsonb, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.scac_record_token_verification_binding(p_token_ref_digest text, p_token_payload jsonb, p_idempotency_key uuid):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_reference_monitor_state()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_reference_monitor_state():carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_reference_monitor_state()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_reference_monitor_state():carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_reference_monitor_state()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_reference_monitor_state():carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_register_operation_effect_binding(p_registry_version text, p_ingress_key text, p_privilege_bundle text, p_registry_entry_digest text, p_effect_keys text[], p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.scac_register_operation_effect_binding(p_registry_version text, p_ingress_key text, p_privilege_bundle text, p_registry_entry_digest text, p_effect_keys text[], p_idempotency_key uuid):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_register_token_issuer_binding(p_issuer_key_digest text, p_issuer_root_event_digest text, p_certification_receipt_digest text, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.scac_register_token_issuer_binding(p_issuer_key_digest text, p_issuer_root_event_digest text, p_certification_receipt_digest text, p_idempotency_key uuid):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_revoke_token_subject(p_subject_kind text, p_subject_digest text, p_reason_digest text, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.scac_revoke_token_subject(p_subject_kind text, p_subject_digest text, p_reason_digest text, p_idempotency_key uuid):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_token_control_snapshot()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_token_control_snapshot():carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_token_control_snapshot()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_token_control_snapshot():carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_transition_reference_monitor_mode(p_mode text, p_reason_digest text, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.scac_transition_reference_monitor_mode(p_mode text, p_reason_digest text, p_idempotency_key uuid):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_transition_token_kill_switch(p_action text, p_reason_digest text, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.scac_transition_token_kill_switch(p_action text, p_reason_digest text, p_idempotency_key uuid):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_acquire_lane_lock(p_component text, p_session_ref text, p_lease_seconds integer, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.siep_acquire_lane_lock(p_component text, p_session_ref text, p_lease_seconds integer, p_idempotency_key uuid):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_attach_evidence(p_component text, p_evidence_kind text, p_ledger_id uuid, p_ledger_kind text, p_evidence_digest text, p_note text, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.siep_attach_evidence(p_component text, p_evidence_kind text, p_ledger_id uuid, p_ledger_kind text, p_evidence_digest text, p_note text, p_idempotency_key uuid):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_attach_evidence(p_component text, p_evidence_kind text, p_ledger_id uuid, p_ledger_kind text, p_evidence_digest text, p_note text, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.siep_attach_evidence(p_component text, p_evidence_kind text, p_ledger_id uuid, p_ledger_kind text, p_evidence_digest text, p_note text, p_idempotency_key uuid):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_bind_evidence_job(p_component text, p_base_version integer, p_evidence_kind text, p_job_id uuid, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.siep_bind_evidence_job(p_component text, p_base_version integer, p_evidence_kind text, p_job_id uuid, p_idempotency_key uuid):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_claim_package(p_component text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.siep_claim_package(p_component text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_manifest_digest()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_manifest_digest():carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_manifest_digest()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_manifest_digest():carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_manifest_digest()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_manifest_digest():carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_manifest_digest()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_manifest_digest():carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_read_evidence_graph(p_component text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_read_evidence_graph(p_component text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_read_evidence_graph(p_component text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_read_evidence_graph(p_component text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_read_evidence_graph(p_component text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_read_evidence_graph(p_component text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_read_evidence_graph(p_component text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_read_evidence_graph(p_component text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_read_program()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_read_program():carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_read_program()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_read_program():carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_read_program()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_read_program():carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_read_program()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_read_program():carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_record_joe_decision(p_component text, p_gate text, p_decision text, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.siep_record_joe_decision(p_component text, p_gate text, p_decision text, p_idempotency_key uuid):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_release_lane_lock(p_component text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.siep_release_lane_lock(p_component text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_terminal_status()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_terminal_status():carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_terminal_status()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_terminal_status():carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_terminal_status()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_terminal_status():carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_terminal_status()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.siep_terminal_status():carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.siep_transition_package(p_component text, p_base_version integer, p_target_state text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.siep_transition_package(p_component text, p_base_version integer, p_target_state text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid):carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

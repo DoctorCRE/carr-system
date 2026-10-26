@@ -57,6 +57,7 @@ for (const [code, extra] of [
   ["version_conflict", { current_version: 3 }], ["needs_confirm", {}],
   ["not_found", {}], ["unauthorized", {}], ["loop_not_open", {}],
   ["value_not_in_declared_vocabulary", { field: "filter" }],
+  ["tour_share_scope_invalid", {}],
 ]) test(`MCP preserves the public ${code} contract`, async t => {
   const payload = await failure(t, new ToolError({ error: code, ...extra,
     detail: privateText, hint: privateText, nested: { stack: privateText } }));
@@ -148,7 +149,7 @@ for (const candidate of [
   { id: 'synthetic-building', address: '1 Fixture', city: 'Fixture' },
   { name: 'Synthetic' }, { ref: 'P-1', name: 'Synthetic' },
 ]) test(`disambiguation curates the ${Object.keys(candidate).join('/')} candidate shape`, async t => {
-  const { publicError } = await import('../src/public-errors.js');
+  const { publicError } = await import('../src/public-errors.ts');
   t.mock.method(console, 'error', () => {});
   const payload = publicError(new ToolError({ error: 'needs_disambiguation',
     candidates: [{ ...candidate, detail: privateText, stack: privateText, nested: { cause: privateText } }],

@@ -21,10 +21,6 @@ import uuid
 import psycopg
 from psycopg.types.json import Jsonb
 
-from canonical_ownership_siep18_normalization import (
-    normalize_siep18_reference_monitor_guards,
-    validate_siep18_guard_rows,
-)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,7 +34,6 @@ RESPONSE_LOCK = Lock()
 CATALOG_FINGERPRINT_SQL = r"""
 with table_targets(obj) as (values
   ('ops.work_request'),('ops.engineering_slice_plan'),('ops.job'),
-  ('ops.siep_lane_lock'),
   ('ops.capability_agent_session'),('ops.engineering_execution_envelope'),
   ('ops.engineering_slice_receipt'),('ops.engineering_reviewer_fact'),
   ('public.actor'),('public.lease'),('public.deal_presence_lease')
@@ -80,54 +75,6 @@ select jsonb_build_object(
     'acl',coalesce(p.proacl::text,'')))
     from function_targets f join pg_proc p on p.oid=to_regprocedure(f.obj))
 )
-"""
-SIEP18_GUARD_SURFACE_SQL = r"""
-with table_targets(obj) as (values
-  ('ops.work_request'),('ops.engineering_slice_plan'),('ops.job'),
-  ('ops.siep_lane_lock'),
-  ('ops.capability_agent_session'),('ops.engineering_execution_envelope'),
-  ('ops.engineering_slice_receipt'),('ops.engineering_reviewer_fact'),
-  ('public.actor'),('public.lease'),('public.deal_presence_lease')
-), runtime_roles as (
-  select oid from pg_roles where rolname in ('carr_writer','carr_jobs','carr_authority')
-), writable as (
-  select distinct c.oid from pg_class c
-  cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
-  where c.relkind in ('r','p')
-    and (a.grantee=0 or a.grantee in(select oid from runtime_roles))
-    and a.privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE')
-  union
-  select distinct c.oid from pg_attribute att join pg_class c on c.oid=att.attrelid
-  cross join lateral aclexplode(att.attacl) a
-  where c.relkind in ('r','p') and att.attnum>0 and not att.attisdropped
-    and (a.grantee=0 or a.grantee in(select oid from runtime_roles))
-    and a.privilege_type in ('INSERT','UPDATE')
-), candidates as (
-  select t.obj target,(w.oid is not null) eligible,tg.*
-  from table_targets t left join writable w on w.oid=to_regclass(t.obj)
-  left join lateral (
-    select tg.tgname name,tg.tgenabled enabled,
-      jsonb_build_object('name',tg.tgname,'enabled',tg.tgenabled,
-        'definition',pg_get_triggerdef(tg.oid,true)) record,
-      tg.tgfoid='ops.scac_reference_monitor_guard()'::regprocedure function_oid_exact,
-      tg.tgtype::integer tgtype,tg.tgnargs::integer tgnargs,
-      octet_length(tg.tgargs) args_bytes,tg.tgqual is null qual_absent,
-      tg.tgoldtable is null old_table_absent,tg.tgnewtable is null new_table_absent,
-      tg.tgconstraint=0 constraint_absent,tg.tgdeferrable is_deferrable,
-      tg.tginitdeferred initially_deferred
-    from pg_trigger tg where tg.tgrelid=to_regclass(t.obj) and not tg.tgisinternal
-      and (tg.tgfoid='ops.scac_reference_monitor_guard()'::regprocedure
-        or tg.tgname in ('scac_reference_monitor_guard_row','scac_reference_monitor_guard_truncate'))
-    order by tg.tgname
-  ) tg on true
-)
-select jsonb_build_object('target',target,'eligible',eligible,'name',name,
-  'record',record,'function_oid_exact',function_oid_exact,'tgtype',tgtype,
-  'tgnargs',tgnargs,'args_bytes',args_bytes,'qual_absent',qual_absent,
-  'old_table_absent',old_table_absent,'new_table_absent',new_table_absent,
-  'constraint_absent',constraint_absent,'deferrable',is_deferrable,
-  'initially_deferred',initially_deferred)
-from candidates order by target,name nulls first
 """
 
 
@@ -284,11 +231,6 @@ def safe_error(exc: BaseException) -> str:
 
 def catalog_fingerprint(cur):
     return one(cur, CATALOG_FINGERPRINT_SQL)[0]
-
-
-def validated_siep18_fingerprint_guards(cur):
-    rows = [row[0] for row in cur.execute(SIEP18_GUARD_SURFACE_SQL)]
-    return validate_siep18_guard_rows(rows)
 
 
 def assert_activated_runtime_boundary(dsn: str, cur) -> None:
@@ -2683,9 +2625,7 @@ def main() -> int:
         if not baseline_text:
             raise RuntimeError("true pre-0450 catalog fingerprint is required")
         baseline = json.loads(baseline_text)
-        current = normalize_siep18_reference_monitor_guards(
-            catalog_fingerprint(cur), validated_siep18_fingerprint_guards(cur)
-        )
+        current = catalog_fingerprint(cur)
         if current != baseline:
             raise RuntimeError("existing catalog/grant fingerprint drifted across 0450")
         assertions += 1

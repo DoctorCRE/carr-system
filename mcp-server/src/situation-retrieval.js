@@ -4,9 +4,9 @@
 // below mirrors its open arithmetic for property tests and offline scorecard
 // inspection; it never rewrites a query or generates answer text.
 
-import { searchDoctrineWithEmbeddings } from "./doctrine-embeddings.js";
+import { searchDoctrineWithEmbeddings } from "./doctrine-embeddings.ts";
 import { personalScopeForActor } from "./identity.js";
-import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.js";
+import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.ts";
 import { ToolError } from "./tool-error.ts";
 
 const POLICIES = new Set(["lexical-dominant-v1", "coequal-normalized-v1"]);

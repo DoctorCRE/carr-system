@@ -130,10 +130,8 @@ export function agentSlugForClient(clientName) {
 /**
  * A self-declared OAuth client_name is attribution only. Native-agent
  * authority requires an exact client-id -> actor binding held in server
- * configuration. Unknown, malformed, or mismatched bindings refuse.
- *
- * SIEP-21 will replace this bootstrap binding with enrolled workload identity;
- * until then absence is deliberately non-authorizing.
+ * configuration. Unknown, malformed, or mismatched bindings refuse, and an
+ * absent binding is deliberately non-authorizing.
  */
 export function verifiedAgentSlugForClient(clientId, attributedSlug, rawBindings) {
   if (typeof clientId !== "string" || !clientId ||
