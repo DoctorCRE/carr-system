@@ -20,6 +20,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from lib import email_router
+from lib import model_call
 from lib import outlook_intake as intake
 from lib.outlook_settings import load_settings
 from outlook_test_support import write_settings
@@ -416,10 +418,62 @@ class IntakeTest(unittest.TestCase):
     def test_main_emits_monitoring_receipt_from_the_actual_outcome(self):
         from io import StringIO
         outcome = intake.Outcome('failed', 'writes_failed', {'writes_failed': 3})
-        with patch.object(intake, 'load_settings', return_value=load_settings(self.home)), patch.object(type(load_settings(self.home)), 'require_repo'), patch.object(intake, 'run', return_value=outcome), patch('sys.stdout', new_callable=StringIO) as stdout:
+        with patch.object(intake, 'load_settings', return_value=load_settings(self.home)), patch.object(type(load_settings(self.home)), 'require_repo'), patch.object(intake, 'run', return_value=outcome), patch.object(email_router, 'step', return_value=0), patch('sys.stdout', new_callable=StringIO) as stdout:
             self.assertEqual(intake.main(), 1)
         receipt = stdout.getvalue().split('outlook-intake-receipt ', 1)[1]
         self.assertEqual(json.loads(receipt), {'state': 'failed', 'reason': 'writes_failed', 'counts': {'writes_failed': 3}})
+
+    def test_main_runs_the_router_after_intake_releases_its_lock_without_changing_the_result(self):
+        write_settings(self.home, ROOT, model='sonnet')
+        settings = load_settings(self.home)
+        order, models = [], []
+
+        def fake_run(repo, home, ports):
+            order.append('intake')
+            ports.next_step({'outbound': False, 'subject': 'S', 'text': 'T'}, datetime(2026, 10, 26).date())
+            ports.lead_intent({'subject': 'S', 'text': 'T'}, datetime(2026, 10, 26).date())
+            return intake.Outcome('succeeded', 'ok')
+
+        def fake_ask(prompt, *, model, schema, system_prompt):
+            models.append(model)
+            return {'next_step': None, 'due_on': None} if schema is intake.REPLY_SCHEMA else {'business': False, 'summary': None}
+
+        def fake_step(repo, given):
+            order.append('router')
+            self.assertIs(given, settings)
+            return 1
+        with patch.object(intake, 'load_settings', return_value=settings), patch.object(type(settings), 'require_repo'), \
+                patch.object(intake, 'run', side_effect=fake_run), patch.object(intake.model_call, 'ask', side_effect=fake_ask), \
+                patch.object(email_router, 'step', side_effect=fake_step), patch('sys.stdout'):
+            self.assertEqual(intake.main(), 0, 'a failed router step never changes the intake result')
+        self.assertEqual(order, ['intake', 'router'])
+        self.assertEqual(models, ['sonnet', 'sonnet'])
+        for reason in ('outside_window', 'previous_run_active'):
+            with patch.object(intake, 'load_settings', return_value=settings), patch.object(type(settings), 'require_repo'), \
+                    patch.object(intake, 'run', return_value=intake.Outcome('skipped', reason)), \
+                    patch.object(email_router, 'step') as step, patch('sys.stdout'):
+                self.assertEqual(intake.main(), 78)
+            step.assert_not_called()
+
+    def test_a_router_that_cannot_import_or_raises_never_changes_the_intake_result(self):
+        import lib
+        from io import StringIO
+        settings = load_settings(self.home)
+        for outcome, code in ((intake.Outcome('succeeded', 'ok'), 0), (intake.Outcome('failed', 'writes_failed'), 1)):
+            saved = lib.email_router
+            del lib.email_router
+            try:
+                with patch.dict(sys.modules, {'lib.email_router': None}), \
+                        patch.object(intake, 'load_settings', return_value=settings), patch.object(type(settings), 'require_repo'), \
+                        patch.object(intake, 'run', return_value=outcome), patch('sys.stdout', new_callable=StringIO) as stdout:
+                    self.assertEqual(intake.main(), code)
+            finally:
+                lib.email_router = saved
+            self.assertIn('email-router-receipt {"state": "failed"', stdout.getvalue())
+            with patch.object(intake, 'load_settings', return_value=settings), patch.object(type(settings), 'require_repo'), \
+                    patch.object(intake, 'run', return_value=outcome), \
+                    patch.object(email_router, 'step', side_effect=RuntimeError('boom')), patch('sys.stdout'):
+                self.assertEqual(intake.main(), code)
 
     def test_contact_failures_have_safe_distinct_reasons(self):
         from types import SimpleNamespace
@@ -1824,13 +1878,34 @@ class ScheduleTest(unittest.TestCase):
 
 class ModelCallTest(unittest.TestCase):
     def test_the_model_runs_isolated_with_no_tools_settings_or_mcp(self):
-        command = intake.model_command()
+        command = model_call.command('haiku', intake.REPLY_SCHEMA, intake.SYSTEM_PROMPT)
         for flag in ('--tools', '--setting-sources', '--strict-mcp-config', '--disable-slash-commands',
                      '--no-session-persistence', '--json-schema'):
             self.assertIn(flag, command)
         self.assertEqual(command[command.index('--tools') + 1], '')
         self.assertEqual(command[command.index('--setting-sources') + 1], '')
         self.assertEqual(command[command.index('--model') + 1], 'haiku')
+
+    def test_the_model_name_comes_from_settings_and_defaults_to_haiku(self):
+        with tempfile.TemporaryDirectory() as home:
+            write_settings(Path(home), ROOT)
+            self.assertEqual(load_settings(Path(home)).model, 'haiku')
+            write_settings(Path(home), ROOT, model='sonnet')
+            self.assertEqual(load_settings(Path(home)).model, 'sonnet')
+            write_settings(Path(home), ROOT, model='haiku; rm -rf')
+            with self.assertRaises(ValueError):
+                load_settings(Path(home))
+        seen = {}
+
+        def fake(cmd, **kwargs):
+            seen['model'] = cmd[cmd.index('--model') + 1]
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(
+                {'is_error': False, 'structured_output': {'next_step': None, 'due_on': None}}), '')
+        mail = {'outbound': False, 'subject': 'Synthetic', 'text': 'Synthetic body'}
+        with patch('subprocess.run', side_effect=fake):
+            self.assertEqual(intake.ask_model(mail, datetime(2026, 10, 26).date(), 'sonnet'),
+                             {'next_step': None, 'due_on': None})
+        self.assertEqual(seen['model'], 'sonnet')
 
     def test_reply_parsing_accepts_only_the_schema(self):
         good = {'next_step': 'Reply', 'due_on': '2026-10-22'}

@@ -1,6 +1,18 @@
 // A compiled projection of the cited doctrine, never an independently editable
 // task ledger. A changed or retired source disables the projection until reviewed.
 import { isCalendarDate } from './calendar-date.ts';
+import type { Db } from './verb-contract.ts';
+
+type DealType = 'lease' | 'renewal' | 'purchase' | 'land';
+type ChecklistItem = { id: string; label: string; status: string; due_on: string | null;
+  evidence_ref: string | null; source: object };
+type ChecklistPhase = { id: string; label: string; items: ChecklistItem[] };
+/** The deal fields the checklist reads; tools.js passes its full Deal Room record. */
+type ChecklistDeal = { id: string; type?: string | null; invoiced_on?: string | null;
+  lease?: { status?: string; evidence_ref?: string; executed_on?: string; expiration_on?: string } | null;
+  critical_dates?: { id: string; kind: string; status: string; source?: string | null; due_on: string }[] | null;
+  commissions?: { commission_id: string; status: string; received_on: string | null }[] };
+type SourceRow = { id: string; status: string; body_hash: string };
 export const CHECKLIST_SOURCES = Object.freeze([
   { document: 'deal-room-kit', section_id: '5f8a3cbd-fe89-4557-b3f4-5b0bbc53276c', version: 1, content_hash: 'fe11a8c2bf371dcab98a0fba969594df46ee64c6a8be047dba9b6befc3dc6424' },
   { document: 'deal-room-kit', section_id: '7e263aa0-9823-477b-86e3-bd8cf0c32003', version: 1, content_hash: '6d1a03dacdff6d1ae8b5b0ca333f4fd98bcb0f380fa57f99ccaff8cff4a8d14e' },
@@ -15,7 +27,7 @@ const PHASES = [
   ['closing', 'Closing'], ['invoice', 'Invoice'],
 ];
 // id, label, phase, applicable deal types, source index. Null types apply to all.
-const TEMPLATE = [
+const TEMPLATE: [string, string, string, DealType[] | null, number | null][] = [
   ['representation', 'Signed representation agreement', 'research', null, 0],
   ['requirements', 'Completed intake and requirements', 'research', null, 0],
   ['current_lease_abstraction', 'Current lease abstraction', 'research', ['renewal'], 0],
@@ -56,21 +68,23 @@ const TEMPLATE = [
   ['commission_received', 'Commission receipt recorded', 'invoice', null, null],
 ];
 
-function dealType(type) {
-  if (['startup', 'relocation', 'expansion', 'additional_office', 'lease'].includes(type)) return 'lease';
-  return ['renewal', 'purchase', 'land'].includes(type) ? type : null;
+function dealType(type: string | null | undefined): DealType | null {
+  if (['startup', 'relocation', 'expansion', 'additional_office', 'lease'].includes(type as string)) return 'lease';
+  return ['renewal', 'purchase', 'land'].includes(type as string) ? type as DealType : null;
 }
 
-export function deriveDealChecklist(record, sources, today) {
+export function deriveDealChecklist(record: ChecklistDeal, sources: SourceRow[], today: string) {
   const type = dealType(record.type);
   const current = CHECKLIST_SOURCES.every(source => sources.some(row =>
     row.id === source.section_id && row.status === 'active' && row.body_hash === source.content_hash));
-  const result = { schema_version: 'deal-checklist.v1', template_state: current ? 'current' : 'source_changed',
+  const result: { schema_version: string; template_state: string; deal_type: DealType | null;
+    sources: typeof CHECKLIST_SOURCES; observed_on: string; phases: ChecklistPhase[]; due_items: ChecklistItem[] } = {
+    schema_version: 'deal-checklist.v1', template_state: current ? 'current' : 'source_changed',
     deal_type: type, sources: CHECKLIST_SOURCES, observed_on: today, phases: [], due_items: [] };
   if (!current) return result;
   result.template_state = type ? 'current' : 'deal_type_unknown';
   result.phases = PHASES.map(([id, label]) => ({ id, label, items: TEMPLATE
-    .filter(([, , phase, types]) => phase === id && (!types || types.includes(type)))
+    .filter(([, , phase, types]) => phase === id && (!types || types.includes(type as DealType)))
     .map(([itemId, itemLabel, , , source]) => ({ id: itemId, label: itemLabel,
       status: 'not_recorded', due_on: null, evidence_ref: null,
       source: source === null ? { request: 'per-deal standard checklist', record_verb: itemId === 'invoice_recorded' ? 'record-deal-invoice' : 'record-commission-receipt' } : CHECKLIST_SOURCES[source],
@@ -80,10 +94,10 @@ export function deriveDealChecklist(record, sources, today) {
     const deadline = { id: `critical-date:${date.id}`, label: date.kind.replaceAll('_', ' '),
       status: date.due_on < today ? 'overdue' : date.due_on === today ? 'due' : 'upcoming',
       due_on: date.due_on, evidence_ref: date.source, source: { record_verb: 'add-critical-date' } };
-    result.phases.find(phase => phase.id === 'legal').items.push(deadline);
+    result.phases.find(phase => phase.id === 'legal')!.items.push(deadline);
   }
   const items = result.phases.flatMap(phase => phase.items);
-  const complete = (id, evidence) => {
+  const complete = (id: string, evidence: string | false | undefined) => {
     const item = items.find(item => item.id === id);
     if (item && evidence) Object.assign(item, { status: 'complete', evidence_ref: evidence });
   };
@@ -97,13 +111,13 @@ export function deriveDealChecklist(record, sources, today) {
     row.status === 'received' && isCalendarDate(row.received_on)) && commissions.map(row => `commission:${row.commission_id}`).join(', '));
   result.due_items = items
     .filter(item => ['due', 'overdue'].includes(item.status))
-    .sort((a, b) => a.due_on.localeCompare(b.due_on) || a.id.localeCompare(b.id));
+    .sort((a, b) => a.due_on!.localeCompare(b.due_on!) || a.id.localeCompare(b.id));
   return result;
 }
 
 let storageUnavailableLogged = false;
 
-export async function readDealChecklist(client, record, now = new Date()) {
+export async function readDealChecklist(client: Db, record: ChecklistDeal, now = new Date()) {
   let sources, commissions;
   try {
     sources = await client.query(
@@ -113,7 +127,7 @@ export async function readDealChecklist(client, record, now = new Date()) {
       `select commission_id, status, to_jsonb(received_on)#>>'{}' as received_on
          from v_deal_room_commission where deal_id=$1 order by commission_id /* checklist:commissions */`, [record.id]);
   } catch (error) {
-    if (error.code !== '42P01') throw error;
+    if ((error as { code?: string }).code !== '42P01') throw error;
     if (!storageUnavailableLogged) {
       storageUnavailableLogged = true;
       console.warn('Deal checklist storage unavailable.');

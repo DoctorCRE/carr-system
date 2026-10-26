@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveDealChecklist, CHECKLIST_SOURCES } from '../src/deal-checklist.js';
+import { deriveDealChecklist, CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
 
 const sources = () => CHECKLIST_SOURCES.map(source => ({ id: source.section_id, body_hash: source.content_hash, status: 'active' }));
 const checklist = (record = {}) => deriveDealChecklist({ type: 'renewal', phase: 'legal', critical_dates: [], ...record }, sources(), '2026-10-20');

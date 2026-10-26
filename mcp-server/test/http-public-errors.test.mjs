@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { publicError } from "../src/public-errors.js";
+import { publicError } from "../src/public-errors.ts";
 import { createCaptureHandler } from "../src/capture.js";
 
 const source = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");

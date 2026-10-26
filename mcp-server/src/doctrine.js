@@ -14,11 +14,11 @@
 // with the findings in the error payload, precise enough to self-repair.
 
 import { organizationTenantForActor, personalScopeForActor } from "./identity.js";
-import { embedDoctrineRevisions, backfillDoctrineEmbeddings } from "./doctrine-embeddings.js";
+import { embedDoctrineRevisions, backfillDoctrineEmbeddings } from "./doctrine-embeddings.ts";
 import { searchDoctrineSituations, retrievalVisibilityActorId } from "./situation-retrieval.js";
 import { CORE_RULE_IDS, CORE_RULE_COUNT, CORE_RULE_TRIAGE_SOURCE } from "./core-rule-ids.js";
 import { ruleBootPage } from "./rule-boot.js";
-import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.js";
+import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.ts";
 
 const CORE_RULE_ID_SET = new Set(CORE_RULE_IDS);
 const TERRITORY_SECTION_ID = "aa3868ef-d0a2-4bc2-9954-525ad418636b";

@@ -1,5 +1,7 @@
-import { createHash } from 'node:crypto';
+import { sha256 } from './sha256.ts';
 import { isCalendarDate } from './calendar-date.ts';
+import { ToolError } from './tool-error.ts';
+import type { Actor, Db, DelegatedHandler, LockDealField, ResolveEmailProposal, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
 
 const properties = {
   deal: { type: 'string', format: 'uuid' },
@@ -9,13 +11,16 @@ const properties = {
   next_date: { type: 'string', format: 'date' },
   owner: { type: 'string', enum: ['joe', 'dell'], default: 'joe' },
 };
-const schema = extra => ({ type: 'object', additionalProperties: false,
+const schema = (extra: Record<string, object>) => ({ type: 'object', additionalProperties: false,
   properties: { ...properties, ...extra },
   required: [...Object.keys(properties).filter(key => key !== 'owner'), ...Object.keys(extra)] });
 
-export function emailNextStepTools({ ToolError, withEnvelope, writeEvent, lockDealField, setNextStep, setNextAction, resolveEmailProposal }) {
-  const fail = error => { throw new ToolError({ error }); };
-  async function proposal(c, args, lock = false) {
+export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, setNextStep, setNextAction, resolveEmailProposal }: {
+  withEnvelope: WithEnvelope; writeEvent: WriteEvent; lockDealField: LockDealField;
+  setNextStep: DelegatedHandler; setNextAction: DelegatedHandler; resolveEmailProposal: ResolveEmailProposal;
+}) {
+  const fail: (error: string) => never = error => { throw new ToolError({ error }); };
+  async function proposal(c: Db, args: VerbInputs['preview-email-next-step'], lock = false) {
     if (!args.text.trim() || !isCalendarDate(args.next_date) || args.next_date.startsWith('0000'))
       fail('email_next_step_input_invalid');
     const row = (await c.query(`select d.id as deal_id,d.name,d.client_id,d.version,d.next_date::text as current_next_date,
@@ -40,8 +45,8 @@ export function emailNextStepTools({ ToolError, withEnvelope, writeEvent, lockDe
       current_next_step: row.current_next_step, current_next_date: row.current_next_date,
       ...(owner === 'dell' ? { current_owner_actions: currentOwnerActions } : {}),
       source, requires_confirmation: true };
-    const digest = createHash('sha256').update(JSON.stringify({ ...result,
-      activity_version: row.activity_version, captured_body: row.detail })).digest('hex');
+    const digest = sha256(JSON.stringify({ ...result,
+      activity_version: row.activity_version, captured_body: row.detail }));
     return { ...result, proposal_digest: `sha256:${digest}` };
   }
   return {
@@ -49,14 +54,14 @@ export function emailNextStepTools({ ToolError, withEnvelope, writeEvent, lockDe
       write: false,
       description: 'Preview a Joe or Dell action for a nonterminal deal on the current Deal Room board from a selected captured inbound email, literal evidence quote, caller-chosen task text and explicit due date. Select the exact deal first. Does not extract or verify commitments, infer dates, execute email instructions or change records. Captured text may be a preview. Shows Joe’s plan or the selected owner’s open actions that confirmation will replace. For Dell, the Deal Room due date follows the confirmed action. Joe must review the task, date, owner and evidence before confirmation.',
       inputSchema: schema({}),
-      handler: (c, _actor, args) => proposal(c, args),
+      handler: (c: Db, _actor: Actor, args: VerbInputs['preview-email-next-step']) => proposal(c, args),
     },
     'confirm-email-next-step': {
       write: true, humanOnly: true, humanCallerOnly: true,
       description: "Joe confirms the displayed email next-step proposal. Requires the preview digest and unchanged source, linkage, deal version, task, date, owner and affected actions. Joe-owned proposals replace the canonical plan through set-next-step. Dell-owned proposals replace Dell's open deal action through set-next-action. Both retain the email quote in history. No sends or automatic task execution.",
       inputSchema: schema({ proposal_digest: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' },
         idempotency_key: { type: 'string', minLength: 1, maxLength: 200 } }),
-      handler: async (c, actor, args) => {
+      handler: async (c: Db, actor: Actor, args: VerbInputs['confirm-email-next-step']) => {
         if (actor.human !== true || actor.slug !== 'joe') fail('joe_confirmation_required');
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
         return withEnvelope(c, actor, 'confirm-email-next-step', args, async () => {

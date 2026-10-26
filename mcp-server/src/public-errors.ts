@@ -1,9 +1,17 @@
 import { ToolError } from "./tool-error.ts";
 import { isValidCorrelationId, logLine } from "./correlation.js";
 
+/** The public JSON-RPC/HTTP refusal shape. Every optional field is opt-in per code. */
+type PublicError = {
+  error: string; correlation_id: string; hint: string;
+  candidates?: Record<string, string | null>[]; retired_aliases?: Record<string, string | null>[];
+  current_version?: number; fields?: unknown[];
+};
+type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSchema };
+
 // Public shapes are deliberately closed. Never copy messages, hints, wrapped
 // details, event rows, driver codes, or arbitrary properties from a refusal.
-const PUBLIC_ERRORS = new Map([
+const PUBLIC_ERRORS = new Map<unknown, string>([
   ["version_conflict", "Re-read the record and ask the human before retrying."],
   ["needs_confirm", "Ask the human to confirm before resubmitting with confirm:true."],
   ["not_found", "The requested record was not found."],
@@ -46,7 +54,7 @@ const CANDIDATE_SHAPES = [
   ["name"],
 ];
 
-function publicCandidates(candidates, shapes = CANDIDATE_SHAPES) {
+function publicCandidates(candidates: unknown, shapes = CANDIDATE_SHAPES): Record<string, string | null>[] {
   if (!Array.isArray(candidates)) return [];
   return candidates.flatMap(candidate => {
     if (!candidate || typeof candidate !== "object") return [];
@@ -59,7 +67,7 @@ function publicCandidates(candidates, shapes = CANDIDATE_SHAPES) {
   });
 }
 
-function inputFields(schema, names = new Set()) {
+function inputFields(schema: InputSchema | undefined, names = new Set<string>()) {
   for (const [name, child] of Object.entries(schema?.properties || {})) {
     names.add(name);
     inputFields(child, names);
@@ -68,7 +76,7 @@ function inputFields(schema, names = new Set()) {
   return names;
 }
 
-function diagnostics(error) {
+function diagnostics(error: unknown) {
   const seen = new WeakSet();
   return JSON.parse(JSON.stringify(error, (_key, value) => {
     if (value && typeof value === "object") {
@@ -88,22 +96,23 @@ function diagnostics(error) {
 /** The sole projection for caught MCP/HTTP failures. Full diagnostics stay in
  * server logs. Validation fields come from the input schema; disambiguation
  * choices use curated record shapes. */
-export function publicError(error, { env, inputSchema, fallback = "unhandled_verb_failure" } = {}) {
+export function publicError(error: unknown, { env, inputSchema, fallback = "unhandled_verb_failure" }:
+  { env?: { CORRELATION_ID?: string }; inputSchema?: InputSchema; fallback?: string } = {}) {
   const correlationId = isValidCorrelationId(env?.CORRELATION_ID)
-    ? env.CORRELATION_ID.trim().toLowerCase() : crypto.randomUUID();
+    ? env!.CORRELATION_ID!.trim().toLowerCase() : crypto.randomUUID();
   if (env) env.CORRELATION_ID = correlationId;
   logLine("error", "request_error", { correlation_id: correlationId, diagnostic: diagnostics(error) });
   const payload = error instanceof ToolError ? error.payload : null;
-  const code = PUBLIC_ERRORS.has(payload?.error) ? payload.error : fallback;
-  const result = { error: code, correlation_id: correlationId,
+  const code = PUBLIC_ERRORS.has(payload?.error) ? payload!.error : fallback;
+  const result: PublicError = { error: code, correlation_id: correlationId,
     hint: PUBLIC_ERRORS.get(code) || "The operation failed. Quote the correlation_id when reporting it." };
   if (code === "needs_disambiguation") {
     result.candidates = publicCandidates(payload?.candidates);
     if (Array.isArray(payload?.retired_aliases))
       result.retired_aliases = publicCandidates(payload.retired_aliases, [["ref", "name"]]);
   }
-  if (code === "version_conflict" && Number.isSafeInteger(payload?.current_version) && payload.current_version >= 0)
-    result.current_version = payload.current_version;
+  if (code === "version_conflict" && Number.isSafeInteger(payload?.current_version) && (payload!.current_version as number) >= 0)
+    result.current_version = payload!.current_version as number;
   if (["invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields"].includes(code)) {
     const allowed = inputFields(inputSchema);
     const candidates = [payload?.field, payload?.column,
@@ -112,7 +121,7 @@ export function publicError(error, { env, inputSchema, fallback = "unhandled_ver
     result.fields = [...new Set(candidates.filter(field => allowed.has(field)))];
     if (code === "invalid_field_value" && result.fields.length === 0) {
       result.error = "database_refused_the_statement";
-      result.hint = PUBLIC_ERRORS.get(result.error);
+      result.hint = PUBLIC_ERRORS.get(result.error)!;
       delete result.fields;
     }
   }
