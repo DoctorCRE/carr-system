@@ -578,7 +578,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "confirm-email-next-step": {
     "ingress_key": "mcp-tool:confirm-email-next-step",
     "source_locator": "mcp-server/src/email-next-step.js",
-    "schema_digest": "3b0cc27fe124cc7b9d48aa15b05ad8c3be387737a735cd987e217336c41f020b",
+    "schema_digest": "28abed1df7d49464dfb3df1fb1cb1a3a49c37500e81379e2202d345c6c5b4f3a",
     "write": true,
     "human_only": true,
     "authority_only": false,
@@ -1420,7 +1420,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "preview-email-next-step": {
     "ingress_key": "mcp-tool:preview-email-next-step",
     "source_locator": "mcp-server/src/email-next-step.js",
-    "schema_digest": "a565d9f5afc3fb8dc8c0c3c84f512f1f16f374de0013f505e32e7743bef49b9a",
+    "schema_digest": "722b7eb2945b75dabf92a52f9ba999c3d33c39dca8c1c5fe79635e3b819747e0",
     "write": false,
     "human_only": false,
     "authority_only": false,
