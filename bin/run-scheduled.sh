@@ -113,6 +113,27 @@ PY_RECEIPT
     fi
     print -r -- "outlook-intake-receipt $detail"
   fi
+  "$PY" - "$receipt_file" <<'PY_ROUTER_RECEIPT'
+import json
+import sys
+
+counts = frozenset("emails routed model_failed abandoned recorded refused dropped write_failed "
+                   "queue_failed more out_of_time error".split())
+receipt = None
+with open(sys.argv[1]) as output:
+    for line in output:
+        if line.startswith("email-router-receipt "):
+            try:
+                receipt = json.loads(line[len("email-router-receipt "):])
+            except ValueError:
+                receipt = None
+if (isinstance(receipt, dict) and receipt.get("state") in ("succeeded", "failed", "skipped")
+        and isinstance(receipt.get("counts"), dict)
+        and all(k in counts and type(v) is int and 0 <= v <= 1_000_000_000
+                for k, v in receipt["counts"].items())):
+    print("email-router-receipt " + json.dumps(
+        {k: receipt[k] for k in ("state", "counts")}, sort_keys=True))
+PY_ROUTER_RECEIPT
   rm -f "$receipt_file"
 fi
 
