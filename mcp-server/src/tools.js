@@ -4467,10 +4467,12 @@ export const TOOLS = {
       if (s.type === "deal") {
         await c.query("update deal set next_date=$2, updated_by=$3 where id=$1 /* dealroom:set-next-date */",
           [s.id, args.due_on || null, actor.id]);
-        await writeEvent(c, actor, "set-next-action", "deal", s.id, {
-          field: "next_date", old: { next_date: oldDate }, new: { next_date: args.due_on || null },
-          recorded_at_after_lock: true, idempotency_key: args.idempotency_key,
-        });
+        if (oldDate !== (args.due_on || null)) {
+          await writeEvent(c, actor, "set-next-action", "deal", s.id, {
+            field: "next_date", old: { next_date: oldDate }, new: { next_date: args.due_on || null },
+            recorded_at_after_lock: true, idempotency_key: args.idempotency_key,
+          });
+        }
       }
       return { ok: true, next_action_id: r.rows[0].id, subject: s, owner: ownerSlug,
         dropped_post_call_action_ids: droppedPostCallIds };
