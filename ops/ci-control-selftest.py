@@ -105,6 +105,15 @@ class Controls(unittest.TestCase):
         self.assertFalse(any(row == {'classes': 'gates'} for row in exclusions))
         self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
 
+    def test_ready_metadata_does_not_replace_required_check(self):
+        wf = workflow()
+        triggers = wf['on']['pull_request']['types']
+        self.assertNotIn('ready_for_review', triggers)
+        self.assertNotIn('edited', triggers)
+        self.assertNotIn('labeled', triggers)
+        self.assertTrue({'opened', 'synchronize', 'reopened'} <= set(triggers))
+        self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
+
     def test_events(self):
         wf = workflow()
         def event(action, sha='a', base='main', run=1):
@@ -118,7 +127,7 @@ class Controls(unittest.TestCase):
         old = state(event('opened'))
         new = state(event('synchronize',sha='b',run=2))
         self.assertEqual(old[0],new[0]); self.assertTrue(new[1])
-        for action in ('opened', 'synchronize', 'reopened', 'ready_for_review', 'converted_to_draft'):
+        for action in wf['on']['pull_request']['types']:
             self.assertEqual(state(event(action))[2:], (True, True))
         changed = state(event('synchronize',base='release',run=4))
         self.assertEqual(changed[0],old[0]); self.assertEqual(changed[1:],(True,True,True))

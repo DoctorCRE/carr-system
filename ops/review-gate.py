@@ -22,7 +22,8 @@ def approved(pr, files, comments):
     return any(c["body"].splitlines()[:1] == ["VERDICT: APPROVE"]
                and len(c["body"].splitlines()) >= 3
                and (c["body"].splitlines()[2] in ("Reviewer: grok", "Reviewer: the Dot", "Reviewer: orchestrator re-pin")
-                    or c["body"].splitlines()[2].startswith("Reviewer: Grok"))
+                    or c["body"].splitlines()[2].startswith(("Reviewer: Grok", "Reviewer: Claude "))
+                    or c["body"].splitlines()[2] == "Reviewer: Claude")
                and f'Reviewed-SHA: {pr["head"]["sha"]}' in c["body"].splitlines() for c in comments)
 
 
