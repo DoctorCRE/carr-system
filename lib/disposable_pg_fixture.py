@@ -48,7 +48,27 @@ _main_launches = 0
 _pending_signal = None
 
 
-def _orphan_segments():
+def _fixture_segment_ids(directory, prefix):
+    segments = set()
+    for root in directory.iterdir():
+        if not root.name.startswith(prefix) or root.is_symlink() or not root.is_dir():
+            continue
+        if root.stat().st_uid != os.getuid():
+            continue
+        for pid_file in root.rglob('postmaster.pid'):
+            try:
+                if pid_file.is_symlink() or not pid_file.resolve().is_relative_to(root):
+                    continue
+                fields = pid_file.read_text().splitlines()[6].split()
+                if len(fields) == 2 and all(field.isdecimal() for field in fields):
+                    segments.add(str(int(fields[1])))
+            except (OSError, UnicodeError, IndexError):
+                continue
+    return segments
+
+
+def _orphan_segments(directory, prefix):
+    candidates = _fixture_segment_ids(directory, prefix)
     rows = {}
     columns = set()
     commands = [['ipcs', '-m', '-a']] if sys.platform == 'darwin' else [
@@ -78,6 +98,8 @@ def _orphan_segments():
     owner = pwd.getpwuid(os.getuid()).pw_name
     orphans = set()
     for ident, row in rows.items():
+        if ident not in candidates:
+            continue
         if row['owner'] not in (owner, str(os.getuid())) or row.get('nattch') != '0':
             continue
         creator = int(row.get('cpid', '0'))
@@ -92,23 +114,23 @@ def _orphan_segments():
     return orphans
 
 
-def _reclaim_orphan_segments():
+def _reclaim_orphan_segments(directory, prefix):
     try:
-        for ident, creator in _orphan_segments():
-            if (ident, creator) in _orphan_segments():
+        for ident, creator in _orphan_segments(directory, prefix):
+            if (ident, creator) in _orphan_segments(directory, prefix):
                 subprocess.run(['ipcrm', '-m', ident], capture_output=True, text=True,
                                timeout=5, check=True)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         print(f'disposable PostgreSQL shared-memory preflight unavailable: {exc}', file=sys.stderr)
 
 
-def _diagnose_shared_memory_failure(output):
+def _diagnose_shared_memory_failure(output, directory, prefix):
     output = str(output).lower()
     if 'no space left on device' not in output or not any(
             term in output for term in ('shared memory', 'shared-memory', 'shmget')):
         return
     try:
-        count = f'{len(_orphan_segments())} orphan segments (owned, unattached, dead creator)'
+        count = f'{len(_orphan_segments(directory, prefix))} orphan segments (owned, unattached, dead creator)'
     except (OSError, ValueError, subprocess.SubprocessError):
         count = 'orphan segment count unavailable'
     raise RuntimeError(
@@ -145,6 +167,7 @@ if threading.current_thread() is threading.main_thread():
 class DisposablePostgres:
     def __init__(self, prefix, pg_ctl, env=None, runner=None, directory='/tmp'):
         self.root = Path(tempfile.mkdtemp(prefix=prefix, dir=directory)).resolve()
+        self._prefix = prefix
         self._identity = self.root.stat().st_ino
         self.pg_ctl = Path(pg_ctl)
         self.env = dict(env or os.environ, LC_ALL='C')
@@ -195,19 +218,21 @@ class DisposablePostgres:
                 # ("postmaster became multithreaded") without a valid locale.
                 kwargs['env'] = {**(kwargs.get('env') or self.env), 'LC_ALL': 'C'}
                 if launch:
-                    _reclaim_orphan_segments()
+                    _reclaim_orphan_segments(self.root.parent, self._prefix)
                 try:
                     result = (self.runner or subprocess.run)(args, **kwargs)
                 except Exception as exc:
                     if launch:
                         _diagnose_shared_memory_failure(
                             self._failure_output(args,
-                                f'{exc} {getattr(exc, "stdout", "")} {getattr(exc, "stderr", "")}'))
+                                f'{exc} {getattr(exc, "stdout", "")} {getattr(exc, "stderr", "")}'),
+                            self.root.parent, self._prefix)
                     raise
                 if launch and result.returncode:
                     _diagnose_shared_memory_failure(
                         self._failure_output(args,
-                            f'{getattr(result, "stdout", "")} {getattr(result, "stderr", "")}'))
+                            f'{getattr(result, "stdout", "")} {getattr(result, "stderr", "")}'),
+                        self.root.parent, self._prefix)
                 return result
             finally:
                 if main_launch:

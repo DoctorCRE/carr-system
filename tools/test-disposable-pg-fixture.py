@@ -69,6 +69,7 @@ m 11 0 --rw {owner} staff {owner} staff 0 56 900001 0
 m 12 0 --rw {owner} staff {owner} staff 1 56 900002 0
 m 13 0 --rw {owner} staff {owner} staff 0 56 {os.getpid()} 0
 m 14 0 --rw another staff another staff 0 56 900004 0
+m 15 0 --rw {owner} staff {owner} staff 0 56 900005 0
 """
         removed = []
         def system(args, **kwargs):
@@ -86,6 +87,11 @@ m 14 0 --rw another staff another staff 0 56 900004 0
              patch('lib.disposable_pg_fixture.os.kill', side_effect=alive), \
              patch('lib.disposable_pg_fixture.sys.platform', 'darwin'):
             with DisposablePostgres('shm-test-', '/fake/pg_ctl') as fixture:
+                for ident in (11, 12, 13, 14):
+                    data = fixture.root / f'data-{ident}'
+                    data.mkdir()
+                    (data / 'postmaster.pid').write_text(
+                        f'1\ndata\n0\n5432\n/tmp\nlocalhost\n0 {ident}\n')
                 fixture.run(['/fake/initdb', '-D', fixture.root / 'data'])
 
     def test_shared_memory_exhaustion_names_environment_fault_and_orphan_count(self):
@@ -117,6 +123,9 @@ m 14 0 --rw another staff another staff 0 56 900004 0
              patch('lib.disposable_pg_fixture.os.kill', side_effect=ProcessLookupError()), \
              patch('lib.disposable_pg_fixture.sys.platform', 'linux'):
             with DisposablePostgres('shm-test-', '/fake/pg_ctl') as fixture:
+                data = fixture.root / 'data'
+                data.mkdir()
+                (data / 'postmaster.pid').write_text('1\ndata\n0\n5432\n/tmp\nlocalhost\n0 21\n')
                 fixture.run(['/fake/pg_ctl', '-D', fixture.root / 'data', 'start'])
         self.assertEqual(removed, [])
         self.assertGreaterEqual(inspections, 2)
@@ -173,7 +182,7 @@ print(ident)
         ids = []
         attached = None
         try:
-            for _ in range(2):
+            for _ in range(3):
                 child = subprocess.run([sys.executable, '-c', script], capture_output=True,
                                        text=True, check=True)
                 ids.append(int(child.stdout))
@@ -197,8 +206,19 @@ print(ident)
                 return result
             with patch('lib.disposable_pg_fixture.subprocess.run', side_effect=inspect):
                 with DisposablePostgres('shm-test-', '/fake/pg_ctl', runner=successful) as fixture:
-                    fixture.run(['/fake/initdb', '-D', fixture.root / 'data'])
+                    with tempfile.TemporaryDirectory(prefix='shm-test-', dir='/tmp') as stale:
+                        data = Path(stale) / 'data'
+                        data.mkdir()
+                        (data / 'postmaster.pid').write_text(
+                            f'1\ndata\n0\n5432\n/tmp\nlocalhost\n0 {ids[0]}\n')
+                        attached_data = Path(stale) / 'attached'
+                        attached_data.mkdir()
+                        (attached_data / 'postmaster.pid').write_text(
+                            f'1\ndata\n0\n5432\n/tmp\nlocalhost\n0 {ids[1]}\n')
+                        fixture.run(['/fake/initdb', '-D', fixture.root / 'data'])
             self.assertEqual(kernel.shmctl(ids[0], 0, None), -1, 'orphan must already be removed')
+            self.assertEqual(kernel.shmctl(ids[2], 0, None), 0,
+                             'foreign non-fixture orphan must survive preflight')
             table = real_run(['ipcs', '-m'], capture_output=True, text=True, check=True).stdout
             attached_rows = [line.split() for line in table.splitlines()
                              if len(line.split()) > 1 and line.split()[1] == str(ids[1])]
