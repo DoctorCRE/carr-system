@@ -43,7 +43,7 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT = ROOT / "db" / "schema.sql"
-HANDLERS = sorted((ROOT / "mcp-server" / "src").glob("*.js"))
+HANDLERS = sorted(path for path in (ROOT / "mcp-server" / "src").iterdir() if path.suffix in (".js", ".ts"))
 
 GRANT = re.compile(r"^\s*grant\s+.+?\s+on\s+table\s+([a-z_]+\.[a-z_]+)\s+to\b", re.I | re.M)
 # Captures the privilege list and the role list too, so "granted, but not to the

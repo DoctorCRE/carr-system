@@ -13,7 +13,7 @@
 // WHAT IT SEALS, and every field is a fact about the REVISION rather than about
 // the checkout standing on it:
 //
-//   source_digest      git's own blob id for every candidate `.js` path in that
+//   source_digest      git's own blob id for every candidate `.js`/`.ts` path in that
 //                      revision's tree, by path. This is what the revision
 //                      SEALED.
 //   artifact_digest    sha256 of each of those blobs' CONTENT, by the same
@@ -132,8 +132,8 @@ export function sealCandidateManifest(repo, rev = "HEAD") {
   if (!REVISION.test(candidateTreeId))
     throw new Error(`${CANDIDATE_PATH} is not a tree at ${gitSha}`);
 
-  const sealed = sealedPaths(repo, gitSha, CANDIDATE_PATH).filter(f => f.path.endsWith(".js"));
-  if (sealed.length === 0) throw new Error(`${CANDIDATE_PATH} sealed no .js paths at ${gitSha}`);
+  const sealed = sealedPaths(repo, gitSha, CANDIDATE_PATH).filter(f => /\.[jt]s$/.test(f.path));
+  if (sealed.length === 0) throw new Error(`${CANDIDATE_PATH} sealed no .js or .ts paths at ${gitSha}`);
   const contents = blobContents(repo, sealed.map(file => file.blob_id));
 
   const environmentBytes = blobAt(repo, gitSha, ENVIRONMENT_MANIFEST_PATH);

@@ -213,7 +213,7 @@ test("no read verb filters the actor table on a column carr_reader cannot read",
   const LITERAL = /`(?:[^`\\]|\\.)*`|'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"/g;
 
   const found = [];
-  for (const name of fs.readdirSync(srcDir).filter(f => f.endsWith(".js")).sort()) {
+  for (const name of fs.readdirSync(srcDir).filter(f => /\.[jt]s$/.test(f)).sort()) {
     const text = fs.readFileSync(path.join(srcDir, name), "utf8");
     for (const m of text.matchAll(LITERAL)) {
       if (!ACTOR.test(m[0]) || !PREDICATE.test(m[0])) continue;
