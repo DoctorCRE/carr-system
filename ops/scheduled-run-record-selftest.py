@@ -215,6 +215,37 @@ def main() -> int:
           state == "failed" and fc == "tool_error")
     os.unlink(p)
 
+    social_launch = json.loads(LAUNCH.format(sid="fx-social", task="social-batch-weekly"))
+    state, fc, detail = compute_outcome([social_launch], json.dumps(social_launch))
+    check("social batch without a reported queue result -> failed/no_output",
+          state == "failed" and fc == "social_batch_no_output")
+
+    failure_marker = ("SOCIAL_BATCH_RESULT state=failed week_start=2026-11-02 "
+                      "queue_count=0 complete=true failure_class=zero_drafts")
+    social_failure = {"message": {"role": "assistant", "content": [
+        {"type": "tool_result", "is_error": True, "content": failure_marker}]}}
+    social_summary = {"message": {"role": "assistant", "content": [
+        {"type": "text", "text": "The social batch ended with no scheduled posts."}]}}
+    state, fc, detail = compute_outcome(
+        [social_launch, social_failure, social_summary],
+        json.dumps([social_launch, social_failure, social_summary]))
+    check("social batch failure remains failed after its summary",
+          state == "failed" and fc == "social_batch_zero_drafts")
+
+    success_marker = ("SOCIAL_BATCH_RESULT state=succeeded week_start=2026-11-02 "
+                      "queue_count=12 complete=true failure_class=none")
+    social_success = {"message": {"role": "assistant", "content": [
+        {"type": "tool_result", "is_error": False, "content": success_marker}]}}
+    state, fc, detail = compute_outcome(
+        [social_launch, social_success], json.dumps([social_launch, social_success]))
+    check("social batch succeeds only with a reported covered-week queue",
+          state == "succeeded" and fc is None)
+
+    other_launch = json.loads(LAUNCH.format(sid="fx-other", task="loop-drain-weekdays"))
+    state, fc, detail = compute_outcome([other_launch], json.dumps(other_launch))
+    check("other scheduled tasks keep their existing outcome rule",
+          state == "succeeded" and fc is None)
+
     # ── argv construction (the piece that maps outcome -> ops-record call) ─
     print("\n3. ops-record.py argv construction")
     argv = build_run_args("loop-drain-weekdays", "failed", "gate_denied",
@@ -274,6 +305,35 @@ def main() -> int:
     rc, out = run_hook({"hook_event_name": "PreToolUse", "session_id": "wrong-event",
                          "transcript_path": "/dev/null"})
     check("a non-Stop event is ignored", rc == 0 and out.strip() == "")
+
+    sid = "selftest-social-empty-" + uuid.uuid4().hex[:8]
+    p = write_fixture([LAUNCH.format(sid=sid, task="social-batch-weekly")])
+    rc, out = run_hook({"hook_event_name": "Stop", "session_id": sid,
+                         "transcript_path": p, "stop_hook_active": False},
+                        env=unreachable_db_env())
+    digest = subprocess.run([PY, os.path.join(REPO, "hooks", "job-watchdog-digest.py")],
+                            input="{}", text=True, capture_output=True, timeout=30,
+                            env=dict(unreachable_db_env(), CARR_JOB_ROOT=PRIVATE_ROOT))
+    context = json.loads(digest.stdout)["hookSpecificOutput"]["additionalContext"] if digest.stdout else ""
+    check("a social batch without a queue result reaches the existing watchdog digest",
+          rc == 0 and digest.returncode == 0 and "social-batch-weekly" in context
+          and "no batch output" in context, out + digest.stderr + context)
+    os.unlink(p)
+
+    sid = "selftest-social-zero-" + uuid.uuid4().hex[:8]
+    p = write_fixture([LAUNCH.format(sid=sid, task="social-batch-weekly"),
+                       json.dumps(social_failure)])
+    rc, out = run_hook({"hook_event_name": "Stop", "session_id": sid,
+                         "transcript_path": p, "stop_hook_active": False},
+                        env=unreachable_db_env())
+    digest = subprocess.run([PY, os.path.join(REPO, "hooks", "job-watchdog-digest.py")],
+                            input="{}", text=True, capture_output=True, timeout=30,
+                            env=dict(unreachable_db_env(), CARR_JOB_ROOT=PRIVATE_ROOT))
+    context = json.loads(digest.stdout)["hookSpecificOutput"]["additionalContext"] if digest.stdout else ""
+    check("a social batch reporting zero drafts reaches the existing watchdog digest",
+          rc == 0 and digest.returncode == 0 and "zero drafts" in context,
+          out + digest.stderr + context)
+    os.unlink(p)
 
     print(f"\nTIER 1: {len(PASSES)} passed, {len(FAILURES)} failed")
 

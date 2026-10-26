@@ -1,3 +1,4 @@
+import { vendorMeetingTools } from "./vendor-meetings.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
@@ -83,6 +84,7 @@ import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
 import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.js";
 import { partyIdentityTools } from "./party-identity.js";
+import { partyDuplicateCandidateTools } from "./party-duplicate-candidates.js";
 import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.ts";
 import { readBriefAssurance } from "./brief-assurance.ts";
 import { readNeedsJoe } from "./needs-joe.js";
@@ -3735,7 +3737,7 @@ export const TOOLS = {
       b.phase, b.phase_sort, b.segment, b.outcome, b.lead_owner, b.last_touch, b.notes_path,
       d.operating_state, d.parking_note, to_jsonb(d.invoiced_on)#>>'{}' as invoiced_on,
       to_jsonb(d.closed_on)#>>'{}' as closed_on, d.lane
-      from v_deal_board b join v_deal_room_board d on d.id=b.id
+      from v_deal_board b join v_open_deal_room_board d on d.id=b.id
       order by b.phase_sort, b.name /* dealboard:operating-state */`)).rows }),
   },
 
@@ -3802,7 +3804,7 @@ export const TOOLS = {
                              and e.field = any($3::text[])
                            order by e.field, e.recorded_at desc, e.id desc) latest
                 ), '{}'::jsonb) as field_base
-           from v_deal_room_board b
+           from v_open_deal_room_board b
            join v_deal_reconciliation_read r on r.id=b.id
            join v_client_engagement_status ce on ce.client_id=b.client_id
           where ($1 = 'all' or b.workspace_kind = $1)
@@ -3820,7 +3822,7 @@ export const TOOLS = {
                 case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind
            from v_deal_board b
            left join v_client_account a on a.client_id=b.client_id and a.is_sub_client
-          where (b.phase = 'closed' or b.outcome is not null or b.invoiced_on is not null)
+          where (b.phase in ('closed', 'invoiced') or b.outcome is not null or b.closed_on is not null or b.invoiced_on is not null)
             and ($1 = 'all' or case when a.account_client_id is null then 'team' else 'national_account' end = $1)
             and ($2::uuid is null or a.account_client_id = $2::uuid)
           order by b.closed_on desc nulls last, b.name, b.id
@@ -3844,7 +3846,7 @@ export const TOOLS = {
             and ($3::uuid is null or account_client_id=$3::uuid)
           order by started_at desc limit 1`,
         [actor.slug, workspace, args.account_client_id || null]);
-      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows.map(d => ({ ...d, short_name: shortDealHeading(d) })), closed_deals: closedDeals.rows.filter(d => d.outcome === 'won' || !d.outcome && (d.closed_on || d.invoiced_on)), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
+      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows.map(d => ({ ...d, short_name: shortDealHeading(d) })), closed_deals: closedDeals.rows.filter(d => d.outcome !== 'lost'), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
         open_session: session.rows[0] || null };
     },
   },
@@ -3930,8 +3932,10 @@ export const TOOLS = {
            from capture_call_context($1::uuid[])
           order by deal_name,deal_id,participant_role,participant_name
           /* capture:tool-call-context */`, [ids])).rows;
-      if (new Set(rows.map(row => String(row.deal_id))).size !== ids.length)
-        throw new ToolError({ error: "invalid_call_context_deals" });
+      const returnedIds = new Set(rows.map(row => String(row.deal_id).toLowerCase()));
+      if (returnedIds.size !== ids.length)
+        throw new ToolError({ error: "invalid_call_context_deals",
+          invalid_deal_ids: ids.filter(id => !returnedIds.has(id.toLowerCase())) });
       const byDeal = new Map();
       for (const row of rows) {
         const deal = byDeal.get(row.deal_id) || { id: row.deal_id, name: row.deal_name,
@@ -8970,10 +8974,12 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "board-answers": "mcp-server/src/board-answers.js",
   "research-sites": "mcp-server/src/research-sites.js",
   "party-identity": "mcp-server/src/party-identity.js",
+  "party-duplicate-candidates": "mcp-server/src/party-duplicate-candidates.js",
   "schedule-board": "mcp-server/src/schedule-board.js",
   "doc-suggestions": "mcp-server/src/doc-suggestions.js",
   "whats-new": "mcp-server/src/whats-new.js",
   "invoice-tracker": "mcp-server/src/invoice-tracker.js",
+  "vendor-meetings": "mcp-server/src/vendor-meetings.js",
 });
 
 function bindToolSource(tool, source) {
@@ -9118,7 +9124,7 @@ registerTools({
 
   "ping-deal-checklist": {
     write: true,
-    description: "Queue action-required notifications for one active deal's due and overdue standard checklist deadlines and open sourced stored checklist items. The recorded deal owner must be Joe or Dell. Uses current doctrine, sourced deadlines, quiet hours and recipient/item/date deduplication. Returns queued notification receipts, never a delivery claim. Does not schedule, send a device message or change deal facts.",
+    description: "Queue action-required notifications for one active deal's due and overdue standard checklist deadlines and open sourced stored checklist items. The recorded deal owner must be Joe or Dell. Uses current doctrine, sourced deadlines, morning holds and recipient/item/date deduplication. Returns queued notification receipts, never a delivery claim. Does not schedule, send a device message or change deal facts.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       deal: { type: "string" }, idempotency_key: { type: "string" },
     }, required: ["deal", "idempotency_key"] },
@@ -9143,20 +9149,26 @@ registerTools({
         .filter(item => item.status === "open" && item.source_ref?.trim()
           && isCalendarDate(item.due_on) && item.due_on <= checklist.observed_on)
         .map(item => ({ id: `deal-item:${item.id}`, due_on: item.due_on }));
+      await c.query("select pg_advisory_xact_lock(hashtextextended('deal-checklist:' || $1, 0))", [deal.id]);
       for (const item of [...checklist.due_items, ...storedDue]) {
-        await writeEvent(c, actor, "ping-deal-checklist", "deal", deal.id, {
-          field: "checklist_ping", new: { checklist_item_id: item.id, due_on: item.due_on, recipient: deal.owner },
-          cause: "automation_job", idempotency_key: args.idempotency_key,
-        });
-        const eventId = (await c.query(
-          `select id from event where subject_type='deal' and subject_id=$1 and verb='ping-deal-checklist'
-             and field='checklist_ping' and idempotency_key=$2 and new_value->>'checklist_item_id'=$3
-           order by recorded_at desc,id desc limit 1`, [deal.id, args.idempotency_key, item.id])).rows[0]?.id;
+        const eventQuery = `select id from event where subject_type='deal' and subject_id=$1 and verb='ping-deal-checklist'
+             and field='checklist_ping' and new_value->>'checklist_item_id'=$2
+             and new_value->>'due_on'=$3 and new_value->>'recipient'=$4
+           order by recorded_at desc,id desc limit 1`;
+        const eventArgs = [deal.id, item.id, item.due_on, deal.owner];
+        let eventId = (await c.query(eventQuery, eventArgs)).rows[0]?.id;
+        if (!eventId) {
+          await writeEvent(c, actor, "ping-deal-checklist", "deal", deal.id, {
+            field: "checklist_ping", new: { checklist_item_id: item.id, due_on: item.due_on, recipient: deal.owner },
+            cause: "automation_job", idempotency_key: args.idempotency_key,
+          });
+          eventId = (await c.query(eventQuery, eventArgs)).rows[0]?.id;
+        }
         const minted = (await c.query(
           "select ops.mint_notification($1,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11) as result",
           ["event", eventId, "deal", deal.id, "A deal checklist item is due. Open the deal checklist for details.",
             "action_required", "/notifications", `deal-checklist:${deal.id}:${item.id}:${item.due_on}`,
-            deal.owner, false, false])).rows[0]?.result;
+            deal.owner, false, true])).rows[0]?.result;
         if (!minted?.ok || !minted.notification_id)
           throw new ToolError({ error: "deal_checklist_notification_unavailable" });
         result[minted.deduplicated ? "deduplicated" : "queued"]++;
@@ -9182,10 +9194,9 @@ registerTools({
                  b.workspace_kind, b.account_client_id, b.operating_state, b.outcome,
                  to_jsonb(b.closed_on)#>>'{}' as closed_on,
                  to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on
-            from v_deal_room_board b
+            from v_open_deal_room_board b
             join v_client_engagement_status ce on ce.client_id = b.client_id
-           where b.operating_state = 'active' and b.phase <> 'closed'
-             and b.outcome is null and b.closed_on is null and b.invoiced_on is null
+           where b.operating_state = 'active'
            order by b.id limit 1001
         ), dates as materialized (
           select d.deal_id, d.id, d.kind, to_jsonb(d.due_on)#>>'{}' as due_on, d.note, d.status
@@ -10282,6 +10293,7 @@ registerTools(systemWorkTools(), "system-work-census");
 registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
 registerTools(researchSiteTools({ withEnvelope, writeEvent }), "research-sites");
 registerTools(partyIdentityTools({ withEnvelope, writeEvent, versionGuard, resolvePartyForWrite }), "party-identity");
+registerTools(partyDuplicateCandidateTools(), "party-duplicate-candidates");
 registerTools(scheduleBoardTools(), "schedule-board");
 registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject,
   canExercisePartnerAuthority, partnerAuthoritySlugForActor }), "deal-items");
@@ -10453,5 +10465,7 @@ registerTools(assuranceHealthStoreTools({ withEnvelope, ToolError }), "assurance
 // to receive server-established actor/sponsor transaction settings; its tool
 // contract remains read-only and the SQL function is stable.
 registerTools(ruleContextRuntimeTools({ withEnvelope, ToolError }), "rule-context-runtime");
+
+registerTools(vendorMeetingTools(), "vendor-meetings");
 
 Object.freeze(TOOLS);
