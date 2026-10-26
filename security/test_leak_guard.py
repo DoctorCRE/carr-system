@@ -153,7 +153,7 @@ class LeakGuardTest(unittest.TestCase):
         refs = f'refs/heads/feature {head} refs/heads/feature {before_merge}\n'
         self.git('remote', 'add', 'origin', str(self.receiver('origin')))
         self.git('push', '-q', 'origin', 'main', before_merge + ':refs/heads/feature')
-        # ops/ci.sh check_secret runs this when the pre-push hook sets CARR_CI_RANGE.
+        # ops/ci.sh check_secret runs this when CARR_CI_RANGE is set outside a pull request.
         result = self.run_guard('--range', before_merge + '..' + head, '--generic-only')
         self.assertEqual(result.returncode, 0, 'ci.sh pre-push range: ' + result.stdout + result.stderr)
         hook = subprocess.run(['python3', str(SCRIPT), '--root', str(self.root), '--pre-push', '--generic-only'],
