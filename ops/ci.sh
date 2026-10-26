@@ -347,16 +347,19 @@ PYEOF
     fi
   done; fi
   # Shard 1 owns the repository-wide invariants; shard 2 used to rerun them.
-  local invariants=""
   if [ "$GATE_SHARD" -eq 1 ]; then
     run_quiet "$LOGDIR/safety-hooks.log" "$PY" hooks/gate-integrity.py --strict \
       || { failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
-    invariants="audit-queue-freshness-check stale-count-check
-      rule-load-layer-check rule-classification-parity-check
-      selftest-git-isolation-check sync-core-rule-ids rule-route-coverage
-      migration-order-gate migration-safety-gate"
   fi
-  for inv in $invariants; do
+
+  for inv in audit-queue-freshness-check \
+             stale-count-check \
+             rule-load-layer-check rule-classification-parity-check \
+             selftest-git-isolation-check \
+             sync-core-rule-ids rule-route-coverage \
+             migration-order-gate \
+             migration-safety-gate; do
+    [ "$GATE_SHARD" -eq 1 ] || break
     [ -f "ops/$inv.py" ] || continue
     local inv_args=()
     case "$inv" in
