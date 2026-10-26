@@ -14,6 +14,81 @@ const compare = observations => TOOLS['compare-fact-observations'].handler(db, a
   entity_ref: 'synthetic-deal-1', observations,
 });
 
+test('review items carry their shared sources and extraction domains beside the cited observations', async () => {
+  const extraction = { pass: 'schema', model: 'synthetic-model' };
+  const inputs = [observation('lease', { extraction }), observation('counter', { value: '25', extraction })];
+  const out = await compare(inputs);
+  assert.deepEqual(out.review_items[0].shared_source_groups, [{ fact_key: 'base_rent_per_sf',
+    basis: 'document_ref', source_ref: 'synthetic-lease-v1', observation_ids: ['lease', 'counter'] }]);
+  assert.deepEqual(out.review_items[0].shared_extraction_groups, [{ fact_key: 'base_rent_per_sf',
+    pass: 'schema', model: 'synthetic-model', observation_ids: ['lease', 'counter'] }]);
+  assert.deepEqual(out.review_items[0].observations.map(o => o.input), inputs);
+});
+
+test('serialized review items isolate correlation evidence by field and preserve source order after priority sorting', async () => {
+  const source = { ...observation('x').source, content_hash: 'A'.repeat(64), document_family_id: 'root' };
+  const extraction = { pass: 'schema', model: 'synthetic-model' };
+  const term = id => {
+    const input = observation(id, { source, extraction, fact_key: 'term_months', value: '60', unit: 'months',
+      confidence_tier: 'verify_band' });
+    delete input.expense_basis;
+    return input;
+  };
+  const inputs = [term('term-first'), observation('rent-first', { source, extraction }),
+    term('term-second'), observation('rent-second', { source, extraction, value: '25', method: 'ocr' })];
+  const args = { entity_ref: 'synthetic-deal-1', observations: inputs };
+  const original = structuredClone(args);
+  const out = JSON.parse(JSON.stringify(await executeRegisteredTool(db, actor, 'compare-fact-observations', args)));
+  assert.deepEqual(out.review_items.map(item => [item.fact_key, item.priority, item.observation_ids]), [
+    ['base_rent_per_sf', 'high', ['rent-first', 'rent-second']],
+    ['term_months', 'normal', ['term-first', 'term-second']],
+  ]);
+  assert.deepEqual(out.review_items.map(item => item.shared_source_groups), [
+    [
+      { fact_key: 'base_rent_per_sf', basis: 'document_ref', source_ref: 'synthetic-lease-v1', observation_ids: ['rent-first', 'rent-second'] },
+      { fact_key: 'base_rent_per_sf', basis: 'content_hash', source_ref: 'a'.repeat(64), observation_ids: ['rent-first', 'rent-second'] },
+      { fact_key: 'base_rent_per_sf', basis: 'document_family_id', source_ref: 'root', observation_ids: ['rent-first', 'rent-second'] },
+    ],
+    [
+      { fact_key: 'term_months', basis: 'document_ref', source_ref: 'synthetic-lease-v1', observation_ids: ['term-first', 'term-second'] },
+      { fact_key: 'term_months', basis: 'content_hash', source_ref: 'a'.repeat(64), observation_ids: ['term-first', 'term-second'] },
+      { fact_key: 'term_months', basis: 'document_family_id', source_ref: 'root', observation_ids: ['term-first', 'term-second'] },
+    ],
+  ]);
+  assert.deepEqual(out.review_items.map(item => item.shared_extraction_groups), [
+    [{ fact_key: 'base_rent_per_sf', pass: 'schema', model: 'synthetic-model', observation_ids: ['rent-first', 'rent-second'] }],
+    [{ fact_key: 'term_months', pass: 'schema', model: 'synthetic-model', observation_ids: ['term-first', 'term-second'] }],
+  ]);
+  assert.deepEqual(out.review_items[0].observations.map(o => o.input), [original.observations[1], original.observations[3]]);
+  assert.deepEqual(out.review_items[1].observations.map(o => o.input), [original.observations[0], original.observations[2]]);
+  assert.deepEqual(out.review_items[0].reasons, ['conflict', 'human_review', 'ocr']);
+  assert.equal(out.review_items[0].observations[1].effective_confidence_tier, 'human_review');
+  assert.deepEqual(out.shared_source_groups.map(group => group.fact_key), [
+    'term_months', 'term_months', 'term_months', 'base_rent_per_sf', 'base_rent_per_sf', 'base_rent_per_sf',
+  ]);
+  assert.deepEqual(args, original);
+  assert.equal(out.evidence_independence, 'not_assessed');
+  assert.equal(out.canonical, false);
+  assert.equal(out.records_written, 0);
+});
+
+test('review items with no reported correlation keep independence unknown and sources unverified', async () => {
+  for (const extraction of [undefined, { pass: 'verify', model: 'synthetic-model' }]) {
+    const first = observation('lease', { confidence_tier: 'verify_band', extraction: { pass: 'schema', model: 'synthetic-model' } });
+    const second = observation('counter', { source: { ...first.source, document_ref: 'synthetic-counter' } });
+    if (extraction) second.extraction = extraction;
+    const out = await compare([first, second]);
+    assert.deepEqual(out.review_items[0].shared_source_groups, []);
+    assert.deepEqual(out.review_items[0].shared_extraction_groups, []);
+    assert.equal(out.fields[0].status, 'agreement');
+    assert.equal(out.evidence_independence, 'not_assessed');
+    assert.equal(out.source_verification, 'unverified');
+    assert.equal(out.entity_binding, 'caller_asserted');
+    assert.equal(out.canonical, false);
+    assert.equal(out.records_written, 0);
+  }
+});
+
 test('matching extraction pass and model expose shared failure domains across documents and extractor versions', async () => {
   const extraction = { pass: 'schema', model: 'synthetic-model-v1' };
   const inputs = [
@@ -364,6 +439,8 @@ test('conflicting auto-accept observations produce one high-priority review item
   assert.deepEqual(out.review_items.map(({ observations, ...item }) => item), [{
     entity_ref: 'synthetic-deal-1', fact_key: 'base_rent_per_sf', priority: 'high',
     observation_ids: ['lease', 'counter', 'revision'], reasons: ['conflict'],
+    shared_source_groups: [{ fact_key: 'base_rent_per_sf', basis: 'document_ref',
+      source_ref: 'synthetic-lease-v1', observation_ids: ['lease', 'counter', 'revision'] }], shared_extraction_groups: [],
   }]);
   assert.equal(out.canonical, false);
   assert.equal(out.records_written, 0);
@@ -384,13 +461,18 @@ test('review tiers route once per field with high priority before verify-band fi
   ]);
   assert.deepEqual(out.review_items.map(({ observations, ...item }) => item), [
     { entity_ref: 'synthetic-deal-1', fact_key: 'base_rent_per_sf', priority: 'high',
-      observation_ids: ['rent-review', 'rent-verify'], reasons: ['human_review', 'verify_band'] },
+      observation_ids: ['rent-review', 'rent-verify'], reasons: ['human_review', 'verify_band'],
+      shared_source_groups: [{ fact_key: 'base_rent_per_sf', basis: 'document_ref',
+        source_ref: 'synthetic-lease-v1', observation_ids: ['rent-review', 'rent-verify'] }], shared_extraction_groups: [] },
     { entity_ref: 'synthetic-deal-1', fact_key: 'landlord_ti_per_sf', priority: 'high',
-      observation_ids: ['ti-review'], reasons: ['human_review'] },
+      observation_ids: ['ti-review'], reasons: ['human_review'],
+      shared_source_groups: [], shared_extraction_groups: [] },
     { entity_ref: 'synthetic-deal-1', fact_key: 'term_months', priority: 'normal',
-      observation_ids: ['term-verify'], reasons: ['verify_band'] },
+      observation_ids: ['term-verify'], reasons: ['verify_band'],
+      shared_source_groups: [], shared_extraction_groups: [] },
     { entity_ref: 'synthetic-deal-1', fact_key: 'free_rent_months', priority: 'normal',
-      observation_ids: ['free-verify'], reasons: ['verify_band'] },
+      observation_ids: ['free-verify'], reasons: ['verify_band'],
+      shared_source_groups: [], shared_extraction_groups: [] },
   ]);
 });
 
@@ -407,6 +489,7 @@ test('mixed text and OCR fields require OCR human review without changing suppli
   assert.deepEqual(out.review_items.map(({ observations, ...item }) => item), [{
     entity_ref: 'synthetic-deal-1', fact_key: 'term_months', priority: 'high',
     observation_ids: ['ocr'], reasons: ['human_review', 'ocr'],
+    shared_source_groups: [], shared_extraction_groups: [],
   }]);
   assert.equal(out.canonical, false);
   assert.equal(out.records_written, 0);
@@ -423,6 +506,8 @@ test('registered dispatch routes all OCR tiers to human review even when values 
     assert.deepEqual(out.review_items.map(({ observations, ...item }) => item), [{
       entity_ref: 'synthetic-dispatch-deal', fact_key: 'base_rent_per_sf', priority: 'high',
       observation_ids: ['text', 'scan'], reasons: ['human_review', 'ocr'],
+      shared_source_groups: [{ fact_key: 'base_rent_per_sf', basis: 'document_ref',
+        source_ref: 'synthetic-lease-v1', observation_ids: ['text', 'scan'] }], shared_extraction_groups: [],
     }]);
     assert.deepEqual(out.observations.map(o => o.input), args.observations);
     assert.equal(out.evidence_independence, 'not_assessed');
@@ -440,6 +525,8 @@ test('conflict and tier reasons share one review item containing every competing
   assert.deepEqual(out.review_items.map(({ observations, ...item }) => item), [{
     entity_ref: 'synthetic-deal-1', fact_key: 'base_rent_per_sf', priority: 'high',
     observation_ids: ['scan', 'verify', 'review'], reasons: ['conflict', 'human_review', 'verify_band', 'ocr'],
+    shared_source_groups: [{ fact_key: 'base_rent_per_sf', basis: 'document_ref',
+      source_ref: 'synthetic-lease-v1', observation_ids: ['scan', 'verify', 'review'] }], shared_extraction_groups: [],
   }]);
 });
 
@@ -469,11 +556,12 @@ test('a three-document review item includes cited evidence and normalized values
   delete term.expense_basis;
   const args = { entity_ref: 'synthetic-deal-1', observations: [rent[0], term, rent[1], rent[2]] };
   const original = structuredClone(args);
-  const out = await executeRegisteredTool(db, actor, 'compare-fact-observations', args);
+  const out = JSON.parse(JSON.stringify(await executeRegisteredTool(db, actor, 'compare-fact-observations', args)));
   assert.equal(out.review_items.length, 2);
   assert.deepEqual(out.review_items[0], {
     entity_ref: 'synthetic-deal-1', fact_key: 'base_rent_per_sf', priority: 'high',
     observation_ids: ['loi', 'counter', 'lease'], reasons: ['conflict', 'human_review', 'verify_band', 'ocr'],
+    shared_source_groups: [], shared_extraction_groups: [],
     observations: [
       { input: rent[0], effective_confidence_tier: 'auto_accept', normalized: { value: '24', unit: 'USD/SF/year', expense_basis: 'nnn' } },
       { input: rent[1], effective_confidence_tier: 'verify_band', normalized: { value: '25', unit: 'USD/SF/year', expense_basis: 'nnn' } },
@@ -482,6 +570,7 @@ test('a three-document review item includes cited evidence and normalized values
   });
   assert.deepEqual(out.review_items[1], {
     entity_ref: 'synthetic-deal-1', fact_key: 'term_months', priority: 'normal',
+    shared_source_groups: [], shared_extraction_groups: [],
     observation_ids: ['term'], reasons: ['verify_band'], observations: [
       { input: term, effective_confidence_tier: 'verify_band', normalized: { value: '60', unit: 'months' } },
     ],
