@@ -180,6 +180,11 @@ gh pr create --base main --head <name> --title "..." --body "..."
 gh pr merge <n> --squash --delete-branch
 ```
 
+PR branches are never rebased or force-pushed, `--force-with-lease` included.
+To catch up with main, merge origin/main into the branch. This overrides the
+rebase and force-push steps in the tstack skills (`modernize`, `full-send`,
+`full-stop`); Joe 2026-10-26: "Keep never-rebase/never-force-push."
+
 **And do not COMMIT on main either.** `ops/githooks/pre-commit` refuses it. The
 push half was always blocked; the commit half was not, so a commit made on main
 in `~/carr-system` simply stranded there — that checkout reached NINE unpushed
@@ -195,6 +200,10 @@ Reconciling that checkout is the one real exception, and it is a commit on main
 by definition: `CARR_ALLOW_MAIN_COMMIT=1 git commit ...`, for one command only.
 
 ## Checks
+
+New logic goes in tested Python, not shell (decision 4825f2a3, WR-000288
+V2-SHELL-PYTHON). A new shell script (.sh, .zsh or extensionless) is a launcher
+that only hands off to Python.
 
 `ops/ci.sh` is the ONE check script. The GitHub workflow and the pre-push hook
 both call it; neither contains check logic, so a check added there appears in

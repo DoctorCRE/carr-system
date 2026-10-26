@@ -2,14 +2,16 @@
 """Keep complete reviewed-map fixtures without a fingerprint per seed row."""
 from __future__ import annotations
 
-import importlib.util
 import hashlib
+import sys
 import json
 import re
 import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "ops"))
+from rule_projection_fixture import seed_reviewed_rule_projection  # noqa: E402
 
 
 class RecordingCursor:
@@ -56,31 +58,26 @@ class ProjectionFixtureTests(unittest.TestCase):
         reviewed = json.loads(raw)
         scopes = {short: scope for scope, shorts in reviewed["active_rule_ids"].items()
                   for short in shorts}
-        for name, tail in (("siep12-policy-epoch", "000000000001"),
-                           ("siep18-reference-monitor", "000000000018")):
-            with self.subTest(gate=name):
-                path = REPO / f"ops/{name}-local-pg-gate.py"
-                spec = importlib.util.spec_from_file_location(name, path)
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                cur = RecordingCursor()
-                module.seed_reviewed_rule_projection(cur)
-                self.assertEqual(set(cur.packs), set(reviewed["rule_packs"]))
-                self.assertEqual(set(cur.layers), set(reviewed["rule_load_layers"]))
-                for pack, contract in reviewed["rule_packs"].items():
-                    self.assertEqual(cur.packs[pack], (
-                        pack, contract["title"], contract["description"], contract["triggers"],
-                        "ops/config/rule-enforcement-map.json"))
-                for short, contract in reviewed["rule_load_layers"].items():
-                    self.assertEqual(cur.layers[short], (
-                        f"{short}-0000-4000-8000-{tail}", short, contract["load_layer"],
-                        contract.get("packs", []), scopes[short], contract.get("why"),
-                        "ops/config/rule-enforcement-map.json", hashlib.sha256(raw).hexdigest()))
-                self.assertEqual(cur.disabled, set(), "fixture must restore every observer")
-                self.assertEqual(cur.refreshes, ["ops.rule_load_layer"],
-                                 "only the final real insert should queue the expensive fingerprint")
-                self.assertIn("set constraints ops.scac_epoch_rule_load_layer immediate", cur.queries)
-                self.assertEqual(cur.queries[-1], "set constraints all deferred")
+        tail = "000000000001"
+        cur = RecordingCursor()
+        seed_reviewed_rule_projection(cur, slug="rule-projection-fixture", title="Rule projection fixture",
+                                      rule_label="Reviewed projection fixture", uuid_tail=tail)
+        self.assertEqual(set(cur.packs), set(reviewed["rule_packs"]))
+        self.assertEqual(set(cur.layers), set(reviewed["rule_load_layers"]))
+        for pack, contract in reviewed["rule_packs"].items():
+            self.assertEqual(cur.packs[pack], (
+                pack, contract["title"], contract["description"], contract["triggers"],
+                "ops/config/rule-enforcement-map.json"))
+        for short, contract in reviewed["rule_load_layers"].items():
+            self.assertEqual(cur.layers[short], (
+                f"{short}-0000-4000-8000-{tail}", short, contract["load_layer"],
+                contract.get("packs", []), scopes[short], contract.get("why"),
+                "ops/config/rule-enforcement-map.json", hashlib.sha256(raw).hexdigest()))
+        self.assertEqual(cur.disabled, set(), "fixture must restore every observer")
+        self.assertEqual(cur.refreshes, ["ops.rule_load_layer"],
+                         "only the final real insert should queue the expensive fingerprint")
+        self.assertIn("set constraints ops.scac_epoch_rule_load_layer immediate", cur.queries)
+        self.assertEqual(cur.queries[-1], "set constraints all deferred")
 
 
 if __name__ == "__main__":

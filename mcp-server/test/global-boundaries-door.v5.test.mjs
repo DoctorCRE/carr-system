@@ -13,7 +13,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { ToolError } from "../src/tool-error.js";
+import { ToolError } from "../src/tool-error.ts";
 import {
   V5_ACTIONS,
   V5_ACTION_KEYS,

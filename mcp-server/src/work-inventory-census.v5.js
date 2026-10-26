@@ -20,7 +20,7 @@
 // matches on PLAIN TEXT, so even naming those constructs in a comment here
 // would turn this library into an ingress. That cost one verdict to learn.
 
-import { readableWorkRequestSql } from "./work-request-read.js";
+import { readableWorkRequestSql } from "./work-request-read.ts";
 import { readSystemWorkCensus } from "./system-work-census.v5.js";
 import { organizationTenantForActor } from "./identity.js";
 

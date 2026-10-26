@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
 import { TOOLS, ToolError } from "../src/tools.js";
-import { publicError } from "../src/public-errors.js";
+import { publicError } from "../src/public-errors.ts";
 
 const actor = { id: "10000000-0000-4000-8000-000000000002", slug: "joe", human: true };
 const id = "20000000-0000-4000-8000-000000000001";

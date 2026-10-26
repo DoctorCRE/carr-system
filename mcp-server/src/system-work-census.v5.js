@@ -1,11 +1,11 @@
 import { observeBoardLinkage, unavailableLinkage } from './work-linkage.js';
 // System design/build projection of the existing work inventory federation.
-import { readableWorkRequestSql } from './work-request-read.js';
+import { readableWorkRequestSql } from './work-request-read.ts';
 import { canonicalJson } from './artifact-trust.js';
 import { createHash } from 'node:crypto';
 import { organizationTenantForActor, personalScopeForActor } from './identity.js';
 import { closureProjection } from './engineering-runtime.js';
-import { safeInteger } from './safe-integer.js';
+import { safeInteger } from './safe-integer.ts';
 
 const base = (source, kind, sql, note = null) => ({ source, kind, sql, note });
 // Every SELECT has the same typed columns. Source states are preserved, never
@@ -136,7 +136,6 @@ export function systemWorkActions(item) {
       action('redesign','update-loop',item.identity,[{name:'title',label:'Revised title',required:true},{name:'body',label:'Revised design',required:true}],true)];
     case 'work_request': return item.state==='captured' ? [action('cancel','decline-work-request',item.identity,[{name:'exit_reason',label:'Why cancel?',required:true}],true),
       ...(item.state==='captured'?[action('progress','review-and-triage',item.identity,[{name:'classification',label:'Review lane',choices:['operational','needs_judgment','safety_review'],required:true}],true)]:[])] : [];
-    case 'capability_session': return item.identity.sequence ? [action('cancel','cancel-capability-session',item.identity,reason,true)] : [];
     case 'investigation': return [action('cancel','close-investigation',{...item.identity,status:'abandoned'},[
       {name:'conclusion',label:'Conclusion',required:true},{name:'confidence',label:'Confidence (0 to 1)',type:'number',min:0,max:1,required:true},
       {name:'strongest_alternative',label:'Strongest alternative',required:true},{name:'alternative_disposition',label:'Alternative disposition',required:true},

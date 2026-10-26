@@ -1,0 +1,77 @@
+import type { ClientBase } from "@neondatabase/serverless";
+import { ToolError } from "./tool-error.ts";
+
+/** A keyset sort key: four strings compared left to right. */
+type QueueKey = string[];
+type Instant = string | number | Date | null | undefined;
+type QueueCursor = { v: 1; scope: string; key: QueueKey };
+
+function isQueueCursor(value: unknown, scope: string): value is QueueCursor {
+  if (!value || typeof value !== 'object') return false;
+  const { v, scope: cursorScope, key } = value as Record<string, unknown>;
+  return v === 1 && cursorScope === scope && Array.isArray(key) && key.length === 4
+    && key.every(part => typeof part === 'string' && part.length <= 256);
+}
+
+const compare = (a: QueueKey, b: QueueKey) => {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] < b[i]) return -1;
+    if (a[i] > b[i]) return 1;
+  }
+  return 0;
+};
+
+export async function briefQueuePage<T>(items: T[], { limit = 50, cursor, scope, key }: {
+  limit?: number; cursor?: string; scope: string; key: (item: T) => QueueKey | Promise<QueueKey>;
+}) {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50)
+    throw new ToolError({ error: 'brief_queue_page_invalid' });
+  let after: QueueCursor | undefined;
+  if (cursor !== undefined) {
+    try {
+      if (typeof cursor !== 'string' || !cursor.length || cursor.length > 8000) throw Error();
+      const parsed: unknown = JSON.parse(decodeURIComponent(atob(cursor)));
+      if (!isQueueCursor(parsed, scope)) throw Error();
+      after = parsed;
+    } catch { throw new ToolError({ error: 'brief_queue_cursor_invalid' }); }
+  }
+  const sorted = (await Promise.all(items.map(async item => ({ item, key: await key(item) }))))
+    .sort((a, b) => compare(a.key, b.key));
+  const available = after ? sorted.filter(row => compare(row.key, after.key) > 0) : sorted;
+  const page = available.slice(0, limit);
+  const remaining = available.length - page.length;
+  return {
+    items: page.map(row => row.item), total: sorted.length, returned: page.length, remaining,
+    has_more: remaining > 0,
+    next_cursor: remaining ? btoa(encodeURIComponent(JSON.stringify({ v: 1, scope, key: page.at(-1)!.key }))) : null,
+    consistency: 'live_keyset; changed rows may move; restart for a fresh full traversal',
+  };
+}
+
+export async function readBriefLoops(c: Pick<ClientBase, "query">) {
+  return (await c.query(`select number, kind, domain, status, owner, marker, title,
+      coalesce(nullif(title, ''),
+        nullif(regexp_replace(split_part(body, E'\\n', 1), '\\*\\*', '', 'g'), '')) as label,
+      blocker_class, blocker_detail, since_text, due_on::text as due_on, version
+    from loop_item
+    where kind='open_loop' and status='open' and lower(owner) in ('joe','dell')`)).rows
+    .map(row => ({ ...row, owner_partner: row.owner.toLowerCase() }));
+}
+
+const fingerprint = async (value: string) => {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+};
+type BriefLoopRow = { due_on: string | null; owner_partner: string; kind: unknown; number: unknown };
+export const briefLoopKey = (sponsor: string) => async (row: BriefLoopRow) => [row.due_on || '~',
+  row.owner_partner === sponsor ? '0' : '1', String(row.kind), await fingerprint(String(row.number))];
+const tier: Record<string, string> = { work: '0', capability: '1', pending: '2' };
+const timestamp = (value: Instant) => value != null && Number.isFinite(new Date(value).getTime()) ? new Date(value).toISOString() : '~';
+type NeedsJoeRow = { key: unknown; title: unknown; blocks: { tier: string }; since: Instant; source: string };
+export const briefNeedsJoeKey = async (row: NeedsJoeRow) => {
+  const identity = await fingerprint(JSON.stringify([row.key, row.title]));
+  return [tier[row.blocks.tier], timestamp(row.since), row.source, identity];
+};
+type AssuranceRow = { severity: string; created_at: Instant; notification_id: string };
+export const briefAssuranceKey = (row: AssuranceRow) => [({ failure: '0', action_required: '1', completion: '2' } as Record<string, string>)[row.severity] || '3',
+  timestamp(row.created_at), '', row.notification_id];

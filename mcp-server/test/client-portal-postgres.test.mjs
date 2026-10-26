@@ -21,6 +21,15 @@ test('a password opens only its client portal and the live deal roadmap', async 
     await c.query(await readFile(new URL('../../migrations/0975_client_portal.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/0976_client_portal_binding.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/0981_client_portal_writer_denials.sql', import.meta.url), 'utf8'));
+    // The current grant contract also carries later registered definers and writer grants.
+    await c.query(await readFile(new URL('../../migrations/0983_fact_store.sql', import.meta.url), 'utf8'));
+    await c.query('create function ops.scac_reference_monitor_guard() returns trigger language plpgsql as $$begin return coalesce(new,old); end$$');
+    await c.query(await readFile(new URL('../../migrations/0987_email_proposal.sql', import.meta.url), 'utf8'));
+    // ...and 0988's retired SIEP grants; its precondition catalog is not built here.
+    const siepDrop = await readFile(new URL('../../migrations/0988_drop_siep_program_leftovers.sql', import.meta.url), 'utf8');
+    await c.query("create function ops.scac_mutation_catalog_v118_current() returns boolean language sql as 'select true'");
+    await c.query(/do \$retire_siep_grants\$[\s\S]*?end \$retire_siep_grants\$;/.exec(siepDrop)[0]);
+    await c.query('drop function ops.scac_mutation_catalog_v118_current()');
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')", [actor.id]);
     await c.query("insert into client_status(slug,label) values('active','Active'); insert into deal_phase(slug,label,sort) values('research','Research',1),('negotiation','Negotiation',2)");
     const party = (await c.query("insert into party(kind,name,notes_path,created_by,updated_by) values('person','Synthetic client A','INTERNAL_A',$1,$1) returning id", [actor.id])).rows[0].id;

@@ -34,6 +34,7 @@ DRAFTS_FILE = "outlook-drafts.json"
 PUSH_FILE = "backend-push.json"
 LOCK_FILE = ".post-call.lock"
 OUTLOOK_URL_LIMIT = 1900
+LOG_PATH = Path(os.environ.get("CARR_CALL_MODE_LOG") or Path.home() / "Library" / "Logs" / "carr-call-mode.log")
 CALL_PHASES = ("pending", "research", "site_selection", "negotiation", "legal", "due_diligence", "closing")
 
 
@@ -71,11 +72,14 @@ def distiller_json_schema() -> dict[str, Any]:
                 **common, "summary": {"type": "string"},
                 "phase_move": {"anyOf": [{"type": "null"}, item({
                     "value": {"type": "string", "enum": list(CALL_PHASES)},
-                }, ["value"])]},
+                    "started_on": {"type": ["string", "null"], "format": "date"},
+                    "needs_review": {"type": ["string", "null"]},
+                }, ["value", "started_on", "needs_review"])]},
                 "next_step": {"anyOf": [{"type": "null"}, item({
                     "text": {"type": "string", "minLength": 1, "maxLength": 500},
                     "next_date": {"type": ["string", "null"], "format": "date"},
-                }, ["text", "next_date"])]},
+                    "needs_review": {"type": ["string", "null"]},
+                }, ["text", "next_date", "needs_review"])]},
             }, ["deal_id", "summary", "participant_ids", "evidence", "next_step", "phase_move"])},
             "draft_proposals": {"type": "array", "items": item({
                 **common, "recipient_party_id": {"type": "string"},
@@ -269,6 +273,18 @@ def _calendar_date_or_none(value: Any, field: str) -> None:
         raise ContractError(f"{field} must be a YYYY-MM-DD calendar date or null")
 
 
+UNSAID_REVIEW = "The model did not say whether this was settled."
+
+
+def _review_note(change: dict[str, Any], field: str) -> None:
+    # A missing flag fails closed: only an explicit null means plainly stated.
+    note = change.setdefault("needs_review", UNSAID_REVIEW)
+    if note is not None and not isinstance(note, str):
+        raise ContractError(f"{field} must be a string or null")
+    if isinstance(note, str) and not note.strip():
+        change["needs_review"] = None
+
+
 def _validate_distillation(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ContractError("distiller output must be an object")
@@ -303,7 +319,8 @@ def _validate_distillation(value: Any) -> dict[str, Any]:
             if step is not None:
                 if not isinstance(step, dict):
                     raise ContractError("deal_updates.next_step must be an object or null")
-                _strict_keys(step, {"text", "next_date"})
+                _strict_keys(step, {"text", "next_date"}, {"needs_review"})
+                _review_note(step, "deal_updates.next_step.needs_review")
                 text = _string(step["text"], "deal_updates.next_step.text")
                 if len(text) > 500:
                     raise ContractError("deal_updates.next_step.text exceeds 500 characters")
@@ -312,9 +329,13 @@ def _validate_distillation(value: Any) -> dict[str, Any]:
             if phase is not None:
                 if not isinstance(phase, dict):
                     raise ContractError("deal_updates.phase_move must be an object or null")
-                _strict_keys(phase, {"value"})
+                _strict_keys(phase, {"value"}, {"started_on", "needs_review"})
+                _review_note(phase, "deal_updates.phase_move.needs_review")
                 if phase["value"] not in CALL_PHASES:
                     raise ContractError("deal_updates.phase_move.value must be a supported open phase")
+                _calendar_date_or_none(phase.setdefault("started_on", None), "deal_updates.phase_move.started_on")
+                if phase["started_on"] is not None and phase["started_on"] > date.today().isoformat():
+                    phase["started_on"] = None
             for key in required - {"deal_id", "participant_ids"}:
                 _string(item[key], f"{list_name}.{key}")
             if not isinstance(item["deal_id"], str) or not item["deal_id"].strip():
@@ -421,12 +442,20 @@ def _distiller_instruction() -> str:
         "For each task, use due_on as YYYY-MM-DD only when the transcript states an unambiguous calendar date, including the year. "
         "Use null when no date is stated. For relative dates or dates with an unclear year, use null and add a question to review_questions; never guess a date. "
         "A deal status statement creates a deal_updates item with next_step and phase_move null. "
-        "Only an explicitly agreed phase change sets phase_move to an object with value. "
+        "Only an explicitly agreed phase change sets phase_move to an object with value and started_on. "
+        "started_on is the YYYY-MM-DD the partners say the new phase began, only when they state that calendar date "
+        "with its year; otherwise null. "
         "Use exactly one of pending, research, site_selection, negotiation, legal, due_diligence, closing. "
         "Do not infer a phase from a general status update. Closure, loss and invoicing become review_questions. "
         "Only an explicitly agreed replacement for the deal card's next step sets next_step to an object with text and next_date. "
         "Use the exact agreed step text. Apply the task date rules to next_date, using null for missing or ambiguous dates. "
-        "Null next_date clears the card's current date on confirmation. Do not turn every assigned task into a replacement next step. "
+        "Do not turn every assigned task into a replacement next step. "
+        "Next steps and phase moves are applied to the cards automatically unless needs_review is set. "
+        "Set needs_review to null only when Joe and Dell plainly stated the change for that exact deal and nobody "
+        "disputed it. Otherwise set needs_review to one short sentence saying what a partner must decide; it then "
+        "waits as an approval card. When they disagree or it is unclear which deal they mean, also add a review question. "
+        "A deal update's evidence must be the exact words that name the deal and state its change; when the phase and "
+        "the next step were said in different sentences, give them as two deal_updates for the same deal. "
         "A request to tell, update, email, or draft a message to an exact attached participant creates a draft_proposals item. "
         "Each item includes a transcript evidence phrase of at most 15 words and only attached participant_ids (an array of exact party_id strings, [] if none). "
         "Draft bodies are concise, professional, factual, and under 900 characters. "
@@ -437,7 +466,7 @@ def _distiller_instruction() -> str:
         '"report": {"summary": "<string>", "decisions": ["<string>", ...], "open_questions": ["<string>", ...]}, '
         '"joe_tasks": [{"title": "<string>", "due_on": null, "deal_id": "<exact deal id>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
         '"dell_tasks": [{"title": "<string>", "due_on": null, "deal_id": "<exact deal id>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
-        '"deal_updates": [{"deal_id": "<exact deal id>", "summary": "<string>", "next_step": null, "phase_move": null, "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
+        '"deal_updates": [{"deal_id": "<exact deal id>", "summary": "<string>", "next_step": null or {"text": "<string>", "next_date": null, "needs_review": null}, "phase_move": null or {"value": "<phase>", "started_on": null, "needs_review": null}, "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
         '"draft_proposals": [{"recipient_party_id": "<exact party id>", "deal_id": "<exact deal id>", "subject": "<string>", "body": "<string>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
         '"review_questions": ["<string>", ...]}\n'
         "If there is nothing for a section, use an empty array. Never omit schema_version or report. "
@@ -479,14 +508,25 @@ def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_session(session_dir: Path) -> dict[str, Any]:
-    """Keep model dependencies out of the Accessibility-granted companion."""
+    """Keep model dependencies out of the Accessibility-granted companion.
+
+    A ready report is filed and its confident changes applied right away
+    through the capture bridge, instead of waiting up to five minutes for
+    capture-poll's next sweep while the partners look at the Deal Room.
+    """
     entry = Path(__file__).resolve()
-    python = entry.parents[3] / ".venv" / "bin" / "python3"
+    python = os.environ.get("CARR_POST_CALL_PYTHON") or entry.parents[3] / ".venv" / "bin" / "python3"
     result = subprocess.run(
         [str(python), str(entry), str(session_dir)],
         capture_output=True, text=True, check=True, timeout=1800,
     )
-    return json.loads(result.stdout)
+    status = json.loads(result.stdout)
+    if status.get("state") == "ready_review":
+        subprocess.run(
+            [sys.executable, str(entry.with_name("capture-bridge.py")), "poll", str(session_dir)],
+            capture_output=True, text=True, timeout=600, check=False,
+        )
+    return status
 
 
 def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]] = default_distiller) -> dict[str, Any]:
@@ -526,9 +566,19 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         stored_context = read_json(session_dir / CONTEXT_FILE) or {}
         jev_context = {**context, "speaker_labels": stored_context.get("speaker_labels"),
                        "local_partner": stored_context.get("recorder")}
-        result = post_call_jev.check_distillation(result, jev_context, transcript)
-    except Exception:
-        pass  # Jev's item checks are advisory; they may never block the pack.
+        result = post_call_jev.check_distillation(result, jev_context, transcript, client=_jev_fixture_client())
+    except Exception as exc:
+        exception_class = type(exc).__name__
+        deal_check_status = {"status": "unavailable", "exception_class": exception_class}
+        result["deal_check"] = deal_check_status
+        try:
+            LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with LOG_PATH.open("a", encoding="utf-8") as handle:
+                handle.write(f"{now()} deal check unavailable session={session_dir.name} "
+                             f"exception={exception_class}\n")
+        except OSError:
+            pass
+    result = mark_automatic(result, transcript, context)
     write_private(session_dir / REPORT_FILE, result)
     # Context is single-use: no later caller gets a searchable customer index.
     stored = read_json(session_dir / CONTEXT_FILE) or {}
@@ -580,6 +630,136 @@ def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | N
     return {"aggregate_report_hash": digest, "backend_report_sha256": report_sha256, "pending_items": 0}
 
 
+AUTOMATIC_FIELDS = ("next_step", "phase_move")
+
+
+def _words(value: Any) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", str(value or "").lower()))
+
+
+# Words too common in deal names to tie a quote to one deal.
+_GENERIC_NAME_WORDS = {"the", "and", "for", "llc", "inc", "medical", "dental", "clinic", "health",
+                       "office", "building", "lease", "expansion", "relocation", "center", "suite"}
+_STOP_WORDS = {"the", "and", "for", "with", "from", "that", "this", "will", "about", "into", "next", "step"}
+MIN_EVIDENCE_WORDS = 4
+
+
+def _jev_fixture_client() -> Any:
+    """The rehearsal's offline Jev stand-in, a seam like the distiller command; None means live Jev."""
+    path = os.environ.get("CARR_POST_CALL_JEV_FIXTURE")
+    if not path:
+        return None
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("post_call_jev_fixture", path)
+    if spec is None or spec.loader is None:
+        raise ContractError("CARR_POST_CALL_JEV_FIXTURE is not a Python file")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.client()
+
+
+def _supports(evidence: str, field: str, value: dict[str, Any], deal_name: str) -> str | None:
+    """Why the quote does not show this deal and this value, or None when it does."""
+    said = set(evidence.split())
+    if len(evidence.split()) < MIN_EVIDENCE_WORDS:
+        return "The quoted evidence is too short to show the change."
+    names = {word for word in _words(deal_name).split() if len(word) >= 3 and word not in _GENERIC_NAME_WORDS}
+    if not names & said:
+        return "The quoted evidence does not name this deal."
+    if field == "phase_move":
+        wanted = set(_words(str(value.get("value", "")).replace("_", " ")).split())
+        if not wanted or not wanted <= said:
+            return "The quoted evidence does not state this phase."
+    else:
+        wanted = {word for word in _words(value.get("text")).split() if len(word) >= 4 and word not in _STOP_WORDS}
+        if not wanted or len(wanted & said) < min(2, len(wanted)):
+            return "The quoted evidence does not state this next step."
+    return None
+
+
+def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any], spoken: str,
+                    deal_name: str) -> str | None:
+    """Why one stated change must stay a card for Joe or Dell, or None to apply it.
+
+    Joe's 2026-10-26 ruling: confident changes apply themselves; anything the
+    model cannot place is kicked back as an approval card. Confident here is
+    deterministic and checkable, never the model's own say-so.
+    """
+    unavailable = report.get("deal_check")
+    if isinstance(unavailable, dict) and unavailable.get("status") == "unavailable":
+        return f"Deal check unavailable ({unavailable['exception_class']})."
+    value: dict[str, Any] = update[field]
+    if value.get("needs_review"):
+        return str(value["needs_review"])
+    if field == "next_step" and not value.get("next_date"):
+        return "No date was stated for this next step."
+    evidence = _words(update.get("evidence"))
+    if not evidence or f" {evidence} " not in f" {spoken} ":
+        return "The quoted evidence was not found word for word in the transcript."
+    unsupported = _supports(evidence, field, value, deal_name)
+    if unsupported:
+        return unsupported
+    same = [other for other in report.get("deal_updates", [])
+            if other.get("deal_id") == update.get("deal_id") and other.get(field) is not None]
+    if len(same) > 1:
+        return "The call stated more than one version of this change."
+    # Jev's RIGHT DEAL answers "unclear which deal". Its RIGHT DETAILS judges
+    # the update's summary, not this change, so it stays advisory here.
+    deal_check = (update.get("checks") or {}).get("deal")
+    if not isinstance(deal_check, dict):
+        return "The automatic deal check did not run."
+    if deal_check.get("pass") is True:
+        return None
+    if deal_check.get("pass") is False and deal_check.get("value") not in (None, "", "none"):
+        return "The automatic check matched these words to a different deal."
+    return "The automatic check could not confirm which deal this is."
+
+
+def mark_automatic(result: dict[str, Any], transcript: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    """Label each stated next step and phase move automatic or for review."""
+    segments = transcript.get("segments") if isinstance(transcript, dict) else None
+    spoken = _words(" ".join(str(seg.get("text", "")) for seg in segments or [] if isinstance(seg, dict)))
+    names = {deal.get("id"): str(deal.get("name") or "") for deal in context.get("deals", []) if isinstance(deal, dict)}
+    for update in result.get("deal_updates", []):
+        for field in AUTOMATIC_FIELDS:
+            value = update.get(field)
+            if isinstance(value, dict):
+                hold = _automatic_hold(update, field, result, spoken, names.get(update.get("deal_id"), ""))
+                value["apply"] = "review" if hold else "automatic"
+                value["review_reason"] = hold
+    return result
+
+
+def automatic_candidates(session_dir: Path) -> list[dict[str, Any]]:
+    """Filed, still-pending changes this call may apply without a confirm."""
+    report = read_json(session_dir / REPORT_FILE) or {}
+    return [update[field] for update in report.get("deal_updates", []) for field in AUTOMATIC_FIELDS
+            if isinstance(update.get(field), dict) and update[field].get("apply") == "automatic"
+            and update[field].get("candidate_id") and update[field].get("candidate_status") == "pending"]
+
+
+def record_automatic(session_dir: Path, outcomes: dict[str, str | None]) -> dict[str, Any]:
+    """Store which changes applied (None) and which stayed cards (the reason)."""
+    report = read_json(session_dir / REPORT_FILE)
+    if report is None:
+        raise ContractError("post-call report is not ready")
+    changes = [update[field] for update in report.get("deal_updates", []) for field in AUTOMATIC_FIELDS
+               if isinstance(update.get(field), dict)]
+    for value in changes:
+        if value.get("candidate_id") not in outcomes:
+            continue
+        reason = outcomes[value["candidate_id"]]
+        if reason is None:
+            value.update({"candidate_status": "confirmed", "applied_automatically": True})
+        else:
+            value.update({"apply": "review", "review_reason": reason})
+    report["automatic"] = {"finished_at": now(),
+                           "applied": sum(1 for value in changes if value.get("applied_automatically")),
+                           "kept_for_review": sum(1 for value in changes if value.get("apply") == "review")}
+    write_private(session_dir / REPORT_FILE, report)
+    return report["automatic"]
+
+
 def report_for_deal_room(session_dir: Path) -> dict[str, Any]:
     report = read_json(session_dir / REPORT_FILE)
     status = read_json(session_dir / STATUS_FILE) or {"state": "awaiting_context", "session": session_dir.name}
@@ -593,11 +773,14 @@ def report_for_deal_room(session_dir: Path) -> dict[str, Any]:
     for update in visible.get("deal_updates", []):
         phase = update.get("phase_move")
         if phase is not None:
-            update["summary"] += f"\nMove phase to: {phase['value']}"
+            verb = "Phase moved to" if phase.get("applied_automatically") else "Move phase to"
+            since = f" (started {phase['started_on']})" if phase.get("started_on") else ""
+            update["summary"] += f"\n{verb}: {phase['value']}{since}"
         step = update.get("next_step")
         if step is not None:
             next_date = step["next_date"] or "not set (clears the current date)"
-            update["summary"] += f"\nReplace next step with: {step['text']}\nNext date: {next_date}"
+            verb = "Next step set to" if step.get("applied_automatically") else "Replace next step with"
+            update["summary"] += f"\n{verb}: {step['text']}\nNext date: {next_date}"
     receipts = (read_json(session_dir / DRAFTS_FILE) or {}).get("drafts", {})
     if isinstance(receipts, dict):
         for draft in visible.get("draft_proposals", []):
@@ -670,9 +853,12 @@ def sanitized_candidates(session_dir: Path) -> dict[str, Any]:
             bindings.append({**_candidate_binding("deal_updates", index, "legacy"), "field": "next_step"})
         phase = update.get("phase_move")
         if phase is not None and not phase.get("candidate_id"):
+            payload = {"deal": update["deal_id"], "field": "phase", "value": phase["value"]}
+            if phase.get("started_on"):
+                payload["started_on"] = phase["started_on"]
             legacy_items.append({
                 "kind": "phase_move",
-                "payload": {"deal": update["deal_id"], "field": "phase", "value": phase["value"]},
+                "payload": payload,
                 "evidence_quote": update["evidence"], "confidence": 0.5,
             })
             bindings.append({**_candidate_binding("deal_updates", index, "legacy"), "field": "phase_move"})
