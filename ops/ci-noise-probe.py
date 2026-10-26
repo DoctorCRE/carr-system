@@ -15,7 +15,7 @@ def main():
 
     def retain_observations(rows):
         affected_services.extend(
-            {'service_key': row.service_key,
+            {'service_key': row.service_key, 'classification': probe['classification'](row),
              'hours_since_observed': (float(row.hours_since_observed)
                                       if row.hours_since_observed is not None else None)}
             for row in probe['affected'](rows))
