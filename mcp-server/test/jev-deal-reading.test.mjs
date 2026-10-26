@@ -1,3 +1,4 @@
+// Test bounded deal-reading advice, evidence handling and abstention.
 import test from 'node:test';
 import { TypeSafeClient, TypeSafeError } from '@typesafe-ai/sdk';
 import assert from 'node:assert/strict';
