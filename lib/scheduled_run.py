@@ -118,13 +118,13 @@ def social_batch_result(records: list[dict], started_at: str | None) -> dict:
         except ValueError:
             week = None
         count_value = None if count == "unknown" else int(count)
-        valid_count = (complete == "true" and count_value is not None and week is not None
-                       and week.isoformat() == week_start and week.weekday() == 0)
         valid_failure = (failure in {"no_output", "zero_duration"} and count == "unknown"
                          and complete == "false" and week is not None
                          and week.isoformat() == week_start and week.weekday() == 0)
-        if valid_count and ((count_value == 0 and state == "failed" and failure == "zero_drafts")
-                            or (count_value > 0 and state == "succeeded" and failure == "none")):
+        if (complete == "true" and count_value is not None and week is not None
+                and week.isoformat() == week_start and week.weekday() == 0
+                and ((count_value == 0 and state == "failed" and failure == "zero_drafts")
+                     or (count_value > 0 and state == "succeeded" and failure == "none"))):
             return {"week_start": week_start, "queue_count": count_value,
                     "queue_complete": True, "failure": None if count_value else "zero_drafts"}
         if valid_failure and state == "failed":
