@@ -23,8 +23,11 @@ ggml-large-v3-turbo, `vocab-prompt.txt`. Never a second engine.
 Meeting transcription records the selected local model path and `model_sha256`
 in private `transcript.json` and logs that identity in `transcribe.log`.
 The hash is computed once per session before inference, including fallback and
-custom models. It identifies the file bytes observed at that point. It does not
-enforce a model pin or prevent replacement of the file during inference.
+custom models. Set `CARR_WHISPER_MODEL_SHA256` in the transcription process
+environment to require that exact 64-character SHA-256 before inference. A
+malformed pin or mismatch fails the session before any audio is transcribed.
+With no pin, existing model selection remains unchanged. The digest identifies
+the bytes observed before inference and does not prevent later file replacement.
 
 ## Deal Room Call Mode
 

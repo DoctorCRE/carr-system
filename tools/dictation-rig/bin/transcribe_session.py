@@ -47,6 +47,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -227,6 +228,20 @@ def resolve_model(log: LogFunc) -> Path:
     )
 
 
+def verify_model_pin(model_sha256: str, log: LogFunc) -> None:
+    expected = os.environ.get("CARR_WHISPER_MODEL_SHA256")
+    if expected is None:
+        return
+    expected = expected.strip().lower()
+    if re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+        raise TranscribeError("CARR_WHISPER_MODEL_SHA256 must be 64 hexadecimal characters")
+    if model_sha256 != expected:
+        raise TranscribeError(
+            f"selected model SHA-256 {model_sha256} does not match configured pin {expected}"
+        )
+    log(f"MODEL pin verified sha256={expected}")
+
+
 def load_prompt() -> str:
     # vocab-prompt.txt is tracked and carries only generic industry terms and
     # place names (WR-000049: this repo is public, so no client roster in the
@@ -358,6 +373,7 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
             digest.update(chunk)
     model_sha256 = digest.hexdigest()
     log(f"MODEL path={model_path} sha256={model_sha256}")
+    verify_model_pin(model_sha256, log)
     prompt = load_prompt()
 
     all_segments: list[Segment] = []

@@ -228,6 +228,35 @@ class ProcessSessionWiringTest(unittest.TestCase):
         self.assertEqual(t["consent"], consent)
         self.assertEqual((self.session / "transcript.json").stat().st_mode & 0o777, 0o600)
 
+    def test_configured_model_pin_refuses_changed_model_before_transcription(self) -> None:
+        self.stub(speaker_split, "run_diarizer", lambda *_a: [])
+        with mock.patch.dict("os.environ", {"CARR_WHISPER_MODEL_SHA256": "0" * 64}):
+            with mock.patch.object(transcribe_session.subprocess, "run") as run:
+                with self.assertRaisesRegex(transcribe_session.TranscribeError, "does not match"):
+                    transcribe_session.process_session(self.session, lambda _line: None)
+                run.assert_not_called()
+
+        self.assertFalse((self.session / "transcript.json").exists())
+
+    def test_matching_model_pin_allows_private_transcript(self) -> None:
+        self.stub(speaker_split, "run_diarizer", lambda *_a: [])
+        with mock.patch.dict("os.environ", {
+            "CARR_WHISPER_MODEL_SHA256":
+                "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD",
+        }):
+            transcript = self.transcript()
+
+        self.assertEqual(transcript["model_sha256"],
+                         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        self.assertTrue(any("MODEL pin verified" in line for line in self.lines))
+
+    def test_malformed_model_pin_fails_without_transcribing(self) -> None:
+        with mock.patch.dict("os.environ", {"CARR_WHISPER_MODEL_SHA256": "not-a-hash"}):
+            with self.assertRaisesRegex(transcribe_session.TranscribeError, "64 hexadecimal"):
+                transcribe_session.process_session(self.session, lambda _line: None)
+
+        self.assertFalse((self.session / "transcript.json").exists())
+
     def test_fallback_model_has_its_own_provenance(self) -> None:
         self.stub(speaker_split, "run_diarizer", lambda *_a: [])
         self.model.unlink()
