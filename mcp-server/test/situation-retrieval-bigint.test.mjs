@@ -1,3 +1,4 @@
+// Test BIGINT version handling in situation retrieval.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";

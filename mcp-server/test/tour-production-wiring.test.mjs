@@ -1,3 +1,4 @@
+// Tests production Tour routing, tool registration, and delivery wiring.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";

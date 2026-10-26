@@ -1,3 +1,4 @@
+// Test scoped assurance health projections and their evidence boundaries.
 import test from "node:test";
 import assert from "node:assert/strict";
 

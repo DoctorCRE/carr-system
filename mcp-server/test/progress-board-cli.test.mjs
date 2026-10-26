@@ -1,3 +1,4 @@
+// Tests the published progress board and answer poller CLI contract.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";

@@ -1,3 +1,4 @@
+// Test rejection of future activity occurrence timestamps.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

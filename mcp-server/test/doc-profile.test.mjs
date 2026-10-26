@@ -1,3 +1,4 @@
+// Test Doc tool discovery, authorization, and input restrictions.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { dispatch, allowedIn, profileForActor, mcpApiHandler, callTool } from "../src/mcp.js";

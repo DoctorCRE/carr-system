@@ -1,3 +1,4 @@
+// Test Doc activity admission alongside successor tool contracts.
 import test from 'node:test';
 import {assertAdmits} from './helpers/registry-admission.mjs';
 

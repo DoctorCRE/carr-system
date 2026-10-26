@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Classify Tailscale health and recover connectivity.
 from __future__ import annotations
 
 import os
