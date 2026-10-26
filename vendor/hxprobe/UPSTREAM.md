@@ -29,7 +29,7 @@ Archive SHA-256:
 `bbffd167a42081abc7de2f6ef6d44e14e7af2a7a004d3f060c62eb3c1a45e21c`
 
 Patch SHA-256:
-`a1ca5a3dd93a46216c9a88b42c917f83b87f23a4d1152bfc2bab36279416293a`
+`9cdb71f06e159a85bac6e0037970eb919b0717425623d74a3d9e77673e4b4567`
 
 Cargo.lock retains all 31 registry package checksums. The crate is copied into
 the repository as editable source. Transitive dependencies stay on crates.io;
@@ -50,7 +50,7 @@ This result covers the checked lockfile against that advisory revision.
 The `hxprobe` class in `ops/ci.sh` runs `cargo test --locked` followed by
 `cargo build --release --locked` from this directory. The PR and main-canary
 workflows register that class. A test failure stops the build and fails CI.
-The crate's 22 tests use synthetic data. Every example email address uses
+The crate's 27 tests use synthetic data. Every example email address uses
 `@example.test`. No private Outlook store or profile is needed.
 
 For updates, retain a separate upstream import and CARR patch commit, review
@@ -105,8 +105,23 @@ Synthetic tests prove candidate separation and fail-closed labeling only.
 Native decoder validation and controlled test-account format research are still
 required before current calendar lifecycle or completeness can be claimed.
 
+An object whose NUL-terminated fields run to its end, with no attendee count,
+decodes with no attendees. The 2026-10-21 TEST-account study pair showed such an
+appointment added one GOID/start identity and, before this, no decoded candidate.
+
 Intake stores opaque candidate hashes and provisional schedule timestamps in its
-private state. It does not create reminders or contact activities from these
+private state. Separately it publishes the next fourteen days of meetings that
+name the configured account in every stored copy as a display snapshot (board
+`calendar-agenda`) for the morning brief, with no notes or bodies.
+
+Observed on the 2026-10-21 study copies (Joe's shared profile, not yet the TEST
+account): each recurring occurrence is a separate object whose Global Object ID
+carries its local instance date in bytes 16-19 (111 of 111 rows matched their
+start date); the series master keeps zero there. Only one ID appeared at two
+starts, which reads as a moved meeting. Not decoded yet, so the snapshot always
+warns about them: attendee responses (declines), deleted-items or folder
+membership, the owning account, revision order, and whether every occurrence of
+a series is materialized. It does not create reminders or contact activities from these
 rows. Existing unacknowledged calendar activities and next actions without
 established mail provenance remain quarantined with their frozen payloads.
 Mail continues independently. Status reasons remain `processed`, `nothing_new`,

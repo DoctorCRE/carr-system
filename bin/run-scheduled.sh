@@ -84,7 +84,11 @@ counts = frozenset("emails events_past events_upcoming logged preview_only full_
                    "error_key_reuse error_transport_oversized error_no_acknowledgement error_reply_unreadable "
                    "error_transport_error error_invalid_request error_subject_unresolved error_database_refused "
                    "error_setup_failed error_contacts_empty error_contacts_read_failed "
-                   "error_next_action_conflict error_legacy_action_guard_required".split())
+                   "error_next_action_conflict error_legacy_action_guard_required error_agenda_version_conflict "
+                   "calendar_agenda_items calendar_agenda_canceled calendar_agenda_conflicts "
+                   "calendar_agenda_other_accounts calendar_agenda_published calendar_agenda_failed "
+                   "calendar_agenda_time_changed calendar_agenda_recurring calendar_agenda_trimmed "
+                   "calendar_agenda_undecoded".split())
 receipt = None
 with open(sys.argv[1]) as output:
     for line in output:
