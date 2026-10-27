@@ -20,6 +20,20 @@ class BillingGateTests(unittest.TestCase):
     def test_shipped_configuration_is_bounded(self):
         self.assertEqual(matrix.billing_failures(self.config), [])
 
+    def test_shipped_ai_budgets_fit_the_shared_free_allowance(self):
+        production = int(self.config["vars"]["AI_DAILY_NEURON_BUDGET"])
+        staging = int(self.config["env"]["staging"]["vars"]["AI_DAILY_NEURON_BUDGET"])
+        self.assertLess(production + staging, 10000)
+        self.assertEqual(matrix.ai_budget_failures(self.config), [])
+
+    def test_ai_budget_gate_rejects_shared_allowance_overrun(self):
+        self.config["env"]["staging"]["vars"]["AI_DAILY_NEURON_BUDGET"] = "8000"
+        self.assertTrue(matrix.ai_budget_failures(self.config))
+
+    def test_uptime_worker_has_cpu_and_sampling_limits(self):
+        config = tomllib.loads((ROOT / "mcp-server/wrangler.uptime.toml").read_text())
+        self.assertEqual(matrix.billing_failures(config), [])
+
     def test_every_environment_needs_cpu_and_sampling_limits(self):
         for name in ("production", "staging", "preview"):
             for field, value in (("cpu_ms", None), ("cpu_ms", 30000),

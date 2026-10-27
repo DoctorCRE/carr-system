@@ -218,10 +218,11 @@ test('exhaustion is cached within an isolate and expires at the next UTC day', a
 });
 
 
-test('a 3000-chunk revision with only 1000 neurons left admits no paid work', async () => {
+test('a 3000-chunk revision with only 1000 neurons left admits no paid work', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 9, 27) });
   const { embedDoctrineRevisions } = await import('../src/doctrine-embeddings.ts');
   const f = fixture({ budget: '8000', run: async (_model, data) => ({ data: data.text.map(() => [1, ...Array(383).fill(0)]) }) });
-  f.values.set('daily', { day: new Date().toISOString().slice(0, 10), spent: 7000 });
+  f.values.set('daily', { day: '2026-10-27', spent: 7000 });
   let inserts = 0;
   const c = { ai: budgetedAi(f.env), query: async sql => {
     if (sql.includes('insert into doctrine_embedding')) inserts++;
@@ -233,4 +234,65 @@ test('a 3000-chunk revision with only 1000 neurons left admits no paid work', as
   assert.equal(inserts, 0);
   assert.equal(f.providerCalls, 0, 'a refused revision must not burn the remaining budget');
   assert.equal(f.values.get('daily').spent, 7000);
+});
+
+
+test('an operation that fits the remainder stores every paid vector', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 9, 27) });
+  const { embedDoctrineRevisions } = await import('../src/doctrine-embeddings.ts');
+  const f = fixture({ budget: '8000', run: async (_model, data) => ({ data: data.text.map(() => [1, ...Array(383).fill(0)]) }) });
+  f.values.set('daily', { day: '2026-10-27', spent: 7983 });
+  let inserts = 0;
+  const c = { ai: budgetedAi(f.env), query: async sql => {
+    if (sql.includes('insert into doctrine_embedding')) inserts++;
+    return { rows: [{ revision_id: 'revision' }] };
+  } };
+  const result = await embedDoctrineRevisions(c, [{ revision_id: 'revision', plain_text: 'x'.repeat(480 + 16 * 384) }]);
+  assert.equal(result.status, 'ready');
+  assert.equal(result.embedded, 1);
+  assert.equal(inserts, 17);
+  assert.equal(f.providerCalls, 2);
+  assert.equal(f.values.get('daily').spent, 8000);
+});
+
+test('competing revisions cannot consume part of each others reservation', async () => {
+  const { embedDoctrineRevisions } = await import('../src/doctrine-embeddings.ts');
+  const f = fixture({ budget: '32', run: async (_model, data) => ({ data: data.text.map(() => [1, ...Array(383).fill(0)]) }) });
+  let inserts = 0;
+  const c = { ai: budgetedAi(f.env), query: async sql => {
+    if (sql.includes('insert into doctrine_embedding')) inserts++;
+    return { rows: [{ revision_id: 'revision' }] };
+  } };
+  const revision = [{ revision_id: 'revision', plain_text: 'x'.repeat(480 + 31 * 384) }];
+  const results = await Promise.all([embedDoctrineRevisions(c, revision), embedDoctrineRevisions(c, revision)]);
+  assert.equal(results.filter(result => result.status === 'ready').length, 1);
+  assert.equal(inserts, 32);
+  assert.equal(f.providerCalls, 2);
+});
+
+test('staging refuses configuration above its share before provider work', async () => {
+  const f = fixture({ budget: '1501' });
+  f.env.CARR_ENV = 'staging';
+  await assert.rejects(budgetedAi(f.env).run(MODEL, input()), { code: 'ai_budget_invalid_config' });
+  assert.equal(f.providerCalls, 0);
+  assert.equal(f.requests, 0);
+});
+
+test('a reserved runner cannot spend its credits twice through concurrent calls', async () => {
+  const f = fixture({ budget: '16' });
+  const operation = await budgetedAi(f.env).reserveOperation(16);
+  const results = await Promise.allSettled([operation.run(MODEL, input(16)), operation.run(MODEL, input(16))]);
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(results.find(result => result.status === 'rejected').reason.code, 'ai_daily_budget_exhausted');
+  assert.equal(f.providerCalls, 1);
+  assert.equal(f.values.get('daily').spent, 16);
+});
+
+test('a reserved provider failure cannot refund credits for a retry', async () => {
+  const f = fixture({ budget: '1', run: async () => { throw new Error('provider timeout'); } });
+  const operation = await budgetedAi(f.env).reserveOperation(1);
+  await assert.rejects(operation.run(MODEL, input()), /provider timeout/);
+  await assert.rejects(operation.run(MODEL, input()), { code: 'ai_daily_budget_exhausted' });
+  assert.equal(f.providerCalls, 1);
+  assert.equal(f.values.get('daily').spent, 1);
 });
