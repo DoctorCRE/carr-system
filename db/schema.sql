@@ -18151,6 +18151,22 @@ COMMENT ON FUNCTION ops.gate_zero_record_read_only_outcome(p_idempotency_key uui
 
 
 --
+-- Name: guard_captured_email_source(); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.guard_captured_email_source() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog'
+    AS $$
+begin
+  if new.email_source is distinct from old.email_source then
+    raise exception 'email_source_immutable' using errcode='23514';
+  end if;
+  return new;
+end $$;
+
+
+--
 -- Name: guard_engineering_actor_authority_update(); Type: FUNCTION; Schema: ops; Owner: -
 --
 
@@ -77244,7 +77260,9 @@ CREATE TABLE public.activity (
     version integer DEFAULT 1 NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by uuid,
-    connected boolean
+    connected boolean,
+    email_source jsonb,
+    CONSTRAINT activity_email_source_check CHECK ((((email_source IS NULL) OR ((kind = 'email_in'::text) AND (jsonb_typeof(email_source) = 'object'::text) AND (email_source ?& ARRAY['mailbox_owner'::text, 'sender_email'::text]) AND ((email_source ->> 'mailbox_owner'::text) = ANY (ARRAY['joe'::text, 'dell'::text])) AND ((email_source ->> 'sender_email'::text) ~ '^[^[:space:]<>@]+@[^[:space:]<>@]+[.][^[:space:]<>@]+$'::text))) IS TRUE))
 );
 
 
@@ -78983,14 +79001,21 @@ CREATE TABLE public.email_proposal (
     resolved_by uuid,
     resolved_at timestamp with time zone,
     resolution_reason text,
-    CONSTRAINT email_proposal_check CHECK ((((kind = 'phase_move'::text) AND (task_text IS NULL) AND (next_date IS NULL) AND (owner IS NULL)) OR ((kind = 'next_step'::text) AND (task_text IS NOT NULL) AND (next_date IS NOT NULL) AND (owner IS NOT NULL)))),
-    CONSTRAINT email_proposal_check1 CHECK ((((status = 'pending'::text) AND (resolved_by IS NULL) AND (resolved_at IS NULL) AND (resolution_reason IS NULL)) OR ((status = 'confirmed'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL)) OR ((status = 'dismissed'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL) AND (resolution_reason IS NOT NULL)))),
+    draft_subject text,
+    draft_body text,
+    submitted_email jsonb,
+    submitted_at timestamp with time zone,
+    send_result jsonb,
     CONSTRAINT email_proposal_confidence_check CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))),
     CONSTRAINT email_proposal_evidence_quote_check CHECK (((length(evidence_quote) >= 10) AND (length(evidence_quote) <= 2000))),
-    CONSTRAINT email_proposal_kind_check CHECK ((kind = ANY (ARRAY['phase_move'::text, 'next_step'::text]))),
+    CONSTRAINT email_proposal_kind_check CHECK ((kind = ANY (ARRAY['phase_move'::text, 'next_step'::text, 'reply_draft'::text]))),
     CONSTRAINT email_proposal_owner_check CHECK ((owner = ANY (ARRAY['joe'::text, 'dell'::text]))),
+    CONSTRAINT email_proposal_resolution CHECK ((((status = 'pending'::text) AND (resolved_by IS NULL) AND (resolved_at IS NULL) AND (resolution_reason IS NULL)) OR ((status = 'confirmed'::text) AND (kind <> 'reply_draft'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL)) OR ((status = 'dismissed'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL) AND (resolution_reason IS NOT NULL)) OR ((status = ANY (ARRAY['approved_to_send'::text, 'sent'::text, 'failed'::text])) AND (kind = 'reply_draft'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL)))),
     CONSTRAINT email_proposal_resolution_reason_check CHECK (((length(btrim(resolution_reason)) >= 1) AND (length(btrim(resolution_reason)) <= 500))),
-    CONSTRAINT email_proposal_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'confirmed'::text, 'dismissed'::text]))),
+    CONSTRAINT email_proposal_send_result CHECK (((((status <> ALL (ARRAY['sent'::text, 'failed'::text])) AND (send_result IS NULL)) OR ((status = ANY (ARRAY['sent'::text, 'failed'::text])) AND ((send_result ->> 'status'::text) = status))) IS TRUE)),
+    CONSTRAINT email_proposal_shape CHECK (((((kind = 'phase_move'::text) AND (task_text IS NULL) AND (next_date IS NULL) AND (owner IS NULL) AND (draft_subject IS NULL) AND (draft_body IS NULL)) OR ((kind = 'next_step'::text) AND (task_text IS NOT NULL) AND (next_date IS NOT NULL) AND (owner IS NOT NULL) AND (draft_subject IS NULL) AND (draft_body IS NULL)) OR ((kind = 'reply_draft'::text) AND (task_text IS NULL) AND (next_date IS NULL) AND (owner IS NOT NULL) AND ((length(draft_subject) >= 1) AND (length(draft_subject) <= 998)) AND ((length(btrim(draft_body)) >= 1) AND (length(btrim(draft_body)) <= 20000)))) IS TRUE)),
+    CONSTRAINT email_proposal_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'confirmed'::text, 'dismissed'::text, 'approved_to_send'::text, 'sent'::text, 'failed'::text]))),
+    CONSTRAINT email_proposal_submission CHECK (((((submitted_email IS NULL) AND (submitted_at IS NULL) AND (status <> ALL (ARRAY['approved_to_send'::text, 'sent'::text, 'failed'::text]))) OR ((kind = 'reply_draft'::text) AND (submitted_at IS NOT NULL) AND (status = ANY (ARRAY['approved_to_send'::text, 'sent'::text, 'failed'::text])) AND (jsonb_typeof(submitted_email) = 'object'::text) AND (submitted_email ?& ARRAY['subject'::text, 'body'::text, 'sha256'::text, 'to'::text, 'cc'::text]))) IS TRUE)),
     CONSTRAINT email_proposal_task_text_check CHECK (((length(btrim(task_text)) >= 1) AND (length(btrim(task_text)) <= 500)))
 );
 
@@ -95734,6 +95759,13 @@ CREATE INDEX doctrine_section_title_search_idx ON public.doctrine_section USING 
 
 
 --
+-- Name: email_proposal_outbox; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX email_proposal_outbox ON public.email_proposal USING btree (owner, submitted_at, id) WHERE (status = 'approved_to_send'::text);
+
+
+--
 -- Name: email_proposal_pending; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -99800,6 +99832,13 @@ CREATE TRIGGER campaign_channels_check BEFORE INSERT OR UPDATE OF channels ON pu
 --
 
 CREATE TRIGGER campaign_touch BEFORE UPDATE ON public.campaign FOR EACH ROW EXECUTE FUNCTION public.trg_touch_row();
+
+
+--
+-- Name: activity captured_email_source_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER captured_email_source_immutable BEFORE UPDATE OF email_source ON public.activity FOR EACH ROW EXECUTE FUNCTION ops.guard_captured_email_source();
 
 
 --
@@ -107864,6 +107903,7 @@ revoke all on function ops.gate_zero_producer_actor_id() from public;
 revoke all on function ops.gate_zero_producer_login_role() from public;
 revoke all on function ops.gate_zero_producer_seat_holder_ref() from public;
 revoke all on function ops.gate_zero_record_read_only_outcome(p_idempotency_key uuid, p_receipt jsonb) from public;
+revoke all on function ops.guard_captured_email_source() from public;
 revoke all on function ops.guard_engineering_actor_authority_update() from public;
 revoke all on function ops.guard_engineering_envelope_supersession() from public;
 revoke all on function ops.guard_engineering_job_definition_currentness_update() from public;
@@ -113068,7 +113108,8 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 1004_phase_start_undo.sql	921899f7e36a786c3570d2da68645051b710c7fd51ec7fbe6c8b74488bd93e52	1970-01-01 00:00:00+00
 1005_calendar_intake_retained_control_ref.sql	2d1910179c7f719c91b55416062725031a447a0ce711621dace61e3049488751	1970-01-01 00:00:00+00
 1006_complete_work_request.sql	5e378cf45c69a0d974684f7538f86649a0fdf1f0a61694a677a962f904fd10fa	1970-01-01 00:00:00+00
-1008_dell_actor_email.sql	442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a	1970-01-01 00:00:00+00
+1008_email_reply_draft.sql	2a3faa08aa0088f8946fac0678d2a250dd90a493c28c7a6635f5cbc38f5808b3	1970-01-01 00:00:00+00
+1009_dell_actor_email.sql	442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a	1970-01-01 00:00:00+00
 \.
 
 
