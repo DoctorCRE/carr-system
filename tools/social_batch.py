@@ -196,12 +196,12 @@ class Blotato:
         if status == 404:
             return None
         try:
-            value = json.loads(raw) if status == 200 else None
-            if not isinstance(value.get('status'), str):
-                raise TypeError('status')
-            return value
-        except (ValueError, TypeError, AttributeError):
-            raise Stop('queue_unreadable', f'readback answered HTTP {status}') from None
+            value = json.loads(raw)
+        except ValueError:
+            value = None
+        if status != 200 or not isinstance(value, dict) or not isinstance(value.get('status'), str):
+            raise Stop('queue_unreadable', f'readback answered HTTP {status}')
+        return value
 
     def upload(self, path: Path) -> tuple[str, str]:
         """Presigned upload, then download it again and match SHA-256."""
@@ -225,9 +225,12 @@ class Blotato:
             raise Stop('submit_failed', 'refusing a post without scheduledTime')
         status, raw = self.send('POST', API + '/posts', {'Content-Type': 'application/json'}, json.dumps(body).encode())
         try:
-            return json.loads(raw)['postSubmissionId'] if status in (200, 201) else None
-        except (ValueError, KeyError, TypeError):
-            raise Stop('submit_failed', f'create answered HTTP {status}') from None
+            submission = json.loads(raw).get('postSubmissionId')
+        except (ValueError, AttributeError):
+            submission = None
+        if status not in (200, 201) or not isinstance(submission, str) or not submission:
+            raise Stop('submit_failed', f'create answered HTTP {status} without a submission id')
+        return submission
 
 
 # ---------------------------------------------------------------- logs
@@ -248,12 +251,12 @@ def append(path: Path, row: dict) -> None:
         os.fsync(handle.fileno())
 
 
-def own_keys(ctx: Context, drafts: dict) -> set[tuple[str, str]]:
+def own_keys(ctx: Context, drafts: dict) -> frozenset[tuple[str, str]]:
     """This batch's own earlier writes, so a retry plans against the same queue it drafted on."""
     ids = {d.get('id') for d in drafts.get('drafts', []) if isinstance(d, dict)}
-    return {(r['platform'], r['utc'][:16]) for r in ledger_rows(ctx.out)
-            if r.get('week') == drafts.get('week_start') and r.get('event') in ('intent', 'posted')
-            and r.get('draft') in ids}
+    return frozenset((r['platform'], r['utc'][:16]) for r in ledger_rows(ctx.out)
+                     if r.get('week') == drafts.get('week_start') and r.get('event') in ('intent', 'posted')
+                     and r.get('draft') in ids)
 
 
 # ---------------------------------------------------------------- plan
@@ -271,7 +274,7 @@ def spec_check(ctx: Context) -> None:
                                        'ops/social/cadence.v1.json')
 
 
-def plan(ctx: Context, own: set[tuple[str, str]] = frozenset()) -> dict:
+def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
     spec_check(ctx)
     cadence, accounts = ctx.cadence, ctx.accounts
     week = target_week(ctx.now)
@@ -461,7 +464,7 @@ def check(drafts: dict, current: dict, ctx: Context) -> list[dict]:
                 find(draft_id, 'media_type', f'{path.name}: need an existing absolute .png, .gif or .mp4')
             elif platform == 'twitter' and kind[0] == 'mp4':
                 find(draft_id, 'media_type', 'no video on X')
-            elif platform == 'instagram' and kind[1] and not 0.8 <= kind[1] / kind[2] <= 1.91:
+            elif platform == 'instagram' and kind[1] and kind[2] and not 0.8 <= kind[1] / kind[2] <= 1.91:
                 find(draft_id, 'media_dims', f'{path.name}: Instagram images run 4:5 to 1.91:1')
             if platform == 'twitter' and 'CARR' in entry['card_text'].upper().split():
                 find(draft_id, 'x_carr_branding', 'X visuals carry no CARR branding')
@@ -590,8 +593,6 @@ def submit(drafts: dict, ctx: Context) -> dict:
                 'scheduledTime': utc}
         append(ledger, {**base, 'event': 'intent'})
         submission = api.create(body)
-        if not submission:
-            raise Stop('submit_failed', f"{draft['id']}: Blotato did not accept the post")
         posted[draft['id']] = row = {**base, 'event': 'posted', 'submission_id': submission}
         append(ledger, row)
     return _finish(drafts, current, ctx, api, ledger, posted, media_urls, window)
