@@ -22,6 +22,7 @@ test('a password opens only its client portal and the live deal roadmap', async 
     await c.query(await readFile(new URL('../../migrations/0975_client_portal.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/0976_client_portal_binding.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/0981_client_portal_writer_denials.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/1015_list_client_portals.sql', import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')", [actor.id]);
     await c.query("insert into client_status(slug,label) values('active','Active'); insert into deal_phase(slug,label,sort) values('research','Research',1),('negotiation','Negotiation',2)");
     const party = (await c.query("insert into party(kind,name,notes_path,created_by,updated_by) values('person','Synthetic client A','INTERNAL_A',$1,$1) returning id", [actor.id])).rows[0].id;
@@ -29,6 +30,36 @@ test('a password opens only its client portal and the live deal roadmap', async 
     const deal = (await c.query("insert into deal(client_id,name,deal_type,phase,notes_path,created_by,updated_by) values($1,'INTERNAL_DEAL_NAME','lease','research','INTERNAL_DEAL_NOTE',$2,$2) returning id", [client, actor.id])).rows[0].id;
     await c.query("insert into ops.client_portal(slug,client_id,deal_id,password_hash) values('synthetic-a',$1,$2,crypt(encode(digest('synthetic-password-a','sha256'),'hex'),gen_salt('bf',12)))", [client, deal]);
     await c.query("insert into ops.client_portal_material(portal_slug,kind,title,content,shared_at) values('synthetic-a','report','Shared A report','Synthetic A report content',now())");
+    await t.test('partners can list registered portals without credentials', async () => {
+      await c.query('set role carr_reader');
+      try {
+        const result = await executeRegisteredTool(c, actor, 'list-client-portals', {});
+        assert.equal(result.portals.length, 1);
+        assert.equal(result.portals[0].slug, 'synthetic-a');
+        assert.equal(result.portals[0].client_name, 'Synthetic client A');
+        assert.equal(result.portals[0].deal_id, deal);
+        assert.equal(result.portals[0].deal_name, 'INTERNAL_DEAL_NAME');
+        assert.equal(result.portals[0].client_portal_url, 'https://share.doctorcre.com/synthetic-a');
+        assert.equal(result.portals[0].status, 'active');
+        assert.equal(result.portals[0].locked, false);
+        assert.ok(result.portals[0].registered_at);
+        assert.ok(result.portals[0].updated_at);
+        assert.equal('password_hash' in result.portals[0], false);
+        assert.equal('password' in result.portals[0], false);
+      } finally { await c.query('reset role'); }
+      await c.query("update ops.client_portal set disabled_at=now(), failed_attempts=5, attempt_window_started_at=now() where slug='synthetic-a'");
+      await c.query('set role carr_reader');
+      try {
+        const row = (await executeRegisteredTool(c, actor, 'list-client-portals', {})).portals[0];
+        assert.equal(row.status, 'disabled');
+        assert.equal(row.locked, true);
+        assert.ok(row.updated_at);
+      } finally { await c.query('reset role'); }
+      await c.query("update ops.client_portal set disabled_at=null, failed_attempts=0, attempt_window_started_at=null where slug='synthetic-a'");
+      await c.query('set role dot_reader');
+      try { await assert.rejects(c.query('select * from v_client_portal_list'), /permission denied/); }
+      finally { await c.query('reset role'); }
+    });
     const read = async (slug = 'synthetic-a', password = 'synthetic-password-a', extra = {}) => {
       await c.query('set role carr_writer');
       try { return await executeRegisteredTool(c, actor, 'read-client-portal', { slug, password, ...extra }); }
