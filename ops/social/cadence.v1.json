@@ -1,0 +1,34 @@
+{
+  "schema": "carr-social-cadence/v1",
+  "source": "docs/social/headless-batch-design.md D4; numbers copied from the pinned store sections below. A changed section hash stops tools/social_batch.py plan with spec_changed until someone reads the section and re-pins this file.",
+  "timezone": "America/Chicago",
+  "pins": [
+    {"document": "x-posting-spec", "section_key": "cadence-format-and-visuals-reset-jul-20-2026-traction-regroup",
+     "section_id": "784603e2-8103-4237-b5ed-1e045b5ba003",
+     "content_hash": "8057e2591a059c91cca7a94d93b5c4ae1850d054544a6a4519d4300efe2f4333"},
+    {"document": "x-posting-spec", "section_key": "schedule-into-blotato-the-gate-stays",
+     "section_id": "36d5265c-9f76-4566-84b1-26ca176b840c",
+     "content_hash": "b41a903664bd29951aca3ab6bc68df32769fbda83c1bc30d98946b4bd46fa804"},
+    {"document": "x-posting-spec", "section_key": "rotate-in-story-time-posts-july-16-2026",
+     "section_id": "2aee2afa-0bae-4968-9483-396e174a59a1",
+     "content_hash": "c72fb384e9df47a48f1e3c8b1fd0765e95fe6a696c772ae59789ded7e47c012f"},
+    {"document": "social-media-workflow", "section_key": "format-rotation-is-mandatory-every-batch-joe-july-24-2026-do-not-ship-all-single-cards",
+     "section_id": "122c8d4e-d94c-43ba-b5d7-3d23c0c13905",
+     "content_hash": "c53adf32b9d59e38a39207721a701b48d575501261fcc7514b385bd9af2d3d2b"}
+  ],
+  "lanes": {
+    "standalone": {"platform": "twitter", "min": 3, "max": 4},
+    "one_liner": {"platform": "twitter", "min": 3, "max": 7},
+    "linkedin": {"platform": "linkedin", "min": 2, "max": 2},
+    "facebook": {"platform": "facebook", "min": 2, "max": 2},
+    "instagram": {"platform": "instagram", "min": 2, "max": 2}
+  },
+  "story_time": {"min": 1, "max": 2},
+  "x_visual": {"min": 1, "max": 1, "no_repeat_last": 4},
+  "x_series": {"min": 1, "max": 1},
+  "carr_formats": {"min_distinct": 3, "carousel_min": 1},
+  "animated_card": {"max_per_batch": 1, "never_on": ["twitter"]},
+  "instagram_hashtags_max": 5,
+  "standalone_hours": [8, 18],
+  "min_lead_hours": 12
+}

@@ -1,0 +1,29 @@
+{
+  "source": "Response shapes recorded from read-only GET /v2/posts and GET /v2/posts/<submission id> on 2026-10-27, and the 2026-10-23 run transcript for media upload and post creation. Every id, account, text and URL here is synthetic.",
+  "accounts": {
+    "twitter": {"accountId": "900001"},
+    "linkedin": {"accountId": "900002", "pageId": "900002"},
+    "facebook": {"accountId": "900003", "pageId": "900033"},
+    "instagram": {"accountId": "900004"}
+  },
+  "listing_item": {"id": "7000001", "account": {"id": "900001", "name": "synthetic", "subaccount": null},
+                   "platform": "twitter", "text": "synthetic", "mediaUrls": [],
+                   "postTime": "2026-11-02T16:23:00.000Z", "state": {"type": "scheduled"}},
+  "post_status": {"postSubmissionId": "00000000-0000-4000-8000-000000000001",
+                  "scheduledTime": "2026-11-02T16:23:00.000Z", "status": "scheduled"},
+  "media_upload": {"presignedUrl": "https://upload.example.invalid/put/", "publicUrl": "https://media.example.invalid/public/"},
+  "post_create": {"postSubmissionId": "00000000-0000-4000-8000-000000000002", "scheduledTime": "2026-11-02T16:23:00.000Z"},
+  "covered_week_2026_11_02": [
+    ["twitter", "2026-11-02T16:23:00.000Z"], ["twitter", "2026-11-03T02:47:00.000Z"],
+    ["twitter", "2026-11-03T19:41:00.000Z"], ["twitter", "2026-11-04T13:13:00.000Z"],
+    ["twitter", "2026-11-05T20:17:00.000Z"], ["twitter", "2026-11-06T18:58:00.000Z"],
+    ["twitter", "2026-11-07T22:22:00.000Z"], ["twitter", "2026-11-09T00:39:00.000Z"],
+    ["linkedin", "2026-11-03T15:06:00.000Z"], ["linkedin", "2026-11-05T14:38:00.000Z"],
+    ["facebook", "2026-11-03T18:44:00.000Z"], ["facebook", "2026-11-05T19:09:00.000Z"],
+    ["instagram", "2026-11-04T17:27:00.000Z"], ["instagram", "2026-11-07T16:53:00.000Z"]
+  ],
+  "previous_week_2026_10_26": [
+    ["twitter", "2026-10-26T15:23:00.000Z"], ["linkedin", "2026-10-27T14:06:00.000Z"],
+    ["instagram", "2026-10-28T16:27:00.000Z"], ["twitter", "2026-11-02T00:39:00.000Z"]
+  ]
+}

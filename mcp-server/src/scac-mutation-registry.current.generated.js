@@ -406,6 +406,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "attach-memory": {
+    "ingress_key": "mcp-tool:attach-memory",
+    "source_locator": "mcp-server/src/doctrine.js",
+    "schema_digest": "9c9cc40926c4aff44d8c9008ca1b9065aa1b022ac3cfa2b7c777c7af1f370e26",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "attach-to-campaign": {
     "ingress_key": "mcp-tool:attach-to-campaign",
     "source_locator": "mcp-server/src/tools.js",
@@ -511,7 +521,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "change-doctrine-sections": {
     "ingress_key": "mcp-tool:change-doctrine-sections",
     "source_locator": "mcp-server/src/doctrine.js",
-    "schema_digest": "f92c6f281e770e96ed5dead23553ddc90083e0ae62a972bd967f5b0e8f3203c8",
+    "schema_digest": "99e1afd57c95406a2386229df99e83d97dddf92cac75659d7c692644b524bda5",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -888,6 +898,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "dispatch-job": {
+    "ingress_key": "mcp-tool:dispatch-job",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "5f22a733198e2dd9caafdda2e49818d467bd93d68fdc7d9d6ce7b7779138a868",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "doctrine-index": {
     "ingress_key": "mcp-tool:doctrine-index",
     "source_locator": "mcp-server/src/doctrine.js",
@@ -921,7 +941,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "dry-run-doctrine-gates": {
     "ingress_key": "mcp-tool:dry-run-doctrine-gates",
     "source_locator": "mcp-server/src/doctrine.js",
-    "schema_digest": "b28351739140bb7b2f367ef0765a89a16e2146a6495e9c5136cd3ee9b2fa6c40",
+    "schema_digest": "5f1df445a315f112c4cbf46be63e84f5d7a4e94d8b643e1aa7ba94648d95198a",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -1286,6 +1306,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
     "schema_digest": "fee19b4dda019dc4b1ee509c75214c8bcee91f79a77b915ae4d46d21c73ac5b7",
     "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "list-client-portals": {
+    "ingress_key": "mcp-tool:list-client-portals",
+    "source_locator": "mcp-server/src/client-portal.ts",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
     "human_only": false,
     "human_caller_only": false,
     "authority_only": false,
@@ -1659,6 +1689,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "plan-work-request-slices": {
+    "ingress_key": "mcp-tool:plan-work-request-slices",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "4a894e2a4a1f94430f51721aa00fcad764f9fe610d321e222d378f0b27e2c3f5",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "prepare-conversation": {
     "ingress_key": "mcp-tool:prepare-conversation",
     "source_locator": "mcp-server/src/tools.js",
@@ -1717,6 +1757,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/email-next-step.ts",
     "schema_digest": "722b7eb2945b75dabf92a52f9ba999c3d33c39dca8c1c5fe79635e3b819747e0",
     "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "prioritize-job": {
+    "ingress_key": "mcp-tool:prioritize-job",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "e990010394ce48b46786d4938bd060e1163f733b96ebd0d3cc363354b78a6967",
+    "write": true,
     "human_only": false,
     "human_caller_only": false,
     "authority_only": false,
@@ -2662,6 +2712,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "register-client-portal": {
+    "ingress_key": "mcp-tool:register-client-portal",
+    "source_locator": "mcp-server/src/client-portal.ts",
+    "schema_digest": "00c44019421387c2c793304e33b1051cd1b100eea9e54f30b62fa37797e99e81",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "register-derivative-source-link": {
     "ingress_key": "mcp-tool:register-derivative-source-link",
     "source_locator": "mcp-server/src/record-source-authority-store.v5.js",
@@ -2820,7 +2880,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "retire-doctrine-section": {
     "ingress_key": "mcp-tool:retire-doctrine-section",
     "source_locator": "mcp-server/src/doctrine.js",
-    "schema_digest": "ef0499be31ea9da23a23c8c3138536ba8a131b79ce8619458b14fcd43eec6c34",
+    "schema_digest": "4709b0adf3938e4c6b077ca1b9a9a5adf5d0b2f3d402c845e1bd6848dfbb1802",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -3399,6 +3459,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "work-queue": {
+    "ingress_key": "mcp-tool:work-queue",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "work-request-card": {
     "ingress_key": "mcp-tool:work-request-card",
     "source_locator": "mcp-server/src/work-request-intake.js",
@@ -3412,7 +3482,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "write-doctrine-section": {
     "ingress_key": "mcp-tool:write-doctrine-section",
     "source_locator": "mcp-server/src/doctrine.js",
-    "schema_digest": "4998bec3cb4dd152089e253d970dfa603eae3682b212573e45e5c7c79442ac44",
+    "schema_digest": "65703ad074461d9abc925a07cc6ef4d7d3abb303313f4e33ec3fea8530bb586f",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -3466,6 +3536,42 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:public.email_proposal:carr_writer:update",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.memory_session",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.memory_session:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.work_request_slice:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.work_request_slice",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.work_request_job:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.work_request_job",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.work_request_job:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.work_request_job",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "update",
+      "grantable": false
     }
   ],
   "secdef_execute": [
@@ -3630,6 +3736,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.list_fact_conflicts(p_tenant text, p_entity_ref text, p_limit integer)",
       "volatility": "s",
       "ingress_key": "db-function-acl:ops.list_fact_conflicts(p_tenant text, p_entity_ref text, p_limit integer):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.register_client_portal(p_deal_id uuid, p_slug text, p_password text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.register_client_portal(p_deal_id uuid, p_slug text, p_password text):carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

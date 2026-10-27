@@ -34,6 +34,7 @@ import { notificationTools } from "./notifications.js";
 import { sessionIdentityTools } from "./session-identity.js";
 import { dispatchSpineTools } from "./dispatch-spine.js";
 import { workShapeTools } from "./work-shape.ts";
+import { workQueueTools } from "./work-queue.js";
 import { workRequestIntakeTools } from "./work-request-intake.js";
 import { workPortfolioTools } from "./work-portfolio.js";
 import { leaseTermComparisonTools } from "./lease-term-comparison.js";
@@ -3808,6 +3809,7 @@ export const TOOLS = {
                 b.operating_state, b.parking_reason, b.parking_note,
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on, b.lane, b.outcome,
+                (select cp.client_portal_url from v_deal_client_portal cp where cp.deal_id=b.id) as client_portal_url,
                 (select to_jsonb(pc) from v_deal_room_phase_change pc where pc.deal_id=b.id) as phase_change,
                 coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
                             from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
@@ -8979,6 +8981,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "dispatch-spine": "mcp-server/src/dispatch-spine.js",
   "doc-outcome-cards": "mcp-server/src/tools.js",
   "work-shape": "mcp-server/src/work-shape.ts",
+  "work-queue": "mcp-server/src/work-queue.js",
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
   "fact-observations": "mcp-server/src/fact-observations.ts",
@@ -9073,6 +9076,7 @@ registerTools({
                 b.operating_state, b.parking_reason, b.parking_note,
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on, b.lane, b.outcome,
+                (select cp.client_portal_url from v_deal_client_portal cp where cp.deal_id=b.id) as client_portal_url,
                 (select to_jsonb(pc) from v_deal_room_phase_change pc where pc.deal_id=b.id) as phase_change,
                 coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
                             from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
@@ -9089,6 +9093,7 @@ registerTools({
                 case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on,
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on, b.outcome, b.lane,
+                (select cp.client_portal_url from v_deal_client_portal cp where cp.deal_id=b.id) as client_portal_url,
                 coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
                             from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
                 r.salesforce_id, r.base_version, ce.client_status, ce.client_version, ce.prospect_engagement_status
@@ -10551,6 +10556,7 @@ registerTools({
 registerTools(workShapeTools({ withEnvelope, writeEvent, ToolError }), "work-shape");
 
 // Program 6: sourced additive capture and a safe card only. No lifecycle verbs.
+registerTools(workQueueTools({ withEnvelope, writeEvent, ToolError }), "work-queue");
 registerTools(workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }), "work-request-intake");
 registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 
@@ -10562,7 +10568,7 @@ registerTools(factObservationTools(), "fact-observations");
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
 registerTools(agentProfileTools(), "agent-profile");
-registerTools(clientPortalTools(), "client-portal");
+registerTools(clientPortalTools({ withEnvelope, writeEvent, resolveSubject }), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
 // src/resource-observation.v5.js.
