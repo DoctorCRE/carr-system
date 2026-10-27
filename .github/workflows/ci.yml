@@ -5,7 +5,7 @@ on:
   merge_group:
     types: [checks_requested]
   pull_request:
-    types: [opened, synchronize, reopened, converted_to_draft]
+    types: [opened, synchronize, reopened, converted_to_draft, ready_for_review]
   schedule:
     # 06:20 UTC daily. Sits after the nightly backup (02:35 UTC) and the 05:10
     # edge-liveness slot.
