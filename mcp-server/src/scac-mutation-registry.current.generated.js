@@ -648,6 +648,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "complete-work-request": {
+    "ingress_key": "mcp-tool:complete-work-request",
+    "source_locator": "mcp-server/src/work-request-intake.js",
+    "schema_digest": "ba6119c8b5476f08d8d5e20df152395f3c89b81732ce898cc783b4f7adc933b0",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "confirm-email-deal-progress": {
     "ingress_key": "mcp-tool:confirm-email-deal-progress",
     "source_locator": "mcp-server/src/email-deal-progress.ts",
@@ -1936,6 +1946,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-doctrine",
     "source_locator": "mcp-server/src/doctrine.js",
     "schema_digest": "92ae529a7e47be0d8ac99fdef3b3b79c8588128418c5b5606f3f2ad1563f2757",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-email-proposal-source": {
+    "ingress_key": "mcp-tool:read-email-proposal-source",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "4e2fb611d9a73e7f55be4b06c870e35cc99ccbd6d40e310c5c37a6883e309bff",
     "write": false,
     "human_only": false,
     "human_caller_only": false,

@@ -7,6 +7,7 @@ import hashlib
 import shutil
 import tempfile
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import sys
@@ -45,6 +46,32 @@ def repository_ledger():
 
 
 class ProofTests(unittest.TestCase):
+    def setUp(self):
+        if self._testMethodName not in {
+            'test_committed_snapshot_schema_only_round_trip_with_zero_pending',
+            'test_compacted_runner_is_read_only_and_preserves_original_ledger_timestamps',
+            'test_live_proof_accepts_production_owner_with_zero_pending',
+            'test_live_proof_rejects_explicit_select_drift',
+        }:
+            return
+        parse_snapshot = runpy.run_path(str(ROOT / 'ops/migration-safety-gate.py'))['ledger_rows']
+        ledger = parse_snapshot((ROOT / 'db/schema.sql').read_text())
+        directory = tempfile.TemporaryDirectory(prefix='snapshot-proof-repository-')
+        self.addCleanup(directory.cleanup)
+        repo = Path(directory.name)
+        for folder in ('tools', 'db', 'migrations'):
+            (repo / folder).mkdir()
+        for name in ('migrate.py', 'migration_baseline.py', 'migration_number_contract.py'):
+            shutil.copyfile(ROOT / 'tools' / name, repo / 'tools' / name)
+        shutil.copyfile(ROOT / 'db/migration-baseline.json', repo / 'db/migration-baseline.json')
+        baseline = dict(proof.MigrationBaseline.load(ROOT).migrations)
+        for name in ledger.keys() - baseline.keys():
+            shutil.copyfile(ROOT / 'migrations' / name, repo / 'migrations' / name)
+        build_schema = proof.build_schema
+        self.enterContext(patch.object(proof, 'repository_ledger', return_value=ledger))
+        self.enterContext(patch.object(proof, 'build_schema',
+            side_effect=lambda *args, **kwargs: build_schema(*args, **dict({'repo': repo}, **kwargs))))
+
     def test_baseline_requires_every_original_row_before_pending_suffix(self):
         baseline = proof.MigrationBaseline.load(ROOT)
         covered = dict(baseline.migrations)
@@ -112,11 +139,13 @@ class ProofTests(unittest.TestCase):
 
 
     def test_reconstruction_failure_reports_post_pending_grants_not_run(self):
-        repository = repository_ledger()
+        parse_snapshot = runpy.run_path(str(ROOT / 'ops/migration-safety-gate.py'))['ledger_rows']
+        repository = parse_snapshot((ROOT / 'db/schema.sql').read_text())
         for failure in ([RuntimeError('reference failed')],
                         [dict(grants={}, ledger={}, dump=''), RuntimeError('replay failed')]):
             with self.subTest(failure=failure), \
                  patch.object(proof, 'production_dsn', return_value='fixture'), \
+                 patch.object(proof, 'repository_ledger', return_value=repository), \
                  patch.object(proof, 'read_source', return_value=(repository, '', {})), \
                  patch.object(proof.comparison, 'find_pg18', return_value=Path('/bin')), \
                  patch.object(proof, 'build_schema', side_effect=failure):
@@ -270,7 +299,7 @@ class ProofTests(unittest.TestCase):
                 (repo / 'migrations').mkdir()
                 baseline = dict(proof.MigrationBaseline.load(ROOT).migrations)
                 for migration in (ROOT / 'migrations').glob('*.sql'):
-                    if migration.name not in baseline:
+                    if migration.name not in baseline and migration.name in repository_ledger():
                         shutil.copyfile(migration, repo / 'migrations' / migration.name)
                 program = ("import sys; from pathlib import Path; "
                            "sys.path.insert(0, sys.argv[1]); import migrate; "

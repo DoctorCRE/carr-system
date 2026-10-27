@@ -1379,7 +1379,7 @@
       "carrying_control": "calendar_intake",
       "home": "gate",
       "id": "d7c69aa6",
-      "reason": "Already machine-enforced via control 'calendar_intake' (tools/calendar-intake-gate.py, bin/calendar-eventkit-capture.sh); binds live calendar capture completion for an unmatched attendee. Failure mode on violation: calendar intake refuses completion without mail, research and record receipts",
+      "reason": "Already machine-enforced via control 'calendar_intake' (tools/calendar-intake-gate.py); binds live calendar capture completion for an unmatched attendee. Failure mode on violation: calendar intake refuses completion without mail, research and record receipts",
       "title_gist": "A NEW NAME ON THE CALENDAR IS AN INTAKE TRIGGER, NOT A CALENDAR ENTRY"
     },
     {

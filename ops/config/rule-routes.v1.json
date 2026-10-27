@@ -786,9 +786,7 @@
       "mcp__*__search_threads"
      ],
      "verbs": [],
-     "bash_patterns": [
-      "\\bcalendar-eventkit-capture\\b"
-     ]
+     "bash_patterns": []
     }
    ]
   },
@@ -2735,7 +2733,6 @@
      ],
      "bash_patterns": [
       "\\bcalendar-intake-gate\\b",
-      "\\bcalendar-eventkit-capture\\b",
       "\\bfetch-calendar\\.sh\\b"
      ]
     }

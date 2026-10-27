@@ -482,7 +482,8 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
   assert.equal(submitted.status, 200);
   const receipt = await submitted.json();
   const queue = await TOOLS["capture-queue"].handler(db, joe, {});
-  assert.deepEqual(queue.candidates[0].payload, { ...item.payload, base_event_id: db.phaseBase });
+  assert.deepEqual(queue.candidates[0].payload, { ...item.payload, base_event_id: db.phaseBase,
+    plan_base: { next_step: null, next_date: null } });
   db.phaseBase = "50000000-0000-0000-0000-000000000002";
   const replay = await post(r.handler, "/capture/candidates", batch);
   assert.deepEqual(await replay.json(), receipt);
@@ -508,6 +509,7 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
     { ...item.payload, value: "closed" }, { ...item.payload, value: "invoiced" },
     { ...item.payload, value: "not-a-phase" }, { ...item.payload, field: "owner" },
     { ...item.payload, base_event_id: null }, { ...item.payload, value: true },
+    { ...item.payload, plan_base: { next_step: null, next_date: null } },
     { ...item.payload, human_quote: "Joe said move it" },
     { ...item.payload, started_on: "2026-13-40" }, { ...item.payload, started_on: "October 20" },
   ];

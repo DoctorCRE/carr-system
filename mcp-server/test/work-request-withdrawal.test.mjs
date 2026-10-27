@@ -95,6 +95,34 @@ test("decline records the reason, the closing time and one audit event", async (
   assert.equal(JSON.parse(event.params[6]).state, "captured");
 });
 
+for (const exit_reason of [
+  "Done", "  shipped to production", "FIXED without a PR",
+  "Already done in #2488", "Implemented by merged app#123", "#2488 shipped the fix",
+  "The issue was fixed in #2488", "Implementation landed in app#123",
+]) test(`decline refuses completion claim: ${exit_reason}`, async () => {
+  const db = new WithdrawFake();
+  await assert.rejects(() => executeRegisteredTool(db, JOE, "decline-work-request",
+    { ...DECLINE, exit_reason }), error => {
+    assert.ok(error instanceof ToolError);
+    assert.equal(error.payload.error, "decline_claims_completion");
+    assert.match(error.payload.hint, /complete-work-request/);
+    return true;
+  });
+  assert.equal(db.calls.length, 0);
+  assert.equal(db.state, "captured");
+});
+
+for (const exit_reason of [
+  "won't do", "superseded by WR-000034", "retired by audit",
+  "See #2488 for the proposed alternative", "No work landed; retired by audit",
+  "Donegal example was captured in error", "The fixtures are fixed-size; won't do",
+]) test(`decline accepts genuine withdrawal: ${exit_reason}`, async () => {
+  const out = await executeRegisteredTool(new WithdrawFake(), JOE, "decline-work-request",
+    { ...DECLINE, exit_reason });
+  assert.equal(out.state, "declined");
+  assert.equal(out.exit_reason, exit_reason);
+});
+
 for (const from of ["captured", "triaged"]) {
   test(`an unsponsored agent cannot decline a ${from} request`, async () => {
     const db = new WithdrawFake({ from });
