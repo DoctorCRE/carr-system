@@ -22,18 +22,22 @@ def call(verb, args):
 
 
 def main():
+    address = json.loads((ROOT / 'mcp-server/src/progress-address.v1.json').read_text())
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('repo', choices=['DoctorCRE/carr-system', 'jbookout/doctorcre-app',
-                                        'jbookout/software-factory'])
+    parser.add_argument('repo', choices=address['repositories'])
     args = parser.parse_args()
     jobs = call('work-queue', {})['jobs']
+    unbound = [job['card_id'] for job in jobs if not job.get('repository')
+               and job['executor'] == 'codex' and not job.get('runner_job_id')]
+    if unbound:
+        print(f"Skipped {len(unbound)} unstarted Codex jobs without a repository: "
+              + ', '.join(unbound), file=sys.stderr, flush=True)
     job = next((job for job in jobs if job.get('repository') == args.repo
                 and job['executor'] == 'codex'
                 and not job.get('runner_job_id')), None)
     if job is None:
         print(f'No unstarted Codex jobs bound to {args.repo}.')
         return 0
-    address = json.loads((ROOT / 'mcp-server/src/progress-address.v1.json').read_text())
     ref = re.fullmatch(address['work_request_pattern'], job['work_request'] or '')
     if (ref is None or any(type(job[key]) is not int or job[key] < 1
                            for key in ('slice_ordinal', 'j_number'))):
@@ -42,6 +46,7 @@ def main():
                .replace('{slice}', str(job['slice_ordinal'])).replace('{job}', str(job['j_number'])))
     if job['card_id'] != card_id:
         raise ValueError('queued card ID does not match its Work Request, slice and job')
+    rules = (ROOT / 'tools/room-bridge/job-rules.md').read_text().strip()
     runner_job_id = 'codex-' + str(uuid4())
     receipt = call('dispatch-job', dict(idempotency_key=str(uuid4()),
                    work_request=job['work_request'], slice=job['slice_ordinal'],
@@ -51,8 +56,9 @@ def main():
     print(f"Card: {job['card_id']} Runner job: {runner_job_id}", flush=True)
     brief = (f"Card: {job['card_id']}\n{job['card_title']}\n{job['description']}\n\n"
              f"Work Request: {job['work_request']}, slice {job['slice_ordinal']}.\n"
-             f"Put Card: {job['card_id']} in the PR body. Preserve this card ID.\n"
+             f"Put Card: {job['card_id']} in the PR body on its own line. Preserve this card ID.\n"
              'Implement this queued task and deliver through a ready pull request.')
+    brief += '\n\n' + rules
     launcher = str(ROOT / 'bin/codex-job')
     os.execv(launcher, [launcher, args.repo, f"job/{job['card_id']}-{runner_job_id}", brief,
                        '-c', 'model=' + job['model'],
