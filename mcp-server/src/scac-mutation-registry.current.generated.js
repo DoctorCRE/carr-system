@@ -1264,7 +1264,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "list-email-proposals": {
     "ingress_key": "mcp-tool:list-email-proposals",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "d3b701137b11ee9d1dd3e3415f453fe91c6a6295c1324c8270e8ff5f6bd6a5ea",
+    "schema_digest": "59d38926efd041da521815c82385ad3adb0ba41b1e6296cbd419d37f14520190",
     "write": false,
     "human_only": false,
     "human_caller_only": false,

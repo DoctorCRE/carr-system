@@ -887,6 +887,45 @@ test('confirming through the existing verbs resolves the stored proposal', async
   assert.ok(rows.every(row => row.resolved_by === actor.id));
 });
 
+test('email proposal history retains confirmed and dismissed evidence without confirmation controls', async () => {
+  await c.query('delete from email_proposal');
+  const source = await email();
+  const ask = await email(askQuote);
+  const phase = await record({ kind: 'phase_move', activity_id: source.activity_id, evidence_quote: quote });
+  const step = await record({ kind: 'next_step', activity_id: ask.activity_id, evidence_quote: askQuote,
+    text: 'Send the floor plan', next_date: '2027-01-08' });
+  const card = byKind(await listed(), 'phase_move');
+  await confirm(card.preview, {}, actor, 'carr_writer');
+  await command('dismiss-email-proposal', { idempotency_key: randomUUID(), proposal_id: step.proposal_id,
+    base_version: 1, reason: 'Already handled by phone' }, actor, 'carr_writer');
+  const roomBefore = await command('get-deal-room', { deal });
+  const history = status => command('list-email-proposals', { deal, status }, actor, 'carr_reader');
+  const confirmed = await history('confirmed');
+  const dismissed = await history('dismissed');
+  assert.deepEqual(confirmed.proposals.map(item => item.id), [phase.proposal_id]);
+  assert.deepEqual(dismissed.proposals.map(item => item.id), [step.proposal_id]);
+  for (const [result, status, evidence, reason] of [
+    [confirmed, 'confirmed', quote, null],
+    [dismissed, 'dismissed', askQuote, 'Already handled by phone'],
+  ]) {
+    assert.equal(result.send, false);
+    const [item] = result.proposals;
+    assert.equal(item.status, status);
+    assert.equal(item.source.evidence_quote, evidence);
+    assert.equal(item.resolution.resolved_by, 'joe');
+    assert.equal(item.resolution.reason, reason);
+    assert.equal(new Date(item.resolution.resolved_at).toISOString(), item.resolution.resolved_at);
+    assert.equal(item.confirm_verb, null);
+    assert.equal(item.preview, null);
+    assert.equal(item.preview_error, null);
+  }
+  assert.equal(confirmed.proposals[0].proposed_next_step, null);
+  assert.deepEqual(dismissed.proposals[0].proposed_next_step,
+    { text: 'Send the floor plan', next_date: '2027-01-08', owner: 'joe' });
+  assert.deepEqual(await listed(), []);
+  assert.deepEqual(await command('get-deal-room', { deal }), roomBefore);
+});
+
 test('confirming a stored proposal twice resolves it once', async () => {
   await c.query('delete from email_proposal');
   const source = await email();
@@ -901,6 +940,41 @@ test('confirming a stored proposal twice resolves it once', async () => {
     error => error.payload?.error === 'email_deal_phase_not_eligible');
   const rows = (await c.query('select status,version from email_proposal')).rows;
   assert.deepEqual(rows, [{ status: 'confirmed', version: 2 }]);
+});
+
+test('resolved email history pages stay scoped to the selected deal and status', async () => {
+  await c.query('delete from email_proposal');
+  const otherDeal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) select 'Synthetic history deal',client_id,'purchase','research','joe',$2,$2 from deal where id=$1 returning id", [deal, actor.id])).rows[0].id;
+  try {
+    const stored = [];
+    for (const target of [otherDeal, deal, deal]) {
+      const source = await email(askQuote);
+      const item = await record({ kind: 'next_step', deal: target, activity_id: source.activity_id,
+        evidence_quote: askQuote, text: 'Send the floor plan', next_date: '2027-01-08' });
+      await command('dismiss-email-proposal', { idempotency_key: randomUUID(), proposal_id: item.proposal_id,
+        base_version: 1, reason: 'Already handled' }, actor, 'carr_writer');
+      stored.push(item);
+    }
+    const pendingSource = await email(askQuote);
+    const pending = await record({ kind: 'next_step', activity_id: pendingSource.activity_id,
+      evidence_quote: askQuote, text: 'Review the floor plan', next_date: '2027-01-09' });
+    const page = args => command('list-email-proposals', { deal: deal.toUpperCase(),
+      status: 'dismissed', limit: 1, ...args }, actor, 'carr_reader');
+    const first = await page({});
+    assert.deepEqual(first.proposals.map(item => item.id), [stored[1].proposal_id]);
+    assert.equal(first.more, true);
+    assert.equal(first.next_cursor, stored[1].proposal_id);
+    const next = await page({ cursor: first.next_cursor });
+    assert.deepEqual(next.proposals.map(item => item.id), [stored[2].proposal_id]);
+    assert.equal(next.more, false);
+    assert.equal(next.next_cursor, null);
+    await assert.rejects(page({ cursor: stored[0].proposal_id }),
+      error => error.payload?.error === 'email_proposals_cursor_invalid');
+    await assert.rejects(page({ status: 'all' }),
+      error => error.payload?.error === 'value_not_in_declared_vocabulary');
+    assert.deepEqual((await command('list-email-proposals', { deal }, actor, 'carr_reader'))
+      .proposals.map(item => [item.id, item.status, item.resolution]), [[pending.proposal_id, 'pending', null]]);
+  } finally { await c.query("update deal set phase='closed' where id=$1", [otherDeal]); }
 });
 
 test('Joe confirming from a stale card after a dismissal wins and keeps the dismissal as a note', async () => {
