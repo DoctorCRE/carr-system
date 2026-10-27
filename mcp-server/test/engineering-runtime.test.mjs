@@ -1,3 +1,4 @@
+import { NOW } from "./helpers/fixed-clock.mjs";
 // Test engineering runtime envelopes, admission, plans, receipts, and closure.
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -49,7 +50,7 @@ class EngineeringToolError extends Error {
 }
 
 function currentClaimEnvelope(sessionId = "99999999-9999-4999-8999-999999999999") {
-  const issued = new Date(Date.now()).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const issued = new Date(NOW).toISOString().replace(/\.\d{3}Z$/, "Z");
   const expiry = new Date(Date.parse(issued) + 29 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
   return {
     schema_version: "execution-envelope.v1", envelope_id: "env:88888888-8888-4888-8888-888888888888", work_request_id: "wr:11111111-1111-4111-8111-111111111111", issued_at: issued, expires_at: expiry,
@@ -397,7 +398,7 @@ function priorSessionAdmissionFixture({
     if (sql.includes("insert into ops.capability_agent_session")) {
       counts.session += 1;
       return { rows: [{ id: nextSession, executor_actor_id: actor.id, state: "claimed",
-        lease_expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString() }] };
+        lease_expires_at: new Date(NOW + 30 * 60 * 1000).toISOString() }] };
     }
     if (sql.trimStart().startsWith("select id from ops.engineering_slice_plan"))
       return { rows: [{ id: "12121212-1212-4212-8212-121212121212" }] };

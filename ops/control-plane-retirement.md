@@ -20,15 +20,14 @@ records no longer require a separate typed approval.
 those shared consumers and disposable database reconstruction. It cannot enqueue,
 claim, execute, retry, or promote jobs. Native schedulers own recurrence.
 
-The three deterministic recurring workflows retain their direct launchd paths.
+The two deterministic recurring workflows retain their direct launchd paths.
 
 | Workflow | Existing launchd job | Command |
 | --- | --- | --- |
-| Calendar fetch | `com.carr.calendar-eventkit` | `bin/calendar-eventkit-capture.sh` |
 | Nightly record layer | `com.carr.nightly-record-layer` | `bin/nightly.sh` |
 | Notes sweep | `com.carr.notes-sweep` | `bin/notes-sweep-post.sh` |
 
-The AI tasks retain their existing native scheduler definitions. The five paused
-capability and prebrief definitions and the disabled renewal-source definition
+The AI tasks retain their existing native scheduler definitions. The paused
+prebrief definitions and the disabled renewal-source definition
 are not activated. `engineering-slice` remains on demand through its dedicated
 MCP and room-bridge worker. No job requires the tick.

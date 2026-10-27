@@ -32,9 +32,9 @@ after(async () => {
 
 const helper = new URL('./helpers/disposable-postgres.mjs', import.meta.url).href;
 async function waitFor(predicate) {
-  const deadline = Date.now() + 15000;
+  const deadline = performance.now() + 15000;
   while (!predicate()) {
-    assert.ok(Date.now() < deadline, 'fixture teardown/startup deadline exceeded');
+    assert.ok(performance.now() < deadline, 'fixture teardown/startup deadline exceeded');
     await delay(25);
   }
 }

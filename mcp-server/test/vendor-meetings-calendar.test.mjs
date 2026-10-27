@@ -1,3 +1,4 @@
+import { NOW } from "./helpers/fixed-clock.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { executeRegisteredTool } from '../src/tools.js';
@@ -9,7 +10,7 @@ const vendor = (email = 'ada@example.test', suffix = '1') => ({
   company: { name: 'Synthetic company', email: 'company@example.test' },
 });
 function snapshot(overrides = {}) {
-  const at = hours => new Date(Date.now() + hours * 3600000).toISOString();
+  const at = hours => new Date(NOW + hours * 3600000).toISOString();
   return { schema: 'carr-calendar-agenda.v1', observed_at: at(0), warnings: [], items: [
     { title: 'Synthetic lender meeting', start: at(1), end: at(2), location: 'Synthetic office',
       organizer: { email: ' ADA@example.test ' }, attendees: [] },
@@ -52,7 +53,7 @@ test('matches attendees without borrowing company, name, domain, or absent conta
 test('only future or ongoing meetings inside the shared seven-day horizon appear', async () => {
   const calendar = snapshot();
   const meeting = calendar.items[0];
-  const at = hours => new Date(Date.now() + hours * 3600000).toISOString();
+  const at = hours => new Date(NOW + hours * 3600000).toISOString();
   calendar.items = [
     { ...meeting, title: 'Synthetic ended meeting', start: at(-2), end: at(-1) },
     { ...meeting, title: 'Synthetic next week', start: at(193), end: at(194) },
@@ -76,7 +77,7 @@ test('absent and malformed snapshots stay unavailable while a fresh empty calend
 });
 
 test('stale observations and lifecycle gaps remain visible beside possible matches', async () => {
-  const calendar = snapshot({ observed_at: new Date(Date.now() - 19 * 3600000).toISOString(),
+  const calendar = snapshot({ observed_at: new Date(NOW - 19 * 3600000).toISOString(),
     warnings: [{ code: 'responses_unverified' }] });
   const result = await executeRegisteredTool(client({ calendar }), JOE, 'read-vendor-meetings', {});
   assert.equal(result.calendar.state, 'partial');
@@ -93,7 +94,10 @@ test('calendar failure preserves the vendor page and recovers its read transacti
   const result = await executeRegisteredTool(c, JOE, 'read-vendor-meetings', {});
   assert.equal(result.items[0].contact.email, 'ada@example.test');
   assert.deepEqual(result.items[0].possible_meetings, []);
-  assert.deepEqual(result.calendar, { state: 'unavailable', reason: 'source_unavailable' });
+  assert.equal(result.calendar.state, 'unavailable');
+  assert.equal(result.calendar.reason, 'source_unavailable');
+  assert.equal(result.calendar.scheduling.state, 'unavailable');
+  assert.deepEqual(result.calendar.scheduling.items, []);
   assert.ok(!JSON.stringify(result).includes('diagnostic'));
   assert.deepEqual(c.queries.filter(q => q.sql.includes('savepoint')).map(q => q.sql), [
     'savepoint vendor_calendar', 'rollback to savepoint vendor_calendar', 'release savepoint vendor_calendar',

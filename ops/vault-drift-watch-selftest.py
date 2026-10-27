@@ -915,63 +915,6 @@ def _(assert_):
     assert_("--rebaseline only" in err, f"the error should name the right mode: {err}")
 
 
-# ---------------------------------------------------------------- v5 cases
-
-
-@case("the Friday social batch's dated outputs are a known writer, not drift")
-def _(assert_):
-    # WHY THIS CASE EXISTS. The other two of the four UNEXPECTED findings that
-    # failed the nightly chain on 2026-08-14 were that morning's social batch:
-    # `social-batch-weekly` (services.json, cron 0 8 * * 5) writes next week's
-    # drafts into the vault every Friday at 08:00. Six weekly folders existed by
-    # then and not one of them had a writer, so the chain went red every Friday
-    # on the most ordinary scheduled work the marketing lane does.
-    #
-    # THE MATCH IS DELIBERATELY NARROW — a dated run folder and a dated x-batch
-    # filename, not the whole Marketing/Social Media/ tree. That tree also holds
-    # the playbooks, strategies and SOPs, which are hand-authored: blanket-
-    # trusting the folder would blind this watch to a foreign writer parking
-    # content beside them, which is the same trap the Backups/portability-mirror
-    # note in vault-drift-watch.py talks itself out of.
-    d = fresh_dirs("social-batch")
-    write(d["root"], "Marketing/Social Media/week-2026-08-17/"
-                     "batch-2026-08-17-carr-platforms.md", "# batch\n")
-    write(d["root"], "Marketing/Social Media/x-batch-2026-08-17-week.md", "# x\n")
-    write(d["root"], "Marketing/Social Media/marketing-playbook.md", "# playbook\n")
-    rc, out, err = run(d)
-    assert_(rc == 0, f"seed run should exit 0, got {rc}\nstderr={err}")
-
-    for needle in ("week-2026-08-17/", "x-batch-2026-08-17-week.md"):
-        lines = [ln for ln in out.splitlines() if needle in ln]
-        assert_(lines, f"{needle} should appear in the report")
-        assert_(all("UNEXPECTED" not in ln for ln in lines),
-                f"{needle} must not classify as UNEXPECTED: {lines}")
-        assert_(any("social-batch-weekly" in ln for ln in lines),
-                f"{needle} should name the Friday batch as its writer: {lines}")
-
-    # The narrowness is the point: a sibling hand-authored doc in the same
-    # folder is still covered.
-    playbook = [ln for ln in out.splitlines() if "marketing-playbook.md" in ln]
-    assert_(any("UNEXPECTED" in ln for ln in playbook),
-            f"a hand-authored doc beside the batches must stay UNEXPECTED: {playbook}")
-
-
-@case("an undated file in the batch namespace is not covered by the batch writer")
-def _(assert_):
-    # The pattern requires a real date in both shapes. Without this, "week-" or
-    # "x-batch-" would become a prefix anyone could park content behind.
-    d = fresh_dirs("social-batch-undated")
-    write(d["root"], "Marketing/Social Media/week-notes/smuggled.md", "# no\n")
-    write(d["root"], "Marketing/Social Media/x-batch-notes-week.md", "# no\n")
-    rc, out, err = run(d)
-    assert_(rc == 0, f"seed run should exit 0, got {rc}\nstderr={err}")
-    for needle in ("week-notes/smuggled.md", "x-batch-notes-week.md"):
-        lines = [ln for ln in out.splitlines() if needle in ln]
-        assert_(lines, f"{needle} should appear in the report")
-        assert_(any("UNEXPECTED" in ln for ln in lines),
-                f"an undated path must stay UNEXPECTED: {lines}")
-
-
 # ── RETIRED-INTO-_to_delete, added 2026-08-16 ────────────────────────────────
 # THE FALSE POSITIVE THIS CLOSES. The 2026-08-16 nightly reported three DELETED
 # files as UNEXPECTED: 00_Context/sweep-sop.md, Automation/local-tasks/

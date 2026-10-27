@@ -106,7 +106,7 @@ Read and follow [the required PR policy](AGENTS.md#before-every-pr-design-and-de
 
 ## Agent skills
 
-Use `gh pr merge --auto --squash <pr>` for GitHub native auto-merge, `gh pr list` for open PRs, and [the brief rules](tools/room-bridge/brief-footer.md) for dispatch briefs.
+Use `gh pr merge --auto <pr>` to join the merge queue (it sets the strategy and refuses `--squash`; the app repo keeps `--auto --squash`), `gh pr list` for open PRs, and [the brief rules](tools/room-bridge/brief-footer.md) for dispatch briefs.
 
 ### Issue tracker
 
