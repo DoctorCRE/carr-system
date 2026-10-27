@@ -888,6 +888,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "dispatch-job": {
+    "ingress_key": "mcp-tool:dispatch-job",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "5f22a733198e2dd9caafdda2e49818d467bd93d68fdc7d9d6ce7b7779138a868",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "doctrine-index": {
     "ingress_key": "mcp-tool:doctrine-index",
     "source_locator": "mcp-server/src/doctrine.js",
@@ -1659,6 +1669,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "plan-work-request-slices": {
+    "ingress_key": "mcp-tool:plan-work-request-slices",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "4a894e2a4a1f94430f51721aa00fcad764f9fe610d321e222d378f0b27e2c3f5",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "prepare-conversation": {
     "ingress_key": "mcp-tool:prepare-conversation",
     "source_locator": "mcp-server/src/tools.js",
@@ -1717,6 +1737,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/email-next-step.ts",
     "schema_digest": "722b7eb2945b75dabf92a52f9ba999c3d33c39dca8c1c5fe79635e3b819747e0",
     "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "prioritize-job": {
+    "ingress_key": "mcp-tool:prioritize-job",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "e990010394ce48b46786d4938bd060e1163f733b96ebd0d3cc363354b78a6967",
+    "write": true,
     "human_only": false,
     "human_caller_only": false,
     "authority_only": false,
@@ -3409,6 +3439,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "work-queue": {
+    "ingress_key": "mcp-tool:work-queue",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "work-request-card": {
     "ingress_key": "mcp-tool:work-request-card",
     "source_locator": "mcp-server/src/work-request-intake.js",
@@ -3485,6 +3525,33 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:public.memory_session:carr_writer:insert",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.work_request_slice:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.work_request_slice",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.work_request_job:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.work_request_job",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.work_request_job:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.work_request_job",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "update",
+      "grantable": false
     }
   ],
   "secdef_execute": [
