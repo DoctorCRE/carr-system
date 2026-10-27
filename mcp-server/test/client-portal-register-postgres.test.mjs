@@ -51,7 +51,7 @@ test('registering a client portal stores only a verifier and exposes only a deri
     await t.test('a slug bound elsewhere, a wrong password, a second portal for the deal and bad input are refused by name', async () => {
       for (const [args, code] of [
         [[b.deal, 'synthetic-a', password], 'portal_slug_taken'],
-        [[a.deal, 'synthetic-a', 'another-password'], 'portal_password_mismatch'],
+        [[a.deal, 'synthetic-a', 'another-password'], 'portal_password_differs'],
         [[a.deal, 'synthetic-second', password], 'portal_deal_already_registered'],
         [[b.deal, 'Bad Slug', password], 'portal_slug_invalid'],
         [[b.deal, 'synthetic-b', ''], 'portal_password_invalid'],
