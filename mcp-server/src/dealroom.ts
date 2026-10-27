@@ -1,12 +1,12 @@
+// Deal Room polling surface. Authentication stays outside this module: callers
+// pass the already-resolved actor and an injected query client. That keeps the
+// contract mountable behind both OAuth and the Deal Room session-cookie gate.
 import type { Actor, Db } from "./verb-contract.ts";
 
 type PipelineCursor = { recorded_at: string; id: string };
 // Patch values are untrusted and checked field by field below.
 type PatchValue = any;
 
-// Deal Room polling surface. Authentication stays outside this module: callers
-// pass the already-resolved actor and an injected query client. That keeps the
-// contract mountable behind both OAuth and the Deal Room session-cookie gate.
 
 const JSON_HEADERS = { "content-type": "application/json" };
 const PLACEHOLDER_FIELDS = new Set([

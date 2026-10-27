@@ -1,7 +1,7 @@
+// Prepare bounded Jev deal-reading advice.
 type CriticalDate = { due_on?: string; status?: string; note?: string; kind?: string };
 type Negotiation = { note?: string; round_no?: number; side?: string; proposed_on?: string; expires_on?: string };
 type DealRecord = { critical_dates?: CriticalDate[]; next_actions?: { status?: string; description?: string }[]; negotiation_rounds?: Negotiation[]; activities?: { summary?: string; detail?: string }[]; thread?: { text?: string }[]; next_step?: string; last_touch?: string; premises?: unknown[]; documents?: { sent_status?: string }[]; phase?: string; type?: string };
-// Prepare bounded Jev deal-reading advice.
 import { TypeSafeClient, TypeSafeError } from "@typesafe-ai/sdk";
 // Bounded, read-only Jev advisory for one authenticated Deal Room record.
 // The record is fetched by the caller through the existing get-deal-room verb.

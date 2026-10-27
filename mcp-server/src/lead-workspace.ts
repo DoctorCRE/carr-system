@@ -1,3 +1,4 @@
+// Read lead workspace data and validate lifecycle reviews.
 import type { Db, VerbInputs } from "./verb-contract.ts";
 
 // The validator checks each field before returning a normalized review.
@@ -5,7 +6,6 @@ type StageReview = NonNullable<VerbInputs["update-lead"]["stage_review"]>;
 // The existing default is Error; production injects the structured ToolError.
 type ErrorConstructor = new (payload: any) => Error;
 
-// Read lead workspace data and validate lifecycle reviews.
 import { isCalendarDate } from "./calendar-date.ts";
 
 // Optional authenticated Leads workspace; the legacy board has live callers.

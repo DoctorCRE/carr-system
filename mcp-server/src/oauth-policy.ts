@@ -1,3 +1,5 @@
+// Shared authorization policy around the pinned provider. No OAuth cryptography
+// is duplicated here; the provider remains responsible for codes and tokens.
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 
 type PolicyKV = Pick<KVNamespace, "put" | "delete" | "list"> & {
@@ -11,8 +13,6 @@ type OAuthEnv = Partial<Pick<Env, "CARR_MCP_ALLOWED_ORIGINS">> & {
 };
 type Provider = { fetch(request: Request, env: OAuthEnv, ctx: ExecutionContext): Promise<Response> };
 
-// Shared authorization policy around the pinned provider. No OAuth cryptography
-// is duplicated here; the provider remains responsible for codes and tokens.
 import { bearerCredential } from "./bearer.ts";
 
 export function validateAuthorizationRequest(request: Request, auth: AuthRequest) {

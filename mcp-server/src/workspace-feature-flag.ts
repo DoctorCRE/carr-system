@@ -1,3 +1,4 @@
+// Parse the deployment-bound Workspace Command Center read flag.
 type WorkspaceEnv = Partial<Pick<Env, typeof WORKSPACE_COMMAND_CENTER_FLAG>>;
 
 export const WORKSPACE_COMMAND_CENTER_FLAG = "WORKSPACE_COMMAND_CENTER_READ_ENABLED";

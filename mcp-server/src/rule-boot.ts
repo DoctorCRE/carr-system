@@ -1,6 +1,6 @@
+// Page and hash the sponsor-visible rule corpus.
 type RuleRow = { id: string; statement: string; scope?: unknown; personal_to?: string | null };
 
-// Page and hash the sponsor-visible rule corpus.
 import { digest } from "./artifact-trust.js";
 
 export const RULE_BOOT_SCHEMA = "carr-rule-boot/v1";

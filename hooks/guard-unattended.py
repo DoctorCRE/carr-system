@@ -2327,7 +2327,7 @@ def decide(payload):
     # could never be closed from Bash-command-text at all — every one of
     # those doors recurses through the SAME server-side callTool(), so
     # the checks now live in the verb handlers themselves
-    # (mcp-server/src/verb-gate-checks.ts, wired into add-loop's handler
+    # (mcp-server/src/verb-gate-checks.js, wired into add-loop's handler
     # in tools.js) and this hook no longer duplicates them. Hosted CI stops a local-hook bypass
     # from reaching main, which is the other reason a client-side
     # regex recheck was the wrong enforcement point.

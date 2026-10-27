@@ -1,9 +1,9 @@
-type Program6Env = Partial<Pick<Env, "DEALROOM_PROGRAM6_ACTIONS_ENABLED">>;
-
 // One deployment-bound flag parser shared by the browser gate and /release.
 // Only the literal string "true" enables Program 6; every other value fails
 // closed.  Do not store this flag as a secret: it is reviewed configuration
 // fingerprinted by the immutable release manifest.
+type Program6Env = Partial<Pick<Env, "DEALROOM_PROGRAM6_ACTIONS_ENABLED">>;
+
 export const PROGRAM6_ACTIONS_FLAG = "DEALROOM_PROGRAM6_ACTIONS_ENABLED";
 
 export function program6ActionPosture(env?: Program6Env | null) {

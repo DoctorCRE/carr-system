@@ -1,10 +1,10 @@
+// Calculate and merge vendor relationship evidence.
 import type { Actor } from './verb-contract.ts';
 type RelationshipStats = { coverage_verified_at?: string | null; deals_worked: number; deals_referred?: number; won: number; lost: number; first_worked_at?: string | null; last_contacted_at?: string | null };
 type DealEvidence = { deal_id: string; role: string; occurred_at: string; evidence_kind: string; evidence_ref: string };
 type RelationshipFields = { deal_evidence?: DealEvidence[]; loan_programs?: string[]; trust_override?: unknown; deal_history_verified_at?: string | null };
 // Evidence and overrides are external JSON, validated field by field below.
 type EvidenceInput = Record<string, any>;
-// Calculate and merge vendor relationship evidence.
 import { exactDealAssociations } from "./relationship-network.ts";
 // Trust uses verified deal history; missing coverage never becomes zero.
 export function computedTrust(stats: Partial<RelationshipStats> | null | undefined, now: string) {

@@ -1,10 +1,10 @@
+// One exact snapshot: graph, recorded referral outcomes and offered introductions.
+// No name matching, inferred employment edges, or vendor score probabilities.
 import type { Db, Actor } from './verb-contract.ts';
 type NetworkNode = { id: string; restricted?: boolean; contact_state?: string; contact_state_until?: string | null };
 type NetworkEdge = { id: string; kind: string; from: string; to: string; via: string | null; detail: string | null; summary?: string; when?: string | null };
 type ReferralCount = { node_id: string; won: number; lost: number; deals: number };
 type NetworkSnapshot = { nodes: NetworkNode[]; edges: NetworkEdge[]; referrals: ReferralCount[] };
-// One exact snapshot: graph, recorded referral outcomes and offered introductions.
-// No name matching, inferred employment edges, or vendor score probabilities.
 export const NETWORK_SCHEMA = 'carr-relationship-network.v1';
 export const REFERRAL_KINDS = ['referral', 'referred'];
 // The one exact party-to-deal association rule; the network snapshot and the

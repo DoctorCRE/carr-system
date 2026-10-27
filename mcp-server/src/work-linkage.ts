@@ -1,9 +1,9 @@
+// Project and observe task and board linkage.
 import type { Db } from './verb-contract.ts';
 // Board snapshots are external JSON; the projector checks association fields before using them.
 type SnapshotRecord = Record<string, any>;
 type LinkSubject = { board_id: string; task_id: string; version: number };
 type LinkReference = { relation: string; ref: string; title: string; state: string; target: { board_id?: string; task_id?: string; url?: string; work_request?: string } | null };
-// Project and observe task and board linkage.
 import { readableWorkRequestSql } from './work-request-read.ts';
 const text=(value: unknown): value is string=>typeof value==='string' && !!value.trim() && !/[\u0000-\u001f]/.test(value);
 // Preserve the original falsy return values while describing its object narrowing.
