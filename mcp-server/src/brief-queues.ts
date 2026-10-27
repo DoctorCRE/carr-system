@@ -1,3 +1,4 @@
+// Page and sort brief queues with scoped cursors.
 import type { ClientBase } from "@neondatabase/serverless";
 import { ToolError } from "./tool-error.ts";
 

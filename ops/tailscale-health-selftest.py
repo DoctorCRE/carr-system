@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test Tailscale health checks and recovery.
 from __future__ import annotations
 
 import importlib.util

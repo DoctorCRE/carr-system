@@ -1,3 +1,4 @@
+// Validate and handle engineering runtime records.
 import { sha256 } from "./sha256.ts";
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/;

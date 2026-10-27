@@ -1,3 +1,4 @@
+// Bundle the practice planner UI into an MCP resource.
 import { build } from 'esbuild';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { CATALOG, GROUPS, MARKETS } from './src/planner.mjs';

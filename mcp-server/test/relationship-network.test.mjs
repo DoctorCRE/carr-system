@@ -1,3 +1,4 @@
+// Tests relationship network snapshots, offers, and authorization.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { projectNetwork,bindReferralDeal,networkStatement } from '../src/relationship-network.js';

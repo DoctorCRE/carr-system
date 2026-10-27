@@ -1,3 +1,4 @@
+// Test schedule board observations and sponsor filtering.
 import test from "node:test";
 import assert from "node:assert/strict";
 

@@ -1,3 +1,4 @@
+// Tests authenticated Tour HTTP routes, validation, and property workflows.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createTourInternalWebHandler, isTourInternalRequest } from "../src/tour-internal-web.js";

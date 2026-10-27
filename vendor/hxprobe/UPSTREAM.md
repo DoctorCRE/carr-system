@@ -6,10 +6,9 @@ commit `191b54e42757687806202f8f696e9066f0514e11`.
 The upstream MIT license is retained in [LICENSE](LICENSE).
 
 The first import commit copies upstream `hxprobe/` verbatim into this directory
-and copies the repository's LICENSE. The next commit applies
-`vendor-patches/hxprobe-calendar-and-bodies.patch` from CARR commit
-`66ac4cc709af5265819e2612aab62d746a9faf85` in PR #2023, with only the path prefix
-changed from `hxprobe/` to `vendor/hxprobe/`.
+and copies the repository's LICENSE. The next commit applies the now-retired
+calendar and bodies patch from CARR commit `66ac4cc709af5265819e2612aab62d746a9faf85`
+in PR #2023, with only the path prefix changed from `hxprobe/` to `vendor/hxprobe/`.
 
 The patch adds calendar events, attendees, body previews, EFMData gzip body
 recovery, copy keys, SQLite export columns, and synthetic tests.

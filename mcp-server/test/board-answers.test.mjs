@@ -1,3 +1,4 @@
+// Tests board answer writes, publication, and reads.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";

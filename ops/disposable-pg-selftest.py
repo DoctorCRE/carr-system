@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test disposable PostgreSQL lifecycle management.
 import os
 import importlib.util
 from pathlib import Path

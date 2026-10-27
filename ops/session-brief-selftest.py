@@ -353,6 +353,18 @@ def _(assert_):
             f"reported, got {out!r}")
 
 
+@case("the fixture tempfile wrapper keeps the standard positional APIs")
+def _(assert_):
+    d = tempfile.mkdtemp(".suffix", "positional-")
+    fd, path = tempfile.mkstemp(".log", "positional-", None, False)
+    os.close(fd)
+    with tempfile.TemporaryDirectory(prefix="temporary-directory-") as held:
+        for made in (d, path, held):
+            assert_(made.startswith(_FIXTURE_ROOT), f"{made} escaped {_FIXTURE_ROOT}")
+    os.unlink(path)
+    os.rmdir(d)
+
+
 def main():
     failures = []
     for name, fn in CASES:

@@ -1,3 +1,4 @@
+// Tests relationship network concurrency and attribution on PostgreSQL.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';

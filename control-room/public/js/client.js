@@ -1,3 +1,4 @@
+// Load and prepare control room fixtures for presentation and safe telemetry.
 const FIXTURES = {
   overview: "../../fixtures/overview.v1.json",
   service: "../../fixtures/service.v1.json",

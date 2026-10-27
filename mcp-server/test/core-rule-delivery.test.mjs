@@ -1,3 +1,4 @@
+// Tests delivery of core rules through registered tools.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { executeRegisteredTool } from "../src/tools.js";

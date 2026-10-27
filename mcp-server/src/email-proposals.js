@@ -1,3 +1,4 @@
+// Expose and resolve email-derived proposals.
 const LIMIT = 200;
 const KINDS = {
   phase_move: { preview: 'preview-email-deal-progress', confirm: 'confirm-email-deal-progress',
