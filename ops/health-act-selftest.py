@@ -55,9 +55,6 @@ SEAT = ("FAIL grok latency=3.151s layer=auth · on breach: open/update one dedup
 SCHEDULE = ("WARN fixture schedule: scheduled evidence absent or stale · on breach: owner orchestrator · "
            "run ops/fixture-schedule.py · verify out/orch/fixture-schedule-report.json · "
            "auto-clear after a complete scheduled run")
-GROK = ("FAIL Grok session — credential timestamps unavailable or invalid · on breach: one incident loop; "
-        "one alert attempt/channel/UTC day · owner Joe · remediation run grok login · verify grok models "
-        "succeeds · auto-clear after fresh successful authentication under the incident lock · incident action FAILED")
 JOBS = ("WARN scheduled jobs com.carr.calendar-eventkit failing_exit: last exit status 1 · on breach: "
         "tools/job-watchdog.py scan files/updates loop scheduled_jobs:com.carr.calendar-eventkit:failing_exit · "
         "owner orchestrator · fix: inspect the job log and repair the failing command; verify a successful run · "
@@ -160,7 +157,6 @@ RED = [
     finding("ai_seat_health", SEAT, "grok"),                       # reader-filed loop -> covered
     finding("export_receipt", "STALE vendors.xlsx (last ok 2026-10-09T07:13)", "vendors.xlsx"),  # unbound
     finding("calendar_prebrief_missed_run", PREBRIEF, "calendar-prebrief-projection-joe-daily"),  # #665
-    finding("grok_session", GROK),                                 # Joe-owned, no loop -> filed as joe
     finding("scheduled_jobs_failing_exit", JOBS, "com.carr.calendar-eventkit"),  # names its filer -> delegated
 ]
 
@@ -192,7 +188,7 @@ def scenario(lib):
         before = lib.audit(RED, door)
         jobs_row = "scheduled_jobs_failing_exit/com.carr.calendar-eventkit"
         expect(sorted(before.unlooped) == sorted(["fixture_schedule/fixture-schedule",
-                                                  "export_receipt/vendors.xlsx", "grok_session", jobs_row]),
+                                                  "export_receipt/vendors.xlsx", jobs_row]),
                f"audit before act: unlooped {before.unlooped}")
         expect(before.delegated == [(jobs_row, "tools/job-watchdog.py")], f"delegated {before.delegated}")
         expect(before.unbound == ["export_receipt/vendors.xlsx"], f"audit unbound {before.unbound}")
@@ -202,12 +198,8 @@ def scenario(lib):
         report = lib.act(RED, door, receipts_path=receipts, complete=True, now=NOW)
         decisions = {r["row_id"]: r["decision"] for r in report.receipts}
         adds = door.writes("add-loop")
-        expect(len(adds) == 2, f"first run filed {len(adds)} loop(s), want 2")
+        expect(len(adds) == 1, f"first run filed {len(adds)} loop(s), want 1")
         expect(decisions.get("fixture_schedule/fixture-schedule") == "filed", f"schedule: {decisions}")
-        expect(decisions.get("grok_session") == "filed", f"grok: {decisions}")
-        grok_add = [a for _, a in adds if "grok_session" in a["body"]]
-        expect(bool(grok_add) and grok_add[0]["owner"] == "joe" and grok_add[0]["blocker"] == "human_only",
-               "a row owned by Joe must file a loop owned by joe with a human_only blocker")
         schedule_add = [a for _, a in adds if "fixture_schedule" in a["body"]]
         expect(bool(schedule_add) and "Remediation: run ops/fixture-schedule.py"
                in schedule_add[0]["body"] and "Verify: out/orch/fixture-schedule-report.json" in schedule_add[0]["body"],
@@ -236,12 +228,12 @@ def scenario(lib):
         expect(len(door.writes()) == writes_before, "a second run with the same rows must write nothing")
         expect(len([l for l in door.open_loops() if "fixture_schedule" in l["body"]]) == 1,
                "exactly one open loop for the schedule row after two runs")
-        expect(again.count("unchanged") == 2, f"second run: {again.summary()}")
+        expect(again.count("unchanged") == 1, f"second run: {again.summary()}")
 
         changed = [dict(f) for f in RED]
         changed[0]["detail"] = SCHEDULE.replace("fixture-schedule.py", "fixture-schedule.py --verbose")
         third = lib.act(changed, door, receipts_path=receipts, complete=True, now=NOW)
-        expect(third.count("updated") == 1 and len(door.writes("add-loop")) == 2,
+        expect(third.count("updated") == 1 and len(door.writes("add-loop")) == 1,
                "a changed bound action updates the same loop, never files another")
 
         partial = FakeDoor()
@@ -351,8 +343,6 @@ class HealthActTests(unittest.TestCase):
              "python3 ops/scheduled-jobs-check.py",
              "next complete scan without failing_exit for com.carr.calendar-eventkit",
              "scheduled_jobs:com.carr.calendar-eventkit:failing_exit"),
-            ("grok_session", GROK, "Joe", "run grok login", "grok models succeeds",
-             "after fresh successful authentication under the incident lock", "health-breach:grok_session"),
             ("production_uptime", UPTIME, "orchestrator",
              "restore failed routes or configure/restart carr-uptime and its secrets",
              "three JSON probes, Healthchecks down/up delivery, and incident loop reconciliation",
@@ -379,8 +369,7 @@ class HealthActTests(unittest.TestCase):
         """A phrase that drifted from its reader's add-loop body would make the
         consumer file a duplicate beside the reader's loop."""
         lib = load()
-        sources = {"production_uptime": "tools/uptime_health.py",
-                   "grok_session": "ops/grok_session.py"}
+        sources = {"production_uptime": "tools/uptime_health.py"}
         self.assertEqual(set(sources), set(lib.READER_LOOP_PHRASES))
         for key, phrases in lib.READER_LOOP_PHRASES.items():
             text = (REPO / sources[key]).read_text()

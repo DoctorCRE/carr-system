@@ -44,7 +44,6 @@ from lib import launchd_calendar, machine_role  # noqa: E402
 # and the test drift apart, which is the two-homes disease.
 COPIES = [
     "hooks/machine-converge.py",
-    "hooks/grok_invocation.py",
     "lib/machine_prerequisites.py",
     "lib/launchd_calendar.py",
     "lib/machine_role.py",

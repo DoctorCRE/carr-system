@@ -204,13 +204,6 @@ def converge():
 
 def main():
     sys.path.insert(0, REPO)
-    if os.environ.get("CARR_GROK_RUN_READ_ONLY") == "1":
-        try:
-            from hooks.grok_invocation import bounded_grok_read_only
-            if bounded_grok_read_only():
-                return 0
-        except ImportError:
-            pass  # an unavailable optional probe retains ordinary processing
     try:
         if scrubbed_env is None:
             return 0  # cannot pin which repository git would hit — see above
