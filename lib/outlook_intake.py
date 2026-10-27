@@ -744,10 +744,10 @@ class Run:
             if not m['full']:
                 self.counts['preview_only'] += 1
 
-    def prepare_attachments(self, mails: list[dict], matcher: Matcher, db: Path, files: Path) -> list:
+    def prepare_attachments(self, mails: list[dict], matcher: Matcher, db: Path, files: Path) -> list[tuple[str, dict, dict, bytes]]:
         from lib import outlook_attachments as att
 
-        prepared = []
+        prepared: list[tuple[str, dict, dict, bytes]] = []
         done = self.state.setdefault('attachments_done', {})
         self.state['attachments_pending'] = False
         candidates = []
@@ -763,7 +763,6 @@ class Run:
             if not refs:
                 continue
             if len(refs) != 1 or len(names) != 1:
-                self.state['attachments_pending'] = True
                 self.counts['attachments_unresolved'] = self.counts.get('attachments_unresolved', 0) + 1
                 continue
             if all(f"{mail['ident']}/{a['id']}" in done for a in mail['attachments']):
@@ -777,7 +776,6 @@ class Run:
             for mail, ref, name in candidates:
                 matches = [d for d in deals if d['client_ref'] == ref and d['name'].casefold() == name.casefold()]
                 if len(matches) != 1:
-                    self.state['attachments_pending'] = True
                     self.counts['attachments_unresolved'] = self.counts.get('attachments_unresolved', 0) + 1
                     continue
                 for row_id in mail['row_ids']:
@@ -805,7 +803,7 @@ class Run:
                     continue
                 if result['status'] != 'stored':
                     self.counts['attachments_' + result['status']] = self.counts.get('attachments_' + result['status'], 0) + 1
-                if result['status'] == 'type_refused':
+                if result['status'] in ('type_refused', 'too_large', 'empty'):
                     done[source] = int(self.now.timestamp())
                     continue
                 if result['status'] != 'stored':
@@ -817,7 +815,7 @@ class Run:
             self.counts['attachments_failed'] = self.counts.get('attachments_failed', 0) + 1
         return prepared
 
-    def file_attachments(self, prepared: list) -> None:
+    def file_attachments(self, prepared: list[tuple[str, dict, dict, bytes]]) -> None:
         from lib import outlook_deal_files as filing
 
         done = self.state.setdefault('attachments_done', {})

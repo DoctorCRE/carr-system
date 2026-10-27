@@ -313,6 +313,49 @@ class IntakeTest(unittest.TestCase):
         ports.copy_attachments, ports.put_object = copy, put
         return ports
 
+    def test_unresolved_attachment_deals_do_not_hold_the_run(self):
+        for scenario in ('missing_folder', 'ambiguous_folder', 'no_deal', 'duplicate_deal'):
+            with self.subTest(scenario=scenario):
+                self.fake.fixture.unlink(missing_ok=True)
+                shutil.rmtree(self.out(), ignore_errors=True)
+                folders = {'missing_folder': ('Inbox',),
+                           'ambiguous_folder': ('Inbox/Active Deals/Synthetic Deal', 'Inbox/Active Deals/Other')}.get(scenario, ('Inbox/Active Deals/Synthetic Deal',))
+                ports = self.attachment_fixture(folders=folders)
+                if scenario == 'no_deal':
+                    self.deals.clear()
+                if scenario == 'duplicate_deal':
+                    self.deals.append({**self.deals[0], 'id': 'other'})
+                result = intake.run(self.repo, self.home, ports)
+                self.assertEqual(result.state, 'succeeded')
+                self.assertEqual(result.counts['attachments_unresolved'], 1)
+                state = json.loads((self.out() / intake.STATE).read_text())
+                self.assertFalse(state['attachments_pending'])
+                self.assertTrue(state['store'])
+                self.assertEqual(self.copied, [])
+
+    def test_attachment_status_controls_run_outcome(self):
+        from lib import outlook_attachments, outlook_deal_files
+        for status in ('too_large', 'empty', 'type_refused', 'batch_cap', 'error', 'quota_refused', 'verb_failed'):
+            with self.subTest(status=status):
+                self.fake.fixture.unlink(missing_ok=True)
+                shutil.rmtree(self.out(), ignore_errors=True)
+                ports = self.attachment_fixture()
+                extract = outlook_attachments.extract
+                def extraction(*args, **kwargs):
+                    rows = extract(*args, **kwargs)
+                    if status not in ('quota_refused', 'verb_failed'):
+                        rows[0]['status'] = status
+                    return rows
+                with patch.object(outlook_attachments, 'extract', side_effect=extraction), \
+                     patch.object(outlook_deal_files, 'file_attachment', return_value={'status': status}):
+                    result = intake.run(self.repo, self.home, ports)
+                terminal = status in ('too_large', 'empty', 'type_refused')
+                self.assertEqual(result.state, 'succeeded' if terminal else 'failed')
+                self.assertEqual(result.counts['attachments_' + status], 1)
+                state = json.loads((self.out() / intake.STATE).read_text())
+                self.assertEqual(state['attachments_pending'], not terminal)
+                self.assertEqual(len(state['attachments_done']), int(terminal))
+
     def test_matched_attachment_is_copied_archived_and_filed_idempotently(self):
         ports = self.attachment_fixture()
         result = intake.run(self.repo, self.home, ports)
