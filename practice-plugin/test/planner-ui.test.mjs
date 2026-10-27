@@ -1,3 +1,4 @@
+// Test planner UI rendering and host context updates in a browser.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

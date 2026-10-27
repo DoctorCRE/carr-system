@@ -1,3 +1,4 @@
+// Handle stateless MCP requests for practice planning tools and resources.
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { ListToolsRequestSchema, CallToolRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema, SUPPORTED_PROTOCOL_VERSIONS, McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';

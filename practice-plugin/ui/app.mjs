@@ -1,3 +1,4 @@
+// Render the practice planner and synchronize plans with the host app.
 import { App } from '@modelcontextprotocol/ext-apps';
 import { OpenAIExtensions } from '@openai/mcp-extensions/app';
 import { z } from 'zod';

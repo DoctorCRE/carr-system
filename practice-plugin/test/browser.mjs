@@ -1,3 +1,4 @@
+// Launch a disposable Chromium browser and register test cleanup.
 import { CHROMIUM_SAFETY_ARGS } from "../../tools/chromium-safety-args.mjs";
 import { chromium } from "playwright-core";
 import { findDisposableChromium } from "../../mcp-server/test/helpers/chromium-binary.mjs";
