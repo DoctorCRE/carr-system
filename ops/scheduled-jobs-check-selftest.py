@@ -442,22 +442,33 @@ class ReportTests(unittest.TestCase):
 
 
 class ManifestTests(unittest.TestCase):
-    def test_retained_headless_executors_are_missing_until_installed(self):
-        labels = {"com.carr.headless.deal-history-research-weekly",
-                  "com.carr.headless.restore-rehearse-weekly"}
-        manifest = jobs.native_manifest()
+    def test_retired_headless_executors_are_not_scheduled(self):
+        labels = {job["label"] for job in jobs.native_manifest()["jobs"]}
+        self.assertNotIn("com.carr.headless.deal-history-research-weekly", labels)
+        self.assertNotIn("com.carr.headless.restore-rehearse-weekly", labels)
+
+    def test_headless_executor_is_missing_until_installed(self):
+        label = "com.carr.headless.example-weekly"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            directory = root / "ops/headless-tasks"
+            directory.mkdir(parents=True)
+            definition = {"Label": label, "ProgramArguments": ["{{REPO}}/bin/headless-task", "example-weekly"],
+                          "StartCalendarInterval": {"Weekday": 5, "Hour": 10}}
+            (directory / (label + ".plist")).write_bytes(plistlib.dumps(definition))
+            manifest = jobs.native_manifest(root)
+        self.assertEqual({job["label"] for job in manifest["jobs"]}, {label})
         snapshot = healthy_snapshot(manifest, "primary", 1000)
         self.assertEqual([r for r in jobs.report(manifest, snapshot, 1000)
-                          if r["label"] in labels], [])
-        for label in labels:
-            snapshot["plists"].pop(label, None)
-            snapshot["launchctl_print"].pop(label, None)
+                          if r["label"] == label], [])
+        snapshot["plists"].pop(label, None)
+        snapshot["launchctl_print"].pop(label, None)
         snapshot["launchctl_list"] = "\n".join(
             line for line in snapshot["launchctl_list"].splitlines()
-            if not any(line.endswith(label) for label in labels))
+            if not line.endswith(label))
         rows = jobs.report(manifest, snapshot, 1000)
-        self.assertEqual({(r["label"], r["code"]) for r in rows if r["label"] in labels},
-                         {(label, "missing_job") for label in labels})
+        self.assertEqual({(r["label"], r["code"]) for r in rows if r["label"] == label},
+                         {(label, "missing_job")})
 
     def test_retired_markdown_refresh_is_not_scheduled(self):
         labels = {job["label"] for job in jobs.native_manifest()["jobs"]}
