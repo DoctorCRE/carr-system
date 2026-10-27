@@ -69,6 +69,17 @@ for (const [code, extra] of [
   if (code === "value_not_in_declared_vocabulary") assert.deepEqual(payload.fields, ["filter"]);
 });
 
+test("MCP next-action conflicts explain how to review the current action", async t => {
+  const payload = await failure(t, new ToolError({ error: "next_action_conflict",
+    hint: privateText, detail: privateText, nested: { stack: privateText } }));
+  assert.equal(payload.error, "next_action_conflict");
+  assert.match(payload.hint, /get-next-action/);
+  assert.match(payload.hint, /ref and owner/);
+  assert.match(payload.hint, /review/i);
+  assert.match(payload.hint, /expected_action/);
+  assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint"]);
+});
+
 test("unknown ToolError codes cannot carry diagnostic text onto the wire", async t => {
   const payload = await failure(t, new ToolError({ error: privateText }));
   assert.equal(payload.error, "unhandled_verb_failure");
