@@ -65,7 +65,6 @@ step "fetch allowlist" ./.venv/bin/python ops/fetch-allowlist.py
 step "corpus push" ./.venv/bin/python tools/corpus-sync.py --push
 step "vendor level drift" ./.venv/bin/python ops/vendor-level-drift-check.py
 step "system costs" ./run.sh costs --publish --alerts
-step "Grok authentication health" ./.venv/bin/python tools/health-check.py --section grok-session
 step "health breach response" ./run.sh health --act
 step "runtime error intake" node ops/runtime-error-watch.mjs
 portability_root="${CARR_EXPORT_HOME:-$HOME/Library/CloudStorage/OneDrive-CARR,Inc/Joe's Folder/CARR AI}"

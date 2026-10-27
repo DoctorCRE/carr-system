@@ -43,8 +43,8 @@ before(async () => {
   const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
   if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
-  if (!(await c.query("select 1 from schema_migrations where filename='1007_work_request_queue.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1007_work_request_queue.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from schema_migrations where filename='1012_work_request_queue.sql'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1012_work_request_queue.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => {

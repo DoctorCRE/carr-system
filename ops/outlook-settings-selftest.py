@@ -44,6 +44,24 @@ class SettingsTest(unittest.TestCase):
                          ('other-owner', 'other@other.test', 'other.test', 'Europe/London'))
         self.assertEqual(settings.profile, self.home / 'Other Profile')
 
+    def test_dell_shaped_settings_render_jobs_without_studio_paths(self):
+        profile = self.home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile'
+        write_settings(self.home, self.repo, owner='dell', account='second.partner@example.test',
+                       profile=str(profile), services=['intake', 'refresh'], full_screen_height=956,
+                       executable_path=f'{self.home}/.cargo/bin:{self.home}/.local/bin:/usr/bin:/bin')
+        settings = load_settings(self.home)
+        self.assertEqual((settings.owner, settings.account, settings.profile, settings.full_screen_height),
+                         ('dell', 'second.partner@example.test', profile, 956))
+        for service in ('intake', 'refresh'):
+            settings.require_service(service)
+            rendered = plistlib.loads(settings.render_plist(ROOT / f'ops/launchd/com.carr.outlook-{service}.plist'))
+            self.assertEqual(rendered['WorkingDirectory'], str(self.repo))
+            self.assertEqual(rendered['EnvironmentVariables']['PATH'], settings.executable_path)
+            self.assertNotIn('/Users/booko', str(rendered))
+            self.assertNotIn('{{', str(rendered))
+        self.assertFalse(settings.mcp_credentials.exists())
+        self.assertFalse(settings.database_credentials.exists())
+
     def test_missing_and_invalid_fields_name_file_and_field(self):
         values = json.loads(self.path.read_text())
         for field, value in [('owner', ''), ('account', 'bad'), ('timezone', 'No/Such_Zone'),
@@ -177,12 +195,15 @@ class SettingsTest(unittest.TestCase):
         self.assertFalse(settings.database_credentials.exists())
         self.assertFalse((repo / 'out').exists())
 
-    def test_window_guard_uses_the_configured_display_height(self):
+    def test_window_guard_uses_visible_window_size(self):
         from lib import outlook_ui as ui
-        window = {'title': 'Inbox • owner@example.test', 'on_current_space': True,
-                  'bounds': {'height': 949}}
-        self.assertFalse(ui.is_ordinary_main_window(window, 949))
-        self.assertTrue(ui.is_ordinary_main_window(window, 1200))
+        window = {'title': 'Inbox • owner@example.test', 'is_on_screen': True,
+                  'bounds': {'x': -1329, 'width': 1329, 'height': 1002}}
+        self.assertTrue(ui.is_ordinary_main_window(window))
+        for width, height in ((1920, 30), (64, 64), (0, 1002)):
+            self.assertFalse(ui.is_ordinary_main_window(
+                window | {'bounds': {'width': width, 'height': height}}))
+        self.assertFalse(ui.is_ordinary_main_window(window | {'is_on_screen': False}))
 
     def test_private_pointers_reject_aliases_into_checkout_or_settings(self):
         self.repo.mkdir()

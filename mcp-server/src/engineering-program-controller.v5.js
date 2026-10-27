@@ -51,7 +51,7 @@
 //     `seam:deployment-controller-release-receipt-store`
 //     (V5_RELEASE_STATE_HOLDER_SEAM) is the authoritative holder of release
 //     receipts, and it EXISTS: ops.release_receipt is its store, and
-//     program-controller-release-state-holder.v5.js is the module-bound
+//     program-controller-release-state-holder.v5.ts is the module-bound
 //     in-process snapshot this module binds below. So an `allow` is reachable —
 //     and reachable ONLY from six receipts that holder resolves, each content
 //     addressed and rehashed. A bound holder that does not hold the cited
@@ -167,7 +167,7 @@ import { canonicalJson, digest } from "./artifact-trust.js";
 import { V5BoundaryError, V5_NO_EFFECTS } from "./global-boundaries.v5.js";
 import { ORGANIZATION_TENANT_ID } from "./identity.js";
 import { ENGINEERING_REPOSITORY_ACTIONS } from "./engineering-runtime.js";
-import { RELEASE_RECEIPT_HOLDER } from "./program-controller-release-state-holder.v5.js";
+import { RELEASE_RECEIPT_HOLDER } from "./program-controller-release-state-holder.v5.ts";
 import { GATE_ZERO_STEP_REF, MINIMUM_REQUIRED_MEMBERS } from "./benchmark-minimum.v5.js";
 
 export const V5_PROGRAM_CONTROLLER_SCHEMA_VERSION =
@@ -1058,7 +1058,7 @@ export function evaluateCheckpointResume(request) {
 //
 // So there is NO INJECTABLE PORT. The holder is bound by this module, under the
 // name V5_RELEASE_STATE_HOLDER_SEAM, and since WR-000110 that seam EXISTS:
-// ops.release_receipt is the store and program-controller-release-state-holder.v5.js
+// ops.release_receipt is the store and program-controller-release-state-holder.v5.ts
 // is the module-bound in-process snapshot the census reader fills from it. The
 // binding below is that holder. `evaluateReleaseEligibility` still takes exactly
 // one argument, a request of references, and a second argument is unreadable
@@ -1186,7 +1186,7 @@ export const V5_RELEASE_STATE_HOLDER_SEAM = "seam:deployment-controller-release-
  * And here is the binding. The seam above exists as of WR-000110: its store is
  * ops.release_receipt (migrations/0517_program_controller_seams.sql) and its
  * in-process face is the module-bound snapshot in
- * program-controller-release-state-holder.v5.js, filled from that store by
+ * program-controller-release-state-holder.v5.ts, filled from that store by
  * program-controller-census.v5.js immediately before an evaluation.
  *
  * THIS IS STILL THE SINGLE PLACE IT BINDS. It is a module constant, not a

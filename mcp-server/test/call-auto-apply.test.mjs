@@ -26,3 +26,23 @@ test("anything below the bar stays a proposal, with a plain reason", () => {
   ];
   for (const [candidate, reason] of cases) assert.match(automaticApplyHold(candidate) || "", reason);
 });
+
+test("punctuation does not count toward the evidence word minimum", () => {
+  for (const evidence_quote of ["... !!! ??? ---", "Gulf moved legal ...", "Gulf's ... ??? ---"])
+    assert.match(automaticApplyHold({ ...phase, evidence_quote }), /evidence/);
+});
+
+test("punctuation does not turn an empty or one-word next step into an automatic change", () => {
+  for (const text of ["... !!!", "Survey ...", "Don't ...", "Don’t ..."])
+    assert.match(automaticApplyHold({ ...step, payload: { ...step.payload, text } }), /step/);
+});
+
+test("ordinary word punctuation and whitespace retain automatic eligibility", () => {
+  assert.equal(automaticApplyHold({ ...phase, evidence_quote: "Gulf's\tphase   is LEGAL." }), null);
+  assert.equal(automaticApplyHold({ ...step, payload: { ...step.payload, text: "Send survey." } }), null);
+});
+
+test("punctuation changes cannot newly qualify a compact quote or next step", () => {
+  assert.match(automaticApplyHold({ ...phase, evidence_quote: "one-two-three-four" }), /evidence/);
+  assert.match(automaticApplyHold({ ...step, payload: { ...step.payload, text: "send-survey" } }), /step/);
+});

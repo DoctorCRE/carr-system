@@ -142,7 +142,7 @@ test("the converted Worker module rejects a wrong binding name and type in CI", 
   const check = () => spawnSync("bash", ["ops/ci.sh", "--only", "types"], {
     encoding: "utf8", cwd: path.dirname(root),
   });
-  const valid = `import { workspaceCommandCenterPosture } from "../../src/workspace-feature-flag.js";
+  const valid = `import { workspaceCommandCenterPosture } from "../../src/workspace-feature-flag.ts";
 declare const env: Parameters<typeof workspaceCommandCenterPosture>[0];
 workspaceCommandCenterPosture({ WORKSPACE_COMMAND_CENTER_READ_ENABLED: "true" });
 declare const bindings: Env;
@@ -201,6 +201,64 @@ test("CI regenerates Worker declarations without a stale cached Env augmentation
     const stale = check();
     assert.equal(stale.status, 1, stale.stdout + stale.stderr);
     assert.match(stale.stdout + stale.stderr, /TS2339.*STALE_REVIEW_ONLY/s);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the converted Leads reader checks its generated request contract in CI", () => {
+  const dir = mkdtempSync(path.join(root, "type-tests/leads-"));
+  const source = path.join(dir, "request.ts");
+  const request = lead => `import { readLeadWorkspace } from "../../src/lead-workspace.ts";
+import type { Db } from "../../src/verb-contract.ts";
+declare const db: Db;
+readLeadWorkspace(db, { workspace: "leads", lead_id: ${lead} });\n`;
+  const check = () => spawnSync("bash", ["ops/ci.sh", "--only", "types"], {
+    encoding: "utf8", cwd: path.dirname(root),
+  });
+  try {
+    writeFileSync(source, request('"00000000-0000-4000-8000-000000000001"'));
+    const accepted = check();
+    assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr);
+    writeFileSync(source, request("42"));
+    const rejected = check();
+    assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
+    assert.match(rejected.stdout + rejected.stderr, /TS2322.*number.*string/s);
+    assert.match(rejected.stdout + rejected.stderr, /Worker verb contract types failed/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("converted work and cutover handlers check generated request contracts", () => {
+  const dir = mkdtempSync(path.join(root, "type-tests/cutover-"));
+  const source = path.join(dir, "request.ts");
+  const request = (version, stage) => `import { workShapeTools } from "../../src/work-shape.ts";
+import { workflowCutoverTools } from "../../src/workflow-cutover.v5.ts";
+import type { Db, Actor } from "../../src/verb-contract.ts";
+declare const db: Db, actor: Actor;
+declare const shape: ReturnType<typeof workShapeTools>;
+declare const cutover: ReturnType<typeof workflowCutoverTools>;
+shape["set-work-shape-disposition"].handler(db, actor, {
+  idempotency_key: "synthetic", work_request: "WR-TEST", base_version: ${version},
+  disposition: "required", rationale: "Synthetic contract fixture",
+});
+cutover["advance-workflow-cutover-stage"].handler(db, actor, {
+  idempotency_key: "synthetic", plan_id: "synthetic", reason: "Synthetic contract fixture",
+  to_stage: ${stage},
+});
+`;
+  const check = () => spawnSync(path.join(root, "node_modules/.bin/tsc"),
+    ["--project", "tsconfig.json"], { encoding: "utf8", cwd: root });
+  try {
+    writeFileSync(source, request("1", '"build_projection"'));
+    const accepted = check();
+    assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr);
+    writeFileSync(source, request('"wrong"', '"not_a_stage"'));
+    const rejected = check();
+    assert.equal(rejected.status, 1, "invalid work and cutover arguments must fail compilation");
+    assert.match(rejected.stdout + rejected.stderr, /TS2322.*string.*number/s);
+    assert.match(rejected.stdout + rejected.stderr, /TS2322.*not_a_stage/s);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
