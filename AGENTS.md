@@ -6,6 +6,16 @@ code work happens — booted with no instructions at all.
 
 To find a script and its purpose, run `./run.sh map` for a fresh path-and-description map.
 
+## Client market research websites
+
+For a client preliminary market study or property review website, first read
+`~/software-factory/capabilities/client-presentation/SKILL.md`. Retrieve client
+context through live CARR verbs and inspect the approved prior studies and
+existing delivery destination before building. A client research portal request
+does not imply a clinic marketing website. Search Google Drive when the task
+identifies a relevant Drive artifact; system workflow discovery starts with the
+repository and its skills. Keep client data and passwords out of public source.
+
 ## Always-on rules
 
 <!-- Generated from ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
