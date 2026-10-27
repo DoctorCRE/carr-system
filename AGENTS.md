@@ -284,6 +284,10 @@ through the pull-request route above. `./run.sh call <verb> '<json>'` reaches an
 This file and the vault's `CLAUDE.md`/`AGENTS.md` are among the few
 exact-path exceptions.
 
+Complete built Work Requests through `complete-work-request` with acceptance
+evidence and independent attestation. Use `decline-work-request` only for an
+actual withdrawal, never to mark finished work done.
+
 ## Before every PR: design and debt pass
 
 Before opening or updating any pull request, apply both skills to the diff:

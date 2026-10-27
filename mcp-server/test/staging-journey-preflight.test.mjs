@@ -1,3 +1,4 @@
+import { NOW } from "./helpers/fixed-clock.mjs";
 // Test staging journey preflight authority refusals.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,7 +10,7 @@ import { ToolError } from '../src/tool-error.ts';
 const actor = { id: randomUUID(), slug: 'joe', human: true, via: 'test' };
 const args = () => ({ idempotency_key: randomUUID(), projection_id: randomUUID(),
   token_digest: 'sha256:' + 'a'.repeat(64), permission_scopes: ['invalid-preflight-scope'],
-  expires_at: new Date(Date.now() + 60000).toISOString(), receipt_digest: 'sha256:' + 'b'.repeat(64) });
+  expires_at: new Date(NOW + 60000).toISOString(), receipt_digest: 'sha256:' + 'b'.repeat(64) });
 
 test('staging journey preflight reaches missing authority before opening a writer', async () => {
   await assert.rejects(callTool({ DATABASE_URL_WRITER: 'must-not-open' }, actor, 'issue-tour-share-grant', args()),

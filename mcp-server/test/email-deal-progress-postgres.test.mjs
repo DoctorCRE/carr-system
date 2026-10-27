@@ -1,5 +1,6 @@
 // Test email-sourced deal progress proposals and confirmation in PostgreSQL.
 import test, { before, beforeEach, after } from 'node:test';
+import { NOW } from './helpers/fixed-clock.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
@@ -42,7 +43,7 @@ before(async () => {
   if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
   if (!(await c.query("select 1 from information_schema.columns where table_schema='public' and table_name='activity' and column_name='email_context'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1009_email_deal_matching.sql', import.meta.url), 'utf8'));
+    await c.query(readFileSync(new URL('../../migrations/1007_email_deal_matching.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
@@ -174,9 +175,9 @@ test('uppercase deal confirmation waits without blocking an independent human ed
     await locker.query('begin');
     await locker.query("select pg_advisory_xact_lock(hashtextextended($1 || ':phase',0))", [deal]);
     pending = confirm(proposal, { deal: deal.toUpperCase() }).then(value => ({ value }), error => ({ error }));
-    const deadline = Date.now() + 5000;
+    const deadline = performance.now() + 5000;
     let waiting = false;
-    while (Date.now() < deadline) {
+    while (performance.now() < deadline) {
       waiting = (await editor.query('select exists(select 1 from pg_locks where pid=$1 and not granted) as waiting', [pid])).rows[0].waiting;
       if (waiting) break;
       await new Promise(resolve => setImmediate(resolve));
@@ -1259,7 +1260,7 @@ test('thread continuity files an unchanged reply but a new doctor defeats inheri
     recipients: [{ email: 'broker@internal.example', internal: true, kind: 'to' }] };
   const prior = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
     summary: 'Email from Synthetic vendor: Coastal property', detail: quote,
-    occurred_at: new Date(Date.now()-60000).toISOString(), email_context: context });
+    occurred_at: new Date(NOW - 60000).toISOString(), email_context: context });
   await c.query('update activity set deal_id=$2 where id=$1', [prior.activity_id,deal]);
   const reply = async extra => command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
     summary: 'Email from Synthetic vendor: Re: Coastal property', detail: quote,
@@ -1321,7 +1322,7 @@ test('subject continuity tolerates reply spacing and refuses a thread older than
     recipients: [{ email: 'broker@internal.example', kind: 'to', internal: true }] };
   const prior = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
     kind: 'email_in', summary: 'Email from Vendor: Synthetic practice', detail: quote,
-    occurred_at: new Date(Date.now()-60000).toISOString(), email_context: context });
+    occurred_at: new Date(NOW - 60000).toISOString(), email_context: context });
   await c.query('update activity set deal_id=$2 where id=$1', [prior.activity_id,deal]);
   const reply = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
     kind: 'email_in', summary: 'Email from Vendor: Re: Synthetic practice', detail: quote,
