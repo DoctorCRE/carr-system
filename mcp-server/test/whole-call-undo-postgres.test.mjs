@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { createCaptureHandler } from '../src/capture.js';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
@@ -68,20 +69,103 @@ async function command(name, args = {}, identity = actor, role = null, client = 
   } catch (error) { await client.query('rollback'); throw error; }
 }
 
+const sessionTokens = new Map();
 async function filedCall() {
-  return (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,
+  const token = randomUUID();
+  const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,
     session_token_hash,expires_at,state,state_at,post_call) values($1,'fixture',$2,'meeting',now(),now(),$1,
-    now()+interval '1 day','done',now(),true) returning id`, [randomUUID(),actor.id])).rows[0].id;
+    now()+interval '1 day','distilling',now(),true) returning id`, [createHash('sha256').update(token).digest('hex'),actor.id])).rows[0].id;
+  sessionTokens.set(session, token);
+  return session;
+}
+async function fileStep(session, text, ref = deal, key = randomUUID()) {
+  const handler = createCaptureHandler({ withWriter: async fn => {
+    await c.query('begin');
+    await c.query('set local role carr_writer');
+    try { const result = await fn(c); await c.query('commit'); return result; }
+    catch(error) { await c.query('rollback'); throw error; }
+  } });
+  const response = await handler.fetch(new Request('http://127.0.0.1/capture/candidates', {
+    method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({
+      session_token:sessionTokens.get(session), idempotency_key:key, items:[{kind:'next_step',
+        payload:{deal:ref,text,next_date:'2027-01-08'}, evidence_quote:'Send the synthetic floor plan next week', confidence:1}]
+    })
+  }), {});
+  const body = await response.json();
+  assert.equal(response.status,200,JSON.stringify(body));
+  return body.candidate_ids[0];
 }
 async function candidate(session, text, automatic = true, ref = deal) {
-  const id = (await c.query(`insert into capture_candidate(session_id,idempotency_key,batch_hash,item_index,kind,payload,evidence_quote,confidence)
-    values($1,$2,$2,0,'next_step',$3,'Send the synthetic floor plan next week',1) returning id`,
-    [session,randomUUID(),{deal:ref,text,next_date:'2027-01-08'}])).rows[0].id;
+  const named = ref === 'Synthetic coastal purchase';
+  const id = await fileStep(session, text, named ? deal : ref);
+  if (named) await c.query("update capture_candidate set payload=jsonb_set(payload,'{deal}',to_jsonb($2::text)) where id=$1", [id,ref]);
   await command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true,automatic});
   return id;
 }
 const room = (ref=deal) => command('get-deal-room',{deal:ref});
 const setStep = async (text,ref=deal) => command('set-next-step',{idempotency_key:randomUUID(),deal:ref,text,next_date:'2027-01-01',base_version:(await room(ref)).base_version});
+
+for (const field of ['next_step', 'next_date']) test(`automatic next step preserves a newer ${field} edit and stays pending after replay`, async () => {
+  await setStep('Keep the original plan');
+  const session=await filedCall();
+  const key=randomUUID();
+  const id=await fileStep(session,'Send the captured plan',deal,key);
+  if(field==='next_step') await setStep('Keep the partners newer plan');
+  else {
+    const current=await room();
+    await command('patch-deal-field',{idempotency_key:randomUUID(),deal,field:'next_date',value:'2027-02-02',
+      base_event_id:current.events.find(e=>e.field==='next_date')?.id ?? null});
+  }
+  assert.equal(await fileStep(session,'Send the captured plan',deal,key),id);
+  const before=await room();
+  await assert.rejects(command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true,automatic:true}),
+    error=>error.payload?.error==='newer_change_exists');
+  const after=await room();
+  assert.equal(after.next_step,before.next_step);
+  assert.equal(after.next_date,before.next_date);
+  assert.deepEqual(after.items,before.items);
+  const outcome=(await command('read-call-outcomes')).calls.find(call=>call.session_id===session);
+  assert.ok(outcome.open_cards.some(card=>card.candidate_id===id));
+  await command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true});
+  assert.equal((await room()).next_step,'Send the captured plan');
+});
+
+test('a legacy proposal without a filed plan base requires human resolution', async () => {
+  const session=await filedCall();
+  const id=await fileStep(session,'Review the legacy call proposal');
+  await c.query("update capture_candidate set payload=payload-'plan_base' where id=$1",[id]);
+  const before=await room();
+  await assert.rejects(command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true,automatic:true}),
+    error=>error.payload?.error==='missing_plan_base');
+  assert.equal((await room()).next_step,before.next_step);
+  await command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true});
+  assert.equal((await room()).next_step,'Review the legacy call proposal');
+});
+
+test('a same-call phase change can supersede the overdue plan before the automatic next step', async () => {
+  await command('set-next-step',{idempotency_key:randomUUID(),deal,text:'Review the overdue plan',
+    next_date:'2020-01-01',base_version:(await room()).base_version});
+  const session=await filedCall();
+  const id=await fileStep(session,'Send the current call plan');
+  await phaseCandidate(session,'negotiation');
+  const args={idempotency_key:randomUUID(),candidate_id:id,accept:true,automatic:true};
+  const result=await command('resolve-candidate',args);
+  assert.equal(result.automatic,true);
+  const after=await room();
+  assert.equal(after.next_step,'Send the current call plan');
+  assert.equal((await command('resolve-candidate',args)).replayed,true);
+  assert.deepEqual((await room()).items,after.items);
+});
+
+test('an unrelated deal edit does not hold the automatic plan', async () => {
+  const ref=await secondDeal();
+  const session=await filedCall();
+  const id=await fileStep(session,'Send the first stated plan',ref);
+  await command('patch-deal-field',{idempotency_key:randomUUID(),deal:ref,field:'attention',value:true,base_event_id:null});
+  const result=await command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true,automatic:true});
+  assert.equal(result.automatic,true);
+  assert.equal((await room(ref)).next_step,'Send the first stated plan');
+});
 
 test('one action restores the plan and checklist across repeated call changes with replayable evidence', async () => {
   await setStep('Review the original floor plan');
