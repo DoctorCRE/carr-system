@@ -1146,11 +1146,11 @@ def launchd_path_refusal(body):
     if not isinstance(working_directory, str) or not os.path.isabs(working_directory):
         return "invalid LaunchAgent: WorkingDirectory must be absolute"
     paths = [working_directory, definition.get("Program"), *arguments]
-    standalone = {os.path.realpath(root) for root in LAUNCHD_DEPENDENCY_CHECKOUTS}
+    outlook_runtime = None
     if f"{definition.get('Label')}.plist" in OUTLOOK_INSTALLERS:
         from lib.outlook_settings import load_settings
         try:
-            standalone.add(os.path.realpath(load_settings(Path(HOME)).repo))
+            outlook_runtime = os.path.realpath(load_settings(Path(HOME)).repo)
         except SettingsError:
             pass
     for path in paths:
@@ -1183,10 +1183,23 @@ def launchd_path_refusal(body):
             identities = dirs.stdout.strip().splitlines()
             if dirs.returncode or len(identities) != 2:
                 return f"cannot verify main/worktree identity for {path}"
-            # Only named package-manager checkouts, and for Outlook jobs the
-            # installer's own detached checkout, may leave main. Standalone
-            # session clones have the same Git directory shape.
-            if identities[0] == identities[1] and os.path.realpath(checkout) in standalone:
+            # bin/install-outlook-intake.sh keeps the Outlook jobs' checkout
+            # detached at a commit it took from the canonical checkout, so
+            # that commit must be on main rather than the checkout on a branch.
+            if os.path.realpath(checkout) == outlook_runtime:
+                head = subprocess.run(["git", "-C", checkout, "rev-parse", "HEAD"],
+                                      capture_output=True, text=True, env=_git_env(), timeout=15)
+                on_main = subprocess.run(["git", "-C", REPO, "merge-base", "--is-ancestor",
+                                          head.stdout.strip() or "HEAD", "refs/heads/main"],
+                                         capture_output=True, text=True, env=_git_env(), timeout=15)
+                if head.returncode or on_main.returncode:
+                    return (f"Outlook runtime {checkout} is at {head.stdout.strip()[:9] or 'no commit'}, "
+                            f"not on {REPO} main; rerun bin/install-outlook-intake.sh from main")
+                continue
+            # Only named package-manager checkouts may use release branches.
+            # Standalone session clones have the same Git directory shape.
+            if identities[0] == identities[1] and os.path.realpath(checkout) in {
+                    os.path.realpath(root) for root in LAUNCHD_DEPENDENCY_CHECKOUTS}:
                 continue
             branch = subprocess.run(["git", "-C", checkout, "symbolic-ref", "--short", "HEAD"],
                                     capture_output=True, text=True, env=_git_env(), timeout=15)
@@ -1343,13 +1356,14 @@ def _cmd_check(holds):
     # shell hooks used to enforce, and install refuses everything while it
     # cannot write it, so its absence is reported here rather than only there.
     try:
+        policy_plan = managed_safety_plan()
         policy = [(f"Claude managed safety policy {name}",
                    "MISSING OR STALE; an administrator must install it before "
                    "`install --apply` can converge anything")
-                  for name, body in managed_safety_plan()
+                  for name, body in policy_plan
                   if json.loads(read(name) or "null") != json.loads(body)]
     except (OSError, ValueError, TypeError) as exc:
-        policy = [("Claude managed safety policy", f"UNREADABLE: {exc}")]
+        policy_plan = policy = [("Claude managed safety policy", f"UNREADABLE: {exc}")]
     missing += policy
     drift = missing + untracked + different + disallowed + refused + pending_reloads
     drift += installed_hook_missing_files()
@@ -1358,7 +1372,7 @@ def _cmd_check(holds):
         if prerequisite_report:
             print(prerequisite_report)
             return 1
-        print(f"config-as-code: OK — {len(configured_pairs)} items, repo matches machine")
+        print(f"config-as-code: OK — {len(configured_pairs) + len(policy_plan)} items, repo matches machine")
         return 0
     if not drift and unversioned:
         print(f"config-as-code: UNVERSIONED HOOKS — {len(unversioned)} script(s) the live "
@@ -1375,7 +1389,7 @@ def _cmd_check(holds):
     # intentionally omitted from normal pairs() on a secondary.  Otherwise
     # "16 of 4" could claim to have checked only four items while reporting
     # sixteen violations, which is operationally misleading.
-    checked_items = (len(configured_pairs) + len(policy) + len(disallowed) + len(refused)
+    checked_items = (len(configured_pairs) + len(policy_plan) + len(disallowed) + len(refused)
                      + len(pending_reloads))
     headline = f"config-as-code: DRIFT — {len(drift)} of {checked_items} items"
     if missing:

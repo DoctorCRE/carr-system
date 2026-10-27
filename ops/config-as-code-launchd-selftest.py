@@ -9,6 +9,7 @@ import io
 import json
 import os
 import plistlib
+import re
 import signal
 import stat
 import subprocess
@@ -413,7 +414,10 @@ def check_and_install_cases() -> list[bool]:
             out.append(check(
                 "cmd_check reports a missing managed safety policy and accepts an equal one",
                 absent_rc == 1 and f"Claude managed safety policy {policy}" in absent_out.getvalue()
-                and "managed safety policy" not in present_out.getvalue(),
+                and "managed safety policy" not in present_out.getvalue()
+                and len(re.findall(r"of (\d+) items", absent_out.getvalue())) == 1
+                and re.findall(r"of (\d+) items", absent_out.getvalue())
+                == re.findall(r"of (\d+) items", present_out.getvalue()),
                 (absent_out.getvalue()[:600], present_out.getvalue()[:600])))
     finally:
         mod.subprocess.run = real_run
