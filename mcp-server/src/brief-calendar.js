@@ -78,6 +78,49 @@ export function calendarSection(snapshot, now = new Date()) {
   };
 }
 
+// Match only exact addresses already present in the partner's visible meetings.
+export async function addCalendarContacts(c, section) {
+  const addresses = [...new Set(section.items.flatMap(item =>
+    [item.organizer, ...item.attendees].map(person => person.email).filter(Boolean)))];
+  for (const item of section.items) item.contacts = [];
+  if (!addresses.length) return;
+  if (c.inTransaction) await c.query("savepoint calendar_contacts");
+  try {
+    const { rows } = await c.query(`
+      select * from (
+        select lower(trim("Email")) as email, 'client' as kind, "Client ID" as ref, "Name" as name from v_export_clients
+        union all
+        select lower(trim("Email")), 'lead', "Lead ID", "Contact Name" from v_export_leads
+        union all
+        select lower(trim("Email")), 'vendor', "ID", "Name" from v_export_vendors
+      ) calendar_contacts where email = any($1::text[]) and ref is not null
+      order by email, kind, ref limit 1001`, [addresses]);
+    if (c.inTransaction) await c.query("release savepoint calendar_contacts");
+    const truncated = rows.length > 1000;
+    for (const item of section.items) {
+      const emails = new Set([item.organizer, ...item.attendees].map(person => person.email).filter(Boolean));
+      const seen = new Set();
+      item.contacts = rows.slice(0, 1000).filter(row => emails.has(row.email)).flatMap(row => {
+        const key = `${row.kind}:${row.ref}`;
+        if (seen.has(key)) return [];
+        seen.add(key);
+        return [{ kind: row.kind, ref: row.ref, name: row.name }];
+      });
+    }
+    section.sources.record_contacts = { state: truncated ? "partial" : "ready" };
+    if (truncated) {
+      section.state = "partial";
+      section.notes.push("Some matching record contacts were omitted. Search the record for more.");
+    }
+  } catch {
+    if (c.inTransaction) await c.query("rollback to savepoint calendar_contacts");
+    if (c.inTransaction) await c.query("release savepoint calendar_contacts");
+    section.state = "partial";
+    section.sources.record_contacts = { state: "unavailable" };
+    section.notes.push("Record contacts could not be checked for these meetings.");
+  }
+}
+
 export async function addCalendarDealSuggestions(c, section, sponsor) {
   const people = item => [item.organizer, ...item.attendees].map(p => p.email).filter(Boolean);
   const addresses = [...new Set(section.items.flatMap(people))];
