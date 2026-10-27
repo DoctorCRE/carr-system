@@ -1,5 +1,7 @@
 // Expose vendor meeting records.
 import { ToolError } from './tool-error.ts';
+import { organizationTenantForActor } from './identity.js';
+import { CALENDAR_AGENDA_BOARD, calendarSection } from './brief-calendar.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ZERO = '00000000-0000-0000-0000-000000000000';
@@ -67,11 +69,41 @@ select (select count(*)::int from filtered) as total,
       'finding_id',flag_id,'observed_at',observed_at,'expires_on',expires_on)
   ) order by vendor_id,coalesce(contact_id,'${ZERO}'::uuid)),'[]'::jsonb) as items from page`;
 
+async function vendorCalendar(c, actor, items) {
+  for (const item of items) item.possible_meetings = [];
+  const unavailable = { state: 'unavailable', reason: 'source_unavailable' };
+  if (c.inTransaction) await c.query('savepoint vendor_calendar');
+  try {
+    const { rows } = await c.query(`select snapshot_json from board_snapshot
+      where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`,
+    [organizationTenantForActor(actor), actor.slug, CALENDAR_AGENDA_BOARD]);
+    const section = calendarSection(rows[0]?.snapshot_json);
+    if (!section) {
+      if (c.inTransaction) await c.query('release savepoint vendor_calendar');
+      return unavailable;
+    }
+    for (const item of items) {
+      const email = item.contact?.email?.trim().toLowerCase();
+      if (email) item.possible_meetings = section.items.filter(meeting =>
+        [meeting.organizer, ...meeting.attendees].some(person => person.email === email));
+    }
+    const { items: _meetings, ...calendar } = section;
+    if (c.inTransaction) await c.query('release savepoint vendor_calendar');
+    return calendar;
+  } catch {
+    if (c.inTransaction) {
+      await c.query('rollback to savepoint vendor_calendar');
+      await c.query('release savepoint vendor_calendar');
+    }
+    return unavailable;
+  }
+}
+
 export function vendorMeetingTools() {
   return {
     'read-vendor-meetings': {
       write: false,
-      description: 'Read vendor-meetings.v1 Suggested or searchable Research pages. Requires a named person and current source-backed office address finding on that person. Known email and phone are optional. Neither composes nor sends introductions.',
+      description: 'Read vendor-meetings.v1 Suggested or searchable Research pages. Requires a named person and current source-backed office address finding on that person. Known email and phone are optional. Includes possible upcoming meetings matched to the contact email in the authenticated partner calendar, with source warnings. Neither composes nor sends introductions.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         view: { type: 'string', enum: ['suggested', 'research'] },
         q: { type: 'string', maxLength: 80 },
@@ -99,7 +131,8 @@ export function vendorMeetingTools() {
         const has_more = result.items.length > limit;
         const items = result.items.slice(0,limit);
         const last = items.at(-1);
-        return { schema: 'vendor-meetings.v1', view, total: result.total, items, has_more,
+        const calendar = await vendorCalendar(c, actor, items);
+        return { schema: 'vendor-meetings.v1', view, total: result.total, items, has_more, calendar,
           next_cursor: has_more ? btoa(encodeURIComponent(JSON.stringify({ v:1,view,q,after:[last.vendor_id,last.contact?.id || ZERO] }))) : null,
           consistency: 'live_keyset; restart after record changes' };
       },
