@@ -68,3 +68,42 @@ export function calendarSection(snapshot, now = new Date()) {
     items: items.slice(0, LIMIT),
   };
 }
+
+export async function addCalendarDealSuggestions(c, section, sponsor) {
+  const people = item => [item.organizer, ...item.attendees].map(p => p.email).filter(Boolean);
+  const addresses = [...new Set(section.items.flatMap(people))];
+  for (const item of section.items) item.possible_deals = [];
+  if (!addresses.length) return;
+  if (c.inTransaction) await c.query("savepoint calendar_deals");
+  try {
+    const { rows } = await c.query(`
+      select lower(trim(c."Email")) as email, d.id::text as id, d.name, d.client_ref
+      from v_export_clients c join v_export_deals d on d.client_ref = c."Client ID"
+      where lower(trim(c."Email")) = any($1::text[]) and d.outcome is null
+        and lower(d.owner) = $2
+      order by email, d.id limit 1001 /* calendar_deal_matches */`, [addresses, sponsor]);
+    if (c.inTransaction) await c.query("release savepoint calendar_deals");
+    for (const item of section.items) {
+      const emails = new Set(people(item));
+      const seen = new Set();
+      item.possible_deals = rows.slice(0, 1000).filter(row => emails.has(row.email)).flatMap(row => {
+        if (seen.has(row.id)) return [];
+        seen.add(row.id);
+        return [{ id: row.id, name: row.name, client_ref: row.client_ref }];
+      });
+    }
+    section.sources.deal_suggestions = { state: rows.length > 1000 ? "partial" : "ready" };
+    if (rows.length > 1000) {
+      section.state = "partial";
+      section.notes.push("Some possible meeting deals were omitted. Search the record for more.");
+    }
+  } catch {
+    if (c.inTransaction) {
+      await c.query("rollback to savepoint calendar_deals");
+      await c.query("release savepoint calendar_deals");
+    }
+    section.state = "partial";
+    section.sources.deal_suggestions = { state: "unavailable" };
+    section.notes.push("Possible meeting deals could not be checked.");
+  }
+}
